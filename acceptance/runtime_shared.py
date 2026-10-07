@@ -51,7 +51,6 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     ScenarioEnvelope,
     GherkinSpec as _GS,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.system_model.critic import (
     strip_empty_responsibilities,
     CriticFindings,
@@ -92,7 +91,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call as _sp1_log_llm_call,
 )
 import tempfile as _tempfile
-import yaml as _yaml_mp
 from asago_scenario_generator.stpa.system_model._constants import (
     PROMPTS_DIR as _FC_PROMPTS_DIR,
 )
@@ -104,8 +102,8 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
+from tests.fixtures.sp1 import load_sp1_fixture
 from tests.stpa.sp1_helpers import MockLLMClient
-import ast
 
 
 def _resolve_value(text: str, examples: dict[str, str]) -> str:
@@ -351,140 +349,28 @@ def _sp1_make_loss_analysis_with_constraints() -> LossAnalysis:
 _SP1ConnectionSet = _SP1CoordinationAnalysis
 
 
-class _SP1MockLLM:
-    """Minimal mock LLM client for acceptance tests."""
+def _acceptance_content(
+    content: Any, wire_format: type | None, user_prompt: str
+) -> Any:
+    """Reshape a canned response for the closed schema an acceptance step calls."""
+    wire_name = getattr(wire_format, "__name__", "")
+    if wire_name in {
+        "ProviderCoordinationAnalysis",
+        "_CoordinationProviderEnvelope",
+    } and isinstance(content, dict):
+        content = {
+            key: value for key, value in content.items() if key != "integrity_findings"
+        }
+        if wire_name == "_CoordinationProviderEnvelope":
+            content.pop("semantic_review", None)
+    return _sp1_complete_semantic_review_fixture(
+        content, wire_format, user_prompt=user_prompt
+    )
 
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-        self._response_map: dict[type, Any] = {}
-        self._response_queue: list[Any] = []
-        self._invalid_types: set[type] = set()
-        self._exception_types: dict[type, Exception] = {}
-        self._call_counts: dict[type, int] = {}
-        self._invalid_after_n: dict[type, int] = {}
-        self.base_url = "http://test:8080"
-        self.model = "test-model"
 
-    def set_response_for(self, model_class: type, response: Any) -> None:
-        self._response_map[model_class] = response
-
-    def set_response_queue(self, responses: list[Any]) -> None:
-        self._response_queue = list(responses)
-
-    def set_invalid_response_for(self, model_class: type) -> None:
-        """Configure the mock to return an invalid response for a type."""
-        self._invalid_types.add(model_class)
-
-    def set_invalid_response_after_n_calls(self, model_class: type, n: int) -> None:
-        """Configure the mock to return invalid JSON only after *n* successful calls."""
-        self._invalid_after_n[model_class] = n
-
-    def set_exception_for(self, model_class: type, exc: Exception) -> None:
-        """Configure the mock to raise *exc* when called for *model_class*."""
-        self._exception_types[model_class] = exc
-
-    def complete(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        response_format: type | None = None,
-        max_completion_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> Any:
-        wire_response_format = response_format
-        self.calls.append(
-            {
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-                "response_format": response_format,
-                "max_completion_tokens": max_completion_tokens,
-                "temperature": temperature,
-            }
-        )
-        # Provider-only subclasses keep the same stage contract. Retain the
-        # actual wire type in the call record, and reuse base-class fixtures.
-        configured = (
-            set(self._response_map)
-            | self._invalid_types
-            | set(self._exception_types)
-            | set(self._invalid_after_n)
-        )
-        if response_format is not None and response_format not in configured:
-            response_format = next(
-                (base for base in response_format.__mro__[1:] if base in configured),
-                response_format,
-            )
-            # Reuse historical semantic fixtures only at this test boundary.
-            # Product provider schemas remain separate and strict.
-            legacy_type = {
-                "_Stage1aRiskProviderDraft": _SP1LossAnalysisDraft,
-                "_Stage1aGapProviderDraft": _SP1LossAnalysisDraft,
-                "ProviderCoordinationAnalysis": _SP1CoordinationAnalysis,
-                "_CoordinationProviderEnvelope": _SP1CoordinationAnalysis,
-            }.get(wire_response_format.__name__)
-            if legacy_type in configured:
-                response_format = legacy_type
-        # Raise exception if configured
-        if response_format is not None and response_format in self._exception_types:
-            raise self._exception_types[response_format]
-        # Track per-type call count for delayed-invalid behaviour
-        if response_format is not None:
-            self._call_counts[response_format] = (
-                self._call_counts.get(response_format, 0) + 1
-            )
-            if (
-                response_format in self._invalid_after_n
-                and self._call_counts[response_format]
-                > self._invalid_after_n[response_format]
-            ):
-                content = "THIS_IS_NOT_VALID_JSON{{{"
-                return LLMResult(
-                    content=content,
-                    prompt_tokens=100,
-                    completion_tokens=50,
-                    duration_ms=5000,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                )
-        if self._response_queue:
-            content = self._response_queue.pop(0)
-        elif response_format is not None and response_format in self._invalid_types:
-            content = "THIS_IS_NOT_VALID_JSON{{{"
-        elif response_format is not None and response_format in self._response_map:
-            content = self._response_map[response_format]
-        else:
-            content = None
-        wire_name = getattr(wire_response_format, "__name__", "")
-        if wire_name in {"_Stage1aRiskProviderDraft", "_Stage1aGapProviderDraft"}:
-            from acceptance.fixture_adapters import legacy_stage1a_provider_payload
-
-            content = legacy_stage1a_provider_payload(
-                content, risk=wire_name == "_Stage1aRiskProviderDraft"
-            )
-        elif (
-            wire_name
-            in {"ProviderCoordinationAnalysis", "_CoordinationProviderEnvelope"}
-            and response_format is _SP1CoordinationAnalysis
-            and isinstance(content, dict)
-        ):
-            content = {
-                key: value
-                for key, value in content.items()
-                if key != "integrity_findings"
-            }
-            if wire_name == "_CoordinationProviderEnvelope":
-                content.pop("semantic_review", None)
-        content = _sp1_complete_semantic_review_fixture(
-            content, wire_response_format, user_prompt=user_prompt
-        )
-        return LLMResult(
-            content=content,
-            prompt_tokens=100,
-            completion_tokens=50,
-            duration_ms=5000,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
+def _sp1_mock_llm() -> MockLLMClient:
+    """Return the shared mock client configured for acceptance responses."""
+    return MockLLMClient(adapt_content=_acceptance_content, preserve_gap_extras=False)
 
 
 def _sp1_complete_semantic_review_fixture(
@@ -628,99 +514,15 @@ def _sp1_complete_semantic_review_fixture(
 
 
 def _sp1_valid_la_dict() -> dict:
-    return {
-        "risk_card_losses": [
-            {
-                "loss_id": "L-1",
-                "description": "Unauthorized transaction",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-001"],
-            },
-            {
-                "loss_id": "L-2",
-                "description": "Data exposure",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-002"],
-            },
-        ],
-        "use_case_losses": [
-            {
-                "loss_id": "L-3",
-                "description": "Loss of trust",
-                "provenance": "use_case",
-                "source_risk_cards": [],
-            },
-        ],
-        "hazards": [
-            {
-                "hazard_id": "H-1",
-                "description": "Agent executes unintended action",
-                "related_losses": ["L-1", "L-3"],
-            },
-            {
-                "hazard_id": "H-2",
-                "description": "Agent exposes data",
-                "related_losses": ["L-2"],
-            },
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "rule": (
-                    "The agent must confirm every unintended action before execution."
-                ),
-                "related_hazards": ["H-1"],
-                "applies_when": [],
-            },
-            {
-                "constraint_id": "SC-2",
-                "rule": "Must not expose data",
-                "related_hazards": ["H-2"],
-                "applies_when": [],
-            },
-        ],
-        "risk_dispositions": [
-            {
-                "risk_ref": "atlas-001",
-                "disposition": "cited",
-                "loss_ids": ["L-1"],
-                "reason": None,
-            },
-        ],
-    }
+    return load_sp1_fixture("loss_analysis", "three_losses")
 
 
 def _sp1_valid_stage1_profile_dict() -> dict:
-    return {
-        "has_persistent_memory": False,
-        "multi_agent": False,
-        "hitl": False,
-        "entry_points": [
-            {"name": "User chat", "direction": "input", "controllability": "direct"}
-        ],
-        "confidence": "medium",
-        "kc_subcodes": ["KC1.1", "KC5.1", "KC6.1.1"],
-        "tool_inventory": [{"name": "tool1", "description": "A tool"}],
-    }
+    return load_sp1_fixture("stage1_profile")
 
 
 def _sp1_valid_req_set_dict() -> dict:
-    return {
-        "requirements": [
-            {
-                "req_id": "REQ-1",
-                "description": "Verify user identity",
-                "classification": "control",
-                "source_constraint": "SC-1",
-            },
-            {
-                "req_id": "REQ-2",
-                "description": "Data protection",
-                "classification": "constraint",
-                "source_constraint": "SC-2",
-            },
-        ]
-    }
+    return load_sp1_fixture("requirement_set", "two_requirements")
 
 
 def _sp1_valid_resp_set_dict() -> dict:
@@ -782,32 +584,7 @@ def _sp1_valid_resp_set_2a_dict() -> dict:
     only responsibility_constraints and process_model_parts.  CAs, FBs,
     and CPs are produced by Call 2b (ControlElementSet).
     """
-    return {
-        "responsibilities": [
-            {
-                "resp_id": "RESP-1",
-                "description": "Authorization controller",
-                "security_constraint_refs": ["SC-1"],
-                "responsibility_constraints": [
-                    {"rc_id": "RC-1-1", "description": "Must confirm"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-1-1", "description": "User intent state"}
-                ],
-            },
-            {
-                "resp_id": "RESP-2",
-                "description": "Data controller",
-                "security_constraint_refs": ["SC-2"],
-                "responsibility_constraints": [
-                    {"rc_id": "RC-2-1", "description": "Protect data"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-2-1", "description": "Data state"}
-                ],
-            },
-        ],
-    }
+    return load_sp1_fixture("responsibility_set", "two_responsibilities")
 
 
 def _sp1_valid_cs_dict() -> dict:
@@ -849,37 +626,7 @@ def _sp1_valid_connection_set_dict() -> dict:
 
 def _sp1_valid_control_element_set_dict() -> dict:
     """Valid ControlElementSet for Call 2b — CAs, FBs, and CPs."""
-    return {
-        "control_actions": [
-            {
-                "ca_id": "CA-1-1",
-                "description": "Execute action",
-                "target": {"type": "controlled_process", "id": "CP-1"},
-            },
-            {
-                "ca_id": "CA-2-1",
-                "description": "Send response",
-                "target": {"type": "responsibility", "id": "RESP-2"},
-            },
-        ],
-        "feedback_channels": [
-            {
-                "fb_id": "FB-1-1",
-                "description": "Action result",
-                "updates": "PM-1-1",
-                "source": {"type": "controlled_process", "id": "CP-1"},
-            },
-            {
-                "fb_id": "FB-2-1",
-                "description": "Response delivery",
-                "updates": "PM-2-1",
-                "source": {"type": "responsibility", "id": "RESP-2"},
-            },
-        ],
-        "controlled_processes": [
-            {"cp_id": "CP-1", "description": "External service"},
-        ],
-    }
+    return load_sp1_fixture("control_element_set", "with_controlled_process")
 
 
 def _sp1_valid_coordination_analysis_dict() -> dict:
@@ -955,61 +702,15 @@ def _sp1_semantic_review_fixture() -> dict:
 
 
 def _sp1_valid_critic_findings_dict() -> dict:
-    return {
-        "gaps": [
-            {
-                "gap_type": "missing_responsibility",
-                "description": "Missing input validation",
-                "related_attack_path": "Attacker sends crafted input",
-                "suggested_remedy": "Add input validation",
-            },
-            {
-                "gap_type": "missing_feedback",
-                "description": "Missing outcome feedback",
-                "related_attack_path": "Attacker exploits unchecked output",
-                "suggested_remedy": "Add outcome verification",
-            },
-        ],
-        "checklist_results": {
-            "Input validation": "present",
-            "Authorization": "present",
-            "Action selection": "present",
-            "Outcome verification": "absent_justified",
-            "Context management": "present",
-            "Multi-agent coordination": "absent_justified",
-            "Human-in-the-loop": "absent_justified",
-        },
-        "taxonomy_probe_results": {},
-    }
+    return load_sp1_fixture("critic_findings", "two_gaps")
 
 
 def _sp1_no_unjustified_critic_dict() -> dict:
-    return {
-        "gaps": [],
-        "checklist_results": {
-            "Input validation": "present",
-            "Authorization": "present",
-            "Action selection": "present",
-            "Outcome verification": "present",
-            "Context management": "present",
-            "Multi-agent coordination": "absent_justified",
-            "Human-in-the-loop": "absent_justified",
-        },
-        "taxonomy_probe_results": {},
-    }
+    return load_sp1_fixture("critic_findings", "no_unjustified")
 
 
 def _sp1_make_risk_cards() -> list:
-    return [
-        _SP1RiskCard(
-            risk_id="atlas-001",
-            risk_name="Prompt injection",
-            risk_description="Risk of prompt injection",
-            taxonomy="ibm-risk-atlas",
-            confidence=0.9,
-            grounding_confidence="high",
-        ),
-    ]
+    return [_SP1RiskCard(**row) for row in load_sp1_fixture("risk_cards")]
 
 
 def _sp1_valid_revision_patch_dict() -> dict:
@@ -1057,9 +758,9 @@ def _sp1_valid_revision_patch_dict() -> dict:
 def _sp1_setup_full_mock_client(
     critic_findings: dict | None = None,
     revised_cs: dict | None = None,
-) -> _SP1MockLLM:
+) -> MockLLMClient:
     """Set up a mock LLM client with valid responses for all stages."""
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
     client.set_response_for(_SP1Stage1aRevisionPatch, _sp1_valid_revision_patch_dict())
     client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
@@ -1084,7 +785,7 @@ def _h_sp1_rev_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the revision is run."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_rev_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     content = (
         world.sp1_llm_content
@@ -1093,8 +794,8 @@ def _h_sp1_rev_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
     # Only set response if no exception/invalid is configured (graceful degradation)
     if (
-        ControlStructure not in client._exception_types
-        and ControlStructure not in client._invalid_types
+        ControlStructure not in client._exception_response_types
+        and ControlStructure not in client._invalid_response_types
     ):
         client.set_response_for(ControlStructure, content)
     try:
@@ -1219,37 +920,6 @@ def _data_table_to_dicts(table: list[list[str]] | None) -> list[dict[str, str]]:
     return result
 
 
-def _profiles_to_yaml(rows: list[dict[str, str]]) -> str:
-    """Convert profile row dicts to YAML text."""
-    profiles: dict[str, Any] = {}
-    for row in rows:
-        name = row.get("profile", "")
-        profile: dict[str, Any] = {}
-        for key in ("base_url", "model", "api_key"):
-            val = row.get(key, "")
-            if val:
-                profile[key] = val
-        for key in ("max_completion_tokens", "temperature", "top_p", "top_k"):
-            val = row.get(key, "")
-            if val:
-                # Try to convert to appropriate type
-                try:
-                    if "." in val:
-                        profile[key] = float(val)
-                    else:
-                        profile[key] = int(val)
-                except ValueError:
-                    profile[key] = val
-        headers_val = row.get("headers", "")
-        if headers_val:
-            try:
-                profile["headers"] = json.loads(headers_val)
-            except (json.JSONDecodeError, TypeError):
-                profile["headers"] = headers_val
-        profiles[name] = profile
-    return _yaml_mp.dump(profiles, default_flow_style=False)
-
-
 def _calls_entries_from_data_table(
     table: list[list[str]] | None,
 ) -> list[dict[str, Any]]:
@@ -1325,48 +995,6 @@ def _san_set_element_ref(
 
 
 _BF2_PROMPTS_DIR = _FC_PROMPTS_DIR
-
-
-class _BF2MockLLMClient:
-    """Mock LLM client that tracks max_completion_tokens."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-        self._response_map: dict[type, Any] = {}
-        self.base_url = "http://test:8080"
-        self.model = "test-model"
-
-    def set_response_for(self, model_class: type, response: Any) -> None:
-        self._response_map[model_class] = response
-
-    def complete(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        response_format: type | None = None,
-        max_completion_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> Any:
-        self.calls.append(
-            {
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-                "response_format": response_format,
-                "max_completion_tokens": max_completion_tokens,
-                "temperature": temperature,
-            }
-        )
-        content = None
-        if response_format is not None and response_format in self._response_map:
-            content = self._response_map[response_format]
-        return LLMResult(
-            content=content,
-            prompt_tokens=100,
-            completion_tokens=50,
-            duration_ms=5000,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
 
 
 class _BF2LogCapture(_bf2_logging.Handler):
@@ -1876,24 +1504,8 @@ def compute_eval_scorecard_simple(world):
     )
 
 
-_VALID_GHERKIN_YAML = (
-    "feature: Safe orchestration\n"
-    "scenario: SCN-001\n"
-    "given:\n"
-    "  - Given PM-1-1 is active\n"
-    "  - And the system is online\n"
-    "when:\n"
-    "  - When a revoked user requests access\n"
-    "then_expected:\n"
-    "  - Then the system should reject the request\n"
-    "then_actual:\n"
-    "  - But the system approves the request\n"
-    "  - And loss L-1 is realized\n"
-)
-
-
-def _ar_client(world: World) -> _SP1MockLLM:
-    client = world.sp1_mock_client or _SP1MockLLM()
+def _ar_client(world: World) -> MockLLMClient:
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     return client
 
@@ -1957,64 +1569,3 @@ def _set_element_description(cs_dict: dict, element_id: str, description: str) -
             if fb["fb_id"] == element_id:
                 fb["description"] = description
                 return
-
-
-def _sc_has_xfail(source: str, func_name: str) -> tuple[bool, bool]:
-    """Return (has_xfail, has_strict_false) for a test function in source."""
-    tree = ast.parse(source)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.FunctionDef) and node.name == func_name:
-            for dec in node.decorator_list:
-                if isinstance(dec, ast.Call) and isinstance(dec.func, ast.Attribute):
-                    if dec.func.attr == "xfail":
-                        has_strict = False
-                        for kw in dec.keywords:
-                            if kw.arg == "strict" and isinstance(
-                                kw.value, ast.Constant
-                            ):
-                                has_strict = kw.value.value is False
-                        return True, has_strict
-            return False, False
-    return False, False
-
-
-def _sc_ensure_property_test_source(world: World) -> str | None:
-    """Ensure world.sc_property_test_source is loaded; return source or None on error."""
-    source = getattr(world, "sc_property_test_source", "")
-    if not source:
-        test_file = (
-            PROJECT_ROOT / "tests" / "stpa" / "test_acceptance_harness_property.py"
-        )
-        if not test_file.is_file():
-            return None
-        source = test_file.read_text()
-        world.sc_property_test_source = source
-    return source
-
-
-def _sc_simulate_priority_registration(
-    world: World,
-    text: str,
-    parse_pattern: str,
-    insert_first: bool,
-) -> tuple[bool, str]:
-    """Add a synthetic registration while preserving its priority semantics."""
-    m = re.search(parse_pattern, text)
-    if not m:
-        return False, f"Could not parse: {text}"
-    pattern_str, handler_name = m.group(1), m.group(2)
-
-    def _test_handler(w: World, t: str, e: dict) -> tuple[bool, str]:
-        return True, ""
-
-    _test_handler.__name__ = handler_name
-    test_list = getattr(world, "sc_test_patterns", None)
-    if test_list is None:
-        test_list = []
-        world.sc_test_patterns = test_list
-    registration = (re.compile(pattern_str, re.IGNORECASE), _test_handler, None)
-    if insert_first:
-        test_list.insert(0, registration)
-    else:
-        test_list.append(registration)
-    return True, ""

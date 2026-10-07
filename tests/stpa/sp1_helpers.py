@@ -8,6 +8,7 @@ Also provides shared fixture data builders used across multiple test modules.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, get_args
@@ -16,6 +17,7 @@ from unittest.mock import MagicMock
 from pydantic import BaseModel
 
 from acceptance.fixture_adapters import legacy_stage1a_provider_payload
+from tests.fixtures.sp1 import load_sp1_fixture
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMResult
@@ -308,6 +310,8 @@ class MockLLMClient:
         base_url: str = "http://test:8080",
         model: str = "test-model",
         temperature: float = 0.4,
+        adapt_content: Callable[[Any, type | None, str], Any] | None = None,
+        preserve_gap_extras: bool = True,
     ) -> None:
         self.base_url = base_url
         self.model = model
@@ -318,6 +322,18 @@ class MockLLMClient:
         self._response_map: dict[type, Any] = {}
         self._invalid_response_types: set[type] = set()
         self._exception_response_types: dict[type, Exception] = {}
+        self._invalid_after_n: dict[type, int] = {}
+        self._call_counts: dict[type, int] = {}
+        # Last step before a response is wrapped: lets one layer reshape the
+        # content for the closed schema it exercises (content, wire type, prompt).
+        self._adapt_content = adapt_content
+        # False drops fields a gap draft has no wire slot for (the shared
+        # acceptance payload carries the risk draft's dispositions).
+        self._preserve_gap_extras = preserve_gap_extras
+
+    def set_invalid_response_after_n_calls(self, model_class: type, n: int) -> None:
+        """Return invalid JSON for *model_class* once *n* calls have succeeded."""
+        self._invalid_after_n[model_class] = n
 
     def set_invalid_response_for(self, model_class: type) -> None:
         """Configure the mock to return an invalid response for a type.
@@ -376,72 +392,20 @@ class MockLLMClient:
         if exception is not None:
             raise exception
 
-        # Determine which response to return
-        if self._response_queue:
-            content = self._response_queue.pop(0)
-        elif self._compatible_type(response_format, self._invalid_response_types):
-            # Return a non-JSON string that will fail parsing/validation
-            content = "THIS_IS_NOT_VALID_JSON{{{"
-        elif (
-            mapped := self._compatible_value(response_format, self._response_map)
-        ) is not None:
-            if isinstance(mapped, list):
-                if mapped:
-                    content = mapped.pop(0)
-                else:
-                    content = None
-            else:
-                content = mapped
-        elif (
-            synthesized := actionability_response_from_prompt(
-                response_format, user_prompt
+        if self._delayed_invalid_due(response_format):
+            return LLMResult(
+                content="THIS_IS_NOT_VALID_JSON{{{",
+                prompt_tokens=100,
+                completion_tokens=50,
+                duration_ms=5000,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
             )
-        ) is not None:
-            content = synthesized
-        elif (
-            synthesized := coverage_review_response_from_prompt(
-                response_format, user_prompt
-            )
-        ) is not None:
-            # The advisory risk-coverage review wire closes its ids to the
-            # supplied cards, so tests synthesize a valid response instead of
-            # registering one canned dict per fixture.
-            content = synthesized
-        elif (
-            synthesized := stated_rules_default_response(response_format)
-        ) is not None:
-            content = synthesized
-        elif response_format is None and None in self._response_map:
-            content = self._response_map[None]
-        else:
-            content = None
 
-        # Legacy Stage 1a tests historically registered ``LossAnalysisDraft``
-        # responses.  Adapt those dictionaries only at this explicit test
-        # client boundary; production parsing remains current-wire strict.
-        if response_format is not None:
-            response_name = getattr(response_format, "__name__", "")
-            if response_name in {
-                "_Stage1aRiskProviderDraft",
-                "_Stage1aGapProviderDraft",
-            }:
-                if isinstance(content, BaseModel):
-                    content = content.model_dump(mode="json")
-                if isinstance(content, str):
-                    try:
-                        decoded = json.loads(content)
-                    except (TypeError, ValueError):
-                        decoded = None
-                    if isinstance(decoded, dict):
-                        content = decoded
-                if isinstance(content, dict):
-                    content = legacy_stage1a_provider_payload(
-                        content,
-                        risk=response_name == "_Stage1aRiskProviderDraft",
-                        preserve_gap_extras=(
-                            response_name == "_Stage1aGapProviderDraft"
-                        ),
-                    )
+        content = self._configured_content(response_format, user_prompt)
+        content = self._adapt_legacy_stage1a(content, response_format)
+        if self._adapt_content is not None:
+            content = self._adapt_content(content, response_format, user_prompt)
 
         return LLMResult(
             content=content,
@@ -450,6 +414,89 @@ class MockLLMClient:
             duration_ms=5000,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+        )
+
+    def _delayed_invalid_due(self, response_format: type | None) -> bool:
+        """Count this call against a delayed-invalid type; true once past its allowance."""
+        delayed = self._compatible_key(response_format, self._invalid_after_n)
+        if delayed is None:
+            return False
+        self._call_counts[delayed] = self._call_counts.get(delayed, 0) + 1
+        return self._call_counts[delayed] > self._invalid_after_n[delayed]
+
+    def _configured_content(
+        self, response_format: type | None, user_prompt: str
+    ) -> Any:
+        if self._response_queue:
+            return self._response_queue.pop(0)
+        if self._compatible_type(response_format, self._invalid_response_types):
+            # Return a non-JSON string that will fail parsing/validation
+            return "THIS_IS_NOT_VALID_JSON{{{"
+        mapped = self._compatible_value(response_format, self._response_map)
+        if mapped is not None:
+            if isinstance(mapped, list):
+                return mapped.pop(0) if mapped else None
+            return mapped
+        for synthesize in (
+            lambda: actionability_response_from_prompt(response_format, user_prompt),
+            # The advisory risk-coverage review wire closes its ids to the
+            # supplied cards, so tests synthesize a valid response instead of
+            # registering one canned dict per fixture.
+            lambda: coverage_review_response_from_prompt(response_format, user_prompt),
+            lambda: stated_rules_default_response(response_format),
+        ):
+            synthesized = synthesize()
+            if synthesized is not None:
+                return synthesized
+        if response_format is None and None in self._response_map:
+            return self._response_map[None]
+        return None
+
+    def _adapt_legacy_stage1a(self, content: Any, response_format: type | None) -> Any:
+        """Reshape ``LossAnalysisDraft`` responses for the Stage 1a provider wires.
+
+        Legacy Stage 1a tests historically registered ``LossAnalysisDraft``
+        responses.  Adapt those dictionaries only at this explicit test
+        client boundary; production parsing remains current-wire strict.
+        """
+        response_name = getattr(response_format, "__name__", "")
+        if response_name not in {
+            "_Stage1aRiskProviderDraft",
+            "_Stage1aGapProviderDraft",
+        }:
+            return content
+        if isinstance(content, BaseModel):
+            content = content.model_dump(mode="json")
+        if isinstance(content, str):
+            try:
+                decoded = json.loads(content)
+            except (TypeError, ValueError):
+                decoded = None
+            if isinstance(decoded, dict):
+                content = decoded
+        if isinstance(content, dict):
+            content = legacy_stage1a_provider_payload(
+                content,
+                risk=response_name == "_Stage1aRiskProviderDraft",
+                preserve_gap_extras=(
+                    self._preserve_gap_extras
+                    and response_name == "_Stage1aGapProviderDraft"
+                ),
+            )
+        return content
+
+    @classmethod
+    def _compatible_key(
+        cls, model_class: type | None, configured: dict[type, Any]
+    ) -> type | None:
+        """Return the configured type that serves *model_class*, if any."""
+        return next(
+            (
+                candidate
+                for candidate in configured
+                if cls._compatible_type(model_class, {candidate})
+            ),
+            None,
         )
 
     @staticmethod
@@ -515,16 +562,7 @@ class MockLLMClient:
 
 def make_risk_cards() -> list[RiskCard]:
     """Return a minimal list of RiskCards for SP1 pipeline tests."""
-    return [
-        RiskCard(
-            risk_id="atlas-001",
-            risk_name="Prompt injection",
-            risk_description="Risk of prompt injection",
-            taxonomy="ibm-risk-atlas",
-            confidence=0.9,
-            grounding_confidence="high",
-        ),
-    ]
+    return [RiskCard(**row) for row in load_sp1_fixture("risk_cards")]
 
 
 def read_calls_jsonl(run_dir: Path) -> list[dict]:
@@ -543,17 +581,7 @@ def valid_stage1_profile_dict() -> dict:
     CapabilityProfile.  Any extra keys in the dict are silently ignored
     by Pydantic.
     """
-    return {
-        "has_persistent_memory": False,
-        "multi_agent": False,
-        "hitl": False,
-        "entry_points": [
-            {"name": "User chat", "direction": "input", "controllability": "direct"},
-        ],
-        "confidence": "medium",
-        "kc_subcodes": ["KC1.1", "KC5.1", "KC6.1.1"],
-        "tool_inventory": [{"name": "tool1", "description": "A tool"}],
-    }
+    return load_sp1_fixture("stage1_profile")
 
 
 def valid_risk_draft_dict() -> dict:
@@ -641,64 +669,12 @@ def valid_loss_analysis_dict() -> dict:
     Tests that mock the LLM should use ``valid_risk_draft_dict`` and
     ``valid_gap_draft_dict`` instead.
     """
-    return {
-        "risk_card_losses": [
-            {
-                "loss_id": "L-1",
-                "description": "Unauthorized transaction",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-001"],
-            }
-        ],
-        "use_case_losses": [
-            {
-                "loss_id": "L-2",
-                "description": "Loss of trust",
-                "provenance": "use_case",
-                "source_risk_cards": [],
-            }
-        ],
-        "hazards": [
-            {
-                "hazard_id": "H-1",
-                "description": "The agent executes an unintended payment.",
-                "related_losses": ["L-1"],
-            },
-            {
-                "hazard_id": "H-2",
-                "description": "The agent erodes user trust.",
-                "related_losses": ["L-2"],
-            },
-        ],
-        "security_constraints": [
-            {
-                "constraint_id": "SC-1",
-                "rule": "The agent must confirm every unintended payment.",
-                "applies_when": ["before execution"],
-                "related_hazards": ["H-1"],
-            },
-            {
-                "constraint_id": "SC-2",
-                "rule": "The agent must preserve user trust.",
-                "applies_when": ["through transparency"],
-                "related_hazards": ["H-2"],
-            },
-        ],
-    }
+    return load_sp1_fixture("loss_analysis", "two_losses")
 
 
 def valid_requirement_set_dict() -> dict:
     """Return a valid RequirementSet dict for Stage 2 Call 1."""
-    return {
-        "requirements": [
-            {
-                "req_id": "REQ-1",
-                "description": "Verify user identity",
-                "classification": "control",
-                "source_constraint": "SC-1",
-            }
-        ]
-    }
+    return load_sp1_fixture("requirement_set", "one_requirement")
 
 
 def valid_responsibility_set_dict() -> dict:
@@ -707,21 +683,7 @@ def valid_responsibility_set_dict() -> dict:
     Only responsibilities with RCs and PM parts — no CAs, FBs, or CPs
     (those come from Call 2b).
     """
-    return {
-        "responsibilities": [
-            {
-                "resp_id": "RESP-1",
-                "description": "Authorization controller",
-                "security_constraint_refs": ["SC-1"],
-                "responsibility_constraints": [
-                    {"rc_id": "RC-1-1", "description": "Must confirm before action"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-1-1", "description": "User intent state"}
-                ],
-            }
-        ]
-    }
+    return load_sp1_fixture("responsibility_set", "one_responsibility")
 
 
 def valid_control_element_set_dict() -> dict:
@@ -730,41 +692,12 @@ def valid_control_element_set_dict() -> dict:
     Contains CAs, FBs, and CPs that match the responsibilities from
     ``valid_responsibility_set_dict``.
     """
-    return {
-        "control_actions": [
-            {
-                "ca_id": "CA-1-1",
-                "description": "Execute action",
-                "target": {"type": "responsibility", "id": "RESP-1"},
-            }
-        ],
-        "feedback_channels": [
-            {
-                "fb_id": "FB-1-1",
-                "description": "Action result",
-                "updates": "PM-1-1",
-                "source": {"type": "responsibility", "id": "RESP-1"},
-            }
-        ],
-        "controlled_processes": [],
-    }
+    return load_sp1_fixture("control_element_set", "responsibility_only")
 
 
 def valid_critic_findings_dict_no_gaps() -> dict:
     """Return a CriticFindings dict with no gaps (all checklist items present)."""
-    return {
-        "gaps": [],
-        "checklist_results": {
-            "Input validation": "present",
-            "Authorization": "present",
-            "Action selection": "present",
-            "Outcome verification": "present",
-            "Context management": "present",
-            "Multi-agent coordination": "present",
-            "Human-in-the-loop": "present",
-        },
-        "taxonomy_probe_results": {},
-    }
+    return load_sp1_fixture("critic_findings", "no_gaps_all_present")
 
 
 def setup_sp1_mock_client() -> MockLLMClient:

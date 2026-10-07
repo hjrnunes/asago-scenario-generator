@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any
 
-from runtime_shared import _SP1MockLLM
+from runtime_shared import _sp1_mock_llm
 from runtime_world import World
 
 Handler = Callable[[World, str, dict], tuple[bool, str]]
@@ -31,7 +31,7 @@ def llm_raises(response_model: Any, message: str) -> Handler:
     """Make the scenario's mock LLM raise for one response model."""
 
     def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
-        client = world.sp1_mock_client or _SP1MockLLM()
+        client = world.sp1_mock_client or _sp1_mock_llm()
         world.sp1_mock_client = client
         client.set_exception_for(response_model, RuntimeError(message))
         return True, ""

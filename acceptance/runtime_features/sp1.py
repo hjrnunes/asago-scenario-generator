@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from pydantic import create_model
 
+from asago_scenario_generator.stpa.infra.llm import LLMResult
 from runtime_shared import (
     _make_responsibility,
     ControlAction,
@@ -11,7 +14,6 @@ from runtime_shared import (
     CoordinationLink,
     ElementRef,
     FeedbackChannel,
-    LLMResult,
     LossAnalysis,
     LossProvenance,
     Path,
@@ -24,7 +26,7 @@ from runtime_shared import (
     _SP1ControlElementSet,
     _SP1CriticFindings,
     _SP1LossAnalysisDraft,
-    _SP1MockLLM,
+    _sp1_mock_llm,
     _SP1RequirementSet,
     _SP1ResponsibilitySet,
     _SP1Stage1Profile,
@@ -110,7 +112,6 @@ from asago_scenario_generator.stpa.system_model.critic import (
     _merge_revision_delta,
 )
 import asago_scenario_generator.stpa.system_model as system_model
-import asago_scenario_generator.stpa.system_model.control_structure as control_structure
 import warnings
 import yaml as _yaml
 from registry import StepTable
@@ -303,7 +304,7 @@ def _h_sp1_la_second_unsupported_setup(
 def _h_sp1_stage1a_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_la_"))
     world.sp1_run_dir = run_dir
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     content = world.sp1_llm_content
     if isinstance(content, list):
         client.set_response_queue(content)
@@ -488,7 +489,7 @@ def _h_sp1_s2_bad_class(world: World, text: str, examples: dict) -> tuple[bool, 
 def _h_sp1_s2_call1_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_s2_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     content = (
         world.sp1_llm_content
@@ -575,12 +576,19 @@ def _h_sp1_critic_gap_type(world: World, text: str, examples: dict) -> tuple[boo
     return True, ""
 
 
-@step("the completeness critic is run")
-def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_critic_"))
-    world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
+def _sp1_critic_degraded(
+    world: World, run_dir: Path, client: Any, exc: Exception
+) -> None:
+    """Record a critic failure the way the pipeline does and fall back to empty findings."""
+    from asago_scenario_generator.stpa.infra.llm_helpers import log_llm_call_failure
+
+    log_llm_call_failure(
+        client.model, run_dir, "stage_2", "critic", f"{type(exc).__name__}: {exc}"
+    )
+    world.sp1_critic_findings = _SP1CriticFindings()
+
+
+def _sp1_critic_answer(world: World, client: Any) -> dict:
     content = (
         world.sp1_llm_content
         if isinstance(world.sp1_llm_content, dict)
@@ -588,14 +596,28 @@ def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, st
     )
     # Only set response if no exception/invalid is configured (graceful degradation)
     if (
-        _SP1CriticFindings not in client._exception_types
-        and _SP1CriticFindings not in client._invalid_types
+        _SP1CriticFindings not in client._exception_response_types
+        and _SP1CriticFindings not in client._invalid_response_types
     ):
         client.set_response_for(_SP1CriticFindings, content)
+    return content
+
+
+def _sp1_critic_user_prompt(world: World) -> str:
+    """A prompt that contains the control structure, profile and use case for verification."""
     cs = world.control_structure or _sp1_make_control_structure_with_resp()
-    # Build a prompt that contains CS, profile, and use-case for verification
     cs_summary = " ".join(r.resp_id for r in cs.responsibilities)
-    user_prompt = f"Control structure: {cs_summary}. Use case: {world.sp1_use_case_text}. Capability profile: KC1.1"
+    return f"Control structure: {cs_summary}. Use case: {world.sp1_use_case_text}. Capability profile: KC1.1"
+
+
+@step("the completeness critic is run")
+def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_critic_"))
+    world.sp1_run_dir = run_dir
+    client = world.sp1_mock_client or _sp1_mock_llm()
+    world.sp1_mock_client = client
+    content = _sp1_critic_answer(world, client)
+    user_prompt = _sp1_critic_user_prompt(world)
     try:
         result = client.complete(
             system_prompt="critic_system",
@@ -604,13 +626,7 @@ def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, st
             temperature=0.4,
         )
     except Exception as exc:
-        # Graceful degradation: LLM exception during critic
-        from asago_scenario_generator.stpa.infra.llm_helpers import log_llm_call_failure
-
-        log_llm_call_failure(
-            client.model, run_dir, "stage_2", "critic", f"{type(exc).__name__}: {exc}"
-        )
-        world.sp1_critic_findings = _SP1CriticFindings()
+        _sp1_critic_degraded(world, run_dir, client, exc)
         return True, ""
     try:
         world.sp1_critic_findings = _SP1CriticFindings.model_validate(
@@ -618,13 +634,7 @@ def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, st
         )
         _sp1_log_llm_call(result, client.model, run_dir, "stage_2", "critic")
     except (ValidationError, ValueError) as e:
-        # Graceful degradation: validation failure returns empty findings
-        from asago_scenario_generator.stpa.infra.llm_helpers import log_llm_call_failure
-
-        log_llm_call_failure(
-            client.model, run_dir, "stage_2", "critic", f"{type(e).__name__}: {e}"
-        )
-        world.sp1_critic_findings = _SP1CriticFindings()
+        _sp1_critic_degraded(world, run_dir, client, e)
         world.validation_error = e
     return True, ""
 
@@ -1044,7 +1054,7 @@ def _h_sp1_cp_prebuilt_profile(
 def _h_sp1_cp_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_cp_"))
     world.sp1_run_dir = run_dir
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     if world.sp1_llm_content is not None:
         client.set_response_for(_SP1Stage1Profile, world.sp1_llm_content)
     else:
@@ -1169,7 +1179,7 @@ def _h_ing_no_access(world: World, text: str, examples: dict) -> tuple[bool, str
 def _h_ing_s1_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle Stage 1 capability-profile validation."""
     run_dir = Path(_tempfile.mkdtemp(prefix="sp1_ingress_"))
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     client.set_response_for(
         _SP1Stage1Profile,
         getattr(world, "ing_data", _sp1_valid_stage1_profile_dict()),
@@ -1203,7 +1213,7 @@ def _h_sp1_cp_profile_flag_run(
 ) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_cp_"))
     world.sp1_run_dir = run_dir
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     world.sp1_mock_client = client
     if world.sp1_profile_path is not None:
         world.sp1_profile = _sp1_load_capability_profile(world.sp1_profile_path)
@@ -1269,7 +1279,7 @@ def _h_sp1_cp_no_llm_call(world: World, text: str, examples: dict) -> tuple[bool
     if client is None:
         return True, ""
     for call in client.calls:
-        if call.get("response_format") == _SP1Stage1Profile:
+        if call.response_format == _SP1Stage1Profile:
             return False, "Unexpected LLM call for Stage 1b"
     return True, ""
 
@@ -1299,7 +1309,7 @@ def _h_sp1_cp_prompt_la_context(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
-    prompt = client.calls[0]["user_prompt"]
+    prompt = client.calls[0].user_prompt
     world.sp1_user_prompt = prompt
     if not prompt:
         return False, "User prompt is empty"
@@ -1600,7 +1610,7 @@ def _h_sp1_critic_prompt_cs(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return True, ""
-    prompt = client.calls[-1]["user_prompt"]
+    prompt = client.calls[-1].user_prompt
     if "RESP" not in prompt:
         return False, "Prompt does not contain control structure"
     return True, ""
@@ -1613,7 +1623,7 @@ def _h_sp1_critic_prompt_profile(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return True, ""
-    prompt = client.calls[-1]["user_prompt"]
+    prompt = client.calls[-1].user_prompt
     if not prompt:
         return False, "Prompt does not contain capability profile"
     return True, ""
@@ -1626,7 +1636,7 @@ def _h_sp1_critic_prompt_use_case(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return True, ""
-    prompt = client.calls[-1]["user_prompt"]
+    prompt = client.calls[-1].user_prompt
     if world.sp1_use_case_text not in prompt:
         return False, "Prompt does not contain use-case text"
     return True, ""
@@ -1849,6 +1859,34 @@ def _h_sp1_run_temp_llm(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
+_SP1_QUIET_CRITIC_FINDINGS = {
+    "gaps": [],
+    "checklist_results": {"Input validation": "present"},
+    "taxonomy_probe_results": {},
+}
+
+
+def _sp1_fill_unconfigured_responses(client: Any) -> None:
+    """Give every full-run response type that the scenario left alone a valid answer."""
+    defaults = (
+        (_SP1LossAnalysisDraft, _sp1_valid_la_dict),
+        (_SP1Stage1Profile, _sp1_valid_stage1_profile_dict),
+        (_GDRequirementSet, _sp1_valid_req_set_dict),
+        (_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict),
+        (_SP1ControlElementSet, _sp1_valid_control_element_set_dict),
+        (_SP1ConnectionSet, _sp1_valid_connection_set_dict),
+        (ControlStructure, _sp1_valid_cs_dict),
+        (_SP1CriticFindings, lambda: dict(_SP1_QUIET_CRITIC_FINDINGS)),
+    )
+    for response_type, make in defaults:
+        if (
+            response_type not in client._response_map
+            and response_type not in client._invalid_response_types
+            and response_type not in client._exception_response_types
+        ):
+            client.set_response_for(response_type, make())
+
+
 @step("the full SP1 run is executed$")
 def _h_sp1_run_full(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_run_"))
@@ -1857,64 +1895,7 @@ def _h_sp1_run_full(world: World, text: str, examples: dict) -> tuple[bool, str]
     # otherwise create a fresh one with valid responses
     if world.sp1_mock_client is not None:
         client = world.sp1_mock_client
-        # Fill in valid responses for any types not already configured
-        if (
-            _SP1LossAnalysisDraft not in client._response_map
-            and _SP1LossAnalysisDraft not in client._invalid_types
-            and _SP1LossAnalysisDraft not in client._exception_types
-        ):
-            client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        if (
-            _SP1Stage1Profile not in client._response_map
-            and _SP1Stage1Profile not in client._invalid_types
-            and _SP1Stage1Profile not in client._exception_types
-        ):
-            client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        if (
-            _GDRequirementSet not in client._response_map
-            and _GDRequirementSet not in client._invalid_types
-            and _GDRequirementSet not in client._exception_types
-        ):
-            client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
-        if (
-            _GDResponsibilitySet not in client._response_map
-            and _GDResponsibilitySet not in client._invalid_types
-            and _GDResponsibilitySet not in client._exception_types
-        ):
-            client.set_response_for(_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict())
-        if (
-            _SP1ControlElementSet not in client._response_map
-            and _SP1ControlElementSet not in client._invalid_types
-            and _SP1ControlElementSet not in client._exception_types
-        ):
-            client.set_response_for(
-                _SP1ControlElementSet, _sp1_valid_control_element_set_dict()
-            )
-        if (
-            _SP1ConnectionSet not in client._response_map
-            and _SP1ConnectionSet not in client._invalid_types
-            and _SP1ConnectionSet not in client._exception_types
-        ):
-            client.set_response_for(_SP1ConnectionSet, _sp1_valid_connection_set_dict())
-        if (
-            ControlStructure not in client._response_map
-            and ControlStructure not in client._invalid_types
-            and ControlStructure not in client._exception_types
-        ):
-            client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
-        if (
-            _SP1CriticFindings not in client._response_map
-            and _SP1CriticFindings not in client._invalid_types
-            and _SP1CriticFindings not in client._exception_types
-        ):
-            client.set_response_for(
-                _SP1CriticFindings,
-                {
-                    "gaps": [],
-                    "checklist_results": {"Input validation": "present"},
-                    "taxonomy_probe_results": {},
-                },
-            )
+        _sp1_fill_unconfigured_responses(client)
     else:
         client = _sp1_setup_full_mock_client()
         if world.sp1_llm_content == "all_critic_two_gaps":
@@ -2039,7 +2020,7 @@ def _h_sp1_run_s2_receives_la(
     # Find call with security constraints
     found = False
     for call in client.calls:
-        if "SC-1" in call["user_prompt"]:
+        if "SC-1" in call.user_prompt:
             found = True
             break
     if not found:
@@ -2061,7 +2042,7 @@ def _h_named_module_exists(world: World, text: str, examples: dict) -> tuple[boo
     filename = match.group(1)
     if not filename.endswith(".py"):
         filename += ".py"
-    from asago_scenario_generator.stpa import scenario_prod, system_model, threat_enum
+    from asago_scenario_generator.stpa import scenario_prod, threat_enum
 
     roots = (
         Path(system_model.__file__).parent,
@@ -2098,7 +2079,7 @@ def _h_sp1_run_temp_04(world: World, text: str, examples: dict) -> tuple[bool, s
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
     for call in client.calls:
-        if call.get("temperature") is not None and call["temperature"] != 0.4:
+        if call.temperature is not None and call.temperature != 0.4:
             return False, f"Expected temperature 0.4 but got {call['temperature']}"
     return True, ""
 
@@ -2271,115 +2252,6 @@ step.add(
 # ---------------------------------------------------------------------------
 
 
-def _sp1_id_payload() -> dict:
-    """Build the ordered source-ID payload used by the renumbering feature."""
-    return {
-        "responsibilities": [
-            {
-                "resp_id": "controller-alpha",
-                "description": "First controller",
-                "responsibility_constraints": [
-                    {"rc_id": "constraint-a", "description": "Constraint A"},
-                    {"rc_id": "constraint-b", "description": "Constraint B"},
-                ],
-                "process_model_parts": [
-                    {
-                        "pm_id": "state-alpha",
-                        "description": "State A",
-                        "feedback_source": {
-                            "type": "responsibility",
-                            "id": "controller-beta",
-                        },
-                    },
-                    {"pm_id": "state-b", "description": "State B"},
-                ],
-                "control_actions": [
-                    {
-                        "ca_id": "action-a",
-                        "description": "Action A",
-                        "target": {
-                            "type": "controlled_process",
-                            "id": "process-beta",
-                        },
-                    },
-                    {"ca_id": "action-b", "description": "Action B"},
-                ],
-                "feedback_channels": [
-                    {
-                        "fb_id": "feedback-a",
-                        "description": "Feedback A",
-                        "updates": "state-alpha",
-                    },
-                    {
-                        "fb_id": "feedback-b",
-                        "description": "Feedback B",
-                        "updates": "state-b",
-                    },
-                ],
-            },
-            {
-                "resp_id": "controller-beta",
-                "description": "Second controller",
-                "responsibility_constraints": [
-                    {"rc_id": "constraint-c", "description": "Constraint C"},
-                    {"rc_id": "constraint-d", "description": "Constraint D"},
-                ],
-                "process_model_parts": [{"pm_id": "state-c", "description": "State C"}],
-                "control_actions": [
-                    {"ca_id": "action-c", "description": "Action C"},
-                    {"ca_id": "action-d", "description": "Action D"},
-                ],
-                "feedback_channels": [
-                    {
-                        "fb_id": "feedback-c",
-                        "description": "Feedback C",
-                        "updates": "state-c",
-                        "source": {
-                            "type": "controlled_process",
-                            "id": "process-alpha",
-                        },
-                    },
-                    {
-                        "fb_id": "feedback-d",
-                        "description": "Feedback D",
-                        "updates": "state-c",
-                    },
-                ],
-            },
-        ],
-        "controlled_processes": [
-            {"cp_id": "process-alpha", "description": "Process A"},
-            {"cp_id": "process-beta", "description": "Process B"},
-        ],
-        "coordination_links": [
-            {
-                "link_id": "connection-alpha",
-                "source": "controller-alpha",
-                "target": "controller-beta",
-                "shared_pm": "state-alpha",
-                "coordination_mechanism": {
-                    "cm_id": "mechanism-alpha",
-                    "description": "Mechanism A",
-                    "payload": "State payload A",
-                },
-                "description": "Connection A",
-            },
-            {
-                "link_id": "connection-beta",
-                "source": "controller-beta",
-                "target": "controller-alpha",
-                "shared_pm": "state-c",
-                "coordination_mechanism": {
-                    "cm_id": "mechanism-beta",
-                    "description": "Mechanism B",
-                    "payload": "State payload B",
-                },
-                "description": "Connection B",
-            },
-        ],
-    }
-
-
 def _sp1_id_normalizer():
     """Import the product normalizer lazily for acceptance execution."""
     return normalize_control_structure_payload
@@ -2390,30 +2262,6 @@ _SP1_ID_CHILD_ALIASES = {
     "process model part": ("process_model_parts", "pm_id"),
     "control action": ("control_actions", "ca_id"),
     "feedback channel": ("feedback_channels", "fb_id"),
-}
-_SP1_ID_DUPLICATE_SCOPES = {
-    "responsibility 1 responsibility constraints": (
-        "responsibility_constraints",
-        "rc_id",
-    ),
-    "responsibility 1 process model parts": ("process_model_parts", "pm_id"),
-    "responsibility 1 control actions": ("control_actions", "ca_id"),
-    "responsibility 1 feedback channels": ("feedback_channels", "fb_id"),
-    "coordination-link coordination mechanisms": None,
-}
-_SP1_ID_UNRESOLVED_FIELDS = {
-    "feedback updates",
-    "process feedback_source",
-    "control action target",
-    "feedback source",
-    "coordination source",
-    "coordination target",
-    "coordination shared_pm",
-}
-_SP1_ID_TYPED_REFERENCE_FIELDS = {
-    "process feedback_source": "feedback_source",
-    "control action target": "target",
-    "feedback source": "source",
 }
 
 
@@ -2468,55 +2316,6 @@ def coordAt(payload: dict, field: str):
     return payload["coordination_links"][0][field]
 
 
-@step("a syntactically parsed SP1 control-structure payload$")
-def _h_sp1_id_payload_parsed(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    world.sp1_id_payload = _sp1_id_payload()
-    return True, ""
-
-
-@step(
-    "the payload preserves responsibility, child, controlled-process, and coordination-link list order$"
-)
-def _h_sp1_id_payload_ordered(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload", None)
-    if not isinstance(payload, dict):
-        return False, "The SP1 ID payload was not initialized"
-    if len(payload.get("responsibilities", [])) < 2:
-        return False, "Expected at least two responsibilities"
-    return True, ""
-
-
-@step("the payload contains at least two elements at")
-def _h_sp1_id_at_least_two(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload", None)
-    scope = examples.get("structural_scope", "")
-    counts = {
-        "responsibilities": len(payload.get("responsibilities", [])),
-        "responsibility constraints": len(
-            payload["responsibilities"][1].get("responsibility_constraints", [])
-        ),
-        "process model parts": len(
-            payload["responsibilities"][0].get("process_model_parts", [])
-        ),
-        "control actions": len(
-            payload["responsibilities"][1].get("control_actions", [])
-        ),
-        "feedback channels": len(
-            payload["responsibilities"][0].get("feedback_channels", [])
-        ),
-        "controlled processes": len(payload.get("controlled_processes", [])),
-        "coordination links": len(payload.get("coordination_links", [])),
-        "coordination mechanisms": len(payload.get("coordination_links", [])),
-    }
-    if not isinstance(payload, dict) or counts.get(scope, 0) < 2:
-        return False, f"Expected at least two elements at {scope}"
-    return True, ""
-
-
 @step("the payload IDs are normalized$")
 def _h_sp1_id_normalize(world: World, text: str, examples: dict) -> tuple[bool, str]:
     if hasattr(world, "sp1_tolerant_nested_payload"):
@@ -2527,776 +2326,10 @@ def _h_sp1_id_normalize(world: World, text: str, examples: dict) -> tuple[bool, 
     return True, ""
 
 
-@step("the element at .* has ID")
-def _h_sp1_id_position_has_id(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    normalized = getattr(world, "sp1_id_normalization", None)
-    position = examples.get("structural_position", "")
-    expected = examples.get("canonical_id", "")
-    try:
-        element, id_key = findOwnerEl(normalized.payload, position)
-    except (KeyError, IndexError, TypeError):
-        return False, f"Unknown structural position {position}"
-    actual = element.get(id_key)
-    if actual != expected:
-        return False, f"Expected {position} to have {expected}, got {actual}"
-    return True, ""
-
-
-@step("two payloads have identical ordered structures but different element IDs$")
-@step("both payloads are normalized$")
-def _h_sp1_id_two_payloads(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    first = _sp1_id_payload()
-    second = json.loads(json.dumps(first))
-    second["responsibilities"][0]["resp_id"] = "different-controller"
-    second["responsibilities"][0]["process_model_parts"][0]["pm_id"] = "different-state"
-    first_result = _sp1_id_normalizer()(first)
-    second_result = _sp1_id_normalizer()(second)
-    world.sp1_id_normalization = first_result
-    world.sp1_id_second_normalization = second_result
-    world.sp1_id_original_payload = first
-    return True, ""
-
-
-@step("the payload contains a unique source ID .* at")
-def _h_sp1_id_unique_source(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload")
-    old_id = examples.get("old_id", "")
-    position = examples.get("structural_position", "")
-    try:
-        element, id_key = findOwnerEl(payload, position)
-    except (KeyError, IndexError, TypeError):
-        return False, f"Unknown structural position {position}"
-    actual = element.get(id_key)
-    if actual != old_id:
-        return False, f"Expected {position} to have source ID {old_id}, got {actual}"
-    return True, ""
-
-
-@step("both normalized payloads have the same element IDs$")
-def _h_sp1_id_same_ids(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    first = getattr(world, "sp1_id_normalization").payload
-    second = getattr(world, "sp1_id_second_normalization").payload
-    first_ids = [(key, value) for key, value in _sp1_id_values(first)]
-    second_ids = [(key, value) for key, value in _sp1_id_values(second)]
-    if first_ids != second_ids:
-        return False, "Normalized payloads did not receive the same IDs"
-    return True, ""
-
-
-def _sp1_id_values(payload: dict):
-    """Yield all namespace labels and IDs in structural order."""
-    for resp in payload.get("responsibilities", []):
-        yield "resp", resp.get("resp_id")
-        for key, id_key in (
-            ("responsibility_constraints", "rc_id"),
-            ("process_model_parts", "pm_id"),
-            ("control_actions", "ca_id"),
-            ("feedback_channels", "fb_id"),
-        ):
-            for child in resp.get(key, []):
-                yield id_key, child.get(id_key)
-    for process in payload.get("controlled_processes", []):
-        yield "cp_id", process.get("cp_id")
-    for link in payload.get("coordination_links", []):
-        yield "link_id", link.get("link_id")
-        yield "cm_id", link.get("coordination_mechanism", {}).get("cm_id")
-
-
-@step("normalization preserves list order$")
-def _h_sp1_id_preserves_order(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    original = getattr(world, "sp1_id_original_payload")
-    normalized = getattr(world, "sp1_id_normalization").payload
-    for key in ("responsibilities", "controlled_processes", "coordination_links"):
-        if [item.get("description") for item in original.get(key, [])] != [
-            item.get("description") for item in normalized.get(key, [])
-        ]:
-            return False, f"Normalization changed {key} order"
-    return True, ""
-
-
-@step("normalization preserves every non-ID field$")
-def _h_sp1_id_preserves_non_ids(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    original = getattr(world, "sp1_id_original_payload")
-    normalized = getattr(world, "sp1_id_normalization").payload
-    original_copy = json.loads(json.dumps(original))
-    normalized_copy = json.loads(json.dumps(normalized))
-
-    # Compare known non-ID fields independently of the canonical IDs.
-    def without_ids(value):
-        if isinstance(value, dict):
-            return {
-                key: without_ids(item)
-                for key, item in value.items()
-                if key
-                not in {
-                    "resp_id",
-                    "rc_id",
-                    "pm_id",
-                    "ca_id",
-                    "fb_id",
-                    "cp_id",
-                    "link_id",
-                    "cm_id",
-                    "id",
-                    "updates",
-                    "source",
-                    "target",
-                    "shared_pm",
-                }
-            }
-        if isinstance(value, list):
-            return [without_ids(item) for item in value]
-        return value
-
-    if without_ids(original_copy) != without_ids(normalized_copy):
-        return False, "Normalization changed a non-ID field"
-    return True, ""
-
-
-@step("the normalization mapping resolves")
-def _h_sp1_id_mapping(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    old_id = examples.get("old_id", "")
-    expected = examples.get("new_id", "")
-    actual = getattr(world, "sp1_id_normalization").mapping.get(old_id)
-    if actual != expected:
-        return False, f"Expected mapping {old_id} -> {expected}, got {actual}"
-    return True, ""
-
-
-@step("two elements in .* both use the same source ID$")
-def _h_sp1_id_prepare_duplicate(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload")
-    scope = examples.get("element_scope", "")
-    if scope not in _SP1_ID_DUPLICATE_SCOPES:
-        return False, f"Unknown duplicate-ID scope {scope}"
-    spec = _SP1_ID_DUPLICATE_SCOPES[scope]
-    duplicate_id = "repeated"
-    if spec is None:
-        for link in payload["coordination_links"]:
-            link["coordination_mechanism"]["cm_id"] = duplicate_id
-        return True, ""
-    collection, id_key = spec
-    children = payload["responsibilities"][0][collection]
-    children[0][id_key] = children[1][id_key] = duplicate_id
-    return True, ""
-
-
-@step("the first element in .* has ID")
-@step("the second element in .* has ID")
-def _h_sp1_id_duplicate_has_ids(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_normalization").payload
-    scope = examples.get("element_scope", "")
-    expected = [examples.get("first_id"), examples.get("second_id")]
-    if scope not in _SP1_ID_DUPLICATE_SCOPES:
-        return False, f"Unknown duplicate-ID scope {scope}"
-    spec = _SP1_ID_DUPLICATE_SCOPES[scope]
-    if spec is None:
-        actual = [
-            link["coordination_mechanism"]["cm_id"]
-            for link in payload["coordination_links"][:2]
-        ]
-    else:
-        collection, id_key = spec
-        actual = [
-            item[id_key] for item in payload["responsibilities"][0][collection][:2]
-        ]
-    if actual != expected:
-        return False, f"Expected IDs {expected}, got {actual}"
-    return True, ""
-
-
-@step(
-    "responsibility 1 and responsibility 2 each contain a process model part with source ID shared-state$"
-)
-@step(
-    "each responsibility contains a feedback channel whose updates value is shared-state$"
-)
-def _h_sp1_id_local_pm_setup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload")
-    for responsibility in payload["responsibilities"]:
-        responsibility["process_model_parts"] = [
-            {"pm_id": "shared-state", "description": "Shared state"}
-        ]
-        responsibility["feedback_channels"] = [
-            {
-                "fb_id": "repeated-feedback",
-                "description": "Local feedback",
-                "updates": "shared-state",
-            }
-        ]
-    return True, ""
-
-
-@step("responsibility .* feedback channel 1 updates")
-def _h_sp1_id_local_pm_update(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    index = int(examples.get("responsibility", "1")) - 1
-    expected = examples.get("local_pm", "")
-    if not expected:
-        expected = text.rsplit("updates", 1)[-1].strip()
-    actual = getattr(world, "sp1_id_normalization").payload["responsibilities"][index][
-        "feedback_channels"
-    ][0]["updates"]
-    if actual != expected:
-        return False, f"Expected local PM {expected}, got {actual}"
-    return True, ""
-
-
-@step("responsibility 1 and controlled process 1 both use source ID shared-element$")
-def _h_sp1_id_cross_namespace_setup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload", None)
-    if not isinstance(payload, dict):
-        return False, "The SP1 ID payload was not initialized"
-    responsibilities = payload.get("responsibilities", [])
-    processes = payload.get("controlled_processes", [])
-    if not responsibilities or not processes:
-        return False, "Expected a responsibility and controlled process"
-    responsibilities[0]["resp_id"] = "shared-element"
-    processes[0]["cp_id"] = "shared-element"
-    return True, ""
-
-
-@step("the flat normalization mapping does not resolve shared-element$")
-def _h_sp1_id_flat_mapping_does_not_resolve(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    mapping = getattr(world, "sp1_id_normalization").mapping
-    if mapping.get("shared-element") is not None:
-        return False, "The flat mapping resolved shared-element"
-    return True, ""
-
-
-@step("the (?:responsibility|controlled-process) mapping resolves shared-element to")
-def _h_sp1_id_namespace_mapping_resolves(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    match = re.search(
-        r"the (responsibility|controlled-process) mapping resolves "
-        r"(\S+) to (\S+)",
-        text,
-        re.IGNORECASE,
-    )
-    if match is None:
-        return False, f"Could not parse namespace mapping from: {text}"
-    namespace = (
-        "responsibility"
-        if match.group(1).lower() == "responsibility"
-        else "controlled_process"
-    )
-    old_id, expected = match.group(2), match.group(3)
-    actual = getattr(world, "sp1_id_normalization").mappings[namespace].get(old_id)
-    if actual != expected:
-        return (
-            False,
-            f"Expected {namespace} mapping {old_id} -> {expected}, got {actual}",
-        )
-    return True, ""
-
-
-@step(
-    "responsibility reference rewriting receives one responsibility whose feedback updates value is missing-state$"
-)
-def _h_sp1_id_missing_local_pm_setup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    world.sp1_id_payload = {
-        "responsibilities": [
-            {
-                "resp_id": "controller-alpha",
-                "description": "Controller",
-                "feedback_channels": [
-                    {
-                        "fb_id": "feedback-a",
-                        "description": "Feedback",
-                        "updates": "missing-state",
-                    }
-                ],
-            }
-        ],
-        "controlled_processes": [],
-        "coordination_links": [],
-    }
-    return True, ""
-
-
-@step("no local process-model mapping is available for responsibility 1$")
-def _h_sp1_id_no_local_pm_mapping(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload", None)
-    if not isinstance(payload, dict):
-        return False, "The SP1 ID payload was not initialized"
-    responsibilities = payload.get("responsibilities", [])
-    if len(responsibilities) != 1:
-        return False, "Expected exactly one responsibility"
-    if responsibilities[0].get("process_model_parts"):
-        return False, "Expected no local process-model entries"
-    return True, ""
-
-
-@step("the responsibility references are rewritten$")
-def _h_sp1_id_rewrite_responsibilities(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    try:
-        world.sp1_id_normalization = _sp1_id_normalizer()(world.sp1_id_payload)
-    except Exception as exc:  # pragma: no cover - acceptance diagnostic
-        return False, f"Reference rewriting raised {type(exc).__name__}: {exc}"
-    return True, ""
-
-
-@step("reference rewriting completes without an error$")
-def _h_sp1_id_rewrite_completed(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if not hasattr(world, "sp1_id_normalization"):
-        return False, "Reference rewriting did not produce a result"
-    return True, ""
-
-
-@step("the SP1 acceptance normalizer is resolved$")
-def _h_sp1_id_acceptance_normalizer_resolved(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    world.sp1_acceptance_normalizer = _sp1_id_normalizer()
-    return True, ""
-
-
-@step(
-    "its module is asago_scenario_generator\\.stpa\\.system_model\\.id_normalization$"
-)
-def _h_sp1_id_acceptance_normalizer_module(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    normalizer = getattr(world, "sp1_acceptance_normalizer", None)
-    if normalizer is None:
-        return False, "The acceptance normalizer was not resolved"
-    expected = "asago_scenario_generator.stpa.system_model.id_normalization"
-    if normalizer.__module__ != expected:
-        return (
-            False,
-            f"Expected normalizer module {expected}, got {normalizer.__module__}",
-        )
-    return True, ""
-
-
-@step(
-    "neither the control-structure module nor the system-model package re-exports the normalizer$"
-)
-def _h_sp1_id_no_normalizer_reexports(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    name = "normalize_control_structure_payload"
-    if name in getattr(system_model, "__all__", ()):
-        return False, "system_model.__all__ still re-exports the normalizer"
-    if name in getattr(control_structure, "__all__", ()):
-        return False, "control_structure.__all__ re-exports the normalizer"
-    return True, ""
-
-
-@step("it normalizes responsibility 1 source ID controller-alpha to RESP-1$")
-def _h_sp1_id_acceptance_normalizer_normalizes(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    normalizer = getattr(world, "sp1_acceptance_normalizer", None)
-    if normalizer is None:
-        return False, "The acceptance normalizer was not resolved"
-    result = normalizer(
-        {
-            "responsibilities": [{"resp_id": "controller-alpha"}],
-            "controlled_processes": [],
-            "coordination_links": [],
-        }
-    )
-    actual = result.payload["responsibilities"][0]["resp_id"]
-    if actual != "RESP-1":
-        return False, f"Expected RESP-1, got {actual}"
-    return True, ""
-
-
-@step("the referenced element at .* has source ID")
-@step(".* has .* ID .* with type")
-def _h_sp1_id_typed_ref_setup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload")
-    old_id = examples.get("old_reference", "")
-    ref_type = examples.get("reference_type", "")
-    field = examples.get("reference_field", "")
-    referenced_position = examples.get("referenced_position", "")
-    owner = examples.get("reference_owner", "")
-    try:
-        referenced, referenced_key = findOwnerEl(payload, referenced_position)
-        owner_element = ownerAt(payload, owner)
-    except (KeyError, IndexError, TypeError) as exc:
-        return False, f"Unknown typed-reference location: {exc}"
-    if referenced.get(referenced_key) != old_id:
-        return False, (
-            f"Expected {referenced_position} to have source ID {old_id}, "
-            f"got {referenced.get(referenced_key)}"
-        )
-    owner_element[field] = {"type": ref_type, "id": old_id}
-    return True, ""
-
-
-@step(
-    "an otherwise reference-resolvable payload has two .* using source ID .* and .* .* references it as .*"
-)
-def _h_sp1_id_ambiguous_global_setup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload", None)
-    if not isinstance(payload, dict):
-        return False, "The SP1 ID payload was not initialized"
-
-    target_scope = examples.get("target_scope", "")
-    ambiguous_id = "ambiguous-global"
-    reference_owner = examples.get("reference_owner", "")
-    reference_field = examples.get("reference_field", "")
-    field = _SP1_ID_TYPED_REFERENCE_FIELDS.get(reference_field)
-    if field is None:
-        return False, f"Unknown typed reference field {reference_field}"
-
-    if target_scope == "responsibilities":
-        for responsibility in payload["responsibilities"][:2]:
-            responsibility["resp_id"] = ambiguous_id
-        # Keep all non-example references valid after canonicalization.  The
-        # duplicated source ID is intentionally reserved for the requested
-        # typed reference below.
-        for responsibility in payload["responsibilities"]:
-            for process_model_part in responsibility.get("process_model_parts", []):
-                if process_model_part.get("feedback_source") is not None:
-                    process_model_part["feedback_source"] = {
-                        "type": "responsibility",
-                        "id": "RESP-2",
-                    }
-        for link in payload.get("coordination_links", []):
-            link["source"] = "RESP-1"
-            link["target"] = "RESP-2"
-    elif target_scope == "controlled processes":
-        for process in payload["controlled_processes"][:2]:
-            process["cp_id"] = ambiguous_id
-        # The default payload has references to both controlled processes.
-        # Use canonical IDs for those unrelated references so only the
-        # example field remains unresolved.
-        for responsibility in payload["responsibilities"]:
-            for control_action in responsibility.get("control_actions", []):
-                if control_action.get("target") is not None:
-                    control_action["target"] = {
-                        "type": "controlled_process",
-                        "id": "CP-1",
-                    }
-            for feedback_channel in responsibility.get("feedback_channels", []):
-                if feedback_channel.get("source") is not None:
-                    feedback_channel["source"] = {
-                        "type": "controlled_process",
-                        "id": "CP-1",
-                    }
-    else:
-        return False, f"Unknown ambiguous target scope {target_scope}"
-
-    expected_type = {
-        "responsibilities": "responsibility",
-        "controlled processes": "controlled_process",
-    }[target_scope]
-    reference_type = examples.get("reference_type", "")
-    if reference_type != expected_type:
-        return False, (
-            f"Expected {target_scope} reference type {expected_type}, got {reference_type}"
-        )
-
-    try:
-        owner_element = ownerAt(payload, reference_owner)
-    except (KeyError, IndexError, TypeError) as exc:
-        return False, f"Unknown ambiguous-reference owner: {exc}"
-    owner_element[field] = {"type": reference_type, "id": ambiguous_id}
-    return True, ""
-
-
-@step(
-    "responsibility \\d+ (?:process model part|control action|feedback channel) \\d+ .* still references .*"
-)
-def _h_sp1_id_ambiguous_global_assert(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    normalized = getattr(world, "sp1_id_normalization", None)
-    if normalized is None:
-        return False, "No normalized payload available"
-    reference_field = examples.get("reference_field", "")
-    field = _SP1_ID_TYPED_REFERENCE_FIELDS.get(reference_field)
-    if field is None:
-        return False, f"Unknown typed reference field {reference_field}"
-    try:
-        owner_element = ownerAt(normalized.payload, examples.get("reference_owner", ""))
-    except (KeyError, IndexError, TypeError) as exc:
-        return False, f"Unknown ambiguous-reference owner: {exc}"
-    reference = owner_element.get(field)
-    actual = reference.get("id") if isinstance(reference, dict) else None
-    expected = "ambiguous-global"
-    if actual != expected:
-        return False, f"Expected {reference_field} to remain {expected}, got {actual}"
-    return True, ""
-
-
-@step(
-    "an otherwise reference-resolvable payload has responsibility 1 and responsibility 2 each containing a process model part with source ID .*"
-)
-def _h_sp1_id_ambiguous_pm_setup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload", None)
-    if not isinstance(payload, dict):
-        return False, "The SP1 ID payload was not initialized"
-    ambiguous_id = "shared-state"
-    responsibilities = payload.get("responsibilities", [])
-    if len(responsibilities) < 2:
-        return False, "Expected at least two responsibilities"
-    first_parts = responsibilities[0].get("process_model_parts", [])
-    second_parts = responsibilities[1].get("process_model_parts", [])
-    if not first_parts or not second_parts:
-        return False, "Expected a process model part in each responsibility"
-    first_parts[0]["pm_id"] = ambiguous_id
-    second_parts[0]["pm_id"] = ambiguous_id
-
-    # Make every unrelated PM update resolve to its canonical position.  The
-    # coordination link's shared_pm is set to the ambiguous ID by the next
-    # step and is the only expected validation failure.
-    for responsibility_index, responsibility in enumerate(responsibilities, start=1):
-        for feedback_channel in responsibility.get("feedback_channels", []):
-            feedback_channel["updates"] = f"PM-{responsibility_index}-1"
-    for link in payload.get("coordination_links", []):
-        link["shared_pm"] = "PM-1-1"
-    if len(payload.get("coordination_links", [])) > 1:
-        payload["coordination_links"][1]["shared_pm"] = "PM-2-1"
-    return True, ""
-
-
-@step("coordination link 1 selects .* as .*")
-def _h_sp1_id_ambiguous_coord_setup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload", None)
-    if not isinstance(payload, dict):
-        return False, "The SP1 ID payload was not initialized"
-    links = payload.get("coordination_links", [])
-    if not links:
-        return False, "Expected at least one coordination link"
-    field = examples.get("coordination_field", "")
-    if field not in {"shared_pm"}:
-        return False, f"Unknown coordination reference field {field}"
-    links[0][field] = "shared-state"
-    return True, ""
-
-
-@step("normalization leaves coordination link 1 .* as .*")
-def _h_sp1_id_ambiguous_coord_assert(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    normalized = getattr(world, "sp1_id_normalization", None)
-    if normalized is None:
-        return False, "No normalized payload available"
-    field = examples.get("coordination_field", "")
-    if field not in {"shared_pm"}:
-        return False, f"Unknown coordination reference field {field}"
-    try:
-        actual = coordAt(normalized.payload, field)
-    except (KeyError, IndexError, TypeError) as exc:
-        return False, f"Unknown coordination reference field {field}: {exc}"
-    expected = "shared-state"
-    if actual != expected:
-        return (
-            False,
-            f"Expected coordination link 1 {field} to remain {expected}, got {actual}",
-        )
-    return True, ""
-
-
-@step("normalization changes .* from .* to")
-@step("the reference type remains")
-def _h_sp1_id_typed_ref_assert(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_normalization").payload
-    field = examples.get("reference_field", "")
-    owner = examples.get("reference_owner", "")
-    try:
-        owner_element = ownerAt(payload, owner)
-    except (KeyError, IndexError, TypeError):
-        return False, f"Unknown reference owner {owner}"
-    ref = owner_element.get(field, {})
-    if ref.get("id") != examples.get("new_reference"):
-        return False, f"Expected {examples.get('new_reference')}, got {ref.get('id')}"
-    if ref.get("type") != examples.get("reference_type"):
-        return False, f"Reference type changed to {ref.get('type')}"
-    return True, ""
-
-
-@step(
-    "responsibility 1 has source ID controller-alpha and process model part source ID shared-state$"
-)
-@step("responsibility 2 has source ID controller-beta$")
-@step(
-    "coordination link 1 has source controller-alpha, target controller-beta, and shared_pm shared-state$"
-)
-def _h_sp1_id_coord_setup(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload")
-    link = payload["coordination_links"][0]
-    link["source"] = "controller-alpha"
-    link["target"] = "controller-beta"
-    link["shared_pm"] = "state-alpha"
-    return True, ""
-
-
-@step("coordination link 1 has")
-def _h_sp1_id_coord_assert(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    field = examples.get("reference_field", "")
-    actual = coordAt(getattr(world, "sp1_id_normalization").payload, field)
-    if actual != examples.get("new_reference"):
-        return False, f"Expected {field} {examples.get('new_reference')}, got {actual}"
-    return True, ""
-
-
-@step(
-    "the payload has duplicate nested IDs, nonconforming ID formats, and an RC value used as a PM ID$"
-)
-def _h_sp1_id_malformed_setup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload")
-    payload["responsibilities"][0]["responsibility_constraints"][0]["rc_id"] = "RC-9-9"
-    payload["responsibilities"][0]["process_model_parts"][0]["pm_id"] = "RC-9-9"
-    payload["responsibilities"][0]["control_actions"][0]["ca_id"] = "repeated"
-    payload["responsibilities"][0]["control_actions"][1]["ca_id"] = "repeated"
-    payload["responsibilities"][0]["feedback_channels"][0]["fb_id"] = "FB-1"
-    payload["responsibilities"][0]["feedback_channels"][1]["fb_id"] = "FB-1"
-    payload["controlled_processes"][0]["cp_id"] = "CP-99-1"
-    payload["coordination_links"][0]["link_id"] = "CL-20"
-    payload["coordination_links"][0]["coordination_mechanism"]["cm_id"] = "CM-7-7"
-    return True, ""
-
-
-@step("the parsed payload enters control-structure post-processing$")
-def _h_sp1_id_post_process(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    return _h_sp1_id_normalize(world, text, examples)
-
-
-@step("ID normalization completes before ControlStructure validation$")
-def _h_sp1_id_normalization_complete(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if not getattr(world, "sp1_id_normalization", None):
-        return False, "ID normalization did not complete"
-    return True, ""
-
-
-@step("every element ID matches the format for its element type$")
-def _h_sp1_id_formats(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    patterns = {
-        "resp": r"^RESP-\d+$",
-        "rc_id": r"^RC-\d+-\d+$",
-        "pm_id": r"^PM-\d+-\d+$",
-        "ca_id": r"^CA-\d+-\d+$",
-        "fb_id": r"^FB-\d+-\d+$",
-        "cp_id": r"^CP-\d+$",
-        "link_id": r"^CL-\d+$",
-        "cm_id": r"^CM-\d+$",
-    }
-    for namespace, value in _sp1_id_values(
-        getattr(world, "sp1_id_normalization").payload
-    ):
-        if not re.match(patterns[namespace], value):
-            return False, f"Invalid {namespace} format: {value}"
-    return True, ""
-
-
-@step("no element type contains duplicate IDs$")
-def _h_sp1_id_no_duplicates(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    seen: dict[str, set] = {}
-    for namespace, value in _sp1_id_values(
-        getattr(world, "sp1_id_normalization").payload
-    ):
-        seen.setdefault(namespace, set())
-        if value in seen[namespace]:
-            return False, f"Duplicate {namespace}: {value}"
-        seen[namespace].add(value)
-    return True, ""
-
-
-@step("no ID occurs in more than one element-type namespace$")
-def _h_sp1_id_no_collisions(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    namespaces: dict[str, set] = {}
-    for namespace, value in _sp1_id_values(
-        getattr(world, "sp1_id_normalization").payload
-    ):
-        namespaces.setdefault(namespace, set()).add(value)
-    values = list(namespaces.items())
-    for index, (_left_name, left) in enumerate(values):
-        for right_name, right in values[index + 1 :]:
-            if left & right:
-                return False, f"Cross-namespace collision with {right_name}"
-    return True, ""
-
-
 def _h_sp1_id_validate(world: World, text: str, examples: dict) -> tuple[bool, str]:
     world.control_structure = ControlStructure.model_validate(
         getattr(world, "sp1_id_normalization").payload
     )
-    return True, ""
-
-
-@step("the payload contains an unresolved .* value$")
-def _h_sp1_id_unresolved_setup(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    payload = getattr(world, "sp1_id_payload")
-    field = examples.get("reference_field", "")
-    missing = "absent-reference"
-    if field not in _SP1_ID_UNRESOLVED_FIELDS:
-        return False, f"Unknown unresolved reference field {field}"
-    if field == "feedback updates":
-        payload["responsibilities"][0]["feedback_channels"][0]["updates"] = missing
-    elif field == "process feedback_source":
-        payload["responsibilities"][0]["process_model_parts"][0]["feedback_source"] = {
-            "type": "responsibility",
-            "id": missing,
-        }
-    elif field == "control action target":
-        payload["responsibilities"][0]["control_actions"][0]["target"] = {
-            "type": "controlled_process",
-            "id": missing,
-        }
-    elif field == "feedback source":
-        payload["responsibilities"][1]["feedback_channels"][0]["source"] = {
-            "type": "controlled_process",
-            "id": missing,
-        }
-    elif field == "coordination source":
-        payload["coordination_links"][0]["source"] = missing
-    elif field == "coordination target":
-        payload["coordination_links"][0]["target"] = missing
-    else:
-        payload["coordination_links"][0]["shared_pm"] = missing
     return True, ""
 
 

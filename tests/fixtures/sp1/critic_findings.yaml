@@ -1,0 +1,42 @@
+# Valid CriticFindings payloads. two_gaps and no_unjustified serve the acceptance scenarios; no_gaps_all_present serves the unit tests.
+two_gaps:
+  gaps:
+  - gap_type: missing_responsibility
+    description: Missing input validation
+    related_attack_path: Attacker sends crafted input
+    suggested_remedy: Add input validation
+  - gap_type: missing_feedback
+    description: Missing outcome feedback
+    related_attack_path: Attacker exploits unchecked output
+    suggested_remedy: Add outcome verification
+  checklist_results:
+    Input validation: present
+    Authorization: present
+    Action selection: present
+    Outcome verification: absent_justified
+    Context management: present
+    Multi-agent coordination: absent_justified
+    Human-in-the-loop: absent_justified
+  taxonomy_probe_results: {}
+no_unjustified:
+  gaps: []
+  checklist_results:
+    Input validation: present
+    Authorization: present
+    Action selection: present
+    Outcome verification: present
+    Context management: present
+    Multi-agent coordination: absent_justified
+    Human-in-the-loop: absent_justified
+  taxonomy_probe_results: {}
+no_gaps_all_present:
+  gaps: []
+  checklist_results:
+    Input validation: present
+    Authorization: present
+    Action selection: present
+    Outcome verification: present
+    Context management: present
+    Multi-agent coordination: present
+    Human-in-the-loop: present
+  taxonomy_probe_results: {}

@@ -37,10 +37,8 @@ from runner_protocol import (  # noqa: E402
 import refresh_snapshot  # noqa: E402
 from runtime_shared import World as SharedWorld  # noqa: E402
 from runtime_world import World  # noqa: E402
-from runtime_features.shadow_cleanup import (  # noqa: E402
-    _h_sc_returns_true_unconditional,
-)
-from runtime_features.sp1_revision import _h_gd_pipeline_no_crash  # noqa: E402
+import acceptance_runtime  # noqa: E402
+import runtime_manifest  # noqa: E402
 
 
 def _handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
@@ -113,6 +111,128 @@ def test_registry_rejects_duplicate_handler_registration() -> None:
 
     with pytest.raises(RuntimeError, match="Duplicate step pattern registration"):
         api.register("duplicate", _handler)
+
+
+@pytest.mark.parametrize(("plain_order", "first_order"), [(10, 30), (30, 10)])
+def test_register_first_beats_register_whatever_the_source_order(
+    plain_order: int, first_order: int
+) -> None:
+    stage = RegistrationStage()
+    api = RegistrationAPI(stage)
+    api.register("witness", _handler, source_order=plain_order)
+    api.register_first("witness", _failing_handler, source_order=first_order)
+
+    registry = PatternRegistry()
+    registry.publish(stage)
+
+    assert registry.resolve("witness") is _failing_handler
+
+
+def test_among_register_first_calls_the_last_registered_wins() -> None:
+    stage = RegistrationStage()
+    api = RegistrationAPI(stage)
+    api.register_first("witness", _handler)
+    api.register_first("witness", _failing_handler)
+
+    registry = PatternRegistry()
+    registry.publish(stage)
+
+    assert registry.resolve("witness") is _failing_handler
+
+
+def test_among_register_calls_the_first_registered_wins() -> None:
+    stage = RegistrationStage()
+    api = RegistrationAPI(stage)
+    api.register("witness", _handler)
+    api.register("witness", _failing_handler)
+
+    registry = PatternRegistry()
+    registry.publish(stage)
+
+    assert registry.resolve("witness") is _handler
+
+
+def test_pattern_conflicts_report_distinct_handlers_in_one_scope_only() -> None:
+    registry = PatternRegistry()
+    registry.register("shadowed", _handler)
+    registry.register("shadowed", _failing_handler)
+    registry.register("scoped", _handler)
+    registry.register_first("scoped", _failing_handler, feature="alpha")
+    registry.register("unique", _handler)
+
+    conflicts = registry.conflicts(["shadowed text", "scoped text", "unique text"])
+
+    assert conflicts == [("shadowed text", "shadowed", "shadowed")]
+
+
+def test_published_keys_match_published_patterns() -> None:
+    stage = RegistrationStage()
+    api = RegistrationAPI(stage)
+    api.register("plain", _handler)
+    api.set_feature("alpha")
+    api.register_first("scoped", _failing_handler)
+
+    registry = PatternRegistry()
+    registry.publish(stage)
+
+    assert len(registry.keys) == len(registry.patterns) == 2
+
+
+def test_failed_replacement_keeps_the_published_registry_and_names_the_feature(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    before_patterns = list(acceptance_runtime.STEP_PATTERNS)
+    before_keys = set(acceptance_runtime._REGISTERED_PATTERN_KEYS)
+
+    def valid_register(api) -> None:
+        api.register("staged witness", _handler)
+
+    def failing_register(api) -> None:
+        api.register("failing witness", _handler)
+        raise ValueError("injected registration failure")
+
+    modules = (
+        SimpleNamespace(FEATURE_ID="valid", register=valid_register),
+        SimpleNamespace(FEATURE_ID="failing", register=failing_register),
+    )
+    monkeypatch.setattr(runtime_manifest, "MODULES", ("valid", "failing"))
+    monkeypatch.setattr(runtime_manifest, "load_modules", lambda: modules)
+
+    with pytest.raises(
+        RuntimeError, match="runtime feature failing registration failed"
+    ):
+        acceptance_runtime._load_feature_registry()
+
+    assert acceptance_runtime.STEP_PATTERNS == before_patterns
+    assert acceptance_runtime._REGISTERED_PATTERN_KEYS == before_keys
+    assert (
+        acceptance_runtime.resolve_handler(
+            acceptance_runtime.STEP_PATTERNS, "staged witness"
+        )
+        is None
+    )
+
+
+def test_the_manifest_registers_every_feature_exactly_once() -> None:
+    modules = runtime_manifest.load_modules()
+    calls: dict[str, int] = {}
+
+    class Counting:
+        def __init__(self, module) -> None:
+            self.FEATURE_ID = module.FEATURE_ID
+            self._module = module
+
+        def register(self, api) -> None:
+            calls[self.FEATURE_ID] = calls.get(self.FEATURE_ID, 0) + 1
+            self._module.register(api)
+
+    runtime_manifest.register_all(
+        RegistrationAPI(RegistrationStage()), tuple(Counting(m) for m in modules)
+    )
+
+    assert tuple(calls) == runtime_manifest.MODULES
+    assert set(calls.values()) == {1}
+    assert all(callable(module.register) for module in modules)
 
 
 def test_step_table_keeps_definition_order_for_stacked_decorators() -> None:
@@ -349,20 +469,6 @@ def test_runtime_world_stays_independent_of_production_models() -> None:
     world = World()
     assert world.loss_analysis is None
     assert world.control_structure is None
-
-
-def test_shadow_cleanup_reuses_revision_no_crash_handler() -> None:
-
-    world = World()
-    passed, error = _h_sc_returns_true_unconditional(
-        world, "the handler returns true unconditionally", {}
-    )
-    assert passed
-    assert error == ""
-    assert _h_gd_pipeline_no_crash(world, "the pipeline does not crash", {}) == (
-        True,
-        "",
-    )
 
 
 @given(

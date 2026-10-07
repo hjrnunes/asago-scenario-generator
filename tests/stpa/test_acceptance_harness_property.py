@@ -91,7 +91,7 @@ def acceptance_artifacts(
         json.dumps(
             {
                 "name": "Fixture",
-                "background": [{"steps": [{"text": "the quality script is invoked"}]}],
+                "background": [{"steps": [{"text": "the pipeline does not crash"}]}],
                 "scenarios": [],
             }
         ),

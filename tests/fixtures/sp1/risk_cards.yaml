@@ -1,0 +1,8 @@
+# The single RiskCard that SP1 pipeline fixtures supply. Both layers build RiskCard models from these rows.
+default:
+- risk_id: atlas-001
+  risk_name: Prompt injection
+  risk_description: Risk of prompt injection
+  taxonomy: ibm-risk-atlas
+  confidence: 0.9
+  grounding_confidence: high

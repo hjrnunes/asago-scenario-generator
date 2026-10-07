@@ -10,6 +10,7 @@ import yaml
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.model_profiles import load_profile
+from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
 
 _KEY = "api_" + "key"  # avoid literal secret-pattern in source
 
@@ -233,6 +234,61 @@ class TestLLMClientTopPTopK:
         call_kwargs = client._client.chat.completions.create.call_args
         assert "top_p" not in call_kwargs.kwargs
         assert "top_k" not in call_kwargs.kwargs
+
+
+class TestRunnerResolution:
+    """MP-09, MP-10, MP-12 — the runner's resolve_llm_client entry point."""
+
+    def test_mp09_profile_name_builds_client_from_profile(self, tmp_path):
+        """MP-09: a profile name passes its parameters to LLMClient."""
+        profiles = _make_default_profiles(tmp_path)
+
+        client, recorded = resolve_llm_client("gemma4-openrouter", str(profiles))
+
+        assert client.base_url == "https://openrouter.ai/api/v1"
+        assert client.model == "google/gemma-4-26b-a4b-it"
+        assert client.temperature == 0.4
+        assert recorded == "gemma4-openrouter"
+
+    def test_mp09_profile_temperature_overrides_the_client_default(self, tmp_path):
+        """MP-09: a profile temperature that differs from the default still arrives."""
+        profiles = _make_default_profiles(tmp_path)
+
+        client, _ = resolve_llm_client("sonnet-4", str(profiles))
+
+        assert client.temperature == 0.3
+
+    def test_mp10_without_profile_falls_back_to_environment(
+        self, tmp_path, monkeypatch
+    ):
+        """MP-10: no profile name builds the client from env vars and records none."""
+        monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://env:1/v1")
+        monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "env-model")
+        monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_API_KEY", "dummy")
+        profiles = _make_default_profiles(tmp_path)
+
+        client, recorded = resolve_llm_client(None, str(profiles))
+
+        assert client.base_url == "http://env:1/v1"
+        assert client.model == "env-model"
+        assert recorded is None
+
+    def test_mp12_profiles_file_selects_the_profile_source(self, tmp_path):
+        """MP-12: the profiles file argument decides which file supplies the profile."""
+        custom = _write_profile(
+            tmp_path / "custom.yaml",
+            "alt-model",
+            base_url="http://alt.example.com/v1",
+            model="alt-model",
+            **{_KEY: "dummy"},
+        )
+
+        client, recorded = resolve_llm_client("alt-model", str(custom))
+
+        assert client.model == "alt-model"
+        assert recorded == "alt-model"
+        with pytest.raises(KeyError):
+            resolve_llm_client("alt-model", str(_make_default_profiles(tmp_path)))
 
 
 class TestSampleProfilesFile:

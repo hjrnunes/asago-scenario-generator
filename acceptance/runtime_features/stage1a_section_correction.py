@@ -8,7 +8,7 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
-from runtime_shared import World, _SP1MockLLM
+from runtime_shared import World, _sp1_mock_llm
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
@@ -271,7 +271,7 @@ def _h_run(world: World, text: str, examples: dict[str, str]) -> tuple[bool, str
     del text, examples
     if world.stage1a_section_fixture in {"section_patch", "empty_sections"}:
         return False, "public Stage 1a seam cannot run an offline-only fixture"
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     client.set_response_queue(_fixture_responses(world.stage1a_section_fixture))
     world.stage1a_section_client = client
     try:
@@ -323,7 +323,7 @@ def _h_wire(world: World, text: str, examples: dict[str, str]) -> tuple[bool, st
     client = getattr(world, "stage1a_section_client", None)
     if client is None or not client.calls:
         return False, "no deterministic Stage 1a call was recorded"
-    schema = client.calls[0]["response_format"].model_json_schema()
+    schema = client.calls[0].response_format.model_json_schema()
     required = set(schema.get("required", ()))
     expected = {
         "risk_card_losses",

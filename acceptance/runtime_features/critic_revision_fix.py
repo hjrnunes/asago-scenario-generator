@@ -17,7 +17,7 @@ from runtime_shared import (
     _FC_PROMPTS_DIR,
     _KNOWN_ELEMENT_DESCRIPTIONS,
     _SP1CriticFindings,
-    _SP1MockLLM,
+    _sp1_mock_llm,
     _SP1Stage1Profile,
     _VALID_CRITIC_STATUSES,
     _VALID_GAP_COUNTS,
@@ -89,6 +89,35 @@ def _h_cmidup_cs_with_two_cls(
     return True, ""
 
 
+def _text_value(pattern: str, text: str, default: str) -> str:
+    match = re.search(pattern, text)
+    return match.group(1) if match else default
+
+
+def _coordination_link(
+    link_id: str,
+    cm_id: str,
+    *,
+    source: str,
+    target: str,
+    shared_pm: str,
+    payload: str,
+    description: str,
+) -> dict[str, Any]:
+    return {
+        "link_id": link_id,
+        "source": source,
+        "target": target,
+        "shared_pm": shared_pm,
+        "coordination_mechanism": {
+            "cm_id": cm_id,
+            "description": "Shared state",
+            "payload": payload,
+        },
+        "description": description,
+    }
+
+
 @step.first(
     "an LLM that returns a RevisionDelta with new_coordination_links containing CL-\\d+ whose cm_id is"
 )
@@ -99,49 +128,24 @@ def _h_cmidup_llm_delta_with_new_cls(
 
     Also handles variants with source, target, shared_pm, description, and payload.
     """
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
-    # Parse link_id and cm_id
     m_link = re.search(r"containing (CL-\d+) whose cm_id is (CM-\d+)", text)
     if not m_link:
         return False, f"Could not parse link_id/cm_id from: {text}"
-    link_id = m_link.group(1)
-    cm_id = m_link.group(2)
-    # Parse optional attributes
-    source = "RESP-1"
-    m_src = re.search(r"source (RESP-\d+)", text)
-    if m_src:
-        source = m_src.group(1)
-    target = "RESP-2"
-    m_tgt = re.search(r"target (RESP-\d+)", text)
-    if m_tgt:
-        target = m_tgt.group(1)
-    shared_pm = "PM-1-1"
-    m_pm = re.search(r"shared_pm (PM-\d+-\d+)", text)
-    if m_pm:
-        shared_pm = m_pm.group(1)
-    description = "shared validation"
-    m_desc = re.search(r'description "([^"]+)"', text)
-    if m_desc:
-        description = m_desc.group(1)
-    payload = "sync"
-    m_payload = re.search(r'payload "([^"]+)"', text)
-    if m_payload:
-        payload = m_payload.group(1)
-
+    link_id, cm_id = m_link.group(1), m_link.group(2)
     new_links = [
-        {
-            "link_id": link_id,
-            "source": source,
-            "target": target,
-            "shared_pm": shared_pm,
-            "coordination_mechanism": {
-                "cm_id": cm_id,
-                "description": "Shared state",
-                "payload": payload,
-            },
-            "description": description,
-        }
+        _coordination_link(
+            link_id,
+            cm_id,
+            source=_text_value(r"source (RESP-\d+)", text, "RESP-1"),
+            target=_text_value(r"target (RESP-\d+)", text, "RESP-2"),
+            shared_pm=_text_value(r"shared_pm (PM-\d+-\d+)", text, "PM-1-1"),
+            payload=_text_value(r'payload "([^"]+)"', text, "sync"),
+            description=_text_value(
+                r'description "([^"]+)"', text, "shared validation"
+            ),
+        )
     ]
     # Check for a second new link (CmDedup-06)
     m_link2 = re.search(
@@ -149,205 +153,20 @@ def _h_cmidup_llm_delta_with_new_cls(
         text[text.index(link_id) + len(link_id) :],
     )
     if m_link2:
-        link_id2 = m_link2.group(1)
-        cm_id2 = m_link2.group(2)
-        src2 = "RESP-2"
-        tgt2 = "RESP-1"
-        pm2 = "PM-2-1"
         new_links.append(
-            {
-                "link_id": link_id2,
-                "source": src2,
-                "target": tgt2,
-                "shared_pm": pm2,
-                "coordination_mechanism": {
-                    "cm_id": cm_id2,
-                    "description": "Shared state",
-                    "payload": "Payload 2",
-                },
-                "description": "Coordination link 2",
-            }
+            _coordination_link(
+                m_link2.group(1),
+                m_link2.group(2),
+                source="RESP-2",
+                target="RESP-1",
+                shared_pm="PM-2-1",
+                payload="Payload 2",
+                description="Coordination link 2",
+            )
         )
 
     delta_dict: dict[str, Any] = {"new_coordination_links": new_links}
     client.set_response_for(_FCRevisionDelta, delta_dict)
-    return True, ""
-
-
-@step.first(
-    "an LLM that returns a RevisionDelta that causes a ValidationError during merge"
-)
-@step.first(
-    "an LLM that returns a RevisionDelta with new_responsibilities containing RESP-3 whose PM part has pm_id"
-)
-def _h_cmidup_llm_delta_validation_error(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Handle: an LLM whose RevisionDelta adds RESP-3 with duplicate pm_id PM-1-1.
-
-    The duplicate PM part makes the merge raise ValidationError.
-    """
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    delta_dict: dict[str, Any] = {
-        "new_responsibilities": [
-            {
-                "resp_id": "RESP-3",
-                "description": "Dup PM",
-                "process_model_parts": [{"pm_id": "PM-1-1", "description": "Dup"}],
-                "control_actions": [{"ca_id": "CA-3-1", "description": "Act"}],
-                "feedback_channels": [
-                    {
-                        "fb_id": "FB-3-1",
-                        "description": "FB",
-                        "updates": "missing-state",
-                        "source": {"type": "responsibility", "id": "RESP-3"},
-                    }
-                ],
-            }
-        ]
-    }
-    client.set_response_for(_FCRevisionDelta, delta_dict)
-    return True, ""
-
-
-@step("the coordination link CL-\\d+ has a cm_id that is not CM-\\d+")
-def _h_cmidup_cl_cm_id_not(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    m = re.search(r"link (CL-\d+) has a cm_id that is not (CM-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id, cm_id = m.group(1), m.group(2)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if cl.coordination_mechanism.cm_id == cm_id:
-        return False, f"Expected {link_id} cm_id to not be {cm_id} but it was"
-    return True, ""
-
-
-@step("the coordination link CL-\\d+ has cm_id CM-\\d+")
-def _h_cmidup_cl_cm_id_is(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    m = re.search(r"link (CL-\d+) has cm_id (CM-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id, cm_id = m.group(1), m.group(2)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if cl.coordination_mechanism.cm_id != cm_id:
-        return (
-            False,
-            f"Expected {link_id} cm_id to be {cm_id} but got {cl.coordination_mechanism.cm_id}",
-        )
-    return True, ""
-
-
-def _cl_cm_id_handler(phrase: str, shown: str):
-    """Build a check that a coordination link's cm_id matches ^CM-\\d+$."""
-
-    def handler(world: World, text: str, examples: dict) -> tuple[bool, str]:
-        m = re.search(rf"link (CL-\d+) has a cm_id matching {phrase}", text)
-        if not m:
-            return False, f"Could not parse from: {text}"
-        link_id = m.group(1)
-        cs = world.control_structure
-        if cs is None:
-            return False, "No control structure"
-        cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-        if cl is None:
-            return False, f"Coordination link {link_id} not found"
-        if not re.match(r"^CM-\d+$", cl.coordination_mechanism.cm_id):
-            return (
-                False,
-                f"Expected {link_id} cm_id to match {shown} but got {cl.coordination_mechanism.cm_id}",
-            )
-        return True, ""
-
-    return handler
-
-
-_h_cmidup_cl_cm_id_format = _cl_cm_id_handler("the format CM-N", "CM-N")
-step.add(
-    "the coordination link CL-\\d+ has a cm_id matching the format CM-N",
-    _h_cmidup_cl_cm_id_format,
-)
-_h_cmidup_cl_cm_id_pattern = _cl_cm_id_handler("the pattern", "^CM-\\d+$")
-step.add(
-    "the coordination link CL-\\d+ has a cm_id matching the pattern",
-    _h_cmidup_cl_cm_id_pattern,
-)
-
-
-@step("the coordination link CL-\\d+ has a cm_id different from CL-\\d+ cm_id")
-def _h_cmidup_cl_cm_id_different(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    m = re.search(r"link (CL-\d+) has a cm_id different from (CL-\d+) cm_id", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id1, link_id2 = m.group(1), m.group(2)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl1 = next((c for c in cs.coordination_links if c.link_id == link_id1), None)
-    cl2 = next((c for c in cs.coordination_links if c.link_id == link_id2), None)
-    if cl1 is None:
-        return False, f"Coordination link {link_id1} not found"
-    if cl2 is None:
-        return False, f"Coordination link {link_id2} not found"
-    if cl1.coordination_mechanism.cm_id == cl2.coordination_mechanism.cm_id:
-        return (
-            False,
-            f"Expected different cm_ids but both are {cl1.coordination_mechanism.cm_id}",
-        )
-    return True, ""
-
-
-@step('the coordination link CL-\\d+ has description "([^"]+)"')
-def _h_cmidup_cl_description(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    m = re.search(r'link (CL-\d+) has description "([^"]+)"', text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id, description = m.group(1), m.group(2)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if cl.description != description:
-        return (
-            False,
-            f"Expected {link_id} description '{description}' but got '{cl.description}'",
-        )
-    return True, ""
-
-
-@step('the coordination link CL-\\d+ has coordination_mechanism payload "([^"]+)"')
-def _h_cmidup_cl_payload(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    m = re.search(r'link (CL-\d+) has coordination_mechanism payload "([^"]+)"', text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id, payload = m.group(1), m.group(2)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl = next((c for c in cs.coordination_links if c.link_id == link_id), None)
-    if cl is None:
-        return False, f"Coordination link {link_id} not found"
-    if cl.coordination_mechanism.payload != payload:
-        return (
-            False,
-            f"Expected {link_id} payload '{payload}' but got '{cl.coordination_mechanism.payload}'",
-        )
     return True, ""
 
 
@@ -384,67 +203,6 @@ def _h_cmidup_warning_mentions(
     return True, ""
 
 
-@step("the warnings list includes a degradation warning")
-def _h_cmidup_degradation_warning(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    warnings = world.sp1_post_revision_warnings or []
-    if not any("degrad" in w.lower() for w in warnings):
-        return False, f"Expected degradation warning but got: {warnings}"
-    return True, ""
-
-
-@step("the warnings list does not include a renumber warning")
-def _h_cmidup_no_renumber_warning(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    warnings = world.sp1_post_revision_warnings or []
-    m = re.search(r"for (CM-\d+)", text)
-    if m:
-        cm_id = m.group(1)
-        renumber_warnings = [w for w in warnings if "Renumber" in w]
-        if any(cm_id in w for w in renumber_warnings):
-            return (
-                False,
-                f"Expected no renumber warning for {cm_id} but found one: {warnings}",
-            )
-    else:
-        if any("Renumber" in w for w in warnings):
-            return False, f"Expected no renumber warning but found: {warnings}"
-    return True, ""
-
-
-@step("the warnings list does not include a degradation warning")
-def _h_cmidup_no_degradation_warning(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    warnings = world.sp1_post_revision_warnings or []
-    if any("degrad" in w.lower() for w in warnings):
-        return False, f"Expected no degradation warning but found: {warnings}"
-    return True, ""
-
-
-@step("the warnings list includes a warning mentioning")
-def _h_cmidup_warning_mentioning(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    m = re.search(r"includes a warning mentioning (.+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    fragment = m.group(1).strip()
-    warnings = world.sp1_post_revision_warnings or []
-    wtext = " ".join(warnings)
-    # Special case: "the error type" means the warning should contain
-    # an actual exception type name like ValidationError or ValueError.
-    if fragment.lower() == "the error type":
-        if "ValidationError" not in wtext and "ValueError" not in wtext:
-            return False, f"Expected warnings to mention an error type but got: {wtext}"
-        return True, ""
-    if fragment.lower() not in wtext.lower():
-        return False, f"Expected warnings to mention '{fragment}' but got: {wtext}"
-    return True, ""
-
-
 @step("the returned ControlStructure is the pre-revision control structure")
 def _h_cmidup_pre_revision_cs(
     world: World, text: str, examples: dict
@@ -460,40 +218,6 @@ def _h_cmidup_pre_revision_cs(
             False,
             "Expected pre-revision CS but RESP-3 is present (merge was applied)",
         )
-    return True, ""
-
-
-@step("the returned ControlStructure contains RESP-\\d+")
-def _h_cmidup_returned_contains_resp(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    m = re.search(r"contains (RESP-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    resp_id = m.group(1)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    resp_ids = {r.resp_id for r in cs.responsibilities}
-    if resp_id not in resp_ids:
-        return False, f"Expected {resp_id} in control structure but got: {resp_ids}"
-    return True, ""
-
-
-@step("the returned ControlStructure contains coordination link CL-\\d+")
-def _h_cmidup_returned_contains_cl(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    m = re.search(r"contains coordination link (CL-\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    link_id = m.group(1)
-    cs = world.control_structure
-    if cs is None:
-        return False, "No control structure"
-    cl_ids = {cl.link_id for cl in cs.coordination_links}
-    if link_id not in cl_ids:
-        return False, f"Expected {link_id} in control structure but got: {cl_ids}"
     return True, ""
 
 
@@ -717,7 +441,7 @@ def _h_crf_critic_run_with_context(
 ) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_critic_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     content = world.sp1_llm_content
     if isinstance(content, dict):
@@ -757,7 +481,7 @@ def _h_crf_critic_prompt_contains(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
-    prompt = client.calls[-1]["user_prompt"]
+    prompt = client.calls[-1].user_prompt
     quoted = re.search(r'"([^"]+)"', text)
     if not quoted:
         return False, f"Could not extract quoted text from: {text}"
@@ -1032,6 +756,12 @@ step.add(
 )
 
 
+def _critic_calls(calls: list[Any]) -> list[Any]:
+    """The critic requests, or every request that is not a RevisionDelta when none is typed."""
+    typed = [c for c in calls if c.response_format is _SP1CriticFindings]
+    return typed or [c for c in calls if c.response_format is not _FCRevisionDelta]
+
+
 @step("the LLM complete call is made without a max_completion_tokens cap")
 def _h_crf_llm_no_max_tokens_cap(
     world: World, text: str, examples: dict
@@ -1039,23 +769,15 @@ def _h_crf_llm_no_max_tokens_cap(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
-    # The critic call should NOT have max_completion_tokens set
-    critic_calls = [
-        c for c in client.calls if c.get("response_format") is _SP1CriticFindings
-    ]
-    if not critic_calls:
-        # Fall back to any call that is not for RevisionDelta
-        critic_calls = [
-            c for c in client.calls if c.get("response_format") is not _FCRevisionDelta
-        ]
+    critic_calls = _critic_calls(client.calls)
     if not critic_calls:
         return False, "No critic LLM calls found"
-    for call in critic_calls:
-        if call.get("max_completion_tokens") is not None:
-            return (
-                False,
-                f"Critic call has max_completion_tokens={call['max_completion_tokens']}",
-            )
+    capped = [c for c in critic_calls if c.max_completion_tokens is not None]
+    if capped:
+        return (
+            False,
+            f"Critic call has max_completion_tokens={capped[0].max_completion_tokens}",
+        )
     return True, ""
 
 
@@ -1095,12 +817,10 @@ def _h_crf_rev_system_prompt_has_cm_next(
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
     # Find the revision call (RevisionDelta as response_format)
-    rev_calls = [
-        c for c in client.calls if c.get("response_format") is _FCRevisionDelta
-    ]
+    rev_calls = [c for c in client.calls if c.response_format is _FCRevisionDelta]
     if not rev_calls:
         return False, "No revision LLM calls found"
-    system_prompt = rev_calls[-1]["system_prompt"]
+    system_prompt = rev_calls[-1].system_prompt
     # The rendered system prompt should contain "CM-" with a number
     # (from the "New coordination mechanisms: CM-{next_cm_num}" line)
     if not re.search(r"CM-\{?next_cm_num\}?|CM-\d", system_prompt):

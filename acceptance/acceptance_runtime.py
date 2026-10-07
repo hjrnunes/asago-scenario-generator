@@ -116,15 +116,7 @@ _PATH_PART_TAGS: dict[str, str] = {
     "acceptance-refresh": "acceptance_refresh",
 }
 
-# Exact-stem to tag mapping (checked after path parts).
-_STEM_TAGS: dict[str, str] = {
-    "class-b-decisions": "shadow_cleanup",
-    "duplicate-assertion": "shadow_cleanup",
-    "no-shadowing-invariant": "shadow_cleanup",
-    "registration-priority": "shadow_cleanup",
-}
-
-# Stem-prefix to tag mapping (checked after exact stems).
+# Stem-prefix to tag mapping (checked after path parts).
 _STEM_PREFIX_TAGS: tuple[tuple[str, str], ...] = (
     ("sp2_", "sp2"),
     ("sp3_", "sp3"),
@@ -144,8 +136,6 @@ def _derive_feature_tag(ir_path: str) -> str | None:
     for part in path.parts:
         if part in _PATH_PART_TAGS:
             return _PATH_PART_TAGS[part]
-    if stem in _STEM_TAGS:
-        return _STEM_TAGS[stem]
     for prefix, tag in _STEM_PREFIX_TAGS:
         if stem.startswith(prefix):
             return tag

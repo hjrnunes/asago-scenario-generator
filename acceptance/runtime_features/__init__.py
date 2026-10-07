@@ -19,11 +19,6 @@ __all__ = (
     "acceptance_refresh",
     "critic_revision_fix",
     "shadow_cleanup",
-    "llm_helper_failure_defenses",
-    "acceptance_hygiene",
-    "acceptance_framework_refactor",
-    "clean_checkout_unit_independence",
-    "acceptance_pipeline_preservation",
     "taxonomy_obligation_planner",
     "stpa",
     "stpa_execution_environment_basis",
@@ -33,6 +28,5 @@ __all__ = (
     "prompt_contract_recovery",
     "mcp_target_discovery_primitive_input",
     "stage1a_section_correction",
-    "loss_analysis_gates",
     "noop_steps",
 )

@@ -8,6 +8,7 @@ validation-error text.
 
 from __future__ import annotations
 
+import inspect
 import json
 from enum import Enum
 from pathlib import Path
@@ -719,6 +720,121 @@ class TestCallWithPolicy:
     def test_negative_retry_counts_are_rejected(self) -> None:
         with pytest.raises(ValueError, match="retry counts must be non-negative"):
             CorrectionPolicy(validation_retries=-1)
+
+
+class _UsageClient:
+    """Serves scripted contents, each reporting the same stable usage."""
+
+    model = "usage-model"
+
+    def __init__(self, *contents) -> None:
+        self.contents = list(contents)
+        self.prompts: list[str] = []
+
+    def complete(self, **kwargs):
+        self.prompts.append(kwargs["user_prompt"])
+        return LLMResult(
+            content=self.contents.pop(0),
+            prompt_tokens=17,
+            completion_tokens=4,
+            duration_ms=230,
+        )
+
+
+class _ValueModel(BaseModel):
+    value: str
+
+
+class TestRetryAttemptLog:
+    """LLM-HELPER-FAILURE-DEFENSES-03, 05, 06, 09, 11: every attempt is logged."""
+
+    def _call(self, client, tmp_path: Path, policy, **extra):
+        return call_with_policy(
+            llm_client=client,
+            system_prompt="system",
+            user_prompt="user",
+            response_format=_ValueModel,
+            run_dir=tmp_path,
+            stage="stage_test",
+            step="step_test",
+            policy=policy,
+            **extra,
+        )
+
+    def test_tolerant_decoding_is_off_by_default(self) -> None:
+        parameter = inspect.signature(call_with_policy).parameters["allow_unvalidated"]
+
+        assert parameter.default is False
+
+    def test_malformed_json_is_retried_once_and_both_attempts_are_logged(
+        self, tmp_path: Path
+    ) -> None:
+        client = _UsageClient("not valid JSON", {"value": "recovered"})
+
+        outcome = self._call(client, tmp_path, CorrectionPolicy(json_retries=1))
+
+        assert outcome.error is None
+        assert outcome.calls == 2
+        entries = read_calls_jsonl(tmp_path)
+        assert [entry["success"] for entry in entries] == [False, True]
+        for entry in entries:
+            assert entry["prompt_tokens"] == 17
+            assert entry["completion_tokens"] == 4
+            assert entry["duration_ms"] == 230
+
+    def test_two_malformed_json_responses_log_two_failed_attempts(
+        self, tmp_path: Path
+    ) -> None:
+        client = _UsageClient("not valid JSON", "still not JSON")
+
+        outcome = self._call(client, tmp_path, CorrectionPolicy(json_retries=1))
+
+        assert outcome.value is None
+        assert outcome.error is not None
+        assert outcome.calls == 2
+        assert [entry["success"] for entry in read_calls_jsonl(tmp_path)] == [
+            False,
+            False,
+        ]
+
+    def test_schema_validation_retry_carries_feedback_and_logs_both_attempts(
+        self, tmp_path: Path
+    ) -> None:
+        client = _UsageClient({"value": None}, {"value": "recovered"})
+        policy = CorrectionPolicy(validation_retries=1, feedback="\n\ncorrective")
+
+        outcome = self._call(client, tmp_path, policy)
+
+        assert outcome.error is None
+        assert outcome.calls == 2
+        assert "corrective" not in client.prompts[0]
+        assert "corrective" in client.prompts[1]
+        assert [entry["success"] for entry in read_calls_jsonl(tmp_path)] == [
+            False,
+            True,
+        ]
+
+    def test_result_validator_rejection_is_retried_with_feedback(
+        self, tmp_path: Path
+    ) -> None:
+        def reject_first(model: _ValueModel) -> None:
+            if model.value == "reject":
+                raise ValueError("result rejected")
+
+        client = _UsageClient({"value": "reject"}, {"value": "recovered"})
+        policy = CorrectionPolicy(validation_retries=1, feedback="\n\ncorrective")
+
+        outcome = self._call(client, tmp_path, policy, result_validator=reject_first)
+
+        assert outcome.error is None
+        assert outcome.value == _ValueModel(value="recovered")
+        assert outcome.calls == 2
+        assert "corrective" not in client.prompts[0]
+        assert "corrective" in client.prompts[1]
+        assert [entry["success"] for entry in read_calls_jsonl(tmp_path)] == [
+            False,
+            True,
+        ]
 
 
 class TestCountRequests:

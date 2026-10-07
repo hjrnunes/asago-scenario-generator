@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from asago_scenario_generator.stpa.infra.llm import LLMResult
 from runtime_shared import (
     _make_responsibility,
     AttackerBDI,
@@ -11,7 +12,6 @@ from runtime_shared import (
     DefenderDesire,
     DefenderIntention,
     GherkinSpec,
-    LLMResult,
     LossAnalysis,
     Path,
     ScenarioEnvelope,

@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from asago_scenario_generator.stpa.infra.llm import LLMResult
 from runtime_shared import (
     Any,
     ControlAction,
     ControlStructure,
     ElementRef,
-    LLMResult,
     LossAnalysis,
     PROJECT_ROOT,
     Path,
@@ -17,12 +17,11 @@ from runtime_shared import (
     ValidationError,
     World,
     _BF2LogCapture,
-    _BF2MockLLMClient,
     _BF2_PROMPTS_DIR,
     _FC_PROMPTS_DIR,
     _PQF_PROMPTS_DIR,
     _SP1LossAnalysisDraft,
-    _SP1MockLLM,
+    _sp1_mock_llm,
     _SP1Stage1Profile,
     _VALID_COMPLETION_TOKENS,
     _VALID_DISMISSAL_COUNTS,
@@ -36,7 +35,6 @@ from runtime_shared import (
     _gd_valid_la,
     _h_sp1_rev_run,
     _make_minimal_loss_analysis,
-    _profiles_to_yaml,
     _san_set_element_ref,
     _sp1_critic_unjustified_gaps,
     _sp1_make_risk_cards,
@@ -49,7 +47,6 @@ from runtime_shared import (
     _sp1_valid_resp_set_dict,
     _sp1_valid_stage1_profile_dict,
     _tempfile,
-    _yaml_mp,
     json,
     re,
 )
@@ -129,9 +126,6 @@ from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile as _gd_derive_profile,
 )
 import yaml as _gd_yaml
-from asago_scenario_generator.stpa.infra.model_profiles import (
-    load_profile as _load_profile,
-)
 from asago_scenario_generator.stpa.infra.calls_html import (
     render_calls_html as _render_calls_html,
 )
@@ -196,7 +190,7 @@ def _h_gd_cs_available(world: World, text: str, examples: dict) -> tuple[bool, s
 
 @step("an LLM that returns an invalid ControlStructure JSON")
 def _h_gd_llm_invalid_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_invalid_response_for(ControlStructure)
     return True, ""
@@ -206,7 +200,7 @@ def _h_gd_llm_invalid_cs(world: World, text: str, examples: dict) -> tuple[bool,
 def _h_gd_llm_invalid_critic(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_invalid_response_for(_GDCriticFindings)
     return True, ""
@@ -331,54 +325,63 @@ def _h_gd_taxonomy_empty(world: World, text: str, examples: dict) -> tuple[bool,
     return True, ""
 
 
+_STAGE_PIPELINE = (
+    (_SP1LossAnalysisDraft, _sp1_valid_la_dict),
+    (_SP1Stage1Profile, _sp1_valid_stage1_profile_dict),
+    (_GDRequirementSet, _sp1_valid_req_set_dict),
+    (_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict),
+    (_GDControlElementSet, _sp1_valid_control_element_set_dict),
+    (_GDCoordinationAnalysis, None),
+)
+_INVALID_STAGE_TARGET = {
+    "stage_1a": _SP1LossAnalysisDraft,
+    "stage_1a_risk": _SP1LossAnalysisDraft,
+    "stage_1b": _SP1Stage1Profile,
+    "stage_2": _GDRequirementSet,
+    "stage_2_call_1": _GDRequirementSet,
+    "stage_2_call_2": _GDResponsibilitySet,
+    "stage_2_call_2a": _GDResponsibilitySet,
+    "stage_2_call_2b": _GDControlElementSet,
+    "stage_2_call_3": _GDCoordinationAnalysis,
+    "stage_2_call_3_coordination": _GDCoordinationAnalysis,
+}
+# stage_1a and stage_1a_risk fail the first request, so nothing precedes them.
+_INVALID_STAGE_SKIPS_VALID_PREFIX = {"stage_1a", "stage_1a_risk"}
+
+
+def _invalid_stage_name(text: str, examples: dict) -> str:
+    stage = examples.get("stage", "")
+    if stage:
+        return stage
+    m = re.search(r"for (stage_\w+)", text)
+    return m.group(1) if m else ""
+
+
+def _answer_valid_before(client: Any, target: Any) -> None:
+    for response_type, make in _STAGE_PIPELINE:
+        if response_type is target:
+            return
+        client.set_response_for(response_type, make())
+
+
 @step("an LLM that returns an invalid response for")
 def _h_gd_llm_invalid_for_stage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
-    stage = examples.get("stage", "")
-    if not stage:
-        # Try to extract from text
-        import re
-
-        m = re.search(r"for (stage_\w+)", text)
-        stage = m.group(1) if m else ""
-    if stage in ("stage_1a", "stage_1a_risk"):
-        client.set_invalid_response_for(_SP1LossAnalysisDraft)
-    elif stage == "stage_1a_gap":
+    stage = _invalid_stage_name(text, examples)
+    if stage == "stage_1a_gap":
         # Let the first call (risk_derivation) succeed, fail only the
         # second call (gap_analysis) so the logged step is gap_analysis.
         client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
         client.set_invalid_response_after_n_calls(_SP1LossAnalysisDraft, 1)
-    elif stage in ("stage_1b",):
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_invalid_response_for(_SP1Stage1Profile)
-    elif stage in ("stage_2", "stage_2_call_1"):
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        client.set_invalid_response_for(_GDRequirementSet)
-    elif stage in ("stage_2_call_2", "stage_2_call_2a"):
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
-        client.set_invalid_response_for(_GDResponsibilitySet)
-    elif stage == "stage_2_call_2b":
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
-        client.set_response_for(_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict())
-        client.set_invalid_response_for(_GDControlElementSet)
-    elif stage in ("stage_2_call_3", "stage_2_call_3_coordination"):
-        client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
-        client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
-        client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
-        client.set_response_for(_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict())
-        client.set_response_for(
-            _GDControlElementSet, _sp1_valid_control_element_set_dict()
-        )
-        client.set_invalid_response_for(_GDCoordinationAnalysis)
-    elif stage == "stage_1a_and_stage_1b" or "and" in stage:
+    elif stage in _INVALID_STAGE_TARGET:
+        target = _INVALID_STAGE_TARGET[stage]
+        if stage not in _INVALID_STAGE_SKIPS_VALID_PREFIX:
+            _answer_valid_before(client, target)
+        client.set_invalid_response_for(target)
+    elif "and" in stage:
         client.set_invalid_response_for(_SP1Stage1Profile)
     return True, ""
 
@@ -387,7 +390,7 @@ def _h_gd_llm_invalid_for_stage(
 def _h_gd_llm_valid_for_stage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
     if "stage_1b" in text or "and stage_1b" in text:
@@ -407,7 +410,7 @@ def _h_gd_derivation_attempted(
 ) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="gd_deriv_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     stage = examples.get("stage", "")
     la = _gd_valid_la()
@@ -726,7 +729,7 @@ def _h_connset_s2_revision_run(
 ) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_rev_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     if ControlStructure not in client._response_map:
         client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
@@ -754,7 +757,7 @@ def _h_connset_s2_revision_run(
 def _h_connset_llm_valid_revised_cs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
     return True, ""
@@ -800,25 +803,6 @@ def _h_mf_contains_resp(world: World, text: str, examples: dict) -> tuple[bool, 
     if not any(r.resp_id == resp_id for r in cs.responsibilities):
         return False, f"Responsibility {resp_id} not found in ControlStructure"
     return True, ""
-
-
-@step("the model profiles module is importable")
-def _h_mp_module_importable(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify the model_profiles module is importable."""
-    from asago_scenario_generator.stpa.infra import model_profiles
-
-    assert model_profiles is not None
-    return True, ""
-
-
-def _write_profiles_yaml(world: World, rows: list[dict[str, str]]) -> None:
-    yaml_text = _profiles_to_yaml(rows)
-    fd, tmp_path = _tempfile_mp.mkstemp(suffix=".yaml", prefix="qa_profiles_")
-    os.close(fd)
-    Path(tmp_path).write_text(yaml_text, encoding="utf-8")
-    world.profiles_path = Path(tmp_path)
 
 
 def _write_calls_jsonl(world: World, entries: list[dict], prefix: str) -> None:
@@ -899,466 +883,6 @@ _TWO_SUCCESSFUL_CALL_TABLE = [
     ["stage_1a", "call_1a", "model-a", "1000", "500", "3000", "true"],
     ["stage_2", "call_2", "model-a", "2000", "800", "5000", "true"],
 ]
-
-_STANDARD_THREE_PROFILES = [
-    {
-        "profile": "gemma4-openrouter",
-        "base_url": "https://openrouter.ai/api/v1",
-        "model": "google/gemma-4-26b-a4b-it",
-        "api_key": "sk-or-v1-xxx",
-        "max_completion_tokens": "16384",
-        "temperature": "0.4",
-    },
-    {
-        "profile": "gemma4-local",
-        "base_url": "https://local.example.com/v1",
-        "model": "gemma-4-26b-a4b-it",
-        "api_key": "unused",
-        "temperature": "0.4",
-    },
-    {
-        "profile": "sonnet-4",
-        "base_url": "https://openrouter.ai/api/v1",
-        "model": "anthropic/claude-sonnet-4",
-        "api_key": "sk-or-v1-yyy",
-        "max_completion_tokens": "16384",
-        "temperature": "0.3",
-    },
-]
-
-
-@step("the standard three-profile YAML fixture")
-def _h_mp_standard_three_profiles(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    _write_profiles_yaml(world, _STANDARD_THREE_PROFILES)
-    return True, ""
-
-
-@step("a single-profile YAML fixture named")
-def _h_mp_single_profile_fixture(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    match = re.search(
-        r'a single-profile YAML fixture named "([^"]+)"(?: with (.+))?$', text
-    )
-    if not match:
-        return False, f"Could not parse single-profile fixture from: {text}"
-    row: dict[str, str] = {"profile": match.group(1)}
-    remainder = match.group(2) or ""
-    for field, value in re.findall(r'(\w+)\s+("[^"]*"|\{.*?\}|\S+)', remainder):
-        row[field] = value.strip('"')
-    _write_profiles_yaml(world, [row])
-    return True, ""
-
-
-@step(r'the profile "([^"]+)" is loaded(?:$| from the custom path)')
-def _h_mp_load_profile(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Load a named profile from the profiles file set up for the scenario."""
-    m = re.search(r'the profile "([^"]+)" is loaded', text)
-    if not m:
-        return False, f"Could not parse profile name from: {text}"
-    profile_name = m.group(1)
-    if world.profiles_path is None:
-        custom = "custom " if "from the custom path" in text else ""
-        return False, f"No {custom}profiles file set up"
-    try:
-        world.profile_result = _load_profile(world.profiles_path, profile_name)
-        world.validation_error = None
-    except (FileNotFoundError, KeyError, ValueError) as e:
-        world.profile_result = None
-        world.validation_error = e
-    return True, ""
-
-
-@step("the returned parameters include headers with key")
-@step("the returned parameters include")
-def _h_mp_params_include(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Verify the returned parameters include a specific value."""
-    if world.profile_result is None:
-        return False, "No profile loaded"
-    # headers with key and value — check first (most specific)
-    m = re.search(r'include headers with key "([^"]+)" and value "([^"]+)"', text)
-    if m:
-        key, expected = m.group(1), m.group(2)
-        headers = world.profile_result.get("headers", {})
-        if headers.get(key) == expected:
-            return True, ""
-        return False, f"Expected headers[{key}]='{expected}', got '{headers.get(key)}'"
-    # Match: the returned parameters include key "value"
-    m = re.search(r'include (\w+) "([^"]+)"', text)
-    if m:
-        key, expected = m.group(1), m.group(2)
-        actual = world.profile_result.get(key)
-        if str(actual) == expected:
-            return True, ""
-        return False, f"Expected {key}='{expected}', got '{actual}'"
-    # Match float: include key float_value (check before int)
-    m = re.search(r"include (\w+) (\d+\.\d+)", text)
-    if m:
-        key, expected = m.group(1), m.group(2)
-        actual = world.profile_result.get(key)
-        if actual is not None and abs(float(actual) - float(expected)) < 1e-9:
-            return True, ""
-        return False, f"Expected {key}={expected}, got {actual}"
-    # Match int: include key int_value
-    m = re.search(r"include (\w+) (\d+)", text)
-    if m:
-        key, expected = m.group(1), m.group(2)
-        actual = world.profile_result.get(key)
-        if str(actual) == expected:
-            return True, ""
-        return False, f"Expected {key}={expected}, got {actual}"
-    return False, f"Could not parse parameter check from: {text}"
-
-
-@step("the returned parameters do not include")
-def _h_mp_params_not_include(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify the returned parameters do not include a key."""
-    m = re.search(r"do not include (\w+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    key = m.group(1)
-    if key not in world.profile_result:
-        return True, ""
-    return False, f"Expected {key} to be absent, but it was present"
-
-
-@step("a profiles YAML file at a custom path with profile")
-def _h_mp_custom_path_profile(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Create a profiles YAML file at a custom path with a single profile."""
-    m = re.search(r'profile "([^"]+)"', text)
-    if not m:
-        return False, f"Could not parse profile name from: {text}"
-    profile_name = m.group(1)
-    # Create a simple profile
-    profiles = {
-        profile_name: {
-            "base_url": "https://custom.example.com/v1",
-            "model": "custom-model" if "custom" in profile_name else "alt-model",
-            "api_key": "unused",
-        }
-    }
-    yaml_text = _yaml_mp.dump(profiles, default_flow_style=False)
-    fd, tmp_path = _tempfile_mp.mkstemp(suffix=".yaml", prefix="qa_custom_")
-    os.close(fd)
-    Path(tmp_path).write_text(yaml_text, encoding="utf-8")
-    world.profiles_path = Path(tmp_path)
-    return True, ""
-
-
-@step("no profiles file exists at the expected path")
-def _h_mp_no_profiles_file(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Set up for missing profiles file test."""
-    world.profiles_path = Path("tmp/nonexistent_profiles.yaml")
-    return True, ""
-
-
-@step("loading any profile")
-def _h_mp_loading_any_profile(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Attempt to load any profile (expected to fail)."""
-    try:
-        world.profile_result = _load_profile(world.profiles_path, "any")
-        world.validation_error = None
-    except (FileNotFoundError, KeyError, ValueError) as e:
-        world.profile_result = None
-        world.validation_error = e
-    return True, ""
-
-
-@step("a clear error is raised mentioning")
-def _h_mp_error_raised(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Verify a clear error was raised mentioning something."""
-    if world.validation_error is None:
-        return False, "Expected an error but none was raised"
-    error_str = str(world.validation_error)
-    # Extract what should be mentioned
-    m = re.search(r'mentioning (?:the )?(?:file path|profile name )?"([^"]+)"', text)
-    if m:
-        expected = m.group(1)
-        if expected in error_str:
-            return True, ""
-        return False, f"Expected '{expected}' in error: {error_str}"
-    m = re.search(r'mentioning "([^"]+)"', text)
-    if m:
-        expected = m.group(1)
-        if expected in error_str:
-            return True, ""
-        return False, f"Expected '{expected}' in error: {error_str}"
-    m = re.search(r"mentioning the file path", text)
-    if m:
-        # Just check the error mentions a path
-        if "/" in error_str or "\\" in error_str or ".yaml" in error_str:
-            return True, ""
-        return False, f"Expected file path in error: {error_str}"
-    return False, f"Could not parse error check from: {text}"
-
-
-@step("the runner script is invoked with --profiles-file.*--profile")
-def _h_mp_runner_with_profiles_file(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Simulate runner script invocation with --profiles-file and --profile."""
-    m = re.search(r'--profile "([^"]+)"', text)
-    if not m:
-        return False, f"Could not parse profile from: {text}"
-    profile_name = m.group(1)
-    if world.profiles_path is None:
-        return False, "No profiles file set up"
-    profile = _load_profile(world.profiles_path, profile_name)
-    world.runner_llm_client = LLMClient(
-        base_url=profile.get("base_url"),
-        api_key=profile.get("api_key"),
-        model=profile.get("model"),
-    )
-    world.runner_profile_name = profile_name
-    return True, ""
-
-
-@step("the runner script is invoked with --profile")
-def _h_mp_runner_with_profile(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Simulate runner script invocation with --profile."""
-    m = re.search(r'--profile "([^"]+)"', text)
-    if not m:
-        return False, f"Could not parse profile from: {text}"
-    profile_name = m.group(1)
-    if world.profiles_path is None:
-        return False, "No profiles file set up"
-    profile = _load_profile(world.profiles_path, profile_name)
-    world.runner_llm_client = LLMClient(
-        base_url=profile.get("base_url"),
-        api_key=profile.get("api_key"),
-        model=profile.get("model"),
-        max_completion_tokens=profile.get("max_completion_tokens"),
-        temperature=profile.get("temperature"),
-        top_p=profile.get("top_p"),
-        top_k=profile.get("top_k"),
-    )
-    world.runner_profile_name = profile_name
-    return True, ""
-
-
-@step("environment variables ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL.*are set")
-def _h_mp_env_vars_set(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Set environment variables for runner fallback test."""
-    os.environ["ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL"] = "https://env.example.com/v1"
-    os.environ["ASAGO_SCENARIO_GENERATOR_API_KEY"] = "env-key"
-    os.environ["ASAGO_SCENARIO_GENERATOR_MODEL_NAME"] = "env-model"
-    return True, ""
-
-
-@step("the runner script is invoked without --profile")
-def _h_mp_runner_without_profile(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Simulate runner script invocation without --profile (env fallback)."""
-    world.runner_llm_client = LLMClient(
-        base_url=os.environ.get("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL"),
-        api_key=os.environ.get("ASAGO_SCENARIO_GENERATOR_API_KEY", "unused"),
-        model=os.environ.get("ASAGO_SCENARIO_GENERATOR_MODEL_NAME"),
-    )
-    world.runner_profile_name = None
-    return True, ""
-
-
-@step("the LLMClient is created with")
-def _h_mp_llmclient_created_with(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify LLMClient was created with specific parameters."""
-    if world.runner_llm_client is None:
-        return False, "No LLMClient created"
-    # Check float value first (e.g., temperature 0.4)
-    m = re.search(r"created with (\w+) (\d+\.\d+)", text)
-    if m:
-        key, expected = m.group(1), m.group(2)
-        actual = getattr(world.runner_llm_client, key, None)
-        if actual is not None and abs(float(actual) - float(expected)) < 1e-9:
-            return True, ""
-        return False, f"Expected {key}={expected}, got '{actual}'"
-    # Check string value
-    m = re.search(r'created with (\w+) "([^"]+)"', text)
-    if m:
-        key, expected = m.group(1), m.group(2)
-        actual = getattr(world.runner_llm_client, key, None)
-        if str(actual) == expected:
-            return True, ""
-        return False, f"Expected {key}='{expected}', got '{actual}'"
-    return False, f"Could not parse from: {text}"
-
-
-@step("the LLMClient is created from environment variables")
-def _h_mp_llmclient_from_env(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify LLMClient was created from environment variables."""
-    if world.runner_llm_client is None:
-        return False, "No LLMClient created"
-    if world.runner_llm_client.base_url == "https://env.example.com/v1":
-        return True, ""
-    return False, f"Expected env base_url, got {world.runner_llm_client.base_url}"
-
-
-@step("no profile name is recorded in the run manifest")
-def _h_mp_no_profile_in_manifest(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify no profile name is recorded."""
-    if world.runner_profile_name is None:
-        return True, ""
-    return False, f"Expected no profile name, got {world.runner_profile_name}"
-
-
-@step("the run manifest model_config dict contains key")
-def _h_mp_manifest_has_profile(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify run manifest contains profile key with value."""
-    m = re.search(r'key "profile" with value "([^"]+)"', text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected = m.group(1)
-    if world.runner_profile_name == expected:
-        return True, ""
-    return False, f"Expected profile='{expected}', got '{world.runner_profile_name}'"
-
-
-@step("an LLMClient is created with top_p.*and.*top_k")
-def _h_mp_llmclient_with_top_pk(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Create an LLMClient with top_p and top_k."""
-    world.runner_llm_client = LLMClient(
-        base_url="https://example.com/v1",
-        api_key="unused",
-        model="test",
-        top_p=0.9,
-        top_k=40,
-    )
-    return True, ""
-
-
-@step("an LLMClient is created without top_p and top_k")
-def _h_mp_llmclient_without_top_pk(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Create an LLMClient without top_p and top_k."""
-    world.runner_llm_client = LLMClient(
-        base_url="https://example.com/v1",
-        api_key="unused",
-        model="test",
-    )
-    return True, ""
-
-
-@step("the LLMClient stores top_p as")
-def _h_mp_llmclient_stores_top_p(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify LLMClient stores top_p."""
-    m = re.search(r"stores top_p as (\d+\.\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected = float(m.group(1))
-    actual = world.runner_llm_client.top_p
-    if actual is not None and abs(actual - expected) < 1e-9:
-        return True, ""
-    return False, f"Expected top_p={expected}, got {actual}"
-
-
-@step("the LLMClient stores top_k as")
-def _h_mp_llmclient_stores_top_k(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify LLMClient stores top_k."""
-    m = re.search(r"stores top_k as (\d+)", text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected = int(m.group(1))
-    actual = world.runner_llm_client.top_k
-    if actual == expected:
-        return True, ""
-    return False, f"Expected top_k={expected}, got {actual}"
-
-
-@step("the LLMClient top_p is None")
-def _h_mp_llmclient_top_p_none(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify LLMClient top_p is None."""
-    if world.runner_llm_client.top_p is None:
-        return True, ""
-    return False, f"Expected top_p=None, got {world.runner_llm_client.top_p}"
-
-
-@step("the LLMClient top_k is None")
-def _h_mp_llmclient_top_k_none(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify LLMClient top_k is None."""
-    if world.runner_llm_client.top_k is None:
-        return True, ""
-    return False, f"Expected top_k=None, got {world.runner_llm_client.top_k}"
-
-
-@step("the sample profiles file config/model-profiles.example.yaml")
-def _h_mp_sample_file_given(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Note the sample profiles file path."""
-    world.profiles_path = Path(PROJECT_ROOT / "config/model-profiles.example.yaml")
-    return True, ""
-
-
-@step("the sample file exists in the repository")
-def _h_mp_sample_file_exists(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify the sample file exists in the repository."""
-    sample = PROJECT_ROOT / "config/model-profiles.example.yaml"
-    if sample.exists():
-        return True, ""
-    return False, f"Sample file not found: {sample}"
-
-
-@step("the sample file contains at least one profile with api_key")
-def _h_mp_sample_file_placeholder(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify the sample file contains placeholder keys."""
-    m = re.search(r'api_key "([^"]+)"', text)
-    if not m:
-        return False, f"Could not parse from: {text}"
-    expected_placeholder = m.group(1)
-    sample = PROJECT_ROOT / "config/model-profiles.example.yaml"
-    content = sample.read_text(encoding="utf-8")
-    # The actual file uses "YOUR-API-KEY-HERE" not "sk-or-v1-YOUR-KEY-HERE"
-    # Check for any placeholder pattern
-    if (
-        "YOUR-KEY-HERE" in content
-        or "YOUR-API-KEY-HERE" in content
-        or expected_placeholder in content
-    ):
-        return True, ""
-    return False, f"Placeholder '{expected_placeholder}' not found in sample file"
-
-
-@step("config/model-profiles.yaml is listed in .gitignore")
-def _h_mp_gitignored(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    """Verify config/model-profiles.yaml is listed in .gitignore."""
-    gitignore = PROJECT_ROOT / ".gitignore"
-    content = gitignore.read_text(encoding="utf-8")
-    if "config/model-profiles.yaml" in content:
-        return True, ""
-    return False, "config/model-profiles.yaml not found in .gitignore"
 
 
 @step.first("the calls_html module is importable")
@@ -1654,230 +1178,6 @@ def _h_strip_module_importable(
 ) -> tuple[bool, str]:
     from asago_scenario_generator.stpa.system_model import critic  # noqa: F401
 
-    return True, ""
-
-
-@step.first(
-    "an LLM that returns a revised ControlStructure with responsibility RESP-\\d+ having PM parts, CAs, and FB channels"
-)
-def _h_strip_llm_returns_full_resp(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    d = _sp1_valid_cs_dict()
-    # Ensure RESP-1 has PM, CA, FB (it already does from _sp1_valid_cs_dict)
-    world.sp1_llm_content = d
-    return True, ""
-
-
-@step.first(
-    "the revised ControlStructure also has responsibility RESP-\\d+ with no PM parts"
-)
-def _h_strip_llm_also_has_empty_resp(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    # Extract RESP-ID from text
-    m = re.search(r"responsibility (RESP-\d+)", text)
-    resp_id = m.group(1) if m else "RESP-2"
-    d = (
-        world.sp1_llm_content
-        if isinstance(world.sp1_llm_content, dict)
-        else _sp1_valid_cs_dict()
-    )
-    d["responsibilities"].append(
-        {
-            "resp_id": resp_id,
-            "description": f"Empty {resp_id}",
-            "responsibility_constraints": [],
-            "process_model_parts": [],
-            "control_actions": [],
-            "feedback_channels": [],
-        }
-    )
-    world.sp1_llm_content = d
-    return True, ""
-
-
-@step.first(
-    "an LLM that returns a revised ControlStructure where every responsibility has at least one"
-)
-def _h_strip_llm_all_have_parts(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    d = _sp1_valid_cs_dict()
-    # Both responsibilities in _sp1_valid_cs_dict have PM, CA, FB
-    world.sp1_llm_content = d
-    return True, ""
-
-
-@step.first(
-    "an LLM that returns a revised ControlStructure with responsibility RESP-\\d+ having PM parts but no CAs"
-)
-def _h_strip_llm_partial_resp(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    m = re.search(r"responsibility (RESP-\d+)", text)
-    resp_id = m.group(1) if m else "RESP-3"
-    num = resp_id.split("-")[-1]
-    d = _sp1_valid_cs_dict()
-    d["responsibilities"].append(
-        {
-            "resp_id": resp_id,
-            "description": f"Partial {resp_id}",
-            "responsibility_constraints": [],
-            "process_model_parts": [{"pm_id": f"PM-{num}-1", "description": "State"}],
-            "control_actions": [],
-            "feedback_channels": [],
-        }
-    )
-    world.sp1_llm_content = d
-    return True, ""
-
-
-@step.first(
-    "an LLM that returns a revised ControlStructure with two empty responsibilities"
-)
-def _h_strip_llm_two_empty(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    d = _sp1_valid_cs_dict()
-    # Remove existing RESP-2 (which has parts) and replace with empty version
-    d["responsibilities"] = [
-        r for r in d["responsibilities"] if r["resp_id"] != "RESP-2"
-    ]
-    d["responsibilities"].append(
-        {
-            "resp_id": "RESP-2",
-            "description": "Empty A",
-            "responsibility_constraints": [],
-            "process_model_parts": [],
-            "control_actions": [],
-            "feedback_channels": [],
-        }
-    )
-    d["responsibilities"].append(
-        {
-            "resp_id": "RESP-4",
-            "description": "Empty B",
-            "responsibility_constraints": [],
-            "process_model_parts": [],
-            "control_actions": [],
-            "feedback_channels": [],
-        }
-    )
-    world.sp1_llm_content = d
-    return True, ""
-
-
-@step.first(
-    "an LLM that returns a revised ControlStructure with empty responsibility RESP-\\d+"
-)
-def _h_strip_llm_one_empty(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    m = re.search(r"responsibility (RESP-\d+)", text)
-    resp_id = m.group(1) if m else "RESP-7"
-    d = _sp1_valid_cs_dict()
-    d["responsibilities"].append(
-        {
-            "resp_id": resp_id,
-            "description": f"Empty {resp_id}",
-            "responsibility_constraints": [],
-            "process_model_parts": [],
-            "control_actions": [],
-            "feedback_channels": [],
-        }
-    )
-    world.sp1_llm_content = d
-    return True, ""
-
-
-@step.first(
-    "an LLM that returns a revised ControlStructure with responsibility RESP-\\d+ having responsibility_constraints but no PM"
-)
-def _h_strip_llm_constraints_only(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    m = re.search(r"responsibility (RESP-\d+)", text)
-    resp_id = m.group(1) if m else "RESP-5"
-    num = resp_id.split("-")[-1]
-    d = _sp1_valid_cs_dict()
-    d["responsibilities"].append(
-        {
-            "resp_id": resp_id,
-            "description": f"Constraints only {resp_id}",
-            "responsibility_constraints": [
-                {"rc_id": f"RC-{num}-1", "description": "Constraint"}
-            ],
-            "process_model_parts": [],
-            "control_actions": [],
-            "feedback_channels": [],
-        }
-    )
-    world.sp1_llm_content = d
-    return True, ""
-
-
-@step.first("the resulting control structure contains RESP-\\d+")
-def _h_strip_cs_contains(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    m = re.search(r"contains (RESP-\d+)", text)
-    if not m:
-        return False, f"Could not parse RESP-ID from: {text}"
-    resp_id = m.group(1)
-    if world.control_structure is None:
-        return False, "No control structure available"
-    resp_ids = {r.resp_id for r in world.control_structure.responsibilities}
-    if resp_id not in resp_ids:
-        return False, f"Expected {resp_id} to be present but it is not"
-    return True, ""
-
-
-@step.first("all responsibilities are preserved in the resulting control structure")
-def _h_strip_all_preserved(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    if world.control_structure is None:
-        return False, "No control structure available"
-    # If no warnings were produced, all were preserved
-    strip_warnings = [
-        w for w in world.sp1_post_revision_warnings if "Stripped empty" in w
-    ]
-    if strip_warnings:
-        return False, f"Expected all preserved but got strip warnings: {strip_warnings}"
-    return True, ""
-
-
-@step.first("the post-revision warnings include a warning for RESP-\\d+")
-def _h_strip_warnings_include(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    m = re.search(r"warning for (RESP-\d+)", text)
-    if not m:
-        return False, f"Could not parse RESP-ID from: {text}"
-    resp_id = m.group(1)
-    warning_text = " | ".join(world.sp1_post_revision_warnings)
-    if resp_id not in warning_text:
-        return False, f"Expected warning for {resp_id} but not found in: {warning_text}"
-    return True, ""
-
-
-@step.first("each warning contains the resp_id and description")
-def _h_strip_warning_has_id_and_desc(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    for w in world.sp1_post_revision_warnings:
-        if "Stripped empty" not in w:
-            continue
-        # Check that resp_id is in the warning
-        if not re.search(r"RESP-\d+", w):
-            return False, f"Warning missing resp_id: {w}"
-        # Check that a description is in the warning (text after resp_id in parens)
-        if not re.search(r"\(.*?\)", w):
-            return False, f"Warning missing description: {w}"
-    return True, ""
-
-
-@step.first("the resulting control structure has at least one responsibility")
-def _h_strip_cs_has_at_least_one(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    if world.control_structure is None:
-        return False, "No control structure available"
-    if len(world.control_structure.responsibilities) < 1:
-        return False, "Expected at least one responsibility but got none"
     return True, ""
 
 
@@ -2446,87 +1746,85 @@ def _h_rev_model_no_field(world: World, text: str, examples: dict) -> tuple[bool
     return True, ""
 
 
-@step.first("an LLM that returns.*RevisionDelta")
-def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
-    world.sp1_mock_client = client
-    delta_dict: dict[str, Any] = {}
+def _resp3(description: str, rc: str, pm: dict, ca: dict, fb: dict) -> dict:
+    return {
+        "resp_id": "RESP-3",
+        "description": description,
+        "responsibility_constraints": [{"rc_id": "RC-3-1", "description": rc}],
+        "process_model_parts": [pm],
+        "control_actions": [ca],
+        "feedback_channels": [fb],
+    }
 
-    if "a new responsibility RESP-3" in text:
-        delta_dict["new_responsibilities"] = [
-            {
-                "resp_id": "RESP-3",
-                "description": "Input validation controller",
-                "responsibility_constraints": [
-                    {"rc_id": "RC-3-1", "description": "Validate input"}
-                ],
-                "process_model_parts": [
-                    {"pm_id": "PM-3-1", "description": "Input state"}
-                ],
-                "control_actions": [{"ca_id": "CA-3-1", "description": "Validate"}],
-                "feedback_channels": [
-                    {
-                        "fb_id": "FB-3-1",
-                        "description": "Validation result",
-                        "updates": "PM-3-1",
-                        "source": {"type": "controlled_process", "id": "CP-1"},
-                    }
-                ],
-            }
+
+_CP1_SOURCE = {"type": "controlled_process", "id": "CP-1"}
+
+
+def _rev_new_resp3_plain(text: str) -> dict:
+    return {
+        "new_responsibilities": [
+            _resp3(
+                "Input validation controller",
+                "Validate input",
+                {"pm_id": "PM-3-1", "description": "Input state"},
+                {"ca_id": "CA-3-1", "description": "Validate"},
+                {
+                    "fb_id": "FB-3-1",
+                    "description": "Validation result",
+                    "updates": "PM-3-1",
+                    "source": _CP1_SOURCE,
+                },
+            )
         ]
-    elif "new_responsibilities containing RESP-3" in text:
-        if "valid PM, CA, and FB" in text:
-            delta_dict["new_responsibilities"] = [
+    }
+
+
+def _rev_new_resp3_wired(text: str) -> dict:
+    return {
+        "new_responsibilities": [
+            _resp3(
+                "Input validation controller",
+                "Validate",
                 {
-                    "resp_id": "RESP-3",
-                    "description": "Input validation controller",
-                    "responsibility_constraints": [
-                        {"rc_id": "RC-3-1", "description": "Validate"}
-                    ],
-                    "process_model_parts": [
-                        {
-                            "pm_id": "PM-3-1",
-                            "description": "Input state",
-                            "feedback_source": {
-                                "type": "controlled_process",
-                                "id": "CP-1",
-                            },
-                        }
-                    ],
-                    "control_actions": [
-                        {
-                            "ca_id": "CA-3-1",
-                            "description": "Validate",
-                            "target": {"type": "controlled_process", "id": "CP-1"},
-                        }
-                    ],
-                    "feedback_channels": [
-                        {
-                            "fb_id": "FB-3-1",
-                            "description": "Result",
-                            "updates": "PM-3-1",
-                            "source": {"type": "controlled_process", "id": "CP-1"},
-                        }
-                    ],
-                }
-            ]
-        else:
-            delta_dict["new_responsibilities"] = [
+                    "pm_id": "PM-3-1",
+                    "description": "Input state",
+                    "feedback_source": _CP1_SOURCE,
+                },
+                {"ca_id": "CA-3-1", "description": "Validate", "target": _CP1_SOURCE},
                 {
-                    "resp_id": "RESP-3",
-                    "description": "New controller",
-                    "responsibility_constraints": [
-                        {"rc_id": "RC-3-1", "description": "RC"}
-                    ],
-                    "process_model_parts": [{"pm_id": "PM-3-1", "description": "PM"}],
-                    "control_actions": [{"ca_id": "CA-3-1", "description": "CA"}],
-                    "feedback_channels": [
-                        {"fb_id": "FB-3-1", "description": "FB", "updates": "PM-3-1"}
-                    ],
-                }
-            ]
-    elif "modified_responsibilities containing RESP-1" in text:
-        delta_dict["modified_responsibilities"] = [
+                    "fb_id": "FB-3-1",
+                    "description": "Result",
+                    "updates": "PM-3-1",
+                    "source": _CP1_SOURCE,
+                },
+            )
+        ]
+    }
+
+
+def _rev_new_resp3_bare(text: str) -> dict:
+    return {
+        "new_responsibilities": [
+            _resp3(
+                "New controller",
+                "RC",
+                {"pm_id": "PM-3-1", "description": "PM"},
+                {"ca_id": "CA-3-1", "description": "CA"},
+                {"fb_id": "FB-3-1", "description": "FB", "updates": "PM-3-1"},
+            )
+        ]
+    }
+
+
+def _rev_new_resp3(text: str) -> dict:
+    if "valid PM, CA, and FB" in text:
+        return _rev_new_resp3_wired(text)
+    return _rev_new_resp3_bare(text)
+
+
+def _rev_modified_resp1(text: str) -> dict:
+    return {
+        "modified_responsibilities": [
             {
                 "resp_id": "RESP-1",
                 "description": "Updated authorization controller",
@@ -2549,12 +1847,18 @@ def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str
                 ],
             }
         ]
-    elif "new_controlled_processes containing CP-2" in text:
-        delta_dict["new_controlled_processes"] = [
-            {"cp_id": "CP-2", "description": "New process"}
-        ]
-    elif "new_coordination_links containing CL-1" in text:
-        delta_dict["new_coordination_links"] = [
+    }
+
+
+def _rev_new_cp2(text: str) -> dict:
+    return {
+        "new_controlled_processes": [{"cp_id": "CP-2", "description": "New process"}]
+    }
+
+
+def _rev_new_cl1(text: str) -> dict:
+    return {
+        "new_coordination_links": [
             {
                 "link_id": "CL-1",
                 "source": "RESP-1",
@@ -2568,8 +1872,12 @@ def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str
                 "description": "Link",
             }
         ]
-    elif "new_responsibility RESP-4 that has no PM parts" in text:
-        delta_dict["new_responsibilities"] = [
+    }
+
+
+def _rev_new_resp4_empty(text: str) -> dict:
+    return {
+        "new_responsibilities": [
             {
                 "resp_id": "RESP-4",
                 "description": "Empty controller",
@@ -2579,84 +1887,108 @@ def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str
                 "feedback_channels": [],
             }
         ]
-    elif "empty RevisionDelta" in text:
-        pass  # Empty delta
-    elif "dismissing a gap with the justification" in text:
-        m = re.search(r'justification "([^"]+)"', text)
-        justification = m.group(1) if m else "Not applicable"
-        delta_dict["dismissed_gaps"] = [justification]
-    elif "whose only content is" in text and "dismissed gaps" in text:
-        m = re.search(r"only content is (\d+) dismissed gaps", text)
-        count = int(m.group(1)) if m else 1
-        if count not in _VALID_DISMISSAL_COUNTS:
-            return (
-                False,
-                f"Unexpected dismissal count {count} (expected one of {sorted(_VALID_DISMISSAL_COUNTS)})",
-            )
-        delta_dict["dismissed_gaps"] = [
-            f"Dismissed gap {i + 1}: not applicable to this system"
-            for i in range(count)
-        ]
-    elif "reporting completion_tokens" in text:
-        m_tok = re.search(r"completion_tokens (\d+)", text)
-        tok_val = int(m_tok.group(1)) if m_tok else 0
-        if tok_val not in _VALID_COMPLETION_TOKENS:
-            return (
-                False,
-                f"Unexpected completion_tokens value {tok_val} (expected one of {sorted(_VALID_COMPLETION_TOKENS)})",
-            )
-        # Valid RevisionDelta — completion_tokens is just metadata
-        delta_dict["new_responsibilities"] = [
-            {
-                "resp_id": "RESP-3",
-                "description": "Input validation controller",
-                "responsibility_constraints": [
-                    {"rc_id": "RC-3-1", "description": "Validate input"}
-                ],
-                "process_model_parts": [
-                    {
-                        "pm_id": "PM-3-1",
-                        "description": "Input state",
-                        "feedback_source": {"type": "controlled_process", "id": "CP-1"},
-                    }
-                ],
-                "control_actions": [
-                    {
-                        "ca_id": "CA-3-1",
-                        "description": "Validate",
-                        "target": {"type": "controlled_process", "id": "CP-1"},
-                    }
-                ],
-                "feedback_channels": [
-                    {
-                        "fb_id": "FB-3-1",
-                        "description": "Result",
-                        "updates": "PM-3-1",
-                        "source": {"type": "controlled_process", "id": "CP-1"},
-                    }
-                ],
-            }
-        ]
+    }
 
-    # Handle "and N dismissed gaps" suffix for cases with changes.
-    # Supports both "and one dismissed gap" (word form) and
-    # "and 2 dismissed gaps" (numeric form).
+
+def _dismissed_gaps(count: int) -> list[str]:
+    if count not in _VALID_DISMISSAL_COUNTS:
+        raise ValueError(
+            f"Unexpected dismissal count {count} (expected one of {sorted(_VALID_DISMISSAL_COUNTS)})"
+        )
+    return [
+        f"Dismissed gap {i + 1}: not applicable to this system" for i in range(count)
+    ]
+
+
+def _rev_dismissal_with_justification(text: str) -> dict:
+    m = re.search(r'justification "([^"]+)"', text)
+    return {"dismissed_gaps": [m.group(1) if m else "Not applicable"]}
+
+
+def _rev_only_dismissed_gaps(text: str) -> dict:
+    m = re.search(r"only content is (\d+) dismissed gaps", text)
+    return {"dismissed_gaps": _dismissed_gaps(int(m.group(1)) if m else 1)}
+
+
+def _rev_reported_completion_tokens(text: str) -> dict:
+    m_tok = re.search(r"completion_tokens (\d+)", text)
+    tok_val = int(m_tok.group(1)) if m_tok else 0
+    if tok_val not in _VALID_COMPLETION_TOKENS:
+        raise ValueError(
+            f"Unexpected completion_tokens value {tok_val} (expected one of {sorted(_VALID_COMPLETION_TOKENS)})"
+        )
+    # Valid RevisionDelta: completion_tokens is just metadata
+    return {
+        "new_responsibilities": [
+            _resp3(
+                "Input validation controller",
+                "Validate input",
+                {
+                    "pm_id": "PM-3-1",
+                    "description": "Input state",
+                    "feedback_source": _CP1_SOURCE,
+                },
+                {"ca_id": "CA-3-1", "description": "Validate", "target": _CP1_SOURCE},
+                {
+                    "fb_id": "FB-3-1",
+                    "description": "Result",
+                    "updates": "PM-3-1",
+                    "source": _CP1_SOURCE,
+                },
+            )
+        ]
+    }
+
+
+def _rev_dismissal_suffix(text: str) -> list[str] | None:
+    """Dismissed gaps named by an "and N dismissed gaps" suffix, in numeric or word form."""
+    m_dg = re.search(r"and (\d+) dismissed gaps", text)
+    if m_dg:
+        return _dismissed_gaps(int(m_dg.group(1)))
+    if "and one dismissed gap" in text:
+        return ["Dismissed: not applicable to this system"]
+    return None
+
+
+# First marker found in the step text wins; the order mirrors the feature wording.
+_REV_DELTA_BUILDERS = (
+    (("a new responsibility RESP-3",), _rev_new_resp3_plain),
+    (("new_responsibilities containing RESP-3",), _rev_new_resp3),
+    (("modified_responsibilities containing RESP-1",), _rev_modified_resp1),
+    (("new_controlled_processes containing CP-2",), _rev_new_cp2),
+    (("new_coordination_links containing CL-1",), _rev_new_cl1),
+    (("new_responsibility RESP-4 that has no PM parts",), _rev_new_resp4_empty),
+    (("empty RevisionDelta",), lambda text: {}),
+    (
+        ("dismissing a gap with the justification",),
+        _rev_dismissal_with_justification,
+    ),
+    (("whose only content is", "dismissed gaps"), _rev_only_dismissed_gaps),
+    (("reporting completion_tokens",), _rev_reported_completion_tokens),
+)
+
+
+def _rev_delta_dict(text: str) -> dict:
+    delta_dict: dict[str, Any] = {}
+    for markers, build in _REV_DELTA_BUILDERS:
+        if all(marker in text for marker in markers):
+            delta_dict = build(text)
+            break
     if "dismissed_gaps" not in delta_dict:
-        m_dg = re.search(r"and (\d+) dismissed gaps", text)
-        if m_dg:
-            count = int(m_dg.group(1))
-            if count not in _VALID_DISMISSAL_COUNTS:
-                return (
-                    False,
-                    f"Unexpected dismissal count {count} (expected one of {sorted(_VALID_DISMISSAL_COUNTS)})",
-                )
-            delta_dict["dismissed_gaps"] = [
-                f"Dismissed gap {i + 1}: not applicable to this system"
-                for i in range(count)
-            ]
-        elif "and one dismissed gap" in text:
-            delta_dict["dismissed_gaps"] = ["Dismissed: not applicable to this system"]
+        suffix = _rev_dismissal_suffix(text)
+        if suffix is not None:
+            delta_dict["dismissed_gaps"] = suffix
+    return delta_dict
 
+
+@step.first("an LLM that returns.*RevisionDelta")
+def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str]:
+    client = world.sp1_mock_client or _sp1_mock_llm()
+    world.sp1_mock_client = client
+    try:
+        delta_dict = _rev_delta_dict(text)
+    except ValueError as exc:
+        return False, str(exc)
     client.set_response_for(_FCRevisionDelta, delta_dict)
     return True, ""
 
@@ -2686,9 +2018,7 @@ def _h_rev_uses_delta_format(
     client = world.sp1_mock_client
     if client is None:
         return False, "No mock LLM client available"
-    found = any(
-        call.get("response_format") is _FCRevisionDelta for call in client.calls
-    )
+    found = any(call.response_format is _FCRevisionDelta for call in client.calls)
     if not found:
         return (
             False,
@@ -2900,6 +2230,41 @@ def _h_rev_cs_with_cl(world: World, text: str, examples: dict) -> tuple[bool, st
     return True, ""
 
 
+def _expects_revision_delta(client: Any) -> bool:
+    return _FCRevisionDelta in client._response_map or (
+        _FCRevisionDelta in client._exception_response_types
+    )
+
+
+def _run_revision_delta(world: World, client: Any) -> tuple[bool, str]:
+    run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="rev_delta_"))
+    world.sp1_run_dir = run_dir
+    cs = world.control_structure
+    if cs is None:
+        cs = ControlStructure.model_validate(_sp1_valid_cs_dict())
+        world.control_structure = cs
+    cf = world.sp1_critic_findings
+    if cf is None:
+        return False, "No CriticFindings available for revision"
+    try:
+        revised_cs, warnings = _sp1_run_revision(
+            llm_client=client,
+            control_structure=cs,
+            critic_findings=cf,
+            use_case_text=world.sp1_use_case_text or "Test use case",
+            run_dir=run_dir,
+            temperature=0.4,
+        )
+        world.control_structure = revised_cs
+        world.sp1_revised = True
+        world.sp1_revision_call_count = 1
+        world.sp1_post_revision_warnings = warnings
+    except Exception as e:
+        world.validation_error = e
+        world.sp1_post_revision_warnings = [f"Revision failed: {e}"]
+    return True, ""
+
+
 @step.first("the revision is applied")
 def _h_rev_revision_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the revision is run — RevisionDelta path.
@@ -2909,37 +2274,8 @@ def _h_rev_revision_run(world: World, text: str, examples: dict) -> tuple[bool, 
     through to the existing ControlStructure-based handler.
     """
     client = world.sp1_mock_client
-    if client is not None and (
-        _FCRevisionDelta in getattr(client, "_response_map", {})
-        or _FCRevisionDelta in getattr(client, "_exception_types", {})
-    ):
-        # Use the RevisionDelta path
-        run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="rev_delta_"))
-        world.sp1_run_dir = run_dir
-        cs = world.control_structure
-        if cs is None:
-            cs = ControlStructure.model_validate(_sp1_valid_cs_dict())
-            world.control_structure = cs
-        cf = world.sp1_critic_findings
-        if cf is None:
-            return False, "No CriticFindings available for revision"
-        try:
-            revised_cs, warnings = _sp1_run_revision(
-                llm_client=client,
-                control_structure=cs,
-                critic_findings=cf,
-                use_case_text=world.sp1_use_case_text or "Test use case",
-                run_dir=run_dir,
-                temperature=0.4,
-            )
-            world.control_structure = revised_cs
-            world.sp1_revised = True
-            world.sp1_revision_call_count = 1
-            world.sp1_post_revision_warnings = warnings
-        except Exception as e:
-            world.validation_error = e
-            world.sp1_post_revision_warnings = [f"Revision failed: {e}"]
-        return True, ""
+    if client is not None and _expects_revision_delta(client):
+        return _run_revision_delta(world, client)
     # Fall through to the existing handler for non-RevisionDelta cases
     return _h_sp1_rev_run(world, text, examples)
 
@@ -3541,7 +2877,7 @@ def _h_bf2_function_accepts_param(
 def _h_bf2_llm_valid_stage2_responses(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
     # Set responses for the three Stage 2 calls
     rs = _sp1_valid_resp_set_dict()
@@ -3560,7 +2896,7 @@ def _h_bf2_sp1_pipeline_run_with_profile(
     # We'll mock the run and check the calls
     client = world.sp1_mock_client
     if client is None:
-        client = _SP1MockLLM()
+        client = _sp1_mock_llm()
         client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
         world.sp1_mock_client = client
 
@@ -3660,7 +2996,7 @@ def _h_bf2_llm_helpers_module_importable(
 def _h_bf2_llm_client_mocked_complete(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    world.sp1_mock_client = _BF2MockLLMClient()
+    world.sp1_mock_client = MockLLMClient()
     return True, ""
 
 
@@ -3732,7 +3068,7 @@ def _h_bf2_complete_called_with_tokens(
     if client is None:
         return False, "No mock LLM client available"
     for call in client.calls:
-        actual = call.get("max_completion_tokens")
+        actual = call.max_completion_tokens
         if actual == expected:
             return True, ""
     return (
@@ -3753,7 +3089,7 @@ def _h_bf2_llm_complete_call_with_tokens(
     if client is None:
         return False, "No mock LLM client available"
     for call in client.calls:
-        if call.get("max_completion_tokens") == expected:
+        if call.max_completion_tokens == expected:
             return True, ""
     return (
         False,
@@ -3767,7 +3103,7 @@ def _h_bf2_llm_complete_call_with_tokens(
 def _h_bf2_llm_returns_delta_with_existing_resp(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     # Extract the resp_id from the step text
     m = re.search(r"new_responsibilities containing (RESP-\d+)", text)
@@ -4832,7 +4168,7 @@ def _revnorm_findings() -> Any:
 
 def _revnorm_set_delta(world: World, delta: dict[str, Any]) -> None:
     """Configure the acceptance mock with a raw RevisionDelta payload."""
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_response_for(_FCRevisionDelta, delta)
     world.revision_norm_delta = delta
@@ -5126,7 +4462,7 @@ def _h_revnorm_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Run the revision-delta normalization acceptance fixture."""
     if not getattr(world, "revision_norm_active", False):
         return _h_bf2_revision_run_with_log_capture(world, text, examples)
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="rev_norm_"))
     world.sp1_run_dir = run_dir

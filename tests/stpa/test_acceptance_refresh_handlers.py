@@ -11,6 +11,7 @@ _PROJECT_ROOT = next(
 )
 sys.path.insert(0, str(_PROJECT_ROOT / "acceptance"))
 
+from tests.stpa.sp1_helpers import MockCall  # noqa: E402
 from runtime_features import acceptance_refresh  # noqa: E402
 from runtime_shared import (  # noqa: E402
     _sp1_valid_coordination_analysis_dict,
@@ -44,6 +45,16 @@ import runtime_manifest  # noqa: E402
 from asago_scenario_generator.stpa.models.control_structure import (  # noqa: E402
     ControlStructure,
 )
+
+
+def _call(user_prompt: str, response_format: type | None = None) -> MockCall:
+    return MockCall(
+        system_prompt="",
+        user_prompt=user_prompt,
+        response_format=response_format,
+        temperature=None,
+        max_completion_tokens=None,
+    )
 
 
 def test_acceptance_refresh_registration_preserves_characterization():
@@ -121,16 +132,18 @@ def test_acceptance_refresh_registration_preserves_characterization():
     assert [entry[0] for entry in api.entries] == expected_patterns
 
 
-def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
-    world = SimpleNamespace(
+def _refresh_world(tmp_path):
+    return SimpleNamespace(
         sp1_run_dir=tmp_path,
         sp1_responsibility_set=None,
         sp1_control_element_set=None,
         control_structure=None,
-        sp1_mock_client=SimpleNamespace(
-            calls=[{"user_prompt": "requirements for Call 2a"}]
-        ),
+        sp1_mock_client=SimpleNamespace(calls=[_call("requirements for Call 2a")]),
     )
+
+
+def test_acceptance_refresh_call_log_branches(tmp_path):
+    world = _refresh_world(tmp_path)
 
     assert not _h_ar_call_log_exists(world, "a malformed step", {})[0]
     (tmp_path / "calls.jsonl").write_text('{"step": "call_3_coordination"}\n')
@@ -156,6 +169,10 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
     ]
     assert not _h_ar_no_log_step(world, "no call log entry has no-step", {})[0]
 
+
+def test_acceptance_refresh_responsibility_shape_branches(tmp_path):
+    world = _refresh_world(tmp_path)
+
     assert not _h_ar_responsibility_shape(world, "", {})[0]
     world.sp1_responsibility_set = SimpleNamespace(responsibilities=[])
     assert _h_ar_responsibility_shape(world, "", {})[0]
@@ -176,6 +193,10 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
     )
     assert _h_ar_responsibility_shape(world, "", {})[0]
 
+
+def test_acceptance_refresh_control_element_branches(tmp_path):
+    world = _refresh_world(tmp_path)
+
     assert not _h_ar_control_elements_contains_cp(world, "", {})[0]
     world.sp1_control_element_set = SimpleNamespace(controlled_processes=[])
     assert not _h_ar_control_elements_contains_cp(world, "", {})[0]
@@ -183,6 +204,10 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
         controlled_processes=[SimpleNamespace(cp_id="CP-1")]
     )
     assert _h_ar_control_elements_contains_cp(world, "", {})[0]
+
+
+def test_acceptance_refresh_model_field_and_prompt_directory_branches(tmp_path):
+    world = _refresh_world(tmp_path)
 
     assert _h_ar_model_field(
         world, "the `CoordinationAnalysis` model declare `coordination_links`", {}
@@ -205,13 +230,17 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
     )[0]
     assert not _h_ar_named_prompts_contains(world, "malformed", {})[0]
 
+
+def test_acceptance_refresh_prior_prompt_and_field_branches(tmp_path):
+    world = _refresh_world(tmp_path)
+
     assert _h_ar_prior_prompt_contains(
         world, "the Call 2a user prompt contains requirements", {}
     )[0]
     assert not _h_ar_prior_prompt_contains(
         world, "the Call 2b user prompt contains responsibilities", {}
     )[0]
-    world.sp1_mock_client.calls = [{"user_prompt": "responsibilities"}]
+    world.sp1_mock_client.calls = [_call("responsibilities")]
     assert _h_ar_prior_prompt_contains(
         world, "the Call 2b user prompt contains responsibilities", {}
     )[0]
@@ -224,6 +253,8 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
     )[0]
     assert not _h_ar_responsibility_no_field(world, "malformed", {})[0]
 
+
+def test_acceptance_refresh_model_world_and_call3_branches(tmp_path):
     model_world = World()
     assert _h_ar_valid_responsibility_set(
         model_world, "a valid ResponsibilitySet from Call 2a", {}
@@ -237,10 +268,10 @@ def test_acceptance_refresh_handler_branches_remain_characterized(tmp_path):
     prompt_world = SimpleNamespace(
         sp1_mock_client=SimpleNamespace(
             calls=[
-                {
-                    "response_format": _CoordinationProviderEnvelope,
-                    "user_prompt": "RESP-1 controls CP-1",
-                }
+                _call(
+                    "RESP-1 controls CP-1",
+                    response_format=_CoordinationProviderEnvelope,
+                )
             ]
         )
     )
