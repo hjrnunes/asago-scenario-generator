@@ -15,7 +15,6 @@ from unittest.mock import patch
 
 import yaml
 
-from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml as real_write_yaml
 from asago_scenario_generator.stpa.system_model import control_structure as cs_module
 from asago_scenario_generator.stpa.system_model import loss_analysis as la_module
@@ -24,25 +23,13 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
+from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import (
     setup_sp1_mock_client,
     valid_empty_coordination_analysis_dict,
 )
 
 CANONICAL = ("loss-analysis.yaml", "control-structure.yaml")
-
-
-def _risk_cards() -> list[RiskCard]:
-    return [
-        RiskCard(
-            risk_id="atlas-001",
-            risk_name="atlas-001",
-            risk_description="Risk atlas-001",
-            taxonomy="test",
-            confidence=0.9,
-            grounding_confidence="high",
-        )
-    ]
 
 
 def _load(run_dir: Path, name: str) -> dict:
@@ -89,7 +76,7 @@ class TestReviewedLossAnalysisVersions:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -106,7 +93,7 @@ class TestReviewedLossAnalysisVersions:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -133,7 +120,7 @@ class TestReviewedLossAnalysisVersions:
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -157,7 +144,7 @@ class TestReviewedLossAnalysisVersions:
             run_sp1(
                 llm_client=client,
                 use_case_text="Test use case",
-                risk_cards=_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=tmp_path,
             )
 
@@ -207,7 +194,7 @@ class TestControlStructureVersions:
             return run_sp1(
                 llm_client=setup_sp1_mock_client(),
                 use_case_text="Test use case",
-                risk_cards=_risk_cards(),
+                risk_cards=make_risk_cards(),
                 run_dir=run_dir,
             )
 
@@ -250,7 +237,7 @@ class TestControlStructureVersions:
         run_sp1(
             llm_client=setup_sp1_mock_client(),
             use_case_text="Test use case",
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
