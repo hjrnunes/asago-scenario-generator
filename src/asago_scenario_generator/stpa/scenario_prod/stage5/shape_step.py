@@ -13,11 +13,19 @@ records the reason on the shape.
 
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
+
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 
 from asago_scenario_generator.stpa.models.attack_shape import (
     MAX_TURNS,
@@ -41,7 +49,16 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     AttackerInfluence,
     ExecutionTargetProfile,
 )
-from asago_scenario_generator.stpa.models.scenario_spec import AdversaryKind
+from asago_scenario_generator.stpa.models.scenario_spec import (
+    AdversaryKind,
+    ScenarioSpec,
+)
+
+from .._constants import PROMPTS_DIR
+from ..presentation import render_scenario_summary
+
+SHAPE_STAGE = "stage5_shape"
+SHAPE_STEP = "shape"
 
 
 @dataclass(frozen=True)
@@ -189,6 +206,17 @@ def attacker_influenced_operations(
     )
 
 
+def observed_operation_names(
+    profile: ExecutionTargetProfile | None,
+) -> tuple[str, ...] | None:
+    """Return the profile's inventory tool names, or ``None`` without a profile."""
+    if profile is None:
+        return None
+    if profile.inventory is None:
+        return ()
+    return tuple(tool.name for tool in profile.inventory.tools)
+
+
 def _indirect_shape(
     proposal: ShapeProposal | ForgedShapeProposal,
 ) -> IndirectShape | None:
@@ -257,3 +285,110 @@ def resolve_attack_shape(
     if reason is not None:
         return default_attack_shape(reason)
     return shape
+
+
+@dataclass(frozen=True)
+class _ShapeRun:
+    """The per-run inputs every scenario's shape request shares."""
+
+    llm_client: LLMClient
+    run_dir: Path
+    loader: TemplateLoader
+    config: ShapeStepConfig
+    temperature: float
+    observed_operations: tuple[str, ...] | None
+    influenced_operations: frozenset[str]
+
+
+def _render_prompts(spec: ScenarioSpec, adversary_kind: AdversaryKind, run: _ShapeRun):
+    operations = (
+        None
+        if run.observed_operations is None
+        else [
+            {"name": name, "influenced": name in run.influenced_operations}
+            for name in run.observed_operations
+        ]
+    )
+    system = run.loader.render_prompt(
+        "stage5_shape_system.j2",
+        max_turns=MAX_TURNS,
+        content_kinds=[kind.value for kind in ContentKind],
+        allow_forged_transcript=run.config.allow_forged_transcript,
+    )
+    user = run.loader.render_prompt(
+        "stage5_shape_user.j2",
+        scenario_id=spec.scenario_id,
+        adversary_kind=adversary_kind.value,
+        adversary_gain=spec.adversary.gain if spec.adversary else "",
+        allowed_channels=sorted(
+            channel.value for channel in allowed_channels(adversary_kind, run.config)
+        ),
+        account=render_scenario_summary(spec)[0],
+        operations=operations,
+    )
+    return system, user
+
+
+def _shape_for(spec: ScenarioSpec, run: _ShapeRun) -> AttackShape | None:
+    adversary = spec.adversary
+    if adversary is None:
+        return default_attack_shape(None)
+    if adversary.kind is AdversaryKind.none:
+        return None
+    system, user = _render_prompts(spec, adversary.kind, run)
+    response_model = response_model_for(run.config)
+    outcome = call_with_policy(
+        llm_client=run.llm_client,
+        system_prompt=system,
+        user_prompt=user,
+        response_format=response_model,
+        run_dir=run.run_dir,
+        stage=SHAPE_STAGE,
+        step=SHAPE_STEP,
+        policy=CorrectionPolicy(),
+        slot_id=spec.threat_source.ica_slot_id,
+        scenario_id=spec.scenario_id,
+        temperature=run.temperature,
+    )
+    if outcome.value is None:
+        return default_attack_shape(ShapeDowngradeReason.SHAPE_CALL_FAILED)
+    facts = ShapeFacts(
+        adversary_kind=adversary.kind,
+        observed_operations=run.observed_operations,
+        influenced_operations=run.influenced_operations,
+        config=run.config,
+    )
+    return resolve_attack_shape(outcome.value, facts)
+
+
+def apply_shape_step(
+    specs: Sequence[ScenarioSpec],
+    *,
+    llm_client: LLMClient,
+    run_dir: Path,
+    execution_target_profile: ExecutionTargetProfile | None,
+    config: ShapeStepConfig = ShapeStepConfig(),
+    temperature: float | None = None,
+    loader: TemplateLoader | None = None,
+) -> list[ScenarioSpec]:
+    """Return ``specs`` with the shape each adversarial scenario's request produced.
+
+    A functional scenario passes through unchanged and costs no request. Each
+    adversarial scenario costs exactly one request, with no retry.
+    """
+    run = _ShapeRun(
+        llm_client=llm_client,
+        run_dir=run_dir,
+        loader=loader or TemplateLoader(PROMPTS_DIR),
+        config=config,
+        temperature=DEFAULT_TEMPERATURE if temperature is None else temperature,
+        observed_operations=observed_operation_names(execution_target_profile),
+        influenced_operations=attacker_influenced_operations(execution_target_profile),
+    )
+    shaped = []
+    for spec in specs:
+        shape = _shape_for(spec, run)
+        shaped.append(
+            spec if shape is None else spec.model_copy(update={"attack_shape": shape})
+        )
+    return shaped
