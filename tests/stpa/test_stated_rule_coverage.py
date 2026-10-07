@@ -57,7 +57,7 @@ from tests.stpa.sp1_helpers import (
     valid_responsibility_set_dict,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
-from tests.stpa.test_duplicate_loss_hazard_references import _risk_cards
+from tests.helpers.stpa_builders import make_risk_cards
 
 USE_CASE = """# Use Case: Support assistant
 
@@ -244,7 +244,7 @@ def _gate(
         llm_client=client,
         loss_analysis=analysis,
         use_case_text=USE_CASE,
-        risk_cards=_risk_cards(),
+        risk_cards=make_risk_cards(),
         run_dir=tmp_path,
         template_loader=TemplateLoader(PROMPTS_DIR),
         temperature=0.4,
@@ -1706,7 +1706,7 @@ class TestRunSp1:
         result = run_sp1(
             llm_client=client,
             use_case_text=USE_CASE,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -1752,7 +1752,7 @@ class TestRunSp1:
         result = run_sp1(
             llm_client=client,
             use_case_text=USE_CASE,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -1782,7 +1782,7 @@ class TestRunSp1:
         result = run_sp1(
             llm_client=client,
             use_case_text=USE_CASE,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -1828,7 +1828,7 @@ class TestRunSp1:
         result = run_sp1(
             llm_client=client,
             use_case_text=use_case,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
@@ -1878,7 +1878,7 @@ class TestStage2Citation:
         result = run_sp1(
             llm_client=setup_sp1_mock_client(),
             use_case_text=USE_CASE,
-            risk_cards=_risk_cards(),
+            risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
 
