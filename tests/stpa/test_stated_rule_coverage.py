@@ -568,6 +568,26 @@ class TestMappingValidation:
         assert "provider down" in (assessment.failure_reason or "")
         assert assessment.findings == ()
 
+    def test_an_unavailable_step_gives_one_manifest_warning(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_exception_for(
+            StatedRuleExtractionResponse, RuntimeError("provider down")
+        )
+        analysis = _analysis()
+        artifact = finalize_stated_rule_coverage(
+            _assess(client, tmp_path, analysis),
+            draft=analysis,
+            final=analysis,
+            final_digest=graph_digest(analysis),
+            revision=StatedRuleRevision(),
+            run_dir=tmp_path,
+        )
+
+        assert coverage_warnings(artifact) == [
+            "stage_1a/stated_rule_coverage unavailable: "
+            "stated_rule_extraction: RuntimeError: provider down"
+        ]
+
     def test_mapping_error_marks_rows_unavailable(self, tmp_path) -> None:
         client = MockLLMClient()
         client.set_response_for(StatedRuleExtractionResponse, {"rules": [FEE_RULE]})
