@@ -55,7 +55,8 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     run_targeted_repair,
     select_disposition_repairs,
 )
-from tests.stpa.sp1_helpers import MockLLMClient, read_calls_jsonl
+from tests.helpers.calls_log import read_calls_jsonl
+from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.run import _write_manifest

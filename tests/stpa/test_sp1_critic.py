@@ -34,10 +34,14 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     RevisionDelta,
+    _build_taxonomy_probes,
+    _needs_rag_probe,
+    _needs_tool_probe,
     has_unjustified_gaps,
     run_completeness_critic,
     run_revision,
 )
+from tests.helpers.stpa_builders import make_capability_profile
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.stpa.system_model import critic as critic_module
@@ -84,20 +88,6 @@ def _make_control_structure() -> ControlStructure:
             ),
         ],
     )
-
-
-def _make_capability_profile() -> CapabilityProfile:
-    return Stage1Profile(
-        has_persistent_memory=False,
-        multi_agent=False,
-        hitl=False,
-        entry_points=[
-            {"name": "User chat", "direction": "input", "controllability": "direct"},
-        ],
-        confidence="medium",
-        kc_subcodes=["KC1.1", "KC5.1", "KC6.1.1"],
-        tool_inventory=[{"name": "tool1", "description": "A tool"}],
-    ).to_capability_profile()
 
 
 def _make_loss_analysis() -> LossAnalysis:
@@ -295,7 +285,7 @@ class TestCriticExecution:
         run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test use case",
             run_dir=tmp_path,
         )
@@ -312,7 +302,7 @@ class TestCriticExecution:
         run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test use case description",
             run_dir=tmp_path,
         )
@@ -328,7 +318,7 @@ class TestCriticExecution:
         run_completeness_critic(
             llm_client=client,
             control_structure=_make_control_structure(),
-            capability_profile=_make_capability_profile(),
+            capability_profile=make_capability_profile(),
             use_case_text="Test use case",
             run_dir=tmp_path,
         )
@@ -732,3 +722,129 @@ class TestRevision:
         assert "RESP-3" in resp_ids
         assert "RESP-1" in resp_ids
         assert "RESP-2" in resp_ids
+
+
+def _profile_with(
+    kc_subcodes: list[str], entry_point_names: list[str] | None = None
+) -> CapabilityProfile:
+    """Build a profile whose capability flags follow from its kc_subcodes."""
+    needs_tools = any(code.startswith(("KC5.", "KC6.")) for code in kc_subcodes)
+    return Stage1Profile(
+        has_persistent_memory=False,
+        multi_agent=False,
+        hitl=False,
+        entry_points=[
+            {"name": name, "direction": "input", "controllability": "direct"}
+            for name in (entry_point_names or ["User chat"])
+        ],
+        confidence="medium",
+        kc_subcodes=kc_subcodes,
+        tool_inventory=[{"name": "tool1", "description": "A tool"}]
+        if needs_tools
+        else [],
+    ).to_capability_profile()
+
+
+class TestProbeGating:
+    """Truth tables for the predicates that gate the taxonomy probes."""
+
+    @pytest.mark.parametrize(
+        ("kc_subcodes", "entry_point_names", "expected"),
+        [
+            pytest.param(["KC1.1", "KC6.3.3"], ["User chat"], True, id="kc_only"),
+            pytest.param(["KC1.1"], ["RAG search interface"], True, id="name_only"),
+            pytest.param(["KC1.1"], ["User chat"], False, id="neither"),
+            pytest.param(["KC1.1", "KC6.3.3"], ["RAG search"], True, id="both"),
+        ],
+    )
+    def test_needs_rag_probe(self, kc_subcodes, entry_point_names, expected):
+        profile = _profile_with(kc_subcodes, entry_point_names)
+        assert _needs_rag_probe(profile) is expected
+
+    @pytest.mark.parametrize(
+        ("kc_subcodes", "expected"),
+        [
+            pytest.param(["KC1.1", "KC5.2"], True, id="kc5"),
+            pytest.param(["KC1.1", "KC6.1.1"], True, id="kc6"),
+            pytest.param(["KC1.1", "KC2.3"], False, id="neither"),
+        ],
+    )
+    def test_needs_tool_probe(self, kc_subcodes, expected):
+        assert _needs_tool_probe(_profile_with(kc_subcodes)) is expected
+
+    @pytest.mark.parametrize(
+        ("kc_subcodes", "entry_point_names", "expected"),
+        [
+            pytest.param(["KC1.1"], ["User chat"], set(), id="no_capability"),
+            pytest.param(
+                ["KC1.1", "KC6.3.3"],
+                ["User chat"],
+                {"RAG retrieval", "Tool parameter validation"},
+                id="rag_via_kc",
+            ),
+            pytest.param(
+                ["KC1.1"], ["RAG search"], {"RAG retrieval"}, id="rag_via_entry_point"
+            ),
+            pytest.param(
+                ["KC1.1", "KC4.3"], ["User chat"], {"Memory integrity"}, id="memory"
+            ),
+            pytest.param(
+                ["KC1.1", "KC2.3"],
+                ["User chat"],
+                {"Multi-agent coordination"},
+                id="multi_agent",
+            ),
+            pytest.param(
+                ["KC1.1", "KCX-HITL"], ["User chat"], {"Human-in-the-loop"}, id="hitl"
+            ),
+            pytest.param(
+                ["KC1.1", "KC5.1"],
+                ["User chat"],
+                {"Tool parameter validation"},
+                id="tools_via_kc5",
+            ),
+        ],
+    )
+    def test_probes_follow_the_capability_profile(
+        self, kc_subcodes, entry_point_names, expected
+    ):
+        every_probe = {
+            "RAG retrieval",
+            "Tool parameter validation",
+            "Memory integrity",
+            "Multi-agent coordination",
+            "Human-in-the-loop",
+        }
+        probes = _build_taxonomy_probes(_profile_with(kc_subcodes, entry_point_names))
+        included = {
+            name for name in every_probe if any(name in probe for probe in probes)
+        }
+        assert included == expected
+
+
+class TestHasUnjustifiedGapsWithoutTypedGaps:
+    """Probe statuses alone are diagnostic: without a typed gap nothing triggers."""
+
+    @pytest.mark.parametrize(
+        "checklist_results",
+        [
+            pytest.param({}, id="empty"),
+            pytest.param({"a": "present", "b": "present"}, id="all_present"),
+            pytest.param(
+                {"a": "absent_justified", "b": "absent_justified"},
+                id="all_absent_justified",
+            ),
+            pytest.param(
+                {
+                    "a": "present",
+                    "b": "absent_justified",
+                    "c": "absent_unjustified",
+                },
+                id="mixed_with_one_unjustified",
+            ),
+            pytest.param({"a": "absent_unjustified"}, id="only_unjustified"),
+        ],
+    )
+    def test_no_typed_gap_means_no_revision(self, checklist_results):
+        findings = CriticFindings(gaps=[], checklist_results=checklist_results)
+        assert has_unjustified_gaps(findings) is False

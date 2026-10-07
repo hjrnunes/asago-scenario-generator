@@ -23,10 +23,10 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
-    read_calls_jsonl,
     setup_sp1_mock_client,
     valid_gap_draft_dict,
     valid_risk_draft_dict,

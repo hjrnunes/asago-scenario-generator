@@ -13,10 +13,10 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
     run_sp3,
 )
+from tests.helpers.stpa_builders import make_cs
 from tests.stpa.sp1_helpers import MockLLMClient
 
 from .test_sp3_run import (
-    _make_cs,
     _make_ets,
     _make_loss_analysis,
     _semantics_wire,
@@ -106,7 +106,7 @@ def test_functional_test_candidate_is_persisted_for_the_owner(
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=tmp_path,
     )
@@ -137,7 +137,7 @@ def test_functional_test_accepts_empty_attacker_bdi_and_keeps_constraint_groundi
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=tmp_path,
     )
@@ -162,7 +162,7 @@ def test_mixed_run_publishes_both_candidates_with_distinct_status(
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=2),
-        control_structure=_make_cs(),
+        control_structure=make_cs(),
         loss_analysis=_make_loss_analysis(),
         run_dir=tmp_path,
     )

@@ -31,6 +31,8 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     derive_loss_analysis,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
+from tests.helpers.stpa_builders import make_capability_profile
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     valid_gap_draft_dict,
@@ -39,7 +41,6 @@ from tests.stpa.sp1_helpers import (
     make_risk_cards,
 )
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-from tests.stpa.test_sp1_graceful_degradation import _make_capability_profile
 
 
 def test_provider_generic_ids_are_canonicalized_for_hazards_and_constraints() -> None:
@@ -436,7 +437,7 @@ class TestStage1aLossAnalysis:
             LossAnalysisDraft,
             [valid_risk_draft_dict(), valid_gap_draft_dict()],
         )
-        profile = _make_capability_profile()
+        profile = make_capability_profile()
         derive_loss_analysis(
             llm_client=client,
             use_case_text="Test use case",
@@ -505,10 +506,7 @@ class TestStage1aLossAnalysis:
         assert "draft_semantics failure class" in message
         assert "no grounded losses were declared" in message
         assert len(client.calls) == 1
-        entries = [
-            json.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         assert [entry["success"] for entry in entries] == [False]
         assert "complete loss -> hazard" in entries[0]["error"]
 
@@ -796,10 +794,7 @@ class TestStage1aLossAnalysis:
         assert "draft_references failure class" in message
         assert "no repair call was made" in message
         assert len(client.calls) == 1
-        entries = [
-            json.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
         assert [entry["success"] for entry in stage1a_entries] == [False]
         assert stage1a_entries[0]["step"] == "risk_derivation"
@@ -825,10 +820,7 @@ class TestStage1aLossAnalysis:
 
         assert "related_hazards" in str(exc_info.value)
         assert "targeted repair unsupported" in str(exc_info.value)
-        entries = [
-            json.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         assert len(entries) == 1
         assert all(not entry["success"] for entry in entries)
         assert not (tmp_path / "loss-analysis.yaml").exists()
@@ -880,10 +872,7 @@ class TestStage1aLossAnalysis:
         message = str(exc_info.value)
         assert "Missing loss declarations: L-99" in message
         assert "Known loss IDs: L-1, L-2" in message
-        entries = [
-            json.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
         assert [entry["success"] for entry in stage1a_entries] == [True, False]
         assert [entry["step"] for entry in stage1a_entries] == [
@@ -914,10 +903,7 @@ class TestStage1aLossAnalysis:
         assert "targeted repair unsupported" in message
         assert "draft_references failure class" in message
         assert "empty gap response is valid" in message
-        entries = [
-            json.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
         assert [entry["success"] for entry in stage1a_entries] == [True, False]
         assert "empty cross-references" in stage1a_entries[1]["error"]

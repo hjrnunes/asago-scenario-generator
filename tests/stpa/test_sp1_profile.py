@@ -11,8 +11,10 @@ from pydantic import ValidationError
 
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
+    EntryPoint,
     Stage1Profile,
     Stage1Profile as S1P,
+    classify_entry_point,
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
@@ -216,3 +218,34 @@ class TestStage1bProfile:
         assert "has_persistent_memory" not in field_names
         assert "multi_agent" not in field_names
         assert "hitl" not in field_names
+
+
+class TestClassifyEntryPoint:
+    """Truth table over controllability, direction and the name keywords."""
+
+    @pytest.mark.parametrize(
+        ("name", "direction", "controllability", "expected"),
+        [
+            # An explicit controllability wins over the name heuristic.
+            ("RAG knowledge", "input", "direct", "direct"),
+            ("user chat", "input", "indirect", "indirect"),
+            # Direction decides before any keyword is read.
+            ("alerts", "output", None, "system"),
+            ("user response channel", "output", None, "system"),
+            ("RAG knowledge-grounding", "bidirectional", None, "direct"),
+            # Input direction: keywords, indirect then system, default direct.
+            ("backend API", "input", None, "system"),
+            ("user chat", "input", None, "direct"),
+            ("RAG knowledge retrieval", "input", None, "indirect"),
+            ("unknown channel", "input", None, "direct"),
+        ],
+    )
+    def test_classification(self, name, direction, controllability, expected):
+        assert classify_entry_point(name, direction, controllability) == expected
+
+    def test_entry_point_is_frozen(self):
+        entry_point = EntryPoint(name="test entry point", direction="input")
+        with pytest.raises(ValidationError):
+            entry_point.name = "changed name"
+        with pytest.raises(ValidationError):
+            entry_point.custom_field = "value"

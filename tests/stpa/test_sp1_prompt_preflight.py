@@ -21,6 +21,7 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     audit_prompt_contract,
     resolve_adapter_prompt_budget,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 
 
 def test_prompt_budget_uses_the_greater_of_ten_percent_or_1024_margin() -> None:
@@ -201,10 +202,7 @@ def test_configured_provider_is_not_called_when_rendered_prompt_exceeds_budget(
     assert error is not None and "prompt_budget_exceeded" in error
     assert client.calls == 0
 
-    [record] = [
-        json.loads(line)
-        for line in (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    [record] = read_calls_jsonl(tmp_path)
     assert record["prompt_preflight"] == {
         "rendered_prompt_digest": record["rendered_prompt_digest"],
         "input_tokens": record["preflight_input_tokens"],

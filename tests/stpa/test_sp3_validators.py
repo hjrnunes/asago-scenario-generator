@@ -3,14 +3,7 @@
 from __future__ import annotations
 
 from asago_scenario_generator.stpa.models.control_structure import (
-    ControlAction,
-    ControlStructure,
-    ElementRef,
-    FeedbackChannel,
     ProcessModelPart,
-    ReferenceType,
-    Responsibility,
-    ControlledProcess,
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
     EnrichedThreatSet,
@@ -45,65 +38,7 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     detect_orphan_elements,
     detect_orphan_icas,
 )
-
-
-def _make_cs(
-    include_resp2: bool = False,
-) -> ControlStructure:
-    cps = [ControlledProcess(cp_id="CP-1", description="Interface")]
-    resp1 = Responsibility(
-        resp_id="RESP-1",
-        description="R1",
-        process_model_parts=[
-            ProcessModelPart(pm_id="PM-1-1", description="State"),
-        ],
-        control_actions=[
-            ControlAction(
-                ca_id="CA-1-1",
-                description="Action",
-                target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
-            ),
-        ],
-        feedback_channels=[
-            FeedbackChannel(
-                fb_id="FB-1-1",
-                description="Feedback",
-                updates="PM-1-1",
-                source=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
-            ),
-        ],
-    )
-    responsibilities = [resp1]
-    if include_resp2:
-        responsibilities.append(
-            Responsibility(
-                resp_id="RESP-2",
-                description="R2",
-                process_model_parts=[
-                    ProcessModelPart(pm_id="PM-2-1", description="State2")
-                ],
-                control_actions=[
-                    ControlAction(
-                        ca_id="CA-2-1",
-                        description="Action2",
-                        target=ElementRef(
-                            type=ReferenceType.controlled_process, id="CP-1"
-                        ),
-                    ),
-                ],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id="FB-2-1",
-                        description="Feedback2",
-                        updates="PM-2-1",
-                        source=ElementRef(
-                            type=ReferenceType.controlled_process, id="CP-1"
-                        ),
-                    ),
-                ],
-            )
-        )
-    return ControlStructure(responsibilities=responsibilities, controlled_processes=cps)
+from tests.helpers.stpa_builders import make_cs
 
 
 def _make_loss_analysis() -> LossAnalysis:
@@ -222,34 +157,34 @@ class TestBDIGroundingValidator:
     """SP3-VAL-01 through SP3-VAL-04."""
 
     def test_passes_with_valid_ids(self):
-        cs = _make_cs()
+        cs = make_cs()
         spec = _make_scenario_spec()
         result = validate_bdi_grounding(spec, cs)
         assert result.passed
 
     def test_fails_on_invalid_pm(self):
-        cs = _make_cs()
+        cs = make_cs()
         spec = _make_scenario_spec(pm_id="PM-99-1")
         result = validate_bdi_grounding(spec, cs)
         assert not result.passed
         assert any("pm_id" in e for e in result.errors)
 
     def test_fails_on_invalid_resp(self):
-        cs = _make_cs()
+        cs = make_cs()
         spec = _make_scenario_spec(resp_id="RESP-99")
         result = validate_bdi_grounding(spec, cs)
         assert not result.passed
         assert any("resp_id" in e for e in result.errors)
 
     def test_fails_on_invalid_ca(self):
-        cs = _make_cs()
+        cs = make_cs()
         spec = _make_scenario_spec(ca_id="CA-99-1")
         result = validate_bdi_grounding(spec, cs)
         assert not result.passed
         assert any("ca_id" in e for e in result.errors)
 
     def test_fails_on_ca_not_belonging_to_controller(self):
-        cs = _make_cs(include_resp2=True)
+        cs = make_cs(include_resp2=True)
         spec = _make_scenario_spec(
             target_controller="RESP-1", target_control_action="CA-2-1"
         )
@@ -284,7 +219,7 @@ class TestTraceability:
     """SP3-VAL-12 through SP3-VAL-18."""
 
     def test_passes_on_complete_chain(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_enriched_threat_set()
         env = _make_envelope()
@@ -292,7 +227,7 @@ class TestTraceability:
         assert len(errors) == 0
 
     def test_fails_on_broken_hazard(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         threat = _make_threat(related_hazards=["H-99"])
         ets = _make_enriched_threat_set(threats=[threat])
@@ -301,7 +236,7 @@ class TestTraceability:
         assert any(e.broken_link == "hazard" for e in errors)
 
     def test_fails_on_broken_constraint(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         threat = _make_threat(related_constraints=["SC-99"])
         ets = _make_enriched_threat_set(threats=[threat])
@@ -310,7 +245,7 @@ class TestTraceability:
         assert any(e.broken_link == "constraint" for e in errors)
 
     def test_fails_on_broken_responsibility(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_enriched_threat_set()
         spec = _make_scenario_spec(target_controller="RESP-99")
@@ -319,7 +254,7 @@ class TestTraceability:
         assert any(e.broken_link == "responsibility" for e in errors)
 
     def test_fails_on_broken_ica_link(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_enriched_threat_set()
         spec = _make_scenario_spec(ica_id="RESP-1:CA-1-1:NOT_PROVIDED:99")
@@ -328,7 +263,7 @@ class TestTraceability:
         assert any(e.broken_link == "ica" for e in errors)
 
     def test_accepts_legal_provenance_root(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_enriched_threat_set()
         spec = _make_scenario_spec(provenance="structural")
@@ -337,7 +272,7 @@ class TestTraceability:
         assert not any(e.broken_link == "provenance_root" for e in errors)
 
     def test_rejects_illegal_provenance_root(self):
-        cs = _make_cs()
+        cs = make_cs()
         la = _make_loss_analysis()
         ets = _make_enriched_threat_set()
         # Use model_construct to bypass Literal validation on ThreatSource
@@ -357,7 +292,7 @@ class TestOrphanDetection:
     """SP3-VAL-19, SP3-VAL-20."""
 
     def test_finds_orphan_elements(self):
-        cs = _make_cs()
+        cs = make_cs()
         cs.responsibilities[0].process_model_parts.append(
             ProcessModelPart(pm_id="PM-1-2", description="Extra PM")
         )
@@ -368,7 +303,7 @@ class TestOrphanDetection:
 
     def test_no_false_positive_orphans_for_referenced_elements(self):
         """Referenced resp/ca must not be flagged as orphans."""
-        cs = _make_cs()
+        cs = make_cs()
         threat = _make_threat()
         ets = _make_enriched_threat_set(threats=[threat])
         orphans = detect_orphan_elements(cs, ets)
@@ -377,7 +312,7 @@ class TestOrphanDetection:
 
     def test_collects_ids_from_two_part_slot_id(self):
         """A 2-part slot ID must still yield resp and ca references."""
-        cs = _make_cs()
+        cs = make_cs()
         threat = _make_threat()
         threat = threat.model_copy(update={"ica_slot_id": "RESP-1:CA-1-1"})
         ets = _make_enriched_threat_set(threats=[threat])

@@ -42,7 +42,6 @@ from asago_scenario_generator.stpa.scenario_prod.enrichment import (
     _tree_mentions_tools,
     _narrative_indicates_multi_turn,
     _find_control_action_description,
-    _garak_testability,
 )
 from tests.stpa.helpers import make_scenario_spec, make_gherkin_spec
 
@@ -442,18 +441,6 @@ class TestScenarioEnvelopeConsumerHintsField:
 class TestComputeConsumerHints:
     """8B06-03 through 8B06-12: compute_consumer_hints determinism and rules."""
 
-    def test_8b06_03_computed_deterministically(self):
-        profile = _make_capability_profile()
-        tree = _make_attack_tree()
-        hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=tree,
-            narrative="A single-turn attack narrative.",
-            primary_attack_zone="input",
-        )
-        assert hints is not None
-        assert isinstance(hints, ConsumerHints)
-
     @pytest.mark.parametrize(
         "zone", ["input", "reasoning", "tool_execution", "memory", "inter_agent"]
     )
@@ -650,12 +637,6 @@ class TestAssembleEnvelopeConsumerHints:
 
 class TestEnrichmentModule:
     """8B06-16: enrichment computation is in a dedicated module."""
-
-    def test_compute_system_context_importable(self):
-        assert callable(compute_system_context)
-
-    def test_compute_consumer_hints_importable(self):
-        assert callable(compute_consumer_hints)
 
     def test_compute_system_context_returns_system_context(self):
         profile = _make_capability_profile()
@@ -859,10 +840,3 @@ class TestFindControlActionDescription:
 
     def test_none_responsibility_returns_empty(self):
         assert _find_control_action_description(None, "CA-1") == ""
-
-
-class TestGarakTestabilityUnknownZone:
-    """Cover default fallback for unknown attack zone."""
-
-    def test_unknown_zone_defaults_to_low(self):
-        assert _garak_testability("unknown_zone") == "low"

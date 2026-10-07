@@ -829,56 +829,38 @@ class TestComputeNextIds:
 
 
 class TestNextNumFrom:
-    """Verify _next_num_from handles edge cases correctly."""
+    """_next_num_from returns the largest numeric suffix plus one, or 1."""
 
-    def test_numeric_ids(self):
-        """Items with numeric IDs return max+1."""
-        items = [{"id": "X-1"}, {"id": "X-3"}, {"id": "X-2"}]
-        result = _next_num_from(items, lambda item: item["id"])
-        assert result == 4  # max(1,2,3)+1
-
-    def test_empty_list_returns_one(self):
-        """Empty list returns 1 (default 0 + 1)."""
-        result = _next_num_from([], lambda item: item["id"])
-        assert result == 1
-
-    def test_non_numeric_ids_filtered(self):
-        """Non-numeric IDs are filtered out; only valid numbers used."""
-        items = [{"id": "X-5"}, {"id": "FOO"}, {"id": "BAR"}]
-        result = _next_num_from(items, lambda item: item["id"])
-        assert result == 6  # max(5)+1, FOO/BAR produce None which is filtered
-
-    def test_all_non_numeric_returns_one(self):
-        """All non-numeric IDs -> default 0 + 1 = 1."""
-        items = [{"id": "FOO"}, {"id": "BAR"}]
-        result = _next_num_from(items, lambda item: item["id"])
-        assert result == 1
-
-    def test_single_item(self):
-        """Single item with number 7 -> next is 8."""
-        items = [{"id": "X-7"}]
-        result = _next_num_from(items, lambda item: item["id"])
-        assert result == 8
+    @pytest.mark.parametrize(
+        ("ids", "expected"),
+        [
+            pytest.param(["X-1", "X-3", "X-2"], 4, id="numeric_ids"),
+            pytest.param([], 1, id="empty_list"),
+            pytest.param(["X-5", "FOO", "BAR"], 6, id="non_numeric_filtered"),
+            pytest.param(["FOO", "BAR"], 1, id="all_non_numeric"),
+            pytest.param(["X-7"], 8, id="single_item"),
+        ],
+    )
+    def test_next_number(self, ids, expected):
+        items = [{"id": item_id} for item_id in ids]
+        assert _next_num_from(items, lambda item: item["id"]) == expected
 
 
 class TestExtractNum:
-    """Verify _extract_num extracts numeric suffixes correctly."""
+    """_extract_num returns the first number in an ID, or None."""
 
-    def test_simple_id(self):
-        assert _extract_num("RESP-3") == 3
-
-    def test_multi_part_id(self):
-        """For 'PM-1-2', returns the first number (1)."""
-        assert _extract_num("PM-1-2") == 1
-
-    def test_no_number(self):
-        assert _extract_num("FOO") is None
-
-    def test_number_at_start(self):
-        assert _extract_num("123abc") == 123
-
-    def test_empty_string(self):
-        assert _extract_num("") is None
+    @pytest.mark.parametrize(
+        ("text", "expected"),
+        [
+            pytest.param("RESP-3", 3, id="simple_id"),
+            pytest.param("PM-1-2", 1, id="multi_part_takes_first"),
+            pytest.param("FOO", None, id="no_number"),
+            pytest.param("123abc", 123, id="number_at_start"),
+            pytest.param("", None, id="empty_string"),
+        ],
+    )
+    def test_extract(self, text, expected):
+        assert _extract_num(text) == expected
 
 
 # ---------------------------------------------------------------------------
@@ -887,90 +869,52 @@ class TestExtractNum:
 
 
 class TestIsResponsibilityEmpty:
-    """Verify _is_responsibility_empty correctly identifies partial vs empty."""
+    """_is_responsibility_empty is True only when PM, CA and FB are all empty."""
 
-    def test_all_fields_empty(self):
-        """All three fields empty -> True."""
+    @pytest.mark.parametrize(
+        ("with_pm", "with_ca", "with_fb", "with_rc", "expected"),
+        [
+            pytest.param(False, False, False, False, True, id="all_empty"),
+            pytest.param(True, True, True, False, False, id="all_populated"),
+            pytest.param(True, False, False, False, False, id="only_pm"),
+            pytest.param(False, True, False, False, False, id="only_ca"),
+            pytest.param(False, False, True, False, False, id="only_fb"),
+            pytest.param(False, False, False, True, True, id="constraints_only"),
+        ],
+    )
+    def test_empty_means_no_pm_ca_or_fb(
+        self, with_pm, with_ca, with_fb, with_rc, expected
+    ):
         resp = Responsibility(
             resp_id="RESP-1",
-            description="Empty",
-            process_model_parts=[],
-            control_actions=[],
-            feedback_channels=[],
+            description="Responsibility",
+            responsibility_constraints=(
+                [ResponsibilityConstraint(rc_id="RC-1-1", description="C")]
+                if with_rc
+                else []
+            ),
+            process_model_parts=(
+                [ProcessModelPart(pm_id="PM-1-1", description="S")] if with_pm else []
+            ),
+            control_actions=(
+                [ControlAction(ca_id="CA-1-1", description="A")] if with_ca else []
+            ),
+            feedback_channels=(
+                [
+                    FeedbackChannel(
+                        fb_id="FB-1-1",
+                        description="F",
+                        updates="PM-1-1",
+                        source=ElementRef(
+                            type=ReferenceType.responsibility, id="RESP-1"
+                        ),
+                    )
+                ]
+                if with_fb
+                else []
+            ),
         )
-        assert _is_responsibility_empty(resp) is True
-
-    def test_all_fields_populated(self):
-        """All three fields populated -> False."""
-        resp = Responsibility(
-            resp_id="RESP-1",
-            description="Full",
-            process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="S")],
-            control_actions=[ControlAction(ca_id="CA-1-1", description="A")],
-            feedback_channels=[
-                FeedbackChannel(
-                    fb_id="FB-1-1",
-                    description="F",
-                    updates="PM-1-1",
-                    source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
-                )
-            ],
-        )
-        assert _is_responsibility_empty(resp) is False
-
-    def test_only_pm_populated(self):
-        """PM populated, CA and FB empty -> False (not ALL empty)."""
-        resp = Responsibility(
-            resp_id="RESP-1",
-            description="Partial PM",
-            process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="S")],
-            control_actions=[],
-            feedback_channels=[],
-        )
-        assert _is_responsibility_empty(resp) is False
-
-    def test_only_ca_populated(self):
-        """CA populated, PM and FB empty -> False."""
-        resp = Responsibility(
-            resp_id="RESP-1",
-            description="Partial CA",
-            process_model_parts=[],
-            control_actions=[ControlAction(ca_id="CA-1-1", description="A")],
-            feedback_channels=[],
-        )
-        assert _is_responsibility_empty(resp) is False
-
-    def test_only_fb_populated(self):
-        """FB populated, PM and CA empty -> False."""
-        resp = Responsibility(
-            resp_id="RESP-1",
-            description="Partial FB",
-            process_model_parts=[],
-            control_actions=[],
-            feedback_channels=[
-                FeedbackChannel(
-                    fb_id="FB-1-1",
-                    description="F",
-                    updates="PM-1-1",
-                    source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
-                )
-            ],
-        )
-        assert _is_responsibility_empty(resp) is False
-
-    def test_constraints_only_still_empty(self):
-        """Responsibility with only constraints but no PM/CA/FB -> True."""
-        resp = Responsibility(
-            resp_id="RESP-1",
-            description="Constraints only",
-            responsibility_constraints=[
-                ResponsibilityConstraint(rc_id="RC-1-1", description="C")
-            ],
-            process_model_parts=[],
-            control_actions=[],
-            feedback_channels=[],
-        )
-        assert _is_responsibility_empty(resp) is True
+        assert _is_responsibility_empty(resp) is expected
 
 
 # ---------------------------------------------------------------------------
@@ -1126,386 +1070,81 @@ def _make_multi_collision_delta() -> dict:
     )
 
 
-class TestCmDedup01RenumberedToNextFree:
-    """CmDedup-01: new link with duplicate cm_id is renumbered to next free CM-N."""
+def _cl_by_id(cs: ControlStructure, link_id: str) -> CoordinationLink:
+    return next(cl for cl in cs.coordination_links if cl.link_id == link_id)
 
-    def test_cl3_present_and_renumbered(self, tmp_path):
+
+def _cm_ids(cs: ControlStructure) -> list[str]:
+    return [cl.coordination_mechanism.cm_id for cl in cs.coordination_links]
+
+
+class TestCmDedupRenumbering:
+    """A new link whose cm_id collides is renumbered to the next free CM-N."""
+
+    def test_airbnb_regression_new_link_reusing_cm1_is_renumbered(self, tmp_path):
+        """CL-1/CM-1 and CL-2/CM-2 exist; the revision adds CL-3 with CM-1."""
         delta = _make_revision_delta_dict(
             new_coordination_links=[_cl_dict("CL-3", "CM-1")]
         )
         cs, _ = _run_rev(tmp_path, delta)
-        cl_ids = {cl.link_id for cl in cs.coordination_links}
-        assert "CL-3" in cl_ids
 
-    def test_cl3_cm_id_not_cm1(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
-        assert cl3.coordination_mechanism.cm_id != "CM-1"
-
-    def test_cl3_cm_id_matches_format(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
-        assert re.match(r"^CM-\d+$", cl3.coordination_mechanism.cm_id)
-
-    def test_final_cs_passes_validation(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        # If ControlStructure was constructed, it passed validation
         assert isinstance(cs, ControlStructure)
+        assert _cl_by_id(cs, "CL-1").coordination_mechanism.cm_id == "CM-1"
+        assert _cl_by_id(cs, "CL-2").coordination_mechanism.cm_id == "CM-2"
+        assert _cl_by_id(cs, "CL-3").coordination_mechanism.cm_id == "CM-3"
+        assert len(_cm_ids(cs)) == len(set(_cm_ids(cs)))
+        assert all(re.match(r"^CM-\d+$", cm_id) for cm_id in _cm_ids(cs))
 
-
-class TestCmDedup02NoDuplicateCmIds:
-    """CmDedup-02: renumbered cm_id does not collide with any existing cm_id."""
-
-    def test_no_duplicate_cm_ids(self, tmp_path):
+    def test_renumbering_keeps_link_content_and_warns(self, tmp_path):
         delta = _make_revision_delta_dict(
             new_coordination_links=[_cl_dict("CL-3", "CM-1")]
         )
-        cs, _ = _run_rev(tmp_path, delta)
-        cm_ids = [cl.coordination_mechanism.cm_id for cl in cs.coordination_links]
-        assert len(cm_ids) == len(set(cm_ids))
+        cs, warnings = _run_rev(tmp_path, delta)
 
-    def test_final_cs_passes_validation(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        assert isinstance(cs, ControlStructure)
-
-
-class TestCmDedup03PreservesLinkContent:
-    """CmDedup-03: renumbering preserves the link content."""
-
-    def test_source_preserved(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[
-                _cl_dict(
-                    "CL-3",
-                    "CM-1",
-                    source="RESP-1",
-                    target="RESP-2",
-                    shared_pm="PM-1-1",
-                    description="shared validation",
-                    payload="sync",
-                )
-            ]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
+        cl3 = _cl_by_id(cs, "CL-3")
         assert cl3.source == "RESP-1"
-
-    def test_target_preserved(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1", target="RESP-2")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
         assert cl3.target == "RESP-2"
-
-    def test_shared_pm_preserved(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1", shared_pm="PM-1-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
         assert cl3.shared_pm == "PM-1-1"
-
-    def test_description_preserved(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[
-                _cl_dict("CL-3", "CM-1", description="shared validation")
-            ]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
         assert cl3.description == "shared validation"
-
-    def test_payload_preserved(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1", payload="sync")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
         assert cl3.coordination_mechanism.payload == "sync"
-
-
-class TestCmDedup04RenumberWarning:
-    """CmDedup-04: renumbering emits a warning naming the colliding cm_id and link_id."""
-
-    def test_warning_mentions_cm1(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        _, warnings = _run_rev(tmp_path, delta)
         wtext = " ".join(warnings)
         assert "CM-1" in wtext
-
-    def test_warning_mentions_cl3(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        _, warnings = _run_rev(tmp_path, delta)
-        wtext = " ".join(warnings)
         assert "CL-3" in wtext
 
+    def test_multiple_collisions_are_each_renumbered(self, tmp_path):
+        cs, _ = _run_rev(tmp_path, _make_multi_collision_delta())
 
-class TestCmDedup05NextFreeNumber:
-    """CmDedup-05: renumbered cm_id is the next free number (CM-3)."""
+        cm3 = _cl_by_id(cs, "CL-3").coordination_mechanism.cm_id
+        cm4 = _cl_by_id(cs, "CL-4").coordination_mechanism.cm_id
+        assert cm3 != "CM-1"
+        assert cm4 != "CM-2"
+        assert cm3 != cm4
+        assert len(_cm_ids(cs)) == len(set(_cm_ids(cs)))
 
-    def test_cl3_gets_cm3(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
-        assert cl3.coordination_mechanism.cm_id == "CM-3"
-
-
-class TestCmDedup06MultipleCollisions:
-    """CmDedup-06: multiple new links with duplicate cm_ids are each renumbered."""
-
-    def test_both_links_present(self, tmp_path):
-        delta = _make_multi_collision_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        cl_ids = {cl.link_id for cl in cs.coordination_links}
-        assert "CL-3" in cl_ids
-        assert "CL-4" in cl_ids
-
-    def test_cl3_cm_id_not_cm1(self, tmp_path):
-        delta = _make_multi_collision_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
-        assert cl3.coordination_mechanism.cm_id != "CM-1"
-
-    def test_cl4_cm_id_not_cm2(self, tmp_path):
-        delta = _make_multi_collision_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        cl4 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-4")
-        assert cl4.coordination_mechanism.cm_id != "CM-2"
-
-    def test_cl3_and_cl4_cm_ids_differ(self, tmp_path):
-        delta = _make_multi_collision_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
-        cl4 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-4")
-        assert cl3.coordination_mechanism.cm_id != cl4.coordination_mechanism.cm_id
-
-    def test_no_duplicate_cm_ids(self, tmp_path):
-        delta = _make_multi_collision_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        cm_ids = [cl.coordination_mechanism.cm_id for cl in cs.coordination_links]
-        assert len(cm_ids) == len(set(cm_ids))
-
-
-class TestCmDedup07UniqueCmIdNotRenumbered:
-    """CmDedup-07: new link with unique cm_id is not renumbered."""
-
-    def test_cl3_keeps_cm3(self, tmp_path):
+    def test_unique_cm_id_is_kept_without_warnings(self, tmp_path):
         delta = _make_revision_delta_dict(
             new_coordination_links=[_cl_dict("CL-3", "CM-3")]
         )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
-        assert cl3.coordination_mechanism.cm_id == "CM-3"
-
-    def test_no_renumber_warning_for_cm3(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-3")]
-        )
-        _, warnings = _run_rev(tmp_path, delta)
-        renumber_warnings = [w for w in warnings if "Renumber" in w]
-        assert not any("CM-3" in w for w in renumber_warnings)
-
-
-class TestCmDedup08CmIdFormatRegex:
-    """CmDedup-08: renumbered cm_id conforms to the CM-N format regex."""
-
-    def test_cm_id_matches_pattern(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
-        assert re.match(r"^CM-\d+$", cl3.coordination_mechanism.cm_id)
-
-
-class TestCmDedup09DegradationFallback:
-    """CmDedup-09: degradation guard falls back to pre-revision CS on merge failure."""
-
-    def test_returns_pre_revision_cs(self, tmp_path):
-        # A new responsibility with duplicate pm_id causes ValidationError
-        delta = _make_degradation_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        resp_ids = {r.resp_id for r in cs.responsibilities}
-        assert "RESP-3" not in resp_ids
-
-    def test_pipeline_does_not_crash(self, tmp_path):
-        delta = _make_degradation_delta()
-        # Should not raise
         cs, warnings = _run_rev(tmp_path, delta)
-        assert isinstance(cs, ControlStructure)
 
-    def test_degradation_warning_present(self, tmp_path):
-        delta = _make_degradation_delta()
-        _, warnings = _run_rev(tmp_path, delta)
-        assert any("degrad" in w.lower() for w in warnings)
-
-
-class TestCmDedup10DegradationWarningContent:
-    """CmDedup-10: degradation warning names the failing step and includes the error type."""
-
-    def test_warning_mentions_revision_delta_merge(self, tmp_path):
-        delta = _make_degradation_delta()
-        _, warnings = _run_rev(tmp_path, delta)
-        wtext = " ".join(warnings)
-        assert "revision delta merge" in wtext.lower()
-
-    def test_warning_mentions_error_type(self, tmp_path):
-        delta = _make_degradation_delta()
-        _, warnings = _run_rev(tmp_path, delta)
-        wtext = " ".join(warnings)
-        # ValidationError or ValueError are the expected error types
-        assert "ValidationError" in wtext or "ValueError" in wtext
-
-
-class TestCmDedup11DegradationPreservesExisting:
-    """CmDedup-11: degradation guard preserves existing responsibilities after fallback."""
-
-    def test_preserves_resp1(self, tmp_path):
-        delta = _make_degradation_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        resp_ids = {r.resp_id for r in cs.responsibilities}
-        assert "RESP-1" in resp_ids
-
-    def test_preserves_resp2(self, tmp_path):
-        delta = _make_degradation_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        resp_ids = {r.resp_id for r in cs.responsibilities}
-        assert "RESP-2" in resp_ids
-
-    def test_preserves_cl1(self, tmp_path):
-        delta = _make_degradation_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        cl_ids = {cl.link_id for cl in cs.coordination_links}
-        assert "CL-1" in cl_ids
-
-    def test_preserves_cl2(self, tmp_path):
-        delta = _make_degradation_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        cl_ids = {cl.link_id for cl in cs.coordination_links}
-        assert "CL-2" in cl_ids
-
-
-class TestCmDedup12AirbnbRegression:
-    """CmDedup-12: Airbnb regression shape — CL-1/CM-1, CL-2/CM-2, revision adds CL-3 with CM-1."""
-
-    def test_does_not_crash(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        assert isinstance(cs, ControlStructure)
-
-    def test_cl1_keeps_cm1(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl1 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-1")
-        assert cl1.coordination_mechanism.cm_id == "CM-1"
-
-    def test_cl2_keeps_cm2(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl2 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-2")
-        assert cl2.coordination_mechanism.cm_id == "CM-2"
-
-    def test_cl3_present(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl_ids = {cl.link_id for cl in cs.coordination_links}
-        assert "CL-3" in cl_ids
-
-    def test_cl3_cm_id_not_cm1(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
-        assert cl3.coordination_mechanism.cm_id != "CM-1"
-
-    def test_no_duplicate_cm_ids(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cm_ids = [cl.coordination_mechanism.cm_id for cl in cs.coordination_links]
-        assert len(cm_ids) == len(set(cm_ids))
-
-    def test_final_cs_passes_validation(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-1")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        assert isinstance(cs, ControlStructure)
-
-
-class TestCmDedup13NestedPmIdCollision:
-    """CmDedup-13: degradation guard catches nested pm_id collision from new responsibility."""
-
-    def test_does_not_crash(self, tmp_path):
-        delta = _make_degradation_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        assert isinstance(cs, ControlStructure)
-
-    def test_returns_pre_revision_cs(self, tmp_path):
-        delta = _make_degradation_delta()
-        cs, _ = _run_rev(tmp_path, delta)
-        resp_ids = {r.resp_id for r in cs.responsibilities}
-        assert "RESP-3" not in resp_ids
-
-    def test_degradation_warning_present(self, tmp_path):
-        delta = _make_degradation_delta()
-        _, warnings = _run_rev(tmp_path, delta)
-        assert any("degrad" in w.lower() for w in warnings)
-
-
-class TestCmDedup14NoCollisionsNoWarnings:
-    """CmDedup-14: successful merge with no collisions produces no renumber or degradation warnings."""
-
-    def test_no_renumber_warning(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-3")]
-        )
-        _, warnings = _run_rev(tmp_path, delta)
+        assert _cl_by_id(cs, "CL-3").coordination_mechanism.cm_id == "CM-3"
         assert not any("Renumber" in w for w in warnings)
-
-    def test_no_degradation_warning(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-3")]
-        )
-        _, warnings = _run_rev(tmp_path, delta)
         assert not any("degrad" in w.lower() for w in warnings)
 
-    def test_cl3_has_cm3(self, tmp_path):
-        delta = _make_revision_delta_dict(
-            new_coordination_links=[_cl_dict("CL-3", "CM-3")]
-        )
-        cs, _ = _run_rev(tmp_path, delta)
-        cl3 = next(cl for cl in cs.coordination_links if cl.link_id == "CL-3")
-        assert cl3.coordination_mechanism.cm_id == "CM-3"
+
+class TestCmDedupNestedPmIdCollision:
+    """A merge that fails validation degrades to the pre-revision structure."""
+
+    def test_nested_pm_id_collision_falls_back_and_warns(self, tmp_path):
+        cs, warnings = _run_rev(tmp_path, _make_degradation_delta())
+
+        assert isinstance(cs, ControlStructure)
+        assert {r.resp_id for r in cs.responsibilities} == {"RESP-1", "RESP-2"}
+        assert {cl.link_id for cl in cs.coordination_links} == {"CL-1", "CL-2"}
+        wtext = " ".join(warnings)
+        assert any("degrad" in w.lower() for w in warnings)
+        assert "revision delta merge" in wtext.lower()
+        assert "ValidationError" in wtext or "ValueError" in wtext
 
 
 # ---------------------------------------------------------------------------
@@ -1514,31 +1153,21 @@ class TestCmDedup14NoCollisionsNoWarnings:
 
 
 class TestNextFreeCmId:
-    """Direct unit tests for _next_free_cm_id to kill surviving mutants."""
+    """_next_free_cm_id returns CM-(max numeric suffix + 1)."""
 
-    def test_empty_set_returns_cm1(self):
-        """Empty used_cm_ids -> CM-1 (default=0 + 1 = 1)."""
-        assert _next_free_cm_id(set()) == "CM-1"
-
-    def test_single_cm_id_returns_next(self):
-        """{'CM-1'} -> CM-2."""
-        assert _next_free_cm_id({"CM-1"}) == "CM-2"
-
-    def test_multiple_cm_ids_returns_max_plus_one(self):
-        """{'CM-1', 'CM-3', 'CM-5'} -> CM-6."""
-        assert _next_free_cm_id({"CM-1", "CM-3", "CM-5"}) == "CM-6"
-
-    def test_non_numeric_cm_ids_filtered(self):
-        """Non-numeric cm_ids are filtered out; default=0+1=1."""
-        assert _next_free_cm_id({"FOO", "BAR"}) == "CM-1"
-
-    def test_mixed_numeric_and_non_numeric(self):
-        """{'CM-2', 'FOO'} -> CM-3 (only CM-2 contributes a number)."""
-        assert _next_free_cm_id({"CM-2", "FOO"}) == "CM-3"
-
-    def test_high_number(self):
-        """{'CM-99'} -> CM-100."""
-        assert _next_free_cm_id({"CM-99"}) == "CM-100"
+    @pytest.mark.parametrize(
+        ("used", "expected"),
+        [
+            pytest.param(set(), "CM-1", id="empty_set"),
+            pytest.param({"CM-1"}, "CM-2", id="single"),
+            pytest.param({"CM-1", "CM-3", "CM-5"}, "CM-6", id="max_plus_one"),
+            pytest.param({"FOO", "BAR"}, "CM-1", id="non_numeric_filtered"),
+            pytest.param({"CM-2", "FOO"}, "CM-3", id="mixed"),
+            pytest.param({"CM-99"}, "CM-100", id="high_number"),
+        ],
+    )
+    def test_next_free(self, used, expected):
+        assert _next_free_cm_id(used) == expected
 
 
 # ---------------------------------------------------------------------------

@@ -46,9 +46,9 @@ from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     finalize_stated_rule_coverage,
     locate_quote,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
-    read_calls_jsonl,
     setup_sp1_mock_client,
     valid_gap_draft_dict,
     valid_loss_analysis_dict,

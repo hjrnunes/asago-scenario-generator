@@ -6,8 +6,8 @@ Three tables drive the tests:
   (``forbidden``), may import (``allowed``), or must import (``required``).
 * ``LAYER_TABLES`` -- layer numbers per module; a module may import only
   modules on its own layer or below. Add a row when you add a module to a
-  layered package. A module without a row counts as layer 99: it may import
-  anything, and no layered module may import it.
+  layered package; ``test_every_module_has_a_layer_row`` fails for a module
+  without one.
 * every module under ``asago_scenario_generator`` imports on its own.
 
 Modules come from ``pkgutil.walk_packages``, so a new module joins its package's
@@ -599,6 +599,9 @@ STPA_MODEL_LAYERS: dict[str, int] = {
     "omission_evidence": 3,
     "run_identity": 0,
     "scenario_envelope": 4,
+    # A pure dataclass leaf over the standard library; only scenario_prod
+    # modules import it.
+    "target_subject_model": 0,
 }
 
 SYSTEM_MODEL_LAYERS: dict[str, int] = {
@@ -715,6 +718,19 @@ def test_no_module_imports_a_higher_layer(table: LayerTable) -> None:
                     f"{short} (layer {own_layer}) imports {imported} (layer {target})"
                 )
     assert not violations, "dependency direction violations:\n" + "\n".join(violations)
+
+
+@pytest.mark.parametrize(
+    "table",
+    [pytest.param(t, id=t.name) for t in LAYER_TABLES if t.own is None],
+)
+def test_every_module_has_a_layer_row(table: LayerTable) -> None:
+    unlisted = sorted(
+        module.name.rpartition(".")[2]
+        for module in table.scanned()
+        if module.name.rpartition(".")[2] not in table.layers
+    )
+    assert not unlisted, f"modules of {table.package} without a layer row: {unlisted}"
 
 
 @pytest.mark.parametrize("table", [pytest.param(t, id=t.name) for t in LAYER_TABLES])

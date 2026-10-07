@@ -1,0 +1,77 @@
+{
+  "responsibilities": [
+    {
+      "resp_id": "RESP-9",
+      "description": "",
+      "responsibility_constraints": [
+        {
+          "rc_id": "RC-9-1",
+          "description": ""
+        }
+      ],
+      "process_model_parts": [
+        {
+          "pm_id": "state-alpha",
+          "description": "",
+          "feedback_source": {
+            "type": "RESP-10",
+            "id": "RESP-10"
+          }
+        }
+      ],
+      "control_actions": [
+        {
+          "ca_id": "action-alpha",
+          "description": "",
+          "target": {
+            "type": "RESP-77",
+            "id": "CP-9"
+          }
+        }
+      ],
+      "feedback_channels": [
+        {
+          "fb_id": "feedback-alpha",
+          "description": "",
+          "updates": "state-alpha",
+          "source": {
+            "type": "CP-9",
+            "id": "CP-9"
+          }
+        }
+      ]
+    },
+    {
+      "resp_id": "RESP-10",
+      "description": "Second controller",
+      "responsibility_constraints": [],
+      "process_model_parts": [],
+      "control_actions": [],
+      "feedback_channels": []
+    }
+  ],
+  "controlled_processes": [
+    {
+      "cp_id": "CP-8",
+      "description": "First process"
+    },
+    {
+      "cp_id": "CP-9",
+      "description": ""
+    }
+  ],
+  "coordination_links": [
+    {
+      "link_id": "link-alpha",
+      "source": "RESP-9",
+      "target": "RESP-10",
+      "shared_pm": "state-alpha",
+      "coordination_mechanism": {
+        "cm_id": "mechanism-alpha",
+        "description": "",
+        "payload": "state"
+      },
+      "description": ""
+    }
+  ]
+}

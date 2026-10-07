@@ -42,9 +42,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 from asago_scenario_generator.stpa.system_model import (
     loss_analysis_gates as gates_module,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
-    read_calls_jsonl,
     setup_sp1_mock_client,
     valid_empty_coordination_analysis_dict,
     valid_gap_draft_dict,
@@ -431,10 +431,7 @@ class TestDeriveLossAnalysisAccounting:
 
         assert result.risk_dispositions[0].risk_ref == "atlas-001"
         assert result.risk_dispositions[0].disposition == "cited"
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         assert [entry["step"] for entry in entries] == [
             "risk_derivation",
             "risk_derivation_repair",
@@ -684,10 +681,7 @@ class TestWireSchemaRetry:
 
         assert result.risk_dispositions[0].risk_ref == "atlas-001"
         assert any("dropped malformed risk_dispositions" in w for w in warnings)
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         gap_entries = [e for e in entries if e["step"] == "gap_analysis"]
         assert [e["success"] for e in gap_entries] == [False]
         # The drop is deterministic: no repair call follows the failure.
@@ -716,10 +710,7 @@ class TestWireSchemaRetry:
         # Every garbage row is dropped and the run proceeds deterministically.
         assert result.risk_dispositions[0].risk_ref == "atlas-001"
         assert sum("dropped malformed risk_dispositions" in w for w in warnings) == 18
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         gap_entries = [e for e in entries if e["step"] == "gap_analysis"]
         assert [e["success"] for e in gap_entries] == [False]
         assert not any(e["step"].endswith("_repair") for e in entries)
@@ -781,10 +772,7 @@ class TestRunSp1Gates:
 
         assert result.loss_analysis is not None
         assert result.control_structure is not None
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         stage1a = [e for e in entries if e["stage"] == "stage_1a"]
         assert [e["step"] for e in stage1a] == [
             "risk_actionability",
@@ -864,10 +852,7 @@ class TestRunSp1Gates:
         assert result.loss_analysis.security_constraints[1].description == (
             "The agent must preserve user trust. Applies when: through transparency."
         )
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         stage1a = [e for e in entries if e["stage"] == "stage_1a"]
         assert [e["step"] for e in stage1a] == [
             "risk_actionability",
@@ -946,10 +931,7 @@ class TestRunSp1Gates:
         assert result.stage_errors == []
         assert result.loss_analysis is not None
         assert result.control_structure is not None
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         stage1a = [e for e in entries if e["stage"] == "stage_1a"]
         assert [e["step"] for e in stage1a] == [
             "risk_actionability",
@@ -997,10 +979,7 @@ class TestRunSp1Gates:
         assert any(
             "Extra inputs are not permitted" in error for error in result.stage_errors
         )
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         revisions = [e for e in entries if e["step"] == "hazard_graph_revision"]
         assert [e["success"] for e in revisions] == [False, False]
         assert [e["attempt_number"] for e in revisions] == [1, 2]
@@ -1091,10 +1070,7 @@ class TestRunSp1Gates:
 
         assert result.stage_errors == []
         assert result.loss_analysis is not None
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         revisions = [e for e in entries if e["step"] == "hazard_graph_revision"]
         assert len(revisions) == 2
         second_prompt = revisions[1]["user_prompt_text"]
@@ -1150,10 +1126,7 @@ class TestRunSp1Gates:
             run_dir=tmp_path,
         )
 
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         revisions = [e for e in entries if e["step"] == "hazard_graph_revision"]
         assert len(revisions) == 2
         assert (
@@ -2405,10 +2378,7 @@ class TestAccountingGroundRules:
             run_dir=tmp_path,
         )
         assert result.risk_dispositions[0].reason is None
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         assert [e["step"] for e in entries if e["stage"] == "stage_1a"] == [
             "risk_derivation",
             "risk_derivation_repair",
@@ -2449,10 +2419,7 @@ class TestAccountingGroundRules:
             run_dir=tmp_path,
         )
         assert result.risk_dispositions[0].disposition == "cited"
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         assert [e["success"] for e in entries if e["stage"] == "stage_1a"] == [
             False,
             True,
@@ -2500,10 +2467,7 @@ class TestAccountingGroundRules:
         # the warning for reviewer visibility.
         assert "No grounded loss applies." in warnings[0]
         # No repair call was needed: normalization, not a retry, resolved it.
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         assert [e["success"] for e in entries if e["stage"] == "stage_1a"] == [
             True,
             True,
@@ -2879,8 +2843,5 @@ class TestRetryPromptFailureKind:
         assert "no repair call was made" in message
         assert "applies_when" in message
         assert len(client.calls) == 1
-        entries = [
-            jsonlib.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        entries = read_calls_jsonl(tmp_path)
         assert [entry["success"] for entry in entries] == [False]

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import copy
 import json
+from collections.abc import Callable
+from typing import NamedTuple
 
 import pytest
 import yaml
@@ -595,28 +597,6 @@ def test_stage5_sends_one_correction_with_the_exact_failure_text(tmp_path) -> No
         assert line in correction
 
 
-def test_stage5_publishes_without_the_condition_after_a_failed_correction(
-    tmp_path,
-) -> None:
-    client = MockLLMClient()
-    bad = _payload_with(_ownership_condition("ORD-1"))
-    client.set_response_queue([bad, copy.deepcopy(bad), copy.deepcopy(bad)])
-
-    result, error = _generate(client, tmp_path)
-
-    assert error is None
-    assert result is not None
-    assert result.discriminating_condition is None
-    assert result.condition_check is None
-    assert result.condition_omitted_reason == (
-        "The discriminating condition failed validation after one correction "
-        f"(discriminating_condition_check_failed); {ANALYTICAL_NOTE}"
-    )
-    assert result.observation_assessment is not None
-    assert result.observation_assessment.disposition == "analytical_only"
-    assert client.call_count == 2
-
-
 class _ContentFormClient(MockLLMClient):
     """Return queued payloads as a parsed model, JSON text, or a mapping.
 
@@ -712,47 +692,6 @@ def test_normal_validator_corrects_a_copy_and_leaves_its_input(
     assert [item.reason for item in check.normalizations] == [
         "undeclared_intention_handles_pruned"
     ]
-
-
-def test_stage5_publishes_without_a_missing_condition_after_correction(
-    tmp_path,
-) -> None:
-    client = MockLLMClient()
-    client.set_response_queue([_payload_with(None), _payload_with(None)])
-
-    result, error = _generate(client, tmp_path)
-
-    assert error is None
-    assert result is not None
-    assert result.discriminating_condition is None
-    assert "(discriminating_condition_missing)" in (
-        result.condition_omitted_reason or ""
-    )
-    assert "discriminating_condition_missing" in client.calls[1].user_prompt
-
-
-def test_stage5_publishes_without_a_structurally_invalid_condition(
-    tmp_path,
-) -> None:
-    literal_only = _ownership_condition("ORD-2")
-    literal_only["comparisons"][0].update(
-        left={"source": "literal", "value": "PII_present"},
-        op="eq",
-        right={"source": "literal", "value": "true"},
-    )
-    bad = _payload_with(literal_only)
-    client = MockLLMClient()
-    client.set_response_queue([bad, copy.deepcopy(bad)])
-
-    result, error = _generate(client, tmp_path)
-
-    assert error is None
-    assert result is not None
-    assert result.discriminating_condition is None
-    assert "(discriminating_condition_invalid)" in (
-        result.condition_omitted_reason or ""
-    )
-    assert "two literals" in client.calls[1].user_prompt
 
 
 def test_stage5_still_drops_a_scenario_whose_other_fields_fail(tmp_path) -> None:
@@ -1572,28 +1511,6 @@ def _kind_mismatch_condition() -> dict:
     return payload
 
 
-def test_stage5_corrects_then_omits_a_kind_mismatched_condition(tmp_path) -> None:
-    bad = _payload_with(_kind_mismatch_condition())
-    client = MockLLMClient()
-    client.set_response_queue([bad, copy.deepcopy(bad)])
-
-    result, error = _generate(client, tmp_path)
-
-    assert error is None
-    assert result is not None
-    assert client.call_count == 2
-    expected = condition_failure_message(_check(_kind_mismatch_condition()))
-    assert expected is not None and "values are different kinds" in expected
-    correction = client.calls[1].user_prompt
-    for line in expected.splitlines():
-        assert " ".join(line.split()) in correction, line
-    assert result.discriminating_condition is None
-    assert result.condition_omitted_reason == (
-        "The discriminating condition failed validation after one correction "
-        f"(discriminating_condition_check_failed); {ANALYTICAL_NOTE}"
-    )
-
-
 def _bad_condition_payload() -> dict:
     return _payload_with(_kind_mismatch_condition())
 
@@ -1911,28 +1828,6 @@ def test_finding_codes_are_stage5_issue_codes_with_repair_guidance() -> None:
         assert IssueCode(code) in _repair_guidance("none")
 
 
-def test_stage5_publishes_without_a_condition_that_keeps_the_operand_mismatch(
-    tmp_path,
-) -> None:
-    client = MockLLMClient()
-    client.set_response_queue(
-        [_operand_mismatch_payload(), _operand_mismatch_payload()]
-    )
-
-    result, error = _generate(
-        client, tmp_path, target_observations=_operand_observations()
-    )
-
-    assert error is None
-    assert result is not None
-    assert result.discriminating_condition is None
-    assert result.condition_omitted_reason == (
-        "The discriminating condition failed validation after one correction "
-        f"({OPERAND_MISMATCH}); {ANALYTICAL_NOTE}"
-    )
-    assert client.call_count == 2
-
-
 # --- findings: a literal no supplied value supports -------------------------
 
 
@@ -2126,27 +2021,6 @@ def _placeholder_payload() -> dict:
     return payload
 
 
-def test_stage5_corrects_and_then_omits_a_condition_with_a_placeholder_literal(
-    tmp_path,
-) -> None:
-    client = MockLLMClient()
-    client.set_response_queue([_placeholder_payload(), _placeholder_payload()])
-
-    result, error = _generate(client, tmp_path)
-
-    assert error is None
-    assert result is not None
-    assert client.call_count == 2
-    correction = client.calls[1].user_prompt
-    assert f"{LITERAL_UNSUPPORTED}:" in correction
-    assert "'ELIGIBLE_ORDER'" in correction
-    assert result.discriminating_condition is None
-    assert result.condition_omitted_reason == (
-        "The discriminating condition failed validation after one correction "
-        f"({LITERAL_UNSUPPORTED}); {ANALYTICAL_NOTE}"
-    )
-
-
 def test_comparisons_without_a_literal_side_have_no_literal_findings() -> None:
     comparisons = [
         {"kind": "not_called", "operation": "publish_item"},
@@ -2289,20 +2163,6 @@ def test_stage5_corrects_a_not_called_on_an_operation_no_criterion_names(
     assert "comparisons[0] is not_called get_gadget" in correction
 
 
-def test_stage5_publishes_without_a_condition_that_keeps_the_wrong_operation(
-    tmp_path,
-) -> None:
-    wrong = _profile_not_called_payload("get_gadget", "update_gadget")
-    client = MockLLMClient()
-    client.set_response_queue([wrong, copy.deepcopy(wrong)])
-
-    result, error = _generate_with_profile(client, tmp_path)
-
-    assert error is None
-    assert result is not None and result.discriminating_condition is None
-    assert f"({OPERATION_MISMATCH})" in result.condition_omitted_reason
-
-
 # --- findings: an order that does not pin the record ---------------------------
 
 
@@ -2392,14 +2252,121 @@ def test_stage5_corrects_an_unscoped_order_and_accepts_the_scoped_one(
     assert "both require gadget_id" in correction
 
 
-def test_stage5_publishes_without_a_condition_that_keeps_the_unscoped_order(
-    tmp_path,
+def _literal_only_payload() -> dict:
+    literal_only = _ownership_condition("ORD-2")
+    literal_only["comparisons"][0].update(
+        left={"source": "literal", "value": "PII_present"},
+        op="eq",
+        right={"source": "literal", "value": "true"},
+    )
+    return _payload_with(literal_only)
+
+
+def _generate_with_operand_observations(client, tmp_path):
+    return _generate(client, tmp_path, target_observations=_operand_observations())
+
+
+def _generate_plain(client, tmp_path):
+    return _generate(client, tmp_path)
+
+
+def _check_failed_fragments(condition: dict) -> list[str]:
+    expected = condition_failure_message(_check(condition))
+    assert expected is not None
+    return expected.splitlines()
+
+
+class _OmitCase(NamedTuple):
+    payload: Callable[[], dict]
+    generate: Callable
+    code: str
+    fragments: Callable[[], list[str]]
+
+
+_OMIT_AFTER_FAILED_CORRECTION = {
+    "ownership-check-failed": _OmitCase(
+        lambda: _payload_with(_ownership_condition("ORD-1")),
+        _generate_plain,
+        "discriminating_condition_check_failed",
+        lambda: _check_failed_fragments(_ownership_condition("ORD-1")),
+    ),
+    "kind-mismatch": _OmitCase(
+        lambda: _payload_with(_kind_mismatch_condition()),
+        _generate_plain,
+        "discriminating_condition_check_failed",
+        lambda: [
+            "values are different kinds",
+            *_check_failed_fragments(_kind_mismatch_condition()),
+        ],
+    ),
+    "missing-condition": _OmitCase(
+        lambda: _payload_with(None),
+        _generate_plain,
+        "discriminating_condition_missing",
+        lambda: ["discriminating_condition_missing"],
+    ),
+    "structurally-invalid": _OmitCase(
+        _literal_only_payload,
+        _generate_plain,
+        "discriminating_condition_invalid",
+        lambda: ["two literals"],
+    ),
+    "operand-mismatch": _OmitCase(
+        _operand_mismatch_payload,
+        _generate_with_operand_observations,
+        OPERAND_MISMATCH,
+        lambda: [f"{OPERAND_MISMATCH}:"],
+    ),
+    "placeholder-literal": _OmitCase(
+        _placeholder_payload,
+        _generate_plain,
+        LITERAL_UNSUPPORTED,
+        lambda: [f"{LITERAL_UNSUPPORTED}:", "'ELIGIBLE_ORDER'"],
+    ),
+    "wrong-operation": _OmitCase(
+        lambda: _profile_not_called_payload("get_gadget", "update_gadget"),
+        _generate_with_profile,
+        OPERATION_MISMATCH,
+        lambda: [
+            f"{OPERATION_MISMATCH}:",
+            "comparisons[0] is not_called get_gadget",
+        ],
+    ),
+    "unscoped-order": _OmitCase(
+        lambda: _order_payload(None),
+        _generate_with_profile,
+        ORDER_UNSCOPED,
+        lambda: [f"{ORDER_UNSCOPED}:", "both require gadget_id"],
+    ),
+}
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(case, id=name)
+        for name, case in _OMIT_AFTER_FAILED_CORRECTION.items()
+    ],
+)
+def test_stage5_sends_one_correction_then_publishes_without_the_condition(
+    tmp_path, case
 ) -> None:
     client = MockLLMClient()
-    client.set_response_queue([_order_payload(None), _order_payload(None)])
+    client.set_response_queue([case.payload(), case.payload()])
 
-    result, error = _generate_with_profile(client, tmp_path)
+    result, error = case.generate(client, tmp_path)
 
     assert error is None
-    assert result is not None and result.discriminating_condition is None
-    assert f"({ORDER_UNSCOPED})" in result.condition_omitted_reason
+    assert result is not None
+    assert client.call_count == 2
+    correction = client.calls[1].user_prompt
+    for fragment in case.fragments():
+        assert fragment in correction, fragment
+    assert result.discriminating_condition is None
+    assert result.condition_check is None
+    assert result.condition_omitted_reason == (
+        "The discriminating condition failed validation after one correction "
+        f"({case.code}); {ANALYTICAL_NOTE}"
+    )
+    assert result.observation_assessment is not None
+    assert result.observation_assessment.disposition == "analytical_only"

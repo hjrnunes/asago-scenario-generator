@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -12,6 +11,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     diagnose_loss_analysis_semantics,
     derive_loss_analysis,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient, valid_risk_draft_dict, make_risk_cards
 
 
@@ -332,9 +332,7 @@ def test_run15_gap_graph_merges_without_id_union_leakage(tmp_path):
         == _run15_risk_response()["security_constraints"][0]["rule"]
     )
 
-    entries = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
     assert [entry["success"] for entry in stage1a_entries] == [True, True]
     # The obsolete SC-17 record of the captured invalid response never lands.
@@ -377,9 +375,7 @@ def test_run15_invalid_gap_references_fail_typed(tmp_path):
     assert "targeted repair unsupported" in message
     assert "draft_references failure class" in message
     assert "no repair call was made" in message
-    entries = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
     assert [entry["success"] for entry in stage1a_entries] == [True, False]
     # The captured invalid response is retained as call evidence.
@@ -483,9 +479,7 @@ def test_run16_canonicalizes_provenance_on_the_risk_draft(tmp_path):
         for item in diagnostics
     )
 
-    entries = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
     assert [entry["success"] for entry in stage1a_entries] == [True, True]
     assert (
@@ -541,9 +535,7 @@ def test_run15_authority_merge_scopes_redeclared_ids_without_overwrite(tmp_path)
         for constraint in result.security_constraints
     )
 
-    entries = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
     assert [entry["success"] for entry in stage1a_entries] == [True, True]
 
@@ -578,9 +570,7 @@ def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
     assert "provenance: use_case" in message
     assert "source_risk_cards: []" in message
     assert "otherwise correct only a mistaken reference" in message
-    entries = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
     assert [entry["success"] for entry in stage1a_entries] == [True, False]
     assert len(client.calls) == 2
@@ -618,9 +608,7 @@ def test_a18_gap_valid_disposition_is_not_c1_cleanup(tmp_path):
 
     # The risk-stage response survives in call evidence; the valid extra row
     # is terminal and receives no cleanup or repair call.
-    entries = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    entries = read_calls_jsonl(tmp_path)
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
     assert [entry["success"] for entry in stage1a_entries] == [True, False]
     assert len(client.calls) == 2

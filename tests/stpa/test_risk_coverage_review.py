@@ -28,10 +28,10 @@ from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
     RiskCoverageRow,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
-    read_calls_jsonl,
     setup_sp1_mock_client,
     valid_empty_coordination_analysis_dict,
 )

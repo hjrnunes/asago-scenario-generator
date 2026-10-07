@@ -11,6 +11,7 @@ from asago_scenario_generator.stpa.infra.call_log import (
     make_call_log_entry,
     mark_call_published,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 
 
 class TestInfraCallLog:
@@ -178,10 +179,7 @@ class TestInfraCallLog:
 
         mark_call_published(tmp_path, "stage", "call")
 
-        persisted = [
-            json.loads(line)
-            for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-        ]
+        persisted = read_calls_jsonl(tmp_path)
         assert persisted[0]["published"] is False
         assert persisted[1]["published"] is False
         assert persisted[2]["published"] is True

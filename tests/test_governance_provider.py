@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 
 import pytest
 
@@ -20,6 +19,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.test_governance_routing import _controls, _setup
 
 
@@ -163,10 +163,7 @@ def test_the_provider_rejects_nothing_it_was_not_given(tmp_path, target) -> None
 
 
 def _file_entries(run_dir):
-    return [
-        json.loads(line)
-        for line in (run_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
-    ]
+    return read_calls_jsonl(run_dir)
 
 
 def test_a_routing_call_lands_in_the_session_records_published(tmp_path) -> None:
