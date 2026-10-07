@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pydantic import create_model
 
+from asago_scenario_generator.stpa.infra.llm import LLMResult
 from runtime_shared import (
     _make_responsibility,
     ControlAction,
@@ -11,7 +12,6 @@ from runtime_shared import (
     CoordinationLink,
     ElementRef,
     FeedbackChannel,
-    LLMResult,
     LossAnalysis,
     LossProvenance,
     Path,
@@ -24,7 +24,7 @@ from runtime_shared import (
     _SP1ControlElementSet,
     _SP1CriticFindings,
     _SP1LossAnalysisDraft,
-    _SP1MockLLM,
+    _sp1_mock_llm,
     _SP1RequirementSet,
     _SP1ResponsibilitySet,
     _SP1Stage1Profile,
@@ -302,7 +302,7 @@ def _h_sp1_la_second_unsupported_setup(
 def _h_sp1_stage1a_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_la_"))
     world.sp1_run_dir = run_dir
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     content = world.sp1_llm_content
     if isinstance(content, list):
         client.set_response_queue(content)
@@ -487,7 +487,7 @@ def _h_sp1_s2_bad_class(world: World, text: str, examples: dict) -> tuple[bool, 
 def _h_sp1_s2_call1_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_s2_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     content = (
         world.sp1_llm_content
@@ -578,7 +578,7 @@ def _h_sp1_critic_gap_type(world: World, text: str, examples: dict) -> tuple[boo
 def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_critic_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     content = (
         world.sp1_llm_content
@@ -587,8 +587,8 @@ def _h_sp1_critic_run(world: World, text: str, examples: dict) -> tuple[bool, st
     )
     # Only set response if no exception/invalid is configured (graceful degradation)
     if (
-        _SP1CriticFindings not in client._exception_types
-        and _SP1CriticFindings not in client._invalid_types
+        _SP1CriticFindings not in client._exception_response_types
+        and _SP1CriticFindings not in client._invalid_response_types
     ):
         client.set_response_for(_SP1CriticFindings, content)
     cs = world.control_structure or _sp1_make_control_structure_with_resp()
@@ -1043,7 +1043,7 @@ def _h_sp1_cp_prebuilt_profile(
 def _h_sp1_cp_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_cp_"))
     world.sp1_run_dir = run_dir
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     if world.sp1_llm_content is not None:
         client.set_response_for(_SP1Stage1Profile, world.sp1_llm_content)
     else:
@@ -1168,7 +1168,7 @@ def _h_ing_no_access(world: World, text: str, examples: dict) -> tuple[bool, str
 def _h_ing_s1_check(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle Stage 1 capability-profile validation."""
     run_dir = Path(_tempfile.mkdtemp(prefix="sp1_ingress_"))
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     client.set_response_for(
         _SP1Stage1Profile,
         getattr(world, "ing_data", _sp1_valid_stage1_profile_dict()),
@@ -1202,7 +1202,7 @@ def _h_sp1_cp_profile_flag_run(
 ) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_cp_"))
     world.sp1_run_dir = run_dir
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     world.sp1_mock_client = client
     if world.sp1_profile_path is not None:
         world.sp1_profile = _sp1_load_capability_profile(world.sp1_profile_path)
@@ -1268,7 +1268,7 @@ def _h_sp1_cp_no_llm_call(world: World, text: str, examples: dict) -> tuple[bool
     if client is None:
         return True, ""
     for call in client.calls:
-        if call.get("response_format") == _SP1Stage1Profile:
+        if call.response_format == _SP1Stage1Profile:
             return False, "Unexpected LLM call for Stage 1b"
     return True, ""
 
@@ -1298,7 +1298,7 @@ def _h_sp1_cp_prompt_la_context(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
-    prompt = client.calls[0]["user_prompt"]
+    prompt = client.calls[0].user_prompt
     world.sp1_user_prompt = prompt
     if not prompt:
         return False, "User prompt is empty"
@@ -1599,7 +1599,7 @@ def _h_sp1_critic_prompt_cs(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return True, ""
-    prompt = client.calls[-1]["user_prompt"]
+    prompt = client.calls[-1].user_prompt
     if "RESP" not in prompt:
         return False, "Prompt does not contain control structure"
     return True, ""
@@ -1612,7 +1612,7 @@ def _h_sp1_critic_prompt_profile(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return True, ""
-    prompt = client.calls[-1]["user_prompt"]
+    prompt = client.calls[-1].user_prompt
     if not prompt:
         return False, "Prompt does not contain capability profile"
     return True, ""
@@ -1625,7 +1625,7 @@ def _h_sp1_critic_prompt_use_case(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return True, ""
-    prompt = client.calls[-1]["user_prompt"]
+    prompt = client.calls[-1].user_prompt
     if world.sp1_use_case_text not in prompt:
         return False, "Prompt does not contain use-case text"
     return True, ""
@@ -1859,52 +1859,52 @@ def _h_sp1_run_full(world: World, text: str, examples: dict) -> tuple[bool, str]
         # Fill in valid responses for any types not already configured
         if (
             _SP1LossAnalysisDraft not in client._response_map
-            and _SP1LossAnalysisDraft not in client._invalid_types
-            and _SP1LossAnalysisDraft not in client._exception_types
+            and _SP1LossAnalysisDraft not in client._invalid_response_types
+            and _SP1LossAnalysisDraft not in client._exception_response_types
         ):
             client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
         if (
             _SP1Stage1Profile not in client._response_map
-            and _SP1Stage1Profile not in client._invalid_types
-            and _SP1Stage1Profile not in client._exception_types
+            and _SP1Stage1Profile not in client._invalid_response_types
+            and _SP1Stage1Profile not in client._exception_response_types
         ):
             client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
         if (
             _GDRequirementSet not in client._response_map
-            and _GDRequirementSet not in client._invalid_types
-            and _GDRequirementSet not in client._exception_types
+            and _GDRequirementSet not in client._invalid_response_types
+            and _GDRequirementSet not in client._exception_response_types
         ):
             client.set_response_for(_GDRequirementSet, _sp1_valid_req_set_dict())
         if (
             _GDResponsibilitySet not in client._response_map
-            and _GDResponsibilitySet not in client._invalid_types
-            and _GDResponsibilitySet not in client._exception_types
+            and _GDResponsibilitySet not in client._invalid_response_types
+            and _GDResponsibilitySet not in client._exception_response_types
         ):
             client.set_response_for(_GDResponsibilitySet, _sp1_valid_resp_set_2a_dict())
         if (
             _SP1ControlElementSet not in client._response_map
-            and _SP1ControlElementSet not in client._invalid_types
-            and _SP1ControlElementSet not in client._exception_types
+            and _SP1ControlElementSet not in client._invalid_response_types
+            and _SP1ControlElementSet not in client._exception_response_types
         ):
             client.set_response_for(
                 _SP1ControlElementSet, _sp1_valid_control_element_set_dict()
             )
         if (
             _SP1ConnectionSet not in client._response_map
-            and _SP1ConnectionSet not in client._invalid_types
-            and _SP1ConnectionSet not in client._exception_types
+            and _SP1ConnectionSet not in client._invalid_response_types
+            and _SP1ConnectionSet not in client._exception_response_types
         ):
             client.set_response_for(_SP1ConnectionSet, _sp1_valid_connection_set_dict())
         if (
             ControlStructure not in client._response_map
-            and ControlStructure not in client._invalid_types
-            and ControlStructure not in client._exception_types
+            and ControlStructure not in client._invalid_response_types
+            and ControlStructure not in client._exception_response_types
         ):
             client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
         if (
             _SP1CriticFindings not in client._response_map
-            and _SP1CriticFindings not in client._invalid_types
-            and _SP1CriticFindings not in client._exception_types
+            and _SP1CriticFindings not in client._invalid_response_types
+            and _SP1CriticFindings not in client._exception_response_types
         ):
             client.set_response_for(
                 _SP1CriticFindings,
@@ -2038,7 +2038,7 @@ def _h_sp1_run_s2_receives_la(
     # Find call with security constraints
     found = False
     for call in client.calls:
-        if "SC-1" in call["user_prompt"]:
+        if "SC-1" in call.user_prompt:
             found = True
             break
     if not found:
@@ -2097,7 +2097,7 @@ def _h_sp1_run_temp_04(world: World, text: str, examples: dict) -> tuple[bool, s
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
     for call in client.calls:
-        if call.get("temperature") is not None and call["temperature"] != 0.4:
+        if call.temperature is not None and call.temperature != 0.4:
             return False, f"Expected temperature 0.4 but got {call['temperature']}"
     return True, ""
 

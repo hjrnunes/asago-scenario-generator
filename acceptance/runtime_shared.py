@@ -51,7 +51,6 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     ScenarioEnvelope,
     GherkinSpec as _GS,
 )
-from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.system_model.critic import (
     strip_empty_responsibilities,
     CriticFindings,
@@ -350,140 +349,28 @@ def _sp1_make_loss_analysis_with_constraints() -> LossAnalysis:
 _SP1ConnectionSet = _SP1CoordinationAnalysis
 
 
-class _SP1MockLLM:
-    """Minimal mock LLM client for acceptance tests."""
+def _acceptance_content(
+    content: Any, wire_format: type | None, user_prompt: str
+) -> Any:
+    """Reshape a canned response for the closed schema an acceptance step calls."""
+    wire_name = getattr(wire_format, "__name__", "")
+    if wire_name in {
+        "ProviderCoordinationAnalysis",
+        "_CoordinationProviderEnvelope",
+    } and isinstance(content, dict):
+        content = {
+            key: value for key, value in content.items() if key != "integrity_findings"
+        }
+        if wire_name == "_CoordinationProviderEnvelope":
+            content.pop("semantic_review", None)
+    return _sp1_complete_semantic_review_fixture(
+        content, wire_format, user_prompt=user_prompt
+    )
 
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-        self._response_map: dict[type, Any] = {}
-        self._response_queue: list[Any] = []
-        self._invalid_types: set[type] = set()
-        self._exception_types: dict[type, Exception] = {}
-        self._call_counts: dict[type, int] = {}
-        self._invalid_after_n: dict[type, int] = {}
-        self.base_url = "http://test:8080"
-        self.model = "test-model"
 
-    def set_response_for(self, model_class: type, response: Any) -> None:
-        self._response_map[model_class] = response
-
-    def set_response_queue(self, responses: list[Any]) -> None:
-        self._response_queue = list(responses)
-
-    def set_invalid_response_for(self, model_class: type) -> None:
-        """Configure the mock to return an invalid response for a type."""
-        self._invalid_types.add(model_class)
-
-    def set_invalid_response_after_n_calls(self, model_class: type, n: int) -> None:
-        """Configure the mock to return invalid JSON only after *n* successful calls."""
-        self._invalid_after_n[model_class] = n
-
-    def set_exception_for(self, model_class: type, exc: Exception) -> None:
-        """Configure the mock to raise *exc* when called for *model_class*."""
-        self._exception_types[model_class] = exc
-
-    def complete(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        response_format: type | None = None,
-        max_completion_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> Any:
-        wire_response_format = response_format
-        self.calls.append(
-            {
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-                "response_format": response_format,
-                "max_completion_tokens": max_completion_tokens,
-                "temperature": temperature,
-            }
-        )
-        # Provider-only subclasses keep the same stage contract. Retain the
-        # actual wire type in the call record, and reuse base-class fixtures.
-        configured = (
-            set(self._response_map)
-            | self._invalid_types
-            | set(self._exception_types)
-            | set(self._invalid_after_n)
-        )
-        if response_format is not None and response_format not in configured:
-            response_format = next(
-                (base for base in response_format.__mro__[1:] if base in configured),
-                response_format,
-            )
-            # Reuse historical semantic fixtures only at this test boundary.
-            # Product provider schemas remain separate and strict.
-            legacy_type = {
-                "_Stage1aRiskProviderDraft": _SP1LossAnalysisDraft,
-                "_Stage1aGapProviderDraft": _SP1LossAnalysisDraft,
-                "ProviderCoordinationAnalysis": _SP1CoordinationAnalysis,
-                "_CoordinationProviderEnvelope": _SP1CoordinationAnalysis,
-            }.get(wire_response_format.__name__)
-            if legacy_type in configured:
-                response_format = legacy_type
-        # Raise exception if configured
-        if response_format is not None and response_format in self._exception_types:
-            raise self._exception_types[response_format]
-        # Track per-type call count for delayed-invalid behaviour
-        if response_format is not None:
-            self._call_counts[response_format] = (
-                self._call_counts.get(response_format, 0) + 1
-            )
-            if (
-                response_format in self._invalid_after_n
-                and self._call_counts[response_format]
-                > self._invalid_after_n[response_format]
-            ):
-                content = "THIS_IS_NOT_VALID_JSON{{{"
-                return LLMResult(
-                    content=content,
-                    prompt_tokens=100,
-                    completion_tokens=50,
-                    duration_ms=5000,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                )
-        if self._response_queue:
-            content = self._response_queue.pop(0)
-        elif response_format is not None and response_format in self._invalid_types:
-            content = "THIS_IS_NOT_VALID_JSON{{{"
-        elif response_format is not None and response_format in self._response_map:
-            content = self._response_map[response_format]
-        else:
-            content = None
-        wire_name = getattr(wire_response_format, "__name__", "")
-        if wire_name in {"_Stage1aRiskProviderDraft", "_Stage1aGapProviderDraft"}:
-            from acceptance.fixture_adapters import legacy_stage1a_provider_payload
-
-            content = legacy_stage1a_provider_payload(
-                content, risk=wire_name == "_Stage1aRiskProviderDraft"
-            )
-        elif (
-            wire_name
-            in {"ProviderCoordinationAnalysis", "_CoordinationProviderEnvelope"}
-            and response_format is _SP1CoordinationAnalysis
-            and isinstance(content, dict)
-        ):
-            content = {
-                key: value
-                for key, value in content.items()
-                if key != "integrity_findings"
-            }
-            if wire_name == "_CoordinationProviderEnvelope":
-                content.pop("semantic_review", None)
-        content = _sp1_complete_semantic_review_fixture(
-            content, wire_response_format, user_prompt=user_prompt
-        )
-        return LLMResult(
-            content=content,
-            prompt_tokens=100,
-            completion_tokens=50,
-            duration_ms=5000,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
+def _sp1_mock_llm() -> MockLLMClient:
+    """Return the shared mock client configured for acceptance responses."""
+    return MockLLMClient(adapt_content=_acceptance_content, preserve_gap_extras=False)
 
 
 def _sp1_complete_semantic_review_fixture(
@@ -871,9 +758,9 @@ def _sp1_valid_revision_patch_dict() -> dict:
 def _sp1_setup_full_mock_client(
     critic_findings: dict | None = None,
     revised_cs: dict | None = None,
-) -> _SP1MockLLM:
+) -> MockLLMClient:
     """Set up a mock LLM client with valid responses for all stages."""
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
     client.set_response_for(_SP1Stage1aRevisionPatch, _sp1_valid_revision_patch_dict())
     client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
@@ -898,7 +785,7 @@ def _h_sp1_rev_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Handle: the revision is run."""
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_rev_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     content = (
         world.sp1_llm_content
@@ -907,8 +794,8 @@ def _h_sp1_rev_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     )
     # Only set response if no exception/invalid is configured (graceful degradation)
     if (
-        ControlStructure not in client._exception_types
-        and ControlStructure not in client._invalid_types
+        ControlStructure not in client._exception_response_types
+        and ControlStructure not in client._invalid_response_types
     ):
         client.set_response_for(ControlStructure, content)
     try:
@@ -1108,48 +995,6 @@ def _san_set_element_ref(
 
 
 _BF2_PROMPTS_DIR = _FC_PROMPTS_DIR
-
-
-class _BF2MockLLMClient:
-    """Mock LLM client that tracks max_completion_tokens."""
-
-    def __init__(self) -> None:
-        self.calls: list[dict] = []
-        self._response_map: dict[type, Any] = {}
-        self.base_url = "http://test:8080"
-        self.model = "test-model"
-
-    def set_response_for(self, model_class: type, response: Any) -> None:
-        self._response_map[model_class] = response
-
-    def complete(
-        self,
-        system_prompt: str,
-        user_prompt: str,
-        response_format: type | None = None,
-        max_completion_tokens: int | None = None,
-        temperature: float | None = None,
-    ) -> Any:
-        self.calls.append(
-            {
-                "system_prompt": system_prompt,
-                "user_prompt": user_prompt,
-                "response_format": response_format,
-                "max_completion_tokens": max_completion_tokens,
-                "temperature": temperature,
-            }
-        )
-        content = None
-        if response_format is not None and response_format in self._response_map:
-            content = self._response_map[response_format]
-        return LLMResult(
-            content=content,
-            prompt_tokens=100,
-            completion_tokens=50,
-            duration_ms=5000,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
 
 
 class _BF2LogCapture(_bf2_logging.Handler):
@@ -1659,8 +1504,8 @@ def compute_eval_scorecard_simple(world):
     )
 
 
-def _ar_client(world: World) -> _SP1MockLLM:
-    client = world.sp1_mock_client or _SP1MockLLM()
+def _ar_client(world: World) -> MockLLMClient:
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     return client
 

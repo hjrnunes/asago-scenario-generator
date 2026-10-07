@@ -17,7 +17,7 @@ from runtime_shared import (
     _FC_PROMPTS_DIR,
     _KNOWN_ELEMENT_DESCRIPTIONS,
     _SP1CriticFindings,
-    _SP1MockLLM,
+    _sp1_mock_llm,
     _SP1Stage1Profile,
     _VALID_CRITIC_STATUSES,
     _VALID_GAP_COUNTS,
@@ -99,7 +99,7 @@ def _h_cmidup_llm_delta_with_new_cls(
 
     Also handles variants with source, target, shared_pm, description, and payload.
     """
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     # Parse link_id and cm_id
     m_link = re.search(r"containing (CL-\d+) whose cm_id is (CM-\d+)", text)
@@ -445,7 +445,7 @@ def _h_crf_critic_run_with_context(
 ) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_critic_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     content = world.sp1_llm_content
     if isinstance(content, dict):
@@ -485,7 +485,7 @@ def _h_crf_critic_prompt_contains(
     client = world.sp1_mock_client
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
-    prompt = client.calls[-1]["user_prompt"]
+    prompt = client.calls[-1].user_prompt
     quoted = re.search(r'"([^"]+)"', text)
     if not quoted:
         return False, f"Could not extract quoted text from: {text}"
@@ -768,18 +768,16 @@ def _h_crf_llm_no_max_tokens_cap(
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
     # The critic call should NOT have max_completion_tokens set
-    critic_calls = [
-        c for c in client.calls if c.get("response_format") is _SP1CriticFindings
-    ]
+    critic_calls = [c for c in client.calls if c.response_format is _SP1CriticFindings]
     if not critic_calls:
         # Fall back to any call that is not for RevisionDelta
         critic_calls = [
-            c for c in client.calls if c.get("response_format") is not _FCRevisionDelta
+            c for c in client.calls if c.response_format is not _FCRevisionDelta
         ]
     if not critic_calls:
         return False, "No critic LLM calls found"
     for call in critic_calls:
-        if call.get("max_completion_tokens") is not None:
+        if call.max_completion_tokens is not None:
             return (
                 False,
                 f"Critic call has max_completion_tokens={call['max_completion_tokens']}",
@@ -823,12 +821,10 @@ def _h_crf_rev_system_prompt_has_cm_next(
     if client is None or not client.calls:
         return False, "No LLM calls recorded"
     # Find the revision call (RevisionDelta as response_format)
-    rev_calls = [
-        c for c in client.calls if c.get("response_format") is _FCRevisionDelta
-    ]
+    rev_calls = [c for c in client.calls if c.response_format is _FCRevisionDelta]
     if not rev_calls:
         return False, "No revision LLM calls found"
-    system_prompt = rev_calls[-1]["system_prompt"]
+    system_prompt = rev_calls[-1].system_prompt
     # The rendered system prompt should contain "CM-" with a number
     # (from the "New coordination mechanisms: CM-{next_cm_num}" line)
     if not re.search(r"CM-\{?next_cm_num\}?|CM-\d", system_prompt):

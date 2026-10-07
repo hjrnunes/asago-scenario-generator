@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
+from asago_scenario_generator.stpa.infra.llm import LLMResult
 from runtime_shared import (
     Any,
     ControlAction,
     ControlStructure,
     ElementRef,
-    LLMResult,
     LossAnalysis,
     PROJECT_ROOT,
     Path,
@@ -17,12 +17,11 @@ from runtime_shared import (
     ValidationError,
     World,
     _BF2LogCapture,
-    _BF2MockLLMClient,
     _BF2_PROMPTS_DIR,
     _FC_PROMPTS_DIR,
     _PQF_PROMPTS_DIR,
     _SP1LossAnalysisDraft,
-    _SP1MockLLM,
+    _sp1_mock_llm,
     _SP1Stage1Profile,
     _VALID_COMPLETION_TOKENS,
     _VALID_DISMISSAL_COUNTS,
@@ -191,7 +190,7 @@ def _h_gd_cs_available(world: World, text: str, examples: dict) -> tuple[bool, s
 
 @step("an LLM that returns an invalid ControlStructure JSON")
 def _h_gd_llm_invalid_cs(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_invalid_response_for(ControlStructure)
     return True, ""
@@ -201,7 +200,7 @@ def _h_gd_llm_invalid_cs(world: World, text: str, examples: dict) -> tuple[bool,
 def _h_gd_llm_invalid_critic(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_invalid_response_for(_GDCriticFindings)
     return True, ""
@@ -330,7 +329,7 @@ def _h_gd_taxonomy_empty(world: World, text: str, examples: dict) -> tuple[bool,
 def _h_gd_llm_invalid_for_stage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     stage = examples.get("stage", "")
     if not stage:
@@ -382,7 +381,7 @@ def _h_gd_llm_invalid_for_stage(
 def _h_gd_llm_valid_for_stage(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_response_for(_SP1LossAnalysisDraft, _sp1_valid_la_dict())
     if "stage_1b" in text or "and stage_1b" in text:
@@ -402,7 +401,7 @@ def _h_gd_derivation_attempted(
 ) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="gd_deriv_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     stage = examples.get("stage", "")
     la = _gd_valid_la()
@@ -721,7 +720,7 @@ def _h_connset_s2_revision_run(
 ) -> tuple[bool, str]:
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="sp1_rev_"))
     world.sp1_run_dir = run_dir
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     if ControlStructure not in client._response_map:
         client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
@@ -749,7 +748,7 @@ def _h_connset_s2_revision_run(
 def _h_connset_llm_valid_revised_cs(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_response_for(ControlStructure, _sp1_valid_cs_dict())
     return True, ""
@@ -1740,7 +1739,7 @@ def _h_rev_model_no_field(world: World, text: str, examples: dict) -> tuple[bool
 
 @step.first("an LLM that returns.*RevisionDelta")
 def _h_rev_llm_delta(world: World, text: str, examples: dict) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     delta_dict: dict[str, Any] = {}
 
@@ -1978,9 +1977,7 @@ def _h_rev_uses_delta_format(
     client = world.sp1_mock_client
     if client is None:
         return False, "No mock LLM client available"
-    found = any(
-        call.get("response_format") is _FCRevisionDelta for call in client.calls
-    )
+    found = any(call.response_format is _FCRevisionDelta for call in client.calls)
     if not found:
         return (
             False,
@@ -2203,7 +2200,7 @@ def _h_rev_revision_run(world: World, text: str, examples: dict) -> tuple[bool, 
     client = world.sp1_mock_client
     if client is not None and (
         _FCRevisionDelta in getattr(client, "_response_map", {})
-        or _FCRevisionDelta in getattr(client, "_exception_types", {})
+        or _FCRevisionDelta in getattr(client, "_exception_response_types", {})
     ):
         # Use the RevisionDelta path
         run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="rev_delta_"))
@@ -2833,7 +2830,7 @@ def _h_bf2_function_accepts_param(
 def _h_bf2_llm_valid_stage2_responses(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = _SP1MockLLM()
+    client = _sp1_mock_llm()
     client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
     # Set responses for the three Stage 2 calls
     rs = _sp1_valid_resp_set_dict()
@@ -2852,7 +2849,7 @@ def _h_bf2_sp1_pipeline_run_with_profile(
     # We'll mock the run and check the calls
     client = world.sp1_mock_client
     if client is None:
-        client = _SP1MockLLM()
+        client = _sp1_mock_llm()
         client.set_response_for(_SP1Stage1Profile, _sp1_valid_stage1_profile_dict())
         world.sp1_mock_client = client
 
@@ -2952,7 +2949,7 @@ def _h_bf2_llm_helpers_module_importable(
 def _h_bf2_llm_client_mocked_complete(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    world.sp1_mock_client = _BF2MockLLMClient()
+    world.sp1_mock_client = MockLLMClient()
     return True, ""
 
 
@@ -3024,7 +3021,7 @@ def _h_bf2_complete_called_with_tokens(
     if client is None:
         return False, "No mock LLM client available"
     for call in client.calls:
-        actual = call.get("max_completion_tokens")
+        actual = call.max_completion_tokens
         if actual == expected:
             return True, ""
     return (
@@ -3045,7 +3042,7 @@ def _h_bf2_llm_complete_call_with_tokens(
     if client is None:
         return False, "No mock LLM client available"
     for call in client.calls:
-        if call.get("max_completion_tokens") == expected:
+        if call.max_completion_tokens == expected:
             return True, ""
     return (
         False,
@@ -3059,7 +3056,7 @@ def _h_bf2_llm_complete_call_with_tokens(
 def _h_bf2_llm_returns_delta_with_existing_resp(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     # Extract the resp_id from the step text
     m = re.search(r"new_responsibilities containing (RESP-\d+)", text)
@@ -4124,7 +4121,7 @@ def _revnorm_findings() -> Any:
 
 def _revnorm_set_delta(world: World, delta: dict[str, Any]) -> None:
     """Configure the acceptance mock with a raw RevisionDelta payload."""
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     client.set_response_for(_FCRevisionDelta, delta)
     world.revision_norm_delta = delta
@@ -4418,7 +4415,7 @@ def _h_revnorm_run(world: World, text: str, examples: dict) -> tuple[bool, str]:
     """Run the revision-delta normalization acceptance fixture."""
     if not getattr(world, "revision_norm_active", False):
         return _h_bf2_revision_run_with_log_capture(world, text, examples)
-    client = world.sp1_mock_client or _SP1MockLLM()
+    client = world.sp1_mock_client or _sp1_mock_llm()
     world.sp1_mock_client = client
     run_dir = world.sp1_run_dir or Path(_tempfile.mkdtemp(prefix="rev_norm_"))
     world.sp1_run_dir = run_dir

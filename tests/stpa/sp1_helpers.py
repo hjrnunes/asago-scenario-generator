@@ -8,6 +8,7 @@ Also provides shared fixture data builders used across multiple test modules.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, get_args
@@ -309,6 +310,8 @@ class MockLLMClient:
         base_url: str = "http://test:8080",
         model: str = "test-model",
         temperature: float = 0.4,
+        adapt_content: Callable[[Any, type | None, str], Any] | None = None,
+        preserve_gap_extras: bool = True,
     ) -> None:
         self.base_url = base_url
         self.model = model
@@ -319,6 +322,18 @@ class MockLLMClient:
         self._response_map: dict[type, Any] = {}
         self._invalid_response_types: set[type] = set()
         self._exception_response_types: dict[type, Exception] = {}
+        self._invalid_after_n: dict[type, int] = {}
+        self._call_counts: dict[type, int] = {}
+        # Last step before a response is wrapped: lets one layer reshape the
+        # content for the closed schema it exercises (content, wire type, prompt).
+        self._adapt_content = adapt_content
+        # False drops fields a gap draft has no wire slot for (the shared
+        # acceptance payload carries the risk draft's dispositions).
+        self._preserve_gap_extras = preserve_gap_extras
+
+    def set_invalid_response_after_n_calls(self, model_class: type, n: int) -> None:
+        """Return invalid JSON for *model_class* once *n* calls have succeeded."""
+        self._invalid_after_n[model_class] = n
 
     def set_invalid_response_for(self, model_class: type) -> None:
         """Configure the mock to return an invalid response for a type.
@@ -376,6 +391,19 @@ class MockLLMClient:
         )
         if exception is not None:
             raise exception
+
+        delayed = self._compatible_key(response_format, self._invalid_after_n)
+        if delayed is not None:
+            self._call_counts[delayed] = self._call_counts.get(delayed, 0) + 1
+            if self._call_counts[delayed] > self._invalid_after_n[delayed]:
+                return LLMResult(
+                    content="THIS_IS_NOT_VALID_JSON{{{",
+                    prompt_tokens=100,
+                    completion_tokens=50,
+                    duration_ms=5000,
+                    system_prompt=system_prompt,
+                    user_prompt=user_prompt,
+                )
 
         # Determine which response to return
         if self._response_queue:
@@ -440,9 +468,13 @@ class MockLLMClient:
                         content,
                         risk=response_name == "_Stage1aRiskProviderDraft",
                         preserve_gap_extras=(
-                            response_name == "_Stage1aGapProviderDraft"
+                            self._preserve_gap_extras
+                            and response_name == "_Stage1aGapProviderDraft"
                         ),
                     )
+
+        if self._adapt_content is not None:
+            content = self._adapt_content(content, response_format, user_prompt)
 
         return LLMResult(
             content=content,
@@ -451,6 +483,20 @@ class MockLLMClient:
             duration_ms=5000,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
+        )
+
+    @classmethod
+    def _compatible_key(
+        cls, model_class: type | None, configured: dict[type, Any]
+    ) -> type | None:
+        """Return the configured type that serves *model_class*, if any."""
+        return next(
+            (
+                candidate
+                for candidate in configured
+                if cls._compatible_type(model_class, {candidate})
+            ),
+            None,
         )
 
     @staticmethod

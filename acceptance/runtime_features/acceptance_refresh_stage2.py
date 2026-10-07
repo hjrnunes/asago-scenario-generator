@@ -59,9 +59,9 @@ def _h_ar_wire_target_effects(
     call = next(
         call
         for call in _ar_client(world).calls
-        if issubclass(call["response_format"], _SP1ControlElementSet)
+        if issubclass(call.response_format, _SP1ControlElementSet)
     )
-    validator = Draft202012Validator(call["response_format"].model_json_schema())
+    validator = Draft202012Validator(call.response_format.model_json_schema())
     action = {
         "ca_id": "CA-1-1",
         "description": "Deliver a message",
@@ -381,10 +381,10 @@ def _h_ar_call3_prompt(world: World, text: str, examples: dict) -> tuple[bool, s
     calls = _ar_client(world).calls
     prompt = next(
         (
-            call["user_prompt"]
+            call.user_prompt
             for call in reversed(calls)
-            if isinstance(call["response_format"], type)
-            and issubclass(call["response_format"], _CoordinationProviderEnvelope)
+            if isinstance(call.response_format, type)
+            and issubclass(call.response_format, _CoordinationProviderEnvelope)
         ),
         "",
     )
@@ -401,7 +401,7 @@ def _h_ar_prior_prompt_contains(
 ) -> tuple[bool, str]:
     expected = "requirements" if "2a" in text else "responsibilities"
     if not any(
-        expected in call["user_prompt"].lower() for call in _ar_client(world).calls
+        expected in call.user_prompt.lower() for call in _ar_client(world).calls
     ):
         return False, f"No prompt contains {expected}"
     return True, ""
