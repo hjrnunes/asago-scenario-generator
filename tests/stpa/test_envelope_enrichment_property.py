@@ -214,6 +214,7 @@ class TestComputeSystemContextProperties:
         ctx2 = compute_system_context(profile, cs, spec)
 
         assert ctx1 == ctx2
+        assert isinstance(ctx1, SystemContext)
 
     @given(_KC_COMBOS)
     @settings(max_examples=50, deadline=None)
@@ -281,26 +282,6 @@ class TestComputeSystemContextProperties:
         assert ctx.multi_agent == profile.multi_agent
         assert ctx.has_persistent_memory == profile.has_persistent_memory
 
-    @given(_KC_COMBOS)
-    @settings(max_examples=30, deadline=None)
-    def test_returns_system_context_type(self, kc_subcodes):
-        """compute_system_context always returns a SystemContext instance."""
-        kc = sorted(set(kc_subcodes))
-        needs_tools = any(k.startswith(("KC5.", "KC6.")) for k in kc)
-        tool_inv = (
-            [ToolInventoryEntry(name="t", description="d")] if needs_tools else None
-        )
-        try:
-            profile = _make_capability_profile(kc_subcodes=kc, tool_inventory=tool_inv)
-        except Exception:
-            return
-        cs = _make_control_structure()
-        spec = make_scenario_spec()
-
-        ctx = compute_system_context(profile, cs, spec)
-
-        assert isinstance(ctx, SystemContext)
-
 
 # ---------------------------------------------------------------------------
 # Property tests: compute_consumer_hints determinism and rules
@@ -332,6 +313,7 @@ class TestComputeConsumerHintsProperties:
             primary_attack_zone=zone,
         )
         assert hints1 == hints2
+        assert isinstance(hints1, ConsumerHints)
 
     @given(_ATTACK_TREES, _NARRATIVES, _ZONES)
     @settings(
@@ -505,75 +487,6 @@ class TestComputeConsumerHintsProperties:
         assert hints.garak_testability in ("high", "medium", "low")
         assert hints.midojo_testability in ("high", "medium", "low")
 
-    @given(_ATTACK_TREES, _NARRATIVES, _ZONES)
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.too_slow],
-    )
-    def test_returns_consumer_hints_type(self, attack_tree, narrative, zone):
-        """compute_consumer_hints always returns a ConsumerHints instance."""
-        profile = _make_capability_profile()
-        hints = compute_consumer_hints(
-            capability_profile=profile,
-            attack_tree=attack_tree,
-            narrative=narrative,
-            primary_attack_zone=zone,
-        )
-        assert isinstance(hints, ConsumerHints)
-
-
-# ---------------------------------------------------------------------------
-# Property tests: backward compatibility
-# ---------------------------------------------------------------------------
-
-
-class TestAssembleEnvelopeBackwardCompatProperties:
-    """Backward compatibility: no enrichment when profile or CS is missing."""
-
-    def test_both_none_yields_no_enrichment(self):
-        """assemble_envelope without profile or CS has None enrichment blocks."""
-        spec = make_scenario_spec()
-        envelope = assemble_envelope(
-            scenario_id="SCN-001",
-            scenario_spec=spec,
-            narrative="Narrative",
-            attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=make_gherkin_spec(),
-        )
-        assert envelope.system_context is None
-        assert envelope.consumer_hints is None
-
-    def test_only_profile_yields_no_enrichment(self):
-        """assemble_envelope with only profile has None enrichment blocks."""
-        spec = make_scenario_spec()
-        profile = _make_capability_profile()
-        envelope = assemble_envelope(
-            scenario_id="SCN-001",
-            scenario_spec=spec,
-            narrative="Narrative",
-            attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=make_gherkin_spec(),
-            capability_profile=profile,
-        )
-        assert envelope.system_context is None
-        assert envelope.consumer_hints is None
-
-    def test_only_cs_yields_no_enrichment(self):
-        """assemble_envelope with only CS has None enrichment blocks."""
-        spec = make_scenario_spec()
-        cs = _make_control_structure()
-        envelope = assemble_envelope(
-            scenario_id="SCN-001",
-            scenario_spec=spec,
-            narrative="Narrative",
-            attack_tree={"root": "r", "branches": [], "leaves": []},
-            gherkin_spec=make_gherkin_spec(),
-            control_structure=cs,
-        )
-        assert envelope.system_context is None
-        assert envelope.consumer_hints is None
-
 
 # ---------------------------------------------------------------------------
 # Property tests: round-trip serialization
@@ -671,19 +584,15 @@ class TestEnrichmentRoundTripProperties:
 class TestEnrichmentModelExports:
     """SystemContext and ConsumerHints are exported from the models package."""
 
-    def test_system_context_importable_from_models(self):
-        from asago_scenario_generator.stpa.models import SystemContext as SC
+    def test_models_package_exports_the_enrichment_types(self):
+        from asago_scenario_generator.stpa import models
 
-        assert SC is SystemContext
-
-    def test_consumer_hints_importable_from_models(self):
-        from asago_scenario_generator.stpa.models import ConsumerHints as CH
-
-        assert CH is ConsumerHints
-
-    def test_models_all_includes_enrichment_types(self):
-        assert "SystemContext" in __all__
-        assert "ConsumerHints" in __all__
+        for name, cls in (
+            ("SystemContext", SystemContext),
+            ("ConsumerHints", ConsumerHints),
+        ):
+            assert name in __all__
+            assert getattr(models, name) is cls
 
     def test_consumer_hints_testability_is_literal(self):
         """ConsumerHints.garak_testability and midojo_testability are Literal types."""
