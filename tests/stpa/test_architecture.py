@@ -841,6 +841,41 @@ class TestCallWithPolicyCanonicalEntryPoint:
         )
 
 
+class TestProviderClientsAreBuiltThroughTheSessionAwareResolver:
+    """A client built outside ``llm_config`` has no call session, so its calls
+    would be missing from the run's in-memory call evidence."""
+
+    @staticmethod
+    def _llm_client_calls(tree: ast.AST) -> list[ast.Call]:
+        return [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "LLMClient"
+        ]
+
+    def test_llm_client_is_constructed_only_by_the_resolver(self):
+        package = STPA_ROOT.parent
+        constructing = {
+            path.relative_to(package).as_posix()
+            for path in sorted(package.rglob("*.py"))
+            if self._llm_client_calls(ast.parse(path.read_text(encoding="utf-8")))
+        }
+
+        assert constructing == {"stpa/pipeline/llm_config.py"}
+
+    def test_every_resolver_construction_passes_the_session(self):
+        tree = ast.parse(
+            (STPA_ROOT / "pipeline" / "llm_config.py").read_text(encoding="utf-8")
+        )
+        calls = self._llm_client_calls(tree)
+
+        assert len(calls) == 2
+        for call in calls:
+            assert "session" in {keyword.arg for keyword in call.keywords}
+
+
 class TestStageErrorLocation:
     """``StageError`` must be defined in the infra layer, not in system_model.
 

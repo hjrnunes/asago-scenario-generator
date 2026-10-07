@@ -28,7 +28,6 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     SemanticExecutionContract,
-    ExecutionSemanticGapCode,
 )
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationAssessment,
@@ -263,45 +262,6 @@ class _ContextStimulusDraft(BaseModel):
     description: StrictStr = Field(min_length=1, max_length=600)
 
 
-class _AnalyticalGapDraft(BaseModel):
-    """Provider-local analytical gap with request-local evidence handles."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    code: ExecutionSemanticGapCode
-    detail: StrictStr = Field(min_length=1, max_length=400)
-    evidence_handles: tuple[StrictStr, ...] = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def validate_handles(self) -> "_AnalyticalGapDraft":
-        handles = tuple(self.evidence_handles)
-        if len(handles) != len(set(handles)):
-            raise ValueError("analytical gap evidence_handles must be unique")
-        if any(not handle.startswith("cause_") for handle in handles):
-            raise ValueError(
-                "analytical gap evidence_handles must be local causal handles"
-            )
-        object.__setattr__(self, "evidence_handles", handles)
-        return self
-
-
-class AnalyticalOnlyRouteSelection(BaseModel):
-    """Provider-selected explanation for a route that cannot be executed."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    disposition: Literal["analytical_only"] = "analytical_only"
-    gaps: tuple[_AnalyticalGapDraft, ...] = Field(min_length=1)
-    reason: StrictStr = Field(min_length=1, max_length=600)
-
-    @model_validator(mode="after")
-    def validate_gaps(self) -> "AnalyticalOnlyRouteSelection":
-        identities = tuple((gap.code, gap.detail) for gap in self.gaps)
-        if len(identities) != len(set(identities)):
-            raise ValueError("analytical route gaps must be unique")
-        return self
-
-
 class BDIGenerationResult(BaseModel):
     """LLM response model for the combined BDI generation call."""
 
@@ -313,10 +273,6 @@ class BDIGenerationResult(BaseModel):
     # Optional only for historical direct callers.  Corrected context
     # requests use a strict dynamic subtype where this field is required.
     unsafe_outcome: UnsafeOutcomeDeclaration | None = None
-    # ``execution_route`` is provider-local and is consumed immediately by
-    # corrected contextual assembly.  Materialized results retain only the
-    # deterministic semantic contract below.
-    execution_route: AnalyticalOnlyRouteSelection | None = None
     execution_contract: SemanticExecutionContract | None = None
     # Phase 3.1 adversary record.  Optional only for historical direct
     # callers; corrected contextual requests require it on the wire.
