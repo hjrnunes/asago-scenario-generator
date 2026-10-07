@@ -3,9 +3,9 @@
 
 Run from any directory: ``uv run python scripts/gen_handoff_kit.py``.
 The v1 kit is never written; only its lock entries are carried forward. The
-v2 and v3 kits are frozen: regenerating them must leave every byte unchanged,
-which ``git diff --stat data/contracts/scenario-handoff/handoff-v2
-data/contracts/scenario-handoff/handoff-v3`` confirms.
+v2 kit is frozen: regenerating it must leave every byte unchanged, which
+``git diff --stat data/contracts/scenario-handoff/handoff-v2`` confirms. The v3
+kit's existing files are frozen too; it gains only invalid ownership cases.
 Downstream repositories mirror the regenerated files byte-identically.
 """
 
@@ -677,6 +677,98 @@ def v2_invalid(valid: dict[str, dict]) -> dict[str, dict]:
     }
 
 
+def cut(base: dict, mutate) -> dict:
+    payload = copy.deepcopy(base)
+    mutate(payload)
+    return payload
+
+
+def in_narrative(text: str):
+    def mutate(payload: dict) -> None:
+        payload["narrative"] += " " + text
+
+    return mutate
+
+
+def in_attack_tree(key: str, value: object):
+    def mutate(payload: dict) -> None:
+        payload["attack_tree"][key] = value
+
+    return mutate
+
+
+def ownership_invalid(base: dict) -> dict[str, dict]:
+    """Cases only the ownership scan rejects, one scan rule per fixture.
+
+    Each case sits in a free-form field (the narrative, the attack tree or the
+    unknowns), so the closed schema accepts it and a reader that skips the
+    ownership scan accepts the whole document. The last four cases are the
+    handoff-v1 ownership cases.
+    """
+
+    def tree_role(payload: dict) -> None:
+        payload["attack_tree"]["children"] = [
+            "The caller speaks as role: user in the first message."
+        ]
+
+    def history_in_unknowns(payload: dict) -> None:
+        payload["assumptions_and_unknowns"].append(
+            'The submitted history is [{"role": "user", "content": "refund"}]'
+        )
+
+    invalid = {
+        "narrative-turn-array": cut(
+            base,
+            in_narrative("The plan sends turns: a greeting, then the request."),
+        ),
+        "narrative-role-serialization": cut(base, tree_role),
+        "ownership-oracle-kind-key": cut(
+            base, in_attack_tree("oracle_kind", "response_contains")
+        ),
+        "ownership-oracle-observes-key": cut(
+            base, in_attack_tree("oracle_observes", "the final reply")
+        ),
+        "ownership-oracle-basis-key": cut(
+            base, in_attack_tree("oracle_basis", "the stated rule")
+        ),
+        "ownership-deliver-this-message": cut(
+            base, in_narrative("Deliver this message to the assistant as the next turn.")
+        ),
+        "ownership-system-prompt-is": cut(
+            base, in_narrative("The assistant's system prompt is set by the operator.")
+        ),
+        "ownership-judge-prompt": cut(
+            base, in_narrative("Give the judge prompt to the grader.")
+        ),
+        "ownership-key-name-pattern": cut(
+            base, in_attack_tree("greater_than", "the stated refund limit")
+        ),
+        "ownership-dotted-key": cut(base, in_attack_tree("tree.role", "observer")),
+        "prepared-message-field": cut(
+            base,
+            in_narrative(
+                "Prepared turn text: prepared_user_text: request the full refund."
+            ),
+        ),
+        "role-turn-array": cut(base, history_in_unknowns),
+        "smuggled-prose": cut(
+            base,
+            in_narrative(
+                "Then send this message to the assistant and compare the "
+                "amount greater_than 40."
+            ),
+        ),
+        "stimulus-turn-field": cut(
+            base,
+            in_attack_tree(
+                "stimulus_turns",
+                [{"content": "Please refund my order.", "role": "user"}],
+            ),
+        ),
+    }
+    return invalid
+
+
 def v3_invalid(valid: dict[str, dict]) -> dict[str, dict]:
     bound = valid["valid/adversarial-observed-record.json"]
     assert bound["tool_call_condition_status"]["status"] == "bound"
@@ -687,10 +779,17 @@ def v3_invalid(valid: dict[str, dict]) -> dict[str, dict]:
         "source": "fact",
         "path": "TARGET-STATE.items.ITEM-1",
     }
-    return {
+    invalid = {
         "invalid/bound-without-condition.json": without_condition,
         "invalid/fact-operand-in-condition.json": fact_operand,
     }
+    invalid.update(
+        {
+            f"invalid/{name}.json": payload
+            for name, payload in ownership_invalid(bound).items()
+        }
+    )
+    return invalid
 
 
 def v4_invalid(valid: dict[str, dict]) -> dict[str, dict]:
@@ -707,11 +806,6 @@ def v4_invalid(valid: dict[str, dict]) -> dict[str, dict]:
         {"position": i, "speaker": "attacker_user", "purpose": "apply_pressure"}
         for i in range(1, 6)
     ]
-
-    def cut(base: dict, mutate) -> dict:
-        payload = copy.deepcopy(base)
-        mutate(payload)
-        return payload
 
     def shape_of(payload: dict) -> dict:
         return payload["attack_shape"]
@@ -734,14 +828,6 @@ def v4_invalid(valid: dict[str, dict]) -> dict[str, dict]:
     def forged_ends_on_forged(payload: dict) -> None:
         last = shape_of(payload)["turn_plan"][-1]
         last.update(speaker="forged_assistant", purpose="forged_history")
-
-    def say(payload: dict) -> None:
-        payload["narrative"] += " The plan sends turns: a greeting, then the request."
-
-    def tree_role(payload: dict) -> None:
-        payload["attack_tree"]["children"] = [
-            "The caller speaks as role: user in the first message."
-        ]
 
     invalid = {
         "shape-purpose-free-text": cut(
@@ -810,9 +896,8 @@ def v4_invalid(valid: dict[str, dict]) -> dict[str, dict]:
         "shape-downgrade-without-default": cut(
             downgraded, lambda p: shape_of(p).update(source="stage5_validated")
         ),
-        "narrative-turn-array": cut(single, say),
-        "narrative-role-serialization": cut(single, tree_role),
     }
+    invalid.update(ownership_invalid(single))
     return {f"invalid/{name}.json": payload for name, payload in invalid.items()}
 
 
