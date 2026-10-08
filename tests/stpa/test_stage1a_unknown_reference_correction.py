@@ -216,6 +216,70 @@ class TestUnknownReferenceCorrection:
         identities = [entry["identity"] for entry in _records(tmp_path, "repair")]
         assert identities == ["H-1.related_losses", "SC-1.related_hazards"]
 
+    def test_unknown_only_request_carries_no_repeated_id_wording(
+        self, tmp_path
+    ) -> None:
+        _derive(
+            tmp_path,
+            [valid_risk_draft_dict(), RECORDED_GAP_RESPONSE],
+            [_constraint_repair("SC-2", ["H-2"])],
+        )
+
+        entry = _call_entry(tmp_path, "gap_analysis_repair")
+        system_prompt = entry["system_prompt_text"]
+        user_prompt = entry["user_prompt_text"]
+        assert (
+            "security constraint's `related_hazards` names an ID that no declared "
+            "record has.\n"
+        ) in system_prompt
+        assert "Each list names an unknown ID: an ID that no declared record" in (
+            system_prompt
+        )
+        assert "each names an\nID that no declared record has." in user_prompt
+        assert "only. Replace each unknown entry" in user_prompt
+        for repeated_wording in (
+            "more than once",
+            "repeated entry",
+            "the repeat",
+            "may also name",
+        ):
+            assert repeated_wording not in system_prompt
+            assert repeated_wording not in user_prompt
+
+    def test_a_request_with_repeated_and_unknown_ids_names_both(self, tmp_path) -> None:
+        risk = valid_risk_draft_dict()
+        risk["hazards"][0]["related_losses"] = ["L-1", "L-1"]
+        risk["security_constraints"][0]["related_hazards"] = ["H-1", "H-9"]
+        repair = {
+            "hazards": [{"hazard_id": "H-1", "related_losses": ["L-1"]}],
+            "security_constraints": [
+                {"constraint_id": "SC-1", "related_hazards": ["H-1"]}
+            ],
+        }
+        gap = {
+            "risk_card_losses": [],
+            "use_case_losses": [],
+            "hazards": [],
+            "security_constraints": [],
+        }
+
+        _derive(tmp_path, [risk, gap], [repair])
+
+        entry = _call_entry(tmp_path, "risk_derivation_repair")
+        system_prompt = entry["system_prompt_text"]
+        user_prompt = entry["user_prompt_text"]
+        assert (
+            "names the same ID more than once\nor names an ID that no declared "
+            "record has.\n"
+        ) in system_prompt
+        assert "Each list names one or more IDs more than once." in system_prompt
+        assert "A list may also name an unknown ID" in system_prompt
+        assert (
+            "each names an\nID more than once or an ID that no declared record has."
+        ) in user_prompt
+        assert "only. Remove each repeated\nentry" in user_prompt
+        assert "name. Replace each unknown entry" in user_prompt
+
     def test_an_empty_gap_list_still_stops_without_a_call(self, tmp_path) -> None:
         gap = json.loads(json.dumps(RECORDED_GAP_RESPONSE))
         gap["security_constraints"][0]["related_hazards"] = []

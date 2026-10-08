@@ -98,6 +98,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
 from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RuleSpanRepairRecord,
     record_rule_span_repairs,
+    rule_span_repair_warnings,
     repair_obligation_rows,
 )
 
@@ -1701,10 +1702,7 @@ class _Stage1aCall:
         """Report each applied rule-span repair as a normalization warning."""
         if self.normalization_warnings is not None:
             self.normalization_warnings.extend(
-                f"{self.step} rule_span {record.constraint}/{record.obligation_id} "
-                f"repaired by {record.repair.kind} match: "
-                f"{record.repair.original!r} -> {record.repair.repaired!r}"
-                for record in self.span_repairs
+                rule_span_repair_warnings(self.step, self.span_repairs)
             )
 
     def record_unsupported(self, identity: str, reason: str) -> None:

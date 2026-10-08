@@ -184,9 +184,11 @@ def test_risk_derivation_drops_an_obligation_whose_span_stays_unmapped(
     assert "SC-1/O1" not in repaired_identities
 
 
-def test_a_constraint_that_loses_its_last_obligation_is_dropped(tmp_path) -> None:
-    risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN)])
-    repair = _obligation_repair("SC-1", [_entry("O1", UNMAPPABLE_SPAN)])
+def test_a_corrected_span_that_a_repair_maps_is_kept(tmp_path) -> None:
+    kept = _entry("O2", "no sensitive health data")
+    risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN), kept])
+    repair = _obligation_repair("SC-1", [_entry("O1", ELLIPSIS_SPAN), kept])
+    warnings: list[str] = []
     client = MockLLMClient()
     client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
     client.set_response_for(ObligationRepairResponse, repair)
@@ -196,17 +198,87 @@ def test_a_constraint_that_loses_its_last_obligation_is_dropped(tmp_path) -> Non
         use_case_text=_USE_CASE,
         risk_cards=_occiai_cards(),
         run_dir=tmp_path,
+        normalization_warnings=warnings,
+    )
+
+    obligations = result.security_constraints[0].obligations
+    assert [(o.obligation_id, o.rule_span) for o in obligations] == [
+        ("O1", REPAIRED_SPAN),
+        ("O2", "no sensitive health data"),
+    ]
+    assert _dropped_entries(tmp_path) == []
+    records = _repair_record(tmp_path)["records"]
+    (span_entry,) = [e for e in records if e["kind"] == "rule_span_repaired"]
+    assert (
+        span_entry["stage"],
+        span_entry["attempt"],
+        span_entry["identity"],
+        span_entry["outcome"],
+        span_entry["raw_step"],
+    ) == ("risk_derivation", "repair", "SC-1/O1", "applied", "risk_derivation_repair")
+    assert span_entry["proposed"] == {"rule_span": ELLIPSIS_SPAN}
+    assert span_entry["applied"] == {"rule_span": REPAIRED_SPAN, "match": "ellipsis"}
+    (repair_entry,) = [e for e in records if e["kind"] == "repair"]
+    assert (repair_entry["identity"], repair_entry["outcome"]) == (
+        "SC-1/O1",
+        "repaired",
+    )
+    assert (
+        "risk_derivation rule_span SC-1/O1 repaired by ellipsis match: "
+        f"{ELLIPSIS_SPAN!r} -> {REPAIRED_SPAN!r}"
+    ) in warnings
+
+
+def test_a_constraint_that_loses_its_last_obligation_is_kept(tmp_path) -> None:
+    risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN)])
+    repair = _obligation_repair("SC-1", [_entry("O1", UNMAPPABLE_SPAN)])
+    warnings: list[str] = []
+    client = MockLLMClient()
+    client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
+    client.set_response_for(ObligationRepairResponse, repair)
+
+    result = derive_loss_analysis(
+        llm_client=client,
+        use_case_text=_USE_CASE,
+        risk_cards=_occiai_cards(),
+        run_dir=tmp_path,
+        normalization_warnings=warnings,
     )
 
     assert [c.constraint_id for c in result.security_constraints] == [
-        f"SC-{number}" for number in range(2, 8)
+        f"SC-{number}" for number in range(1, 8)
     ]
+    assert result.security_constraints[0].obligations == []
     (dropped,) = _dropped_entries(tmp_path)
-    assert dropped["applied"] == {
-        "dropped_entries": ["O1"],
-        "constraint_dropped": "SC-1",
-    }
-    assert "constraint was dropped" in dropped["reason"]
+    assert dropped["applied"] == {"dropped_entries": ["O1"]}
+    assert dropped["reason"].endswith("so the obligation was dropped.")
+    (warning,) = [w for w in warnings if "rule_span SC-1/O1 dropped" in w]
+    assert warning.endswith("does not occur in the rule")
+
+
+def test_a_gap_constraint_left_without_obligations_keeps_the_chain_complete(
+    tmp_path,
+) -> None:
+    gap = _gap_constraint_defect_response()
+    gap["security_constraints"][0]["obligations"] = [_entry("O1", UNMAPPABLE_SPAN)]
+    repair = _obligation_repair("SC-8", [_entry("O1", UNMAPPABLE_SPAN)])
+    client = MockLLMClient()
+    client.set_response_for(LossAnalysisDraft, [_complete_risk_response(), gap])
+    client.set_response_for(ObligationRepairResponse, repair)
+
+    result = derive_loss_analysis(
+        llm_client=client,
+        use_case_text=_USE_CASE,
+        risk_cards=_occiai_cards(),
+        run_dir=tmp_path,
+    )
+
+    gap_constraint = result.security_constraints[7]
+    assert gap_constraint.constraint_id == "SC-8"
+    assert gap_constraint.related_hazards == ["H-8"]
+    assert gap_constraint.obligations == []
+    (dropped,) = _dropped_entries(tmp_path)
+    assert (dropped["stage"], dropped["identity"]) == ("gap_analysis", "SC-8/O1")
 
 
 def test_gap_analysis_drops_an_obligation_whose_span_stays_unmapped(tmp_path) -> None:
@@ -234,6 +306,40 @@ def test_gap_analysis_drops_an_obligation_whose_span_stays_unmapped(tmp_path) ->
     (dropped,) = _dropped_entries(tmp_path)
     assert (dropped["stage"], dropped["identity"]) == ("gap_analysis", "SC-8/O1")
     assert dropped["proposed"]["rule"] == GAP_RULE
+
+
+def test_an_unknown_hazard_beside_an_unmapped_span_stops_without_a_call(
+    tmp_path,
+) -> None:
+    risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN)])
+    risk["security_constraints"][0]["related_hazards"].append("H-99")
+    client = MockLLMClient()
+    client.set_response_for(LossAnalysisDraft, [risk])
+
+    with pytest.raises(StageError) as exc_info:
+        derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+        )
+
+    message = str(exc_info.value)
+    assert message.startswith(
+        "stage_1a/risk_derivation: targeted repair unsupported (graph "
+        "validation is outside the approved repair scope: "
+    )
+    assert "unknown IDs: H-99" in message
+    assert "no repair call was made; wire_schema failure class" in message
+    assert [entry["step"] for entry in _stage1a_entries(tmp_path)] == [
+        "risk_derivation"
+    ]
+    (unsupported,) = [
+        entry
+        for entry in _repair_record(tmp_path)["records"]
+        if entry["kind"] == "unsupported"
+    ]
+    assert unsupported["identity"] == "response"
 
 
 def test_a_slipping_span_beside_an_unrelated_edit_still_stops(tmp_path) -> None:

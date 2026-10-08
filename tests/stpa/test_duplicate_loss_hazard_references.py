@@ -249,6 +249,11 @@ class TestStage1aDuplicateRepair:
             "each in this order; name no ID outside the kept and replacement IDs"
         ) in user_prompt
         assert "Test use case" in user_prompt
+        assert "names the same ID more than once.\n" in system_prompt
+        assert "each names an\nID more than once. Everything else" in user_prompt
+        for unknown_wording in ("no declared record has", "unknown"):
+            assert unknown_wording not in system_prompt
+            assert unknown_wording not in user_prompt
 
 
 class TestStage1aDuplicateRepairLimits:

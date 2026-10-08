@@ -179,8 +179,12 @@ def record_rule_span_repairs(
     attempt: str,
     repairs: list[RuleSpanRepairRecord],
     outcome: str,
+    raw_step: str | None = None,
 ) -> None:
-    """Append one repair-record entry per repaired obligation span."""
+    """Append one repair-record entry per repaired obligation span.
+
+    *raw_step* names the response the span came from (default: *step*).
+    """
     if repair_record is None:
         return
     for record in repairs:
@@ -199,8 +203,20 @@ def record_rule_span_repairs(
             proposed={"rule_span": repair.original},
             applied={"rule_span": repair.repaired, "match": repair.kind},
             outcome=outcome,
-            raw_step=step,
+            raw_step=raw_step or step,
         )
+
+
+def rule_span_repair_warnings(
+    step: str, repairs: list[RuleSpanRepairRecord]
+) -> list[str]:
+    """One normalization warning per repaired obligation span."""
+    return [
+        f"{step} rule_span {record.constraint}/{record.obligation_id} "
+        f"repaired by {record.repair.kind} match: "
+        f"{record.repair.original!r} -> {record.repair.repaired!r}"
+        for record in repairs
+    ]
 
 
 def _accepted(

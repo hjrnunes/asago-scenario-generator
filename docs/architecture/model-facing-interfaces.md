@@ -487,10 +487,13 @@ therefore reads `applied`. (The graph-revision compiler still marks the
 repairs of an attempt it did not accept `discarded`.)
 
 A span that no mapping resolves goes to the targeted obligation repair as
-before. When the corrected entry's `rule_span` still is not part of the rule
+before. The corrected entry's `rule_span` gets the same mapping; a mapped span
+is a `rule_span_repaired` entry with `attempt: repair` and a normalization
+warning. When the corrected entry's `rule_span` still is not part of the rule
 and nothing else in the entry broke the repair's scope, code drops that
-obligation instead of stopping the run. A constraint left with no obligation is
-dropped with it. Each drop is a `rule_span_dropped` entry (outcome `dropped`,
+obligation instead of stopping the run. A constraint left with no obligation
+stays in the graph with an empty `obligations` list, so its hazard stays
+covered. Each drop is a `rule_span_dropped` entry (outcome `dropped`,
 the span and the rule under `proposed`) in `loss-analysis-repair.yaml` and a
 normalization warning; the dropped obligation has no `repair` entry. The drop
 applies to `risk_derivation` and `gap_analysis`; the graph revision keeps its
@@ -501,7 +504,8 @@ A `risk_derivation` or `gap_analysis` response that parses but has a hazard
 once, or naming an ID no declared record has, gets exactly one reference
 correction call. The call carries the validator's finding and offers the
 IDs valid for each selected list, with their meanings, as replacements; it
-cannot declare a new record. A correction that is rejected or fails
+cannot declare a new record. The request describes repeated IDs only when a
+selected list repeats one. A correction that is rejected or fails
 validation for a list with an unknown ID does not stop the run. Instead,
 code cuts each selected list to its known IDs and drops any hazard or
 constraint left without a valid ID, along with any constraint whose every
@@ -531,7 +535,10 @@ the existing hazard lacks) to that hazard's ID instead of adding a duplicate,
 and records a normalization warning. A `rule_span` that is not in its
 rule fails with the span and the rule quoted; on a constraint addition, the
 error names the addition's handle, because the provider never sees the ID
-code assigns to it.
+code assigns to it. When several constraint edits or additions fail
+validation, one error names each of them, so the single correction request
+covers them all; one failure keeps its error unchanged. An unknown or
+repeated hazard reference still fails at once.
 
 The post-review density gate exempts a hazard or constraint that the
 semantic review explicitly marks `unresolved`. The exemption becomes a

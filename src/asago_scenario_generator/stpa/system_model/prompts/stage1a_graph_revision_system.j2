@@ -39,10 +39,10 @@ assembled graph against every failed check.
   follow the existing obligations rules for edits. The full density check runs
   on the merged graph, so a repair that creates a new uncovered hazard fails.
 - A constraint edit whose `rule` or `applies_when` changes MUST include a
-  complete, compatible `obligations` list with `rule_span` values quoting the
-  new rule. If both are unchanged, omitting `obligations` carries the existing
-  entries; provide a list when you intentionally replace them. Never omit
-  obligations to erase a stale interpretation.
+  complete, compatible `obligations` list whose `rule_span` values meet the
+  `rule_span` requirement below. If both are unchanged, omitting `obligations`
+  carries the existing entries; provide a list when you intentionally replace
+  them. Never omit obligations to erase a stale interpretation.
 - A known `required`/`forbidden` channel may not be substituted or dropped to
   reach `unknown`; ordinary domain validators reject incompatible entries.
 - Do not return losses or risk dispositions. They are immutable and carried
