@@ -545,13 +545,11 @@ changes, and external actions are the other typed effects.
 field sets the environment basis. The profile is a content-addressed, closed
 semantic inventory with no secrets or live connection details. Metadata-free
 MCP profiles are produced independently by the optional `asago-target-scan
-mcp` command: the default scan performs `tools/list` only and writes a
+mcp` command: the scan performs `tools/list` only and never calls a tool; it writes a
 self-contained profile plus sanitized inventory, manifest, and call accounting.
 Secret-like values are removed from prompt views and persisted discovery
 artifacts while each sanitized tool row retains the SHA-256 of the original
-normalized observation. Optional disposable-environment inspection may invoke
-only verifier-agreed read/observe tools whose schema admits an empty argument
-object, and remains bounded by the caller's explicit call limit.
+normalized observation.
 MCP profiles retain separate `inventory_authority: observed` and
 `semantic_authority: inferred|reviewed` fields, and each operation preserves
 the exact MCP tool name as both `operation_id` and `semantic_operation`.

@@ -31,7 +31,7 @@ def _args(tmp_path: Path, *extra: str) -> list[str]:
 def test_profile_option_constructs_interpreter_and_passes_it_to_discovery(
     tmp_path: Path,
 ):
-    interpreter = object()
+    interpreter = SimpleNamespace(model_name="fixture-model")
     adapter = object()
     result = SimpleNamespace(profile=object(), valid=True)
     with (
@@ -60,8 +60,6 @@ def test_profile_option_constructs_interpreter_and_passes_it_to_discovery(
                 "fixture-profile",
                 "--profiles-file",
                 str(tmp_path / "profiles.yaml"),
-                "--model-name",
-                "fixture-model",
                 "--interpretation-batch-size",
                 "1",
             ),
@@ -123,78 +121,40 @@ def _scan(tmp_path: Path, *extra: str, result=None, written=None, env=None):
     return completed, adapter, discover
 
 
-def test_unknown_mode_is_a_usage_error(tmp_path: Path):
-    completed, _adapter, discover = _scan(tmp_path, "--mode", "bogus")
+@pytest.mark.parametrize("mode", ["bogus", "full", "disposable_test_environment"])
+def test_any_mode_other_than_schema_only_is_a_usage_error(tmp_path: Path, mode):
+    completed, adapter, discover = _scan(tmp_path, "--mode", mode)
 
     assert completed.exit_code == 2
-    assert "must be schema_only or disposable_test_environment" in completed.output
-    discover.assert_not_called()
-
-
-def test_inspect_tool_requires_the_disposable_mode(tmp_path: Path):
-    completed, _adapter, discover = _scan(tmp_path, "--inspect-tool", "get_payment")
-
-    assert completed.exit_code == 2
-    assert "requires --mode disposable_test_environment" in completed.output
-    discover.assert_not_called()
-
-
-def test_inspect_tool_is_passed_through_in_the_disposable_mode(tmp_path: Path):
-    completed, _adapter, discover = _scan(
-        tmp_path,
-        "--mode",
-        "disposable_test_environment",
-        "--inspect-tool",
-        "get_payment",
-        "--max-inspection-calls",
-        "3",
-    )
-
-    assert completed.exit_code == 0, completed.output
-    inputs = discover.call_args.args[0]
-    assert inputs.mode.value == "disposable_test_environment"
-    assert inputs.active_inspection_tool_names == ("get_payment",)
-    assert inputs.max_active_inspection_calls == 3
-
-
-def test_auth_header_comes_from_the_named_environment_variable(tmp_path: Path):
-    completed, adapter, _discover = _scan(
-        tmp_path,
-        "--auth-header-env",
-        "SCAN_AUTH",
-        "--timeout",
-        "5",
-        env={"SCAN_AUTH": "Bearer secret-token"},
-    )
-
-    assert completed.exit_code == 0, completed.output
-    adapter.assert_called_once_with(
-        "http://127.0.0.1:8888/sse",
-        headers={"Authorization": "Bearer secret-token"},
-        timeout=5.0,
-    )
-    assert "secret-token" not in completed.output
-
-
-def test_without_auth_header_option_the_adapter_gets_no_headers(tmp_path: Path):
-    _completed, adapter, _discover = _scan(tmp_path)
-
-    assert adapter.call_args.kwargs["headers"] == {}
-
-
-@pytest.mark.parametrize("value", [None, ""])
-def test_unset_or_empty_auth_environment_variable_is_a_usage_error(
-    tmp_path: Path, value
-):
-    env = {"SCAN_AUTH": value}
-    completed, adapter, discover = _scan(
-        tmp_path, "--auth-header-env", "SCAN_AUTH", env=env
-    )
-
-    assert completed.exit_code == 2
-    assert "environment variable 'SCAN_AUTH' is not set" in completed.output
+    assert "only schema_only is supported" in completed.output
     adapter.assert_not_called()
     discover.assert_not_called()
+
+
+def test_schema_only_mode_reaches_discovery(tmp_path: Path):
+    completed, _adapter, discover = _scan(tmp_path, "--mode", "schema_only")
+
+    assert completed.exit_code == 0, completed.output
+    assert discover.call_args.args[0].mode.value == "schema_only"
+
+
+@pytest.mark.parametrize(
+    "flag",
+    ["--inspect-tool", "--max-inspection-calls", "--auth-header-env", "--model-name"],
+)
+def test_removed_options_are_rejected(tmp_path: Path, flag):
+    completed, _adapter, discover = _scan(tmp_path, flag, "value")
+
+    assert completed.exit_code == 2
+    assert "No such option" in completed.output
+    discover.assert_not_called()
+
+
+def test_timeout_reaches_the_adapter_without_headers(tmp_path: Path):
+    completed, adapter, _discover = _scan(tmp_path, "--timeout", "5")
+
+    assert completed.exit_code == 0, completed.output
+    adapter.assert_called_once_with("http://127.0.0.1:8888/sse", timeout=5.0)
 
 
 @pytest.mark.parametrize(

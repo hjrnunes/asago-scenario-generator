@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import typer
@@ -56,11 +55,6 @@ def scan_mcp(
             "semantic records remain unresolved and no model call is made."
         ),
     ),
-    model_name: str | None = typer.Option(
-        None,
-        "--model-name",
-        help="Optional non-secret model identity for provenance.",
-    ),
     profiles_file: Path = typer.Option(
         Path("config/model-profiles.yaml"),
         "--profiles-file",
@@ -69,24 +63,7 @@ def scan_mcp(
     mode: str = typer.Option(
         DiscoveryMode.schema_only.value,
         "--mode",
-        help="schema_only or disposable_test_environment.",
-    ),
-    auth_header_env: str | None = typer.Option(
-        None,
-        "--auth-header-env",
-        help="Environment variable containing a runtime Authorization header value.",
-    ),
-    inspect_tool: list[str] = typer.Option(
-        [],
-        "--inspect-tool",
-        help="Tool name to call only in disposable_test_environment mode (repeatable).",
-    ),
-    max_inspection_calls: int = typer.Option(
-        8,
-        "--max-inspection-calls",
-        min=0,
-        max=32,
-        help="Bound for explicitly requested disposable inspection calls.",
+        help="Discovery mode; only schema_only is supported.",
     ),
     interpretation_batch_size: int = typer.Option(
         8,
@@ -98,33 +75,24 @@ def scan_mcp(
     timeout: float = typer.Option(30.0, "--timeout", min=0.1),
 ) -> None:
     """Scan one MCP tools/list inventory and write a self-contained profile."""
-    selected_mode = _selected_mode(mode, inspect_tool)
-    headers = _authorization_headers(auth_header_env)
+    if mode != DiscoveryMode.schema_only.value:
+        raise typer.BadParameter(
+            f"only schema_only is supported, got {mode!r}", param_hint="--mode"
+        )
     inputs = McpTargetDiscoveryInputs(
         target_id=target_id,
         authorization_scope_id=authorization_scope,
-        mode=selected_mode,
+        mode=DiscoveryMode.schema_only,
         model_profile=profile,
-        model_name=model_name,
-        active_inspection_tool_names=tuple(inspect_tool),
-        max_active_inspection_calls=max_inspection_calls,
         interpretation_batch_size=interpretation_batch_size,
     )
     interpreter_factory = None
     if profile is not None:
         interpreter_factory = _load_interpreter(profiles_file, profile)
-        resolved_model_name = (
-            model_name
-            if model_name is not None
-            else getattr(interpreter_factory, "model_name", None)
-        )
-        if resolved_model_name is not None:
-            inputs = inputs.model_copy(update={"model_name": resolved_model_name})
-    adapter = HttpMcpInventoryAdapter(
-        server_url,
-        headers=headers,
-        timeout=timeout,
-    )
+        model_name = getattr(interpreter_factory, "model_name", None)
+        if model_name is not None:
+            inputs = inputs.model_copy(update={"model_name": model_name})
+    adapter = HttpMcpInventoryAdapter(server_url, timeout=timeout)
     result = discover_mcp_target(
         inputs,
         adapter,
@@ -138,33 +106,6 @@ def scan_mcp(
         raise typer.Exit(code=1)
     if not result.valid:
         raise typer.Exit(code=2)
-
-
-def _selected_mode(mode: str, inspect_tool: list[str]) -> DiscoveryMode:
-    try:
-        selected_mode = DiscoveryMode(mode)
-    except ValueError as exc:
-        raise typer.BadParameter(
-            "must be schema_only or disposable_test_environment", param_hint="--mode"
-        ) from exc
-    if inspect_tool and selected_mode is DiscoveryMode.schema_only:
-        raise typer.BadParameter(
-            "--inspect-tool requires --mode disposable_test_environment",
-            param_hint="--inspect-tool",
-        )
-    return selected_mode
-
-
-def _authorization_headers(auth_header_env: str | None) -> dict[str, str]:
-    if not auth_header_env:
-        return {}
-    value = os.environ.get(auth_header_env)
-    if not value:
-        raise typer.BadParameter(
-            f"environment variable {auth_header_env!r} is not set",
-            param_hint="--auth-header-env",
-        )
-    return {"Authorization": value}
 
 
 def _load_interpreter(
