@@ -49,6 +49,8 @@ cases:
       - not restatements of the risk
       - "provenance: risk_card"
       - the failure is not itself the hazard
+      - "A **hazard** is a system-level state or condition"
+      - State the resulting system-level
     once:
       - Express each constraint as the safe relationship
     forbidden:
