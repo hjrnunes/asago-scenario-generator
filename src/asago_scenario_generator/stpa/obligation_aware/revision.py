@@ -24,7 +24,6 @@ from asago_scenario_generator.models.obligation_consideration import (
     RevisionAddition,
     StructuralRevisionDelta,
 )
-from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.infra.llm_helpers import count_requests
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -52,6 +51,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     RevisionDraft,
     StructuralRevisionRequest,
     StructuralRevisionResponse,
+    default_synthesis_controls,
 )
 
 
@@ -1340,12 +1340,7 @@ def revise_structure_once(
             final_control_structure=baseline_cs,
         )
     if controls is None:
-        controls = AnalysisControls(
-            model_profile="synthesis",
-            model_name="caller-supplied",
-            deadline_seconds=300.0,
-            temperature=DEFAULT_TEMPERATURE,
-        )
+        controls = default_synthesis_controls()
     request = StructuralRevisionRequest(
         gaps=ordered_gaps,
         baseline_loss_analysis=baseline_la,

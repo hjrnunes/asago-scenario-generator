@@ -22,7 +22,6 @@ from asago_scenario_generator.models.obligation_plan import (
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     RequestTally,
     count_requests,
@@ -37,6 +36,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     StructuralAnalysisAdapter,
     StructuralRoutingRequest,
     StructuralRoutingResponse,
+    default_synthesis_controls,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     authoritative_hazard_constraint_pairs,
@@ -231,13 +231,7 @@ def _default_controls(
 ) -> AnalysisControls:
     """Resolve controls without changing the caller's immutable controls."""
     if controls is None:
-        return AnalysisControls(
-            model_profile="synthesis",
-            model_name="caller-supplied",
-            deadline_seconds=300.0,
-            temperature=DEFAULT_TEMPERATURE,
-            max_batch_size=max_batch_size,
-        )
+        return default_synthesis_controls(max_batch_size=max_batch_size)
     if not isinstance(controls, AnalysisControls):
         raise TypeError("controls must be AnalysisControls")
     if controls.max_batch_size == max_batch_size:

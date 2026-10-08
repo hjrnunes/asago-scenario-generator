@@ -15,7 +15,6 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
     ObligationRoute,
 )
-from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.infra.llm_helpers import count_requests
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
@@ -45,6 +44,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotFillResult,
     SynthesisSlotRequest,
     SynthesisSlotResponse,
+    default_synthesis_controls,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_synthesis_slot_prompts,
@@ -324,12 +324,7 @@ def build_synthesis_slot_requests(
                 + ", ".join(sorted(unknown))
             )
     if controls is None:
-        controls = AnalysisControls(
-            model_profile="synthesis",
-            model_name="caller-supplied",
-            deadline_seconds=300.0,
-            temperature=DEFAULT_TEMPERATURE,
-        )
+        controls = default_synthesis_controls()
     requests: list[SynthesisSlotRequest] = []
     for target, target_kind, target_slots in _group_slots(slots):
         routed_briefs, routed_routes = _routed_for_target(target_slots, briefs, routes)

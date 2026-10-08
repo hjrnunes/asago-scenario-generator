@@ -32,6 +32,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     StructuralRevisionDelta,
     StructuralConceptKind,
 )
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionTemporality,
     ControlStructure,
@@ -100,6 +101,17 @@ class AnalysisControls(_Model):
     context_window: int | None = Field(gt=0, strict=True, default=None)
     maximum_completion_tokens: int | None = Field(gt=0, strict=True, default=None)
     safety_margin: int | None = Field(ge=0, strict=True, default=None)
+
+
+def default_synthesis_controls(*, max_batch_size: int = 8) -> AnalysisControls:
+    """Return the controls a stage uses when its caller supplies none."""
+    return AnalysisControls(
+        model_profile="synthesis",
+        model_name="caller-supplied",
+        deadline_seconds=300.0,
+        temperature=DEFAULT_TEMPERATURE,
+        max_batch_size=max_batch_size,
+    )
 
 
 class StructuralRoutingRequest(_DigestModel):
@@ -945,4 +957,5 @@ __all__ = [
     "SynthesisSlotFillResult",
     "SynthesisSlotRequest",
     "SynthesisSlotResponse",
+    "default_synthesis_controls",
 ]
