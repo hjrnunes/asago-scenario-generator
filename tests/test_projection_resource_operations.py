@@ -9,9 +9,11 @@ import pytest
 from pydantic import ValidationError
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_chain import (
     AttackPattern,
     ResourceSlot,
+)
+from asago_scenario_generator.models.attack_pattern_digests import (
     compute_chain_semantic_digest,
 )
 from asago_scenario_generator.models.attack_pattern_contracts import (

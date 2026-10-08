@@ -196,7 +196,6 @@ STAGE_MODULES = tuple(
     f"{SYSTEM_MODEL}.{name}"
     for name in ("loss_analysis", "profile", "control_structure", "heuristics")
 )
-ATTACK_PATTERN_FACADE = f"{PUBLIC_MODELS}.attack_pattern"
 PROJECTION_IMPLEMENTATIONS = tuple(
     f"{PIPELINE}.projection_{name}"
     for name in (
@@ -439,28 +438,8 @@ RULES: list[Rule] = [
             f"{PUBLIC_MODELS}.attack_pattern_{name}"
             for name in ("contracts", "digests", "chain", "projection", "validation")
         ),
-        "responsibility modules stay free of the public facade and of IO",
-        forbidden=(ATTACK_PATTERN_FACADE, PIPELINE, *IO_NEAR),
-    ),
-    Rule(
-        "attack-pattern-consumers-skip-the-facade",
-        (
-            f"{DATA}.taxonomy_pins",
-            *(
-                f"{PIPELINE}.projection_{name}"
-                for name in (
-                    "allocation",
-                    "allocator",
-                    "candidates",
-                    "qualification",
-                    "relations",
-                    "requirements",
-                    "resources",
-                )
-            ),
-        ),
-        "adapters reach types through the responsibility leaves",
-        forbidden=(ATTACK_PATTERN_FACADE,),
+        "responsibility modules stay free of the pipeline and of IO",
+        forbidden=(PIPELINE, *IO_NEAR),
     ),
     Rule(
         "projection-contracts-are-a-leaf",
@@ -533,7 +512,6 @@ RULES: list[Rule] = [
             OBLIGATION_INPUT,
             f"{PUBLIC_MODELS}.attack_pattern_chain",
             f"{PUBLIC_MODELS}.attack_pattern_contracts",
-            ATTACK_PATTERN_FACADE,
             f"{PUBLIC_MODELS}.canonical",
             f"{PIPELINE}.projection_authoritative",
             PROJECTION_CONTRACTS,

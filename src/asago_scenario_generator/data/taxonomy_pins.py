@@ -18,7 +18,7 @@ Authority rules:
 
 The resolver performs all I/O at construction time via this module's
 loaders; the constructed object is a pure in-memory implementation of the
-merged :class:`~asago_scenario_generator.models.attack_pattern.TaxonomyResolver`
+merged :class:`~asago_scenario_generator.models.attack_pattern_contracts.TaxonomyResolver`
 protocol.
 """
 

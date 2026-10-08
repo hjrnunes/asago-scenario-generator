@@ -12,7 +12,7 @@ from __future__ import annotations
 import pytest
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
-from asago_scenario_generator.models.attack_pattern import AttackPattern
+from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 
 # The five historically enriched pattern IDs.  AP-T17-02 was retired in the
 # canonical lineage (disposition=retire) and has no resulting live record.

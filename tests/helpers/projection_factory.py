@@ -9,10 +9,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from asago_scenario_generator.models.attack_pattern import (
-    AttackPattern,
+from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.models.attack_pattern_contracts import (
     AuthoritativeFactReference,
     EvaluatedFactEvidence,
+)
+from asago_scenario_generator.models.attack_pattern_digests import (
     compute_chain_semantic_digest,
 )
 from asago_scenario_generator.models.capability_profile import (

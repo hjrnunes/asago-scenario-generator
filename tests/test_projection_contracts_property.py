@@ -13,7 +13,7 @@ import unicodedata
 
 from hypothesis import given, settings, strategies as st
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_projection import (
     EntryPointResourceReference,
     ToolResourceReference,
 )

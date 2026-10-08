@@ -22,8 +22,8 @@ import pytest
 from pydantic import ValidationError
 from tests.cli_helpers import PlainCliRunner
 
-from asago_scenario_generator.models.attack_pattern import (
-    AttackPattern,
+from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.models.attack_pattern_digests import (
     compute_chain_semantic_digest,
 )
 from asago_scenario_generator.models.canonical import (
