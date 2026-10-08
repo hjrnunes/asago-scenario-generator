@@ -1876,24 +1876,18 @@ def _raise_accounting_failure(
         revision_applied=False,
         normalization_warnings=accounting_normalization_warnings,
     )
+    failing_checks = (
+        *accounting.missing_dispositions,
+        *accounting.unaccounted_risk_refs,
+        *accounting.contradictions,
+    )
     raise LossAnalysisGateError(
         stage=STAGE,
         step=STEP_GAP,
         message="risk accounting gate failed: "
-        + "; ".join(
-            dict.fromkeys(
-                [
-                    *accounting.missing_dispositions,
-                    *accounting.unaccounted_risk_refs,
-                ]
-            )
-        ),
+        + "; ".join(dict.fromkeys(failing_checks)),
         gate="risk_accounting",
-        failing_checks=(
-            *accounting.missing_dispositions,
-            *accounting.unaccounted_risk_refs,
-            *accounting.contradictions,
-        ),
+        failing_checks=failing_checks,
     )
 
 

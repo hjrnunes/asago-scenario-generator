@@ -323,11 +323,11 @@ GATE_FAILURES = [
         ("atlas-002", "atlas-002"),
     ),
     (
-        "contradiction alone leaves the message tail empty",
+        "contradiction alone",
         ["atlas-001"],
         [NOT_APPLICABLE_1],
         ("atlas-001",),
-        "stage_1a/gap_analysis: risk accounting gate failed: ",
+        "stage_1a/gap_analysis: risk accounting gate failed: " + CONTRADICTION,
         (CONTRADICTION,),
     ),
     (
@@ -335,7 +335,8 @@ GATE_FAILURES = [
         ["atlas-001"],
         [NOT_APPLICABLE_1],
         ("atlas-001", "atlas-002"),
-        "stage_1a/gap_analysis: risk accounting gate failed: atlas-002",
+        "stage_1a/gap_analysis: risk accounting gate failed: atlas-002; "
+        + CONTRADICTION,
         ("atlas-002", "atlas-002", CONTRADICTION),
     ),
 ]
