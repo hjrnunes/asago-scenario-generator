@@ -39,6 +39,9 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ProcessModelPart,
     Responsibility,
 )
+from asago_scenario_generator.stpa.observation_contract import (
+    default_observation_contract,
+)
 from asago_scenario_generator.stpa.scenario_prod._constants import (
     PROMPTS_DIR as STAGE5_PROMPTS_DIR,
 )
@@ -56,6 +59,10 @@ from tests.helpers.normal_authoring_wire import (
     _record_observations,
     _target_operation,
     _wrong_timing_context,
+)
+from tests.stpa.condition_prompt_fixture import (
+    realistic_observations,
+    realistic_profile,
 )
 
 PHRASES_DIR = Path(__file__).with_name("phrases")
@@ -153,6 +160,28 @@ def _commit_operation_facts() -> dict[str, object]:
     }
 
 
+def _realistic_request_facts(tool_call: bool = True) -> dict[str, object]:
+    """Return the six-operation synthetic target with the default captures."""
+    contract = default_observation_contract()
+    if not tool_call:
+        contract = contract.model_copy(
+            update={
+                "capture": tuple(
+                    item.model_copy(update={"available": False})
+                    if item.kind == "tool_call"
+                    else item
+                    for item in contract.capture
+                )
+            }
+        )
+    profile = realistic_profile()
+    return {
+        "execution_target_profile": profile,
+        "target_observations": realistic_observations(profile),
+        "observation_contract": contract,
+    }
+
+
 def _system_model(**variables: object) -> Callable[[str], str]:
     def render(template: str) -> str:
         loader = TemplateLoader(SYSTEM_MODEL_PROMPTS_DIR)
@@ -194,6 +223,8 @@ CASES: dict[str, Callable[[str], str]] = {
     ),
     "archive-item": _stage5(_archive_item_facts),
     "commit-operation": _stage5(_commit_operation_facts),
+    "realistic-request": _stage5(_realistic_request_facts),
+    "realistic-no-tool-call": _stage5(lambda: _realistic_request_facts(False)),
 }
 
 

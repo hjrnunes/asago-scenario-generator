@@ -36,22 +36,11 @@ def test_stage5_prompt_separates_negative_feedback_from_sensor_anomaly() -> None
         "## Allowed Stimulus Categories", 1
     )[0]
 
-    assert "negative or empty feedback result can be valid" in rendered
-    assert "misinterprets an accurate negative/empty result" in rendered
-    assert "select the supplied `PROCESS_MODEL_FLAW` handle" in rendered
-    assert (
-        "Select `SENSOR_ANOMALY` only when the supplied context either establishes"
-        in rendered
-    )
-    assert "prospective corruption/misreporting mechanism" in rendered
-    assert "this is not proof that corruption already occurred" in rendered
-    assert "infer attacker influence from a negative/empty result" in rendered
     assert "feedback itself misreports a known fact" in source_view
     assert (
         "interpretation of an accurate result belongs to the process-model"
         in source_view
     )
-    assert rendered.count("A negative or empty feedback result can be valid") == 1
 
 
 @pytest.mark.parametrize("status", tuple(item.value for item in CausalEvidenceStatus))
@@ -117,9 +106,6 @@ def test_stage5_observation_view_keeps_empty_read_as_quoted_feedback() -> None:
 
     assert "TARGET-READ-001" in rendered
     assert '"items":[],"status":"not_found"' in rendered
-    assert "not an attacker-controlled stimulus by itself" in rendered
-    assert "background evidence" in rendered
-    assert "unchanged target returns" in rendered
 
 
 def _route_payload(source_handle: str, stimulus_category: str) -> dict:

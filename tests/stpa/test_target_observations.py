@@ -185,7 +185,6 @@ def test_stage5_prompt_renders_complete_bound_operation_inventory() -> None:
     )
 
     rendered = f"{system}\n{user}"
-    assert "## Observed target operations" in rendered
     assert "operation_name: retrieve-1" in rendered
     assert "description: Retrieve content for the model context." in rendered
     assert "argument_names: []" in rendered
@@ -193,7 +192,6 @@ def test_stage5_prompt_renders_complete_bound_operation_inventory() -> None:
     assert "likely_effect: unknown" in rendered
     assert "likely_state_effect: unknown" in rendered
     assert "!!python" not in rendered
-    assert "## Exact Target Operation" not in user
 
 
 def test_stage5_prompt_renders_multiple_operations_and_interface_metadata() -> None:

@@ -884,18 +884,6 @@ def test_rendered_request_explains_the_condition_within_the_token_budget() -> No
         target_observations=_observations(),
         observation_contract=default_observation_contract(),
     )
-    rendered = " ".join(f"{system}\n{user}".split())
-    for phrase in (
-        "## Discriminating condition",
-        "Also return `discriminating_condition` under `unsafe_outcome`",
-        '{"source":"argument","operation":<name>,"argument":<name>}',
-        '{"source":"fact","path":<path>}',
-        '"requires_prior":<name>',
-        '{"status":"unavailable","reason":<one sentence>}',
-        "Never invent a record or value.",
-    ):
-        assert phrase in rendered, phrase
-
     schema = _scenario_semantics_payload_type(
         4,
         duration_eligible=False,
@@ -905,16 +893,6 @@ def test_rendered_request_explains_the_condition_within_the_token_budget() -> No
     assert "DiscriminatingCondition" in json.dumps(schema)
     total = estimate_prompt_tokens(system + user + json.dumps(schema))
     assert total <= STAGE5_PROMPT_TOKEN_BUDGET
-
-
-def test_rendered_request_without_contract_omits_the_condition() -> None:
-    system, user = build_context_bdi_prompts(
-        _wrong_timing_context(),
-        TemplateLoader(PROMPTS_DIR),
-        target_operation=_operation(),
-        target_observations=_observations(),
-    )
-    assert "discriminating_condition" not in system + user
 
 
 # --- relative argument paths ----------------------------------------------
@@ -1100,61 +1078,6 @@ def test_rendered_request_enumerates_absolute_fact_paths() -> None:
         "- TARGET-READ-001.documents: list with 1 entries (not indexed)",
     ):
         assert line in user, line
-
-
-def test_rendered_request_explains_the_observed_selection_without_steering() -> None:
-    system, user, _ = _realistic_request()
-    rendered = " ".join(f"{system}\n{user}".split())
-    for phrase in (
-        "`TARGET-STATE.<collection>.<record_key>.<field>`",
-        "names the record the unsafe call would act on: the target of the violation.",
-        "Each `argument_values` entry names an argument that selects the "
-        "record the unsafe call acts on (usually its key argument) and gives "
-        "the value the test passes for it",
-        '"record_path":"TARGET-STATE.widgets.W-2",',
-        '{"operation":"get_widget","argument":"widget_id","path":'
-        '"TARGET-STATE.widgets.W-2"}',
-        '"left":{"source":"fact","path":"TARGET-STATE.widgets.W-2.owner_id"}, '
-        '"op":"ne","right":{"source":"fact","path":"TARGET-STATE.session_user_id"}',
-        "never compare two literals",
-        '{"kind":"not_called","operation":<name>}',
-        "Reply text is not an operand",
-        "only when no listed record meets the comparisons",
-    ):
-        assert phrase in rendered, phrase
-    for removed in (
-        "Prefer arguments, session facts, and literals",
-        "otherwise mark the record unavailable",
-        "gives the value the test passes to that operation argument for this record",
-        "TARGET-STATE.order_id",
-        "TARGET-STATE.record_id",
-        "`TARGET-STATE.<key>.<field>`",
-    ):
-        assert removed not in rendered, removed
-
-
-def test_rendered_request_keeps_record_paths_out_of_safe_outcome_record_refs() -> None:
-    system, user, _ = _realistic_request()
-    rendered_system = " ".join(system.split())
-    rendered_user = " ".join(user.split())
-    for phrase in (
-        "Set `record_refs` only to top-level supplied `observation_ref` values "
-        "such as `TARGET-STATE`, never to a record path such as "
-        "`TARGET-STATE.widgets.W-2`.",
-        "Put the selected record path (the same value as "
-        "`record_selection.record_path`) and its field paths",
-    ):
-        assert phrase in rendered_system, phrase
-    for phrase in (
-        "`record_refs` lists only top-level supplied `observation_ref` values "
-        "(for example `TARGET-STATE`), never a record path.",
-        "The selected record path (the same value as "
-        "`record_selection.record_path`, for example `TARGET-STATE.widgets.W-2`) "
-        "and its field paths (shape "
-        "`TARGET-STATE.<collection>.<record_key>.<field>`) go in `fact_refs`.",
-    ):
-        assert phrase in rendered_user, phrase
-    assert "Use only supplied `record_refs` and" not in rendered_user
 
 
 def test_realistic_rendered_request_stays_within_the_token_budget() -> None:
@@ -1541,30 +1464,6 @@ def test_stage5_publishes_nothing_when_the_final_reply_has_no_recoverable_condit
     assert error is not None
     assert error.startswith(f"{error_type}: ")
     assert client.call_count == calls
-
-
-def test_rendered_request_explains_value_kinds_and_preconditions() -> None:
-    system, user, _ = _realistic_request()
-    rendered_user = " ".join(user.split())
-    for phrase in (
-        "Compare values of the same kind: a record key only with another key "
-        "of the same collection or with a field whose values are such keys.",
-        "Take record facts from the selected record or from a record one key "
-        "link away (one of its fields holds that record's key, or that "
-        "record's field holds its key); for ownership, compare that record's "
-        "owner field with the session value.",
-        "For an `order` comparison, choose as `requires_prior` an operation "
-        "that reads the same record the unsafe operation acts on, and set "
-        "`same_argument` to the shared record-key argument when both take it.",
-        "A comparison that only restates a state fact unrelated to the unsafe "
-        "call is reported as not checkable.",
-    ):
-        assert phrase in rendered_user, phrase
-    rendered_system = " ".join(system.split())
-    assert (
-        "Compare values of the same kind, and take record facts from the "
-        "selected record or a record one key link away from it."
-    ) in rendered_system
 
 
 # --- findings: a condition that resolves but cannot separate the call -------
