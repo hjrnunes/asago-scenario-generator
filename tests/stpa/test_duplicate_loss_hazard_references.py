@@ -43,7 +43,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     select_reference_repairs,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
-from tests.helpers.calls_log import read_calls_jsonl
+from tests.helpers.calls_log import read_calls_jsonl, stage1a_steps
 from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -52,14 +52,6 @@ from tests.stpa.sp1_helpers import (
     valid_risk_draft_dict,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
-
-
-def _stage1a_steps(run_dir: Path) -> list[str]:
-    return [
-        entry["step"]
-        for entry in read_calls_jsonl(run_dir)
-        if entry["stage"] == "stage_1a"
-    ]
 
 
 def _derive_with_repair(
@@ -157,7 +149,7 @@ class TestStage1aReferenceRepairLimits:
 
         _, analysis = _derive_with_repair(tmp_path, [risk, _gap_with_l3()], [repair])
 
-        assert _stage1a_steps(tmp_path) == [
+        assert stage1a_steps(tmp_path) == [
             "risk_derivation",
             "risk_derivation_repair",
             "gap_analysis",
@@ -186,7 +178,7 @@ class TestStage1aReferenceRepairLimits:
         with pytest.raises(StageError, match="targeted repair failed"):
             _derive_with_repair(tmp_path, [risk, valid_gap_draft_dict()], [repair])
 
-        assert _stage1a_steps(tmp_path) == [
+        assert stage1a_steps(tmp_path) == [
             "risk_derivation",
             "risk_derivation_repair",
         ]
