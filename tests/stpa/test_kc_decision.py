@@ -95,3 +95,36 @@ def test_a_possible_or_unverified_change_keeps_full_crud_open() -> None:
         decision = target_kc_decision(_profile(_tool("lookup"), tool))
 
         assert "KC6.3.2" not in decision.absent
+
+
+def test_a_verified_text_search_tool_is_a_rag_data_source() -> None:
+    decision = target_kc_decision(
+        _profile(_tool("policy", roles=("text_search",)), _tool("lookup"))
+    )
+
+    assert "KC6.3.3" in decision.present
+    assert "policy" in decision.reasons["KC6.3.3"]
+
+
+def test_an_unverified_text_search_role_decides_nothing() -> None:
+    decision = target_kc_decision(
+        _profile(
+            _tool("policy", roles=("text_search",), agreement="unverified"),
+            completeness=InventoryCompleteness.observed_partial,
+        )
+    )
+
+    assert "KC6.3.3" not in decision.present | decision.absent
+
+
+def test_rules_combine_into_one_decision() -> None:
+    decision = target_kc_decision(
+        _profile(
+            _tool("policy", roles=("text_search",)),
+            _tool("refund", effect="execute", state="changes"),
+        )
+    )
+
+    assert decision.present == {"KC6.3.2", "KC6.3.3"}
+    assert decision.absent == {"KC6.3.1"}
+    assert set(decision.reasons) == {"KC6.3.1", "KC6.3.2", "KC6.3.3"}

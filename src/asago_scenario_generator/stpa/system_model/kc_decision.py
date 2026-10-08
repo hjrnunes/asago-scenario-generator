@@ -26,6 +26,8 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 
 DATABASE_READ_ONLY = "KC6.3.1"
 DATABASE_FULL_CRUD = "KC6.3.2"
+RAG_DATA_SOURCE = "KC6.3.3"
+TEXT_SEARCH_ROLE = "text_search"
 
 
 @dataclass(frozen=True)
@@ -102,8 +104,40 @@ def _database_access(
     )
 
 
+def _retrieval_source(
+    verified: tuple[TargetSemanticInterpretation, ...],
+) -> KcFactDecision:
+    """A verified free-text document search feeds retrieved text to the model."""
+    searchers = [item for item in verified if TEXT_SEARCH_ROLE in item.semantic_roles]
+    if not searchers:
+        return KcFactDecision()
+    return KcFactDecision(
+        present=frozenset({RAG_DATA_SOURCE}),
+        reasons={
+            RAG_DATA_SOURCE: (
+                f"observed tools {_names(searchers)} search documents for the "
+                "model's context"
+            )
+        },
+    )
+
+
+def _combine(decisions: Iterable[KcFactDecision]) -> KcFactDecision:
+    present: set[str] = set()
+    absent: set[str] = set()
+    reasons: dict[str, str] = {}
+    for decision in decisions:
+        present |= decision.present
+        absent |= decision.absent
+        reasons.update(decision.reasons)
+    return KcFactDecision(frozenset(present), frozenset(absent), reasons)
+
+
 def target_kc_decision(profile: ExecutionTargetProfile | None) -> KcFactDecision:
     """Return the KC sub-codes that *profile*'s verified facts decide."""
     if profile is None:
         return KcFactDecision()
-    return _database_access(profile, _verified(profile))
+    verified = _verified(profile)
+    return _combine(
+        (_database_access(profile, verified), _retrieval_source(verified))
+    )
