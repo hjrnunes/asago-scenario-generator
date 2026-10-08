@@ -1240,7 +1240,7 @@ def _prepare_one_correction(
         )
     try:
         correction_raw = _invoke_correction_method(correction_method, request, verdict)
-        correction_value = _coerce_correction_value(correction_raw, request)
+        correction_value = _coerce_correction_value(correction_raw)
         if correction_value.disposition != "revise":
             return _CorrectionPreparation(correction=correction_value)
         corrected_request = apply_ica_hazard_verification_correction(
@@ -1607,15 +1607,15 @@ def _invoke_correction_method(
     return method(request, verdict=verdict)
 
 
-def _coerce_correction_value(
-    value: Any,
-    request: IcaHazardVerificationRequest,
-) -> IcaHazardVerificationCorrection:
-    """Require a typed correction bound to *request* before disposition handling."""
+def _coerce_correction_value(value: Any) -> IcaHazardVerificationCorrection:
+    """Require a typed correction before disposition handling.
+
+    Identity is checked where the correction is used: by
+    ``apply_ica_hazard_verification_correction`` for a revision and by the
+    verification record for a terminal disposition.
+    """
     if not isinstance(value, IcaHazardVerificationCorrection):
         raise TypeError("ICA correction must return an IcaHazardVerificationCorrection")
-    if value.ica_id != request.ica_id:
-        raise ValueError("ICA correction identity does not match its request")
     return value
 
 

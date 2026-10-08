@@ -770,6 +770,57 @@ def test_untyped_correction_is_a_failure_not_a_coerced_correction() -> None:
     assert filtered.slots[0].icas == []
 
 
+def test_a_revising_correction_for_another_ica_is_a_recorded_failure() -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+
+    class Adapter(_TerminalCorrectionFake):
+        def correct_ica_hazard(self, request, verdict):
+            return IcaHazardVerificationCorrection(
+                ica_id=request.ica_id + "-other",
+                deviation=request.deviation + " with the missing timing fact",
+                rationale="Add the missing typed timing fact.",
+            )
+
+    adapter = Adapter("unresolved")
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    assert adapter.verification_calls == 1
+    assert batch.records[0].disposition == "provider_failure"
+    assert any(
+        "bounded ICA correction failed: ValueError: ICA correction identity "
+        "does not match its request" in item.detail
+        for item in batch.diagnostics
+    )
+    assert filtered.slots[0].icas == []
+
+
+def test_a_terminal_correction_for_another_ica_fails_the_verification_record() -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+
+    class Adapter(_TerminalCorrectionFake):
+        def correct_ica_hazard(self, request, verdict):
+            return IcaHazardVerificationCorrection(
+                ica_id=request.ica_id + "-other",
+                disposition="unresolved",
+                rationale="The author supplied an explicit terminal disposition.",
+            )
+
+    with pytest.raises(
+        ValueError, match="verification correction ICA identity changed"
+    ):
+        verify_final_ica_batch(
+            Adapter("unresolved"),
+            enumeration,
+            loss_analysis=loss_analysis,
+            control_structure=control_structure,
+        )
+
+
 def _coordination_inputs(
     *, link_source: str = "RESP-1", link_target: str = "RESP-2"
 ) -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
