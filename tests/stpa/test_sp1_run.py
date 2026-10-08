@@ -504,7 +504,7 @@ class TestRunOrchestration:
         assert result.stage_warnings == []
         assert any(
             "call_2b_control_elements" in error
-            and "target requires type and id" in error
+            and "control_actions.0.target.id\n  Field required" in error
             for error in result.stage_errors
         )
 
@@ -529,7 +529,7 @@ class TestRunOrchestration:
         assert result.stage_warnings == []
         assert any(
             "call_2b_control_elements" in error
-            and "requires a non-empty updates" in error
+            and "feedback_channels.0.updates\n  Input should be a valid string" in error
             for error in result.stage_errors
         )
 

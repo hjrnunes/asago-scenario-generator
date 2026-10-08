@@ -8,6 +8,7 @@ must fail before canonical ID repair or fallback construction.
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlledProcess,
@@ -23,7 +24,6 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _call_2b_control_elements,
     _assemble_control_structure,
     _enrich_responsibilities,
-    _stage2_id_list,
     _validate_responsibility_payload,
     parse_control_element_set_response,
 )
@@ -332,42 +332,69 @@ def _payload_with(**changes) -> dict:
     return payload
 
 
-@pytest.mark.parametrize(
-    ("payload", "message"),
-    [
-        (
-            _payload_with(controlled_processes=None, feedback=None),
-            "Call 2b response is missing top-level collection(s): "
-            "controlled_processes, feedback",
-        ),
-        (
-            _payload_with(feedback_channels=[]),
-            "Call 2b response must use one feedback collection, not both feedback "
-            "and feedback_channels",
-        ),
-        (_payload_with(control_actions={}), "control_actions must be a list"),
-        (
-            _payload_with(controlled_processes="CP-1"),
-            "controlled_processes must be a list",
-        ),
-        (
-            _payload_with(feedback=None, feedback_channels={}),
-            "feedback_channels must be a list",
-        ),
-        (
-            _payload_with(feedback=[]),
-            "feedback must contain at least one feedback channel",
-        ),
-    ],
-)
-def test_call2b_parser_rejects_malformed_top_level_collections(
-    payload: dict, message: str
-) -> None:
-    with pytest.raises(ValueError) as exc_info:
+def _wire_errors(payload: object) -> list[tuple[str, str]]:
+    """Return the (location, message) pairs a malformed Call 2b response raises."""
+    with pytest.raises(ValidationError) as exc_info:
         parse_control_element_set_response(
             payload, responsibilities=_responsibilities().responsibilities
         )
-    assert str(exc_info.value) == message
+    return [
+        (".".join(str(part) for part in error["loc"]), error["msg"])
+        for error in exc_info.value.errors()
+    ]
+
+
+def _has_error(errors: list[tuple[str, str]], location: str, fragment: str) -> bool:
+    return any(loc == location and fragment in msg for loc, msg in errors)
+
+
+@pytest.mark.parametrize(
+    ("payload", "location", "fragment"),
+    [
+        (
+            _payload_with(controlled_processes=None, feedback=None),
+            "controlled_processes",
+            "Field required",
+        ),
+        (
+            _payload_with(controlled_processes=None, feedback=None),
+            "feedback",
+            "Field required",
+        ),
+        (
+            _payload_with(feedback_channels=[]),
+            "",
+            "must use one feedback collection, not both feedback and feedback_channels",
+        ),
+        (_payload_with(control_actions={}), "control_actions", "valid list"),
+        (_payload_with(controlled_processes="CP-1"), "controlled_processes", "list"),
+        (
+            _payload_with(feedback=None, feedback_channels={}),
+            "feedback_channels",
+            "list",
+        ),
+        (_payload_with(feedback=[]), "feedback", "at least 1 item"),
+        (_payload_with(extra=[]), "extra", "Extra inputs are not permitted"),
+    ],
+    ids=[
+        "missing-processes",
+        "missing-feedback",
+        "both-feedback-spellings",
+        "actions-not-list",
+        "processes-not-list",
+        "feedback-channels-not-list",
+        "empty-feedback",
+        "unknown-collection",
+    ],
+)
+def test_call2b_parser_rejects_malformed_top_level_collections(
+    payload: dict, location: str, fragment: str
+) -> None:
+    assert _has_error(_wire_errors(payload), location, fragment)
+
+
+def test_call2b_parser_rejects_a_non_object_response() -> None:
+    assert _wire_errors(["not", "an", "object"])
 
 
 def test_call2b_parser_accepts_historical_feedback_channels_spelling() -> None:
@@ -381,27 +408,48 @@ def test_call2b_parser_accepts_historical_feedback_channels_spelling() -> None:
     assert [item.fb_id for item in parsed.feedback_channels] == ["FB-1-1", "FB-2-1"]
 
 
-def _action_error(action: object) -> str:
+def _action_errors(action: object) -> list[tuple[str, str]]:
     payload = _valid_payload()
     payload["control_actions"][0] = action
-    with pytest.raises(ValueError) as exc_info:
-        parse_control_element_set_response(
-            payload, responsibilities=_responsibilities().responsibilities
-        )
-    return str(exc_info.value)
+    return _wire_errors(payload)
 
 
 def test_call2b_parser_rejects_a_non_object_action() -> None:
-    assert _action_error("CA-2-1") == "control_actions[0] must be an object"
+    assert _has_error(_action_errors("CA-2-1"), "control_actions.0", "")
 
 
 def test_call2b_parser_rejects_an_action_without_a_matching_owner() -> None:
     action = _valid_payload()["control_actions"][0]
     action["ca_id"] = "CA-3-1"
 
-    assert _action_error(action) == (
-        "control_actions[0] 'CA-3-1' has no matching responsibility owner; "
-        "ownership cannot be recovered from array order"
+    assert _has_error(
+        _action_errors(action),
+        "control_actions.0.ca_id",
+        "'CA-3-1' has no matching responsibility owner; "
+        "ownership cannot be recovered from array order",
+    )
+
+
+def test_call2b_parser_rejects_an_id_without_an_owner() -> None:
+    action = _valid_payload()["control_actions"][0]
+    action["ca_id"] = "first-action"
+
+    assert _has_error(
+        _action_errors(action),
+        "control_actions.0.ca_id",
+        "must encode an explicit owner using CA-X-Y; got 'first-action'",
+    )
+
+
+def test_call2b_parser_names_the_combined_action_field() -> None:
+    action = _valid_payload()["control_actions"][0]
+    action["action"] = "CA-2-1 Verify the completed transaction"
+
+    assert _has_error(
+        _action_errors(action),
+        "control_actions.0",
+        "uses combined action field 'action'; return separate ca_id and "
+        "description fields",
     )
 
 
@@ -409,8 +457,10 @@ def test_call2b_parser_rejects_the_action_temporality_spelling() -> None:
     action = _valid_payload()["control_actions"][0]
     action["action_temporality"] = "discrete"
 
-    assert _action_error(action) == (
-        "control_actions[0] contains unexpected semantic field(s): action_temporality"
+    assert _has_error(
+        _action_errors(action),
+        "control_actions.0.action_temporality",
+        "Extra inputs are not permitted",
     )
 
 
@@ -419,8 +469,40 @@ def test_call2b_parser_rejects_a_malformed_operation(operation: object) -> None:
     action = _valid_payload()["control_actions"][0]
     action["operation"] = operation
 
-    assert _action_error(action) == (
-        "control_actions[0] operation must be an operation name or null"
+    assert _has_error(_action_errors(action), "control_actions.0.operation", "")
+
+
+@pytest.mark.parametrize(
+    ("target", "fragment"),
+    [
+        ("PM-1-1", "must name RESP-N or CP-N; got 'PM-1-1'"),
+        (" ", "must name RESP-N or CP-N"),
+        ({"type": "controlled_process", "id": "CP-1", "x": 1}, "Extra inputs"),
+        ({"type": "process", "id": "CP-1"}, "Input should be"),
+    ],
+    ids=["unknown-prefix", "blank", "extra-field", "unknown-type"],
+)
+def test_call2b_parser_rejects_a_malformed_target(
+    target: object, fragment: str
+) -> None:
+    action = _valid_payload()["control_actions"][0]
+    action["target"] = target
+
+    assert any(
+        loc.startswith("control_actions.0.target") and fragment in msg
+        for loc, msg in _action_errors(action)
+    )
+
+
+def test_call2b_parser_rejects_an_effect_that_contradicts_its_target() -> None:
+    action = _valid_payload()["control_actions"][1]
+    action["effect_kind"] = "tool_call"
+
+    assert _has_error(
+        _action_errors(action),
+        "control_actions.0",
+        "control actions targeting a responsibility must use "
+        "effect_kind='agent_message'",
     )
 
 
@@ -436,20 +518,17 @@ def test_call2b_parser_keeps_temporality_and_operation() -> None:
 
     assert parsed.control_actions[0].temporality.value == "discrete"
     assert parsed.control_actions[0].operation == "verify_transaction"
+    assert parsed.control_actions[1].effect_kind.value == "agent_message"
 
 
-def _feedback_error(channel: object) -> str:
+def _feedback_errors(channel: object) -> list[tuple[str, str]]:
     payload = _valid_payload()
     payload["feedback"][0] = channel
-    with pytest.raises(ValueError) as exc_info:
-        parse_control_element_set_response(
-            payload, responsibilities=_responsibilities().responsibilities
-        )
-    return str(exc_info.value)
+    return _wire_errors(payload)
 
 
 def test_call2b_parser_rejects_a_non_object_feedback_channel() -> None:
-    assert _feedback_error("FB-1-1") == "feedback[0] must be an object"
+    assert _has_error(_feedback_errors("FB-1-1"), "feedback.0", "")
 
 
 @pytest.mark.parametrize("field", ["fb_id", "description", "updates", "source"])
@@ -457,16 +536,20 @@ def test_call2b_parser_rejects_a_feedback_channel_missing_a_field(field: str) ->
     channel = _valid_payload()["feedback"][0]
     channel.pop(field)
 
-    assert _feedback_error(channel) == f"feedback[0] is missing {field}"
+    assert _has_error(
+        _feedback_errors(channel), f"feedback.0.{field}", "Field required"
+    )
 
 
 def test_call2b_parser_rejects_feedback_without_a_matching_owner() -> None:
     channel = _valid_payload()["feedback"][0]
     channel["fb_id"] = "FB-3-1"
 
-    assert _feedback_error(channel) == (
-        "feedback[0] 'FB-3-1' has no matching responsibility owner; "
-        "ownership cannot be recovered from array order"
+    assert _has_error(
+        _feedback_errors(channel),
+        "feedback.0.fb_id",
+        "'FB-3-1' has no matching responsibility owner; "
+        "ownership cannot be recovered from array order",
     )
 
 
@@ -474,17 +557,27 @@ def test_call2b_parser_rejects_a_null_feedback_source() -> None:
     channel = _valid_payload()["feedback"][0]
     channel["source"] = None
 
-    assert _feedback_error(channel) == "feedback[0] requires a non-null source"
+    assert _has_error(_feedback_errors(channel), "feedback.0.source", "")
 
 
 def test_call2b_parser_rejects_an_unknown_feedback_source_kind() -> None:
     channel = _valid_payload()["feedback"][0]
     channel["source_kind"] = "telepathy"
 
-    message = _feedback_error(channel)
+    assert _has_error(
+        _feedback_errors(channel), "feedback.0.source_kind", "Input should be"
+    )
 
-    assert message.startswith("feedback[0] source_kind must be one of: ")
-    assert message.endswith("got 'telepathy'")
+
+def test_call2b_parser_rejects_a_controlled_process_without_a_number() -> None:
+    payload = _valid_payload()
+    payload["controlled_processes"][0]["cp_id"] = "CP-RESERVATIONS"
+
+    assert _has_error(
+        _wire_errors(payload),
+        "controlled_processes.0.cp_id",
+        "must encode an explicit owner using CP-X-Y; got 'CP-RESERVATIONS'",
+    )
 
 
 def test_call2b_parser_keeps_a_valid_feedback_source_kind() -> None:
@@ -532,21 +625,28 @@ def test_call2b_parser_rejects_feedback_for_an_unknown_process_model_part() -> N
     )
 
 
-def test_stage2_id_list_defaults_and_deduplicates() -> None:
-    assert _stage2_id_list(None, field_name="refs", item_label="x") == []
-    assert _stage2_id_list(
-        ["PM-1", "PM-2", "PM-1"], field_name="refs", item_label="x"
-    ) == [
-        "PM-1",
-        "PM-2",
-    ]
+def test_call2b_parser_defaults_and_deduplicates_process_model_refs() -> None:
+    payload = _valid_payload()
+    payload["control_actions"][0]["process_model_refs"] = ["PM-2-1", "PM-2-1"]
+    payload["control_actions"][1]["process_model_refs"] = None
+
+    parsed = parse_control_element_set_response(
+        payload, responsibilities=_responsibilities().responsibilities
+    )
+
+    assert parsed.control_actions[0].process_model_refs == ["PM-2-1"]
+    assert parsed.control_actions[1].process_model_refs == []
 
 
-@pytest.mark.parametrize("value", ["PM-1", {"a": 1}, ["PM-1", ""], ["PM-1", 2]])
-def test_stage2_id_list_rejects_other_shapes(value: object) -> None:
-    with pytest.raises(ValueError) as exc_info:
-        _stage2_id_list(value, field_name="refs", item_label="action")
-    assert str(exc_info.value) == "action refs must be a list of IDs"
+@pytest.mark.parametrize("value", ["PM-2-1", {"a": 1}, ["PM-2-1", ""], ["PM-2-1", 2]])
+def test_call2b_parser_rejects_other_process_model_ref_shapes(value: object) -> None:
+    action = _valid_payload()["control_actions"][0]
+    action["process_model_refs"] = value
+
+    assert any(
+        loc.startswith("control_actions.0.process_model_refs")
+        for loc, _ in _action_errors(action)
+    )
 
 
 def _entry(**changes) -> dict:
