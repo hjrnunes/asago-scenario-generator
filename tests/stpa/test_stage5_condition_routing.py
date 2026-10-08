@@ -12,7 +12,7 @@ from asago_scenario_generator.stpa.observation_contract import (
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from .test_discriminating_condition import (
+from tests.helpers.discriminating_condition import (
     _generate,
     _ownership_condition,
     _payload_with,

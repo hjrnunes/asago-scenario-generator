@@ -13,7 +13,7 @@ from asago_scenario_generator.stpa.obligation_aware.governance_routing import (
     GovernanceRoutingResult,
 )
 from tests.helpers.synthesis_fixture import baseline_loss_analysis
-from tests.test_synthesis import _FakeAdapters, _inputs
+from tests.helpers.synthesis import _FakeAdapters, _inputs
 
 _GOVERNANCE_RISK = "risk-governance"
 

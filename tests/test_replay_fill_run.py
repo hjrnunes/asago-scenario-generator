@@ -24,8 +24,8 @@ from asago_scenario_generator.stpa.infra.provider_record import (
 )
 from tests.cli_helpers import PlainCliRunner
 from tests.helpers.synthesis_fixture import synthesis_inputs
-from tests.stpa.test_provider_call_record import _completion
-from tests.test_synthesis import _FakeAdapters
+from tests.helpers.provider_call_record import _completion
+from tests.helpers.synthesis import _FakeAdapters
 
 runner = PlainCliRunner()
 

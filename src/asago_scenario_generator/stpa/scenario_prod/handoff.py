@@ -68,7 +68,7 @@ from asago_scenario_generator.stpa.observation_contract import (
     ObservationCriterion,
     SafeObservableOutcome,
 )
-from asago_scenario_generator.stpa.scenario_prod.attack_shape import (
+from asago_scenario_generator.stpa.models.attack_shape import (
     AttackShape,
     default_attack_shape,
 )

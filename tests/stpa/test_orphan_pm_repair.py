@@ -22,7 +22,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
 )
-from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
     CoordinationAnalysis,

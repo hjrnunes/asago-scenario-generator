@@ -21,7 +21,10 @@ from asago_scenario_generator.stpa.infra.templates import (
     TemplateLoader,
     TemplateLoader as TL,
 )
-from asago_scenario_generator.stpa.system_model import PROMPTS_DIR, PROMPTS_DIR as PD
+from asago_scenario_generator.stpa.system_model._constants import (
+    PROMPTS_DIR,
+    PROMPTS_DIR as PD,
+)
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     CriticGap,

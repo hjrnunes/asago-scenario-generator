@@ -19,7 +19,7 @@ from asago_scenario_generator.pipeline.scenario_realization import (
 )
 from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,
-    build_neutral_obligation_briefs,
+    build_neutral_briefs,
     build_obligation_accounting,
 )
 from asago_scenario_generator.pipeline.obligation_planner import (
@@ -268,7 +268,7 @@ def _accounting_from_verified_consideration(
         constraint_ids=pair.constraint_ids,
         evidence=("canary:verified-route",),
     )
-    briefs = build_neutral_obligation_briefs(plan, inputs.attack_pattern_catalog)
+    briefs = build_neutral_briefs(plan, inputs.attack_pattern_catalog)
     consideration = build_consideration_artifact(
         plan=plan,
         briefs=briefs,

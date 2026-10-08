@@ -1965,9 +1965,8 @@ def _run_stage2_llm_call(
     allow_unvalidated: bool = False,
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[Any], None] | None = None,
-    result_parser: Callable[[Any], _Stage2ModelT] | None = None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _Stage2ModelT] | None
+    response_parser: (
+        Callable[[Any, list[dict[str, Any]]], _Stage2ModelT] | None
     ) = None,
     user_prompt_suffix: str = "",
     recover: (
@@ -2005,8 +2004,7 @@ def _run_stage2_llm_call(
         temperature=temperature,
         allow_unvalidated=allow_unvalidated,
         raw_result_validator=raw_result_validator,
-        result_parser=result_parser,
-        result_parser_with_cleanup=result_parser_with_cleanup,
+        response_parser=response_parser,
         result_validator=result_validator,
     )
     if outcome.error is not None and recover is not None:
@@ -2160,7 +2158,7 @@ def _call_2b_control_elements(
         step="call_2b_control_elements",
         # Call 2b is semantic output.  Its stage-local parser rejects unknown
         # carriers and missing meaning before canonical IDs are repaired.
-        result_parser=parse,
+        response_parser=parse,
         recover=correct_references,
     )
 
@@ -2307,7 +2305,7 @@ def _call_3_coordination(
             loss_analysis,
             use_case_text=use_case_text,
         ),
-        result_parser=lambda result: _parse_call3_source_selection(
+        response_parser=lambda result, _cleanup: _parse_call3_source_selection(
             result,
             source_excerpts,
             structure=control_structure,

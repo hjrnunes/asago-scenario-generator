@@ -21,7 +21,7 @@ from asago_scenario_generator.models.obligation_consideration import (
 from asago_scenario_generator.pipeline.obligation_consideration import (
     _governance_route_map,
     build_consideration_artifact,
-    build_neutral_obligation_briefs,
+    build_neutral_briefs,
     build_obligation_accounting,
 )
 from tests.helpers.projection_factory import get_test_raw_pattern
@@ -43,7 +43,7 @@ _PRE_CREDIT_JSON_LEN = 2059
 def _inputs() -> tuple[Any, Any, ObligationIcaConsideration]:
     plan = _plan_with_non_stpa_rows()
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
-    briefs = build_neutral_obligation_briefs(plan, (pattern,))
+    briefs = build_neutral_briefs(plan, (pattern,))
     route = ObligationRoute(
         obligation_id=briefs[0].obligation_id,
         disposition="targeted",

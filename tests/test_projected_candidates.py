@@ -9,24 +9,32 @@ from typing import Any
 import pytest
 from pydantic import ValidationError
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_chain import (
     AttackPattern,
+    ResourceSlot,
+)
+from asago_scenario_generator.models.attack_pattern_contracts import (
     AuthoritativeFactReference,
     EvaluatedFactEvidence,
-    compute_chain_semantic_digest,
-    IntegrationResourceReference,
-    ResourceSlot,
-    ProjectionSnapshot,
-    compute_projection_digest,
-    validate_projection_snapshot,
-    OutputSurfaceResourceReference,
-    AgentInternalResourceReference,
-    ToolResourceReference,
-    TrustBoundaryResourceReference,
     AllCondition,
     AnyCondition,
     EqualityCondition,
     NotCondition,
+)
+from asago_scenario_generator.models.attack_pattern_digests import (
+    compute_chain_semantic_digest,
+    compute_projection_digest,
+)
+from asago_scenario_generator.models.attack_pattern_projection import (
+    IntegrationResourceReference,
+    ProjectionSnapshot,
+    OutputSurfaceResourceReference,
+    AgentInternalResourceReference,
+    ToolResourceReference,
+    TrustBoundaryResourceReference,
+)
+from asago_scenario_generator.models.attack_pattern_validation import (
+    validate_projection_snapshot,
 )
 from asago_scenario_generator.models.canonical import normalize_unicode
 from asago_scenario_generator.models.capability_profile import (
@@ -327,7 +335,8 @@ def _project(
     resolver_pattern = raw if "canonical_chain" in raw else _pattern()
     resolver = TaxonomyResolver(
         __import__(
-            "asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"]
+            "asago_scenario_generator.models.attack_pattern_chain",
+            fromlist=["AttackPattern"],
         )
         .AttackPattern.model_validate(resolver_pattern)
         .canonical_chain.taxonomy_context
@@ -781,7 +790,8 @@ def test_catalog_pin_and_candidate_identity_ignore_record_order_and_duplicates()
     )
     resolver = TaxonomyResolver(
         __import__(
-            "asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"]
+            "asago_scenario_generator.models.attack_pattern_chain",
+            fromlist=["AttackPattern"],
         )
         .AttackPattern.model_validate(first)
         .canonical_chain.taxonomy_context
@@ -887,7 +897,8 @@ def test_no_explicit_links_produces_no_observations() -> None:
     )
     with pytest.raises(ValidationError, match="lacks an observable outcome link"):
         __import__(
-            "asago_scenario_generator.models.attack_pattern", fromlist=["AttackPattern"]
+            "asago_scenario_generator.models.attack_pattern_chain",
+            fromlist=["AttackPattern"],
         ).AttackPattern.model_validate(raw)
 
 
@@ -1163,7 +1174,7 @@ def test_observation_retains_concrete_rejected_combinations() -> None:
     raw = _pattern(conditional=False)
     resolver = TaxonomyResolver(
         __import__(
-            "asago_scenario_generator.models.attack_pattern",
+            "asago_scenario_generator.models.attack_pattern_chain",
             fromlist=["AttackPattern"],
         )
         .AttackPattern.model_validate(raw)
@@ -1945,10 +1956,10 @@ class TestReferenceResolutionHelpers:
         )
 
     def test_entry_point_eligibility_only_requires_accessibility_for_ingress(self):
-        from asago_scenario_generator.models.attack_pattern import (
+        from asago_scenario_generator.models.attack_pattern_projection import (
             EntryPointResourceReference,
-            ResourceSlot,
         )
+        from asago_scenario_generator.models.attack_pattern_chain import ResourceSlot
 
         base = _profile()
         output = base.entry_points[0].model_copy(update={"direction": "output"})
@@ -2184,11 +2195,11 @@ class TestReferenceResolutionHelpers:
         )
 
     def test_snapshot_resource_matching_fails_closed_at_each_filter(self):
-        from asago_scenario_generator.models.attack_pattern import (
+        from asago_scenario_generator.models.attack_pattern_projection import (
             EntryPointResourceReference,
-            ResourceSlot,
             ToolResourceReference,
         )
+        from asago_scenario_generator.models.attack_pattern_chain import ResourceSlot
 
         snapshot = self._snapshot()
         entry_point = snapshot.profile.entry_points[0]
@@ -2540,7 +2551,7 @@ class TestRemainingProjectionHelpers:
             _resource_id(object())
 
     def test_contains_resource_matches_profile_inventory(self):
-        from asago_scenario_generator.models.attack_pattern import (
+        from asago_scenario_generator.models.attack_pattern_projection import (
             AgentInternalResourceReference,
             EntryPointResourceReference,
             OutputSurfaceResourceReference,
@@ -2760,7 +2771,7 @@ class TestRemainingProjectionHelpers:
         raw = _pattern()
         resolver = TaxonomyResolver(
             __import__(
-                "asago_scenario_generator.models.attack_pattern",
+                "asago_scenario_generator.models.attack_pattern_chain",
                 fromlist=["AttackPattern"],
             )
             .AttackPattern.model_validate(raw)

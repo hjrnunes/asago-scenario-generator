@@ -1804,7 +1804,7 @@ def _run_stage1a_call(
         policy=CorrectionPolicy(json_retries=JSON_DECODE_RETRIES),
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-        result_parser_with_cleanup=call.parse_first_response,
+        response_parser=call.parse_first_response,
         result_validator=call.validate_references,
     )
     first_result = call.record_first_attempt(first.result)

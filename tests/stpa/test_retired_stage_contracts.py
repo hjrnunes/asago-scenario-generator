@@ -11,7 +11,7 @@ import pytest
 from pydantic import BaseModel
 
 from asago_scenario_generator.models.capability_profile import Stage1Profile
-from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model import control_structure
 from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,

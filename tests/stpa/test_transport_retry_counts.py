@@ -11,8 +11,8 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     call_with_policy,
     count_requests,
 )
-from tests.stpa.test_provider_call_record import _Answer, _answer, _client, _Provider
-from tests.stpa.test_transport_retry import (
+from tests.helpers.provider_call_record import _Answer, _answer, _client, _Provider
+from tests.helpers.transport_retry import (
     _connection_error,
     _failing_then,
     _status_error,

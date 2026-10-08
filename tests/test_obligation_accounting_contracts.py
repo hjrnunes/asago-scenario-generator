@@ -19,7 +19,7 @@ from asago_scenario_generator.models.obligation_consideration import (
 )
 from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,
-    build_neutral_obligation_briefs,
+    build_neutral_briefs,
     build_obligation_accounting,
 )
 from tests.helpers.obligation_factory import make_plan
@@ -30,7 +30,7 @@ from tests.helpers.governance import _accounting_pins, _plan_with_non_stpa_rows
 def _fixture():
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
     plan = make_plan()
-    briefs = build_neutral_obligation_briefs(plan, (pattern,))
+    briefs = build_neutral_briefs(plan, (pattern,))
     route = ObligationRoute(
         obligation_id=briefs[0].obligation_id,
         disposition="targeted",
@@ -232,7 +232,7 @@ def test_accounting_retains_capability_excluded_and_governance_rows_exactly_once
 ):
     plan = _plan_with_non_stpa_rows()
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
-    briefs = build_neutral_obligation_briefs(plan, (pattern,))
+    briefs = build_neutral_briefs(plan, (pattern,))
     route = ObligationRoute(
         obligation_id=briefs[0].obligation_id,
         disposition="targeted",

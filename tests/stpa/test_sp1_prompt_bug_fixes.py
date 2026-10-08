@@ -12,7 +12,7 @@ import pytest
 from hypothesis import given, settings, strategies as st
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 
 
 @pytest.mark.parametrize("template_name", ("critic_system.j2", "revision_system.j2"))

@@ -25,14 +25,14 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     call_identity,
     provider_call_session,
 )
-from tests.stpa.test_provider_call_record import (
+from tests.helpers.provider_call_record import (
     _Answer,
     _client,
     _completion,
     _Provider,
     _records,
 )
-from tests.stpa.test_transport_retry import _status_error
+from tests.helpers.transport_retry import _status_error
 
 
 def _tagged(tag: str) -> _Provider:

@@ -20,7 +20,7 @@ from tests.stpa.sp1_helpers import (
 from asago_scenario_generator.stpa.infra import llm_helpers as llm_helpers_module
 from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
     CoordinationAnalysis,

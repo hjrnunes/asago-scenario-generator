@@ -26,10 +26,12 @@ from pydantic import ValidationError
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
-from asago_scenario_generator.models.attack_pattern import (
-    AttackPattern,
+from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.models.attack_pattern_contracts import (
     EvaluatedFactEvidence,
     evaluate_condition,
+)
+from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
 

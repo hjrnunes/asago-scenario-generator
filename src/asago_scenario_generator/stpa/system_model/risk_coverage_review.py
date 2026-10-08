@@ -1089,7 +1089,9 @@ def _run_one_review_call(
 
     wire_invalid: list[RiskCoverageInvalidRow] = []
 
-    def parse_review(result: LLMResult) -> RiskCoverageReview:
+    def parse_review(
+        result: LLMResult, _cleanup: list[dict[str, Any]]
+    ) -> RiskCoverageReview:
         """Parse rows independently after the strict provider contract."""
 
         payload = decode_content(result)
@@ -1159,7 +1161,7 @@ def _run_one_review_call(
         policy=CorrectionPolicy(),
         temperature=temperature,
         max_completion_tokens=max_completion_tokens,
-        result_parser=parse_review,
+        response_parser=parse_review,
         prompt_template_hashes=_review_prompt_hashes(loader),
     )
     review, error_msg = outcome.value, outcome.error

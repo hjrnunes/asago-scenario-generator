@@ -65,10 +65,6 @@ def _typed_briefs(
     return ordered
 
 
-# The shorter name is useful in the STPA adapter while retaining the full
-# name for callers that want to emphasize the Phase 1 provenance.
-build_neutral_obligation_briefs = build_neutral_briefs
-
 GOVERNANCE_BRIEF_INSTRUCTION = (
     "Treat this governance risk as a hypothesis for structural STPA analysis. "
     "No attack pattern covers it, and it is not a mandatory mechanism, ordered "
@@ -797,7 +793,6 @@ __all__ = [
     "build_consideration_artifact",
     "build_governance_briefs",
     "build_neutral_briefs",
-    "build_neutral_obligation_briefs",
     "build_obligation_accounting",
     "create_obligation_batches",
     "validate_obligation_routes",

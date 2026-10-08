@@ -216,12 +216,6 @@ def _remove_markdown_fence(value: str) -> tuple[str, str | None]:
     return body, body
 
 
-def _decode_json_text(value: str) -> Any:
-    """Decode JSON using the shared cleanup policy."""
-    decoded, _transformations = _decode_json_text_with_evidence(value)
-    return decoded
-
-
 class StageError(Exception):
     """Exception carrying stage and step context for a failed LLM call.
 
@@ -409,7 +403,7 @@ class _SafeCallState:
     prompt_audit: PromptAudit | None = None
     raw_result_validation_failed: bool = False
     result_validation_failed: bool = False
-    result_parser_failed: bool = False
+    response_parser_failed: bool = False
     draft_parsed: bool = False
     semantic_validation_passed: bool = False
     cleanup_transformations: list[dict[str, Any]] = field(default_factory=list)
@@ -450,7 +444,7 @@ def _failure_class(
         (
             state.raw_result_validation_failed,
             isinstance(error, (ValidationError, TypeError)),
-            state.result_parser_failed,
+            state.response_parser_failed,
         )
     ):
         return "answered_schema_failure"
@@ -546,10 +540,7 @@ def _validate_raw_result(
 def _parse_and_validate_result(
     result: LLMResult,
     response_format: type[_T],
-    result_parser: Callable[[LLMResult], _T] | None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
-    ),
+    response_parser: Callable[[LLMResult, list[dict[str, Any]]], _T] | None,
     result_validator: Callable[[_T], _T | None] | None,
     state: _SafeCallState,
 ) -> _T:
@@ -558,15 +549,12 @@ def _parse_and_validate_result(
         model = _parse_structured_result(
             result,
             response_format,
-            result_parser=result_parser,
-            result_parser_with_cleanup=result_parser_with_cleanup,
+            response_parser=response_parser,
             cleanup_transformations=state.cleanup_transformations,
         )
         state.draft_parsed = True
     except Exception:
-        state.result_parser_failed = (
-            result_parser is not None or result_parser_with_cleanup is not None
-        )
+        state.response_parser_failed = response_parser is not None
         raise
     if result_validator is None:
         return model
@@ -592,10 +580,7 @@ def _perform_safe_call(
     allow_unvalidated: bool,
     raw_result_validator: Callable[[Any], None] | None,
     result_validator: Callable[[_T], _T | None] | None,
-    result_parser: Callable[[LLMResult], _T] | None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
-    ),
+    response_parser: Callable[[LLMResult, list[dict[str, Any]]], _T] | None,
     slot_id: str | None,
     scenario_id: str | None,
     prompt_template_hashes: Mapping[str, str] | None,
@@ -626,8 +611,7 @@ def _perform_safe_call(
     model = _parse_and_validate_result(
         state.result,
         response_format,
-        result_parser,
-        result_parser_with_cleanup,
+        response_parser,
         result_validator,
         state,
     )
@@ -737,7 +721,7 @@ def _validation_retry_requested(
         isinstance(error, ValidationError)
         or state.raw_result_validation_failed
         or state.result_validation_failed
-        or state.result_parser_failed
+        or state.response_parser_failed
     )
 
 
@@ -903,20 +887,15 @@ def _truncated(message: str, limit: int) -> str:
 def _parse_structured_result(
     result: LLMResult,
     response_format: type[_T],
-    result_parser: Callable[[LLMResult], _T] | None = None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
-    ) = None,
+    response_parser: (Callable[[LLMResult, list[dict[str, Any]]], _T] | None) = None,
     cleanup_transformations: list[dict[str, Any]] | None = None,
 ) -> _T:
     """Parse a structured result with the stage parser or the response model."""
-    if result_parser_with_cleanup is not None:
-        return result_parser_with_cleanup(
+    if response_parser is not None:
+        return response_parser(
             result,
             cleanup_transformations if cleanup_transformations is not None else [],
         )
-    if result_parser is not None:
-        return result_parser(result)
     return parse_llm_result(
         result,
         response_format,
@@ -1090,10 +1069,7 @@ def call_with_policy(
     allow_unvalidated: bool = False,
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[_T], _T | None] | None = None,
-    result_parser: Callable[[LLMResult], _T] | None = None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
-    ) = None,
+    response_parser: (Callable[[LLMResult, list[dict[str, Any]]], _T] | None) = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
     first_attempt_number: int = 1,
 ) -> CallOutcome[_T]:
@@ -1119,21 +1095,20 @@ def call_with_policy(
             provided, forwarded to ``llm_client.complete``.
         allow_unvalidated: When true, ask the client for a JSON-object
             response instead of a strict JSON Schema response.  Parsing is
-            unchanged: ``result_parser`` or the response model still decides.
+            unchanged: ``response_parser`` or the response model still decides.
         raw_result_validator: Optional validation to run on the decoded
             response before parsing.
         result_validator: Optional additional validation to run on the parsed
             model before the call is logged as successful. A
             validator that returns a model publishes that model, which is
             logged and returned, in place of the parsed one.
-        result_parser: Optional stage-local parser for semantic responses. The
-            parser receives the raw ``LLMResult`` and must return a validated
-            response model. It is useful when a stage needs stricter wire
-            validation than the shared compatibility decoder provides.
-        result_parser_with_cleanup: Optional stage-local parser variant that
-            also receives the mutable cleanup-transformation list used by the
-            durable call record. Use this when parsing applies a response
-            correction that must remain distinguishable from model output.
+        response_parser: Optional stage-local parser for semantic responses.
+            It receives the raw ``LLMResult`` and the mutable
+            cleanup-transformation list of the durable call record, and must
+            return a validated response model. Use it when a stage needs
+            stricter wire validation than the shared compatibility decoder
+            provides; a parser that applies a response correction appends it
+            to the list so the record keeps it apart from model output.
         first_attempt_number: Number of the first attempt in the call log; a
             follow-up request in the same step continues the numbering.
     """
@@ -1167,8 +1142,7 @@ def call_with_policy(
                     allow_unvalidated=allow_unvalidated,
                     raw_result_validator=raw_result_validator,
                     result_validator=result_validator,
-                    result_parser=result_parser,
-                    result_parser_with_cleanup=result_parser_with_cleanup,
+                    response_parser=response_parser,
                     slot_id=slot_id,
                     scenario_id=scenario_id,
                     prompt_template_hashes=prompt_template_hashes,

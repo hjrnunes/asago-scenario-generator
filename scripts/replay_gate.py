@@ -443,7 +443,7 @@ def _provider_record_order(record: dict[str, Any]) -> str:
 
 
 def _self_digest_difference(document: Any, side: str) -> str | None:
-    from asago_scenario_generator.pipeline.synthesis import (
+    from asago_scenario_generator.pipeline.synthesis_manifest import (
         _MANIFEST_DOMAIN,
         _digest_payload,
     )

@@ -26,9 +26,8 @@ allocation depend inward on that leaf.
 Authoritative attack-pattern models are split by responsibility
 (`attack_pattern_contracts`, `attack_pattern_chain`,
 `attack_pattern_projection`, `attack_pattern_digests`,
-`attack_pattern_validation`) behind the historical
-`models.attack_pattern` façade. Projection and taxonomy pins consume those
-leaves rather than the façade.
+`attack_pattern_validation`); callers import from the leaf that defines
+each name.
 
 The former taxonomy-led runner, generation stages, finalization controllers,
 scenario-authoring prompts, reports, evaluation adapters, and their acceptance

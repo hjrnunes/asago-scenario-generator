@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, get_args
 from unittest.mock import MagicMock
 
@@ -509,14 +508,6 @@ class MockLLMClient:
 def make_risk_cards() -> list[RiskCard]:
     """Return a minimal list of RiskCards for SP1 pipeline tests."""
     return [RiskCard(**row) for row in load_sp1_fixture("risk_cards")]
-
-
-def read_calls_jsonl(run_dir: Path) -> list[dict]:
-    """Read calls.jsonl and return parsed entries."""
-    calls_file = run_dir / "calls.jsonl"
-    if not calls_file.exists():
-        return []
-    return [json.loads(line) for line in calls_file.read_text().splitlines()]
 
 
 def valid_stage1_profile_dict() -> dict:

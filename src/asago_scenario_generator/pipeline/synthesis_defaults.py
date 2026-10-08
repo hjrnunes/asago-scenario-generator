@@ -173,11 +173,11 @@ def _default_plan(*, taxonomy_inputs: Any, **_: Any) -> Any:
 
 def _default_briefs(*, plan: Any, taxonomy_inputs: Any, **_: Any) -> Any:
     """Build neutral briefs from the exact plan/catalog input graph."""
-    from asago_scenario_generator.stpa.obligation_aware import (
-        build_neutral_obligation_briefs,
+    from asago_scenario_generator.stpa.obligation_aware.briefs import (
+        build_neutral_briefs,
     )
 
-    return build_neutral_obligation_briefs(
+    return build_neutral_briefs(
         plan=plan, attack_pattern_catalog=taxonomy_inputs.attack_pattern_catalog
     )
 

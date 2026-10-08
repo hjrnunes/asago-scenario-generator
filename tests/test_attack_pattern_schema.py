@@ -8,19 +8,25 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic import TypeAdapter, ValidationError
 
-from asago_scenario_generator.models.attack_pattern import (
+from asago_scenario_generator.models.attack_pattern_chain import (
     AttackPattern,
-    AuthoritativeFactReference,
     CanonicalAttackChain,
+)
+from asago_scenario_generator.models.attack_pattern_contracts import (
+    AuthoritativeFactReference,
     Condition,
     ConditionEvaluationResult,
     EvaluatedFactEvidence,
     ExecutionRequirement,
-    ProjectionSnapshot,
+    evaluate_condition,
+)
+from asago_scenario_generator.models.attack_pattern_projection import ProjectionSnapshot
+from asago_scenario_generator.models.attack_pattern_digests import (
     _canonical_json,
     compute_chain_semantic_digest,
     compute_projection_digest,
-    evaluate_condition,
+)
+from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
     validate_projection_snapshot,
 )

@@ -29,9 +29,11 @@ from asago_scenario_generator.data.taxonomy_pins import (
     _merge_mapping_rows,
     _merge_scalar_metadata,
 )
-from asago_scenario_generator.models.attack_pattern import (
-    TaxonomyPin,
+from asago_scenario_generator.models.attack_pattern_contracts import TaxonomyPin
+from asago_scenario_generator.models.attack_pattern_digests import (
     compute_chain_semantic_digest,
+)
+from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
 

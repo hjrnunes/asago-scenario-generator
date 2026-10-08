@@ -13,7 +13,7 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
 )
 
-from .test_sp3_stage5_provider_contract import (
+from tests.helpers.sp3_stage5_provider_contract import (
     _provider_payload,
     _typed_tool_context,
 )

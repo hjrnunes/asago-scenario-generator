@@ -16,7 +16,7 @@ from hypothesis import given, settings
 from hypothesis import strategies as st
 from pydantic import ValidationError
 
-from asago_scenario_generator.stpa.scenario_prod.attack_shape import (
+from asago_scenario_generator.stpa.models.attack_shape import (
     AttackShape,
     carrier_operation_observed,
 )

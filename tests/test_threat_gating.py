@@ -19,7 +19,7 @@ from asago_scenario_generator.data.threat_gating import (
     _filter_attack_patterns,
     determine_threat_scope,
 )
-from asago_scenario_generator.models import (
+from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     MemoryMechanism,
 )

@@ -21,7 +21,6 @@ def test_every_public_builder_name_is_the_shared_function() -> None:
     assert routing.build_neutral_brief is shared.build_neutral_brief
     assert routing.create_obligation_batches is shared.create_obligation_batches
     assert pipeline.build_neutral_briefs is shared.build_neutral_briefs
-    assert pipeline.build_neutral_obligation_briefs is shared.build_neutral_briefs
 
 
 def test_a_catalog_may_be_a_sequence_or_a_mapping_of_the_same_patterns() -> None:

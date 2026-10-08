@@ -39,6 +39,7 @@ _ALLOWED_PREFIXES = (
     "asago_scenario_generator.stpa.pipeline",
     "asago_scenario_generator.stpa.models",
     "asago_scenario_generator.models",
+    "asago_scenario_generator.model_profiles",
     "asago_scenario_generator.data",
 )
 

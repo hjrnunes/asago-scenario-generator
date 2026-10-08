@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from .test_discriminating_condition import (
+from tests.helpers.discriminating_condition import (
     _generate,
     _generate_plain,
     _payload_with,

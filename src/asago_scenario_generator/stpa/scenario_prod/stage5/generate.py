@@ -406,7 +406,7 @@ def _call_bdi_with_bounded_length_retry(
             temperature=temperature,
             max_completion_tokens=max_completion_tokens,
             result_validator=result_validator,
-            result_parser=lambda value: _parse_context_bdi_result(
+            response_parser=lambda value, _cleanup: _parse_context_bdi_result(
                 value, response_format
             ),
         )

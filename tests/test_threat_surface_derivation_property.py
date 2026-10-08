@@ -30,7 +30,7 @@ from asago_scenario_generator.data.threat_gating import (
     _evaluate_prerequisite_capabilities,
     determine_threat_scope,
 )
-from asago_scenario_generator.models import CapabilityProfile
+from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.capability_profile import ToolInventoryEntry
 
 # ---------------------------------------------------------------------------

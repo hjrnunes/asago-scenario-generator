@@ -35,7 +35,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.issues import IssueCode
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from .test_discriminating_condition import (
+from tests.helpers.discriminating_condition import (
     ANALYTICAL_NOTE,
     _generate,
     _observations,
@@ -43,7 +43,7 @@ from .test_discriminating_condition import (
     _ownership_condition,
     _payload_with,
 )
-from .test_sp3_scenario_continuity import (
+from tests.helpers.sp3_scenario_continuity import (
     _control_structure,
     _loss_analysis,
     _threat,

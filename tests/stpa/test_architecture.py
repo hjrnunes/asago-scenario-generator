@@ -82,7 +82,9 @@ class TestSystemModelNormalizerSurface:
             exported.extend(alias.name for alias in node.names)
         assert "normalize_control_structure_payload" not in exported
         package = importlib.import_module("asago_scenario_generator.stpa.system_model")
-        assert "normalize_control_structure_payload" not in package.__all__
+        assert "normalize_control_structure_payload" not in getattr(
+            package, "__all__", ()
+        )
         assert not hasattr(package, "normalize_control_structure_payload")
 
     def test_control_structure_uses_leaf_normalizer(self, system_model_files):
