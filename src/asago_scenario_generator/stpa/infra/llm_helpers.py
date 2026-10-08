@@ -47,9 +47,6 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     audit_prompt_contract,
     enforce_prompt_audit,
 )
-from asago_scenario_generator.stpa.infra.unvalidated_decode import (
-    construct_model_unvalidated,
-)
 from asago_scenario_generator.stpa._model_data import raw_model_data
 
 _T = TypeVar("_T", bound=BaseModel)
@@ -372,31 +369,6 @@ def decode_content(
     )
 
 
-def parse_llm_result_unvalidated(
-    result: LLMResult,
-    model_class: type[_T],
-    *,
-    cleanup_transformations: list[dict[str, Any]] | None = None,
-) -> _T:
-    """Decode an LLM result into nested models without field validation.
-
-    This narrow escape hatch is used by SP1 control-structure parsing so
-    malformed IDs can be repaired from structural position before the final
-    ``ControlStructure`` validation.  It still requires a decodable
-    JSON-shaped response; missing fields and other schema errors are left for
-    the post-normalization model validation to report.
-    """
-    content = decode_content(result, cleanup_transformations=cleanup_transformations)
-    if isinstance(content, model_class):
-        return content
-    if not isinstance(content, dict):
-        raise TypeError(
-            f"Expected a mapping for {model_class.__name__}, "
-            f"got {type(content).__name__}."
-        )
-    return construct_model_unvalidated(content, model_class)
-
-
 def _build_completion_kwargs(
     *,
     system_prompt: str,
@@ -574,7 +546,6 @@ def _validate_raw_result(
 def _parse_and_validate_result(
     result: LLMResult,
     response_format: type[_T],
-    allow_unvalidated: bool,
     result_parser: Callable[[LLMResult], _T] | None,
     result_parser_with_cleanup: (
         Callable[[LLMResult, list[dict[str, Any]]], _T] | None
@@ -587,7 +558,6 @@ def _parse_and_validate_result(
         model = _parse_structured_result(
             result,
             response_format,
-            allow_unvalidated,
             result_parser=result_parser,
             result_parser_with_cleanup=result_parser_with_cleanup,
             cleanup_transformations=state.cleanup_transformations,
@@ -656,7 +626,6 @@ def _perform_safe_call(
     model = _parse_and_validate_result(
         state.result,
         response_format,
-        allow_unvalidated,
         result_parser,
         result_parser_with_cleanup,
         result_validator,
@@ -932,14 +901,13 @@ def _truncated(message: str, limit: int) -> str:
 def _parse_structured_result(
     result: LLMResult,
     response_format: type[_T],
-    allow_unvalidated: bool,
     result_parser: Callable[[LLMResult], _T] | None = None,
     result_parser_with_cleanup: (
         Callable[[LLMResult, list[dict[str, Any]]], _T] | None
     ) = None,
     cleanup_transformations: list[dict[str, Any]] | None = None,
 ) -> _T:
-    """Validate a structured result, with a tolerant fallback when requested."""
+    """Parse a structured result with the stage parser or the response model."""
     if result_parser_with_cleanup is not None:
         return result_parser_with_cleanup(
             result,
@@ -947,20 +915,11 @@ def _parse_structured_result(
         )
     if result_parser is not None:
         return result_parser(result)
-    try:
-        return parse_llm_result(
-            result,
-            response_format,
-            cleanup_transformations=cleanup_transformations,
-        )
-    except ValidationError:
-        if not allow_unvalidated:
-            raise
-        return parse_llm_result_unvalidated(
-            result,
-            response_format,
-            cleanup_transformations=cleanup_transformations,
-        )
+    return parse_llm_result(
+        result,
+        response_format,
+        cleanup_transformations=cleanup_transformations,
+    )
 
 
 def log_llm_call(
@@ -1155,16 +1114,13 @@ def call_with_policy(
         temperature: LLM temperature.
         max_completion_tokens: Optional cap on completion tokens. When
             provided, forwarded to ``llm_client.complete``.
-        allow_unvalidated: When true, decode a JSON-shaped response into
-            nested models without field validators if normal validation
-            fails.  Callers must validate the resulting structure after
-            deterministic normalization.
+        allow_unvalidated: When true, ask the client for a JSON-object
+            response instead of a strict JSON Schema response.  Parsing is
+            unchanged: ``result_parser`` or the response model still decides.
         raw_result_validator: Optional validation to run on the decoded
-            response before Pydantic parsing. This is useful when tolerant
-            decoding would otherwise discard unknown fields.
+            response before parsing.
         result_validator: Optional additional validation to run on the parsed
-            model before the call is logged as successful. This also applies
-            to models built through the tolerant unvalidated path. A
+            model before the call is logged as successful. A
             validator that returns a model publishes that model, which is
             logged and returned, in place of the parsed one.
         result_parser: Optional stage-local parser for semantic responses. The

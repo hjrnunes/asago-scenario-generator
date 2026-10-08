@@ -13,9 +13,6 @@ import yaml
 
 from asago_scenario_generator.models.capability_profile import Stage1Profile
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-from asago_scenario_generator.stpa.infra.unvalidated_decode import (
-    construct_model_unvalidated,
-)
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysisDraft,
@@ -434,8 +431,8 @@ class TestAssemblyFailureStopsStage2:
 
         with pytest.raises(StageError) as exc_info:
             _assemble_stage2_structure(
-                construct_model_unvalidated(responsibilities, ResponsibilitySet),
-                construct_model_unvalidated(elements, ControlElementSet),
+                ResponsibilitySet.model_validate(responsibilities),
+                ControlElementSet.model_validate(elements),
                 tmp_path,
                 "test-model",
             )

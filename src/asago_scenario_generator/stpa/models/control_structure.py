@@ -264,9 +264,9 @@ def normalize_control_action_effect_kind(
 ) -> ControlActionEffectKind | None:
     """Apply the deterministic responsibility-target effect rule.
 
-    This helper is also used by tolerant Stage 2 parsing, whose recovery path
-    intentionally uses ``model_construct`` and therefore bypasses Pydantic's
-    model validators.  It accepts legacy missing values but never silently
+    This helper is also used by Call 2b parsing, which builds its domain
+    models with ``model_construct`` and therefore bypasses Pydantic's model
+    validators.  It accepts legacy missing values but never silently
     changes an explicitly conflicting effect.
     """
     if effect_kind is not None:
@@ -351,8 +351,8 @@ class ControlAction(BaseModel):
         action description.  A conflicting explicit value is rejected so a
         downstream execution planner never has to choose between contradictory
         typed facts.  A ``before`` validator keeps the model immutable during
-        post-validation; tolerant Stage 2 parsing calls the shared helper
-        explicitly because it uses ``model_construct``.  Under
+        post-validation; Call 2b parsing calls the shared helper explicitly
+        because it uses ``model_construct``.  Under
         ASSEMBLY_DEFERRED an invalid or conflicting effect is left for the
         assembled structure to reject.
         """
@@ -692,7 +692,7 @@ def _validate_element_refs(
 def _normalize_control_action_semantics(
     responsibilities: list[Responsibility],
 ) -> None:
-    """Fill derived action semantics after tolerant nested construction."""
+    """Fill derived action semantics on actions built without validation."""
     for responsibility in responsibilities:
         for index, action in enumerate(responsibility.control_actions):
             effect_kind = normalize_control_action_effect_kind(

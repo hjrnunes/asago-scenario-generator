@@ -879,9 +879,9 @@ def _stitch_revision_delta(
       IDs are not the published IDs; the subsequent normalization pass
       assigns ``CM-N`` from final list position.
 
-    The returned structure is unvalidated: the revision delta is decoded
-    tolerantly, so malformed source IDs must survive until the
-    high-level normalizer sees the complete stitched lists.
+    The returned structure is unvalidated: the revision delta keeps its IDs
+    as written (``ASSEMBLY_DEFERRED``), so malformed source IDs must survive
+    until the high-level normalizer sees the complete stitched lists.
     """
     existing_resp_ids = {r.resp_id for r in cs.responsibilities}
     existing_cp_ids = {cp.cp_id for cp in cs.controlled_processes}

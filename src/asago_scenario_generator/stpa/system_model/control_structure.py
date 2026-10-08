@@ -702,21 +702,6 @@ def _resolve_call3_source_item(
     }
 
 
-def _validate_stage2_intermediate(model: BaseModel) -> None:
-    """Reject semantically empty Stage 2 inputs after tolerant decoding.
-
-    Calls 2a and 2b use tolerant decoding so malformed nested references can
-    be repaired deterministically. That path intentionally bypasses Pydantic
-    validators, including ``Field(min_length=1)``. Keep the semantic
-    cardinality checks at the shared LLM boundary so an empty set cannot reach
-    control-structure assembly while preserving tolerant nested decoding.
-    """
-    if isinstance(model, RequirementSet) and not model.requirements:
-        raise ValueError("requirements must contain at least one item")
-    if isinstance(model, ResponsibilitySet) and not model.responsibilities:
-        raise ValueError("responsibilities must contain at least one item")
-
-
 def _holds_nothing(value: Any) -> bool:
     return value in (None, "", [], {})
 
@@ -995,7 +980,7 @@ class _Call2bResponse(_Call2bWire):
 
 
 def _decode_control_element_payload(value: Any) -> Any:
-    """Decode one Call 2b response without applying tolerant field defaults."""
+    """Decode one Call 2b response into plain JSON data."""
     if isinstance(value, BaseModel):
         return raw_model_data(value)
     if isinstance(value, str):
@@ -1972,7 +1957,7 @@ def _run_stage2_llm_call(
         raw_result_validator=raw_result_validator,
         result_parser=result_parser,
         result_parser_with_cleanup=result_parser_with_cleanup,
-        result_validator=result_validator or _validate_stage2_intermediate,
+        result_validator=result_validator,
     )
     if outcome.error is not None:
         raise StageError(stage=STAGE, step=step, message=outcome.error)
@@ -2099,8 +2084,7 @@ def _call_2b_control_elements(
         response_format=_ControlElementProviderSet,
         step="call_2b_control_elements",
         # Call 2b is semantic output.  Its stage-local parser rejects unknown
-        # carriers and missing meaning before canonical IDs are repaired; the
-        # generic tolerant decoder is intentionally not enabled here.
+        # carriers and missing meaning before canonical IDs are repaired.
         result_parser=lambda result: parse_control_element_set_response(
             result.content,
             responsibilities=responsibility_set.responsibilities,
