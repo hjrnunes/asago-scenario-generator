@@ -135,9 +135,12 @@ def _validated_addressed_pairs(
         row = _addressed_row_for_finding(pair, accounting_rows)
         if row is None:
             continue
-        for ica_id in pair.ica_ids:
+        icas = [
             _validate_one_pair_finding(row, pair, ica_id, findings)
-            observed.add((pair.obligation_id, ica_id))
+            for ica_id in pair.ica_ids
+        ]
+        _validate_pair_context_union(pair, icas)
+        observed.update((pair.obligation_id, ica_id) for ica_id in pair.ica_ids)
         eligible.append(pair)
     expected = {
         (row.obligation_id, ica_id)
@@ -172,7 +175,7 @@ def _credited(row: ObligationAccountingRow) -> bool:
     )
 
 
-def _validate_one_pair_finding(row, pair, ica_id, findings) -> None:
+def _validate_one_pair_finding(row, pair, ica_id, findings) -> ICA:
     if ica_id not in row.ica_ids or pair.slot_id not in row.slot_ids:
         raise ValueError("finding consideration is outside addressed accounting")
     resolved = findings.get(ica_id)
@@ -181,10 +184,21 @@ def _validate_one_pair_finding(row, pair, ica_id, findings) -> None:
     slot_id, ica = resolved
     if slot_id != pair.slot_id:
         raise ValueError("finding consideration ICA belongs to a different slot")
-    if set(pair.hazard_ids) != set(ica.related_hazards):
-        raise ValueError("finding consideration hazards do not match its ICA")
-    if set(pair.constraint_ids) != set(ica.related_constraints):
-        raise ValueError("finding consideration constraints do not match its ICA")
+    return ica
+
+
+def _validate_pair_context_union(
+    pair: ObligationIcaConsideration, icas: list[ICA]
+) -> None:
+    """A finding's hazards and constraints are the union over its ICAs.
+
+    Slot filling builds them that way, so one finding may cite ICAs that
+    relate to different hazards.
+    """
+    if set(pair.hazard_ids) != {h for ica in icas for h in ica.related_hazards}:
+        raise ValueError("finding consideration hazards do not match its ICAs")
+    if set(pair.constraint_ids) != {c for ica in icas for c in ica.related_constraints}:
+        raise ValueError("finding consideration constraints do not match its ICAs")
 
 
 def _requested_finding_ids(

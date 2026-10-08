@@ -63,6 +63,7 @@ from asago_scenario_generator.pipeline.synthesis_persist import (
     _persist_plan,
     _persist_prepared_profile,
     _persist_sidecar,
+    _persist_slot_hazard_offers,
     _persist_target_realization,
     _reload_persisted_plan,
     _render_report,
@@ -75,6 +76,7 @@ from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _run_realization,
     _run_scenarios,
     _run_target_realization,
+    _slot_hazard_offers,
     _target_realized_stpa_inputs,
     _verified_enriched_operations as _verified_enriched_operations,
 )
@@ -298,6 +300,7 @@ def _run_synthesis(
             resolved,
         )
     )
+    hazard_offers = _slot_hazard_offers(ica_enumeration)
     target_realization = log.take(
         _run_target_realization(
             ica_enumeration=ica_enumeration,
@@ -354,6 +357,7 @@ def _run_synthesis(
             ),
             slot_evidence=ica_enumeration,
             governance_routes=governance_routes,
+            hazard_offers=hazard_offers,
         )
     )
     realization = log.take(
@@ -385,6 +389,7 @@ def _run_synthesis(
         resolved.persist_realization,
         "realization",
     )
+    hazard_offers_path = _persist_slot_hazard_offers(output_dir, hazard_offers)
     target_realization_path = _persist_target_realization(
         output_dir,
         target_realization,
@@ -449,6 +454,7 @@ def _run_synthesis(
         target_realization_path=target_realization_path,
         operation_enrichment=operation_enrichment,
         report_path=report_path,
+        hazard_offers_path=hazard_offers_path,
     )
 
     return SynthesisResult(

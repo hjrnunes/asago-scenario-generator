@@ -27,6 +27,7 @@ from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
 )
 from asago_scenario_generator.models.artifact_pin import ArtifactPin
+from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferReport
 from asago_scenario_generator.pipeline.control_action_enrichment import (
     ControlActionEnrichment,
     ControlActionOperationEnrichmentRecord,
@@ -1779,6 +1780,14 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
     assert result.ica_enumeration is not None
     assert (tmp_path / "obligation-consideration.yaml").exists()
     assert (tmp_path / "obligation-accounting.yaml").exists()
+    offers = SlotHazardOfferReport.from_yaml(
+        (tmp_path / "slot-hazard-offers.yaml").read_text(encoding="utf-8")
+    )
+    assert offers.summary.routed_slots == 1
+    assert result.accounting.slot_hazard_offers == offers.summary
+    assert result.artifact_paths["slot-hazard-offers.yaml"] == (
+        tmp_path / "slot-hazard-offers.yaml"
+    )
 
 
 def test_scenario_failure_is_recorded_without_erasing_accounting(

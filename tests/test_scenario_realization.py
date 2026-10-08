@@ -274,3 +274,72 @@ def test_findings_must_reconcile_with_addressed_accounting(pairs, match) -> None
             ica_enumeration=_enumeration(),
             scenario_specs=(_scenario(),),
         )
+
+
+def _two_ica_inputs(pair_hazards: tuple[str, ...]):
+    """One pair citing two ICAs of the slot that relate to different hazards."""
+    second_id = f"{_SLOT_ID}:2"
+    enumeration = _enumeration()
+    slot = enumeration.slots[0]
+    second = slot.icas[0].model_copy(
+        update={
+            "ica_id": second_id,
+            "related_hazards": ["H-2"],
+            "related_constraints": ["SC-2"],
+        }
+    )
+    enumeration = enumeration.model_copy(
+        update={"slots": [slot.model_copy(update={"icas": [*slot.icas, second]})]}
+    )
+    row = (
+        _accounting()
+        .rows[0]
+        .model_copy(
+            update={
+                "ica_ids": (_ICA_ID, second_id),
+                "hazard_ids": ("H-1", "H-2"),
+                "constraint_ids": ("SC-1", "SC-2"),
+            }
+        )
+    )
+    accounting = ObligationAccounting(
+        source_pins=_accounting().source_pins,
+        rows=(row,),
+        summary=derive_obligation_accounting_summary((row,)),
+    )
+    pair = ObligationIcaConsideration.model_validate(
+        {
+            **_pair().model_dump(mode="json", exclude={"pair_id"}),
+            "ica_ids": [_ICA_ID, second_id],
+            "hazard_ids": list(pair_hazards),
+            "constraint_ids": ["SC-1", "SC-2"],
+        }
+    )
+    return accounting, pair, enumeration
+
+
+def test_a_finding_citing_icas_with_different_hazards_is_realized() -> None:
+    accounting, pair, enumeration = _two_ica_inputs(("H-1", "H-2"))
+
+    result = build_scenario_realization_assessment(
+        accounting=accounting,
+        ica_considerations=(pair,),
+        ica_enumeration=enumeration,
+        scenario_specs=(_scenario(),),
+        requested_ica_ids=(_ICA_ID,),
+    )
+
+    assert result.summary.total == 2
+
+
+@pytest.mark.parametrize("pair_hazards", [("H-1",), ("H-1", "H-2", "H-3")])
+def test_finding_hazards_must_be_the_union_of_its_icas_hazards(pair_hazards) -> None:
+    accounting, pair, enumeration = _two_ica_inputs(pair_hazards)
+
+    with pytest.raises(ValueError, match="hazards do not match"):
+        build_scenario_realization_assessment(
+            accounting=accounting,
+            ica_considerations=(pair,),
+            ica_enumeration=enumeration,
+            scenario_specs=(_scenario(),),
+        )

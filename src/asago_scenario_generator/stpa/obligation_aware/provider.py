@@ -102,6 +102,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _draft_considerations,
+    _finding_context,
     _slot_authority,
     _validate_finding_semantics,
     compile_slot_provider_entry,
@@ -1253,6 +1254,9 @@ def _validate_slot_payload_semantics(
                 valid_process_models=process_models,
                 valid_feedback=feedback,
                 loss_analysis=request.loss_analysis,
+            )
+            _finding_context(
+                finding, slot=expected, control_structure=request.control_structure
             )
         for result in draft.consideration_results:
             _validate_consideration_result(result, draft, route_by_pair)

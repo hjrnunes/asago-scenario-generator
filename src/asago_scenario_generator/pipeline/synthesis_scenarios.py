@@ -66,6 +66,21 @@ def _run_ica(
     return StageRun(verified, calls=("ica",))
 
 
+def _slot_hazard_offers(slot_fill: Any) -> Any | None:
+    """Report the hazard offer of every slot request the slot filler sent.
+
+    A slot-fill result without its requests (a test adapter) has no report.
+    """
+    requests = getattr(getattr(slot_fill, "result", None), "requests", None)
+    if not requests:
+        return None
+    from asago_scenario_generator.stpa.obligation_aware.hazard_offer import (
+        build_slot_hazard_offer_report,
+    )
+
+    return build_slot_hazard_offer_report(requests)
+
+
 def _run_ica_verification(
     result: Any,
     *,
@@ -371,14 +386,16 @@ def _run_accounting(
     source_pins: tuple[Any, ...] = (),
     slot_evidence: Any | None = None,
     governance_routes: tuple[Any, ...] = (),
+    hazard_offers: Any | None = None,
 ) -> StageRun:
     """Derive provisional accounting from the complete Phase 1 universe.
 
     ``slot_evidence`` is the unprojected final ICA result.  A target projection
     keeps only the ICA enumeration, so the obligation/slot pairs and hazard
     verdicts come from the result the projection started from.
-    ``governance_routes`` are the final routes of governance-only rows; the
-    adapter receives them only when there are any.
+    ``governance_routes`` are the final routes of governance-only rows and
+    ``hazard_offers`` is the slot hazard offer report; the adapter receives
+    each only when there is one.
     """
     ordinary_icas = _ordinary_icas(ica_enumeration)
     evidence = ica_enumeration if slot_evidence is None else slot_evidence
@@ -386,7 +403,11 @@ def _run_accounting(
     verification = _ica_verification(evidence)
     if adapters.account is None:
         raise ValueError("synthesis has no obligation accounting adapter")
-    extra = {"governance_routes": governance_routes} if governance_routes else {}
+    extra: dict[str, Any] = {}
+    if governance_routes:
+        extra["governance_routes"] = governance_routes
+    if hazard_offers is not None:
+        extra["hazard_offers"] = hazard_offers
     result = adapters.account(
         plan=plan,
         consideration=consideration,

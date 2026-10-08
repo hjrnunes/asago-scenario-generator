@@ -1997,7 +1997,8 @@ def _exclude_from_slot(
     *,
     terminal_na_reasons: Mapping[str, str] | None = None,
 ) -> ICASlot:
-    if slot.is_na:
+    # A slot with no ICAs had nothing to verify; keep its own unresolved reason.
+    if slot.is_na or not slot.icas:
         return slot
     kept = [ica for ica in slot.icas if ica.ica_id not in excluded]
     if kept:

@@ -63,6 +63,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     ProviderTargetIndex,
     PromptContractAudit,
 )
+from asago_scenario_generator.stpa.obligation_aware.hazard_offer import slot_offer
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 
@@ -1303,19 +1304,14 @@ def project_ica_target_context(
     tuple[ProviderRoutedRoute, ...],
 ]:
     """Project exactly one target slice plus the obligations routed to it."""
+    offer = slot_offer(loss_analysis, routed_routes)
     target_index = project_control_structure_context(
         control_structure,
         slots=slots,
         target_id=target_id,
         loss_analysis=loss_analysis,
-        hazard_ids=(
-            hazard_id for route in routed_routes for hazard_id in route.hazard_ids
-        ),
-        constraint_ids=(
-            constraint_id
-            for route in routed_routes
-            for constraint_id in route.constraint_ids
-        ),
+        hazard_ids=offer.hazard_ids,
+        constraint_ids=offer.constraint_ids,
     )
     brief_map = {brief.obligation_id: brief for brief in routed_briefs}
     handles = local_obligation_handles(routed_routes)
