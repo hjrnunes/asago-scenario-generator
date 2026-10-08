@@ -1002,6 +1002,19 @@ def test_context_factory_hashes_model_defaults_when_optional_collections_omitted
     assert rebuilt.catalog_context == ()
 
 
+def test_context_digest_must_cover_the_typed_action_semantics() -> None:
+    payload = _context().model_dump(
+        mode="json",
+        exclude={
+            "context_digest": True,
+            "target_control_path": {"control_action": {"target_kind", "effect_kind"}},
+        },
+    )
+
+    with pytest.raises(ValidationError, match="context_digest"):
+        ScenarioGenerationContext.create(**payload)
+
+
 def test_contextual_scenario_rejects_empty_causal_factors() -> None:
     payload = _contextual_spec().model_dump(mode="json")
     payload["causal_factors"] = []

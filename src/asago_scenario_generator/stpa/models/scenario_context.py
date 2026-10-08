@@ -290,39 +290,12 @@ class ScenarioGenerationContext(ScenarioContextModel):
     @model_validator(mode="after")
     def validate_digest_and_relationships(self) -> "ScenarioGenerationContext":
         """Reject tamper and relationships that do not reach the selected ICA."""
-        current_digest = _context_digest(self.model_dump(mode="json"))
-        legacy_digest = _legacy_context_digest(self)
-        if self.context_digest not in {current_digest, legacy_digest}:
+        if self.context_digest != _context_digest(self.model_dump(mode="json")):
             raise ValueError("context_digest does not match scenario context")
         if self.scenario_identity.ica_id != self.ica.ica_id:
             raise ValueError("scenario identity does not match ICA context")
         _validate_context_relationships(self)
         return self
-
-
-def _legacy_context_digest(context: ScenarioGenerationContext) -> str:
-    """Verify v1 contexts written before typed action semantics were added."""
-    payload = context.model_dump(mode="json")
-    path_payload = payload["target_control_path"]
-    _drop_unset_action_semantics(
-        path_payload["control_action"], context.target_control_path.control_action
-    )
-    for action_payload, action in zip(
-        path_payload.get("related_control_actions", ()),
-        context.target_control_path.related_control_actions,
-        strict=True,
-    ):
-        _drop_unset_action_semantics(action_payload, action)
-    return _context_digest(payload)
-
-
-def _drop_unset_action_semantics(
-    payload: dict[str, Any], action: DescribedControlAction
-) -> None:
-    """Remove only fields absent from a historical serialized action."""
-    for field_name in ("target_kind", "effect_kind"):
-        if field_name not in action.model_fields_set:
-            payload.pop(field_name, None)
 
 
 def _validate_context_relationships(context: ScenarioGenerationContext) -> None:
