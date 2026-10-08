@@ -57,60 +57,6 @@ def reasoning_completion_cap(
     return max(requested, profile_cap)
 
 
-def _load_raw_profiles(path: Path) -> dict[str, Any]:
-    """Load and return the raw YAML profiles mapping.
-
-    Raises:
-        FileNotFoundError: If *path* does not exist.
-    """
-    if not path.exists():
-        raise FileNotFoundError(f"Model profiles file not found: {path}")
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
-
-
-def _resolve_profile_dict(raw: Any, profile_name: str, path: Path) -> dict[str, Any]:
-    """Return the profile dict for *profile_name* from the raw YAML.
-
-    Raises:
-        KeyError: If *profile_name* is not found.
-        ValueError: If the profile entry is not a mapping.
-    """
-    if not isinstance(raw, dict) or profile_name not in raw:
-        raise KeyError(f"Profile '{profile_name}' not found in {path}")
-    profile = raw[profile_name]
-    if not isinstance(profile, dict):
-        raise ValueError(f"Profile '{profile_name}' in {path} is not a mapping")
-    return profile
-
-
-def _extract_required_fields(
-    profile: dict[str, Any], profile_name: str, path: Path
-) -> dict[str, Any]:
-    """Validate and return the required fields from *profile*.
-
-    Raises:
-        ValueError: If a required field is missing or empty.
-    """
-    result: dict[str, Any] = {}
-    for field in REQUIRED_FIELDS:
-        value = profile.get(field)
-        if value is None or (isinstance(value, str) and value == ""):
-            raise ValueError(
-                f"Profile '{profile_name}' is missing required field '{field}'"
-            )
-        result[field] = value
-    return result
-
-
-def _extract_optional_fields(profile: dict[str, Any]) -> dict[str, Any]:
-    """Return optional fields that are present and non-None."""
-    return {
-        field: profile[field]
-        for field in OPTIONAL_FIELDS
-        if field in profile and profile[field] is not None
-    }
-
-
 def load_profile(profiles_path: Path | str, profile_name: str) -> dict[str, Any]:
     """Load a named profile from a YAML profiles file.
 
@@ -133,8 +79,21 @@ def load_profile(profiles_path: Path | str, profile_name: str) -> dict[str, Any]
         ValueError: If a required field is missing or empty.
     """
     path = Path(profiles_path)
-    raw = _load_raw_profiles(path)
-    profile = _resolve_profile_dict(raw, profile_name, path)
-    return _extract_required_fields(
-        profile, profile_name, path
-    ) | _extract_optional_fields(profile)
+    if not path.exists():
+        raise FileNotFoundError(f"Model profiles file not found: {path}")
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or profile_name not in raw:
+        raise KeyError(f"Profile '{profile_name}' not found in {path}")
+    profile = raw[profile_name]
+    if not isinstance(profile, dict):
+        raise ValueError(f"Profile '{profile_name}' in {path} is not a mapping")
+    for field in REQUIRED_FIELDS:
+        if profile.get(field) in (None, ""):
+            raise ValueError(
+                f"Profile '{profile_name}' is missing required field '{field}'"
+            )
+    return {
+        field: profile[field]
+        for field in (*REQUIRED_FIELDS, *OPTIONAL_FIELDS)
+        if profile.get(field) is not None
+    }
