@@ -2218,11 +2218,9 @@ def _snapshot_value(annotation: Any, value: Any) -> Any:
 
 
 def _snapshot_model(annotation: Any) -> type[BaseModel]:
-    for candidate in get_args(annotation):
+    for candidate in (annotation, *get_args(annotation)):
         if isinstance(candidate, type) and issubclass(candidate, BaseModel):
             return candidate
-    if isinstance(annotation, type) and issubclass(annotation, BaseModel):
-        return annotation
     raise TypeError(f"snapshot field {annotation!r} names no snapshot model")
 
 
