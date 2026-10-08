@@ -281,6 +281,40 @@ def test_gap_analysis_drops_an_obligation_whose_span_stays_unmapped(tmp_path) ->
     assert dropped["proposed"]["rule"] == GAP_RULE
 
 
+def test_an_unknown_hazard_beside_an_unmapped_span_stops_without_a_call(
+    tmp_path,
+) -> None:
+    risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN)])
+    risk["security_constraints"][0]["related_hazards"].append("H-99")
+    client = MockLLMClient()
+    client.set_response_for(LossAnalysisDraft, [risk])
+
+    with pytest.raises(StageError) as exc_info:
+        derive_loss_analysis(
+            llm_client=client,
+            use_case_text=_USE_CASE,
+            risk_cards=_occiai_cards(),
+            run_dir=tmp_path,
+        )
+
+    message = str(exc_info.value)
+    assert message.startswith(
+        "stage_1a/risk_derivation: targeted repair unsupported (graph "
+        "validation is outside the approved repair scope: "
+    )
+    assert "unknown IDs: H-99" in message
+    assert "no repair call was made; wire_schema failure class" in message
+    assert [entry["step"] for entry in _stage1a_entries(tmp_path)] == [
+        "risk_derivation"
+    ]
+    (unsupported,) = [
+        entry
+        for entry in _repair_record(tmp_path)["records"]
+        if entry["kind"] == "unsupported"
+    ]
+    assert unsupported["identity"] == "response"
+
+
 def test_a_slipping_span_beside_an_unrelated_edit_still_stops(tmp_path) -> None:
     kept = _entry("O2", "no sensitive health data")
     risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN), kept])
