@@ -650,8 +650,12 @@ factor-to-assertion and factor-to-step mapping, canonical predicates, the
 final unsafe-control-action step, and typed provenance — and returns typed
 violations aligned with the taxonomy `projection_validation` contract.
 Normal publication renders narrative, attack-tree and Gherkin summaries
-deterministically through `render_scenario_summary`. They retain the selected
-causal evidence and describe a hypothesis, not an observed test result.
+deterministically through `render_scenario_presentation`: functional
+scenarios publish the `render_scenario_summary` account, and adversarial
+scenarios publish a narrative and Gherkin rendered from the attack shape over
+the same tree. The structured handoff fields and the tree retain the selected
+causal evidence; every rendering describes a hypothesis, not an observed test
+result.
 The run makes no model calls to render them.
 Stage 5 prompt views teach condition field semantics without supplying invented
 request-specific values. Temporal outcomes reuse the factor-condition local
