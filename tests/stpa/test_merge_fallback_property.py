@@ -9,6 +9,7 @@ prefix names; the sanitize and strip tiers conserve them).
 from __future__ import annotations
 
 
+import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
 
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -454,8 +455,8 @@ class TestEnrichResponsibilitiesProperties:
         n_resps=st.integers(min_value=1, max_value=3),
     )
     @settings(max_examples=15, deadline=None)
-    def test_elements_with_no_matching_resp_dropped(self, n_resps):
-        """Orphan elements: CAs/FBs whose resp_num matches no responsibility are dropped."""
+    def test_elements_with_no_matching_resp_rejected(self, n_resps):
+        """Orphan elements: CAs/FBs whose resp_num matches no responsibility fail."""
         resp_set = ResponsibilitySet(
             responsibilities=[
                 _make_resp_pm_only(f"RESP-{x}") for x in range(1, n_resps + 1)
@@ -477,10 +478,12 @@ class TestEnrichResponsibilitiesProperties:
                 )
             ],
         )
-        enriched = _enrich_responsibilities(resp_set, ces)
-        for resp in enriched:
-            assert resp.control_actions == []
-            assert resp.feedback_channels == []
+        with pytest.raises(ValueError) as exc_info:
+            _enrich_responsibilities(resp_set, ces)
+        assert str(exc_info.value) == (
+            "unmatched control-element ownership; cannot distribute by response "
+            f"order: CA CA-{n_resps + 1}-1, FB FB-{n_resps + 1}-1"
+        )
 
 
 class TestFallbackConservationProperties:
@@ -540,123 +543,3 @@ class TestFallbackConservationProperties:
         for resp in cs.responsibilities:
             for pm in resp.process_model_parts:
                 assert pm.feedback_source is None
-
-    @given(
-        n_resps=st.integers(min_value=1, max_value=3),
-        n_cas=st.integers(min_value=1, max_value=2),
-        n_fbs=st.integers(min_value=1, max_value=2),
-    )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_strip_tier_conserves_cas_and_fbs(self, tmp_path, n_resps, n_cas, n_fbs):
-        """Strip tier: every CA/FB from Call 2b appears on the fallback CS.
-
-        The sanitize tier is forced to fail by adding a duplicate RESP-1
-        (duplicate resp_id fails ControlStructure validation even after
-        sanitizing refs). The strip tier deduplicates by resp_id (keeping
-        the first occurrence, which carries the enriched CAs/FBs) and
-        strips all ElementRefs, conserving the CAs/FBs themselves.
-        """
-        responsibilities = [_make_resp_pm_only("RESP-1")]
-        # Add a duplicate RESP-1 to force sanitize-tier failure.
-        responsibilities.append(_make_resp_pm_only("RESP-1"))
-        # Add distinct responsibilities for resp_nums 2..n_resps.
-        for x in range(2, n_resps + 1):
-            responsibilities.append(_make_resp_pm_only(f"RESP-{x}"))
-        resp_set = ResponsibilitySet(responsibilities=responsibilities)
-        ces = _make_control_element_set(n_resps, n_cas, n_fbs)
-
-        cs, warnings = _assemble_with_fallback(resp_set, ces, tmp_path, "test-model")
-
-        # Every CA and FB from the ControlElementSet appears on the CS.
-        all_ca_ids = {
-            ca.ca_id for resp in cs.responsibilities for ca in resp.control_actions
-        }
-        all_fb_ids = {
-            fb.fb_id for resp in cs.responsibilities for fb in resp.feedback_channels
-        }
-        for x in range(1, n_resps + 1):
-            for y in range(1, n_cas + 1):
-                assert f"CA-{x}-{y}" in all_ca_ids
-            for y in range(1, n_fbs + 1):
-                assert f"FB-{x}-{y}" in all_fb_ids
-        # The strip tier nullified all ElementRefs.
-        for resp in cs.responsibilities:
-            for pm in resp.process_model_parts:
-                assert pm.feedback_source is None
-            for ca in resp.control_actions:
-                assert ca.target is None
-            for fb in resp.feedback_channels:
-                assert fb.source is None
-        # The duplicate RESP-1 was removed (dedup keeping first).
-        resp_ids = [r.resp_id for r in cs.responsibilities]
-        assert len(resp_ids) == len(set(resp_ids))
-
-    @given(
-        n_resps=st.integers(min_value=1, max_value=3),
-    )
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_strip_tier_strips_valid_refs_but_keeps_cas_fbs(self, tmp_path, n_resps):
-        """Sanitize-11 invariant: strip tier carries over CAs/FBs with refs stripped.
-
-        CAs carry valid targets (controlled_process CP-1) and FBs carry
-        valid sources (responsibility RESP-X). The strip tier nullifies
-        those refs but the CAs/FBs themselves survive on the fallback CS.
-        """
-        responsibilities = [_make_resp_pm_only("RESP-1")]
-        # Duplicate RESP-1 forces sanitize failure → strip tier runs.
-        responsibilities.append(_make_resp_pm_only("RESP-1"))
-        for x in range(2, n_resps + 1):
-            responsibilities.append(_make_resp_pm_only(f"RESP-{x}"))
-        resp_set = ResponsibilitySet(responsibilities=responsibilities)
-
-        # CAs with valid targets and FBs with valid sources.
-        control_actions = [
-            ControlAction(
-                ca_id=f"CA-{x}-1",
-                description=f"Action {x}",
-                target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
-            )
-            for x in range(1, n_resps + 1)
-        ]
-        feedback_channels = [
-            FeedbackChannel(
-                fb_id=f"FB-{x}-1",
-                description=f"Feedback {x}",
-                updates=f"PM-{x}-1",
-                source=ElementRef(type=ReferenceType.responsibility, id=f"RESP-{x}"),
-            )
-            for x in range(1, n_resps + 1)
-        ]
-        ces = ControlElementSet(
-            control_actions=control_actions,
-            feedback_channels=feedback_channels,
-            controlled_processes=[
-                ControlledProcess(cp_id="CP-1", description="Process")
-            ],
-        )
-
-        cs, _ = _assemble_with_fallback(resp_set, ces, tmp_path, "test-model")
-
-        # CAs and FBs survive but their refs are stripped to None.
-        all_ca_ids = {
-            ca.ca_id for resp in cs.responsibilities for ca in resp.control_actions
-        }
-        all_fb_ids = {
-            fb.fb_id for resp in cs.responsibilities for fb in resp.feedback_channels
-        }
-        for x in range(1, n_resps + 1):
-            assert f"CA-{x}-1" in all_ca_ids
-            assert f"FB-{x}-1" in all_fb_ids
-        for resp in cs.responsibilities:
-            for ca in resp.control_actions:
-                assert ca.target is None
-            for fb in resp.feedback_channels:
-                assert fb.source is None

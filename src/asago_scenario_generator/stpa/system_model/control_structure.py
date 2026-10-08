@@ -71,7 +71,6 @@ from asago_scenario_generator.stpa.system_model.semantic_review import (
     ControlStructureSemanticReview,
     HazardSemanticReview,
     ResponsibilityReview,
-    SourceEvidence,
     apply_control_structure_semantic_review,
 )
 
@@ -423,13 +422,11 @@ def _exact_review_rows(record_type, identity_field, identities):
 
 
 def _provider_source_evidence_type(
-    loss_analysis: LossAnalysis | None,
+    loss_analysis: LossAnalysis,
     use_case_text: str,
     source_excerpts: Sequence[_Call3SourceExcerpt] | None,
 ):
-    """Return the evidence row type; restrict ``source_ref`` once a graph is known."""
-    if loss_analysis is None:
-        return SourceEvidence
+    """Return the evidence row type with ``source_ref`` restricted to the excerpts."""
     excerpts = tuple(
         source_excerpts
         if source_excerpts is not None
@@ -449,22 +446,14 @@ def _provider_source_evidence_type(
 
 def _coordination_provider_schema(
     structure: ControlStructure,
-    loss_analysis: LossAnalysis | None = None,
+    loss_analysis: LossAnalysis,
     *,
     use_case_text: str = "",
     source_excerpts: Sequence[_Call3SourceExcerpt] | None = None,
 ):
     """Require the same complete review that the Call 3 consumer validates."""
-    constraint_ids = (
-        [sc.constraint_id for sc in loss_analysis.security_constraints]
-        if loss_analysis is not None
-        else []
-    )
-    hazard_ids = (
-        [hazard.hazard_id for hazard in loss_analysis.hazards]
-        if loss_analysis is not None
-        else []
-    )
+    constraint_ids = [sc.constraint_id for sc in loss_analysis.security_constraints]
+    hazard_ids = [hazard.hazard_id for hazard in loss_analysis.hazards]
     evidence_type = _provider_source_evidence_type(
         loss_analysis, use_case_text, source_excerpts
     )
@@ -475,44 +464,36 @@ def _coordination_provider_schema(
             Field(min_length=0),
         )
 
-    constraint_rows = _exact_review_rows(
-        ConstraintHazardReview,
-        "constraint_id",
-        constraint_ids,
-    )
-    if loss_analysis is not None:
-        constraint_row_type = create_model(
-            "ProviderConstraintHazardReview",
-            __base__=ConstraintHazardReview,
-            constraint_id=(Literal[tuple(constraint_ids)], ...),
-            source_evidence=evidence_field(),
-            related_hazards=(
-                tuple[Literal[tuple(hazard_ids)], ...],
-                Field(
-                    min_length=0,
-                    max_length=len(hazard_ids),
-                ),
-            ),
-        )
-        constraint_rows = (
-            tuple[constraint_row_type, ...],
+    constraint_row_type = create_model(
+        "ProviderConstraintHazardReview",
+        __base__=ConstraintHazardReview,
+        constraint_id=(Literal[tuple(constraint_ids)], ...),
+        source_evidence=evidence_field(),
+        related_hazards=(
+            tuple[Literal[tuple(hazard_ids)], ...],
             Field(
-                min_length=len(constraint_ids),
-                max_length=len(constraint_ids),
+                min_length=0,
+                max_length=len(hazard_ids),
             ),
-        )
-        hazard_row_type = create_model(
-            "ProviderHazardSemanticReview",
-            __base__=HazardSemanticReview,
-            hazard_id=(Literal[tuple(hazard_ids)], ...),
-            source_evidence=evidence_field(),
-        )
-        hazard_rows = (
-            tuple[hazard_row_type, ...],
-            Field(min_length=len(hazard_ids), max_length=len(hazard_ids)),
-        )
-    else:
-        hazard_rows = _exact_review_rows(HazardSemanticReview, "hazard_id", hazard_ids)
+        ),
+    )
+    constraint_rows = (
+        tuple[constraint_row_type, ...],
+        Field(
+            min_length=len(constraint_ids),
+            max_length=len(constraint_ids),
+        ),
+    )
+    hazard_row_type = create_model(
+        "ProviderHazardSemanticReview",
+        __base__=HazardSemanticReview,
+        hazard_id=(Literal[tuple(hazard_ids)], ...),
+        source_evidence=evidence_field(),
+    )
+    hazard_rows = (
+        tuple[hazard_row_type, ...],
+        Field(min_length=len(hazard_ids), max_length=len(hazard_ids)),
+    )
     review_type = create_model(
         "ProviderControlStructureSemanticReview",
         __base__=ControlStructureSemanticReview,
@@ -544,20 +525,15 @@ def _parse_call3_source_selection(
     result: Any,
     source_excerpts: Sequence[_Call3SourceExcerpt],
     *,
-    structure: ControlStructure | None = None,
-    loss_analysis: LossAnalysis | None = None,
+    structure: ControlStructure,
+    loss_analysis: LossAnalysis,
 ) -> CoordinationAnalysis:
     """Map provider-local source selections to immutable final evidence."""
     payload = _decode_call3_payload(result)
     review = payload.get("semantic_review")
     if not isinstance(review, dict):
         return CoordinationAnalysis.model_validate(payload)
-    if structure is not None or loss_analysis is not None:
-        if structure is None or loss_analysis is None:
-            raise ValueError(
-                "Call 3 parser requires both structure and loss_analysis authorities"
-            )
-        _apply_call3_review_authorities(review, structure, loss_analysis)
+    _apply_call3_review_authorities(review, structure, loss_analysis)
     _resolve_call3_source_evidence(review, _call3_source_ref_map(source_excerpts))
     return CoordinationAnalysis.model_validate(payload)
 
@@ -1364,15 +1340,12 @@ def _assign_elements_to_responsibilities(
     id_attr: str,
     resp_by_num: dict[int, Responsibility],
     target_attr: str,
-    *,
-    return_unmatched: bool = False,
-) -> list | None:
+) -> list:
     """Assign elements (CAs or FBs) to their parent responsibility by ID prefix.
 
     For each element, extracts the numeric prefix from its ``id_attr``
     (e.g. ``CA-3-1`` → 3) and appends it to the matching responsibility's
-    ``target_attr`` list. Elements with no matching responsibility are
-    silently dropped, matching the original assembly behavior.
+    ``target_attr`` list. Returns the elements no responsibility owns.
     """
     unmatched = []
     for element in elements:
@@ -1381,25 +1354,20 @@ def _assign_elements_to_responsibilities(
             getattr(resp, target_attr).append(element)
         else:
             unmatched.append(element)
-    return unmatched if return_unmatched else None
+    return unmatched
 
 
 def _enrich_responsibilities(
     responsibility_set: ResponsibilitySet,
     control_element_set: ControlElementSet,
-    *,
-    normalize_ids: bool = False,
 ) -> list[Responsibility]:
     """Deep-copy responsibilities and assign Call 2b CAs/FBs onto them by ID prefix.
 
     Returns a deep-copied list of the Call 2a responsibilities with the
     Call 2b ``control_actions`` and ``feedback_channels`` appended to the
     matching responsibility by ID prefix (CA-X-Y → RESP-X, FB-X-Y → RESP-X).
-
-    ``resp_by_num`` keeps the FIRST occurrence of each responsibility number
-    for the compatibility (non-normalizing) path.  The normalizing path
-    rejects an unmatched element instead of recovering ownership from the
-    response-array order.
+    An element no responsibility owns is rejected instead of being
+    distributed by response-array order.
     """
     enriched = copy.deepcopy(responsibility_set.responsibilities)
     resp_by_num: dict[int, Responsibility] = {}
@@ -1410,19 +1378,17 @@ def _enrich_responsibilities(
         "ca_id",
         resp_by_num,
         "control_actions",
-        return_unmatched=normalize_ids,
     )
     unmatched_fbs = _assign_elements_to_responsibilities(
         control_element_set.feedback_channels,
         "fb_id",
         resp_by_num,
         "feedback_channels",
-        return_unmatched=normalize_ids,
     )
-    if normalize_ids and (unmatched_cas or unmatched_fbs):
+    if unmatched_cas or unmatched_fbs:
         unmatched_labels = [
-            *[f"CA {item.ca_id}" for item in unmatched_cas or []],
-            *[f"FB {item.fb_id}" for item in unmatched_fbs or []],
+            *[f"CA {item.ca_id}" for item in unmatched_cas],
+            *[f"FB {item.fb_id}" for item in unmatched_fbs],
         ]
         raise ValueError(
             "unmatched control-element ownership; cannot distribute by response "
@@ -1434,26 +1400,17 @@ def _enrich_responsibilities(
 def _assemble_control_structure(
     responsibility_set: ResponsibilitySet,
     control_element_set: ControlElementSet,
-    *,
-    normalize_ids: bool = False,
 ) -> ControlStructure:
     """Merge Call 2a (responsibilities + RCs + PMs) and Call 2b (CAs + FBs + CPs).
 
     Matches CAs and FBs to responsibilities by ID prefix (CA-X-Y → RESP-X,
-    FB-X-Y → RESP-X). Produces and validates the final ControlStructure.
+    FB-X-Y → RESP-X). Produces the final ControlStructure with canonical IDs
+    and validates it.
     """
-    responsibilities = _enrich_responsibilities(
-        responsibility_set,
-        control_element_set,
-        normalize_ids=normalize_ids,
-    )
+    responsibilities = _enrich_responsibilities(responsibility_set, control_element_set)
     controlled_processes = copy.deepcopy(control_element_set.controlled_processes)
 
-    return _build_control_structure(
-        responsibilities,
-        controlled_processes,
-        normalize_ids=normalize_ids,
-    )
+    return _build_control_structure(responsibilities, controlled_processes)
 
 
 def _control_structure_payload(
@@ -1473,17 +1430,10 @@ def _control_structure_payload(
 def _build_control_structure(
     responsibilities: list[Responsibility],
     controlled_processes: list[ControlledProcess],
-    *,
-    normalize_ids: bool,
 ) -> ControlStructure:
-    """Construct a control structure, optionally normalizing its IDs."""
-    if normalize_ids:
-        return validate_normalized_control_structure(
-            _control_structure_payload(responsibilities, controlled_processes)
-        )
-    return ControlStructure(
-        responsibilities=responsibilities,
-        controlled_processes=controlled_processes,
+    """Construct a control structure with canonical IDs and validate it."""
+    return validate_normalized_control_structure(
+        _control_structure_payload(responsibilities, controlled_processes)
     )
 
 
@@ -1646,8 +1596,6 @@ def _strip_all_element_refs(
 def _fallback_control_structure(
     enriched_responsibilities: list[Responsibility],
     controlled_processes: list[ControlledProcess],
-    *,
-    normalize_ids: bool,
 ) -> tuple[ControlStructure, list[str]]:
     """Build the sanitized fallback, degrading to stripped refs if needed."""
     warnings: list[str] = []
@@ -1658,11 +1606,7 @@ def _fallback_control_structure(
         )
         warnings.extend(sanitize_warnings)
         return (
-            _build_control_structure(
-                sanitized_resps,
-                sanitized_cps,
-                normalize_ids=normalize_ids,
-            ),
+            _build_control_structure(sanitized_resps, sanitized_cps),
             warnings,
         )
     except Exception:
@@ -1672,11 +1616,7 @@ def _fallback_control_structure(
         )
         warnings.extend(strip_warnings)
         return (
-            _build_control_structure(
-                stripped_resps,
-                stripped_cps,
-                normalize_ids=normalize_ids,
-            ),
+            _build_control_structure(stripped_resps, stripped_cps),
             warnings,
         )
 
@@ -1687,7 +1627,6 @@ def _assemble_with_fallback(
     run_dir: Path,
     model: str,
     *,
-    normalize_ids: bool = False,
     call_log: CallLog | None = None,
 ) -> tuple[ControlStructure, list[str]]:
     """Assemble ControlStructure from Call 2a + Call 2b, falling back on failure.
@@ -1714,8 +1653,6 @@ def _assemble_with_fallback(
         control_element_set: CAs, FBs, and CPs from Call 2b.
         run_dir: Directory for failure logging.
         model: LLM model name (used in the call-log entry).
-        normalize_ids: If true, assign canonical IDs and fail when a Call 2b
-            element does not carry an addressable responsibility owner.
 
     Returns:
         A tuple of (ControlStructure, assembly_warnings). The warning list
@@ -1723,11 +1660,7 @@ def _assemble_with_fallback(
     """
     try:
         return (
-            _assemble_control_structure(
-                responsibility_set,
-                control_element_set,
-                normalize_ids=normalize_ids,
-            ),
+            _assemble_control_structure(responsibility_set, control_element_set),
             [],
         )
     except Exception as exc:
@@ -1751,14 +1684,11 @@ def _assemble_with_fallback(
         # cross-tier mutation.
         try:
             enriched_resps = _enrich_responsibilities(
-                responsibility_set,
-                control_element_set,
-                normalize_ids=normalize_ids,
+                responsibility_set, control_element_set
             )
             fallback, fallback_warnings = _fallback_control_structure(
                 enriched_resps,
                 control_element_set.controlled_processes,
-                normalize_ids=normalize_ids,
             )
         except Exception as fallback_exc:
             fallback_error = f"{type(fallback_exc).__name__}: {fallback_exc}"
@@ -2081,7 +2011,6 @@ def derive_control_structure(
         control_element_set,
         run_dir,
         llm_client.model,
-        normalize_ids=True,
         call_log=call_log_of(llm_client),
     )
 
@@ -2422,7 +2351,7 @@ def _call_2b_control_elements(
 
 def _deterministic_integrity_findings(
     control_structure: ControlStructure,
-    loss_analysis: LossAnalysis | None = None,
+    loss_analysis: LossAnalysis,
 ) -> tuple[str, ...]:
     """Return the structural diagnostics computed by deterministic code."""
     checks = check_structural_heuristics(control_structure, loss_analysis)
@@ -2437,10 +2366,10 @@ def _call_3_coordination(
     llm_client: LLMClient,
     use_case_text: str,
     control_structure: ControlStructure,
+    loss_analysis: LossAnalysis,
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
-    loss_analysis: LossAnalysis | None = None,
     correction_feedback: str = "",
     step: str = "call_3_coordination",
     target_evidence: TargetEvidence | None = None,
@@ -2456,26 +2385,18 @@ def _call_3_coordination(
     Raises:
         StageError: If the LLM call fails or the response fails validation.
     """
-    source_excerpts = (
-        _build_call3_source_excerpts(use_case_text, loss_analysis)
-        if loss_analysis is not None
-        else ()
-    )
+    source_excerpts = _build_call3_source_excerpts(use_case_text, loss_analysis)
     integrity_findings = _deterministic_integrity_findings(
         control_structure, loss_analysis
     )
     source_ref_by_canonical = {
         excerpt.canonical_ref: excerpt.local_ref for excerpt in source_excerpts
     }
-    response_format = (
-        _coordination_provider_schema(
-            control_structure,
-            loss_analysis,
-            use_case_text=use_case_text,
-            source_excerpts=source_excerpts,
-        )
-        if loss_analysis is not None
-        else _CoordinationProviderEnvelope
+    response_format = _coordination_provider_schema(
+        control_structure,
+        loss_analysis,
+        use_case_text=use_case_text,
+        source_excerpts=source_excerpts,
     )
     analysis = _run_stage2_llm_call(
         llm_client=llm_client,
@@ -2495,31 +2416,18 @@ def _call_3_coordination(
         },
         response_format=response_format,
         step=step,
-        allow_unvalidated=loss_analysis is None,
         user_prompt_suffix=correction_feedback,
-        result_validator=(
-            lambda value: _validate_semantic_review_response(
-                value,
-                control_structure,
-                loss_analysis,
-                use_case_text=use_case_text,
-            )
-        )
-        if loss_analysis is not None
-        else None,
-        result_parser=(
-            lambda result: _parse_call3_source_selection(
-                result,
-                source_excerpts,
-                structure=control_structure,
-                loss_analysis=loss_analysis,
-            )
-        )
-        if loss_analysis is not None
-        else lambda result: CoordinationAnalysis(
-            **_CoordinationProviderEnvelope.model_validate(
-                decode_content(result)
-            ).model_dump()
+        result_validator=lambda value: _validate_semantic_review_response(
+            value,
+            control_structure,
+            loss_analysis,
+            use_case_text=use_case_text,
+        ),
+        result_parser=lambda result: _parse_call3_source_selection(
+            result,
+            source_excerpts,
+            structure=control_structure,
+            loss_analysis=loss_analysis,
         ),
     )
     # The durable record receives the structural check actually performed

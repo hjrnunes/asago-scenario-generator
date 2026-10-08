@@ -144,6 +144,8 @@ def test_parser_copies_exact_excerpt_and_maps_to_final_source_reference() -> Non
     parsed = _parse_call3_source_selection(
         LLMResult(content=payload, prompt_tokens=0, completion_tokens=0, duration_ms=0),
         excerpts,
+        structure=structure,
+        loss_analysis=losses,
     )
 
     assert parsed.semantic_review is not None
@@ -177,6 +179,8 @@ def test_parser_handles_provider_model_at_real_client_boundary() -> None:
             duration_ms=0,
         ),
         excerpts,
+        structure=structure,
+        loss_analysis=losses,
     )
 
     assert parsed.semantic_review is not None
@@ -547,6 +551,8 @@ def test_parser_rejects_unknown_or_transcribed_source_evidence(mutate, match) ->
                 duration_ms=0,
             ),
             excerpts,
+            structure=structure,
+            loss_analysis=losses,
         )
 
 

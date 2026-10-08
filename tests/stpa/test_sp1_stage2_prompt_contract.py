@@ -289,9 +289,7 @@ def test_assembly_assigns_reordered_actions_by_owner_encoded_in_id() -> None:
         _valid_payload(), responsibilities=responsibilities.responsibilities
     )
 
-    assembled = _assemble_control_structure(
-        responsibilities, elements, normalize_ids=True
-    )
+    assembled = _assemble_control_structure(responsibilities, elements)
 
     by_resp = {item.resp_id: item for item in assembled.responsibilities}
     assert by_resp["RESP-1"].control_actions[0].description == (
@@ -321,7 +319,7 @@ def test_normalized_assembly_rejects_unmatched_owner_instead_of_order_recovery()
         ControlAction(ca_id="CA-99-1", description="Unowned action")
     )
     with pytest.raises(ValueError, match="owner|responsibility|unmatched"):
-        _enrich_responsibilities(responsibilities, elements, normalize_ids=True)
+        _enrich_responsibilities(responsibilities, elements)
 
 
 def _payload_with(**changes) -> dict:
