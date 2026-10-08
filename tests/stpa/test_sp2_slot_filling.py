@@ -21,13 +21,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICASlot,
     UCAType,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
+from tests.helpers.stpa_builders import make_loss_analysis
 
 
 def _make_test_control_structure() -> ControlStructure:
@@ -102,29 +96,6 @@ def _make_test_control_structure() -> ControlStructure:
     )
 
 
-def _make_test_loss_analysis() -> LossAnalysis:
-    """Build a loss analysis with hazard H-1 and constraint SC-1."""
-    return LossAnalysis(
-        risk_card_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=["atlas-001"],
-            )
-        ],
-        use_case_losses=[],
-        hazards=[
-            Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"]),
-        ],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1", rule="Constraint", related_hazards=["H-1"]
-            ),
-        ],
-    )
-
-
 # ---------------------------------------------------------------------------
 # One LLM call per responsibility (SP2-FILL-01)
 # ---------------------------------------------------------------------------
@@ -180,7 +151,7 @@ class TestHazardIDValidation:
 
     def test_valid_hazard_ids_validate(self):
         cs = _make_test_control_structure()
-        la = _make_test_loss_analysis()
+        la = make_loss_analysis()
         ica_enum = ICAEnumeration(
             slots=[
                 ICASlot(
@@ -207,7 +178,7 @@ class TestHazardIDValidation:
 
     def test_invalid_hazard_ids_rejected(self):
         cs = _make_test_control_structure()
-        la = _make_test_loss_analysis()
+        la = make_loss_analysis()
         ica_enum = ICAEnumeration(
             slots=[
                 ICASlot(

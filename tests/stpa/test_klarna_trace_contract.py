@@ -10,13 +10,6 @@ from __future__ import annotations
 import pytest
 
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
 from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,
     ControlElementSet,
@@ -25,35 +18,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     derive_control_structure,
 )
 from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
-
-
-def _loss_analysis() -> LossAnalysis:
-    """Return one loss, hazard, and security constraint for Stage 2 tests."""
-    return LossAnalysis(
-        risk_card_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=["risk-1"],
-            )
-        ],
-        use_case_losses=[],
-        hazards=[
-            Hazard(
-                hazard_id="H-1",
-                description="Hazard",
-                related_losses=["L-1"],
-            )
-        ],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1",
-                rule="Constraint",
-                related_hazards=["H-1"],
-            )
-        ],
-    )
+from tests.helpers.stpa_builders import make_loss_analysis
 
 
 def _requirement_response() -> dict:
@@ -139,7 +104,7 @@ def test_stage2_rejects_unexpected_responsibility_collection(tmp_path) -> None:
         derive_control_structure(
             llm_client=_stage2_client(response),
             use_case_text="Test",
-            loss_analysis=_loss_analysis(),
+            loss_analysis=make_loss_analysis(),
             run_dir=tmp_path,
         )
 
@@ -152,7 +117,7 @@ def test_stage2_requires_and_preserves_security_constraint_refs(tmp_path) -> Non
         derive_control_structure(
             llm_client=client,
             use_case_text="Test",
-            loss_analysis=_loss_analysis(),
+            loss_analysis=make_loss_analysis(),
             run_dir=tmp_path,
         )
 
@@ -162,7 +127,7 @@ def test_stage2_preserves_security_constraint_refs(tmp_path) -> None:
     result = derive_control_structure(
         llm_client=_stage2_client(_responsibility_response()),
         use_case_text="Test",
-        loss_analysis=_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=tmp_path,
     )
     control_structure = result.control_structure

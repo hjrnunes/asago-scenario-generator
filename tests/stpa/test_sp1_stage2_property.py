@@ -54,7 +54,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 )
 from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.helpers.sp1_critic import _make_loss_analysis
+from tests.stpa.helpers import make_minimal_loss_analysis
 
 # Calls 1, 2a, 2b and 3, each answered validly on its first request.
 DERIVATION_CALLS = 4
@@ -498,7 +498,7 @@ class TestCallLogOrdering:
         derive_control_structure(
             llm_client=client,
             use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
+            loss_analysis=make_minimal_loss_analysis(),
             run_dir=tmp_path,
         )
 
@@ -584,7 +584,7 @@ class TestCallLogOrdering:
         derive_control_structure(
             llm_client=client,
             use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
+            loss_analysis=make_minimal_loss_analysis(),
             run_dir=tmp_path,
         )
         assert len(client.calls) == DERIVATION_CALLS

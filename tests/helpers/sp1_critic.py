@@ -11,13 +11,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
 
 
 def _make_control_structure() -> ControlStructure:
@@ -59,24 +52,5 @@ def _make_control_structure() -> ControlStructure:
                     )
                 ],
             ),
-        ],
-    )
-
-
-def _make_loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[],
-        use_case_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.use_case,
-            )
-        ],
-        hazards=[
-            Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"]),
-        ],
-        security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
         ],
     )

@@ -32,7 +32,8 @@ from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from asago_scenario_generator.stpa.system_model import critic as critic_module
-from tests.helpers.sp1_critic import _make_control_structure, _make_loss_analysis
+from tests.helpers.sp1_critic import _make_control_structure
+from tests.stpa.helpers import make_minimal_loss_analysis
 
 
 def _valid_critic_findings_dict() -> dict:
@@ -532,7 +533,7 @@ class TestRevision:
             critic_findings=findings,
             use_case_text="Test",
             run_dir=tmp_path,
-            loss_analysis=_make_loss_analysis(),
+            loss_analysis=make_minimal_loss_analysis(),
         )
         # Heuristics were re-run — warnings is a list (may be empty)
         assert isinstance(warnings, list)
