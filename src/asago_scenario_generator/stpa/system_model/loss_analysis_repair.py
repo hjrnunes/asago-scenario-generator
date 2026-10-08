@@ -54,6 +54,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections import Counter
 from collections.abc import Callable, Container, Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -1359,6 +1360,12 @@ _REFERENCE_LIST_FIELDS = {
 }
 
 
+def _named_twice(ids: Iterable[str]) -> list[str]:
+    """Return each ID that appears more than once, sorted."""
+    counts = Counter(ids)
+    return sorted(ref for ref, count in counts.items() if count > 1)
+
+
 @dataclass(frozen=True)
 class SelectedReferenceList:
     """One reference list that names an unknown ID.
@@ -1394,9 +1401,14 @@ class SelectedReferenceList:
         return len(self.original) - len(self.kept)
 
     @property
+    def repeats_only(self) -> bool:
+        """True when the list names no unknown ID but repeats a known one."""
+        return not self.unknown and bool(_named_twice(self.original))
+
+    @property
     def kept_order(self) -> str:
         """How the kept entries must appear; a repeat stays for the gate."""
-        if len(set(self.kept)) == len(self.kept):
+        if not _named_twice(self.kept):
             return "once each"
         return "exactly as listed, repeats included,"
 
@@ -1455,6 +1467,21 @@ def select_reference_repairs(
     reference gate's duplicate detection reports that list, and no repair
     call is made.
     """
+    lists = _reference_lists(
+        draft, valid_loss_ids=valid_loss_ids, valid_hazard_ids=valid_hazard_ids
+    )
+    if any(item.repeats_only for item in lists):
+        return ()
+    return tuple(item for item in lists if item.unknown)
+
+
+def _reference_lists(
+    draft: LossAnalysisDraft,
+    *,
+    valid_loss_ids: set[str],
+    valid_hazard_ids: set[str],
+) -> tuple[SelectedReferenceList, ...]:
+    """Every hazard and constraint reference list, with its unknown IDs."""
     rows = (
         ("hazards", hazard.hazard_id, hazard.related_losses, valid_loss_ids)
         for hazard in draft.hazards
@@ -1468,7 +1495,7 @@ def select_reference_repairs(
         )
         for constraint in draft.security_constraints
     )
-    lists = tuple(
+    return tuple(
         SelectedReferenceList(
             collection=collection,
             owner_id=owner_id,
@@ -1478,12 +1505,6 @@ def select_reference_repairs(
         )
         for collection, owner_id, references, valid_ids in (*rows, *constraint_rows)
     )
-    if any(
-        not item.unknown and len(set(item.original)) < len(item.original)
-        for item in lists
-    ):
-        return ()
-    return tuple(item for item in lists if item.unknown)
 
 
 def select_disposition_repairs(
@@ -2739,7 +2760,7 @@ def _check_added_references(
     selected: SelectedReferenceList, returned: list[str], keep: set[str]
 ) -> None:
     added = [ref for ref in returned if ref not in keep]
-    repeated = sorted({ref for ref in added if added.count(ref) > 1})
+    repeated = _named_twice(added)
     if repeated:
         raise RepairRejected(
             f"repair_duplicate_remaining: {selected.identity} adds "
