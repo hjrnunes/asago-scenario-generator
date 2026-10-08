@@ -112,8 +112,8 @@ def _target_operation() -> TargetOperationObservation:
     )
 
 
-def _record_observations() -> TargetObservationSnapshot:
-    """One quoted target state holding the record facts the model must see."""
+def _state_snapshot(content: str) -> TargetObservationSnapshot:
+    """One quoted target state whose JSON text is ``content``."""
     return TargetObservationSnapshot.create(
         target_profile_digest="a" * 64,
         observations=(
@@ -121,12 +121,16 @@ def _record_observations() -> TargetObservationSnapshot:
                 observation_ref="TARGET-STATE",
                 kind="state",
                 content_format="json",
-                content=(
-                    '{"order_id": "ORD-104", "refund_eligible": false, '
-                    '"owner_id": "cus-778"}'
-                ),
+                content=content,
             ),
         ),
+    )
+
+
+def _record_observations() -> TargetObservationSnapshot:
+    """One quoted target state holding the record facts the model must see."""
+    return _state_snapshot(
+        '{"order_id": "ORD-104", "refund_eligible": false, "owner_id": "cus-778"}'
     )
 
 
