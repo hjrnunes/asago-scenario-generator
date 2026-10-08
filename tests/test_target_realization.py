@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from asago_scenario_generator.models.target_realization import (
     CapabilityClaim,
     CapabilityExposureDisposition,
+    SystemicControlAction,
     SystemicControlledProcess,
     SystemicElementReference,
     TargetDerivedICARequest,
@@ -2268,3 +2269,39 @@ def test_union_projection_and_effective_view_bytes_are_pinned():
             "367daeab04983f5fbd921d6b4dad6421ad9afa704215d1022ed9a5e0f37a4217"
         ),
     }
+
+
+def test_projection_requires_the_effective_view():
+    baseline, loss_analysis, control_structure, ica_enumeration = _union_authorities()
+    realization = _realize(baseline, _profile(), lambda: _Interpreter())
+    assert realization.effective_view is None
+
+    with pytest.raises(ValueError, match="must pass realize_target_derived_icas"):
+        project_target_realization_to_stpa(
+            baseline, loss_analysis, control_structure, ica_enumeration, realization
+        )
+
+
+def test_view_builder_rejects_a_target_action_under_an_unknown_controller():
+    action = SystemicControlAction(
+        control_action_id="CA-9-1",
+        controller_id="RESP-9",
+        description="Unknown controller action",
+        provenance="target_derived",
+    )
+
+    with pytest.raises(ValueError, match="not in the baseline: RESP-9"):
+        target_realization_module._combine_control_structure(_baseline(), (action,), ())
+
+
+def test_typed_structure_rejects_a_target_process_that_collides_with_the_baseline():
+    with pytest.raises(ValidationError, match="Duplicate"):
+        ControlStructure(
+            responsibilities=[
+                Responsibility(resp_id="RESP-1", description="payment controller")
+            ],
+            controlled_processes=[
+                ControlledProcess(cp_id="CP-1", description="payment ledger"),
+                ControlledProcess(cp_id="CP-1", description="target-derived copy"),
+            ],
+        )

@@ -89,8 +89,6 @@ class TargetRealizationStpaProjection:
 
     control_structure: ControlStructure
     ica_enumeration: ICAEnumeration
-    target_derived_ica_findings: tuple[TargetDerivedICAFinding, ...]
-    denominators: TargetRealizationDenominators
 
 
 class _ExtensionResult(NamedTuple):
@@ -516,12 +514,12 @@ def project_target_realization_to_stpa(
     """Project one realized result into exact STPA models for downstream SP3.
 
     ``baseline`` is attested against the three exact typed authorities before
-    any projection occurs.  The authority models are copied deeply, then
-    target-derived actions, controlled processes, slots, and verified ICAs are
-    appended.  Baseline objects and the input realization are never modified.
-    A result that contains target-derived slots but has not passed
-    :func:`realize_target_derived_icas` is rejected so an SP3 caller cannot
-    accidentally omit target-derived candidate findings.
+    any projection occurs.  The authority models are copied deeply, then the
+    target-derived actions, controlled processes, slots, and verified ICAs of
+    the realization's effective view are appended.  Baseline objects and the
+    input realization are never modified.  A result that has not passed
+    :func:`realize_target_derived_icas` carries no effective view and is
+    rejected, so an SP3 caller cannot omit target-derived candidate findings.
     """
     _require_baseline(baseline)
     _require_projection_types(
@@ -539,26 +537,23 @@ def project_target_realization_to_stpa(
         control_structure=control_structure,
         ica_enumeration=ica_enumeration,
     )
-    _require_effective_view_for_target_slots(realization)
+    view = _require_effective_view(realization)
 
     projected_control_structure = _project_control_structure_to_stpa(
         control_structure,
-        realization,
+        view,
     )
     projected_ica_enumeration = _project_ica_enumeration_to_stpa(
         ica_enumeration,
-        realization,
+        view,
     )
     projected_ica_enumeration.validate_against(
         loss_analysis,
         projected_control_structure,
     )
-    denominators = _projection_denominators(baseline, ica_enumeration, realization)
     return TargetRealizationStpaProjection(
         control_structure=projected_control_structure,
         ica_enumeration=projected_ica_enumeration,
-        target_derived_ica_findings=tuple(realization.target_derived_ica_findings),
-        denominators=denominators,
     )
 
 
@@ -579,30 +574,14 @@ def _require_projection_types(
             raise TypeError(f"{name} must be a typed {expected.__name__}")
 
 
-def _require_effective_view_for_target_slots(
+def _require_effective_view(
     realization: TargetRealizationResult,
-) -> None:
-    if realization.target_derived_ica_slots and realization.effective_view is None:
+) -> TargetRealizationEffectiveView:
+    if realization.effective_view is None:
         raise ValueError(
-            "target-derived slots must pass realize_target_derived_icas before SP3"
+            "target realization must pass realize_target_derived_icas before SP3"
         )
-
-
-def _projection_denominators(
-    baseline: SystemicStpaBaseline,
-    ica_enumeration: ICAEnumeration,
-    realization: TargetRealizationResult,
-) -> TargetRealizationDenominators:
-    if realization.effective_view is not None:
-        return realization.effective_view.denominators
-    return TargetRealizationDenominators(
-        baseline_control_actions=len(baseline.control_actions),
-        target_derived_control_actions=0,
-        baseline_ica_slots=len(ica_enumeration.slots),
-        target_derived_ica_slots=0,
-        baseline_ica_findings=len(baseline.ica_ids),
-        target_derived_ica_findings=0,
-    )
+    return realization.effective_view
 
 
 def _assert_authorities_match_baseline(
@@ -629,17 +608,31 @@ def _assert_authorities_match_baseline(
 
 def _project_control_structure_to_stpa(
     control_structure: ControlStructure,
-    realization: TargetRealizationResult,
+    view: TargetRealizationEffectiveView,
 ) -> ControlStructure:
-    """Deep-copy and append target-derived controls to a typed structure."""
-    processes, target_process_ids = _project_target_processes(
-        control_structure, realization
-    )
-    by_controller = _target_actions_by_controller(realization)
-    _require_known_target_controllers(control_structure, by_controller)
-    responsibilities = _project_responsibilities(
-        control_structure, by_controller, target_process_ids
-    )
+    """Deep-copy the typed structure and append the view's target additions."""
+    processes = list(control_structure.controlled_processes) + [
+        ControlledProcess(cp_id=process.cp_id, description=process.description)
+        for process in view.target_derived_controlled_processes
+    ]
+    process_ids = {item.cp_id for item in processes}
+    added = _target_actions_by_controller(view)
+    responsibilities = [
+        responsibility.model_copy(
+            update={
+                "control_actions": [
+                    item.model_copy(deep=True)
+                    for item in responsibility.control_actions
+                ]
+                + [
+                    _control_action_to_stpa(snapshot, process_ids)
+                    for snapshot in added.get(responsibility.resp_id, ())
+                ]
+            },
+            deep=True,
+        )
+        for responsibility in control_structure.responsibilities
+    ]
     return ControlStructure.model_validate(
         {
             "responsibilities": responsibilities,
@@ -649,84 +642,19 @@ def _project_control_structure_to_stpa(
     )
 
 
-def _project_target_processes(
-    control_structure: ControlStructure,
-    realization: TargetRealizationResult,
-) -> tuple[list[ControlledProcess], set[str]]:
-    process_ids = {item.cp_id for item in control_structure.controlled_processes}
-    processes = list(control_structure.controlled_processes)
-    for process in realization.target_derived_controlled_processes:
-        _append_target_process(process, processes, process_ids)
-    return processes, process_ids
-
-
-def _append_target_process(
-    process: SystemicControlledProcess,
-    processes: list[ControlledProcess],
-    process_ids: set[str],
-) -> None:
-    if process.cp_id in process_ids:
-        raise ValueError(
-            "target-derived controlled-process identity collides with baseline: "
-            f"{process.cp_id}"
-        )
-    processes.append(
-        ControlledProcess(cp_id=process.cp_id, description=process.description)
-    )
-    process_ids.add(process.cp_id)
-
-
 def _target_actions_by_controller(
-    realization: TargetRealizationResult,
+    view: TargetRealizationEffectiveView,
 ) -> dict[str, list[SystemicControlAction]]:
-    by_controller: dict[str, list[SystemicControlAction]] = {}
-    for action in realization.target_derived_control_actions:
-        by_controller.setdefault(action.controller_id, []).append(action)
-    return by_controller
-
-
-def _require_known_target_controllers(
-    control_structure: ControlStructure,
-    by_controller: Mapping[str, Sequence[SystemicControlAction]],
-) -> None:
-    responsibility_ids = {item.resp_id for item in control_structure.responsibilities}
-    if any(controller not in responsibility_ids for controller in by_controller):
-        raise ValueError(
-            "target-derived action controller is absent from typed structure"
-        )
-
-
-def _project_responsibilities(
-    control_structure: ControlStructure,
-    by_controller: Mapping[str, Sequence[SystemicControlAction]],
-    target_process_ids: set[str],
-) -> list[Responsibility]:
-    return [
-        responsibility.model_copy(
-            update={
-                "control_actions": _project_responsibility_actions(
-                    responsibility,
-                    by_controller.get(responsibility.resp_id, ()),
-                    target_process_ids,
-                )
-            },
-            deep=True,
-        )
-        for responsibility in control_structure.responsibilities
-    ]
-
-
-def _project_responsibility_actions(
-    responsibility: Responsibility,
-    snapshots: Sequence[SystemicControlAction],
-    target_process_ids: set[str],
-) -> list[ControlAction]:
-    actions = [item.model_copy(deep=True) for item in responsibility.control_actions]
-    actions.extend(
-        _control_action_to_stpa(snapshot, target_process_ids)
-        for snapshot in sorted(snapshots, key=lambda item: item.control_action_id)
-    )
-    return actions
+    """Return each controller's appended actions in effective-view order."""
+    baseline_ids = set(view.baseline_control_action_ids)
+    return {
+        responsibility.resp_id: [
+            action
+            for action in responsibility.control_actions
+            if action.control_action_id not in baseline_ids
+        ]
+        for responsibility in view.effective_control_structure.responsibilities
+    }
 
 
 def _control_action_to_stpa(
@@ -789,34 +717,20 @@ def _enum_temporality(value: str | None) -> ControlActionTemporality | None:
 
 def _project_ica_enumeration_to_stpa(
     ica_enumeration: ICAEnumeration,
-    realization: TargetRealizationResult,
+    view: TargetRealizationEffectiveView,
 ) -> ICAEnumeration:
-    """Deep-copy baseline slots and append verified target-derived slots."""
-    findings_by_slot = _findings_by_slot(realization.target_derived_ica_findings)
+    """Deep-copy baseline slots and append the view's target-derived slots."""
+    baseline_slot_ids = set(view.baseline_ica_slot_ids)
     slots = [item.model_copy(deep=True) for item in ica_enumeration.slots]
     slots.extend(
-        _project_target_ica_slot(slot, findings_by_slot)
-        for slot in realization.target_derived_ica_slots
+        _ica_slot_to_stpa(slot)
+        for slot in view.effective_ica_enumeration.slots
+        if slot.slot_id not in baseline_slot_ids
     )
     return ICAEnumeration.model_validate({"slots": slots})
 
 
-def _findings_by_slot(
-    findings: Sequence[TargetDerivedICAFinding],
-) -> dict[str, list[TargetDerivedICAFinding]]:
-    grouped: dict[str, list[TargetDerivedICAFinding]] = {}
-    for finding in findings:
-        grouped.setdefault(finding.slot_id, []).append(finding)
-    return grouped
-
-
-def _project_target_ica_slot(
-    slot: TargetDerivedICASlot,
-    findings_by_slot: Mapping[str, Sequence[TargetDerivedICAFinding]],
-) -> ICASlot:
-    findings = tuple(
-        sorted(findings_by_slot.get(slot.slot_id, ()), key=lambda item: item.ica_id)
-    )
+def _ica_slot_to_stpa(slot: SystemicICASlot) -> ICASlot:
     try:
         uca_type = UCAType(slot.uca_type)
     except ValueError as exc:
@@ -826,48 +740,26 @@ def _project_target_ica_slot(
     return ICASlot(
         slot_id=slot.slot_id,
         responsibility=slot.responsibility,
-        coordination_link=None,
+        coordination_link=slot.coordination_link,
         control_action=slot.control_action,
         action_temporality=_enum_temporality(slot.action_temporality),
         uca_type=uca_type,
-        # A failed or omitted target-derived finding is unresolved, not a
-        # reviewed N/A decision.  The shared ICASlot contract requires the
-        # explicit unresolved state to retain the distinction.
-        is_na=False,
-        icas=_project_target_icas(findings),
-        na_justification=None,
-        unresolved_reason=_target_ica_unresolved_reason(findings),
-    )
-
-
-def _project_target_icas(
-    findings: Sequence[TargetDerivedICAFinding],
-) -> list[ICA]:
-    return [
-        ICA(
-            ica_id=finding.ica_id,
-            ica_text=finding.ica_text,
-            deviation=finding.deviation,
-            hazardous_context=finding.hazardous_context,
-            loss_scenario=finding.loss_scenario,
-            related_hazards=list(finding.related_hazards),
-            related_constraints=list(finding.related_constraints),
-            quality_warnings=list(finding.quality_warnings),
-        )
-        for finding in findings
-    ]
-
-
-def _target_ica_unresolved_reason(
-    findings: Sequence[TargetDerivedICAFinding],
-) -> str | None:
-    return (
-        None
-        if findings
-        else (
-            "target-derived ICA finding was not independently verified or had "
-            "no exact owner-compatible governing constraint"
-        )
+        is_na=slot.is_na,
+        icas=[
+            ICA(
+                ica_id=ica.ica_id,
+                ica_text=ica.ica_text,
+                deviation=ica.deviation,
+                hazardous_context=ica.hazardous_context,
+                loss_scenario=ica.loss_scenario,
+                related_hazards=list(ica.related_hazards),
+                related_constraints=list(ica.related_constraints),
+                quality_warnings=list(ica.quality_warnings),
+            )
+            for ica in slot.icas
+        ],
+        na_justification=slot.na_justification,
+        unresolved_reason=slot.unresolved_reason,
     )
 
 
