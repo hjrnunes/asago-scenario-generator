@@ -50,6 +50,7 @@ from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.pipeline import synthesis
 from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
+from asago_scenario_generator.pipeline.synthesis_defaults import _default_scenarios
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _OCCIAI_RUN_DIR = _REPO_ROOT / "build" / "adaptive-runs" / "m3-occiai-attempt1"
@@ -463,7 +464,7 @@ def test_synthesis_threads_stage_1a_source(
         output_dir=tmp_path,
         loss_analysis_path=loss_analysis_path,
     )
-    synthesis._default_scenarios(
+    _default_scenarios(
         ica_enumeration=final_ica_result(),
         control_structure=SimpleNamespace(),
         loss_analysis=_make_loss_analysis(),

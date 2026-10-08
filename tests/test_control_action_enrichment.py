@@ -27,10 +27,12 @@ from asago_scenario_generator.pipeline.control_action_enrichment import (
     ControlActionEnrichmentRow,
 )
 from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
-from asago_scenario_generator.pipeline.synthesis import (
-    SynthesisAdapters,
+from asago_scenario_generator.pipeline.synthesis import SynthesisAdapters
+from asago_scenario_generator.pipeline.synthesis_defaults import (
     _default_enrich_control_actions,
     _resolve_adapters,
+)
+from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _verified_enriched_operations,
 )
 from asago_scenario_generator.stpa.models.control_structure import (

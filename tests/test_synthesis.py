@@ -37,31 +37,25 @@ from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     SynthesisInputs,
     SynthesisRunStatus,
-    _accounting_source_pins,
-    _assert_taxonomy_input_identity,
-    _declared_capability_labels,
-    _default_baseline,
-    _dump,
-    _ica_considerations,
-    _ica_verification,
-    _ordinary_icas,
-    _scenario_generation_status,
-    _systemic_inputs,
     run_synthesis,
-    _run_accounting,
-    _build_synthesis_scenario_contexts,
-    _close_consideration_artifact,
 )
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _manifest_prompt_call_evidence,
     _manifest_provider_evidence,
+    _scenario_generation_status,
     _total_prompt_tokens,
 )
+from asago_scenario_generator.pipeline.synthesis_types import _systemic_inputs
 from asago_scenario_generator.stpa.infra.call_log import append_call_log
 from asago_scenario_generator.pipeline.synthesis_baseline import (
+    _assert_taxonomy_input_identity,
     _prepare_capability_profile,
 )
+from asago_scenario_generator.pipeline.synthesis_consideration import (
+    _close_consideration_artifact,
+)
 from asago_scenario_generator.pipeline.synthesis_defaults import (
+    _default_baseline,
     _default_prepare_capability,
     _default_revision,
     _default_scenarios,
@@ -71,10 +65,20 @@ from asago_scenario_generator.pipeline.synthesis_defaults import (
     _resolve_obligation_provider,
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
+    _accounting_source_pins,
+    _build_synthesis_scenario_contexts,
+    _run_accounting,
     _run_ica_verification,
     _run_scenarios,
 )
-from asago_scenario_generator.pipeline.synthesis_values import _semantic_digest
+from asago_scenario_generator.pipeline.synthesis_values import (
+    _declared_capability_labels,
+    _dump,
+    _ica_considerations,
+    _ica_verification,
+    _ordinary_icas,
+    _semantic_digest,
+)
 from asago_scenario_generator.report.synthesis import (
     _candidate_outcomes_html,
     render_synthesis_report,

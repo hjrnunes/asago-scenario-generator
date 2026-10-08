@@ -21,7 +21,6 @@ from typing import Any
 
 from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
 from asago_scenario_generator.pipeline.synthesis_baseline import (
-    _assert_taxonomy_input_identity as _assert_taxonomy_input_identity,
     _baseline_diagnostics,
     _baseline_failure_message,
     _build_briefs,
@@ -39,22 +38,18 @@ from asago_scenario_generator.pipeline.synthesis_consideration import (
     _run_consideration,
 )
 from asago_scenario_generator.pipeline.synthesis_defaults import (
-    _default_baseline as _default_baseline,
-    _default_enrich_control_actions as _default_enrich_control_actions,
-    _default_scenarios as _default_scenarios,
     _ensure_obligation_provider,
-    _production_defaults as _production_defaults,
     _resolve_adapters,
 )
 from asago_scenario_generator.pipeline.synthesis_governance import (
     _run_governance_routing,
 )
+
+# replay_gate imports _MANIFEST_DOMAIN and _digest_payload from this module.
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _MANIFEST_DOMAIN as _MANIFEST_DOMAIN,
     _build_manifest,
     _digest_payload as _digest_payload,
-    _manifest_prompt_call_evidence as _manifest_prompt_call_evidence,
-    _scenario_generation_status as _scenario_generation_status,
 )
 from asago_scenario_generator.pipeline.synthesis_persist import (
     _artifact_paths,
@@ -69,7 +64,6 @@ from asago_scenario_generator.pipeline.synthesis_persist import (
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _accounting_source_pins,
-    _build_synthesis_scenario_contexts as _build_synthesis_scenario_contexts,
     _run_accounting,
     _run_ica,
     _run_operation_enrichment,
@@ -78,7 +72,6 @@ from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _run_target_realization,
     _slot_hazard_offers,
     _target_realized_stpa_inputs,
-    _verified_enriched_operations as _verified_enriched_operations,
 )
 from asago_scenario_generator.pipeline.synthesis_types import (
     ACCOUNTING_FILENAME,
@@ -94,13 +87,7 @@ from asago_scenario_generator.pipeline.synthesis_types import (
     SynthesisRunStatus,
     _systemic_inputs,
 )
-from asago_scenario_generator.pipeline.synthesis_values import (
-    _declared_capability_labels as _declared_capability_labels,
-    _dump as _dump,
-    _ica_considerations,
-    _ica_verification as _ica_verification,
-    _ordinary_icas as _ordinary_icas,
-)
+from asago_scenario_generator.pipeline.synthesis_values import _ica_considerations
 from asago_scenario_generator.stpa.infra.provider_record import provider_call_session
 
 
