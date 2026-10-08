@@ -1,0 +1,11 @@
+template: revision_system.j2
+cases:
+  empty-structure:
+    required:
+      - Do not turn an "only when" condition into an unconditional denial
+      - >-
+        Keep a critic's proposed safeguard in the dismissed-gaps rationale
+        unless the source establishes the omitted function
+      - Use the new/modified delta only for a source-established omitted function
+      - Treat the Existing Control Structure section as current-state evidence
+      - Do not copy a critic's recommendation into that diagram as if it were observed

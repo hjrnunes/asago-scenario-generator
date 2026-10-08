@@ -1,0 +1,28 @@
+template: stage1a_gap_system.j2
+cases:
+  no-variables:
+    required:
+      - "## Gap analysis method"
+      - Architectural components
+      - Integration points
+      - "## Relevance and causal follow-up"
+      - not require an adversary
+      - concrete attack path for inclusion
+      - missing attack evidence does not exclude an otherwise grounded gap
+      - Adversarial relevance
+      - >-
+        A stated permission, authorization, or conditional exception remains
+        part of the behavior being analyzed.
+      - A hazardous state is not evidence that an attacker reached it
+      - Do not require an adversary, entry point, or concrete attack path for inclusion
+      - Treat source-stated authenticated or otherwise authorized operations
+      - >-
+        safe relationship among the source-established action, authorization
+        or request, and intended effect
+      - Do not blanket-ban a permitted function or invent a secondary verifier
+      - preserve a supplied human-review trigger
+    once:
+      - Express each constraint as the safe relationship
+    forbidden:
+      - Focus on adversary-actionable threats
+      - Omit operational risks with no adversarial vector

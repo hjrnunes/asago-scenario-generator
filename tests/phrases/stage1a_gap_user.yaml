@@ -1,0 +1,11 @@
+template: stage1a_gap_user.j2
+cases:
+  records-service:
+    required:
+      - request-local `handle`
+      - compiler assigns their canonical IDs
+      - Do not require an adversary, entry point, or concrete attack path for inclusion
+      - adversarial relevance
+    forbidden:
+      - Focus on adversary-actionable threats
+      - Omit operational risks with no adversarial vector

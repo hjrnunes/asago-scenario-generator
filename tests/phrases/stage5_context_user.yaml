@@ -1,0 +1,91 @@
+template: stage5_context_user.j2
+cases:
+  target-blind:
+    required:
+      - possible benefit alone does not establish malicious intent
+      - functional scenario
+      - do not invent an actor or benefit
+      - unsupported rather than guessing a subtype
+      - &role-guidance >-
+        Keep the identity of each party, that party's authority or permission,
+        the eligibility of the operation for its purpose, and any review or
+        approval status distinct
+      - Ground the sentence in the supplied STPA facts
+      - Do not invent a target record, value, or operation
+    forbidden:
+      - "`stimulus`"
+      - Allowed Stimulus Categories
+      - execution_route
+      - selected_for_route
+      - delivery_class
+      - compatible_delivery
+      - compatible_stimulus
+      - action_value
+      - state_value
+      - action_presence
+      - comparison_evidence
+      - analytical_only
+      - disposition
+      - action_kind
+      - the route may remain parameterized
+      - "## Exact Target Operation"
+      - "## Optional Target Observations"
+      - Name the concrete record and the observed value
+      - observation_ref
+      - comparison-evidence
+      - &domain-clinical clinical domain
+      - &domain-customer customer domain
+      - &domain-booking booking domain
+      - &field-patient patient_reference
+      - &field-permission permission_reference
+  commit-operation:
+    required:
+      - *role-guidance
+    forbidden:
+      - *domain-clinical
+      - *domain-customer
+      - *domain-booking
+      - *field-patient
+      - *field-permission
+  operation:
+    required:
+      - "## Exact Target Operation"
+      - Do not invent a record identity or observed value
+      - distinguish
+    forbidden:
+      - "## Optional Target Observations"
+      - Name the concrete record and the observed value
+      - ground both the unsafe argument predicate and the record it acts on
+      - required status is not held
+      - record's observed field value or status that makes the operation unsafe
+  observations:
+    required:
+      - "## Optional Target Observations"
+      - Ground the proposition in supplied target
+      - observations when they establish a concrete record
+      - do not invent an operation identity
+      - distinguish
+    forbidden:
+      - "## Exact Target Operation"
+      - required status is not held
+      - record's observed field value or status that makes the operation unsafe
+  operation-and-observations:
+    required:
+      - "## Exact Target Operation"
+      - "## Optional Target Observations"
+      - Ground the sentence in the supplied facts it tests
+      - >-
+        Name the documented operation, the concrete record it acts on, and the
+        condition that distinguishes unsafe from safe behavior
+      - keep the proposition about that same operation and argument
+  archive-item:
+    required:
+      - >-
+        State the condition that distinguishes unsafe from safe behavior in
+        terms of operation arguments, session facts, observed record facts, or
+        call ordering.
+      - an observed value alone is not the semantic failure criterion
+    forbidden:
+      - REVIEWED
+      - AWAITING_REVIEW
+      - required status is not held

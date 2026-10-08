@@ -1,0 +1,20 @@
+template: stage2_call3_system.j2
+cases:
+  no-variables:
+    required:
+      - Each coordination link represents an explicit lateral control or information
+      - responsibilities overlap or leave a decision boundary ambiguous
+      - actions affect the same controlled process or resource
+      - actions can conflict or must occur in a defined order
+      - One controller needs state or outcome information held by the other
+      - greenhouse heating and ventilation controllers
+      - "## Connection integrity checks"
+      - A **controller** is a functional decision maker
+      - A **process model part** is decision-relevant information
+      - feedback updates the process model
+      - the action influences the controlled
+      - >-
+        a security constraint describes an obligation, not evidence of an
+        installed controller
+      - Preserve source-stated authorization and conditional exceptions
+      - Keep distinct source-named functions distinct

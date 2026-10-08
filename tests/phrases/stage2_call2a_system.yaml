@@ -1,0 +1,40 @@
+template: stage2_call2a_system.j2
+cases:
+  no-variables:
+    required:
+      - >-
+        When `tool_execution` is active: require a responsibility governing tool
+        parameter validation and action selection
+      - >-
+        When `memory` is active: require a responsibility for context management
+        and memory lifecycle
+      - >-
+        When `hitl` is true: require a responsibility for escalation and human
+        oversight
+      - >-
+        When `inter_agent` is active: require a responsibility for inter-agent
+        coordination and message validation
+      - This is a hard requirement, not a suggestion
+      - Security requirements do not exhaust the control structure
+      - Functional responsibilities must carry every exact
+      - "## ID conventions"
+      - A **controller** is a functional decision maker
+      - A **process model part** is decision-relevant information
+      - feedback updates the process model
+      - the action influences the controlled
+      - externally meaningful function
+      - every exact `SC-*` whose constraint governs their outcome
+      - Identify functional responsibilities first
+      - Do not mechanically create one controller per security constraint
+      - output states facts, advice, or other content to a recipient
+      - whether that content is supported by a source
+      - no context can express wrong or unsupported content
+      - Keep source-named functions distinct
+      - >-
+        only when the use-case or typed factual context explicitly establishes
+        a separate function
+      - treat a reviewer as a design recommendation, not a new installed element
+      - >-
+        A security constraint is an obligation on a function, not evidence of
+        an installed controller
+      - score, threshold, approval stage, or separate tool

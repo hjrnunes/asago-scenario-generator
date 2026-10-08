@@ -1,0 +1,8 @@
+template: stage2_call2a_user.j2
+cases:
+  neutral-status:
+    required:
+      - externally meaningful functions
+      - Reuse the same
+      - explicitly establishes that safeguard as a distinct function
+      - retain it as a design recommendation on the established function

@@ -1,0 +1,28 @@
+template: stage2_call2b_system.j2
+cases:
+  no-variables:
+    required:
+      - Each CA is a single discrete action the controller takes
+      - Split composite actions into separate CAs
+      - approve or reject request
+      - CA-X-1 Approve request
+      - CA-X-2 Reject request
+      - >-
+        A CA containing "or", "and", or similar conjunctions is likely
+        composite and should be split
+      - Security safeguards do not exhaust control actions
+      - internal request/prompt payload is not
+      - A **controller** is a functional decision maker
+      - A **process model part** is decision-relevant information
+      - feedback updates the process model
+      - the action influences the controlled
+      - discrete control action or actions that realize that function
+      - controlled process declared in this same response
+      - Primary control actions (CA-*) first
+      - >-
+        An operation allowed only in an authenticated or reviewed state must
+        retain that condition
+      - Keep distinct source-named functions and operations distinct
+      - >-
+        Declare a controlled process only when the source establishes the
+        external entity or interface

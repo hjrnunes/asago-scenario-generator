@@ -1,4 +1,9 @@
-"""Regression tests for the SP1 prompt bug fixes."""
+"""Regression tests for the SP1 prompt bug fixes.
+
+The fixed Stage 1a and Stage 2 wording lives in the phrase tables under
+``tests/phrases/``. The Stage 1b pins stay here while the capability-inference
+work on Stage 1b is in flight.
+"""
 
 from __future__ import annotations
 
@@ -11,135 +16,25 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
 
 
-_REQUIRED_CONTENT = {
-    "stage1a_risk_system.j2": (
-        "Every loss must cite its source risk IDs",
-        "Every hazard references at least one valid local loss handle",
-    ),
-    "stage1b_system.j2": (
-        "every tool must be explicitly mentioned or directly implied "
-        "by the use-case description",
-        "Do not invent tools based on what a system like this might have",
-    ),
-    "stage2_call2a_system.j2": (
-        "Check the capability profile's active zones",
-        "When `tool_execution` is active: require a responsibility governing tool "
-        "parameter validation and action selection",
-        "When `memory` is active: require a responsibility for context management and "
-        "memory lifecycle",
-        "When `hitl` is true: require a responsibility for escalation and human oversight",
-        "When `inter_agent` is active: require a responsibility for inter-agent "
-        "coordination and message validation",
-        "This is a hard requirement, not a suggestion",
-        "Security requirements do not exhaust the control structure",
-        "Functional responsibilities must carry every exact",
-    ),
-    "stage2_call2b_system.j2": (
-        "Each CA is a single discrete action the controller takes",
-        "Split composite actions into separate CAs",
-        "approve or reject request",
-        "CA-X-1 Approve request",
-        "CA-X-2 Reject request",
-        'A CA containing "or", "and", or similar conjunctions is likely '
-        "composite and should be split",
-        "Security safeguards do not exhaust control actions",
-        "internal request/prompt payload is not",
-    ),
-    "stage2_call3_system.j2": (
-        "Each coordination link represents an explicit lateral control or information",
-        "responsibilities overlap or leave a decision boundary ambiguous",
-        "actions affect the same controlled process or resource",
-        "actions can conflict or must occur in a defined order",
-        "One controller needs state or outcome information held by the other",
-        "greenhouse heating and ventilation controllers",
-    ),
-}
-
-
-@pytest.mark.parametrize("template_name, fragments", _REQUIRED_CONTENT.items())
-def test_sp1_prompt_bug_fix_content_is_in_template(
-    template_name: str, fragments: tuple[str, ...]
-) -> None:
-    text = (PROMPTS_DIR / template_name).read_text()
-    assert all(fragment in text for fragment in fragments)
-
-
-@pytest.mark.parametrize("template_name, fragments", _REQUIRED_CONTENT.items())
-def test_sp1_prompt_bug_fix_content_renders(
-    template_name: str, fragments: tuple[str, ...]
-) -> None:
-    rendered = TemplateLoader(PROMPTS_DIR).render_prompt(template_name)
-    assert all(fragment in rendered for fragment in fragments)
-
-
-@pytest.mark.parametrize(
-    "template_name, section",
-    (
-        ("stage1a_risk_system.j2", "## Quality requirements"),
-        ("stage1b_system.j2", "## Rules"),
-        ("stage2_call2a_system.j2", "## ID conventions"),
-        ("stage2_call3_system.j2", "## Connection integrity checks"),
-    ),
+_STAGE1B_REQUIRED = (
+    "every tool must be explicitly mentioned or directly implied "
+    "by the use-case description",
+    "Do not invent tools based on what a system like this might have",
 )
-def test_sp1_prompt_bug_fixes_preserve_existing_sections(
-    template_name: str, section: str
-) -> None:
-    text = (PROMPTS_DIR / template_name).read_text()
-    assert section in text
 
 
-@pytest.mark.parametrize(
-    "template_name",
-    (
-        "stage2_call2a_system.j2",
-        "stage2_call2b_system.j2",
-        "stage2_call3_system.j2",
-    ),
-)
-def test_control_structure_prompts_define_the_feedback_loop(
-    template_name: str,
-) -> None:
-    rendered = TemplateLoader(PROMPTS_DIR).render_prompt(template_name)
-
-    assert "A **controller** is a functional decision maker" in rendered
-    assert "A **process model part** is decision-relevant information" in rendered
-    assert "feedback updates the process model" in rendered
-    assert "the action influences the controlled" in rendered
+def test_stage1b_bug_fix_content_is_in_template() -> None:
+    text = (PROMPTS_DIR / "stage1b_system.j2").read_text()
+    assert all(fragment in text for fragment in _STAGE1B_REQUIRED)
 
 
-def test_stage2_functional_coverage_rules_are_present_in_both_prompt_halves() -> None:
-    """Call 2a/2b preserve explicit functions and typed action boundaries."""
-    loader = TemplateLoader(PROMPTS_DIR)
-    call2a_system = loader.render_prompt("stage2_call2a_system.j2")
-    call2a_user = (PROMPTS_DIR / "stage2_call2a_user.j2").read_text()
-    call2b_system = loader.render_prompt("stage2_call2b_system.j2")
-    call2b_user = (PROMPTS_DIR / "stage2_call2b_user.j2").read_text()
+def test_stage1b_bug_fix_content_renders() -> None:
+    rendered = TemplateLoader(PROMPTS_DIR).render_prompt("stage1b_system.j2")
+    assert all(fragment in rendered for fragment in _STAGE1B_REQUIRED)
 
-    normalized_call2a_system = " ".join(call2a_system.split())
-    normalized_call2b_system = " ".join(call2b_system.split())
-    assert "externally meaningful function" in normalized_call2a_system
-    assert (
-        "every exact `SC-*` whose constraint governs their outcome"
-        in normalized_call2a_system
-    )
-    assert "externally meaningful functions" in call2a_user
-    assert "Reuse the same" in call2a_user
-    assert "discrete control action or actions that realize that function" in (
-        normalized_call2b_system
-    )
-    assert (
-        "controlled process declared in this same response" in normalized_call2b_system
-    )
-    assert "functional outputs" in call2b_user
-    assert "internal request/prompt payload is not `model_output`" in call2b_user
-    assert "Identify functional responsibilities first" in call2a_system
-    assert (
-        "Do not mechanically create one controller per security constraint"
-        in call2a_system
-    )
-    assert "Primary control actions (CA-*) first" in call2b_system
-    assert "not a substitute for delivering the answer" in call2b_user
-    assert "Governing security constraints:" in call2b_user
+
+def test_stage1b_bug_fixes_preserve_existing_sections() -> None:
+    assert "## Rules" in (PROMPTS_DIR / "stage1b_system.j2").read_text()
 
 
 @pytest.mark.parametrize("template_name", ("critic_system.j2", "revision_system.j2"))

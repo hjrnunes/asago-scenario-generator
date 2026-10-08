@@ -1,0 +1,12 @@
+template: stage2_call2b_user.j2
+cases:
+  neutral-status:
+    required:
+      - functional outputs
+      - internal request/prompt payload is not `model_output`
+      - not a substitute for delivering the answer
+      - separate safeguard operation explicitly established
+      - does not establish an installed safeguard action
+  one-responsibility:
+    required:
+      - "Governing security constraints:"

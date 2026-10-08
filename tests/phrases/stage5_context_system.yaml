@@ -1,0 +1,43 @@
+template: stage5_context_system.j2
+cases:
+  target-blind:
+    required:
+      - adversary
+      - attacker_bdi
+      - causal_factors
+      - semantic_proposition
+      - evidence_status
+      - bounded_assumption
+      - reachable_capability
+    forbidden:
+      - "`stimulus`"
+      - Allowed Stimulus Categories
+      - execution_route
+      - selected_for_route
+      - delivery_class
+      - compatible_delivery
+      - compatible_stimulus
+      - action_value
+      - state_value
+      - action_presence
+      - comparison_evidence
+      - analytical_only
+      - disposition
+      - action_kind
+      - the route may remain parameterized
+  operation:
+    forbidden: &no-status-criterion
+      - required status is not held
+      - record's observed field value or status that makes the operation unsafe
+  observations:
+    forbidden: *no-status-criterion
+  operation-and-observations:
+    required:
+      - >-
+        A sentence that only restates the governing constraint or an abstract
+        loss is incomplete
+  archive-item:
+    forbidden:
+      - REVIEWED
+      - AWAITING_REVIEW
+      - required status is not held

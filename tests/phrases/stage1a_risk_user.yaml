@@ -1,0 +1,10 @@
+template: stage1a_risk_user.j2
+cases:
+  records-service:
+    required:
+      - No organizational risks provided
+      - Do not require an adversary, entry point, or concrete attack path for inclusion
+      - adversarial relevance
+    forbidden:
+      - Focus on adversary-actionable threats
+      - Omit operational risks with no adversarial vector
