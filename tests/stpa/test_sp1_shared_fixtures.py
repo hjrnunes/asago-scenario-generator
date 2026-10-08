@@ -16,13 +16,11 @@ from tests.fixtures.sp1 import load_sp1_fixture
 
 _VARIANTS = [
     ("stage1_profile", "default", Stage1Profile),
-    ("requirement_set", "two_requirements", RequirementSet),
     ("requirement_set", "one_requirement", RequirementSet),
     ("responsibility_set", "two_responsibilities", ResponsibilitySet),
     ("responsibility_set", "one_responsibility", ResponsibilitySet),
     ("control_element_set", "with_controlled_process", ControlElementSet),
     ("control_element_set", "responsibility_only", ControlElementSet),
-    ("critic_findings", "two_gaps", CriticFindings),
     ("critic_findings", "no_unjustified", CriticFindings),
     ("critic_findings", "no_gaps_all_present", CriticFindings),
     ("loss_analysis", "two_losses", LossAnalysis),

@@ -1,4 +1,4 @@
-# A valid Stage1Profile response. The acceptance and unit layers share one payload.
+# A valid Stage1Profile response. The SP1 unit tests share one payload.
 default:
   has_persistent_memory: false
   multi_agent: false

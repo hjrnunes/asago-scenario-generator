@@ -1,4 +1,4 @@
-# Valid loss-analysis payloads. three_losses has two risk-card losses, one use-case loss, and a risk disposition; the acceptance scenarios use it as the LossAnalysisDraft response. two_losses is the merged result of the risk and gap drafts; unit tests build a LossAnalysis from it.
+# Valid loss-analysis payloads. three_losses has two risk-card losses, one use-case loss, and a risk disposition; the mock-client tests use it as the LossAnalysisDraft response. two_losses is the merged result of the risk and gap drafts; unit tests build a LossAnalysis from it.
 three_losses:
   risk_card_losses:
   - loss_id: L-1

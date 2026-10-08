@@ -1,4 +1,4 @@
-# Valid ResponsibilitySet payloads for Stage 2 Call 2a (constraints and process-model parts, no actions or feedback). two_responsibilities serves the acceptance scenarios; one_responsibility serves the unit tests.
+# Valid ResponsibilitySet payloads for Stage 2 Call 2a (constraints and process-model parts, no actions or feedback). two_responsibilities serves the fallback-update tests; one_responsibility serves the pipeline tests.
 two_responsibilities:
   responsibilities:
   - resp_id: RESP-1

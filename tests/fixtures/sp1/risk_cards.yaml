@@ -1,4 +1,4 @@
-# The single RiskCard that SP1 pipeline fixtures supply. Both layers build RiskCard models from these rows.
+# The single RiskCard that SP1 pipeline fixtures supply. The unit tests build RiskCard models from these rows.
 default:
 - risk_id: atlas-001
   risk_name: Prompt injection

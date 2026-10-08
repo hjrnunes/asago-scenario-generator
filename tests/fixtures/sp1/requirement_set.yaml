@@ -1,14 +1,4 @@
-# Valid RequirementSet payloads for Stage 2 Call 1. two_requirements serves the acceptance scenarios; one_requirement serves the unit tests.
-two_requirements:
-  requirements:
-  - req_id: REQ-1
-    description: Verify user identity
-    classification: control
-    source_constraint: SC-1
-  - req_id: REQ-2
-    description: Data protection
-    classification: constraint
-    source_constraint: SC-2
+# A valid RequirementSet payload for Stage 2 Call 1.
 one_requirement:
   requirements:
   - req_id: REQ-1

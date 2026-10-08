@@ -1,4 +1,4 @@
-"""Canonical SP1 payloads shared by the unit tests and the acceptance runtime.
+"""Canonical SP1 payloads shared by the unit tests.
 
 Each YAML file holds named variants of one payload. Callers receive a deep
 copy, so a test may edit its payload without affecting the next caller.

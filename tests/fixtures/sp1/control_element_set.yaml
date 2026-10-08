@@ -1,4 +1,4 @@
-# Valid ControlElementSet payloads for Stage 2 Call 2b. with_controlled_process targets CP-1 and RESP-2 and serves the acceptance scenarios; responsibility_only targets RESP-1 and serves the unit tests.
+# Valid ControlElementSet payloads for Stage 2 Call 2b. with_controlled_process targets CP-1 and RESP-2 and serves the fallback-update tests; responsibility_only targets RESP-1 and serves the pipeline tests.
 with_controlled_process:
   control_actions:
   - ca_id: CA-1-1
