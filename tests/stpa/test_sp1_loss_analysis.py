@@ -42,47 +42,6 @@ from tests.stpa.sp1_helpers import (
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 
 
-def test_provider_generic_ids_are_canonicalized_for_hazards_and_constraints() -> None:
-    """Provider-facing drafts accept generic IDs but serialize canonical names."""
-    payload = valid_risk_draft_dict()
-    payload["hazards"][0]["id"] = payload["hazards"][0].pop("hazard_id")
-    payload["security_constraints"][0]["id"] = payload["security_constraints"][0].pop(
-        "constraint_id"
-    )
-
-    draft = LossAnalysisDraft.model_validate(payload)
-    dumped = draft.model_dump(mode="json")
-
-    assert dumped["hazards"][0]["hazard_id"] == "H-1"
-    assert dumped["security_constraints"][0]["constraint_id"] == "SC-1"
-    assert "id" not in dumped["hazards"][0]
-    assert "id" not in dumped["security_constraints"][0]
-
-
-def test_provider_generic_losses_are_split_only_by_explicit_provenance() -> None:
-    """A generic provider collection is normalized without guessing its source."""
-    payload = valid_risk_draft_dict()
-    losses = [*payload.pop("risk_card_losses"), *payload.pop("use_case_losses")]
-    losses.append(
-        {
-            "loss_id": "L-2",
-            "description": "A use-case loss.",
-            "provenance": "use_case",
-            "source_risk_cards": [],
-        }
-    )
-    for item in losses:
-        item["id"] = item.pop("loss_id")
-    payload["losses"] = losses
-
-    draft = LossAnalysisDraft.model_validate(payload)
-    dumped = draft.model_dump(mode="json")
-
-    assert [item["loss_id"] for item in dumped["risk_card_losses"]] == ["L-1"]
-    assert [item["loss_id"] for item in dumped["use_case_losses"]] == ["L-2"]
-    assert "losses" not in dumped
-
-
 def _observed_invalid_risk_draft() -> dict:
     """Return the sanitized run-3 risk draft shape."""
     draft = valid_risk_draft_dict()

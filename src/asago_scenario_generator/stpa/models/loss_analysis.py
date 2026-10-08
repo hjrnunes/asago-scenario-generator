@@ -7,9 +7,9 @@ from __future__ import annotations
 
 from datetime import date
 from enum import Enum
-from typing import Any, Literal, get_args
+from typing import Literal, get_args
 
-from pydantic import AliasChoices, BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from asago_scenario_generator.stpa.models._validation import check_duplicate_ids
 
@@ -196,7 +196,7 @@ class RiskDisposition(BaseModel):
 class Loss(BaseModel):
     """A system-level loss (something stakeholders want to avoid)."""
 
-    loss_id: str = Field(validation_alias=AliasChoices("loss_id", "id"))
+    loss_id: str
     description: str
     provenance: LossProvenance
     source_risk_cards: list[str] = Field(
@@ -214,7 +214,7 @@ class Loss(BaseModel):
 class Hazard(BaseModel):
     """A system-level hazard (a condition that can lead to a loss)."""
 
-    hazard_id: str = Field(validation_alias=AliasChoices("hazard_id", "id"))
+    hazard_id: str
     description: str
     related_losses: list[str]  # loss_id refs
 
@@ -242,7 +242,7 @@ class SecurityConstraint(BaseModel):
     matched against the constraint text.
     """
 
-    constraint_id: str = Field(validation_alias=AliasChoices("constraint_id", "id"))
+    constraint_id: str
     rule: str = Field(min_length=1)
     related_hazards: list[str]  # hazard_id refs
     # Conditions under which the rule is in force; all must hold.  Empty
@@ -363,11 +363,6 @@ def _validate_review_stamps(constraint: SecurityConstraint) -> None:
         )
 
 
-def _is_risk_card_loss(item: Any) -> bool:
-    """Whether a provider loss explicitly declares risk-card provenance."""
-    return bool(isinstance(item, dict) and item.get("provenance") == "risk_card")
-
-
 class LossAnalysisDraft(BaseModel):
     """Intermediate loss analysis result from a single Stage 1a LLM call.
 
@@ -386,28 +381,6 @@ class LossAnalysisDraft(BaseModel):
     # Only populated by the risk-derivation call; the gap call leaves this
     # empty because it reviews an existing graph and supplies no risk cards.
     risk_dispositions: list[RiskDisposition] = Field(default_factory=list)
-
-    @model_validator(mode="before")
-    @classmethod
-    def split_generic_losses_by_explicit_provenance(cls, value: Any) -> Any:
-        """Normalize a provider ``losses`` list without guessing provenance."""
-        if not isinstance(value, dict) or "losses" not in value:
-            return value
-        data = dict(value)
-        losses = data.pop("losses")
-        if not isinstance(losses, list):
-            return data
-        for key, from_risk_card in (
-            ("risk_card_losses", True),
-            ("use_case_losses", False),
-        ):
-            if not data.get(key):
-                data[key] = [
-                    item
-                    for item in losses
-                    if _is_risk_card_loss(item) is from_risk_card
-                ]
-        return data
 
 
 class LossAnalysis(BaseModel):
