@@ -609,22 +609,6 @@ def run_completeness_critic(
     return outcome.value  # type: ignore[return-value]
 
 
-def has_unjustified_gaps(findings: CriticFindings) -> bool:
-    """Return whether findings contain an explicit actionable structural gap.
-
-    Checklist and taxonomy probe statuses remain diagnostic context. They do
-    not authorize a revision unless the critic also represents the missing
-    concept and evidence in a typed ``CriticGap``.
-
-    Args:
-        findings: The critic findings to check.
-
-    Returns:
-        True if revision should be triggered, False otherwise.
-    """
-    return bool(findings.gaps)
-
-
 # ---------------------------------------------------------------------------
 # Critic ID sanitization
 # ---------------------------------------------------------------------------

@@ -7,7 +7,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     CriticGap,
-    has_unjustified_gaps,
 )
 from asago_scenario_generator.stpa.system_model.reply_constraint_placement import (
     attach_to_sole_reply_responsibility,
@@ -179,11 +178,9 @@ class TestReplyPlacementGaps:
         assert merged.gaps[0] == critic_gap
         assert "SC-2" in merged.gaps[1].description
         assert merged.checklist_results == {"Authorization": "present"}
-        assert has_unjustified_gaps(
-            with_reply_placement_gaps(
-                CriticFindings(), _retrieval_owner_structure(), _analysis()
-            )
-        )
+        assert with_reply_placement_gaps(
+            CriticFindings(), _retrieval_owner_structure(), _analysis()
+        ).gaps
 
     def test_placed_structure_leaves_critic_findings_unchanged(self) -> None:
         cs = _structure(_responsibility("RESP-1", ["SC-1", "SC-2"], "model_output"))

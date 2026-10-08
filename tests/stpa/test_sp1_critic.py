@@ -23,7 +23,6 @@ from asago_scenario_generator.stpa.system_model.critic import (
     _build_taxonomy_probes,
     _needs_rag_probe,
     _needs_tool_probe,
-    has_unjustified_gaps,
     run_completeness_critic,
     run_revision,
 )
@@ -287,7 +286,7 @@ class TestCriticExecution:
     def test_critic_10_unjustified_gaps_trigger_revision(self):
         """SP1-CRITIC-10: unjustified gaps trigger revision."""
         findings = CriticFindings.model_validate(_valid_critic_findings_dict())
-        assert has_unjustified_gaps(findings) is True
+        assert findings.gaps
 
     def test_critic_11_only_justified_gaps_no_revision(self):
         """SP1-CRITIC-11: only justified gaps do not trigger revision."""
@@ -302,7 +301,7 @@ class TestCriticExecution:
         data["gaps"] = []
         data["taxonomy_probe_results"] = {}
         findings = CriticFindings.model_validate(data)
-        assert has_unjustified_gaps(findings) is False
+        assert not findings.gaps
 
 
 class TestRevision:
@@ -770,4 +769,4 @@ class TestProbeGating:
 def test_no_typed_gap_means_no_revision(checklist_results):
     """Probe statuses alone are diagnostic: without a typed gap nothing triggers."""
     findings = CriticFindings(gaps=[], checklist_results=checklist_results)
-    assert has_unjustified_gaps(findings) is False
+    assert not findings.gaps

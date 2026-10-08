@@ -6,7 +6,7 @@ Covers five invariant families:
    number that collides with an existing ID of that kind.
 2. **ID-space independence**: ``next_cm_num`` depends only on ``cm_id``
    values, and ``next_cl_num`` depends only on ``link_id`` values.
-3. **has_unjustified_gaps iff**: ``has_unjustified_gaps`` is True iff the
+3. **Revision needs a gap**: Stage 2 requests a revision iff the
    findings contain at least one explicit structural gap. Checklist and
    taxonomy statuses remain diagnostic context.
 4. **Dismissal visibility**: every ``dismissed_gaps`` entry surfaces in
@@ -21,6 +21,8 @@ Covers five invariant families:
 """
 
 from __future__ import annotations
+
+from unittest.mock import patch
 
 import pytest
 from hypothesis import HealthCheck, assume, given, settings, strategies as st
@@ -44,12 +46,12 @@ from asago_scenario_generator.stpa.system_model.critic import (
     _compute_next_ids,
     _merge_revision_delta,
     _stitch_revision_delta,
-    has_unjustified_gaps,
     run_revision,
 )
 from asago_scenario_generator.stpa.system_model.id_normalization import (
     normalize_control_structure_payload,
 )
+from asago_scenario_generator.stpa.system_model import run as run_module
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
@@ -382,7 +384,7 @@ class TestIdSpaceIndependence:
 
 
 # ---------------------------------------------------------------------------
-# 3. has_unjustified_gaps iff an explicit structural gap is present
+# 3. Revision runs iff an explicit structural gap is present
 # ---------------------------------------------------------------------------
 
 st_status = st.sampled_from(["present", "absent_justified", "absent_unjustified"])
@@ -447,50 +449,57 @@ def st_critic_findings(draw) -> CriticFindings:
     )
 
 
-class TestHasUnjustifiedGapsIff:
+def _revision_attempted(findings: CriticFindings, run_dir) -> bool:
+    """Return whether Stage 2 asks for a revision of these critic findings."""
+    baseline = _make_base_cs()
+    with patch.object(
+        run_module, "run_revision", return_value=(baseline, [])
+    ) as revision:
+        run_module._maybe_apply_revision(
+            baseline,
+            critic_findings=findings,
+            llm_client=MockLLMClient(),
+            use_case_text="Test use case",
+            run_dir=run_dir,
+            loss_analysis=None,
+            loader=None,
+            temperature=0.0,
+        )
+    return revision.called
+
+
+class TestRevisionNeedsAnExplicitGap:
     """Only explicit structural gaps authorize revision."""
 
     @given(findings=st_critic_findings())
-    @settings(max_examples=100, deadline=None)
-    def test_iff_at_least_one_unjustified(self, findings):
+    @settings(
+        max_examples=100,
+        deadline=None,
+        suppress_health_check=[HealthCheck.function_scoped_fixture],
+    )
+    def test_revision_iff_at_least_one_gap(self, findings, tmp_path):
         """Probe statuses alone do not authorize revision."""
-        assert has_unjustified_gaps(findings) == bool(findings.gaps)
-
-    @given(findings=st_critic_findings())
-    @settings(max_examples=100, deadline=None)
-    def test_all_justified_means_false(self, findings):
-        """When all probes are justified/present and no gaps, result is False."""
-        # Force all statuses to non-unjustified and no gaps
-        clean = CriticFindings(
-            gaps=[],
-            checklist_results={
-                k: v if v != "absent_unjustified" else "absent_justified"
-                for k, v in findings.checklist_results.items()
-            },
-            taxonomy_probe_results={
-                k: v if v != "absent_unjustified" else "absent_justified"
-                for k, v in findings.taxonomy_probe_results.items()
-            },
-        )
-        assert has_unjustified_gaps(clean) is False
+        assert _revision_attempted(findings, tmp_path) == bool(findings.gaps)
 
     @given(
         checklist=st.dictionaries(st_checklist_key, st_status, min_size=1, max_size=3),
         taxonomy=st.dictionaries(st_taxonomy_key, st_status, min_size=0, max_size=2),
     )
-    @settings(max_examples=80, deadline=None)
-    def test_probe_only_unjustified_does_not_trigger(self, checklist, taxonomy):
+    @settings(
+        max_examples=80,
+        deadline=None,
+        suppress_health_check=[HealthCheck.function_scoped_fixture],
+    )
+    def test_probe_only_unjustified_does_not_trigger(
+        self, checklist, taxonomy, tmp_path
+    ):
         """Absent results without explicit gaps remain diagnostic only."""
-        clean_taxonomy = {
-            k: v if v != "absent_unjustified" else "present"
-            for k, v in taxonomy.items()
-        }
         findings = CriticFindings(
             gaps=[],
             checklist_results=checklist,
-            taxonomy_probe_results=clean_taxonomy,
+            taxonomy_probe_results=taxonomy,
         )
-        assert has_unjustified_gaps(findings) is False
+        assert _revision_attempted(findings, tmp_path) is False
 
 
 # ---------------------------------------------------------------------------

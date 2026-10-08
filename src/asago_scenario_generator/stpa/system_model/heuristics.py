@@ -1,17 +1,13 @@
-"""Structural heuristics and solution-neutrality post-checks.
+"""Stage 2 advisory post-checks: uncited constraints and solution neutrality.
 
-Wraps the foundation's ``check_structural_heuristics`` and adds the
-solution-neutrality keyword scan. These are deterministic post-checks
-run after Stage 2 Call 3 assembles the ControlStructure.
+These deterministic checks run after Stage 2 Call 3 assembles the
+ControlStructure; the structural checks live in
+``stpa.models.control_structure.check_structural_heuristics``.
 """
 
 from __future__ import annotations
 
-from asago_scenario_generator.stpa.models.control_structure import (
-    ControlStructure,
-    HeuristicResult,
-    check_structural_heuristics,
-)
+from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 
 # Component names that violate solution-neutrality (case-insensitive).
@@ -23,25 +19,6 @@ _SOLUTION_NEUTRALITY_KEYWORDS: tuple[str, ...] = (
     "prompt",
     "API",
 )
-
-
-def run_heuristics(
-    cs: ControlStructure,
-    loss_analysis: LossAnalysis | None = None,
-) -> HeuristicResult:
-    """Run structural heuristics on a control structure.
-
-    Wraps the foundation's ``check_structural_heuristics``. When
-    ``loss_analysis`` is provided, the hazard tracing check is included.
-
-    Args:
-        cs: The control structure to check.
-        loss_analysis: Optional loss analysis for hazard tracing.
-
-    Returns:
-        A HeuristicResult with errors and warnings.
-    """
-    return check_structural_heuristics(cs, loss_analysis)
 
 
 def uncited_security_constraints(

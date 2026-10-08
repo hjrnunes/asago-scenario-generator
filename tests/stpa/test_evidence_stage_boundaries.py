@@ -22,6 +22,7 @@ from asago_scenario_generator.stpa.system_model import run as run_module
 from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,
 )
+from asago_scenario_generator.stpa.system_model.critic import CriticFindings, CriticGap
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import (
@@ -183,7 +184,19 @@ class TestControlStructureVersions:
                 base + "attach_to_sole_reply_responsibility",
                 side_effect=self._tagged("placed"),
             ),
-            patch(base + "has_unjustified_gaps", return_value=True),
+            patch(
+                base + "run_completeness_critic",
+                return_value=CriticFindings(
+                    gaps=[
+                        CriticGap(
+                            gap_type="missing_feedback",
+                            description="Missing feedback",
+                            related_attack_path="Attack path",
+                            suggested_remedy="Add feedback",
+                        )
+                    ]
+                ),
+            ),
             patch(base + "run_revision", side_effect=revise),
         ]
         if writes is not None:

@@ -48,7 +48,6 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 )
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
-    has_unjustified_gaps,
     run_completeness_critic,
     run_revision,
     sanitize_critic_ids,
@@ -770,7 +769,7 @@ def _maybe_apply_revision(
     target_evidence: TargetEvidence | None = None,
 ) -> tuple[ControlStructure, list[str], bool]:
     """Apply a critic revision only when unjustified gaps are present."""
-    if not has_unjustified_gaps(critic_findings):
+    if not critic_findings.gaps:
         return control_structure, [], False
 
     # Keep the baseline identity for the applied/not-applied decision.

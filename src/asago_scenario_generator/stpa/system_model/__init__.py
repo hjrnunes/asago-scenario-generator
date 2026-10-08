@@ -27,7 +27,6 @@ from asago_scenario_generator.stpa.system_model.critic import (  # noqa: E402
 )
 from asago_scenario_generator.stpa.system_model.heuristics import (  # noqa: E402
     check_solution_neutrality,
-    run_heuristics,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     derive_loss_analysis,
@@ -76,7 +75,6 @@ __all__ = [
     "derive_control_structure",
     "run_completeness_critic",
     "run_revision",
-    "run_heuristics",
     "check_solution_neutrality",
     "run_sp1",
 ]

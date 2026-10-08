@@ -37,7 +37,6 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 )
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
-    has_unjustified_gaps,
     run_completeness_critic,
     run_revision,
 )
@@ -263,8 +262,8 @@ class TestCriticGracefulDegradation:
             use_case_text="Test",
             run_dir=tmp_path,
         )
-        # Empty findings → has_unjustified_gaps is False
-        assert has_unjustified_gaps(findings) is False
+        # Empty findings carry no gap, so no revision runs
+        assert findings.gaps == []
 
     def test_gd_07_critic_llm_exception_returns_empty_findings(self, tmp_path):
         """SP1-GD-07: critic LLM exception returns empty CriticFindings."""

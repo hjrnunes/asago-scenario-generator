@@ -35,7 +35,6 @@ from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     RevisionDelta,
-    has_unjustified_gaps,
     run_completeness_critic,
     run_revision,
 )
@@ -350,20 +349,6 @@ def test_critic_gap_retry_requires_concept_and_evidence_text(tmp_path) -> None:
     )
     assert client.call_count == 2
     assert findings.gaps[0].description
-
-
-def test_critic_absent_unjustified_without_gap_does_not_trigger_revision() -> None:
-    """Diagnostic probe statuses alone cannot authorize a revision call."""
-    findings = CriticFindings(
-        gaps=[],
-        checklist_results={"Input validation": "absent_unjustified"},
-        taxonomy_probe_results={},
-    )
-
-    assert has_unjustified_gaps(findings) is False
-
-    actionable = findings.model_copy(update={"gaps": [_critic_gap_dict()]})
-    assert has_unjustified_gaps(actionable) is True
 
 
 def test_revision_noop_retains_baseline_and_reports_unresolved_gap(tmp_path) -> None:
