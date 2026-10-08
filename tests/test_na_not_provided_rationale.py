@@ -1,7 +1,8 @@
 """N/A rationale contract for slot filling.
 
 The slot prompt does not ask for an argument about the action's absence,
-because that raised the share of NOT_PROVIDED slots marked N/A. The only
+because that raised the share of NOT_PROVIDED slots marked N/A
+(``tests/phrases/synthesis_ica_system.yaml`` forbids that wording). The only
 deterministic check is that an N/A rationale is present and non-empty; its
 meaning stays with the model.
 """
@@ -12,9 +13,6 @@ import pytest
 
 from asago_scenario_generator.stpa.models.ica_enumeration import ICASlot, UCAType
 from asago_scenario_generator.stpa.obligation_aware.contracts import SlotIcaDraft
-from asago_scenario_generator.stpa.obligation_aware.prompts import (
-    build_synthesis_slot_prompts,
-)
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _validate_compiled_slot,
     compile_ica_slot_draft,
@@ -23,7 +21,6 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_aware import (
     _control_structure,
     _loss_analysis,
-    _provider_slot_request,
 )
 
 
@@ -41,33 +38,6 @@ def _na_draft(rationale: str | None) -> SlotIcaDraft:
         findings=(),
         consideration_results=(),
     )
-
-
-def _normalized_system_prompt() -> str:
-    request = _provider_slot_request()
-    system_prompt, _user_prompt = build_synthesis_slot_prompts(
-        target_id=request.target_id,
-        slots=request.slots,
-        routed_briefs=request.routed_briefs,
-        routed_routes=request.routed_routes,
-        loss_analysis=request.loss_analysis,
-        control_structure=request.control_structure,
-    )
-    return " ".join(system_prompt.split())
-
-
-def test_prompt_does_not_ask_for_an_absence_argument() -> None:
-    prompt = _normalized_system_prompt()
-
-    assert "For a NOT_PROVIDED slot marked N/A" not in prompt
-    assert "absence cannot be hazardous" not in prompt
-    assert "lacks a requirement" not in prompt
-
-
-def test_prompt_keeps_the_general_na_contract() -> None:
-    prompt = _normalized_system_prompt()
-
-    assert "a non-empty `na_rationale` citing a complete structural property" in prompt
 
 
 @pytest.mark.parametrize("rationale", [None, "", "   ", "\n\t"])

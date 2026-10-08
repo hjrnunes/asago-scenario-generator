@@ -625,7 +625,6 @@ def test_call3_review_distinguishes_loss_objectives_from_permitted_behavior() ->
     losses, structure = _authorities()
     excerpts = _build_call3_source_excerpts(USE_CASE, losses)
     loader = TemplateLoader(PROMPTS_DIR)
-    system = loader.render_prompt("stage2_call3_system.j2")
     user = loader.render_prompt(
         "stage2_call3_user.j2",
         use_case_text=USE_CASE,
@@ -634,15 +633,6 @@ def test_call3_review_distinguishes_loss_objectives_from_permitted_behavior() ->
         source_excerpts=excerpts,
         source_ref_by_canonical={e.canonical_ref: e.local_ref for e in excerpts},
     )
-    normalized = " ".join(system.split())
-    assert system.index("## Final semantic review") < system.index(
-        "## Coordination links"
-    )
-    assert "`preserve` is not the default decision" in normalized
-    assert "normative analysis inputs, not deployment observations" in normalized
-    assert "loss does not need a duplicate requirement in USE_CASE" in normalized
-    assert "Code derives its empty hazard-edge list" in normalized
-    assert "Missing implementation" in normalized
     assert user.count("Linked loss L-1 (source_3)") == 1
     assert user.count("What permitted behavior remains?") == 1
     assert user.index("Linked loss L-1") < user.index("**SC-1** proposed wording")

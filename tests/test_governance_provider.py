@@ -73,10 +73,6 @@ def test_the_prompt_states_each_risk_and_explains_every_field() -> None:
 
     assert "risk-b" in user
     assert "CA-1-1" in user
-    for field in ("placements", "risk_id", "targets", "target_id", "reason"):
-        assert f"`{field}`" in system
-    assert "hypothesis" in system
-    assert "exactly one entry for each" in system
     assert "mapping" not in (system + user).lower()
     assert "attack pattern" not in user.lower()
 

@@ -22,8 +22,17 @@ cases:
       - Deterministic code has already checked
       - Do not return an
       - integrity_findings
+      - "`preserve` is not the default decision"
+      - normative analysis inputs, not deployment observations
+      - loss does not need a duplicate requirement in USE_CASE
+      - Code derives its empty hazard-edge list
+      - Missing implementation
+      - listed under the link's `source` or `target`
     forbidden:
       - ConnectionSet
       - Poh
       - STPA-Sec
       - connection_assignments
+    ordered:
+      - - "## Final semantic review"
+        - "## Coordination links"

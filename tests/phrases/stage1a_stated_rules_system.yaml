@@ -1,0 +1,6 @@
+template: stage1a_stated_rules_system.j2
+cases:
+  no-variables:
+    required:
+      - Judge the conduct, not the grammar.
+      - whatever its grammatical subject

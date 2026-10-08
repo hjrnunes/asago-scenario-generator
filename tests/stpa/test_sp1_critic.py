@@ -237,22 +237,6 @@ class TestCriticExecution:
         assert "Test use case description" in user_prompt
         assert "kc_subcodes" not in user_prompt.lower() or "KC" in user_prompt
 
-    def test_critic_prompt_checks_typed_action_kind_conflicts(self, tmp_path):
-        client = MockLLMClient()
-        client.set_response_for(CriticFindings, _valid_critic_findings_dict())
-        run_completeness_critic(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            capability_profile=make_capability_profile(),
-            use_case_text="Test use case",
-            run_dir=tmp_path,
-        )
-
-        prompt = client.calls[0].system_prompt
-        assert "typed `effect_kind`" in prompt
-        assert "action-kind consistency gap" in prompt
-        assert "never silently relabel" in prompt.lower()
-
     def test_critic_09_taxonomy_probes_conditioned_on_profile(self, tmp_path):
         """SP1-CRITIC-09: taxonomy probes are conditioned on capability profile."""
         client = MockLLMClient()
@@ -307,9 +291,7 @@ class TestCriticExecution:
 class TestRevision:
     """SP1-REV-01 through SP1-REV-08."""
 
-    def test_revision_schema_and_prompt_expose_closed_action_effect_enum(
-        self, tmp_path
-    ):
+    def test_revision_schema_exposes_closed_action_effect_enum(self):
         """Revision providers receive exact effect values and their meanings."""
         schema = RevisionDelta.model_json_schema()
         effect_schema = schema["$defs"]["ControlActionEffectKind"]
@@ -322,23 +304,6 @@ class TestRevision:
             "environment_action",
         ):
             assert fragment in effect_schema["description"]
-
-        client = MockLLMClient()
-        client.set_response_for(RevisionDelta, RevisionDelta().model_dump())
-        run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=CriticFindings.model_validate(
-                _valid_critic_findings_dict()
-            ),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
-        prompt = client.calls[0].system_prompt
-        assert "effect_kind` is a closed enum" in prompt
-        assert "do not invent synonyms such as" in prompt
-        assert "internal_state_update" in prompt
-        assert 'MUST use `effect_kind: "agent_message"`' in prompt
 
     def test_revision_invalid_effect_kind_preserves_baseline(self, tmp_path):
         """A captured invalid enum remains a visible fallback, not a merge."""

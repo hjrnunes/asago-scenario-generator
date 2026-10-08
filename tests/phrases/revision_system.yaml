@@ -17,5 +17,24 @@ cases:
       - You may DISMISS a finding if you judge it to be a false positive
       - connect properly
       - modified_responsibilities list must contain ONLY responsibilities you are CHANGING
+      - solution-neutrality
+      - ElementRef references must be valid
+      - feedback channel updates must reference a PM in the same responsibility
+      - New responsibilities
+      - RESP-{next_resp_num}
+      - New PM parts
+      - PM-{resp_num}-{next_pm_num}
+      - New CAs
+      - CA-{resp_num}-{next_ca_num}
+      - New FB channels
+      - FB-{resp_num}-{next_fb_num}
+      - New RCs
+      - RC-{resp_num}-{next_rc_num}
+      - New coordination links
+      - CL-{next_cl_num}
+      - effect_kind` is a closed enum
+      - do not invent synonyms such as
+      - internal_state_update
+      - 'MUST use `effect_kind: "agent_message"`'
     forbidden:
       - STPA-Sec

@@ -43,6 +43,12 @@ cases:
       - "Every rc_id MUST start with \"RC-\", never \"PM-\"."
       - PM-X-Y
       - RC-X-Y
+      - >-
+        When a requirement limits who may act on a record, state the
+        responsibility constraint as that condition on the record and the
+        requester (for example, "act only on records whose owner is the
+        requester"), not as a verification step that must precede the action.
+        State an order only when the sequence itself matters.
     forbidden:
       - Control Actions
       - Feedback Channels

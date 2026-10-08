@@ -12,7 +12,6 @@ from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationSemanticAssessment,
 )
-from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     ObligationRoute,
     StructuralRoutingResponse,
@@ -31,7 +30,6 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
     build_neutral_briefs,
     route_obligations,
 )
-from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     RevisionDelta,
@@ -382,15 +380,3 @@ def test_revision_noop_retains_baseline_and_reports_unresolved_gap(tmp_path) -> 
     assert revised == original
     assert any("no structural change" in warning.lower() for warning in warnings)
     assert any("baseline" in warning.lower() for warning in warnings)
-
-
-def test_stage1_hazard_framing_separates_attack_context_from_system_state() -> None:
-    """Stage 1 distinguishes adversary context from the resulting hazard state."""
-    rendered = TemplateLoader(PROMPTS_DIR).render_prompt("stage1a_risk_system.j2")
-    lowered = rendered.lower()
-    assert (
-        "adversary action is selection context, not the grammar of the hazard"
-        in lowered
-    )
-    assert "system state" in lowered
-    assert "cause or attack mechanism" in lowered

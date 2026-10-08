@@ -67,3 +67,9 @@ cases:
         - "`security_constraint_additions` declares"
       - - "## Worked examples"
         - An edit that restates an existing record's content unchanged
+  stated-rules:
+    required:
+      - "## Stated rules no constraint carries"
+      - This revision may only add.
+      - >-
+        the obligations rule for edits above: do not return an `obligations`

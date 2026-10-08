@@ -285,10 +285,8 @@ def test_coordination_prompts_state_the_endpoint_ownership_rule(tmp_path):
         loader=TemplateLoader(PROMPTS_DIR),
         temperature=0,
     )
-    call = client.calls[0]
-    for prompt in (call.system_prompt, call.user_prompt):
-        normalized = " ".join(prompt.split())
-        assert "listed under the link's `source` or `target`" in normalized
+    normalized = " ".join(client.calls[0].user_prompt.split())
+    assert "listed under the link's `source` or `target`" in normalized
 
 
 def _with_obligation(losses, rule_span):

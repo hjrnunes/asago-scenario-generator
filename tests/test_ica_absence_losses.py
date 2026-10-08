@@ -392,13 +392,11 @@ def test_evidence_on_a_verdict_that_does_not_need_it_is_not_kept(tmp_path) -> No
 def test_the_prompt_explains_the_new_fields_and_keeps_the_reviewer_blind() -> None:
     request = _absence_request()
 
-    system, user = build_ica_hazard_verification_prompts((request,))
+    _system, user = build_ica_hazard_verification_prompts((request,))
 
-    for field in ("absence_loss_ids", "absence_consequence"):
-        assert f"`{field}`" in system
     assert "loss_id" in user
     assert "uca_type" not in user
-    assert "NOT_PROVIDED" not in system + user
+    assert "NOT_PROVIDED" not in user
 
 
 def test_the_seam_downgrades_a_supported_absence_without_evidence() -> None:

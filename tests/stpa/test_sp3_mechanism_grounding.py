@@ -15,9 +15,6 @@ import yaml
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.models.scenario_spec import AttackerBDI
-from asago_scenario_generator.stpa.models.scenario_context import (
-    ScenarioObligationConsideration,
-)
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
@@ -153,17 +150,6 @@ def test_bounded_assumption_is_retained_without_capability_claim() -> None:
     )
 
 
-def test_empty_reachability_prompt_allows_structural_condition_without_attack() -> None:
-    """Stage 5 does not require active manipulation without access evidence."""
-    context = _empty_reachability_context()
-    loader = TemplateLoader(PROMPTS_DIR)
-    stage5_system, stage5 = build_context_bdi_prompts(context, loader)
-
-    combined = "\n".join((stage5_system, stage5)).lower()
-    assert "do not claim" in combined or "do not describe" in combined
-    assert "existing structural condition" in combined
-
-
 def test_stage5_prompt_contains_only_actionable_context_and_defines_references() -> (
     None
 ):
@@ -173,7 +159,6 @@ def test_stage5_prompt_contains_only_actionable_context_and_defines_references()
         context, TemplateLoader(PROMPTS_DIR)
     )
     prompt = f"{system_prompt}\n{user_prompt}"
-    normalized_prompt = " ".join(prompt.split())
 
     assert context.context_digest not in prompt
     assert context.scenario_identity.scenario_id not in prompt
@@ -182,42 +167,3 @@ def test_stage5_prompt_contains_only_actionable_context_and_defines_references()
     assert context.target_control_path.feedback[0].element_id not in prompt
     assert "source_pins:" not in prompt
     assert "catalog_context:" not in prompt
-    assert "Do not return hazard, constraint, or loss IDs" in normalized_prompt
-
-
-def test_obligation_mechanism_is_provenance_not_causal_evidence() -> None:
-    """A taxonomy finding selects the ICA but cannot establish its attack story."""
-    threat = _threat()
-    context = build_scenario_generation_context(
-        threat,
-        _control_structure(),
-        _loss_analysis(),
-        scenario_id="SCN-001",
-        obligation_considerations=(
-            ScenarioObligationConsideration(
-                obligation_id="ob:v1:" + "a" * 64,
-                attack_pattern_id="AP-T2-04",
-                attack_pattern_name="Poisoned persistent memory",
-                concise_concern=(
-                    "An adversary poisons persistent memory so later decisions use "
-                    "attacker-controlled state."
-                ),
-                disposition="finding",
-                rationale=(
-                    "The selected ICA is a system-specific unsafe-control path "
-                    "related to the concern."
-                ),
-                finding_ica_id=threat.ica_id,
-            ),
-        ),
-    )
-    loader = TemplateLoader(PROMPTS_DIR)
-    stage5_system, stage5_user = build_context_bdi_prompts(context, loader)
-
-    assert "analysis provenance, not causal evidence" in " ".join(stage5_user.split())
-    assert "explain why STPA considered this unsafe action" in " ".join(
-        stage5_user.split()
-    )
-    assert "A mechanism needs exact supplied capability/access evidence" in " ".join(
-        stage5_system.split()
-    )

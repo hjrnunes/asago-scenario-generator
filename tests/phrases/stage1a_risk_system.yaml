@@ -51,6 +51,13 @@ cases:
       - the failure is not itself the hazard
       - "A **hazard** is a system-level state or condition"
       - State the resulting system-level
+      - loss registry
+      - Adversary action is selection context, not the grammar of the hazard
+      - system state
+      - cause or attack mechanism
+      - Constraints are requirements, not observations of installed controls
+      - identity-confidence score falls below 0.8
+      - unless that score and threshold were supplied
     once:
       - Express each constraint as the safe relationship
     forbidden:

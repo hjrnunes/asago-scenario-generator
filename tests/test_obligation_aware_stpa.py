@@ -51,7 +51,6 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_structural_routing_prompts,
-    build_synthesis_slot_prompts,
     project_revision_context,
     audit_prompt_contract,
 )
@@ -1452,49 +1451,6 @@ def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:
     )
     provider.fill(_provider_slot_request())
     assert caps == [8192]
-
-
-def test_slot_prompt_states_ica_and_na_output_contract() -> None:
-    """The slot prompt spells out the cross-field ICA/N/A requirements."""
-    request = _provider_slot_request()
-    system_prompt, _user_prompt = build_synthesis_slot_prompts(
-        target_id=request.target_id,
-        slots=request.slots,
-        routed_briefs=request.routed_briefs,
-        routed_routes=request.routed_routes,
-        loss_analysis=request.loss_analysis,
-        control_structure=request.control_structure,
-    )
-    normalized_prompt = " ".join(system_prompt.split())
-    assert "is_na=false" in system_prompt
-    assert "at least one structured item in `findings`" in system_prompt
-    assert "is_na=true" in system_prompt
-    assert "non-empty `na_rationale`" in system_prompt
-    assert "matching zero-based positions" in system_prompt
-    assert "do not use `unresolved` merely because" in system_prompt
-    assert "not proof that the current control already recognizes" in system_prompt
-    assert "requires another control path" in system_prompt
-    assert "subject, operation, affected object, and effect" in system_prompt
-    assert (
-        "`value`, `input`, `parameter`, or `threshold` are not mechanism evidence"
-        in system_prompt
-    )
-    assert "taxonomy mechanism is not established evidence" in normalized_prompt
-    assert (
-        "`deviation` and `hazardous_context` must describe the unsafe control"
-        in normalized_prompt
-    )
-    assert (
-        "Bad: `when an adversary uses poisoned persistent memory`" in normalized_prompt
-    )
-    assert (
-        "Good: `the current authorization is not revalidated after stored context"
-        in normalized_prompt
-    )
-    assert (
-        "legacy `responsibility`, `control_action`, `uca_type`, or `icas`"
-        in system_prompt
-    )
 
 
 def test_provider_slot_schema_leads_with_normative_structured_draft(tmp_path) -> None:

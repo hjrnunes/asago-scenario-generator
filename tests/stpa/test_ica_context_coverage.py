@@ -428,10 +428,6 @@ def _template(name: str) -> str:
 
 
 def test_slot_prompt_treats_each_source_state_as_its_own_context() -> None:
-    text = _template("_source_limited_reply.j2")
-
-    assert "misstates it, contradicts it, or adds details it does not contain" in text
-    assert "the source supplies no applicable answer" in text
     assert '{% include "_source_limited_reply.j2" %}' in _template(
         "synthesis_ica_system.j2"
     )

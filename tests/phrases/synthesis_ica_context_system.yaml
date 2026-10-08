@@ -1,0 +1,6 @@
+template: synthesis_ica_context_system.j2
+cases:
+  no-context-gaps:
+    required:
+      - misstates it, contradicts it, or adds details it does not contain
+      - the source supplies no applicable answer

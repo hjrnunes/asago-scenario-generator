@@ -620,14 +620,6 @@ class TestGateRevisionTrigger:
         assert "## Stated Rules No Constraint Carries" in call.user_prompt
         assert f'R-1: "{FEE_FINDING.quote}"' in call.user_prompt
         assert "None. The current graph passes" in call.user_prompt
-        assert "## Stated rules no constraint carries" in call.system_prompt
-        assert "This revision may only add." in call.system_prompt
-        # The general edit rule demands an obligations list for a changed
-        # rule; the rule round must say that its extensions omit it.
-        assert (
-            "the obligations rule for edits above: do not return an `obligations`"
-            in call.system_prompt
-        )
         artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
         assert artifact["passed"] is True
         assert artifact["failing_checks"] == []
@@ -1334,23 +1326,6 @@ class TestSharedTerms:
         )
         assessment = _assess(client, tmp_path, analysis)
         return assessment, assessment.verdicts["R-1"], client
-
-    def test_mapping_prompt_explains_shared_terms(self, tmp_path) -> None:
-        _, _, client = self._verdict(tmp_path, _fee_analysis(), ids=["SC-2"])
-
-        system_prompt = client.calls[1].system_prompt
-        assert "shared_terms" in system_prompt
-        assert "not carried" in system_prompt
-
-    def test_extraction_prompt_counts_reply_limits_with_another_subject(
-        self, tmp_path
-    ) -> None:
-        """A grounding rule worded about its sources still limits the reply."""
-        _, _, client = self._verdict(tmp_path, _fee_analysis(), ids=["SC-2"])
-
-        system_prompt = client.calls[0].system_prompt
-        assert "Judge the conduct, not the grammar." in system_prompt
-        assert "whatever its grammatical subject" in system_prompt
 
     def test_term_in_quote_and_cited_rule_is_accepted(self, tmp_path) -> None:
         _, verdict, _ = self._verdict(tmp_path, _fee_analysis(), ids=["SC-2"])

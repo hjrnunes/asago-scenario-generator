@@ -1,0 +1,14 @@
+template: structural_routing_system.j2
+cases:
+  routing-batch:
+    required:
+      - whether the system has the surface
+      - free-text input, tool calls, or retrieval
+      - not whether the system description mentions or describes the
+      - Choose `absent_from_system` only when the structure lacks that surface
+      - adjacent safeguard is not evidence
+      - unauthenticated access or authentication rejection is not poisoned
+      - ingress resource proves only that content can arrive
+      - neither establishes semantic separation
+      - the disposition must be `unresolved`
+      - capability flags, or integration IDs cannot substitute

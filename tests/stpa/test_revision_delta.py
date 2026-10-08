@@ -363,18 +363,6 @@ class TestRevisionDelta06MergeNewCoordLinks:
 class TestRevisionDelta07UserPromptChecklist:
     """RevisionDelta-07: revision_user.j2 contains the add-or-dismiss per-finding checklist."""
 
-    def test_template_contains_checklist_directive(self):
-        text = _load_template_text("revision_user.j2")
-        # Spec issue 7 replaced the mandatory-add directive with add-or-dismiss.
-        # The template must offer both options: add the missing element(s)
-        # to the RevisionDelta, or dismiss with a one-sentence justification
-        # in dismissed_gaps.
-        assert "add the missing element(s)" in text
-        assert "dismiss it with a one-sentence justification" in text
-        assert "dismissed_gaps" in text
-        # The old mandatory-add directive must NOT be present
-        assert "You MUST add at least one element for EACH finding" not in text
-
     def test_template_contains_numbered_list_format(self):
         text = _load_template_text("revision_user.j2")
         # The numbered per-finding list (loop.index) is gone; the per-gap
@@ -382,43 +370,6 @@ class TestRevisionDelta07UserPromptChecklist:
         assert "{% for gap in critic_findings.gaps %}" in text
         assert "gap_type" in text
         assert "suggested_remedy" in text
-
-
-# ---------------------------------------------------------------------------
-# RevisionDelta-08: revision_system.j2 contains ID format rules
-# ---------------------------------------------------------------------------
-
-
-class TestRevisionDelta08SystemPromptIdRules:
-    """RevisionDelta-08: revision_system.j2 contains ID format rules with next-available numbers."""
-
-    def test_template_contains_id_format_rules(self):
-        text = _load_template_text("revision_system.j2")
-        assert "ID format rules" in text
-
-    @pytest.mark.parametrize(
-        "element_kind, id_format",
-        [
-            ("New responsibilities", "RESP-{next_resp_num}"),
-            ("New PM parts", "PM-{resp_num}-{next_pm_num}"),
-            ("New CAs", "CA-{resp_num}-{next_ca_num}"),
-            ("New FB channels", "FB-{resp_num}-{next_fb_num}"),
-            ("New RCs", "RC-{resp_num}-{next_rc_num}"),
-            ("New coordination links", "CL-{next_cl_num}"),
-        ],
-        ids=[
-            "new_resp",
-            "new_pm",
-            "new_ca",
-            "new_fb",
-            "new_rc",
-            "new_cl",
-        ],
-    )
-    def test_template_contains_id_rule(self, element_kind, id_format):
-        text = _load_template_text("revision_system.j2")
-        assert element_kind in text
-        assert id_format in text
 
 
 # ---------------------------------------------------------------------------
@@ -676,30 +627,6 @@ class TestRevisionDelta13ChecklistEachGap:
         # rendering is a for loop, not a numbered list)
         assert rendered.count("missing_responsibility") >= 1
         assert rendered.count("missing_feedback") >= 1
-
-
-# ---------------------------------------------------------------------------
-# RevisionDelta-14: revision_system.j2 preserves existing rules
-# ---------------------------------------------------------------------------
-
-
-class TestRevisionDelta14PreservesExistingRules:
-    """RevisionDelta-14: revision_system.j2 preserves existing rules."""
-
-    def test_template_preserves_solution_neutrality(self):
-        text = _load_template_text("revision_system.j2")
-        assert "solution-neutrality" in text
-
-    def test_template_preserves_valid_references_rule(self):
-        text = _load_template_text("revision_system.j2")
-        assert "ElementRef references must be valid" in text
-
-    def test_template_preserves_feedback_channel_rule(self):
-        text = _load_template_text("revision_system.j2")
-        assert (
-            "feedback channel updates must reference a PM in the same responsibility"
-            in text
-        )
 
 
 # ---------------------------------------------------------------------------

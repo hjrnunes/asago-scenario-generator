@@ -1,0 +1,6 @@
+template: stage1a_stated_rule_mapping_system.j2
+cases:
+  no-variables:
+    required:
+      - shared_terms
+      - not carried

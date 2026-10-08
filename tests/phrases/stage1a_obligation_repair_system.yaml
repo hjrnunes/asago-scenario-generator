@@ -1,0 +1,8 @@
+template: stage1a_obligation_repair_system.j2
+cases:
+  no-variables:
+    required:
+      - kind-exclusive
+      - not a rewrite
+      - Never substitute
+      - another channel and never drop a known channel
