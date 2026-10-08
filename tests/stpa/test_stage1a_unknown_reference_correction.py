@@ -286,3 +286,184 @@ class TestUnknownReferenceMerge:
                     _constraint_repair("SC-1", returned)
                 ),
             )
+
+
+class TestUnresolvedReferenceDrop:
+    """A correction that still fails drops what it could not resolve.
+
+    Deterministic code removes each unknown or repeated entry; a record whose
+    list is left without a valid ID is dropped, and so is a constraint whose
+    every hazard was dropped.  The draft is validated again, and only a draft
+    that is still invalid stops the unit.
+    """
+
+    def test_unresolved_gap_constraint_is_dropped_and_recorded(self, tmp_path) -> None:
+        warnings: list[str] = []
+        analysis = _derive(
+            tmp_path,
+            [valid_risk_draft_dict(), RECORDED_GAP_RESPONSE],
+            [_constraint_repair("SC-2", ["merchant_policy_constraint"])],
+            warnings,
+        )
+
+        assert _stage1a_steps(tmp_path) == [
+            "risk_derivation",
+            "gap_analysis",
+            "gap_analysis_repair",
+        ]
+        assert [c.constraint_id for c in analysis.security_constraints] == ["SC-1"]
+        assert [h.hazard_id for h in analysis.hazards] == ["H-1", "H-2"]
+        [rejected] = _records(tmp_path, "repair")
+        assert rejected["outcome"] == "rejected"
+        [dropped] = _records(tmp_path, "reference_dropped")
+        assert dropped["stage"] == "gap_analysis"
+        assert dropped["identity"] == "SC-2.related_hazards"
+        assert dropped["outcome"] == "dropped"
+        assert dropped["proposed"] == {"references": ["merchant_policy_constraint"]}
+        assert dropped["applied"] == {
+            "references": [],
+            "dropped_entries": ["merchant_policy_constraint"],
+            "dropped_records": ["SC-2"],
+        }
+        assert (
+            "gap_analysis reference SC-2.related_hazards dropped "
+            "merchant_policy_constraint; SC-2 had no other valid ID and was dropped"
+        ) in warnings
+
+    def test_a_list_with_a_known_id_keeps_its_record(self, tmp_path) -> None:
+        risk = valid_risk_draft_dict()
+        risk["security_constraints"][0]["related_hazards"] = ["H-1", "H-9", "H-1"]
+
+        analysis = _derive(
+            tmp_path,
+            [risk, _empty_gap()],
+            [_constraint_repair("SC-1", ["H-9"])],
+        )
+
+        [constraint] = analysis.security_constraints
+        assert constraint.related_hazards == ["H-1"]
+        [dropped] = _records(tmp_path, "reference_dropped")
+        assert dropped["identity"] == "SC-1.related_hazards"
+        assert dropped["applied"] == {
+            "references": ["H-1"],
+            "dropped_entries": ["H-9", "H-1"],
+            "dropped_records": [],
+        }
+
+    def test_a_dropped_hazard_drops_the_constraints_left_without_a_hazard(
+        self, tmp_path
+    ) -> None:
+        gap = _two_hazard_gap()
+        gap["hazards"][1]["related_losses"] = ["unknown_loss"]
+
+        analysis = _derive(
+            tmp_path,
+            [valid_risk_draft_dict(), gap],
+            [
+                {
+                    "hazards": [
+                        {"hazard_id": "H-3", "related_losses": ["unknown_loss"]}
+                    ],
+                    "security_constraints": [],
+                }
+            ],
+        )
+
+        assert [h.hazard_id for h in analysis.hazards] == ["H-1", "H-2"]
+        constraints = {c.constraint_id: c for c in analysis.security_constraints}
+        assert sorted(constraints) == ["SC-1", "SC-2"]
+        assert constraints["SC-2"].related_hazards == ["H-2"]
+        dropped = {
+            entry["identity"]: entry["applied"]
+            for entry in _records(tmp_path, "reference_dropped")
+        }
+        assert dropped == {
+            "H-3.related_losses": {
+                "references": [],
+                "dropped_entries": ["unknown_loss"],
+                "dropped_records": ["H-3"],
+            },
+            "SC-2.related_hazards": {
+                "references": ["H-2"],
+                "dropped_entries": ["H-3"],
+                "dropped_records": [],
+            },
+            "SC-3.related_hazards": {
+                "references": [],
+                "dropped_entries": ["H-3"],
+                "dropped_records": ["SC-3"],
+            },
+        }
+
+    def test_a_draft_still_invalid_after_the_drop_stops(self, tmp_path) -> None:
+        risk = valid_risk_draft_dict()
+        risk["security_constraints"] = []
+        gap = _empty_gap()
+        gap["security_constraints"] = [
+            {
+                "handle": "payment_constraint",
+                "rule": "The agent must confirm every unintended payment.",
+                "applies_when": ["before execution"],
+                "behavior_class": "unauthorized_write",
+                "related_hazards": ["payment_constraint"],
+            }
+        ]
+
+        with pytest.raises(StageError) as exc_info:
+            _derive(
+                tmp_path,
+                [risk, gap],
+                [_constraint_repair("SC-1", ["payment_constraint"])],
+            )
+
+        message = str(exc_info.value)
+        assert message.startswith("stage_1a/gap_analysis: targeted repair failed")
+        assert "dropping the unresolved references left an invalid draft" in message
+        assert "no security constraints were declared" in message
+        assert "draft_references failure class" in message
+        assert "Missing hazard declarations: payment_constraint" in message
+        assert _records(tmp_path, "reference_dropped") == []
+
+    def test_a_correction_without_a_response_stops_without_a_drop(
+        self, tmp_path
+    ) -> None:
+        with pytest.raises(StageError, match="targeted repair failed"):
+            _derive(tmp_path, [valid_risk_draft_dict(), RECORDED_GAP_RESPONSE], [])
+
+        assert not (tmp_path / "loss-analysis.yaml").exists()
+        assert _records(tmp_path, "reference_dropped") == []
+
+
+def _empty_gap() -> dict:
+    return {
+        "risk_card_losses": [],
+        "use_case_losses": [],
+        "hazards": [],
+        "security_constraints": [],
+    }
+
+
+def _two_hazard_gap() -> dict:
+    """A gap draft with two hazards; SC-2 names both, SC-3 only the second."""
+    gap = json.loads(json.dumps(RECORDED_GAP_RESPONSE))
+    gap["hazards"].append(
+        {
+            "handle": "refund_hazard",
+            "description": "The assistant refunds an order twice.",
+            "related_losses": ["L-1"],
+        }
+    )
+    gap["security_constraints"][0]["related_hazards"] = [
+        "merchant_policy_hazard",
+        "refund_hazard",
+    ]
+    gap["security_constraints"].append(
+        {
+            "handle": "refund_constraint",
+            "rule": "The assistant must refund an order at most once.",
+            "applies_when": ["a refund is requested via `process_refund`"],
+            "behavior_class": "unauthorized_write",
+            "related_hazards": ["refund_hazard"],
+        }
+    )
+    return gap

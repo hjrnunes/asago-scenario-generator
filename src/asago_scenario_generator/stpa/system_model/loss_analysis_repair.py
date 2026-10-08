@@ -108,6 +108,9 @@ _REPAIR_STEP_SUFFIX = "_repair"
 # An obligation the repair dropped because its span stays outside the rule.
 RULE_SPAN_DROPPED_KIND = "rule_span_dropped"
 
+# A reference list cut after its one correction failed to resolve it.
+REFERENCE_DROPPED_KIND = "reference_dropped"
+
 # The run-level, cross-stage record of every Stage 1a transformation (R3).
 REPAIR_RECORD_FILENAME = "loss-analysis-repair.yaml"
 REPAIR_RECORD_SCHEMA_VERSION = "loss-analysis-repair-record-v2"
@@ -2785,6 +2788,175 @@ def merge_reference_repair(
     return LossAnalysisDraft.model_validate(payload)
 
 
+@dataclass(frozen=True)
+class DroppedReferences:
+    """One reference list deterministic code cut after a failed correction.
+
+    ``kept`` is what the list keeps; an empty ``kept`` drops the record that
+    owns the list.
+    """
+
+    collection: str
+    owner_id: str
+    original: tuple[str, ...]
+    kept: tuple[str, ...]
+    reason: str
+
+    @property
+    def identity(self) -> str:
+        return f"{self.owner_id}.{_REFERENCE_LIST_FIELDS[self.collection][0]}"
+
+    @property
+    def dropped_entries(self) -> tuple[str, ...]:
+        """Each original entry the cut removed, in original order."""
+        remaining = list(self.kept)
+        dropped: list[str] = []
+        for ref in self.original:
+            if remaining and ref == remaining[0]:
+                remaining.pop(0)
+            else:
+                dropped.append(ref)
+        return tuple(dropped)
+
+
+def drop_unresolved_references(
+    plan: ReferenceRepairPlan,
+) -> tuple[LossAnalysisDraft, tuple[DroppedReferences, ...]]:
+    """Cut every selected list to its known IDs and drop emptied records.
+
+    A hazard left without a valid loss is dropped; each constraint then loses
+    its references to dropped hazards, and a constraint left without a hazard
+    is dropped too.  Every other record and field keeps its exact payload.
+    """
+    selected = {(item.collection, item.owner_id): item for item in plan.selected}
+    payload = plan.prior.model_dump(mode="json")
+    drops: list[DroppedReferences] = []
+    dropped_hazards: set[str] = set()
+    # Hazards come first, so constraints see every hazard dropped before them.
+    for collection, (field_name, id_field) in _REFERENCE_LIST_FIELDS.items():
+        rows = []
+        for row in payload[collection]:
+            cut = _cut_reference_list(
+                selected.get((collection, row[id_field])),
+                collection=collection,
+                owner_id=row[id_field],
+                original=tuple(row[field_name]),
+                gone=dropped_hazards if collection == "security_constraints" else set(),
+            )
+            if cut is None:
+                rows.append(row)
+                continue
+            drops.append(cut)
+            if cut.kept:
+                row[field_name] = list(cut.kept)
+                rows.append(row)
+            elif collection == "hazards":
+                dropped_hazards.add(cut.owner_id)
+        payload[collection] = rows
+    return LossAnalysisDraft.model_validate(payload), tuple(drops)
+
+
+def _cut_reference_list(
+    selected: SelectedReferenceList | None,
+    *,
+    collection: str,
+    owner_id: str,
+    original: tuple[str, ...],
+    gone: set[str],
+) -> DroppedReferences | None:
+    base = selected.kept if selected is not None else original
+    kept = tuple(ref for ref in base if ref not in gone)
+    if selected is None and kept == original:
+        return None
+    reasons = [selected.defect_reason] if selected is not None else []
+    lost = tuple(dict.fromkeys(ref for ref in original if ref in gone))
+    if lost:
+        reasons.append("dropped hazards: " + ", ".join(lost))
+    return DroppedReferences(
+        collection=collection,
+        owner_id=owner_id,
+        original=original,
+        kept=kept,
+        reason="; ".join(reasons),
+    )
+
+
+def _record_dropped_references(
+    drops: Iterable[DroppedReferences],
+    *,
+    step: str,
+    repair_record: RepairRecord | None,
+    normalization_warnings: list[str] | None,
+) -> None:
+    """Record each list the drop cut and each record it dropped."""
+    for item in drops:
+        consequence = (
+            ""
+            if item.kept
+            else f"; {item.owner_id} had no other valid ID and was dropped"
+        )
+        _record_warnings(
+            (
+                f"{step} reference {item.identity} dropped "
+                + ", ".join(item.dropped_entries)
+                + consequence,
+            ),
+            normalization_warnings,
+        )
+        if repair_record is None:
+            continue
+        repair_record.add(
+            stage=step,
+            attempt="repair",
+            kind=REFERENCE_DROPPED_KIND,
+            identity=item.identity,
+            reason=(
+                f"{item.reason}; the one correction did not resolve the list, "
+                f"so deterministic code dropped the entries it could not keep"
+                f"{consequence}."
+            ),
+            proposed={"references": list(item.original)},
+            applied={
+                "references": list(item.kept),
+                "dropped_entries": list(item.dropped_entries),
+                "dropped_records": [] if item.kept else [item.owner_id],
+            },
+            outcome="dropped",
+            # The cut entries come from the first-attempt response.
+            raw_step=step,
+        )
+
+
+def _drop_unresolved(
+    plan: ReferenceRepairPlan,
+    validation: _RepairValidation,
+    *,
+    step: str,
+    error_msg: str | None,
+    repair_record: RepairRecord | None,
+) -> LossAnalysisDraft:
+    """Accept the draft without what the correction left unresolved, or stop."""
+    try:
+        cut, drops = drop_unresolved_references(plan)
+        draft = _finish_merged_draft(cut, validation, step=step)
+    except ValueError as exc:
+        raise StageError(
+            stage="stage_1a",
+            step=step,
+            message=(
+                f"targeted repair failed: {error_msg}; dropping the unresolved "
+                f"references left an invalid draft: {exc}"
+            ),
+        ) from exc
+    _record_dropped_references(
+        drops,
+        step=step,
+        repair_record=repair_record,
+        normalization_warnings=validation.normalization_warnings,
+    )
+    return draft
+
+
 # ---------------------------------------------------------------------------
 # One repair call
 # ---------------------------------------------------------------------------
@@ -3245,13 +3417,28 @@ def run_targeted_repair(
             repair_record=repair_record,
             normalization_warnings=normalization_warnings,
         )
-    if error_msg is not None or draft is None:
-        raise StageError(
-            stage="stage_1a",
+    if error_msg is None and draft is not None:
+        return draft
+    # A typed verdict means a response came back and was rejected or failed
+    # validation; a transport or undecodable failure has nothing to resolve.
+    # A duplicate-only plan keeps its stop (decision 47b).
+    if (
+        isinstance(plan, ReferenceRepairPlan)
+        and verdicts
+        and any(selected.unknown for selected in plan.selected)
+    ):
+        return _drop_unresolved(
+            plan,
+            validation,
             step=step,
-            message=f"targeted repair failed: {error_msg}",
+            error_msg=error_msg,
+            repair_record=repair_record,
         )
-    return draft
+    raise StageError(
+        stage="stage_1a",
+        step=step,
+        message=f"targeted repair failed: {error_msg}",
+    )
 
 
 def _selected_card_views(

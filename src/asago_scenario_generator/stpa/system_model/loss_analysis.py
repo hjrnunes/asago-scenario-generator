@@ -1882,6 +1882,8 @@ def _correct_references(
     error_msg: str,
 ) -> LossAnalysisDraft:
     """Send the one reference correction; a failed one stops with the finding."""
+    # Validating the corrected or cut draft reclassifies the call's failure.
+    failure_class = call.failure_class
     try:
         return _stage1a_targeted_repair(
             call,
@@ -1895,7 +1897,7 @@ def _correct_references(
             stage=STAGE,
             step=call.step,
             message=(
-                f"{exc.message}; {call.failure_class} failure class; first "
+                f"{exc.message}; {failure_class} failure class; first "
                 f"attempt failed: {error_msg}. {call.validation_feedback}"
             ),
         ) from exc
