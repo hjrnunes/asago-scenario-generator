@@ -52,6 +52,13 @@ class ObservationContractError(ValueError):
     """Raised when an observation contract is malformed or tampered."""
 
 
+class SafeOutcomeClaimMissingError(ValueError):
+    """An observable safe outcome without its claim level or evidence kind.
+
+    Stage 5 sits above this module and gives the error its repair code.
+    """
+
+
 class ObservationContractModel(BaseModel):
     """Strict base for the producer-owned observation contract."""
 
@@ -190,7 +197,7 @@ class SafeObservableOutcome(ObservationContractModel):
 
     def _require_matching_evidence(self) -> None:
         if self.claim_level is None or self.evidence is None:
-            raise ValueError(
+            raise SafeOutcomeClaimMissingError(
                 "observable safe outcomes require claim_level and evidence"
             )
         expected = _CLAIM_EVIDENCE[self.claim_level]
@@ -463,6 +470,7 @@ __all__ = [
     "ObservationCapability",
     "ObservationContract",
     "ObservationContractError",
+    "SafeOutcomeClaimMissingError",
     "ObservationCriterion",
     "ObservationDisposition",
     "ObservationEvidence",

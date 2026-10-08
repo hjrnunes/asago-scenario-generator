@@ -264,6 +264,27 @@ def test_an_adversary_without_intentions_raises_its_own_code(tmp_path) -> None:
     assert "- attacker_intentions_missing:" in client.calls[1].user_prompt
 
 
+def test_an_observable_safe_outcome_without_a_claim_raises_its_own_code(
+    tmp_path,
+) -> None:
+    payload = _command_attempt_payload([], [])
+    payload["unsafe_outcome"]["safe_observable_outcome"].update(
+        claim_level=None, evidence=None, operation_name=None
+    )
+
+    client, (result, error) = _generate(
+        tmp_path,
+        payload,
+        target_operation=_target_operation(),
+        target_observations=_nested_observations(),
+    )
+
+    assert result is None
+    assert "observable safe outcomes require claim_level and evidence" in error
+    retry_prompt = client.calls[1].user_prompt
+    assert "- safe_outcome_claim_missing:" in retry_prompt
+
+
 def test_an_unknown_operation_name_raises_its_own_code(tmp_path) -> None:
     payload = _command_attempt_payload([], [])
     payload["unsafe_outcome"]["observation_criteria"][0]["operation_name"] = (

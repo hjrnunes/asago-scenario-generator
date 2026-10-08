@@ -159,6 +159,12 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "scenario is executable, and observable=false with no claim or "
             "references when it is analytical_only."
         ),
+        IssueCode.safe_outcome_claim_missing: (
+            "an observable safe_observable_outcome sets claim_level and evidence "
+            "(and operation_name for command_attempt) from a supported "
+            "observation criterion; with no observable criterion, set "
+            "observable=false with no claim or references."
+        ),
         IssueCode.intention_handle_undeclared: (
             "every attacker_bdi intention cites at least one source_handle that "
             "has a declared causal_factors entry; declare the factor or cite a "

@@ -13,6 +13,9 @@ from enum import StrEnum
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.llm_helpers import ExactFeedbackError
+from asago_scenario_generator.stpa.observation_contract import (
+    SafeOutcomeClaimMissingError,
+)
 
 from ..condition_check import (
     LITERAL_UNSUPPORTED,
@@ -47,6 +50,7 @@ class IssueCode(StrEnum):
     safe_outcome_record_ref_not_supplied = "safe_outcome_record_ref_not_supplied"
     safe_outcome_fact_ref_not_supplied = "safe_outcome_fact_ref_not_supplied"
     safe_outcome_observability_mismatch = "safe_outcome_observability_mismatch"
+    safe_outcome_claim_missing = "safe_outcome_claim_missing"
     intention_handle_undeclared = "intention_handle_undeclared"
     attacker_intentions_missing = "attacker_intentions_missing"
     mechanism_source_mismatch = "mechanism_source_mismatch"
@@ -125,6 +129,8 @@ def _issue_of_item(item: dict) -> ValidationIssue | None:
     cause = item.get("ctx", {}).get("error")
     if isinstance(cause, ValidationIssueError):
         return cause.issue
+    if isinstance(cause, SafeOutcomeClaimMissingError):
+        return ValidationIssue(IssueCode.safe_outcome_claim_missing, str(cause))
     for part in item["loc"]:
         if part in _SCHEMA_FIELD_CODES:
             return ValidationIssue(_SCHEMA_FIELD_CODES[part], item["msg"])
