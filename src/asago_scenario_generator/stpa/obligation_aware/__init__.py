@@ -37,10 +37,6 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
 )
 
 
-# Friendly alias for direct callers and the composition-root discovery spelling.
-build_neutral_obligation_briefs = build_neutral_briefs
-
-
 __all__ = [
     "ObligationAwareLLMAdapter",
     "RevisionCompilation",
@@ -49,7 +45,6 @@ __all__ = [
     "SlotFillRunResult",
     "build_neutral_brief",
     "build_neutral_briefs",
-    "build_neutral_obligation_briefs",
     "build_synthesis_slot_requests",
     "compile_revision_draft",
     "create_obligation_batches",

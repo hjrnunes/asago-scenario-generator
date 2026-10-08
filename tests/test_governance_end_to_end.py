@@ -10,7 +10,7 @@ from asago_scenario_generator.models.obligation_consideration import ObligationR
 from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,
     build_governance_briefs,
-    build_neutral_obligation_briefs,
+    build_neutral_briefs,
     build_obligation_accounting,
 )
 from asago_scenario_generator.pipeline.scenario_realization import (
@@ -106,7 +106,7 @@ def _world():
         }
     )
     governance_brief = build_governance_briefs(plan, ("risk-b",))[0]
-    pattern_brief = build_neutral_obligation_briefs(plan, (pattern,))[0]
+    pattern_brief = build_neutral_briefs(plan, (pattern,))[0]
     return plan, loss, make_minimal_control_structure(), pattern_brief, governance_brief
 
 

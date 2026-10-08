@@ -19,7 +19,7 @@ from asago_scenario_generator.models.obligation_consideration import (
 from asago_scenario_generator.pipeline.obligation_consideration import (
     batch_neutral_obligation_briefs,
     build_consideration_artifact,
-    build_neutral_obligation_briefs,
+    build_neutral_briefs,
     validate_obligation_routes,
 )
 
@@ -30,7 +30,7 @@ from tests.helpers.projection_factory import get_test_raw_pattern
 def _briefs():
     plan = make_plan()
     patterns = (AttackPattern.model_validate(get_test_raw_pattern()),)
-    return plan, build_neutral_obligation_briefs(plan, patterns)
+    return plan, build_neutral_briefs(plan, patterns)
 
 
 def _pin(artifact_id: str, schema_version: str = "fixture-v1") -> ArtifactPin:
@@ -74,7 +74,7 @@ def test_brief_factory_retains_applicable_rows_even_when_projection_is_not_ready
 ):
     plan, briefs = _briefs()
     row = plan.obligations[0]
-    retained = build_neutral_obligation_briefs(
+    retained = build_neutral_briefs(
         plan, (AttackPattern.model_validate(get_test_raw_pattern()),)
     )
 
@@ -85,12 +85,12 @@ def test_brief_factory_retains_applicable_rows_even_when_projection_is_not_ready
 def test_brief_factory_rejects_loose_plan_or_pattern_values() -> None:
     plan, briefs = _briefs()
     with pytest.raises(TypeError, match="TaxonomyObligationPlan"):
-        build_neutral_obligation_briefs(  # type: ignore[arg-type]
+        build_neutral_briefs(  # type: ignore[arg-type]
             plan.model_dump(mode="json"),
             (AttackPattern.model_validate(get_test_raw_pattern()),),
         )
     with pytest.raises(TypeError, match="AttackPattern"):
-        build_neutral_obligation_briefs(  # type: ignore[arg-type]
+        build_neutral_briefs(  # type: ignore[arg-type]
             plan,
             (
                 AttackPattern.model_validate(get_test_raw_pattern()).model_dump(
@@ -103,7 +103,7 @@ def test_brief_factory_rejects_loose_plan_or_pattern_values() -> None:
 def test_batching_is_canonical_and_rejects_invalid_size() -> None:
     plan = make_plan(risk_ids=("risk-a", "risk-b"))
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
-    briefs = build_neutral_obligation_briefs(plan, (pattern,))
+    briefs = build_neutral_briefs(plan, (pattern,))
 
     forward = batch_neutral_obligation_briefs(briefs, 1)
     reverse = batch_neutral_obligation_briefs(tuple(reversed(briefs)), 1)
@@ -304,9 +304,9 @@ def test_brief_factory_rejects_unknown_or_substituted_patterns() -> None:
         }
     )
     with pytest.raises(ValueError, match="references an unknown attack pattern"):
-        build_neutral_obligation_briefs(plan, ())
+        build_neutral_briefs(plan, ())
     with pytest.raises(ValueError, match="substituted its attack-pattern digest"):
-        build_neutral_obligation_briefs(plan, (substituted,))
+        build_neutral_briefs(plan, (substituted,))
 
 
 @pytest.mark.parametrize(
