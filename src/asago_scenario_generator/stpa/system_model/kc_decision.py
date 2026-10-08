@@ -7,13 +7,19 @@ reads the verified interpretations of an observed execution target profile
 the codes that fact makes present or absent.  Rules are per code and use
 the definitions in ``kc-threat-mapping.yaml`` and the discovery vocabulary
 (``likely_state_effect``, the ``text_search`` role); they never name a
-target.  Codes no rule decides stay with the model.
+target.  Codes no rule decides stay with the model, which Stage 1b samples
+several times: :func:`vote_kc_subcodes` keeps a code that at least a third
+of the draws select.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections import Counter
+from collections.abc import Collection, Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
+from fractions import Fraction
+
+from pydantic import BaseModel, ConfigDict
 
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
@@ -23,6 +29,10 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetSemanticInterpretation,
     TargetStateEffect,
 )
+
+# A code that one draw in three selects is kept: the prompt asks for every
+# grounded code, and a sampled draw more often omits a code than invents one.
+KC_VOTE_SHARE = Fraction(1, 3)
 
 DATABASE_READ_ONLY = "KC6.3.1"
 DATABASE_FULL_CRUD = "KC6.3.2"
@@ -141,3 +151,47 @@ def target_kc_decision(profile: ExecutionTargetProfile | None) -> KcFactDecision
     return _combine(
         (_database_access(profile, verified), _retrieval_source(verified))
     )
+
+
+def vote_kc_subcodes(draws: Sequence[Collection[str]]) -> list[str]:
+    """Return the codes selected by at least ``KC_VOTE_SHARE`` of *draws*."""
+    if not draws:
+        raise ValueError("a KC vote needs at least one draw")
+    counts = Counter(code for draw in draws for code in set(draw))
+    return sorted(
+        code
+        for code, count in counts.items()
+        if Fraction(count, len(draws)) >= KC_VOTE_SHARE
+    )
+
+
+class KcDecisionRecord(BaseModel):
+    """How Stage 1b decided its KC sub-codes, as ``capability-kc-decision.yaml``."""
+
+    model_config = ConfigDict(frozen=True)
+
+    samples: int
+    vote_share: str
+    draws: list[list[str]]
+    failed_draws: list[str]
+    counts: dict[str, int]
+    kc_subcodes: list[str]
+
+    @classmethod
+    def of(
+        cls,
+        *,
+        samples: int,
+        draws: list[list[str]],
+        failed_draws: list[str],
+        kc_subcodes: list[str],
+    ) -> KcDecisionRecord:
+        counts = Counter(code for draw in draws for code in set(draw))
+        return cls(
+            samples=samples,
+            vote_share=str(KC_VOTE_SHARE),
+            draws=draws,
+            failed_draws=failed_draws,
+            counts=dict(sorted(counts.items())),
+            kc_subcodes=kc_subcodes,
+        )
