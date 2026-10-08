@@ -3419,12 +3419,35 @@ def run_targeted_repair(
         )
     if error_msg is None and draft is not None:
         return draft
-    # A typed verdict means a response came back and was rejected or failed
-    # validation; a transport or undecodable failure has nothing to resolve.
-    # A duplicate-only plan keeps its stop (decision 47b).
+    return _finish_failed_repair(
+        plan,
+        validation,
+        step=step,
+        error_msg=error_msg,
+        answered=bool(verdicts),
+        repair_record=repair_record,
+    )
+
+
+def _finish_failed_repair(
+    plan: RepairPlan,
+    validation: _RepairValidation,
+    *,
+    step: str,
+    error_msg: str | None,
+    answered: bool,
+    repair_record: RepairRecord | None,
+) -> LossAnalysisDraft:
+    """Drop what a failed unknown-reference correction left unresolved, or stop.
+
+    ``answered`` means the parser reached a typed verdict: a response came
+    back and was rejected or failed validation.  A transport or undecodable
+    failure has nothing to resolve, and a duplicate-only plan keeps its stop
+    (decision 47b).
+    """
     if (
         isinstance(plan, ReferenceRepairPlan)
-        and verdicts
+        and answered
         and any(selected.unknown for selected in plan.selected)
     ):
         return _drop_unresolved(
