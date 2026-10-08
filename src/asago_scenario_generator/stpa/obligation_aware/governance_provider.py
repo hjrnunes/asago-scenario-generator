@@ -5,7 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Annotated, Any, Literal
 
-from pydantic import Field, conlist, create_model
+from pydantic import Field, create_model
 
 from asago_scenario_generator.stpa.infra.call_log import (
     call_log_of,
@@ -25,6 +25,9 @@ from asago_scenario_generator.stpa.obligation_aware.governance_routing import (
     GovernanceRoutingRequest,
     GovernanceRoutingResponse,
     GovernanceTarget,
+)
+from asago_scenario_generator.stpa.obligation_aware.payload_types import (
+    exact_length_payload_type,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     obligation_prompt_template_hashes,
@@ -56,15 +59,13 @@ def governance_payload_type(risk_ids: tuple[str, ...]) -> type[_Model]:
         __base__=_WirePlacement,
         risk_id=(Literal.__getitem__(risk_ids), ...),
     )
-    placements = conlist(
-        Annotated[placement, Field()],
-        min_length=len(risk_ids),
-        max_length=len(risk_ids),
-    )
-    return create_model(
+    return exact_length_payload_type(
         f"_GovernancePayload{len(risk_ids)}",
-        __base__=_Model,
-        placements=(placements, ...),
+        _Model,
+        "placements",
+        Annotated[placement, Field()],
+        len(risk_ids),
+        module=__name__,
     )
 
 

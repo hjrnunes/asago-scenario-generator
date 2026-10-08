@@ -12,7 +12,7 @@ from functools import lru_cache, partial
 from pathlib import Path
 from typing import Annotated, Any, Literal, Mapping, Sequence, Union
 
-from pydantic import Field, conlist, create_model, field_validator, model_validator
+from pydantic import Field, create_model, field_validator, model_validator
 
 from asago_scenario_generator.models.artifact_pin import ObligationId
 from asago_scenario_generator.models.obligation_consideration import (
@@ -108,6 +108,11 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _slot_authority,
     _validate_finding_semantics,
     compile_slot_provider_entry,
+)
+from asago_scenario_generator.stpa.obligation_aware.payload_types import (
+    exact_length_payload_type,
+    require_non_negative_count,
+    require_positive_count,
 )
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
     StpaIndex,
@@ -426,17 +431,14 @@ def _routing_provider_payload_type(
     makes an otherwise-valid empty/default response impossible at the native
     structured-output boundary.
     """
-    if type(route_count) is not int or route_count <= 0:
-        raise ValueError("route_count must be a positive integer")
-    routes = conlist(
-        _routing_exact_identity_union(obligation_ids),
-        min_length=route_count,
-        max_length=route_count,
-    )
-    return create_model(
+    require_positive_count(route_count, "route_count")
+    return exact_length_payload_type(
         f"_RoutingProviderPayload{route_count}",
-        __base__=_RoutingProviderPayload,
-        routes=(routes, ...),
+        _RoutingProviderPayload,
+        "routes",
+        _routing_exact_identity_union(obligation_ids),
+        route_count,
+        module=__name__,
     )
 
 
@@ -651,34 +653,28 @@ class _IcaHazardCorrectionPayload(_Model):
 @lru_cache(maxsize=16)
 def _mechanism_verdict_payload_type(verdict_count: int) -> type[_Model]:
     """Build a strict verifier payload for every selected route."""
-    if type(verdict_count) is not int or verdict_count <= 0:
-        raise ValueError("verdict_count must be a positive integer")
-    verdicts = conlist(
-        _MechanismVerdict,
-        min_length=verdict_count,
-        max_length=verdict_count,
-    )
-    return create_model(
+    require_positive_count(verdict_count, "verdict_count")
+    return exact_length_payload_type(
         f"_MechanismVerdictPayload{verdict_count}",
-        __base__=_MechanismVerdictPayload,
-        verdicts=(verdicts, ...),
+        _MechanismVerdictPayload,
+        "verdicts",
+        _MechanismVerdict,
+        verdict_count,
+        module=__name__,
     )
 
 
 @lru_cache(maxsize=16)
 def _ica_hazard_provider_payload_type(verdict_count: int) -> type[_Model]:
     """Build a strict provider payload for an exact ICA batch cardinality."""
-    if type(verdict_count) is not int or verdict_count <= 0:
-        raise ValueError("verdict_count must be a positive integer")
-    verdicts = conlist(
-        _IcaHazardProviderVerdict,
-        min_length=verdict_count,
-        max_length=verdict_count,
-    )
-    return create_model(
+    require_positive_count(verdict_count, "verdict_count")
+    return exact_length_payload_type(
         f"_IcaHazardProviderPayload{verdict_count}",
-        __base__=_IcaHazardProviderPayload,
-        verdicts=(verdicts, ...),
+        _IcaHazardProviderPayload,
+        "verdicts",
+        _IcaHazardProviderVerdict,
+        verdict_count,
+        module=__name__,
     )
 
 
@@ -1115,17 +1111,15 @@ def _slot_provider_payload_type(
     constraint_ids: tuple[str, ...] = (),
 ) -> type[_Model]:
     """Build a provider payload constrained to one request's exact counts."""
-    _require_positive_count(slot_count, "slot_count")
-    _require_non_negative_count(required_pair_count, "required_pair_count")
-    filled_slots = conlist(
-        _slot_exact_constraint_type(constraint_ids),
-        min_length=slot_count,
-        max_length=slot_count,
-    )
-    return create_model(
+    require_positive_count(slot_count, "slot_count")
+    require_non_negative_count(required_pair_count, "required_pair_count")
+    return exact_length_payload_type(
         f"_SlotProviderPayload{slot_count}Pairs{required_pair_count}",
-        __base__=_SlotProviderPayload,
-        filled_slots=(filled_slots, ...),
+        _SlotProviderPayload,
+        "filled_slots",
+        _slot_exact_constraint_type(constraint_ids),
+        slot_count,
+        module=__name__,
     )
 
 
@@ -1149,18 +1143,6 @@ def _slot_exact_constraint_type(constraint_ids: tuple[str, ...]) -> type[_Model]
         __base__=_SlotProviderDraft,
         findings=(tuple[finding, ...], ()),
     )
-
-
-def _require_positive_count(value: int, name: str) -> None:
-    """Reject booleans and non-positive dynamic-schema counts."""
-    if type(value) is not int or value <= 0:
-        raise ValueError(f"{name} must be a positive integer")
-
-
-def _require_non_negative_count(value: int, name: str) -> None:
-    """Reject booleans and negative dynamic-schema counts."""
-    if type(value) is not int or value < 0:
-        raise ValueError(f"{name} must be a non-negative integer")
 
 
 def _required_pair_keys(
