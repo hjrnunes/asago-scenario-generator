@@ -745,16 +745,7 @@ def _extension_target_prompt_view(baseline: Any, outcome: Any) -> dict[str, Any]
             "id": None,
             "description": process.description if process is not None else None,
         }
-    target = proposal.target
-    if target is None:
-        return None
-    return {
-        "type": target.type,
-        "id": target.id,
-        "description": baseline.control_structure.element_description(
-            target.type, target.id
-        ),
-    }
+    return baseline.control_structure.target_prompt_view(proposal.target)
 
 
 def _extension_semantic_context(

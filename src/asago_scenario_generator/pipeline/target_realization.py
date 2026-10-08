@@ -2471,23 +2471,10 @@ def _action_prompt_view(
         "controller_id": action.controller_id,
         "controller": control_structure.controller_prompt_view(action.controller_id),
         "description": action.description,
-        "target": _target_prompt_view(action.target, control_structure),
+        "target": control_structure.target_prompt_view(action.target),
         "effect_kind": action.effect_kind,
         "temporality": action.temporality,
     }
-
-
-def _target_prompt_view(
-    target: Any,
-    control_structure: SystemicControlStructureSnapshot | None,
-) -> dict[str, Any] | None:
-    """Resolve an action target from the attested structure, never from prose."""
-    if target is None:
-        return None
-    description = None
-    if control_structure is not None:
-        description = control_structure.element_description(target.type, target.id)
-    return {"type": target.type, "id": target.id, "description": description}
 
 
 def _capability_rows(

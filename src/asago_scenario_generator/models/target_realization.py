@@ -364,6 +364,18 @@ class SystemicControlStructureSnapshot(ClosedCanonicalModel):
             "description": self.element_description("responsibility", controller_id),
         }
 
+    def target_prompt_view(
+        self, target: SystemicElementReference | None
+    ) -> dict[str, Any] | None:
+        """Resolve an action target from this structure, never from prose."""
+        if target is None:
+            return None
+        return {
+            "type": target.type,
+            "id": target.id,
+            "description": self.element_description(target.type, target.id),
+        }
+
 
 class SystemicICA(ClosedCanonicalModel):
     """Closed snapshot of one ordinary ICA."""
