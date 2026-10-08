@@ -14,6 +14,7 @@ cases:
       - Do not invent a target record, value, or operation
       - do not establish an attacker mechanism or access path
     forbidden:
+      - compatible_mechanisms
       - "`stimulus`"
       - Allowed Stimulus Categories
       - execution_route

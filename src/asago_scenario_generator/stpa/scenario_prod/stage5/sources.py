@@ -7,8 +7,6 @@ from asago_scenario_generator.models.target_realization import (
 )
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactorKind,
-    CausalMechanism,
-    validate_mechanism_pairing,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionActionKind,
@@ -40,18 +38,6 @@ _ACTION_EFFECT_KINDS: dict[str, ExecutionActionKind] = {
 _UNTRUSTED_SOURCE_KINDS = frozenset(
     {"user_message", "conversation_history", "retrieved_content"}
 )
-
-
-def _compatible_mechanisms(choice: _CausalSourceChoice) -> list[str]:
-    """Return the STPA-Sec mechanisms this source choice may carry."""
-    compatible: list[str] = []
-    for mechanism in CausalMechanism:
-        try:
-            validate_mechanism_pairing(mechanism, choice.kind, choice.source_kind)
-        except ValueError:
-            continue
-        compatible.append(mechanism.value)
-    return compatible
 
 
 def _context_expected_action_kind(

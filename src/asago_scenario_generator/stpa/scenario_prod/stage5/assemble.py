@@ -218,7 +218,6 @@ def _materialize_causal_factors(
             access_refs=declaration.access_refs,
             bounded_assumption=declaration.bounded_assumption,
             temporal_condition=declaration.temporal_condition,
-            mechanism=declaration.mechanism,
         )
         for declaration in llm_result.causal_factors
     ]

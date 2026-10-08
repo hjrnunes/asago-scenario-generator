@@ -37,7 +37,6 @@ from .sources import (
     _UNTRUSTED_SOURCE_KINDS,
     _action_duration_eligible,
     _causal_source_choices,
-    _compatible_mechanisms,
     _context_expected_action_kind,
     _normalize_typed_value,
     _typed_control_action_effect,
@@ -286,7 +285,6 @@ def _context_source_choices_yaml(
         if choice.source_kind is not None:
             rendered_choice["feedback_source_kind"] = choice.source_kind
             rendered_choice["untrusted"] = choice.source_kind in _UNTRUSTED_SOURCE_KINDS
-        rendered_choice["compatible_mechanisms"] = _compatible_mechanisms(choice)
         rendered_choices.append(rendered_choice)
     return _yaml_dump(rendered_choices)
 

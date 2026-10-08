@@ -13,10 +13,6 @@ from pydantic import (
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
 )
-from asago_scenario_generator.stpa.models.causal_factor import (
-    CausalMechanism,
-    validate_mechanism_pairing,
-)
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     normalize_semantic_proposition,
 )
@@ -178,7 +174,6 @@ def _validate_normal_provider_payload(
         value.attacker_bdi, value.causal_factors, normalizations=normalizations
     )
     _validate_intention_choice_handles(value.attacker_bdi, allowed_handles)
-    _validate_factor_mechanisms(value.causal_factors, choices)
     _validate_context_provider_temporal_conditions(
         value.causal_factors, choices, context
     )
@@ -1007,27 +1002,6 @@ def _validate_intention_choice_handles(
             "intention source handles must name supplied context choices: "
             + ", ".join(unknown)
         )
-
-
-def _validate_factor_mechanisms(
-    factor_drafts: Sequence[BaseModel],
-    choices: Sequence[_CausalSourceChoice],
-) -> None:
-    """Require each factor's mechanism to fit its selected source."""
-    by_handle = {choice.handle: choice for choice in choices}
-    for factor in factor_drafts:
-        mechanism = getattr(factor, "mechanism", CausalMechanism.none)
-        choice = by_handle.get(factor.source_handle)
-        if choice is None:
-            continue
-        try:
-            validate_mechanism_pairing(
-                CausalMechanism(mechanism), choice.kind, choice.source_kind
-            )
-        except ValueError as exc:
-            raise ValidationIssueError(
-                IssueCode.mechanism_source_mismatch, f"{factor.source_handle}: {exc}"
-            ) from exc
 
 
 def _validate_intention_factor_handles(

@@ -48,7 +48,7 @@ class _Payload(BaseModel):
 
     @model_validator(mode="after")
     def reject(self) -> "_Payload":
-        raise ValidationIssueError(IssueCode.mechanism_source_mismatch, "inside")
+        raise ValidationIssueError(IssueCode.attacker_intentions_missing, "inside")
 
 
 def test_issue_error_text_is_the_code_then_the_detail() -> None:
@@ -81,7 +81,7 @@ def test_issues_of_reads_an_error_a_model_validator_raised() -> None:
         _Payload(value=1)
 
     assert issues_of(caught.value) == (
-        ValidationIssue(IssueCode.mechanism_source_mismatch, "inside"),
+        ValidationIssue(IssueCode.attacker_intentions_missing, "inside"),
     )
 
 
@@ -129,7 +129,7 @@ def test_a_callable_feedback_is_rendered_from_the_error(tmp_path) -> None:
     assert prompts[1].startswith("u FEEDBACK[ValidationError]")
     assert isinstance(outcome.failure, ValidationError)
     assert issues_of(outcome.failure) == (
-        ValidationIssue(IssueCode.mechanism_source_mismatch, "inside"),
+        ValidationIssue(IssueCode.attacker_intentions_missing, "inside"),
     )
 
 

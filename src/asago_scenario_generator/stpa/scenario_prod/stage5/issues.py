@@ -53,7 +53,6 @@ class IssueCode(StrEnum):
     safe_outcome_claim_missing = "safe_outcome_claim_missing"
     intention_handle_undeclared = "intention_handle_undeclared"
     attacker_intentions_missing = "attacker_intentions_missing"
-    mechanism_source_mismatch = "mechanism_source_mismatch"
     no_content_surface = "no_content_surface"
 
 

@@ -174,8 +174,4 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "an adversarial scenario lists at least one attacker_bdi intention "
             "that cites a declared causal handle."
         ),
-        IssueCode.mechanism_source_mismatch: (
-            "choose a mechanism listed in the selected source's "
-            "compatible_mechanisms, or use none."
-        ),
     }

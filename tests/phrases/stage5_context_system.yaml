@@ -11,7 +11,13 @@ cases:
       - reachable_capability
       - process-model flaw
       - sensor anomaly
+      - >-
+        A source marked `untrusted: true` carries information an adversary can
+        author; it does not establish attacker access by itself
     forbidden:
+      - Security mechanism
+      - compatible_mechanisms
+      - injected_instruction
       - "`stimulus`"
       - Allowed Stimulus Categories
       - execution_route
