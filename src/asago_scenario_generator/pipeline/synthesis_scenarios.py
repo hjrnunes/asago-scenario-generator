@@ -1,12 +1,13 @@
 """Synthesis stages from the final structure to scenario realization.
 
 Final ICA filling and verification, the target-realization lens, the
-control-action enrichment, ordinary scenarios, accounting, and scenario
-realization.
+control-action enrichment, ordinary scenarios and the obligation findings
+each scenario context carries, accounting, and scenario realization.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -283,6 +284,111 @@ class _LocalScenarioFailure:
     scenario_envelopes: tuple[Any, ...] = ()
     scenario_specs: tuple[Any, ...] = ()
     candidate_outcomes: None = None
+
+
+def _consideration_identity(brief: Any) -> dict[str, Any]:
+    """Name the concern a scenario context carries: its pattern or its risk."""
+    if getattr(brief, "kind", "pattern") == "governance":
+        risk = brief.risk_ref
+        name = risk.risk_name or risk.risk_id
+        return {
+            "kind": "governance",
+            "risk_id": risk.risk_id,
+            "risk_name": name,
+            "concise_concern": risk.risk_description or name,
+        }
+    return {
+        "attack_pattern_id": brief.attack_pattern_id,
+        "attack_pattern_name": brief.attack_pattern_name,
+        "concise_concern": brief.attack_pattern_description,
+    }
+
+
+def _findings_by_ica(
+    briefs: tuple[Any, ...],
+    ica_considerations: tuple[Any, ...],
+) -> dict[str, list[Any]]:
+    """Project each ICA finding onto every ICA it names, in input order."""
+    from asago_scenario_generator.stpa.models.scenario_context import (
+        ScenarioObligationConsideration,
+    )
+
+    brief_by_id = {
+        brief.obligation_id: brief
+        for brief in briefs
+        if getattr(brief, "obligation_id", None) is not None
+    }
+    by_ica: dict[str, list[ScenarioObligationConsideration]] = {}
+    for pair in ica_considerations:
+        if getattr(pair, "disposition", None) != "finding":
+            continue
+        brief = brief_by_id.get(pair.obligation_id)
+        if brief is None:
+            raise ValueError(
+                f"ICA finding references unknown obligation {pair.obligation_id!r}"
+            )
+        projected = ScenarioObligationConsideration(
+            obligation_id=pair.obligation_id,
+            **_consideration_identity(brief),
+            disposition="finding",
+            rationale=pair.rationale
+            or (
+                "STPA identified this concern in the selected ICA after "
+                "analyzing the routed control path."
+            ),
+            finding_ica_id=None,
+        )
+        for ica_id in pair.ica_ids:
+            by_ica.setdefault(ica_id, []).append(
+                projected.model_copy(update={"finding_ica_id": ica_id})
+            )
+
+    return by_ica
+
+
+def _build_synthesis_scenario_contexts(
+    threats: Iterable[Any],
+    control_structure: Any,
+    loss_analysis: Any,
+    *,
+    briefs: tuple[Any, ...],
+    ica_considerations: tuple[Any, ...],
+) -> dict[str, Any]:
+    """Bind each Stage 5 candidate to the obligation findings its ICA carries.
+
+    Contexts are keyed by scenario ID because one ICA can yield several
+    candidates, one per condition family.
+    """
+    from asago_scenario_generator.stpa.scenario_prod.context import (
+        build_scenario_generation_context,
+    )
+
+    by_ica = _findings_by_ica(briefs, ica_considerations)
+    result: dict[str, Any] = {}
+    for index, threat in enumerate(threats):
+        if threat.ica_id is None:
+            raise ValueError("synthesis scenario threat has no exact ICA identity")
+        considerations = tuple(
+            sorted(
+                by_ica.get(threat.ica_id, ()),
+                key=lambda item: item.obligation_id,
+            )
+        )
+        scenario_id = f"SCN-{index + 1:03d}"
+        try:
+            result[scenario_id] = build_scenario_generation_context(
+                threat,
+                control_structure,
+                loss_analysis,
+                scenario_id=scenario_id,
+                obligation_considerations=considerations,
+            )
+        except ValueError:
+            # SP3 builds a missing supplied context again inside its per-threat
+            # boundary.  Leaving this one out lets that boundary retain the
+            # exact error for this ICA without erasing valid sibling contexts.
+            continue
+    return result
 
 
 def _accounting_source_pins(

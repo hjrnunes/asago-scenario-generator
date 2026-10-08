@@ -39,7 +39,6 @@ from asago_scenario_generator.pipeline.synthesis_consideration import (
     _run_consideration,
 )
 from asago_scenario_generator.pipeline.synthesis_defaults import (
-    _build_synthesis_scenario_contexts as _build_synthesis_scenario_contexts,
     _default_baseline as _default_baseline,
     _default_enrich_control_actions as _default_enrich_control_actions,
     _default_scenarios as _default_scenarios,
@@ -70,6 +69,7 @@ from asago_scenario_generator.pipeline.synthesis_persist import (
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _accounting_source_pins,
+    _build_synthesis_scenario_contexts as _build_synthesis_scenario_contexts,
     _run_accounting,
     _run_ica,
     _run_operation_enrichment,

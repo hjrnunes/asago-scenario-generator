@@ -16,7 +16,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
 from asago_scenario_generator.pipeline.scenario_realization import (
     build_scenario_realization_assessment,
 )
-from asago_scenario_generator.pipeline.synthesis_defaults import _findings_by_ica
+from asago_scenario_generator.pipeline.synthesis_scenarios import _findings_by_ica
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _obligation_resolution_funnel,
 )
