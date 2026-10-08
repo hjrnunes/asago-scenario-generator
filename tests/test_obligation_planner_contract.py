@@ -33,7 +33,6 @@ from asago_scenario_generator.models.canonical import (
 )
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.pipeline.obligation_contracts import (
-    CompatibilityPolicyInput,
     CrossTaxonomyMappingInput,
     QualificationFactsInput,
     RiskCardInput,
@@ -333,7 +332,6 @@ def _input_payload(
             max_candidates=100,
             max_derivation_work=4096,
         ),
-        "compatibility_policy": {"allow_legacy_keyword_matches": False},
     }
     assert "candidate_expansions" not in values
     return values
@@ -983,9 +981,13 @@ def test_sssom_mapping_fields_are_nonempty(field: str) -> None:
         SSSOMMappingInput.model_validate(values)
 
 
-def test_compatibility_policy_defaults_to_closed_legacy_behavior() -> None:
-    """Legacy keyword matching stays opt-in at the typed input boundary."""
-    assert CompatibilityPolicyInput().allow_legacy_keyword_matches is False
+def test_planner_inputs_carry_no_compatibility_policy() -> None:
+    """Legacy keyword matching has no switch; the closed input rejects one."""
+    payload = _make_inputs().model_dump(mode="json")
+    assert "compatibility_policy" not in payload
+
+    with pytest.raises(ValidationError, match="compatibility_policy"):
+        _input_type().model_validate({**payload, "compatibility_policy": {}})
 
 
 def _contradictory_fact_raw() -> dict[str, Any]:

@@ -103,7 +103,6 @@ def make_inputs(
             max_candidates=100,
             max_derivation_work=4096,
         ),
-        "compatibility_policy": {"allow_legacy_keyword_matches": False},
     }
     return TaxonomyObligationInputs.model_validate(payload)
 

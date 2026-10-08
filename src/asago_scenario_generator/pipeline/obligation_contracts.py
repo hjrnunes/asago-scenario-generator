@@ -363,12 +363,6 @@ class QualificationFactsInput(_InputModel):
         return self
 
 
-class CompatibilityPolicyInput(_InputModel):
-    """Explicitly named compatibility switches; no candidate override exists."""
-
-    allow_legacy_keyword_matches: bool = False
-
-
 class TaxonomyObligationInputs(_InputModel):
     """Complete immutable input value for ``plan_taxonomy_obligations``."""
 
@@ -381,9 +375,6 @@ class TaxonomyObligationInputs(_InputModel):
     mapping_pins: dict[str, TaxonomyPin] = Field(min_length=1)
     qualification_facts: QualificationFactsInput
     projection_budget: ProjectionBudget = Field(default_factory=ProjectionBudget)
-    compatibility_policy: CompatibilityPolicyInput = Field(
-        default_factory=CompatibilityPolicyInput
-    )
 
     @model_validator(mode="before")
     @classmethod
@@ -463,7 +454,6 @@ class TaxonomyObligationInputs(_InputModel):
 
 
 __all__ = [
-    "CompatibilityPolicyInput",
     "CrossTaxonomyMappingInput",
     "QualificationFactsInput",
     "RiskCardInput",

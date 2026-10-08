@@ -768,7 +768,6 @@ def test_planner_accepts_only_complete_typed_inputs() -> None:
         ("mapping_pins", "mapping_set_pins"),
         ("qualification_facts", "qualification_evidence"),
         ("projection_budget", "budget"),
-        ("compatibility_policy", "compatibility"),
     ],
 )
 def test_planner_inputs_accept_only_field_names(field: str, other_name: str) -> None:
