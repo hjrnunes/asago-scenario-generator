@@ -18,3 +18,4 @@ cases:
         installed controller
       - Preserve source-stated authorization and conditional exceptions
       - Keep distinct source-named functions distinct
+      - Coordination links are required when

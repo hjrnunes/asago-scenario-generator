@@ -5,6 +5,8 @@ cases:
       - No organizational risks provided
       - Do not require an adversary, entry point, or concrete attack path for inclusion
       - adversarial relevance
+      - concrete component, data flow, or integration point
+      - "grounded in this specific system's architecture and domain"
     forbidden:
       - Focus on adversary-actionable threats
       - Omit operational risks with no adversarial vector

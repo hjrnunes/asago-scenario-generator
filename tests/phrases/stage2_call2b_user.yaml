@@ -7,6 +7,19 @@ cases:
       - not a substitute for delivering the answer
       - separate safeguard operation explicitly established
       - does not establish an installed safeguard action
+      - "## Use-Case Description"
+      - >-
+        `model_output` is text or structured output returned by the tested
+        model or agent invocation
+      - "`tool_call` is a structured invocation emitted by the tested agent"
+      - "`state_change` changes session or persistent state"
+      - "`agent_message` is an internal message to another responsibility"
+      - "`environment_action` is an external side effect"
+      - advice to a user
+      - loan-renewal invocation
+      - session record
+      - risk flag
+      - physical alarm
   one-responsibility:
     required:
       - "Governing security constraints:"

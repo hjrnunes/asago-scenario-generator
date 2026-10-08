@@ -26,3 +26,4 @@ cases:
       - >-
         Declare a controlled process only when the source establishes the
         external entity or interface
+      - control action target

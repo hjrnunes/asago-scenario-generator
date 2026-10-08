@@ -6,6 +6,8 @@ cases:
       - compiler assigns their canonical IDs
       - Do not require an adversary, entry point, or concrete attack path for inclusion
       - adversarial relevance
+      - capability codes
+      - new records by their local handles
     forbidden:
       - Focus on adversary-actionable threats
       - Omit operational risks with no adversarial vector

@@ -9,3 +9,7 @@ cases:
         An attack path requires supplied attacker access and the relevant
         operation or state
       - Do not infer a recipient, mechanism, or misuse from hazard
+      - "## False positive guidance"
+      - Not every system needs every capability
+      - a CriticFindings with gaps, checklist_results, and taxonomy_probe_results
+      - the capability IS present but the control structure fails to govern it

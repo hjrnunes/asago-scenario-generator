@@ -38,3 +38,6 @@ cases:
         A security constraint is an obligation on a function, not evidence of
         an installed controller
       - score, threshold, approval stage, or separate tool
+      - "Check the capability profile's active zones"
+      - Do NOT copy PM entries as RCs
+      - "Every rc_id MUST start with \"RC-\", never \"PM-\"."

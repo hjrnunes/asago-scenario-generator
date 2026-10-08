@@ -9,3 +9,11 @@ cases:
       - Use the new/modified delta only for a source-established omitted function
       - Treat the Existing Control Structure section as current-state evidence
       - Do not copy a critic's recommendation into that diagram as if it were observed
+      - "## ID format rules"
+      - Do NOT restate the entire control structure
+      - "New controlled processes: CP-{next_cp_num} (next available: CP-1)"
+      - "New coordination mechanisms: CM-{next_cm_num} (next available: CM-1)"
+      - RevisionDelta with only new and modified elements
+      - You may DISMISS a finding if you judge it to be a false positive
+      - connect properly
+      - modified_responsibilities list must contain ONLY responsibilities you are CHANGING

@@ -37,6 +37,18 @@ cases:
       - For a warehouse dispatch service
       - dispatches the wrong quantity
       - secondary review step
+      - "## Request-local identity conventions"
+      - Each hazard MUST name at least one specific component
+      - Every loss must cite its source risk IDs
+      - "Every loss must cite its source risk IDs in `source_risk_cards`."
+      - Reject a generic catalog statement
+      - "component cause such as \"the sensor fails."
+      - first expansion
+      - model output is manipulated
+      - name the affected function or data flow
+      - not restatements of the risk
+      - "provenance: risk_card"
+      - the failure is not itself the hazard
     once:
       - Express each constraint as the safe relationship
     forbidden:

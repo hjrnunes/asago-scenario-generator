@@ -9,6 +9,8 @@ cases:
       - evidence_status
       - bounded_assumption
       - reachable_capability
+      - process-model flaw
+      - sensor anomaly
     forbidden:
       - "`stimulus`"
       - Allowed Stimulus Categories

@@ -12,6 +12,7 @@ cases:
         approval status distinct
       - Ground the sentence in the supplied STPA facts
       - Do not invent a target record, value, or operation
+      - do not establish an attacker mechanism or access path
     forbidden:
       - "`stimulus`"
       - Allowed Stimulus Categories

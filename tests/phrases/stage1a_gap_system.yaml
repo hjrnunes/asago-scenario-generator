@@ -21,6 +21,16 @@ cases:
         or request, and intended effect
       - Do not blanket-ban a permitted function or invent a secondary verifier
       - preserve a supplied human-review trigger
+      - "### When no gaps exist"
+      - "**Architectural components**"
+      - "**Attack surfaces**"
+      - "**Domain-specific features**"
+      - "**Integration points**"
+      - "**Stakeholder groups**"
+      - Do NOT duplicate
+      - Do not invent gaps to fill a quota
+      - component failure itself as the hazard
+      - "empty `source_risk_cards`"
     once:
       - Express each constraint as the safe relationship
     forbidden:

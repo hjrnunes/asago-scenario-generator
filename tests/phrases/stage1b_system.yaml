@@ -1,0 +1,18 @@
+template: stage1b_system.j2
+cases:
+  no-variables:
+    required:
+      - "## KC Sub-Code Taxonomy"
+      - "## Tool Inventory"
+      - "**controllability**: \"direct\" (attacker types input)"
+      - "**direction**: \"input\" (attacker sends data in)"
+      - "**name**: short description of the entry point"
+      - A component can appear in both tool_inventory and entry_points
+      - Do not infer capabilities speculatively
+      - Identify every attacker-accessible ingress path
+      - KC2.3 (multi-agent) implies entry points at inter-agent message channels
+      - KC4.3+ (cross-session memory) implies entry points at the memory store
+      - KC6.1.2 (extensive API access) implies entry points at API response surfaces
+      - KC6.3.3 (RAG) implies an indirect entry point at the knowledge base / document store
+      - every KC code, entry point, and tool must be traceable to a specific capability described in the use-case text
+      - every tool must be explicitly mentioned or directly implied by the use-case description
