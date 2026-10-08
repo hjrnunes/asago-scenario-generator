@@ -49,6 +49,7 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.pipeline import synthesis
+from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _OCCIAI_RUN_DIR = _REPO_ROOT / "build" / "adaptive-runs" / "m3-occiai-attempt1"
@@ -469,6 +470,7 @@ def test_synthesis_threads_stage_1a_source(
         inputs=inputs,
         capability_profile=None,
         output_dir=tmp_path,
+        model_runtime=ModelRuntime.for_inputs(inputs),
     )
 
     assert captured["stage_1a_source"] == expected_source

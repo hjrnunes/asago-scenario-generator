@@ -26,6 +26,7 @@ from asago_scenario_generator.pipeline.control_action_enrichment import (
     enrich_control_actions,
     ControlActionEnrichmentRow,
 )
+from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
 from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     _default_enrich_control_actions,
@@ -415,6 +416,7 @@ class TestEnrichmentAdapterWiring:
                 execution_target_profile=None,
                 inputs=inputs,
                 output_dir="/tmp/unused",
+                model_runtime=ModelRuntime.for_inputs(inputs),
             )
             is None
         )
@@ -427,6 +429,7 @@ class TestEnrichmentAdapterWiring:
                 execution_target_profile=simulation,
                 inputs=inputs,
                 output_dir="/tmp/unused",
+                model_runtime=ModelRuntime.for_inputs(inputs),
             )
             is None
         )

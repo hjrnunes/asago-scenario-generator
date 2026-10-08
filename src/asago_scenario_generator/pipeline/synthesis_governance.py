@@ -75,7 +75,7 @@ def _run_governance_routing(
 ) -> StageRun:
     """Route the cited governance-only risks; a failure never stops the run."""
     selection = select_governance_risks(plan, loss_analysis)
-    if not selection.risk_ids or adapters.govern is None:
+    if not selection.risk_ids:
         return StageRun(GovernanceStage(selection))
     briefs = build_governance_briefs(plan, selection.risk_ids)
     try:

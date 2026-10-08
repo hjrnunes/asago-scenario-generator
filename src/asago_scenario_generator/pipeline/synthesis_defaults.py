@@ -135,7 +135,7 @@ def _ensure_obligation_provider(
 def _default_prepare_capability(
     *,
     inputs: SynthesisInputs,
-    model_runtime: ModelRuntime | None = None,
+    model_runtime: ModelRuntime,
     execution_target_profile: ExecutionTargetProfile | None = None,
     **_: Any,
 ) -> Any:
@@ -153,13 +153,12 @@ def _default_prepare_capability(
     from asago_scenario_generator.stpa.infra.templates import TemplateLoader
     from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 
-    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
     return derive_capability_profile(
-        llm_client=runtime.client,
+        llm_client=model_runtime.client,
         use_case_text=inputs.use_case,
         run_dir=inputs.output_dir,
         template_loader=TemplateLoader(PROMPTS_DIR),
-        temperature=runtime.temperature(),
+        temperature=model_runtime.temperature(),
         samples=KC_VOTE_SAMPLES,
         target_profile=execution_target_profile,
     )
@@ -189,7 +188,7 @@ def _default_baseline(
     output_dir: Path,
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
-    model_runtime: ModelRuntime | None = None,
+    model_runtime: ModelRuntime,
     **_: Any,
 ) -> Any:
     """Run ordinary SP1 using one resolved provider client.
@@ -207,8 +206,7 @@ def _default_baseline(
         build_target_evidence,
     )
 
-    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
-    client, profile_name = runtime.client, runtime.profile_name
+    client, profile_name = model_runtime.client, model_runtime.profile_name
     risk_cards = list(inputs.risk_cards)
     if not risk_cards and inputs.risk_extraction_path is not None:
         risk_cards = load_reviewed_risk_extraction(inputs.risk_extraction_path)
@@ -233,13 +231,12 @@ def _default_baseline(
 def _resolve_obligation_provider(
     inputs: SynthesisInputs,
     output_dir: Path,
-    model_runtime: ModelRuntime | None = None,
+    model_runtime: ModelRuntime,
 ) -> Any:
     """Resolve the one SP2 provider adapter shared by named STPA stages."""
     if inputs.obligation_adapter is not None:
         return inputs.obligation_adapter
-    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
-    return runtime.obligation_adapter(Path(output_dir))
+    return model_runtime.obligation_adapter(Path(output_dir))
 
 
 def _provider_controls(provider: Any, inputs: SynthesisInputs) -> Any:
@@ -266,8 +263,7 @@ def _default_consider(
     loss_analysis: Any,
     control_structure: Any,
     inputs: SynthesisInputs,
-    obligation_adapter: Any | None,
-    output_dir: Path,
+    obligation_adapter: Any,
     **_: Any,
 ) -> Any:
     """Run one typed initial routing pass with the shared SP2 adapter."""
@@ -275,13 +271,12 @@ def _default_consider(
         route_obligations,
     )
 
-    provider = obligation_adapter or _resolve_obligation_provider(inputs, output_dir)
     return route_obligations(
-        provider,
+        obligation_adapter,
         briefs=briefs,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
-        controls=_provider_controls(provider, inputs),
+        controls=_provider_controls(obligation_adapter, inputs),
         purpose="initial",
     )
 
@@ -293,8 +288,7 @@ def _default_revision(
     loss_analysis: Any,
     control_structure: Any,
     inputs: SynthesisInputs,
-    obligation_adapter: Any | None,
-    output_dir: Path,
+    obligation_adapter: Any,
     **_: Any,
 ) -> Any:
     """Run the one typed additive revision attempt through SP2."""
@@ -305,7 +299,6 @@ def _default_revision(
         revise_structure_once,
     )
 
-    provider = obligation_adapter or _resolve_obligation_provider(inputs, output_dir)
     routes = tuple(gaps or ())
     concepts: list[MissingStructuralConcept] = []
     trigger_ids: list[str] = []
@@ -319,12 +312,12 @@ def _default_revision(
             trigger_ids.append(value.obligation_id)
         concepts.extend(value.missing_concepts)
     return revise_structure_once(
-        provider,
+        obligation_adapter,
         gaps=concepts,
         trigger_obligation_ids=trigger_ids,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
-        controls=_provider_controls(provider, inputs),
+        controls=_provider_controls(obligation_adapter, inputs),
         plan_digest=_semantic_digest(plan),
     )
 
@@ -335,8 +328,7 @@ def _default_recheck(
     loss_analysis: Any,
     control_structure: Any,
     inputs: SynthesisInputs,
-    obligation_adapter: Any | None,
-    output_dir: Path,
+    obligation_adapter: Any,
     **_: Any,
 ) -> Any:
     """Run the sole complete post-revision routing pass through SP2."""
@@ -344,13 +336,12 @@ def _default_recheck(
         route_obligations,
     )
 
-    provider = obligation_adapter or _resolve_obligation_provider(inputs, output_dir)
     return route_obligations(
-        provider,
+        obligation_adapter,
         briefs=briefs,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
-        controls=_provider_controls(provider, inputs),
+        controls=_provider_controls(obligation_adapter, inputs),
         purpose="recheck",
     )
 
@@ -362,8 +353,7 @@ def _default_fill_icas(
     loss_analysis: Any,
     control_structure: Any,
     inputs: SynthesisInputs,
-    obligation_adapter: Any | None,
-    output_dir: Path,
+    obligation_adapter: Any,
     **_: Any,
 ) -> Any:
     """Fill final ICA slots with exact routed obligation evidence."""
@@ -371,14 +361,13 @@ def _default_fill_icas(
         fill_synthesis_slots,
     )
 
-    provider = obligation_adapter or _resolve_obligation_provider(inputs, output_dir)
     return fill_synthesis_slots(
-        provider,
+        obligation_adapter,
         briefs=briefs,
         routes=routes,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
-        controls=_provider_controls(provider, inputs),
+        controls=_provider_controls(obligation_adapter, inputs),
     )
 
 
@@ -389,9 +378,8 @@ def _default_target_realize(
     ica_enumeration: Any,
     capability_profile: Any,
     execution_target_profile: ExecutionTargetProfile,
-    inputs: SynthesisInputs,
     output_dir: Path,
-    model_runtime: ModelRuntime | None = None,
+    model_runtime: ModelRuntime,
     operation_enrichment: Any | None = None,
     **_: Any,
 ) -> Any:
@@ -420,11 +408,10 @@ def _default_target_realize(
         ica_enumeration=ica_enumeration,
         declared_capabilities=_declared_capability_labels(capability_profile),
     )
-    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
     interpreter = TargetRealizationLlmInterpreter(
-        runtime.client,
+        model_runtime.client,
         output_dir,
-        temperature=runtime.temperature(),
+        temperature=model_runtime.temperature(),
         call_variant="target_realization",
     )
     mapped = realize_target_operations(
@@ -436,9 +423,9 @@ def _default_target_realize(
         else operation_enrichment.rows,
     )
     finder = TargetDerivedICALlmFinder(
-        runtime.client,
+        model_runtime.client,
         output_dir,
-        temperature=runtime.temperature(),
+        temperature=model_runtime.temperature(),
     )
     return realize_target_derived_icas(
         baseline,
@@ -453,9 +440,8 @@ def _default_enrich_control_actions(
     control_structure: Any,
     capability_profile: Any,
     execution_target_profile: ExecutionTargetProfile | None,
-    inputs: SynthesisInputs,
     output_dir: Path,
-    model_runtime: ModelRuntime | None = None,
+    model_runtime: ModelRuntime,
     **_: Any,
 ) -> Any | None:
     """Run the pre-ICA enrichment grounding for an observed target profile.
@@ -480,11 +466,10 @@ def _default_enrich_control_actions(
         TargetRealizationLlmInterpreter,
     )
 
-    runtime = model_runtime or ModelRuntime.for_inputs(inputs)
     interpreter = TargetRealizationLlmInterpreter(
-        runtime.client,
+        model_runtime.client,
         output_dir,
-        temperature=runtime.temperature(),
+        temperature=model_runtime.temperature(),
         call_variant="control_action_enrichment",
     )
     return enrich_control_actions(
@@ -509,7 +494,7 @@ def _default_scenarios(
     enriched_operations: Mapping[str, str] | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
-    model_runtime: ModelRuntime | None = None,
+    model_runtime: ModelRuntime,
     **_: Any,
 ) -> Any:
     """Run ordinary SP3 from the final ICA enumeration.
@@ -529,7 +514,7 @@ def _default_scenarios(
         enrich_threats,
     )
 
-    client = (model_runtime or ModelRuntime.for_inputs(inputs)).client
+    client = model_runtime.client
     # ``fill_synthesis_slots`` returns a wrapper carrying both the ordinary
     # ICA enumeration and the exact obligation/slot evidence needed by
     # accounting.  SP3 consumes only the ordinary enumeration.

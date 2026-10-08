@@ -10,6 +10,7 @@ import pytest
 import yaml
 
 from asago_scenario_generator.pipeline import synthesis
+from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
@@ -45,7 +46,10 @@ def test_baseline_builds_evidence_from_the_observed_target(
             yaml.safe_load((FIXTURES / "target-observations.yaml").read_text())
         ),
     )
-    adapters = synthesis.SynthesisAdapters(baseline=synthesis._default_baseline)
+    adapters = synthesis.SynthesisAdapters(
+        baseline=synthesis._default_baseline,
+        model_runtime=ModelRuntime.for_inputs(inputs),
+    )
 
     run = synthesis._run_baseline(inputs, None, None, None, None, adapters)
 
