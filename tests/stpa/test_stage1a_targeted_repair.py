@@ -262,13 +262,6 @@ class TestSavedObligationFailure:
         # The deleted permissions stay deleted.
         assert "from scratch" not in repair_prompt
         assert "Omit entries rather than guessing" not in repair_prompt
-        repair_system = entries[1]["system_prompt_text"]
-        assert "kind-exclusive" in repair_system
-        assert "not a rewrite" in repair_system
-        # R1.6: the system prompt anchors channel preservation.  The
-        # sentence wraps across template lines, so assert both halves.
-        assert "Never substitute" in repair_system
-        assert "another channel and never drop a known channel" in repair_system
 
     def test_repair_wire_carries_no_constraint_fields(self, tmp_path):
         client = MockLLMClient()

@@ -51,6 +51,10 @@ cases:
       - the failure is not itself the hazard
       - "A **hazard** is a system-level state or condition"
       - State the resulting system-level
+      - loss registry
+      - Adversary action is selection context, not the grammar of the hazard
+      - system state
+      - cause or attack mechanism
     once:
       - Express each constraint as the safe relationship
     forbidden:

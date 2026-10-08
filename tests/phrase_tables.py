@@ -234,6 +234,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "commit-operation": _stage5(_commit_operation_facts),
     "realistic-request": _stage5(_realistic_request_facts),
     "realistic-no-tool-call": _stage5(lambda: _realistic_request_facts(False)),
+    "stated-rules": _system_model(stated_rules=True),
     "no-findings": _system_model(**NO_FINDINGS),
 }
 

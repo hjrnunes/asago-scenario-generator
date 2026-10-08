@@ -489,8 +489,6 @@ class TestStage1aLossAnalysis:
         assert [loss.loss_id for loss in result.risk_card_losses] == ["L-1"]
         assert result.hazards and result.security_constraints
         assert len(client.calls) == 2
-        assert "loss registry" in client.calls[0].system_prompt.lower()
-        assert "closed dependency boundary" in client.calls[1].system_prompt.lower()
 
     def test_la_16_gap_hazard_can_reference_existing_loss(self, tmp_path):
         """Gap analysis hazards can reference existing loss IDs from risk call."""
