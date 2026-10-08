@@ -13,16 +13,34 @@ from __future__ import annotations
 import itertools
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
+from types import MappingProxyType
 from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 from asago_scenario_generator.stpa.models._validation import check_duplicate_ids
 
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+
+
+ASSEMBLY_DEFERRED: Mapping[str, bool] = MappingProxyType({"defer_to_assembly": True})
+"""Validation context for Stage 2 model output.
+
+Stage 2 parses model output before ``id_normalization`` renumbers its IDs by
+structural position, and the assembled ``ControlStructure`` validates the
+result. Passing this context keeps each ID as written instead of rejecting its
+format; every other field rule still applies.
+"""
+
+
+def _assembly_deferred(info: ValidationInfo | None) -> bool:
+    """Return whether *info* carries the :data:`ASSEMBLY_DEFERRED` context."""
+    context = info.context if info is not None else None
+    return bool(context and context.get("defer_to_assembly"))
 
 
 def _validate_id_format(
@@ -31,6 +49,7 @@ def _validate_id_format(
     format_spec: str,
     example: str,
     pattern: str,
+    info: ValidationInfo | None = None,
 ) -> str:
     """Validate that *value* matches the expected ID format.
 
@@ -45,6 +64,8 @@ def _validate_id_format(
         format_spec: Format placeholder (e.g. ``"RC-X-Y"``).
         example: Concrete example for the error message (e.g. ``"RC-1-1"``).
         pattern: Anchored regex pattern the value must match.
+        info: Validation info; under :data:`ASSEMBLY_DEFERRED` the format
+            check is skipped.
 
     Returns:
         The validated value (unchanged).
@@ -52,6 +73,8 @@ def _validate_id_format(
     Raises:
         ValueError: If *value* does not match *pattern*.
     """
+    if _assembly_deferred(info):
+        return value
     if not re.match(pattern, value):
         raise ValueError(
             f"{field_name} must match format '{format_spec}' "
@@ -157,8 +180,10 @@ class ResponsibilityConstraint(BaseModel):
 
     @field_validator("rc_id")
     @classmethod
-    def validate_rc_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "rc_id", "RC-X-Y", "RC-1-1", r"^RC-\d+-\d+$")
+    def validate_rc_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "rc_id", "RC-X-Y", "RC-1-1", r"^RC-\d+-\d+$", info
+        )
 
 
 class ProcessModelPart(BaseModel):
@@ -186,8 +211,10 @@ class ProcessModelPart(BaseModel):
 
     @field_validator("pm_id")
     @classmethod
-    def validate_pm_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "pm_id", "PM-X-Y", "PM-1-1", r"^PM-\d+-\d+$")
+    def validate_pm_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "pm_id", "PM-X-Y", "PM-1-1", r"^PM-\d+-\d+$", info
+        )
 
 
 def normalize_control_action_effect_kind(
@@ -258,8 +285,10 @@ class ControlAction(BaseModel):
 
     @field_validator("ca_id")
     @classmethod
-    def validate_ca_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "ca_id", "CA-X-Y", "CA-1-1", r"^CA-\d+-\d+$")
+    def validate_ca_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "ca_id", "CA-X-Y", "CA-1-1", r"^CA-\d+-\d+$", info
+        )
 
     @model_validator(mode="before")
     @classmethod
@@ -321,8 +350,10 @@ class FeedbackChannel(BaseModel):
 
     @field_validator("fb_id")
     @classmethod
-    def validate_fb_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "fb_id", "FB-X-Y", "FB-1-1", r"^FB-\d+-\d+$")
+    def validate_fb_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "fb_id", "FB-X-Y", "FB-1-1", r"^FB-\d+-\d+$", info
+        )
 
 
 class Responsibility(BaseModel):
@@ -343,8 +374,10 @@ class Responsibility(BaseModel):
 
     @field_validator("resp_id")
     @classmethod
-    def validate_resp_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "resp_id", "RESP-N", "RESP-1", r"^RESP-\d+$")
+    def validate_resp_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "resp_id", "RESP-N", "RESP-1", r"^RESP-\d+$", info
+        )
 
 
 class ControlledProcess(BaseModel):
@@ -355,8 +388,8 @@ class ControlledProcess(BaseModel):
 
     @field_validator("cp_id")
     @classmethod
-    def validate_cp_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "cp_id", "CP-N", "CP-1", r"^CP-\d+$")
+    def validate_cp_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(v, "cp_id", "CP-N", "CP-1", r"^CP-\d+$", info)
 
 
 class CoordinationMechanism(BaseModel):
@@ -368,8 +401,8 @@ class CoordinationMechanism(BaseModel):
 
     @field_validator("cm_id")
     @classmethod
-    def validate_cm_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "cm_id", "CM-N", "CM-1", r"^CM-\d+$")
+    def validate_cm_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(v, "cm_id", "CM-N", "CM-1", r"^CM-\d+$", info)
 
 
 class CoordinationLink(BaseModel):
@@ -384,8 +417,8 @@ class CoordinationLink(BaseModel):
 
     @field_validator("link_id")
     @classmethod
-    def validate_link_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "link_id", "CL-N", "CL-1", r"^CL-\d+$")
+    def validate_link_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(v, "link_id", "CL-N", "CL-1", r"^CL-\d+$", info)
 
 
 class ControlStructure(BaseModel):
