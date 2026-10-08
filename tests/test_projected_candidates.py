@@ -70,6 +70,9 @@ from asago_scenario_generator.pipeline.projection_allocation import (
 from asago_scenario_generator.pipeline.projection_authoritative import (
     project_authoritative_candidate_observations,
 )
+from asago_scenario_generator.pipeline.projection_qualification import (
+    compute_authoritative_catalog_pin,
+)
 from asago_scenario_generator.pipeline.projection_relations import (
     _source_entry_point_detail,
 )
@@ -686,6 +689,26 @@ def test_legacy_catalog_record_cannot_masquerade_as_projected_candidate() -> Non
     }
     with pytest.raises(ValueError, match="authoritative"):
         _project(pattern=deepcopy(legacy))
+
+
+def test_catalog_pin_qualifies_records_like_projection() -> None:
+    """The catalog pin rejects invalid records with the projection's errors."""
+    raw = _pattern()
+    resolver = TaxonomyResolver(
+        AttackPattern.model_validate(raw).canonical_chain.taxonomy_context
+    )
+    legacy = {"id": "AP-T1-01", "name": "Legacy", "kill_chain": []}
+    with pytest.raises(ValueError, match="requires qualified canonical-chain records"):
+        compute_authoritative_catalog_pin([legacy], resolver)
+
+    broken = deepcopy(raw)
+    broken["canonical_chain"]["steps"] = []
+    with pytest.raises(ValueError, match="attack pattern qualification failed"):
+        compute_authoritative_catalog_pin([broken], resolver)
+
+    assert compute_authoritative_catalog_pin([raw, deepcopy(raw)], resolver) == (
+        _project(pattern=raw).candidates[0].projection.catalog_pin
+    )
 
 
 def test_kc_all_and_any_prerequisites_are_authoritative_profile_gates() -> None:

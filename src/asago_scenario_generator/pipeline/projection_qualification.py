@@ -395,18 +395,6 @@ def compute_authoritative_catalog_pin(
     persisted candidate must not depend on whether its binding variant would
     be rediscovered under an arbitrary projection budget.
     """
-    qualified: dict[str, str] = {}
-    for raw in records:
-        pattern = validate_attack_pattern(raw, taxonomy_resolver)
-        pattern = AttackPattern.model_validate(
-            _normalize_semantic_order(pattern.model_dump(mode="json"))
-        )
-        pattern_pin = _pattern_pin(pattern)
-        previous = qualified.get(pattern.id)
-        if previous is not None and previous != pattern_pin:
-            raise ValueError("conflicting authoritative records share one pattern id")
-        qualified[pattern.id] = pattern_pin
-    return compute_framed_digest(
-        "asago-scenario-generator:authoritative-catalog:v1",
-        [qualified[pattern_id] for pattern_id in sorted(qualified)],
+    return _catalog_content_pin(
+        _qualify_authoritative_records(records, taxonomy_resolver)
     )
