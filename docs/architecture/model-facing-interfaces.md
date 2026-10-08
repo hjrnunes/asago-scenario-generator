@@ -534,7 +534,10 @@ the existing hazard lacks) to that hazard's ID instead of adding a duplicate,
 and records a normalization warning. A `rule_span` that is not in its
 rule fails with the span and the rule quoted; on a constraint addition, the
 error names the addition's handle, because the provider never sees the ID
-code assigns to it.
+code assigns to it. When several constraint edits or additions fail
+validation, one error names each of them, so the single correction request
+covers them all; one failure keeps its error unchanged. An unknown or
+repeated hazard reference still fails at once.
 
 The post-review density gate exempts a hazard or constraint that the
 semantic review explicitly marks `unresolved`. The exemption becomes a

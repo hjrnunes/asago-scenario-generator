@@ -25,7 +25,8 @@ service or infer a taxonomy mechanism.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Collection, Sequence
+from collections.abc import Callable, Collection, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 
@@ -80,6 +81,7 @@ from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     normalized_text,
 )
 from pydantic import BaseModel, Field, ValidationError
+from pydantic_core import ErrorDetails, InitErrorDetails
 
 STEP_GRAPH_REVISION = "hazard_graph_revision"
 GATES_ARTIFACT = "loss-analysis-gates.yaml"
@@ -899,30 +901,34 @@ def _revision_patch_to_draft(
         constraint_id: constraint.model_copy(deep=True)
         for constraint_id, constraint in prior_constraints.items()
     }
+    failures: list[ValidationError] = []
     for edit in patch.security_constraint_edits:
-        assembled_constraints[edit.constraint_id] = _edited_constraint(
-            prior_constraints[edit.constraint_id],
-            edit,
-            existing_hazard_ids=existing_hazard_ids,
-            hazard_handle_map=hazard_handle_map,
-            warnings_out=warnings_out,
-            span_repairs_out=span_repairs_out,
-        )
-    for addition in patch.security_constraint_additions:
-        assembled_constraints[constraint_handle_map[addition.handle]] = (
-            _build_constraint(
-                constraint_id=constraint_handle_map[addition.handle],
-                rule=addition.rule,
-                applies_when=addition.applies_when,
-                behavior_class=addition.behavior_class,
-                related_hazards=addition.related_hazards,
-                obligations=addition.obligations,
+        with _collecting(failures):
+            assembled_constraints[edit.constraint_id] = _edited_constraint(
+                prior_constraints[edit.constraint_id],
+                edit,
                 existing_hazard_ids=existing_hazard_ids,
                 hazard_handle_map=hazard_handle_map,
+                warnings_out=warnings_out,
                 span_repairs_out=span_repairs_out,
-                addition_handle=addition.handle,
             )
-        )
+    for addition in patch.security_constraint_additions:
+        with _collecting(failures):
+            assembled_constraints[constraint_handle_map[addition.handle]] = (
+                _build_constraint(
+                    constraint_id=constraint_handle_map[addition.handle],
+                    rule=addition.rule,
+                    applies_when=addition.applies_when,
+                    behavior_class=addition.behavior_class,
+                    related_hazards=addition.related_hazards,
+                    obligations=addition.obligations,
+                    existing_hazard_ids=existing_hazard_ids,
+                    hazard_handle_map=hazard_handle_map,
+                    span_repairs_out=span_repairs_out,
+                    addition_handle=addition.handle,
+                )
+            )
+    _raise_collected(failures)
 
     return LossAnalysisDraft.model_validate(
         {
@@ -940,6 +946,44 @@ def _revision_patch_to_draft(
             ],
         }
     )
+
+
+@contextmanager
+def _collecting(failures: list[ValidationError]) -> Iterator[None]:
+    """Collect a record's validation error so later records still run.
+
+    A reference ``ValueError`` still raises at once.
+    """
+    try:
+        yield
+    except ValidationError as exc:
+        failures.append(exc)
+
+
+def _raise_collected(failures: list[ValidationError]) -> None:
+    """Raise one error naming every collected record failure.
+
+    A single failure raises unchanged, so its feedback keeps its wording.
+    """
+    if not failures:
+        return
+    if len(failures) == 1:
+        raise failures[0]
+    raise ValidationError.from_exception_data(
+        failures[0].title,
+        [_line_error(error) for failure in failures for error in failure.errors()],
+    )
+
+
+def _line_error(error: ErrorDetails) -> InitErrorDetails:
+    line: InitErrorDetails = {
+        "type": error["type"],
+        "loc": error["loc"],
+        "input": error.get("input"),
+    }
+    if "ctx" in error:
+        line["ctx"] = error["ctx"]
+    return line
 
 
 def _edited_constraint(

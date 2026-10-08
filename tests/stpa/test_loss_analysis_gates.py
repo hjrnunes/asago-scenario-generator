@@ -1477,6 +1477,47 @@ class TestGraphRevisionDropsUnquotedAdditions:
         assert stage_1a["hazard_graph_density"] == "passed_after_revision"
         assert stage_1a["graph_revision_call_count"] == 2
 
+    def test_one_correction_names_every_slipping_addition(self, tmp_path) -> None:
+        handles = ("grounded_constraint", "summary_constraint", "draft_constraint")
+        slipping = _revision_with_additions(
+            _addition_with_span("trust_constraint", _TRUST_RULE, _VERBATIM_TRUST_SPAN),
+            *(
+                _addition_with_span(handle, _GROUNDED_RULE, "must keep users happy")
+                for handle in handles
+            ),
+        )
+        result = _run_sp1_with_revisions(
+            tmp_path, [slipping, _revision_covering_h2_with_span(_VERBATIM_TRUST_SPAN)]
+        )
+
+        assert result.stage_errors == []
+        entries = _revision_entries(tmp_path)
+        assert [e["success"] for e in entries] == [False, True]
+        correction = entries[1]["user_prompt_text"]
+        for handle in handles:
+            assert f"security constraint addition '{handle}'" in correction
+        assert "addition 'trust_constraint'" not in correction
+
+    def test_slips_in_several_final_records_drop_each_of_them(self, tmp_path) -> None:
+        revision = _revision_with_additions(
+            _addition_with_span("trust_constraint", _TRUST_RULE, _VERBATIM_TRUST_SPAN),
+            _addition_with_span(
+                "grounded_constraint", _GROUNDED_RULE, "must keep users happy"
+            ),
+            _addition_with_span(
+                "summary_constraint", _GROUNDED_RULE, "summarize content"
+            ),
+        )
+        result = _run_sp1_with_revisions(tmp_path, [revision, revision])
+
+        assert result.stage_errors == []
+        gates = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        dropped = gates["revision_rounds"][0]["dropped_records"]
+        assert [d["handle"] for d in dropped] == [
+            "grounded_constraint",
+            "summary_constraint",
+        ]
+
     def test_stage_evidence_names_the_dropped_addition_and_its_error(
         self, tmp_path
     ) -> None:

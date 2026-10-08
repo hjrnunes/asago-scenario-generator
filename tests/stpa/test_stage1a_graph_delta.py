@@ -615,6 +615,117 @@ def test_delta_span_error_names_the_addition_handle_span_and_rule() -> None:
     assert "'The system must not share privacy records.'" in message
 
 
+def _slipping_addition(handle: str, rule: str, span: str) -> dict:
+    return {
+        "handle": handle,
+        "rule": rule,
+        "applies_when": [],
+        "related_hazards": ["H-9"],
+        "obligations": [
+            {
+                "obligation_id": "O1",
+                "kind": "forbidden",
+                "behavior": "share privacy records",
+                "rule_span": span,
+                "violated_via": "reply",
+            }
+        ],
+    }
+
+
+def _slipping_edit(span: str) -> dict:
+    return {
+        "constraint_id": "SC-3",
+        "rule": "Protect account records",
+        "applies_when": [],
+        "related_hazards": ["H-4"],
+        "obligations": [
+            {
+                "obligation_id": "O1",
+                "kind": "required",
+                "behavior": "Protect account records",
+                "rule_span": span,
+                "realized_by": "tool_call",
+            }
+        ],
+    }
+
+
+def _constraint_patch(
+    *, edits: list[dict] | None = None, additions: list[dict] | None = None
+) -> _Stage1aRevisionPatch:
+    return _Stage1aRevisionPatch.model_validate(
+        {
+            "hazard_edits": [],
+            "hazard_additions": [],
+            "security_constraint_edits": edits or [],
+            "security_constraint_additions": additions or [],
+        }
+    )
+
+
+def _patch_error(patch: _Stage1aRevisionPatch) -> ValidationError:
+    with pytest.raises(ValidationError) as caught:
+        _revision_patch_to_draft(_prior_analysis(), patch, [])
+    return caught.value
+
+
+_ALPHA = _slipping_addition(
+    "alpha_constraint",
+    "The system must not share privacy records.",
+    "does not share privacy records",
+)
+_BETA = _slipping_addition(
+    "beta_constraint",
+    "The system must not export privacy records.",
+    "never exports privacy records",
+)
+_VALID_ADDITION = _slipping_addition(
+    "valid_constraint",
+    "The system must not leak privacy records.",
+    "must not leak privacy records",
+)
+
+
+def test_delta_names_every_failing_edit_and_addition_in_one_error() -> None:
+    error = _patch_error(
+        _constraint_patch(
+            edits=[_slipping_edit("Guard account records")],
+            additions=[_ALPHA, _VALID_ADDITION, _BETA],
+        )
+    )
+
+    assert error.error_count() == 3
+    message = str(error)
+    assert "'Guard account records'" in message
+    assert "security constraint addition 'alpha_constraint'" in message
+    assert "security constraint addition 'beta_constraint'" in message
+    assert "valid_constraint" not in message
+
+
+def test_delta_keeps_a_single_failure_unchanged() -> None:
+    alone = _patch_error(_constraint_patch(additions=[_ALPHA]))
+    beside_a_valid_addition = _patch_error(
+        _constraint_patch(additions=[_VALID_ADDITION, _ALPHA])
+    )
+
+    assert str(beside_a_valid_addition) == str(alone)
+    assert alone.error_count() == 1
+
+
+def test_delta_keeps_a_reference_error_immediate() -> None:
+    unknown_hazard = dict(_VALID_ADDITION, related_hazards=["H-99"])
+
+    with pytest.raises(ValueError, match="unknown hazard ID") as caught:
+        _revision_patch_to_draft(
+            _prior_analysis(),
+            _constraint_patch(additions=[_ALPHA, unknown_hazard]),
+            [],
+        )
+
+    assert not isinstance(caught.value, ValidationError)
+
+
 def test_delta_keeps_a_same_text_hazard_addition_that_cites_a_new_loss() -> None:
     prior = _prior_analysis()
     patch = _Stage1aRevisionPatch.model_validate(
