@@ -501,7 +501,8 @@ A `risk_derivation` or `gap_analysis` response that parses but has a hazard
 once, or naming an ID no declared record has, gets exactly one reference
 correction call. The call carries the validator's finding and offers the
 IDs valid for each selected list, with their meanings, as replacements; it
-cannot declare a new record. A correction that is rejected or fails
+cannot declare a new record. The request describes repeated IDs only when a
+selected list repeats one. A correction that is rejected or fails
 validation for a list with an unknown ID does not stop the run. Instead,
 code cuts each selected list to its known IDs and drops any hazard or
 constraint left without a valid ID, along with any constraint whose every

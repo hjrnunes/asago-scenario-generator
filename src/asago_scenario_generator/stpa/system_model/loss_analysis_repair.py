@@ -3261,6 +3261,7 @@ def _reference_request(
         system_prompt=loader.render_prompt(
             REFERENCE_REPAIR_SYSTEM_TEMPLATE,
             unknown_ids=any(selected.unknown for selected in plan.selected),
+            repeated_ids=any(selected.repeated for selected in plan.selected),
         ),
         user_prompt=loader.render_prompt(
             REFERENCE_REPAIR_USER_TEMPLATE,

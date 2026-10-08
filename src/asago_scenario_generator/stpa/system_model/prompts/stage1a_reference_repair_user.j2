@@ -1,4 +1,4 @@
-{% set unknown_ids = selected_lists | selectattr("unknown") | list %}## Use-Case Description
+{% set unknown_ids = selected_lists | selectattr("unknown") | list %}{% set repeated_ids = selected_lists | selectattr("repeated") | list %}## Use-Case Description
 
 {{ use_case_text }}
 
@@ -9,7 +9,7 @@
 {% if feedback %}**Validation feedback:** {{ feedback }}
 
 {% endif %}The prior response failed validation for exactly these lists: each names an
-ID more than once{% if unknown_ids %} or an ID that no declared record has{% endif %}. Everything else about each record (its description or
+ID {% if repeated_ids %}more than once{% if unknown_ids %} or an ID {% endif %}{% endif %}{% if unknown_ids %}that no declared record has{% endif %}. Everything else about each record (its description or
 rule, its conditions, and its obligations) is retained by deterministic code
 and cannot change.
 
@@ -34,9 +34,9 @@ and cannot change.
 ## Your Task
 
 Return the corrected `related_losses` or `related_hazards` list for each
-selected record, using canonical IDs only. Remove each repeated
+selected record, using canonical IDs only. {% if repeated_ids %}Remove each repeated
 entry, or replace it with one listed replacement ID whose meaning the record
-was meant to name. {% if unknown_ids %}Replace each unknown entry with the listed replacement ID
+was meant to name. {% endif %}{% if unknown_ids %}Replace each unknown entry with the listed replacement ID
 of the record it was meant to name, or remove it when no listed record has
 that meaning. {% endif %}Keep the other IDs once each in their original order. A
 list that still repeats an ID, drops or reorders a kept ID, or names an ID
