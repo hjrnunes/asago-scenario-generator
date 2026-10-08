@@ -259,26 +259,31 @@ def render(template: str, case: str) -> str:
     return normalize(CASES[case](template))
 
 
+def _ordered_failure(phrase: tuple[str, ...], rendered: str) -> str | None:
+    markers = [normalize(marker) for marker in phrase]
+    missing = [marker for marker in markers if marker not in rendered]
+    if missing:
+        return f"missing {missing[0]!r} (ordered {markers!r})"
+    positions = [rendered.index(marker) for marker in markers]
+    return None if positions == sorted(positions) else f"out of order {markers!r}"
+
+
+def _count_failure(kind: str, phrase: str, rendered: str) -> str | None:
+    text = normalize(phrase)
+    count = rendered.count(text)
+    if kind == "required" and count == 0:
+        return f"missing {text!r}"
+    if kind == "once" and count != 1:
+        return f"expected once, found {count} times: {text!r}"
+    if kind == "forbidden" and count:
+        return f"forbidden {text!r}"
+    return None
+
+
 def failures(check: PhraseCheck, rendered: str) -> list[str]:
     """Return one message per phrase of ``check`` that ``rendered`` breaks."""
-    found: list[str] = []
-    for phrase in check.phrases:
-        if check.kind == "ordered":
-            markers = [normalize(marker) for marker in phrase]
-            missing = [m for m in markers if m not in rendered]
-            if missing:
-                found.append(f"missing {missing[0]!r} (ordered {markers!r})")
-                continue
-            positions = [rendered.index(m) for m in markers]
-            if positions != sorted(positions):
-                found.append(f"out of order {markers!r}")
-            continue
-        text = normalize(phrase)
-        count = rendered.count(text)
-        if check.kind == "required" and count == 0:
-            found.append(f"missing {text!r}")
-        elif check.kind == "once" and count != 1:
-            found.append(f"expected once, found {count} times: {text!r}")
-        elif check.kind == "forbidden" and count:
-            found.append(f"forbidden {text!r}")
-    return [f"{check.id}: {message}" for message in found]
+    if check.kind == "ordered":
+        found = [_ordered_failure(phrase, rendered) for phrase in check.phrases]
+    else:
+        found = [_count_failure(check.kind, p, rendered) for p in check.phrases]
+    return [f"{check.id}: {message}" for message in found if message]

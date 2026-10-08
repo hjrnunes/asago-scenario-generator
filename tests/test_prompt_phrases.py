@@ -59,5 +59,7 @@ def test_failures_name_the_table_case_and_phrase() -> None:
 
     assert failures(check, "a present b") == ["t/c/required: missing 'absent phrase'"]
     assert failures(ordered, "a b") == ["t/c/ordered: out of order ['b', 'a']"]
+    assert failures(ordered, "a") == ["t/c/ordered: missing 'b' (ordered ['b', 'a'])"]
+    assert failures(ordered, "b a") == []
     assert failures(once, "a a") == ["t/c/once: expected once, found 2 times: 'a'"]
     assert failures(forbidden, "a") == ["t/c/forbidden: forbidden 'a'"]
