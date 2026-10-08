@@ -487,7 +487,9 @@ therefore reads `applied`. (The graph-revision compiler still marks the
 repairs of an attempt it did not accept `discarded`.)
 
 A span that no mapping resolves goes to the targeted obligation repair as
-before. When the corrected entry's `rule_span` still is not part of the rule
+before. The corrected entry's `rule_span` gets the same mapping; a mapped span
+is a `rule_span_repaired` entry with `attempt: repair` and a normalization
+warning. When the corrected entry's `rule_span` still is not part of the rule
 and nothing else in the entry broke the repair's scope, code drops that
 obligation instead of stopping the run. A constraint left with no obligation is
 dropped with it. Each drop is a `rule_span_dropped` entry (outcome `dropped`,

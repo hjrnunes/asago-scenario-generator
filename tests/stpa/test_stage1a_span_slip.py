@@ -184,6 +184,51 @@ def test_risk_derivation_drops_an_obligation_whose_span_stays_unmapped(
     assert "SC-1/O1" not in repaired_identities
 
 
+def test_a_corrected_span_that_a_repair_maps_is_kept(tmp_path) -> None:
+    kept = _entry("O2", "no sensitive health data")
+    risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN), kept])
+    repair = _obligation_repair("SC-1", [_entry("O1", ELLIPSIS_SPAN), kept])
+    warnings: list[str] = []
+    client = MockLLMClient()
+    client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
+    client.set_response_for(ObligationRepairResponse, repair)
+
+    result = derive_loss_analysis(
+        llm_client=client,
+        use_case_text=_USE_CASE,
+        risk_cards=_occiai_cards(),
+        run_dir=tmp_path,
+        normalization_warnings=warnings,
+    )
+
+    obligations = result.security_constraints[0].obligations
+    assert [(o.obligation_id, o.rule_span) for o in obligations] == [
+        ("O1", REPAIRED_SPAN),
+        ("O2", "no sensitive health data"),
+    ]
+    assert _dropped_entries(tmp_path) == []
+    records = _repair_record(tmp_path)["records"]
+    (span_entry,) = [e for e in records if e["kind"] == "rule_span_repaired"]
+    assert (
+        span_entry["stage"],
+        span_entry["attempt"],
+        span_entry["identity"],
+        span_entry["outcome"],
+        span_entry["raw_step"],
+    ) == ("risk_derivation", "repair", "SC-1/O1", "applied", "risk_derivation_repair")
+    assert span_entry["proposed"] == {"rule_span": ELLIPSIS_SPAN}
+    assert span_entry["applied"] == {"rule_span": REPAIRED_SPAN, "match": "ellipsis"}
+    (repair_entry,) = [e for e in records if e["kind"] == "repair"]
+    assert (repair_entry["identity"], repair_entry["outcome"]) == (
+        "SC-1/O1",
+        "repaired",
+    )
+    assert (
+        "risk_derivation rule_span SC-1/O1 repaired by ellipsis match: "
+        f"{ELLIPSIS_SPAN!r} -> {REPAIRED_SPAN!r}"
+    ) in warnings
+
+
 def test_a_constraint_that_loses_its_last_obligation_is_dropped(tmp_path) -> None:
     risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN)])
     repair = _obligation_repair("SC-1", [_entry("O1", UNMAPPABLE_SPAN)])
