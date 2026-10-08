@@ -63,6 +63,32 @@ def test_unknown_nested_field_is_reported_with_its_collection_index() -> None:
     assert str(caught.value) == _MALFORMED_LINK_ERROR
 
 
+@pytest.mark.parametrize("source", ["omitted", None], ids=["omitted", "null"])
+def test_feedback_channel_without_a_source_is_a_valid_carrier(
+    source: str | None,
+) -> None:
+    channel: dict[str, Any] = {
+        "fb_id": "FB-1-2",
+        "description": "Operator confirmation",
+        "updates": "PM-1-1",
+    }
+    if source is None:
+        channel["source"] = None
+    delta = {
+        **_EMPTY_DELTA,
+        "modified_responsibilities": [
+            {
+                "resp_id": "RESP-1",
+                "description": "Controller 1",
+                "process_model_parts": [{"pm_id": "PM-1-1", "description": "State 1"}],
+                "feedback_channels": [channel],
+            }
+        ],
+    }
+
+    _validate_revision_delta_carrier(delta)
+
+
 @pytest.mark.parametrize(
     "payloads, warning",
     [
