@@ -291,17 +291,21 @@ def _plain_value(value: Any) -> Any:
         return value
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
-    if isinstance(value, Mapping):
-        return {str(key): _plain_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_plain_value(item) for item in value]
+    items = _plain_items(value)
+    if items is None:
+        return str(value)
+    return {str(key): _plain_value(item) for key, item in items}
+
+
+def _plain_items(value: Any) -> Any:
+    """Return the key-value pairs of a mapping or public object attributes."""
+    if isinstance(value, Mapping):
+        return value.items()
     if hasattr(value, "__dict__"):
-        return {
-            str(key): _plain_value(item)
-            for key, item in vars(value).items()
-            if not key.startswith("_")
-        }
-    return str(value)
+        return [(k, v) for k, v in vars(value).items() if not k.startswith("_")]
+    return None
 
 
 def _usage_details(response: Any) -> dict[str, Any]:
