@@ -2868,17 +2868,26 @@ def _cut_reference_list(
     kept = tuple(ref for ref in base if ref not in gone)
     if selected is None and kept == original:
         return None
-    reasons = [selected.defect_reason] if selected is not None else []
-    lost = tuple(dict.fromkeys(ref for ref in original if ref in gone))
-    if lost:
-        reasons.append("dropped hazards: " + ", ".join(lost))
     return DroppedReferences(
         collection=collection,
         owner_id=owner_id,
         original=original,
         kept=kept,
-        reason="; ".join(reasons),
+        reason=_cut_reason(selected, original, gone),
     )
+
+
+def _cut_reason(
+    selected: SelectedReferenceList | None,
+    original: tuple[str, ...],
+    gone: set[str],
+) -> str:
+    """The list's own finding, then the dropped hazards it named."""
+    reasons = [selected.defect_reason] if selected is not None else []
+    lost = tuple(dict.fromkeys(ref for ref in original if ref in gone))
+    if lost:
+        reasons.append("dropped hazards: " + ", ".join(lost))
+    return "; ".join(reasons)
 
 
 def _record_dropped_references(
