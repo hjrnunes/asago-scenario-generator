@@ -1,6 +1,13 @@
 """Related constraints must not multiply repeated authority descriptions."""
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlActionEffectKind,
+    ElementRef,
+    FeedbackChannel,
+    ReferenceType,
+)
 from asago_scenario_generator.stpa.system_model.control_structure import (
     PROMPTS_DIR,
     _build_call3_source_excerpts,
@@ -79,3 +86,46 @@ def test_call3_shows_the_rule_with_conditions_as_fixed_context() -> None:
     assert conditional.description not in rendered
     assert "not under review" in rendered
     assert "1. the chamber is loaded" in rendered
+
+
+def test_call3_renders_action_effects_and_reference_types_as_values() -> None:
+    losses, structure = _authorities()
+    responsibility = structure.responsibilities[0]
+    responsibility.control_actions = [
+        ControlAction(
+            ca_id="CA-1-1",
+            description="Renew the loan",
+            target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+            effect_kind=ControlActionEffectKind.tool_call,
+        ),
+        ControlAction(ca_id="CA-1-2", description="Summarize the loan"),
+    ]
+    responsibility.feedback_channels = [
+        FeedbackChannel(
+            fb_id="FB-1-1",
+            description="Loan state",
+            updates="PM-1-1",
+            source=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+        )
+    ]
+    excerpts = _build_call3_source_excerpts(USE_CASE, losses)
+
+    rendered = TemplateLoader(PROMPTS_DIR).render_prompt(
+        "stage2_call3_user.j2",
+        use_case_text=USE_CASE,
+        control_structure=structure,
+        loss_analysis=losses,
+        source_excerpts=excerpts,
+        source_ref_by_canonical={
+            item.canonical_ref: item.local_ref for item in excerpts
+        },
+    )
+
+    assert (
+        "- CA-1-1: Renew the loan; current effect: tool_call; target: "
+        "controlled_process CP-1" in rendered
+    )
+    assert "- CA-1-2: Summarize the loan; current effect: None" in rendered
+    assert "FB-1-1 (updates PM-1-1, source: controlled_process CP-1)" in rendered
+    assert "ReferenceType." not in rendered
+    assert "ControlActionEffectKind." not in rendered

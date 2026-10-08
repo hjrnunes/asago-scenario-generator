@@ -15,21 +15,38 @@ import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Literal, TypeVar
+from typing import Annotated, Any, Literal, TypeVar
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, create_model
+from pydantic import (
+    AliasChoices,
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictStr,
+    ValidationInfo,
+    create_model,
+    field_validator,
+    model_validator,
+)
 
 from asago_scenario_generator.models.capability_profile import (
     ZONE_DISPLAY_NAMES,
     CapabilityProfile,
     build_kc_subcodes_display,
 )
-from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
+from asago_scenario_generator.stpa.infra.llm import (
+    DEFAULT_TEMPERATURE,
+    LLMClient,
+    LLMResult,
+)
 from asago_scenario_generator.stpa.infra.call_log import CallLog, call_log_of
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CallOutcome,
     CorrectionPolicy,
     StageError,
     call_with_policy,
+    correction_prompt,
     decode_content,
     log_llm_call_failure,
     strip_json_fence,
@@ -38,6 +55,7 @@ from asago_scenario_generator.stpa._model_data import raw_model_data
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
+    ASSEMBLY_DEFERRED,
     ControlAction,
     ControlActionEffectKind,
     ControlActionTemporality,
@@ -47,8 +65,11 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ElementRef,
     FeedbackChannel,
     FeedbackSourceKind,
+    NonBlankStr,
+    ProcessModelPart,
     ReferenceType,
     Responsibility,
+    ResponsibilityConstraint,
     check_structural_heuristics,
     normalize_control_action_effect_kind,
 )
@@ -683,83 +704,101 @@ def _resolve_call3_source_item(
     }
 
 
-def _validate_stage2_intermediate(model: BaseModel) -> None:
-    """Reject semantically empty Stage 2 inputs after tolerant decoding.
+def _holds_nothing(value: Any) -> bool:
+    return value in (None, "", [], {})
 
-    Calls 2a and 2b use tolerant decoding so malformed nested references can
-    be repaired deterministically. That path intentionally bypasses Pydantic
-    validators, including ``Field(min_length=1)``. Keep the semantic
-    cardinality checks at the shared LLM boundary so an empty set cannot reach
-    control-structure assembly while preserving tolerant nested decoding.
+
+class _Call2aConstraint(ResponsibilityConstraint):
+    """A responsibility constraint whose omitted ID normalization supplies.
+
+    ``id_normalization`` numbers every RC by its position, so an RC whose ID
+    key the model misspelled still has a position and keeps its meaning.
     """
-    if isinstance(model, RequirementSet) and not model.requirements:
-        raise ValueError("requirements must contain at least one item")
-    if isinstance(model, ResponsibilitySet) and not model.responsibilities:
-        raise ValueError("responsibilities must contain at least one item")
+
+    rc_id: str = ""
 
 
-_RESPONSIBILITY_FIELDS = (
-    "resp_id",
-    "description",
-    "responsibility_constraints",
-    "security_constraint_refs",
-    "process_model_parts",
-)
+class _Call2aResponsibility(BaseModel):
+    """One Call 2a responsibility; a field it does not declare is an error.
+
+    A generic ``id`` stands for ``resp_id``.  An undeclared field that holds
+    nothing carries no meaning to lose, so it is dropped instead of rejected;
+    one that holds content fails with the list of fields to keep.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resp_id: StrictStr
+    description: NonBlankStr
+    responsibility_constraints: list[_Call2aConstraint] = Field(default_factory=list)
+    security_constraint_refs: list[StrictStr]
+    process_model_parts: list[ProcessModelPart] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_generic_id_and_drop_empty_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        record = {
+            name: item
+            for name, item in value.items()
+            if name in cls.model_fields or name == "id" or not _holds_nothing(item)
+        }
+        unexpected = sorted(set(record) - {"id", *cls.model_fields})
+        if unexpected:
+            fields = list(cls.model_fields)
+            raise ValueError(
+                f"unexpected responsibility field(s): {', '.join(unexpected)}. "
+                f"Remove them; each responsibility contains only "
+                f"{', '.join(fields[:-1])}, and {fields[-1]}"
+            )
+        generic_id = record.pop("id", None)
+        if "resp_id" not in record and generic_id is not None:
+            record["resp_id"] = generic_id
+        return record
 
 
-def _nonempty_unknown_fields(record: dict[str, Any], allowed: set[str]) -> list[str]:
-    """Return the sorted unknown fields of ``record`` that hold a value."""
-    return sorted(
-        str(name)
-        for name, item in record.items()
-        if name not in allowed and item not in (None, "", [], {})
+class _Call2aResponse(BaseModel):
+    """The Call 2a response as the model must write it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    responsibilities: list[_Call2aResponsibility] = Field(min_length=1)
+
+
+def _validate_responsibility_wire(value: Any) -> None:
+    """Check a decoded Call 2a response against its closed wire models."""
+    _Call2aResponse.model_validate(value, context=ASSEMBLY_DEFERRED)
+
+
+def parse_responsibility_set_response(value: Any) -> ResponsibilitySet:
+    """Parse a Call 2a response; IDs stay as written for ``id_normalization``."""
+    wire = _Call2aResponse.model_validate(value, context=ASSEMBLY_DEFERRED)
+    return ResponsibilitySet.model_construct(
+        responsibilities=[
+            Responsibility.model_construct(
+                resp_id=item.resp_id,
+                description=item.description,
+                responsibility_constraints=[
+                    ResponsibilityConstraint.model_construct(
+                        rc_id=constraint.rc_id, description=constraint.description
+                    )
+                    for constraint in item.responsibility_constraints
+                ],
+                security_constraint_refs=item.security_constraint_refs,
+                process_model_parts=item.process_model_parts,
+            )
+            for item in wire.responsibilities
+        ]
     )
 
 
-def _validate_responsibility_payload(value: Any) -> None:
-    """Reject Call 2a fields tolerant decoding would silently discard.
-
-    Call 2a deliberately retains tolerant ID normalization for malformed
-    nested IDs, but its top-level collection and security-trace fields are
-    normative. Validate those raw fields before the tolerant parser can drop
-    unknown responsibility collections or omitted constraint references. Any
-    alternate top-level collection fails, even an empty one, because the
-    prompt forbids splitting the collection. Inside a responsibility, an
-    unknown field whose value is empty carries nothing to lose, so the
-    tolerant parser may drop it.
-    """
-    if not isinstance(value, dict):
-        return
-    unexpected = set(value) - {"responsibilities"}
-    if unexpected:
-        names = ", ".join(sorted(str(item) for item in unexpected))
-        raise ValueError(f"unexpected responsibility collection(s): {names}")
-    responsibilities = value.get("responsibilities")
-    if not isinstance(responsibilities, list):
-        return
-    for index, responsibility in enumerate(responsibilities):
-        if isinstance(responsibility, dict):
-            _validate_responsibility_entry(responsibility, index)
-
-
-def _validate_responsibility_entry(responsibility: dict[str, Any], index: int) -> None:
-    """Reject one raw responsibility with a dropped field or untraced constraints."""
-    unexpected_fields = _nonempty_unknown_fields(
-        responsibility, {"id", *_RESPONSIBILITY_FIELDS}
+def _parse_responsibility_result(
+    result: LLMResult, cleanup_transformations: list[dict[str, Any]]
+) -> ResponsibilitySet:
+    return parse_responsibility_set_response(
+        decode_content(result, cleanup_transformations=cleanup_transformations)
     )
-    if unexpected_fields:
-        raise ValueError(
-            f"unexpected responsibility collection field(s) at index {index}: "
-            f"{', '.join(unexpected_fields)}. Remove them; each responsibility "
-            f"contains only {', '.join(_RESPONSIBILITY_FIELDS[:-1])}, and "
-            f"{_RESPONSIBILITY_FIELDS[-1]}"
-        )
-    if "security_constraint_refs" not in responsibility:
-        raise ValueError(
-            f"responsibility is missing security_constraint_refs at index {index}"
-        )
-    if not isinstance(responsibility["security_constraint_refs"], list):
-        raise ValueError(f"security_constraint_refs must be a list at index {index}")
 
 
 # ---------------------------------------------------------------------------
@@ -767,337 +806,189 @@ def _validate_responsibility_entry(responsibility: dict[str, Any], index: int) -
 # ---------------------------------------------------------------------------
 
 
-_CONTROL_ELEMENT_TOP_LEVEL_FIELDS = {
-    "control_actions",
-    "feedback",
-    "feedback_channels",  # historical input spelling; normalized below
-    "controlled_processes",
-}
-_CONTROL_ACTION_FIELDS = {
-    "ca_id",
-    "description",
-    "target",
-    "effect_kind",
-    "temporality",
-    "operation",
-    "process_model_refs",
-}
-_FEEDBACK_FIELDS = {"fb_id", "description", "updates", "source", "source_kind"}
-_CONTROLLED_PROCESS_FIELDS = {"cp_id", "description"}
-_ELEMENT_REF_FIELDS = {"type", "id"}
-
-
-def _decode_control_element_payload(value: Any) -> dict[str, Any]:
-    """Decode one Call 2b response without applying tolerant field defaults."""
-    if isinstance(value, BaseModel):
-        value = raw_model_data(value)
-    elif isinstance(value, str):
-        value = json.loads(strip_json_fence(value))
-    if not isinstance(value, dict):
-        raise ValueError(
-            "Call 2b response must be one JSON object containing control_actions, "
-            "feedback, and controlled_processes"
-        )
-    return raw_model_data(value)
-
-
-def _require_stage2_string(
-    value: Any,
-    *,
-    field_name: str,
-    item_label: str,
-) -> str:
-    """Require a semantic string while preserving the supplied text exactly."""
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{item_label} requires a non-empty {field_name}")
-    return value
-
-
-def _reject_unexpected_fields(
-    item: dict[str, Any],
-    *,
-    allowed: set[str],
-    item_label: str,
-) -> None:
-    """Reject unknown fields before Pydantic's permissive nested models see them."""
-    unexpected = set(item) - allowed
-    if not unexpected:
-        return
-    names = ", ".join(sorted(str(name) for name in unexpected))
-    if "action" in unexpected:
-        raise ValueError(
-            f"{item_label} uses combined action field 'action'; return separate "
-            "ca_id and description fields"
-        )
-    raise ValueError(f"{item_label} contains unexpected semantic field(s): {names}")
-
-
-def _validate_stage2_element_id(
-    value: Any,
-    *,
-    prefix: str,
-    item_label: str,
-) -> str:
-    """Validate an ID carries an explicit, recoverable responsibility owner."""
-    identifier = _require_stage2_string(
-        value,
-        field_name=f"{prefix.lower()}_id",
-        item_label=item_label,
-    )
-    # Canonical IDs are CA-X-Y/FB-X-Y.  A one-suffix CA-X or FB-X is accepted
-    # only as a narrowly recoverable source ID: its numeric prefix still
-    # states the owner unambiguously and canonicalization can supply Y.  An
-    # arbitrary value such as ``first-action`` has no ownership information
-    # and must not be distributed by response-array order.
-    if not re.fullmatch(rf"{prefix}-\d+(?:-\d+)?", identifier):
-        raise ValueError(
-            f"{item_label} {prefix.lower()}_id must encode an explicit owner "
-            f"using {prefix}-X-Y; got {identifier!r}"
-        )
-    return identifier
+_OWNER_CONTEXT_KEY = "owner_numbers"
 
 
 def _owner_number(identifier: str, *, prefix: str) -> int:
     """Return the responsibility number encoded by one CA/FB ID."""
     match = re.fullmatch(rf"{prefix}-(\d+)(?:-\d+)?", identifier)
-    if match is None:  # pragma: no cover - guarded by _validate_stage2_element_id
+    if match is None:  # pragma: no cover - guarded by the wire ID check
         raise ValueError(f"{prefix} ID does not encode an owner: {identifier!r}")
     return int(match.group(1))
 
 
-def _stage2_element_ref(value: Any, *, field_name: str, item_label: str) -> ElementRef:
-    """Parse one explicit control-structure element reference."""
-    if isinstance(value, str):
-        identifier = _require_stage2_string(
-            value,
-            field_name=field_name,
-            item_label=item_label,
+def _require_owner_format(identifier: str, prefix: str) -> str:
+    """Require ``PREFIX-X`` or ``PREFIX-X-Y``.
+
+    Canonical IDs are CA-X-Y/FB-X-Y.  A one-suffix CA-X or FB-X is accepted
+    only as a narrowly recoverable source ID: its numeric prefix still states
+    the owner unambiguously and canonicalization can supply Y.  An arbitrary
+    value such as ``first-action`` has no ownership information and must not
+    be distributed by response-array order.
+    """
+    if not re.fullmatch(rf"{prefix}-\d+(?:-\d+)?", identifier):
+        raise ValueError(
+            f"must encode an explicit owner using {prefix}-X-Y; got {identifier!r}"
         )
-        if re.fullmatch(r"RESP-\d+", identifier):
-            reference_type = ReferenceType.responsibility
-        elif re.fullmatch(r"CP-\d+", identifier):
-            reference_type = ReferenceType.controlled_process
-        else:
+    return identifier
+
+
+def _require_known_owner(identifier: str, prefix: str, info: ValidationInfo) -> str:
+    """Require an owned ID whose owner is a supplied responsibility."""
+    _require_owner_format(identifier, prefix)
+    owners = (info.context or {}).get(_OWNER_CONTEXT_KEY)
+    if owners is not None and _owner_number(identifier, prefix=prefix) not in owners:
+        raise ValueError(
+            f"{identifier!r} has no matching responsibility owner; "
+            "ownership cannot be recovered from array order"
+        )
+    return identifier
+
+
+def _element_ref_from_text(value: Any) -> Any:
+    """Read a compact ``RESP-N`` or ``CP-N`` reference as a typed object."""
+    if not isinstance(value, str):
+        return value
+    if re.fullmatch(r"RESP-\d+", value):
+        return {"type": ReferenceType.responsibility, "id": value}
+    if re.fullmatch(r"CP-\d+", value):
+        return {"type": ReferenceType.controlled_process, "id": value}
+    raise ValueError(f"must name RESP-N or CP-N; got {value!r}")
+
+
+class _Call2bWire(BaseModel):
+    """A closed object of the Call 2b wire: unknown fields are errors."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class _Call2bRef(_Call2bWire):
+    type: ReferenceType
+    id: str
+
+
+_Call2bRefField = Annotated[_Call2bRef, BeforeValidator(_element_ref_from_text)]
+
+
+class _Call2bAction(_Call2bWire):
+    ca_id: NonBlankStr
+    description: NonBlankStr
+    target: _Call2bRefField
+    effect_kind: ControlActionEffectKind | None = None
+    temporality: ControlActionTemporality | None = None
+    operation: Annotated[StrictStr, Field(min_length=1)] | None = None
+    process_model_refs: list[Annotated[StrictStr, Field(min_length=1)]] | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _name_the_combined_action(cls, value: Any) -> Any:
+        if isinstance(value, dict) and "action" in value:
             raise ValueError(
-                f"{item_label} {field_name} must name RESP-N or CP-N; "
-                f"got {identifier!r}"
+                "uses combined action field 'action'; return separate ca_id and "
+                "description fields"
             )
-        return ElementRef(type=reference_type, id=identifier)
-    if not isinstance(value, dict):
-        raise ValueError(f"{item_label} {field_name} must be an ID or object")
-    _reject_unexpected_fields(
-        value,
-        allowed=_ELEMENT_REF_FIELDS,
-        item_label=f"{item_label} {field_name}",
-    )
-    if "type" not in value or "id" not in value:
-        raise ValueError(f"{item_label} {field_name} requires type and id")
-    try:
-        return ElementRef.model_validate(value)
-    except Exception as exc:
-        raise ValueError(f"{item_label} has invalid {field_name}: {exc}") from exc
+        return value
 
+    @field_validator("ca_id")
+    @classmethod
+    def _owned_ca_id(cls, value: str, info: ValidationInfo) -> str:
+        return _require_known_owner(value, "CA", info)
 
-def _stage2_optional_enum(
-    value: Any,
-    *,
-    enum_type: type[ControlActionEffectKind] | type[ControlActionTemporality],
-    field_name: str,
-    item_label: str,
-) -> ControlActionEffectKind | ControlActionTemporality | None:
-    """Parse an optional typed Stage 2 action field without tolerant coercion."""
-    if value is None:
-        return None
-    try:
-        return enum_type(value)
-    except (TypeError, ValueError) as exc:
-        allowed = ", ".join(item.value for item in enum_type)
-        raise ValueError(
-            f"{item_label} {field_name} must be one of: {allowed}; got {value!r}"
-        ) from exc
-
-
-def _require_stage2_action_fields(value: Any, *, item_label: str) -> None:
-    """Require an action object with only known fields and its semantic fields."""
-    if not isinstance(value, dict):
-        raise ValueError(f"{item_label} must be an object")
-    _reject_unexpected_fields(
-        value,
-        allowed=_CONTROL_ACTION_FIELDS,
-        item_label=item_label,
-    )
-    if "ca_id" not in value:
-        raise ValueError(f"{item_label} is missing ca_id")
-    if "description" not in value:
-        raise ValueError(f"{item_label} is missing description")
-    if "target" not in value or value["target"] is None:
-        raise ValueError(f"{item_label} is missing target")
-
-
-def _stage2_action_description(value: Any, *, ca_id: str, item_label: str) -> str:
-    """Return a non-empty action description that is not a generated placeholder."""
-    description = _require_stage2_string(
-        value, field_name="description", item_label=item_label
-    )
-    normalized_description = " ".join(description.split()).lower()
-    normalized_id = " ".join(ca_id.split()).lower()
-    if normalized_description in {normalized_id, f"control action {normalized_id}"}:
-        raise ValueError(
-            f"{item_label} description must be meaningful, not a generated placeholder"
+    @model_validator(mode="after")
+    def _meaningful_and_consistent(self) -> _Call2bAction:
+        normalized_description = " ".join(self.description.split()).lower()
+        normalized_id = " ".join(self.ca_id.split()).lower()
+        if normalized_description in {normalized_id, f"control action {normalized_id}"}:
+            raise ValueError(
+                "description must be meaningful, not a generated placeholder"
+            )
+        self.effect_kind = normalize_control_action_effect_kind(
+            ElementRef(type=self.target.type, id=self.target.id), self.effect_kind
         )
-    return description
+        return self
 
-
-def _stage2_control_action(
-    value: Any,
-    *,
-    index: int,
-    owner_numbers: set[int] | None,
-) -> ControlAction:
-    """Parse one semantic control action for the Call 2b wire contract."""
-    item_label = f"control_actions[{index}]"
-    _require_stage2_action_fields(value, item_label=item_label)
-    ca_id = _validate_stage2_element_id(
-        value["ca_id"], prefix="CA", item_label=item_label
-    )
-    if (
-        owner_numbers is not None
-        and _owner_number(ca_id, prefix="CA") not in owner_numbers
-    ):
-        raise ValueError(
-            f"{item_label} {ca_id!r} has no matching responsibility owner; "
-            "ownership cannot be recovered from array order"
+    def to_domain(self) -> ControlAction:
+        return ControlAction.model_construct(
+            ca_id=self.ca_id,
+            description=self.description,
+            target=ElementRef(type=self.target.type, id=self.target.id),
+            effect_kind=self.effect_kind,
+            temporality=self.temporality,
+            operation=self.operation,
+            process_model_refs=list(dict.fromkeys(self.process_model_refs or [])),
         )
-    description = _stage2_action_description(
-        value["description"], ca_id=ca_id, item_label=item_label
-    )
-    target = _stage2_element_ref(
-        value["target"], field_name="target", item_label=item_label
-    )
-    effect_kind = _stage2_optional_enum(
-        value.get("effect_kind"),
-        enum_type=ControlActionEffectKind,
-        field_name="effect_kind",
-        item_label=item_label,
-    )
-    temporality = _stage2_optional_enum(
-        value.get("temporality"),
-        enum_type=ControlActionTemporality,
-        field_name="temporality",
-        item_label=item_label,
-    )
-    effect_kind = normalize_control_action_effect_kind(target, effect_kind)
-    operation = value.get("operation")
-    if operation is not None and (not isinstance(operation, str) or not operation):
-        raise ValueError(f"{item_label} operation must be an operation name or null")
-    process_model_refs = _stage2_id_list(
-        value.get("process_model_refs"),
-        field_name="process_model_refs",
-        item_label=item_label,
-    )
-    return ControlAction.model_construct(
-        ca_id=ca_id,
-        description=description,
-        target=target,
-        effect_kind=effect_kind,
-        temporality=temporality,
-        operation=operation,
-        process_model_refs=process_model_refs,
-    )
 
 
-def _stage2_id_list(value: Any, *, field_name: str, item_label: str) -> list[str]:
-    """Parse an optional list of identifiers without coercing other shapes."""
-    if value is None:
-        return []
-    if not isinstance(value, list) or not all(
-        isinstance(item, str) and item for item in value
-    ):
-        raise ValueError(f"{item_label} {field_name} must be a list of IDs")
-    return list(dict.fromkeys(value))
+class _Call2bFeedback(_Call2bWire):
+    fb_id: NonBlankStr
+    description: NonBlankStr
+    updates: NonBlankStr
+    source: _Call2bRefField
+    source_kind: FeedbackSourceKind | None = None
 
+    @field_validator("fb_id")
+    @classmethod
+    def _owned_fb_id(cls, value: str, info: ValidationInfo) -> str:
+        return _require_known_owner(value, "FB", info)
 
-def _stage2_feedback_channel(
-    value: Any,
-    *,
-    index: int,
-    owner_numbers: set[int] | None,
-) -> FeedbackChannel:
-    """Parse one semantic feedback channel for the Call 2b wire contract."""
-    item_label = f"feedback[{index}]"
-    if not isinstance(value, dict):
-        raise ValueError(f"{item_label} must be an object")
-    _reject_unexpected_fields(value, allowed=_FEEDBACK_FIELDS, item_label=item_label)
-    for field_name in ("fb_id", "description", "updates", "source"):
-        if field_name not in value:
-            raise ValueError(f"{item_label} is missing {field_name}")
-    fb_id = _validate_stage2_element_id(
-        value["fb_id"], prefix="FB", item_label=item_label
-    )
-    if (
-        owner_numbers is not None
-        and _owner_number(fb_id, prefix="FB") not in owner_numbers
-    ):
-        raise ValueError(
-            f"{item_label} {fb_id!r} has no matching responsibility owner; "
-            "ownership cannot be recovered from array order"
+    def to_domain(self) -> FeedbackChannel:
+        return FeedbackChannel.model_construct(
+            fb_id=self.fb_id,
+            description=self.description,
+            updates=self.updates,
+            source=ElementRef(type=self.source.type, id=self.source.id),
+            source_kind=self.source_kind,
         )
-    description = _require_stage2_string(
-        value["description"], field_name="description", item_label=item_label
-    )
-    updates = _require_stage2_string(
-        value["updates"], field_name="updates", item_label=item_label
-    )
-    if value["source"] is None:
-        raise ValueError(f"{item_label} requires a non-null source")
-    source = _stage2_element_ref(
-        value["source"], field_name="source", item_label=item_label
-    )
-    return FeedbackChannel.model_construct(
-        fb_id=fb_id,
-        description=description,
-        updates=updates,
-        source=source,
-        source_kind=_stage2_feedback_source_kind(value, item_label=item_label),
-    )
 
 
-def _stage2_feedback_source_kind(
-    value: dict[str, Any], *, item_label: str
-) -> FeedbackSourceKind | None:
-    """Parse the optional ``source_kind`` of a feedback channel."""
-    if value.get("source_kind") is None:
-        return None
-    try:
-        return FeedbackSourceKind(value["source_kind"])
-    except ValueError as exc:
-        allowed = ", ".join(item.value for item in FeedbackSourceKind)
-        raise ValueError(
-            f"{item_label} source_kind must be one of: {allowed}; "
-            f"got {value['source_kind']!r}"
-        ) from exc
+class _Call2bProcess(_Call2bWire):
+    """A controlled process; ``id_normalization`` numbers it by position.
+
+    A controlled process has no owner to encode, so any non-blank ID that
+    the response's references use is enough.
+    """
+
+    cp_id: NonBlankStr
+    description: NonBlankStr
+
+    def to_domain(self) -> ControlledProcess:
+        return ControlledProcess.model_construct(
+            cp_id=self.cp_id, description=self.description
+        )
 
 
-def _stage2_controlled_process(value: Any, *, index: int) -> ControlledProcess:
-    """Parse one controlled process for the Call 2b wire contract."""
-    item_label = f"controlled_processes[{index}]"
-    if not isinstance(value, dict):
-        raise ValueError(f"{item_label} must be an object")
-    _reject_unexpected_fields(
-        value,
-        allowed=_CONTROLLED_PROCESS_FIELDS,
-        item_label=item_label,
+class _Call2bResponse(_Call2bWire):
+    """The Call 2b response as the model must write it.
+
+    ``feedback`` is the provider-facing collection name; the historical
+    ``feedback_channels`` spelling is accepted on input, never both.
+    """
+
+    control_actions: list[_Call2bAction] = Field(min_length=1)
+    feedback: list[_Call2bFeedback] = Field(
+        min_length=1,
+        validation_alias=AliasChoices("feedback", "feedback_channels"),
     )
-    for field_name in ("cp_id", "description"):
-        if field_name not in value:
-            raise ValueError(f"{item_label} is missing {field_name}")
-    cp_id = _validate_stage2_element_id(
-        value["cp_id"], prefix="CP", item_label=item_label
-    )
-    description = _require_stage2_string(
-        value["description"], field_name="description", item_label=item_label
-    )
-    return ControlledProcess.model_construct(cp_id=cp_id, description=description)
+    controlled_processes: list[_Call2bProcess]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _one_feedback_spelling(cls, value: Any) -> Any:
+        if isinstance(value, dict) and {"feedback", "feedback_channels"} <= set(value):
+            raise ValueError(
+                "Call 2b response must use one feedback collection, not both "
+                "feedback and feedback_channels"
+            )
+        return value
+
+
+def _decode_control_element_payload(value: Any) -> Any:
+    """Decode one Call 2b response into plain JSON data."""
+    if isinstance(value, BaseModel):
+        return raw_model_data(value)
+    if isinstance(value, str):
+        return json.loads(strip_json_fence(value))
+    return raw_model_data(value)
 
 
 def parse_control_element_set_response(
@@ -1105,44 +996,28 @@ def parse_control_element_set_response(
     *,
     responsibilities: Sequence[Responsibility] | None = None,
 ) -> ControlElementSet:
-    """Strictly parse a Call 2b response while preserving semantic content.
+    """Parse a Call 2b response through its closed wire models.
 
-    The ordinary ``stpa.infra.unvalidated_decode`` helper is deliberately not
-    used here.  This response is semantic model output: every carrier field is
-    checked, descriptions cannot be empty or generated placeholders, and CA/FB
-    IDs must carry an explicit responsibility owner.  Source IDs may still be
+    The response is semantic model output: every carrier field is checked,
+    descriptions cannot be empty or generated placeholders, and CA/FB IDs must
+    carry an explicit responsibility owner.  Source IDs may still be
     canonicalized later by ``id_normalization`` when their owner is explicit.
-
-    ``feedback`` is the normative provider-facing collection name.  The
-    historical ``feedback_channels`` spelling is accepted only as an input
-    compatibility alias and never silently merged when both are supplied.
+    A shape error raises the wire models' ``ValidationError``; a reference
+    to an element the supplied responsibilities lack raises ``ValueError``.
     """
-    payload = _decode_control_element_payload(value)
-    feedback_key = _check_control_element_collections(payload)
     owner_numbers = (
         _responsibility_owner_numbers(responsibilities)
         if responsibilities is not None
         else None
     )
-    actions = [
-        _stage2_control_action(
-            item,
-            index=index,
-            owner_numbers=owner_numbers,
-        )
-        for index, item in enumerate(payload["control_actions"])
-    ]
-    feedback_channels = [
-        _stage2_feedback_channel(
-            item,
-            index=index,
-            owner_numbers=owner_numbers,
-        )
-        for index, item in enumerate(payload[feedback_key])
-    ]
+    wire = _Call2bResponse.model_validate(
+        _decode_control_element_payload(value),
+        context={_OWNER_CONTEXT_KEY: owner_numbers},
+    )
+    actions = [action.to_domain() for action in wire.control_actions]
+    feedback_channels = [channel.to_domain() for channel in wire.feedback]
     controlled_processes = [
-        _stage2_controlled_process(item, index=index)
-        for index, item in enumerate(payload["controlled_processes"])
+        process.to_domain() for process in wire.controlled_processes
     ]
     if responsibilities is not None:
         _check_control_elements_against_responsibilities(
@@ -1157,45 +1032,6 @@ def parse_control_element_set_response(
         feedback_channels=feedback_channels,
         controlled_processes=controlled_processes,
     )
-
-
-def _check_control_element_collection_names(payload: dict[str, Any]) -> None:
-    """Require every Call 2b collection, with exactly one feedback spelling."""
-    required_top_level = {"control_actions", "controlled_processes"}
-    missing_top_level = required_top_level - set(payload)
-    if "feedback" not in payload and "feedback_channels" not in payload:
-        missing_top_level.add("feedback")
-    if missing_top_level:
-        names = ", ".join(sorted(missing_top_level))
-        raise ValueError(
-            f"Call 2b response is missing top-level collection(s): {names}"
-        )
-    if "feedback" in payload and "feedback_channels" in payload:
-        raise ValueError(
-            "Call 2b response must use one feedback collection, not both feedback "
-            "and feedback_channels"
-        )
-
-
-def _check_control_element_collections(payload: dict[str, Any]) -> str:
-    """Check the Call 2b top-level collections; return the feedback key used."""
-    _reject_unexpected_fields(
-        payload,
-        allowed=_CONTROL_ELEMENT_TOP_LEVEL_FIELDS,
-        item_label="Call 2b response",
-    )
-    _check_control_element_collection_names(payload)
-    for collection_name in ("control_actions", "controlled_processes"):
-        if not isinstance(payload[collection_name], list):
-            raise ValueError(f"{collection_name} must be a list")
-    feedback_key = "feedback" if "feedback" in payload else "feedback_channels"
-    if not isinstance(payload[feedback_key], list):
-        raise ValueError(f"{feedback_key} must be a list")
-    if not payload["control_actions"]:
-        raise ValueError("control_actions must contain at least one action")
-    if not payload[feedback_key]:
-        raise ValueError(f"{feedback_key} must contain at least one feedback channel")
-    return feedback_key
 
 
 def _responsibility_owner_numbers(
@@ -1241,6 +1077,44 @@ def _check_every_responsibility_is_served(
         )
 
 
+@dataclass(frozen=True)
+class UnknownReference:
+    """One Call 2b reference to an element the structure does not hold.
+
+    ``owner`` names the responsibility whose process model parts a
+    ``process_model_refs`` entry should have come from.
+    """
+
+    location: str
+    value: str
+    owner: str | None = None
+
+    @property
+    def message(self) -> str:
+        if self.owner is not None:
+            return (
+                f"{self.location} {self.value!r} is not a process model part of "
+                f"the action's own responsibility {self.owner}"
+            )
+        return (
+            f"{self.location} reference {self.value!r} is not present in the "
+            "supplied structure"
+        )
+
+
+class UnknownReferenceError(ValueError):
+    """A Call 2b response names targets, sources or process model parts it lacks."""
+
+    def __init__(
+        self,
+        references: Sequence[UnknownReference],
+        controlled_processes: Sequence[ControlledProcess] = (),
+    ) -> None:
+        self.references = tuple(references)
+        self.controlled_processes = tuple(controlled_processes)
+        super().__init__("; ".join(item.message for item in self.references))
+
+
 def _check_control_elements_against_responsibilities(
     responsibilities: Sequence[Responsibility],
     *,
@@ -1258,69 +1132,74 @@ def _check_control_elements_against_responsibilities(
     _check_every_responsibility_is_served(
         owner_numbers, known_pm_ids, actions, feedback_channels
     )
-    _check_control_element_refs(
+    unknown = _unknown_element_refs(
         actions,
         feedback_channels,
         responsibility_ids={resp.resp_id for resp in responsibilities},
         controlled_process_ids={process.cp_id for process in controlled_processes},
     )
-    for index, channel in enumerate(feedback_channels):
-        if channel.updates not in known_pm_ids:
-            raise ValueError(
-                f"feedback[{index}] updates unknown process model part "
-                f"{channel.updates!r}"
-            )
-    _check_action_process_model_refs(actions, responsibilities)
+    if not unknown:
+        for index, channel in enumerate(feedback_channels):
+            if channel.updates not in known_pm_ids:
+                raise ValueError(
+                    f"feedback[{index}] updates unknown process model part "
+                    f"{channel.updates!r}"
+                )
+    unknown += _foreign_process_model_refs(actions, responsibilities)
+    if unknown:
+        raise UnknownReferenceError(unknown, controlled_processes)
 
 
-def _check_control_element_refs(
+def _unknown_element_refs(
     actions: Sequence[ControlAction],
     feedback_channels: Sequence[FeedbackChannel],
     *,
     responsibility_ids: set[str],
     controlled_process_ids: set[str],
-) -> None:
-    """Reject an action target or feedback source absent from the structure."""
+) -> list[UnknownReference]:
+    """Return each action target or feedback source absent from the structure."""
+    unknown: list[UnknownReference] = []
     for collection_name, elements, ref_field in (
-        ("control action", actions, "target"),
-        ("feedback channel", feedback_channels, "source"),
+        ("control_actions", actions, "target"),
+        ("feedback", feedback_channels, "source"),
     ):
         for index, element in enumerate(elements):
             ref = getattr(element, ref_field)
-            if ref is None:  # pragma: no cover - required above
-                raise ValueError(f"{collection_name}[{index}] is missing {ref_field}")
-            if ref.type.value == "responsibility":
-                known = ref.id in responsibility_ids
-            else:
-                known = ref.id in controlled_process_ids
-            if not known:
-                raise ValueError(
-                    f"{collection_name}[{index}] {ref_field} reference "
-                    f"{ref.id!r} is not present in the supplied structure"
+            known_ids = (
+                responsibility_ids
+                if ref.type is ReferenceType.responsibility
+                else controlled_process_ids
+            )
+            if ref.id not in known_ids:
+                unknown.append(
+                    UnknownReference(f"{collection_name}[{index}].{ref_field}", ref.id)
                 )
+    return unknown
 
 
-def _check_action_process_model_refs(
+def _foreign_process_model_refs(
     actions: Sequence[ControlAction],
     responsibilities: Sequence[Responsibility],
-) -> None:
-    """Reject an action that cites another responsibility's process model."""
+) -> list[UnknownReference]:
+    """Return each action reference to another responsibility's process model."""
     pm_ids_by_owner = {
         _extract_resp_num(responsibility.resp_id): {
             pm.pm_id for pm in responsibility.process_model_parts
         }
         for responsibility in responsibilities
     }
+    unknown: list[UnknownReference] = []
     for index, action in enumerate(actions):
-        owner_pm_ids = pm_ids_by_owner.get(_owner_number(action.ca_id, prefix="CA"))
-        foreign = [
-            ref for ref in action.process_model_refs if ref not in (owner_pm_ids or ())
-        ]
-        if foreign:
-            raise ValueError(
-                f"control_actions[{index}] process_model_refs {foreign} are not "
-                "process model parts of the action's own responsibility"
+        owner = _owner_number(action.ca_id, prefix="CA")
+        owner_pm_ids = pm_ids_by_owner.get(owner, set())
+        unknown.extend(
+            UnknownReference(
+                f"control_actions[{index}].process_model_refs", ref, f"RESP-{owner}"
             )
+            for ref in action.process_model_refs
+            if ref not in owner_pm_ids
+        )
+    return unknown
 
 
 # ---------------------------------------------------------------------------
@@ -2087,14 +1966,21 @@ def _run_stage2_llm_call(
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[Any], None] | None = None,
     result_parser: Callable[[Any], _Stage2ModelT] | None = None,
+    result_parser_with_cleanup: (
+        Callable[[LLMResult, list[dict[str, Any]]], _Stage2ModelT] | None
+    ) = None,
     user_prompt_suffix: str = "",
+    recover: (
+        Callable[[CallOutcome[_Stage2ModelT], str, str], _Stage2ModelT | None] | None
+    ) = None,
 ) -> _Stage2ModelT:
     """Render prompts, call the LLM, validate, and raise StageError on failure.
 
     Shared backbone for the four Stage 2 LLM calls (Call 1, 2a, 2b, 3).
     Each call renders a system + user prompt, invokes the LLM via
     ``call_with_policy``, and raises ``StageError`` if the call or validation
-    fails.
+    fails.  ``recover`` receives a failed outcome with the system and user
+    prompts and may return a model from a follow-up request instead.
     """
     system_prompt = loader.render_prompt(system_template)
     user_prompt = (
@@ -2120,8 +2006,13 @@ def _run_stage2_llm_call(
         allow_unvalidated=allow_unvalidated,
         raw_result_validator=raw_result_validator,
         result_parser=result_parser,
-        result_validator=result_validator or _validate_stage2_intermediate,
+        result_parser_with_cleanup=result_parser_with_cleanup,
+        result_validator=result_validator,
     )
+    if outcome.error is not None and recover is not None:
+        recovered = recover(outcome, system_prompt, user_prompt)
+        if recovered is not None:
+            return recovered
     if outcome.error is not None:
         raise StageError(stage=STAGE, step=step, message=outcome.error)
     return outcome.value  # type: ignore[return-value]
@@ -2207,7 +2098,8 @@ def _call_2a_responsibilities(
         response_format=ResponsibilitySet,
         step="call_2a_responsibilities",
         allow_unvalidated=True,
-        raw_result_validator=_validate_responsibility_payload,
+        raw_result_validator=_validate_responsibility_wire,
+        result_parser_with_cleanup=_parse_responsibility_result,
     )
 
 
@@ -2231,6 +2123,27 @@ def _call_2b_control_elements(
     Raises:
         StageError: If the LLM call fails or the response fails validation.
     """
+
+    def parse(result: LLMResult) -> ControlElementSet:
+        return parse_control_element_set_response(
+            result.content, responsibilities=responsibility_set.responsibilities
+        )
+
+    def correct_references(
+        outcome: CallOutcome[ControlElementSet], system_prompt: str, user_prompt: str
+    ) -> ControlElementSet | None:
+        return _correct_call_2b_references(
+            outcome,
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            responsibilities=responsibility_set.responsibilities,
+            parse=parse,
+            run_dir=run_dir,
+            loader=loader,
+            temperature=temperature,
+        )
+
     return _run_stage2_llm_call(
         llm_client=llm_client,
         run_dir=run_dir,
@@ -2246,13 +2159,73 @@ def _call_2b_control_elements(
         response_format=_ControlElementProviderSet,
         step="call_2b_control_elements",
         # Call 2b is semantic output.  Its stage-local parser rejects unknown
-        # carriers and missing meaning before canonical IDs are repaired; the
-        # generic tolerant decoder is intentionally not enabled here.
-        result_parser=lambda result: parse_control_element_set_response(
-            result.content,
-            responsibilities=responsibility_set.responsibilities,
-        ),
+        # carriers and missing meaning before canonical IDs are repaired.
+        result_parser=parse,
+        recover=correct_references,
     )
+
+
+def _correct_call_2b_references(
+    outcome: CallOutcome[ControlElementSet],
+    *,
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    responsibilities: Sequence[Responsibility],
+    parse: Callable[[LLMResult], ControlElementSet],
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+) -> ControlElementSet | None:
+    """Send the one reference correction for a Call 2b response, or decline.
+
+    It runs only when the generic correction is spent and the last response
+    still names unknown targets, sources or process model parts.  The request
+    names each unknown reference, offers the valid IDs with their
+    descriptions, and continues the step's attempt numbering.  Every other
+    failure is declined so the caller stops as before.
+    """
+    failure = outcome.failure
+    if not isinstance(failure, UnknownReferenceError) or outcome.result is None:
+        return None
+    owners = {item.owner for item in failure.references if item.owner is not None}
+    feedback = "\n\n" + loader.render_prompt(
+        "stage2_call2b_reference_correction.j2",
+        unknown_references=failure.references,
+        responsibilities=responsibilities,
+        controlled_processes=failure.controlled_processes,
+        process_model_owners=[
+            responsibility
+            for responsibility in responsibilities
+            if responsibility.resp_id in owners
+        ],
+    )
+    corrected = call_with_policy(
+        llm_client=llm_client,
+        system_prompt=system_prompt,
+        user_prompt=correction_prompt(
+            original_prompt=user_prompt,
+            feedback=feedback,
+            error=failure,
+            response_format=_ControlElementProviderSet,
+            include_schema=False,
+            prior_result=outcome.result,
+            include_prior_response=True,
+        ),
+        response_format=_ControlElementProviderSet,
+        run_dir=run_dir,
+        stage=STAGE,
+        step="call_2b_control_elements",
+        policy=CorrectionPolicy(),
+        temperature=temperature,
+        result_parser=parse,
+        first_attempt_number=outcome.attempt_number + 1,
+    )
+    if corrected.error is not None:
+        raise StageError(
+            stage=STAGE, step="call_2b_control_elements", message=corrected.error
+        )
+    return corrected.value
 
 
 # ---------------------------------------------------------------------------

@@ -1,7 +1,6 @@
-"""Tests for the shared LLM helpers: parsing, tolerant decoding, calls and logs.
+"""Tests for the shared LLM helpers: parsing, calls and logs.
 
-Covers ``parse_llm_result``, the tolerant ``parse_llm_result_unvalidated`` path
-used before ID normalization, ``call_with_policy`` (compatibility retry,
+Covers ``parse_llm_result``, ``call_with_policy`` (compatibility retry,
 corrections, preflight, request counting), the call log, and the compact
 validation-error text.
 """
@@ -10,7 +9,6 @@ from __future__ import annotations
 
 import inspect
 import json
-from enum import Enum
 from pathlib import Path
 
 import pytest
@@ -30,7 +28,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call,
     log_llm_call_failure,
     parse_llm_result,
-    parse_llm_result_unvalidated,
 )
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.scripted_client import ScriptedClient
@@ -54,75 +51,11 @@ class _NestedModel(BaseModel):
         return value
 
 
-class _ContainerModel(BaseModel):
-    """Container used to verify tolerant nested construction."""
-
-    items: list[_NestedModel]
-
-
-class _RequiredNestedContainer(BaseModel):
-    """Container whose omitted nested model must not be fabricated."""
-
-    nested: _NestedModel
-
-
-class _Mode(str, Enum):
-    READY = "ready"
-
-
-class _CollectionModel(BaseModel):
-    """Model covering collection, enum, and union tolerant decoding."""
-
-    labels: set[str]
-    checkpoints: tuple[str, ...]
-    mode: _Mode
-    note: str | None = None
-
-
-class _MissingRequiredFieldsModel(BaseModel):
-    """Model covering every scalar and collection missing-field sentinel."""
-
-    text: str
-    count: int
-    ratio: float
-    enabled: bool
-    labels: list[str]
-    checkpoints: tuple[str, ...]
-    tags: set[str]
-    metadata: dict[str, int]
-
-
-class _RequiredUnionFieldsModel(BaseModel):
-    """Model covering Optional and non-optional Union sentinels."""
-
-    optional_text: str | None
-    text_or_count: str | int
-
-
 class _OptionalDumpModel(BaseModel):
     """Model whose default is not None, so omit-None dumps change meaning."""
 
     name: str
     unused: str | None = "present"
-
-
-class _ConstructFilterModel(BaseModel):
-    """Model used to verify unknown decoded fields are not constructed."""
-
-    name: str
-    optional: str | None = "default"
-
-
-class _UnionItemModel(BaseModel):
-    """Union field that should construct a nested model, not keep a dict."""
-
-    item: _NestedModel | None = None
-
-
-class _NoneFirstUnionModel(BaseModel):
-    """Union with None first so the None-candidate branch is executed."""
-
-    item: None | _NestedModel = None
 
 
 def _result(content) -> LLMResult:
@@ -189,160 +122,17 @@ class TestParseLlmResult:
             parse_llm_result(_result(12345), _SampleModel)
 
 
-class TestParseLlmResultUnvalidated:
-    """The tolerant path defers validation and keeps the response attribute-safe."""
+class TestCallWithPolicyRequestShape:
+    """allow_unvalidated shapes the request only; a client TypeError is not retried."""
 
-    def test_nested_invalid_source_id_is_preserved(self):
-        """Tolerant decoding defers nested validation to post-processing."""
-        result = _result({"items": [{"item_id": "malformed"}]})
-        parsed = parse_llm_result_unvalidated(result, _ContainerModel)
-        assert parsed.items[0].item_id == "malformed"
+    def test_json_object_mode_is_passed_and_still_validates(self, tmp_path):
+        client = ScriptedClient([{"item_id": "malformed"}])
 
-    def test_nested_missing_required_fields_are_filled(self):
-        """Nested model construction also supplies required-field sentinels."""
-        parsed = parse_llm_result_unvalidated(_result({"items": [{}]}), _ContainerModel)
-        assert parsed.items[0].item_id == ""
+        outcome = _send(client, tmp_path, allow_unvalidated=True)
 
-    def test_collections_and_enums_are_constructed(self):
-        """Tolerant decoding preserves supported nested annotation shapes."""
-        result = _result(
-            {
-                "labels": ["one", "two"],
-                "checkpoints": ["first", "second"],
-                "mode": "ready",
-                "note": "optional",
-            }
-        )
-
-        parsed = parse_llm_result_unvalidated(result, _CollectionModel)
-
-        assert parsed.labels == {"one", "two"}
-        assert parsed.checkpoints == ("first", "second")
-        assert parsed.mode is _Mode.READY
-        assert parsed.note == "optional"
-
-    def test_missing_required_fields_get_typed_sentinels(self):
-        """Missing required fields remain attribute-safe with typed sentinels."""
-        parsed = parse_llm_result_unvalidated(_result({}), _MissingRequiredFieldsModel)
-
-        assert parsed.text == ""
-        assert parsed.count == 0
-        assert parsed.ratio == 0.0
-        assert parsed.enabled is False
-        assert parsed.labels == []
-        assert parsed.checkpoints == ()
-        assert parsed.tags == set()
-        assert parsed.metadata == {}
-
-    def test_missing_nested_models_are_not_fabricated(self):
-        """Missing required nested models become None for later validation."""
-        parsed = parse_llm_result_unvalidated(_result({}), _RequiredNestedContainer)
-
-        assert parsed.nested is None
-        with pytest.raises(ValidationError, match="nested"):
-            _RequiredNestedContainer.model_validate(parsed.model_dump())
-
-    def test_union_sentinels(self):
-        """Optional unions use None and other unions use their first member."""
-        parsed = parse_llm_result_unvalidated(_result({}), _RequiredUnionFieldsModel)
-
-        assert parsed.optional_text is None
-        assert parsed.text_or_count == ""
-
-    def test_json_and_model_content_are_accepted(self):
-        """Tolerant decoding handles JSON strings and Pydantic content."""
-        content = {"name": "decoded"}
-        for encoded in (json.dumps(content), _SampleModel(**content)):
-            parsed = parse_llm_result_unvalidated(_result(encoded), _SampleModel)
-            assert parsed.name == "decoded"
-
-    def test_non_mapping_content_is_rejected(self):
-        """Tolerant decoding still requires a mapping-shaped response.
-
-        ``decode_content`` always returns a dumped mapping, JSON
-        object, or raises.  The later ``isinstance(content, model_class)``
-        branch is therefore defensive and unreachable from this public
-        helper.
-        """
-        result = _result(["not", "a", "mapping"])
-
-        with pytest.raises(TypeError, match="Unexpected LLM result content type"):
-            parse_llm_result_unvalidated(result, _SampleModel)
-
-        result.content = json.dumps(["not", "a", "mapping"])
-        with pytest.raises(TypeError, match="Expected a mapping"):
-            parse_llm_result_unvalidated(result, _SampleModel)
-
-    def test_decode_keeps_an_explicit_none(self):
-        """Kill: exclude_none=False -> True in decode_content."""
-        result = _result(_OptionalDumpModel(name="decoded", unused=None))
-        parsed = parse_llm_result_unvalidated(result, _OptionalDumpModel)
-        assert parsed.unused is None
-
-    def test_unknown_fields_are_filtered_out(self):
-        """Unknown response fields must not become model attributes."""
-        result = _result({"name": "decoded", "unmodeled": "ignore me"})
-
-        parsed = parse_llm_result_unvalidated(result, _ConstructFilterModel)
-
-        assert parsed.model_dump() == {"name": "decoded", "optional": "default"}
-        assert not hasattr(parsed, "unmodeled")
-
-    @pytest.mark.parametrize(
-        "model_class",
-        [_UnionItemModel, _NoneFirstUnionModel],
-        ids=["none_last", "none_first"],
-    )
-    def test_union_constructs_the_nested_model_member(self, model_class):
-        """Kill: candidate is type(None) -> is not type(None)."""
-        parsed = parse_llm_result_unvalidated(
-            _result({"item": {"item_id": "ok"}}), model_class
-        )
-        assert isinstance(parsed.item, _NestedModel)
-        assert parsed.item.item_id == "ok"
-
-    @pytest.mark.parametrize(
-        ("content", "model_class", "field"),
-        [
-            pytest.param(
-                {"nested": "not-a-dict"},
-                _RequiredNestedContainer,
-                "nested",
-                id="model_field_given_a_non_dict",
-            ),
-            pytest.param(
-                {"labels": ["one"], "checkpoints": ["first"], "mode": "not-a-mode"},
-                _CollectionModel,
-                "mode",
-                id="malformed_enum",
-            ),
-            pytest.param(
-                {"item": ["not", "a", "model"]},
-                _UnionItemModel,
-                "item",
-                id="union_no_member_accepts",
-            ),
-        ],
-    )
-    def test_a_value_that_cannot_be_constructed_is_kept_as_sent(
-        self, content, model_class, field
-    ):
-        """Kill: the model check `and` -> `or`; enum and union fall back to the raw value."""
-        parsed = parse_llm_result_unvalidated(_result(content), model_class)
-        assert getattr(parsed, field) == content[field]
-
-
-class TestCallWithPolicyTolerantMode:
-    """allow_unvalidated defers validation; a client TypeError is not retried."""
-
-    def test_tolerant_mode_is_passed_and_defers_validation(self, tmp_path):
-        client = ScriptedClient([{"items": [{"item_id": "malformed"}]}])
-
-        outcome = _send(client, tmp_path, _ContainerModel, allow_unvalidated=True)
-
-        assert outcome.error is None
         assert client.calls[0]["allow_unvalidated"] is True
-        assert outcome.value.items[0].item_id == "malformed"
+        assert outcome.value is None
+        assert "malformed source ID" in outcome.error
 
     def test_max_completion_tokens_is_forwarded(self, tmp_path):
         client = ScriptedClient([{"name": "ok", "unused": None}])
@@ -360,19 +150,7 @@ class TestCallWithPolicyTolerantMode:
         assert client.calls[0]["max_completion_tokens"] == 10
         assert client.calls[0]["allow_unvalidated"] is True
 
-    def test_validation_error_falls_back_to_the_raw_model(self, tmp_path):
-        outcome = _send(
-            ScriptedClient([{"item_id": "malformed"}]),
-            tmp_path,
-            allow_unvalidated=True,
-        )
-
-        assert outcome.error is None
-        assert outcome.value.item_id == "malformed"
-        with pytest.raises(ValidationError):
-            _NestedModel.model_validate({"item_id": "malformed"})
-
-    def test_default_does_not_use_the_tolerant_fallback(self, tmp_path):
+    def test_default_validates_against_the_response_model(self, tmp_path):
         outcome = _send(ScriptedClient([{"item_id": "malformed"}]), tmp_path)
 
         assert outcome.value is None
@@ -708,7 +486,7 @@ class TestRetryAttemptLog:
             **extra,
         )
 
-    def test_tolerant_decoding_is_off_by_default(self) -> None:
+    def test_json_object_mode_is_off_by_default(self) -> None:
         parameter = inspect.signature(call_with_policy).parameters["allow_unvalidated"]
 
         assert parameter.default is False

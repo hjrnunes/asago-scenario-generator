@@ -504,7 +504,7 @@ class TestRunOrchestration:
         assert result.stage_warnings == []
         assert any(
             "call_2b_control_elements" in error
-            and "target requires type and id" in error
+            and "control_actions.0.target.id\n  Field required" in error
             for error in result.stage_errors
         )
 
@@ -529,8 +529,40 @@ class TestRunOrchestration:
         assert result.stage_warnings == []
         assert any(
             "call_2b_control_elements" in error
-            and "requires a non-empty updates" in error
+            and "feedback_channels.0.updates\n  Input should be a valid string" in error
             for error in result.stage_errors
+        )
+
+    def test_invented_reference_gets_the_typed_reference_correction(self, tmp_path):
+        """An invented Call 2b target gets one typed correction, then the run goes on."""
+        invented = valid_control_element_set_dict()
+        invented["control_actions"][0]["target"] = {
+            "type": "responsibility",
+            "id": "RESP-T_S",
+        }
+        invented["control_actions"][0]["effect_kind"] = "agent_message"
+        client = _setup_mock_client()
+        client.set_response_for(
+            ControlElementSet,
+            [invented, invented, valid_control_element_set_dict()],
+        )
+
+        result = run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        assert result.control_structure is not None
+        attempts = [
+            entry
+            for entry in read_calls_jsonl(tmp_path)
+            if entry["step"] == "call_2b_control_elements"
+        ]
+        assert [entry["attempt_number"] for entry in attempts] == [1, 2, 3]
+        assert (
+            "- control_actions[0].target: RESP-T_S" in (attempts[2]["user_prompt_text"])
         )
 
     def test_run_manifest_records_profile_name(self, tmp_path):

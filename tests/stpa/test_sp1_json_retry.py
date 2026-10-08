@@ -99,7 +99,7 @@ def test_stage2_json_decode_retry_is_bounded(tmp_path):
 
 
 def test_stage2_semantic_failure_gets_one_corrective_retry(tmp_path):
-    """A semantically empty tolerant result gets one bounded retry."""
+    """A semantically empty result gets one bounded retry."""
     client: MockLLMClient = setup_sp1_mock_client()
     client.set_response_for(
         ResponsibilitySet,
@@ -121,7 +121,8 @@ def test_stage2_semantic_failure_gets_one_corrective_retry(tmp_path):
     ]
     assert len(attempts) == 2
     assert [entry["success"] for entry in attempts] == [False, True]
-    assert "ValueError" in attempts[0]["error"]
+    assert "responsibilities" in attempts[0]["error"]
+    assert "at least 1 item" in attempts[0]["error"]
     assert (
         "Prior structured response to correct in place"
         in attempts[1]["user_prompt_text"]
@@ -156,7 +157,7 @@ def test_stage2_semantic_failure_retry_is_bounded(tmp_path):
     ]
     assert len(attempts) == 2
     assert [entry["success"] for entry in attempts] == [False, False]
-    assert all("ValueError" in entry["error"] for entry in attempts)
+    assert all("at least 1 item" in entry["error"] for entry in attempts)
 
 
 def test_stage2_client_failure_is_not_retried(tmp_path):

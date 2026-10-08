@@ -23,9 +23,9 @@ Each `source_N` means one exact supplied USE_CASE paragraph, not an inferred fac
   PM parts: {% for pm in resp.process_model_parts %}{{ pm.pm_id }} ({{ pm.description }}){% if not loop.last %}, {% endif %}{% endfor %}
   Control actions:
 {% for ca in resp.control_actions %}
-  - {{ ca.ca_id }}: {{ ca.description }}; current effect: {{ ca.effect_kind }}{% if ca.target %}; target: {{ ca.target.type }} {{ ca.target.id }}{% endif %}
+  - {{ ca.ca_id }}: {{ ca.description }}; current effect: {{ ca.effect_kind.value if ca.effect_kind is not none else ca.effect_kind }}{% if ca.target %}; target: {{ ca.target.type.value }} {{ ca.target.id }}{% endif %}
 {% endfor %}
-  Feedback channels: {% for fb in resp.feedback_channels %}{{ fb.fb_id }} (updates {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type }} {{ fb.source.id }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}
+  Feedback channels: {% for fb in resp.feedback_channels %}{{ fb.fb_id }} (updates {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type.value }} {{ fb.source.id }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}
 {% endfor %}
 
 ### Controlled Processes

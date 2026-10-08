@@ -24,7 +24,6 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     RevisionDelta,
-    _validate_revision_dismissed_gaps,
     run_revision,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
@@ -99,13 +98,10 @@ def test_strict_revision_failure_retains_structure_and_is_visible(tmp_path) -> N
 
     assert revised == original
     assert any(warning.startswith("Revision failed:") for warning in warnings)
-    assert any("new_responsibilities must be a list" in warning for warning in warnings)
-
-
-def test_revision_dismissed_gap_shape_requires_nonempty_source_text() -> None:
-    _validate_revision_dismissed_gaps(["the gap is not supported by the model"])
-    with pytest.raises(ValueError, match=r"dismissed_gaps\[0\]"):
-        _validate_revision_dismissed_gaps([" "])
+    assert any(
+        "ValidationError" in warning and "new_responsibilities" in warning
+        for warning in warnings
+    )
 
 
 def test_gap_prompt_receives_source_separated_deduplicated_losses(tmp_path) -> None:

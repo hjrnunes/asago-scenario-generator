@@ -1272,3 +1272,17 @@ class TestRenumberCollidingCmIds:
         assert cl2.coordination_mechanism.description == "Unique mechanism"
         assert cl2.coordination_mechanism.payload == "Unique payload"
         assert cl2.coordination_mechanism.cm_id != "CM-1"
+
+
+def test_revision_prompt_renders_a_feedback_source_type_as_its_value():
+    cs = _make_control_structure()
+    cs.responsibilities[0].process_model_parts[0].feedback_source = ElementRef(
+        type=ReferenceType.controlled_process, id="CP-1"
+    )
+
+    rendered = _render_template(
+        "revision_system.j2", control_structure=cs, **_compute_next_ids(cs)
+    )
+
+    assert "- PM-1-1: State 1 (source: controlled_process CP-1)" in rendered
+    assert "ReferenceType." not in rendered

@@ -24,11 +24,8 @@ from copy import deepcopy
 
 import pytest
 from hypothesis import HealthCheck, given, settings, strategies as st
-from pydantic import BaseModel, ValidationError
+from pydantic import ValidationError
 
-from asago_scenario_generator.stpa.infra.unvalidated_decode import (
-    construct_model_unvalidated,
-)
 from asago_scenario_generator.stpa.system_model.id_normalization import (
     normalize_control_structure_payload,
     validate_normalized_control_structure,
@@ -762,36 +759,3 @@ class TestEmptyDescriptionRepair:
             assert actual is None
         else:
             assert "description" not in result.payload["responsibilities"][0]
-
-
-class _Sample(BaseModel):
-    item_id: str
-    note: str
-    count: int = 3
-
-
-class TestGenericIdAlias:
-    """Generic ``id`` fills omitted ``*_id`` fields only."""
-
-    @given(st_label, st_label)
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_alias_fills_id_fields_only(self, item, note):
-        decoded = construct_model_unvalidated({"id": item, "note": note}, _Sample)
-        assert decoded.item_id == item
-        assert decoded.note == note
-        assert decoded.count == 3
-
-        explicit = construct_model_unvalidated(
-            {"id": "ignored", "item_id": item, "note": note},
-            _Sample,
-        )
-        assert explicit.item_id == item
-        assert explicit.note == note
-
-        omitted = construct_model_unvalidated({"id": item}, _Sample)
-        assert omitted.item_id == item
-        assert omitted.note == ""

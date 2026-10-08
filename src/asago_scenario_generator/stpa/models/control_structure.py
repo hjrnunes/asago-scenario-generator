@@ -13,16 +13,67 @@ from __future__ import annotations
 import itertools
 import math
 import re
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING
+from types import MappingProxyType
+from typing import TYPE_CHECKING, Annotated
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Field,
+    StrictStr,
+    ValidationError,
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+    model_validator,
+)
 
 from asago_scenario_generator.stpa.models._validation import check_duplicate_ids
 
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+
+
+ASSEMBLY_DEFERRED: Mapping[str, bool] = MappingProxyType({"defer_to_assembly": True})
+"""Validation context for Stage 2 model output.
+
+Stage 2 parses model output before ``id_normalization`` renumbers its IDs by
+structural position, and the assembled ``ControlStructure`` validates the
+result. Passing this context keeps each ID as written instead of rejecting its
+format; every other field rule still applies.
+"""
+
+
+def _assembly_deferred(info: ValidationInfo | None) -> bool:
+    """Return whether *info* carries the :data:`ASSEMBLY_DEFERRED` context."""
+    context = info.context if info is not None else None
+    return bool(context and context.get("defer_to_assembly"))
+
+
+def _non_blank(value: str) -> str:
+    """Require a visible character while keeping the string exactly."""
+    if not value.strip():
+        raise ValueError("must be a non-empty string")
+    return value
+
+
+NonBlankStr = Annotated[StrictStr, AfterValidator(_non_blank)]
+"""Model-written text that must show a character; the string is kept as written."""
+
+
+def _keep_when_deferred(
+    value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+) -> object:
+    """Validate *value*, or keep an invalid string under ASSEMBLY_DEFERRED."""
+    try:
+        return handler(value)
+    except ValidationError:
+        if _assembly_deferred(info) and isinstance(value, str):
+            return value
+        raise
 
 
 def _validate_id_format(
@@ -31,6 +82,7 @@ def _validate_id_format(
     format_spec: str,
     example: str,
     pattern: str,
+    info: ValidationInfo | None = None,
 ) -> str:
     """Validate that *value* matches the expected ID format.
 
@@ -45,6 +97,8 @@ def _validate_id_format(
         format_spec: Format placeholder (e.g. ``"RC-X-Y"``).
         example: Concrete example for the error message (e.g. ``"RC-1-1"``).
         pattern: Anchored regex pattern the value must match.
+        info: Validation info; under :data:`ASSEMBLY_DEFERRED` the format
+            check is skipped.
 
     Returns:
         The validated value (unchanged).
@@ -52,6 +106,8 @@ def _validate_id_format(
     Raises:
         ValueError: If *value* does not match *pattern*.
     """
+    if _assembly_deferred(info):
+        return value
     if not re.match(pattern, value):
         raise ValueError(
             f"{field_name} must match format '{format_spec}' "
@@ -148,6 +204,14 @@ class ElementRef(BaseModel):
     type: ReferenceType
     id: str  # RESP-* or CP-*
 
+    @field_validator("type", mode="wrap")
+    @classmethod
+    def keep_deferred_type(
+        cls, value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+    ) -> object:
+        """Under ASSEMBLY_DEFERRED, leave an unknown type for assembly to reject."""
+        return _keep_when_deferred(value, handler, info)
+
 
 class ResponsibilityConstraint(BaseModel):
     """A constraint on a responsibility."""
@@ -157,8 +221,10 @@ class ResponsibilityConstraint(BaseModel):
 
     @field_validator("rc_id")
     @classmethod
-    def validate_rc_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "rc_id", "RC-X-Y", "RC-1-1", r"^RC-\d+-\d+$")
+    def validate_rc_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "rc_id", "RC-X-Y", "RC-1-1", r"^RC-\d+-\d+$", info
+        )
 
 
 class ProcessModelPart(BaseModel):
@@ -186,8 +252,10 @@ class ProcessModelPart(BaseModel):
 
     @field_validator("pm_id")
     @classmethod
-    def validate_pm_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "pm_id", "PM-X-Y", "PM-1-1", r"^PM-\d+-\d+$")
+    def validate_pm_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "pm_id", "PM-X-Y", "PM-1-1", r"^PM-\d+-\d+$", info
+        )
 
 
 def normalize_control_action_effect_kind(
@@ -196,9 +264,9 @@ def normalize_control_action_effect_kind(
 ) -> ControlActionEffectKind | None:
     """Apply the deterministic responsibility-target effect rule.
 
-    This helper is also used by tolerant Stage 2 parsing, whose recovery path
-    intentionally uses ``model_construct`` and therefore bypasses Pydantic's
-    model validators.  It accepts legacy missing values but never silently
+    This helper is also used by Call 2b parsing, which builds its domain
+    models with ``model_construct`` and therefore bypasses Pydantic's model
+    validators.  It accepts legacy missing values but never silently
     changes an explicitly conflicting effect.
     """
     if effect_kind is not None:
@@ -258,12 +326,24 @@ class ControlAction(BaseModel):
 
     @field_validator("ca_id")
     @classmethod
-    def validate_ca_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "ca_id", "CA-X-Y", "CA-1-1", r"^CA-\d+-\d+$")
+    def validate_ca_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "ca_id", "CA-X-Y", "CA-1-1", r"^CA-\d+-\d+$", info
+        )
+
+    @field_validator("effect_kind", "temporality", mode="wrap")
+    @classmethod
+    def keep_deferred_kind(
+        cls, value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+    ) -> object:
+        """Under ASSEMBLY_DEFERRED, leave an unknown kind for assembly to reject."""
+        return _keep_when_deferred(value, handler, info)
 
     @model_validator(mode="before")
     @classmethod
-    def infer_responsibility_message_effect(cls, value: object) -> object:
+    def infer_responsibility_message_effect(
+        cls, value: object, info: ValidationInfo
+    ) -> object:
         """Derive the only valid effect for a responsibility target.
 
         Responsibility-to-responsibility actions are messages between
@@ -271,8 +351,10 @@ class ControlAction(BaseModel):
         action description.  A conflicting explicit value is rejected so a
         downstream execution planner never has to choose between contradictory
         typed facts.  A ``before`` validator keeps the model immutable during
-        post-validation; tolerant Stage 2 parsing calls the shared helper
-        explicitly because it uses ``model_construct``.
+        post-validation; Call 2b parsing calls the shared helper explicitly
+        because it uses ``model_construct``.  Under
+        ASSEMBLY_DEFERRED an invalid or conflicting effect is left for the
+        assembled structure to reject.
         """
         if not isinstance(value, dict):
             return value
@@ -290,8 +372,12 @@ class ControlAction(BaseModel):
             try:
                 normalized = ControlActionEffectKind(effect_kind)
             except (TypeError, ValueError) as exc:
+                if _assembly_deferred(info):
+                    return value
                 raise ValueError("invalid effect_kind") from exc
             if normalized is not ControlActionEffectKind.agent_message:
+                if _assembly_deferred(info):
+                    return value
                 raise ValueError(
                     "control actions targeting a responsibility must use "
                     "effect_kind='agent_message'"
@@ -321,8 +407,10 @@ class FeedbackChannel(BaseModel):
 
     @field_validator("fb_id")
     @classmethod
-    def validate_fb_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "fb_id", "FB-X-Y", "FB-1-1", r"^FB-\d+-\d+$")
+    def validate_fb_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "fb_id", "FB-X-Y", "FB-1-1", r"^FB-\d+-\d+$", info
+        )
 
 
 class Responsibility(BaseModel):
@@ -343,8 +431,10 @@ class Responsibility(BaseModel):
 
     @field_validator("resp_id")
     @classmethod
-    def validate_resp_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "resp_id", "RESP-N", "RESP-1", r"^RESP-\d+$")
+    def validate_resp_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(
+            v, "resp_id", "RESP-N", "RESP-1", r"^RESP-\d+$", info
+        )
 
 
 class ControlledProcess(BaseModel):
@@ -355,8 +445,8 @@ class ControlledProcess(BaseModel):
 
     @field_validator("cp_id")
     @classmethod
-    def validate_cp_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "cp_id", "CP-N", "CP-1", r"^CP-\d+$")
+    def validate_cp_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(v, "cp_id", "CP-N", "CP-1", r"^CP-\d+$", info)
 
 
 class CoordinationMechanism(BaseModel):
@@ -368,8 +458,8 @@ class CoordinationMechanism(BaseModel):
 
     @field_validator("cm_id")
     @classmethod
-    def validate_cm_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "cm_id", "CM-N", "CM-1", r"^CM-\d+$")
+    def validate_cm_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(v, "cm_id", "CM-N", "CM-1", r"^CM-\d+$", info)
 
 
 class CoordinationLink(BaseModel):
@@ -384,8 +474,8 @@ class CoordinationLink(BaseModel):
 
     @field_validator("link_id")
     @classmethod
-    def validate_link_id_format(cls, v: str) -> str:
-        return _validate_id_format(v, "link_id", "CL-N", "CL-1", r"^CL-\d+$")
+    def validate_link_id_format(cls, v: str, info: ValidationInfo) -> str:
+        return _validate_id_format(v, "link_id", "CL-N", "CL-1", r"^CL-\d+$", info)
 
 
 class ControlStructure(BaseModel):
@@ -602,7 +692,7 @@ def _validate_element_refs(
 def _normalize_control_action_semantics(
     responsibilities: list[Responsibility],
 ) -> None:
-    """Fill derived action semantics after tolerant nested construction."""
+    """Fill derived action semantics on actions built without validation."""
     for responsibility in responsibilities:
         for index, action in enumerate(responsibility.control_actions):
             effect_kind = normalize_control_action_effect_kind(

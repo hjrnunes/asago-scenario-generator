@@ -1,0 +1,27 @@
+The prior response names references that this structure does not hold.
+Correct only these references, and keep every other record as written.
+
+Unknown references in the prior response:
+{%- for ref in unknown_references %}
+- {{ ref.location }}: {{ ref.value }}{% if ref.owner %} (not a process model part of {{ ref.owner }}){% endif %}
+{%- endfor %}
+
+Valid action targets and feedback sources:
+{%- for resp in responsibilities %}
+- {{ resp.resp_id }} (responsibility): {{ resp.description }}
+{%- endfor %}
+{%- for process in controlled_processes %}
+- {{ process.cp_id }} (controlled process): {{ process.description }}
+{%- endfor %}
+A target or source may also name a controlled process that you add to
+`controlled_processes` in this response.
+{%- if process_model_owners %}
+
+An action's `process_model_refs` name only process model parts of the action's
+own responsibility. Valid process model parts:
+{%- for resp in process_model_owners %}
+{%- for pm in resp.process_model_parts %}
+- {{ resp.resp_id }}: {{ pm.pm_id }}: {{ pm.description }}
+{%- endfor %}
+{%- endfor %}
+{%- endif %}
