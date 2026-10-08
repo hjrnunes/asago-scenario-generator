@@ -42,8 +42,6 @@ and the full graph, and the merged rows keep the supplied card order.
 from __future__ import annotations
 
 import hashlib
-import os
-import tempfile
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Literal, Sequence
@@ -59,6 +57,7 @@ from pydantic import (
     field_validator,
 )
 
+from asago_scenario_generator.manifest import atomic_write_text
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
@@ -910,27 +909,13 @@ def _atomic_write_yaml(model: BaseModel, path: Path) -> Path:
     requires explicit ``null`` for ``failure_reason``, ``against``, and
     ``missing_protection``, so this writer dumps the full JSON-mode mapping.
     """
-    path = Path(path)
-    path.parent.mkdir(parents=True, exist_ok=True)
     payload = yaml.dump(
         model.model_dump(mode="json"),
         default_flow_style=False,
         sort_keys=False,
         allow_unicode=True,
     )
-    descriptor, temporary_name = tempfile.mkstemp(
-        dir=path.parent, suffix=".tmp", prefix=path.name
-    )
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
-            handle.write(payload)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, path)
-    finally:
-        temporary_path.unlink(missing_ok=True)
-    return path
+    return atomic_write_text(path, payload)
 
 
 def _write_artifact(
