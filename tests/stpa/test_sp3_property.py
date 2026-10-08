@@ -34,7 +34,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlledProcess,
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
-    CoverageAnalysis,
     EnrichedThreatSet,
     StructuralThreat,
 )
@@ -63,6 +62,7 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_traceability,
 )
 from tests.helpers.stpa_builders import make_loss_analysis
+from tests.helpers.sp3_run import threat_set_of
 
 
 # Strategies
@@ -144,17 +144,7 @@ def _make_threat(
 
 
 def _make_ets(threats: list[StructuralThreat] | None = None) -> EnrichedThreatSet:
-    return EnrichedThreatSet(
-        structural_threats=threats or [_make_threat()],
-        coverage_analysis=CoverageAnalysis(
-            structural_coverage={
-                "total_slots": 1,
-                "non_na": 1,
-                "na": 0,
-                "coverage_rate": 1.0,
-            },
-        ),
-    )
+    return threat_set_of(threats or [_make_threat()])
 
 
 def _make_envelope(

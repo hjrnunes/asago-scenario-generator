@@ -39,6 +39,21 @@ def _make_ets(num_threats: int = 2) -> EnrichedThreatSet:
     )
 
 
+def threat_set_of(threats: list[StructuralThreat]) -> EnrichedThreatSet:
+    """Wrap ``threats`` with the one-slot, fully covered coverage analysis."""
+    return EnrichedThreatSet(
+        structural_threats=threats,
+        coverage_analysis=CoverageAnalysis(
+            structural_coverage={
+                "total_slots": 1,
+                "non_na": 1,
+                "na": 0,
+                "coverage_rate": 1.0,
+            },
+        ),
+    )
+
+
 def _semantics_wire(payload: dict) -> dict:
     """Reduce an execution-design Stage 5 payload to the scenario-semantics wire.
 
