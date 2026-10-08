@@ -5,24 +5,26 @@ question per adversarial scenario: which channel, how many turns, who speaks
 each turn and why, and (for indirect attacks) which operation carries the
 planted item. The reply holds no free text, so no attack words can appear in it.
 
-Code validates the reply and never repairs it. Any failure, whether the call,
-the schema, a cross-field rule, an unobserved carrier or a missing attacker
-influence, replaces the proposal with the single-turn direct default and
-records the reason on the shape.
+Code validates the reply and never repairs it. A reply that breaks the schema,
+a cross-field rule, the allowed channels, or names an unobserved or
+uninfluenced carrier earns one correction request naming every broken rule.
+Any failure that remains, and any failed call, replaces the proposal with the
+single-turn direct default and records the reason on the shape.
 """
 
 from __future__ import annotations
 
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StrictInt
 
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
+    ExactFeedbackError,
     call_with_policy,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -216,9 +218,9 @@ def _indirect_shape(
     )
 
 
-def _validated_shape(proposal: ShapeProposal | ForgedShapeProposal) -> AttackShape:
+def _shape_fields(proposal: ShapeProposal | ForgedShapeProposal) -> dict[str, object]:
     channel = AttackChannel(proposal.channel)
-    return AttackShape(
+    return dict(
         channel=channel,
         # The plan is the structure; a reply whose count disagrees with it is
         # not a different shape.
@@ -242,33 +244,131 @@ def _validated_shape(proposal: ShapeProposal | ForgedShapeProposal) -> AttackSha
     )
 
 
-def _downgrade_reason(
+def _model_rule_failures(fields: dict[str, object]) -> list[str]:
+    """Run each ``AttackShape`` rule on its own, so every broken rule is named.
+
+    Pydantic stops at the first failing model validator; a correction that
+    named only that one would let the next reply break the others.
+    """
+    draft = AttackShape.model_construct(**fields)
+    failures = []
+    for rule in AttackShape.__pydantic_decorators__.model_validators.values():
+        try:
+            rule.func(draft)
+        except ValueError as error:
+            failures.append(str(error))
+    return failures
+
+
+def _fact_failures(
     shape: AttackShape, facts: ShapeFacts
-) -> ShapeDowngradeReason | None:
-    if shape.channel not in allowed_channels(facts.adversary_kind, facts.config):
-        return ShapeDowngradeReason.SHAPE_VALIDATION_FAILED
+) -> list[tuple[ShapeDowngradeReason, str]]:
+    """Name each fact about the scenario or target the shape contradicts."""
+    failures = []
+    allowed = allowed_channels(facts.adversary_kind, facts.config)
+    if shape.channel not in allowed:
+        names = ", ".join(f"`{channel.value}`" for channel in sorted(allowed))
+        failures.append(
+            (
+                ShapeDowngradeReason.SHAPE_VALIDATION_FAILED,
+                f"channel `{shape.channel.value}` is not allowed for this "
+                f"scenario; allowed: {names}",
+            )
+        )
+    if shape.indirect is None:
+        return failures
+    carrier = shape.indirect.carrier_operation
     if not carrier_operation_observed(shape, facts.observed_operations):
-        return ShapeDowngradeReason.CARRIER_NOT_OBSERVED
-    if (
-        shape.indirect is not None
-        and shape.indirect.carrier_operation not in facts.influenced_operations
-    ):
-        return ShapeDowngradeReason.NO_ATTACKER_INFLUENCED_OPERATION
-    return None
+        failures.append(
+            (
+                ShapeDowngradeReason.CARRIER_NOT_OBSERVED,
+                f"R8: carrier_operation `{carrier}` is not an operation the "
+                "target offers",
+            )
+        )
+    elif carrier not in facts.influenced_operations:
+        failures.append(
+            (
+                ShapeDowngradeReason.NO_ATTACKER_INFLUENCED_OPERATION,
+                f"carrier_operation `{carrier}` is not marked `outside content: yes`",
+            )
+        )
+    return failures
+
+
+@dataclass(frozen=True)
+class _Judgement:
+    """A proposal's shape (or the code default) and every rule it broke."""
+
+    shape: AttackShape
+    failures: tuple[str, ...]
+
+
+def _judge(
+    proposal: ShapeProposal | ForgedShapeProposal, facts: ShapeFacts
+) -> _Judgement:
+    fields = _shape_fields(proposal)
+    rule_failures = _model_rule_failures(fields)
+    fact_failures = _fact_failures(AttackShape.model_construct(**fields), facts)
+    failures = tuple(rule_failures + [text for _, text in fact_failures])
+    if rule_failures:
+        reason = ShapeDowngradeReason.SHAPE_VALIDATION_FAILED
+    elif fact_failures:
+        reason = fact_failures[0][0]
+    else:
+        return _Judgement(AttackShape(**fields), ())
+    return _Judgement(default_attack_shape(reason), failures)
 
 
 def resolve_attack_shape(
     proposal: ShapeProposal | ForgedShapeProposal, facts: ShapeFacts
 ) -> AttackShape:
     """Validate a proposal into a shape, or return the code default with its reason."""
-    try:
-        shape = _validated_shape(proposal)
-    except ValidationError:
-        return default_attack_shape(ShapeDowngradeReason.SHAPE_VALIDATION_FAILED)
-    reason = _downgrade_reason(shape, facts)
-    if reason is not None:
-        return default_attack_shape(reason)
-    return shape
+    return _judge(proposal, facts).shape
+
+
+class _ShapeRejectedError(ExactFeedbackError):
+    """A parsed reply that broke a rule; ``shape`` is its code default."""
+
+    def __init__(self, message: str, shape: AttackShape) -> None:
+        super().__init__(message)
+        self.shape = shape
+
+
+def _rejection_message(failures: tuple[str, ...], facts: ShapeFacts) -> str:
+    lines = ["the reply breaks these rules:", *(f"- {text}" for text in failures)]
+    if AttackChannel.INDIRECT in allowed_channels(facts.adversary_kind, facts.config):
+        names = ", ".join(f"`{name}`" for name in sorted(facts.influenced_operations))
+        lines.append(f"Operations marked `outside content: yes`: {names}.")
+    return "\n".join(lines)
+
+
+def _rule_check(
+    facts: ShapeFacts,
+) -> Callable[[ShapeProposal | ForgedShapeProposal], None]:
+    """Return the result validator that turns a broken rule into a correction."""
+
+    def check(proposal: ShapeProposal | ForgedShapeProposal) -> None:
+        judgement = _judge(proposal, facts)
+        if judgement.failures:
+            raise _ShapeRejectedError(
+                _rejection_message(judgement.failures, facts), judgement.shape
+            )
+
+    return check
+
+
+# One correction, through the shared policy: the prior reply is echoed so the
+# model fixes it in place, and the schema is already on the request.
+SHAPE_CORRECTION_POLICY = CorrectionPolicy(
+    validation_retries=1,
+    feedback=(
+        "\n\nCode rejected the prior reply. Return the whole reply again with "
+        "every listed rule fixed."
+    ),
+    include_schema=False,
+    include_response=True,
+)
 
 
 @dataclass(frozen=True)
@@ -340,29 +440,31 @@ def _shape_for(spec: ScenarioSpec, run: _ShapeRun) -> AttackShape | None:
     if unreachable is not None:
         return default_attack_shape(unreachable)
     system, user = _render_prompts(spec, adversary.kind, run)
-    response_model = response_model_for(run.config)
-    outcome = call_with_policy(
-        llm_client=run.llm_client,
-        system_prompt=system,
-        user_prompt=user,
-        response_format=response_model,
-        run_dir=run.run_dir,
-        stage=SHAPE_STAGE,
-        step=SHAPE_STEP,
-        policy=CorrectionPolicy(),
-        slot_id=spec.threat_source.ica_slot_id,
-        scenario_id=spec.scenario_id,
-        temperature=run.temperature,
-    )
-    if outcome.value is None:
-        return default_attack_shape(ShapeDowngradeReason.SHAPE_CALL_FAILED)
     facts = ShapeFacts(
         adversary_kind=adversary.kind,
         observed_operations=run.observed_operations,
         influenced_operations=run.influenced_operations,
         config=run.config,
     )
-    return resolve_attack_shape(outcome.value, facts)
+    outcome = call_with_policy(
+        llm_client=run.llm_client,
+        system_prompt=system,
+        user_prompt=user,
+        response_format=response_model_for(run.config),
+        run_dir=run.run_dir,
+        stage=SHAPE_STAGE,
+        step=SHAPE_STEP,
+        policy=SHAPE_CORRECTION_POLICY,
+        slot_id=spec.threat_source.ica_slot_id,
+        scenario_id=spec.scenario_id,
+        temperature=run.temperature,
+        result_validator=_rule_check(facts),
+    )
+    if outcome.value is not None:
+        return resolve_attack_shape(outcome.value, facts)
+    if isinstance(outcome.failure, _ShapeRejectedError):
+        return outcome.failure.shape
+    return default_attack_shape(ShapeDowngradeReason.SHAPE_CALL_FAILED)
 
 
 def apply_shape_step(
@@ -380,7 +482,8 @@ def apply_shape_step(
     A functional scenario passes through unchanged and costs no request, as
     does an indirect-only scenario when the run has no attacker-influenced
     operation; that scenario takes the code default with the reason. Each other
-    adversarial scenario costs exactly one request, with no retry.
+    adversarial scenario costs one request, plus one correction when its reply
+    breaks a rule.
     """
     run = _ShapeRun(
         llm_client=llm_client,

@@ -145,7 +145,7 @@ def test_duplicates_keep_the_scenario_whose_shape_the_model_proposed(
     publish(
         [_normal_semantics_payload(), _normal_semantics_payload()],
         tmp_path,
-        shape_reply=[invalid_reply, DIRECT_REPLY],
+        shape_reply=[invalid_reply, invalid_reply, DIRECT_REPLY],
     )
 
     first = assert_valid_v4(_published_handoff(tmp_path, "SCN-001"))

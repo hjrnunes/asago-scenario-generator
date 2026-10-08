@@ -618,7 +618,9 @@ no executable condition, and publishes the scenario handoff from it.
 ## Shape step
 
 After Stage 5, the shape step makes one request per adversarial scenario
-(`stage5_shape_system.j2`, `stage5_shape_user.j2`). The response model,
+(`stage5_shape_system.j2`, `stage5_shape_user.j2`). An indirect-only scenario
+in a run where no operation carries attacker-influenced content, or with no
+target profile, costs no request and takes the default at once. The response model,
 `ShapeProposal` in `stpa.scenario_prod.stage5.shape_step`, is closed: `channel`,
 `turn_count`, `turn_plan` entries of `position`, `speaker` and `purpose`, and
 an `indirect` block of `carrier_operation`, `content_kind`, `record_ref` and
@@ -636,9 +638,15 @@ forged-transcript
 channel, its speakers and its purpose appear in the response model and the
 prompts only when `ShapeStepConfig.allow_forged_transcript` is on.
 
-Code validates the reply and never asks the model to correct it. A failed
-request, an invalid reply or a rejected shape becomes the single-turn direct
-default with a `downgrade_reason`; the table in `overview.md` lists the reasons.
+Code takes `turn_count` from the length of `turn_plan` and validates the rest
+of the reply without repairing it. A reply that breaks the schema, an
+`AttackShape` rule, the allowed channels, or names a carrier that is not
+observed or not influenced earns one correction through the shared
+`CorrectionPolicy`: the prompt again, the prior reply, and one line per broken
+rule (the rule's own error text), then the operations marked
+`outside content: yes` when `indirect` is allowed. A failed request, or a reply
+that still fails after the correction, becomes the single-turn direct default
+with a `downgrade_reason`; the table in `overview.md` lists the reasons.
 `tests/stpa/shape_step_prompts/` pins the rendered request for each adversary
 kind.
 
