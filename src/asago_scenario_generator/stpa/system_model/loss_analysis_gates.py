@@ -2326,33 +2326,7 @@ def gate_pinned_loss_analysis(
     accounting = check_risk_accounting(loss_analysis, risk_cards)
     density = check_hazard_graph_density(loss_analysis)
     if not accounting.passed:
-        _write_gates_artifact(
-            run_dir,
-            accounting=accounting,
-            density=density,
-            failing_checks=[],
-            revision_attempted=False,
-            revision_applied=False,
-        )
-        raise LossAnalysisGateError(
-            stage=STAGE,
-            step=STEP_GAP,
-            message="risk accounting gate failed: "
-            + "; ".join(
-                dict.fromkeys(
-                    [
-                        *accounting.missing_dispositions,
-                        *accounting.unaccounted_risk_refs,
-                    ]
-                )
-            ),
-            gate="risk_accounting",
-            failing_checks=(
-                *accounting.missing_dispositions,
-                *accounting.unaccounted_risk_refs,
-                *accounting.contradictions,
-            ),
-        )
+        _raise_accounting_failure(run_dir, accounting, density, None)
     if not density.passed:
         _write_gates_artifact(
             run_dir,
