@@ -341,7 +341,6 @@ def run_sp3(
         functional_test_specs = []
     all_validation_errors, coverage_gaps, eval_scorecard = _stage7_outputs(
         scenario_envelopes,
-        scenario_specs,
         enriched_threat_set,
         control_structure,
         loss_analysis,
@@ -1080,20 +1079,14 @@ def _publish_execution_target_profile(
 
 def _stage7_outputs(
     scenario_envelopes: list[ScenarioEnvelope],
-    scenario_specs: list[ScenarioSpec],
     enriched_threat_set: EnrichedThreatSet,
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
 ) -> tuple[list[str], dict, dict]:
     """Validate accepted scenarios and derive coverage/evaluation outputs."""
     validation_errors: list[str] = []
-    _run_stage7_validations(
-        scenario_envelopes,
-        scenario_specs,
-        control_structure,
-        loss_analysis,
-        validation_errors,
-    )
+    for envelope in scenario_envelopes:
+        _validate_envelope_stage7(envelope, loss_analysis, validation_errors)
     trace_errors = validate_traceability(
         scenario_envelopes, enriched_threat_set, control_structure, loss_analysis
     )
@@ -1451,36 +1444,6 @@ def _run_stage6_for_spec(
         gherkin_raw=gherkin.to_feature_text(),
         capability_profile=capability_profile,
         control_structure=control_structure,
-    )
-
-
-def _run_stage7_validations(
-    envelopes: list[ScenarioEnvelope],
-    specs: list[ScenarioSpec],
-    control_structure: ControlStructure,
-    loss_analysis: LossAnalysis,
-    validation_errors: list[str],
-) -> None:
-    """Run Stage 7 validations on all specs and envelopes."""
-    for spec in specs:
-        _validate_spec_stage7(spec, control_structure, validation_errors)
-
-    for env in envelopes:
-        _validate_envelope_stage7(env, loss_analysis, validation_errors)
-
-
-def _validate_spec_stage7(
-    spec: ScenarioSpec,
-    control_structure: ControlStructure,
-    validation_errors: list[str],
-) -> None:
-    """Run stage-local validators for a single spec in Stage 7."""
-    _extend_validation_errors(
-        (
-            validate_bdi_grounding(spec, control_structure),
-            validate_vulnerability_completeness(spec),
-        ),
-        validation_errors,
     )
 
 
