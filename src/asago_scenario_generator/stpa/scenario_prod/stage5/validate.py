@@ -41,6 +41,7 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
 )
 from ..condition_check import (
+    ConditionCheckOutcome,
     ConditionUniverse,
     build_condition_universe,
     check_discriminating_condition,
@@ -184,11 +185,12 @@ def _validate_normal_provider_payload(
     _validate_context_condition_reference_closure(
         value.causal_factors, choices, context
     )
+    condition_outcome = None
     if observation_contract is not None:
         safe_outcome = getattr(outcome, "safe_observable_outcome", None)
         # Last, so the correction for a draft that fails another check as well
         # names that check: a failed condition can still be dropped afterwards.
-        _validate_discriminating_condition(
+        condition_outcome = _validate_discriminating_condition(
             getattr(outcome, "discriminating_condition", None),
             assessment,
             condition_universe
@@ -210,7 +212,11 @@ def _validate_normal_provider_payload(
                 safe_outcome=safe_outcome,
             ),
         )
-    return _NormalDraftCheck(draft=value, normalizations=tuple(normalizations))
+    return _NormalDraftCheck(
+        draft=value,
+        normalizations=tuple(normalizations),
+        condition_outcome=condition_outcome,
+    )
 
 
 @dataclass(frozen=True)
@@ -221,6 +227,8 @@ class _NormalDraftCheck:
     normalizations: tuple[Stage5Normalization, ...]
     # Where a condition-less command attempt was moved; None when it was not.
     route: str | None = None
+    # The check of the draft's condition; None when no condition was checked.
+    condition_outcome: ConditionCheckOutcome | None = None
 
 
 def _normal_adversary_and_outcome(
@@ -558,21 +566,22 @@ def _validate_discriminating_condition(
     required: bool = True,
     named_operations: frozenset[str] = frozenset(),
     claim: ConditionClaim | None = None,
-) -> None:
+) -> ConditionCheckOutcome | None:
     """Require a resolvable, record-consistent condition for executable scenarios.
 
     A failure here is a result-validator failure, so the existing Stage 5
     validation retry delivers the exact message as the one correction call.
     A condition on an analytical-only or ungrounded scenario is not an error:
     materialization discards it and records why. ``claim`` holds the
-    scenario fields the condition must agree with.
+    scenario fields the condition must agree with. Returns the passing check,
+    or ``None`` when no condition was checked.
     """
 
     if assessment.disposition == "analytical_only" or not universe.grounded:
-        return
+        return None
     if condition is None:
         _require_condition(required)
-        return
+        return None
     outcome = check_discriminating_condition(condition, universe)
     message = condition_failure_message(outcome)
     if message is not None:
@@ -584,6 +593,7 @@ def _validate_discriminating_condition(
         named_operations=named_operations,
         claim=claim,
     )
+    return outcome
 
 
 def _require_condition(required: bool) -> None:

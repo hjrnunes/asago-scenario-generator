@@ -35,9 +35,8 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
 )
 from ..condition_check import (
+    ConditionCheckOutcome,
     ConditionUniverse,
-    check_discriminating_condition,
-    condition_failure_message,
 )
 from ..tool_call_binding import bind_tool_call_condition
 from .wire import (
@@ -74,9 +73,14 @@ _CONDITION_DISCARDED_UNGROUNDED = (
 def _discriminating_condition_result(
     condition: DiscriminatingCondition | None,
     universe: ConditionUniverse | None,
-    assessment: ObservationAssessment | None = None,
+    assessment: ObservationAssessment | None,
+    checked: ConditionCheckOutcome | None,
 ) -> tuple[DiscriminatingCondition | None, ConditionCheck | None, str | None]:
-    """Return the accepted condition, its code-owned check, and any omission."""
+    """Return the accepted condition, its code-owned check, and any omission.
+
+    ``checked`` is the passing check validation already ran on ``condition``;
+    validation checks every condition this function would keep.
+    """
 
     if condition is None or universe is None:
         return None, None, None
@@ -84,10 +88,9 @@ def _discriminating_condition_result(
         return None, None, _CONDITION_DISCARDED_ANALYTICAL
     if not universe.grounded:
         return None, None, _CONDITION_DISCARDED_UNGROUNDED
-    outcome = check_discriminating_condition(condition, universe)
-    if outcome.failures:
-        raise ValueError(condition_failure_message(outcome))
-    return outcome.condition, outcome.check, None
+    if checked is None:
+        raise ValueError("discriminating_condition reached compilation unchecked")
+    return checked.condition, checked.check, None
 
 
 def _materialize_adversary(draft: BaseModel) -> Adversary:
@@ -119,6 +122,7 @@ def _materialize_normal_context_bdi(
     *,
     condition_universe: ConditionUniverse | None = None,
     condition_omitted_reason: str | None = None,
+    condition_outcome: ConditionCheckOutcome | None = None,
 ) -> BDIGenerationResult:
     """Compile a normal-path draft: semantics and evidence, no execution wire.
 
@@ -140,6 +144,7 @@ def _materialize_normal_context_bdi(
         getattr(outcome, "discriminating_condition", None),
         condition_universe,
         assessment,
+        condition_outcome,
     )
     omitted_reason = condition_omitted_reason or discarded_reason
     binding = bind_tool_call_condition(

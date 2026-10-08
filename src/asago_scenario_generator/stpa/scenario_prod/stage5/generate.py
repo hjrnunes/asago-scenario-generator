@@ -43,6 +43,7 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 from .._constants import PROMPTS_DIR
 from ..condition_family import ConditionFamily
 from ..condition_check import (
+    ConditionCheckOutcome,
     ConditionUniverse,
     build_condition_universe,
 )
@@ -292,6 +293,7 @@ def _generate_semantics(
                 )
                 condition_omitted_reason = _condition_omitted_reason(issues, route)
                 draft, error = recovered, None
+        published = next((check for check in checks if check.draft is draft), None)
         result, error = _finish_normal_context_bdi(
             draft,
             error,
@@ -300,9 +302,11 @@ def _generate_semantics(
             observation_contract,
             condition_universe=condition_universe,
             condition_omitted_reason=condition_omitted_reason,
+            condition_outcome=(
+                published.condition_outcome if published is not None else None
+            ),
         )
         if result is not None:
-            published = next(check for check in checks if check.draft is draft)
             _write_stage5_normalization_record(
                 published.normalizations, scenario_context, run_dir
             )
@@ -338,6 +342,7 @@ def _finish_normal_context_bdi(
     *,
     condition_universe: ConditionUniverse | None = None,
     condition_omitted_reason: str | None = None,
+    condition_outcome: ConditionCheckOutcome | None = None,
 ) -> tuple[BDIGenerationResult | None, str | None]:
     """Compile one normal-path draft without any execution materialization."""
     if error is not None or draft is None:
@@ -351,6 +356,7 @@ def _finish_normal_context_bdi(
                 observation_contract,
                 condition_universe=condition_universe,
                 condition_omitted_reason=condition_omitted_reason,
+                condition_outcome=condition_outcome,
             ),
             None,
         )
