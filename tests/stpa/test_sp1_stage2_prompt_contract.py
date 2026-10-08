@@ -570,14 +570,36 @@ def test_call2b_parser_rejects_an_unknown_feedback_source_kind() -> None:
     )
 
 
-def test_call2b_parser_rejects_a_controlled_process_without_a_number() -> None:
+def test_assembly_numbers_a_named_controlled_process_by_position() -> None:
     payload = _valid_payload()
     payload["controlled_processes"][0]["cp_id"] = "CP-RESERVATIONS"
+    for item in (payload["control_actions"][0], *payload["feedback"]):
+        reference = item.get("target") or item["source"]
+        reference["id"] = "CP-RESERVATIONS"
+    responsibilities = _responsibilities()
+
+    elements = parse_control_element_set_response(
+        payload, responsibilities=responsibilities.responsibilities
+    )
+    assembled = _assemble_control_structure(responsibilities, elements)
+
+    assert elements.controlled_processes[0].cp_id == "CP-RESERVATIONS"
+    assert [process.cp_id for process in assembled.controlled_processes] == ["CP-1"]
+    by_resp = {item.resp_id: item for item in assembled.responsibilities}
+    assert by_resp["RESP-2"].control_actions[0].target == ElementRef(
+        type=ReferenceType.controlled_process, id="CP-1"
+    )
+    assert by_resp["RESP-1"].feedback_channels[0].source == ElementRef(
+        type=ReferenceType.controlled_process, id="CP-1"
+    )
+
+
+def test_call2b_parser_rejects_a_blank_controlled_process_id() -> None:
+    payload = _valid_payload()
+    payload["controlled_processes"][0]["cp_id"] = " "
 
     assert _has_error(
-        _wire_errors(payload),
-        "controlled_processes.0.cp_id",
-        "must encode an explicit owner using CP-X-Y; got 'CP-RESERVATIONS'",
+        _wire_errors(payload), "controlled_processes.0.cp_id", "non-empty"
     )
 
 

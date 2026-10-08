@@ -940,13 +940,14 @@ class _Call2bFeedback(_Call2bWire):
 
 
 class _Call2bProcess(_Call2bWire):
+    """A controlled process; ``id_normalization`` numbers it by position.
+
+    A controlled process has no owner to encode, so any non-blank ID that
+    the response's references use is enough.
+    """
+
     cp_id: NonBlankStr
     description: NonBlankStr
-
-    @field_validator("cp_id")
-    @classmethod
-    def _numbered_cp_id(cls, value: str) -> str:
-        return _require_owner_format(value, "CP")
 
     def to_domain(self) -> ControlledProcess:
         return ControlledProcess.model_construct(
