@@ -25,6 +25,7 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 )
 from ..condition_family import ConditionFamily, family_prompt_view
 from ..condition_check import (
+    ConditionUniverse,
     build_condition_universe,
     condition_fact_listing,
 )
@@ -53,6 +54,7 @@ def build_context_bdi_prompts(
     target_observations: TargetObservationSnapshot | None = None,
     observation_contract: ObservationContract | None = None,
     condition_family: ConditionFamily | None = None,
+    condition_universe: ConditionUniverse | None = None,
 ) -> tuple[str, str]:
     """Render Stage 5 from only the immutable context and output contract.
 
@@ -87,11 +89,12 @@ def build_context_bdi_prompts(
     has_target_observations = target_observations is not None
     # The response schema carries the condition key only with an observation
     # contract, so the prompt describes it under the same gate.
-    condition_universe = build_condition_universe(
-        execution_target_profile=execution_target_profile,
-        target_operation=target_operation,
-        target_observations=target_observations,
-    )
+    if condition_universe is None:
+        condition_universe = build_condition_universe(
+            execution_target_profile=execution_target_profile,
+            target_operation=target_operation,
+            target_observations=target_observations,
+        )
     has_condition_references = (
         observation_contract is not None and condition_universe.grounded
     )

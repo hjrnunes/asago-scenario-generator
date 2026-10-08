@@ -208,6 +208,7 @@ def _generate_semantics(
         target_observations=target_observations,
         observation_contract=observation_contract,
         condition_family=condition_family,
+        condition_universe=condition_universe,
     )
     response_format = _scenario_semantics_payload_type(
         len(choices),
@@ -229,6 +230,7 @@ def _generate_semantics(
             execution_target_profile=execution_target_profile,
             target_observations=target_observations,
             condition_required=condition_required,
+            condition_universe=condition_universe,
         )
         checks.append(check)
         return check.draft

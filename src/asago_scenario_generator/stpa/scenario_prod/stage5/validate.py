@@ -124,6 +124,7 @@ def _validate_normal_provider_payload(
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     condition_required: bool = True,
+    condition_universe: ConditionUniverse | None = None,
 ) -> _NormalDraftCheck:
     """Validate normal-path scenario semantics; never artifact feasibility.
 
@@ -190,7 +191,9 @@ def _validate_normal_provider_payload(
         _validate_discriminating_condition(
             getattr(outcome, "discriminating_condition", None),
             assessment,
-            build_condition_universe(
+            condition_universe
+            if condition_universe is not None
+            else build_condition_universe(
                 execution_target_profile=execution_target_profile,
                 target_operation=target_operation,
                 target_observations=target_observations,
