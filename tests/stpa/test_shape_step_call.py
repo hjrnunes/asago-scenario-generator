@@ -55,7 +55,6 @@ INDIRECT_REPLY = {
     "indirect": {
         "carrier_operation": "get_listing",
         "content_kind": "listing_content",
-        "record_ref": None,
         "controller": "counterparty",
     },
 }
