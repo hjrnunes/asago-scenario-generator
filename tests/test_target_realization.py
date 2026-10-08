@@ -2024,10 +2024,11 @@ def test_verified_target_ica_findings_retain_empty_and_unverified_diagnostics():
     ("input_schema", "error", "message"),
     [
         ({"properties": {"limit": {"maximum": float("nan")}}}, ValueError, "NaN"),
+        ({"properties": {"limit": {"maximum": float("inf")}}}, ValueError, "infinity"),
         ({"properties": {1: {"type": "string"}}}, TypeError, "keys must be strings"),
         ({"enum": [{"value"}]}, TypeError, "only JSON values"),
     ],
-    ids=["nan", "non-string-key", "set"],
+    ids=["nan", "infinity", "non-string-key", "set"],
 )
 def test_operation_input_schema_rejects_non_json_values(
     input_schema: dict, error: type[Exception], message: str
