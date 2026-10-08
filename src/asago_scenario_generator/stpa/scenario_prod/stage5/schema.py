@@ -53,10 +53,7 @@ def _scenario_semantics_payload_type(
     temporal_handles = ("target_action", *handles)
     temporal_handle_type = Literal.__getitem__(temporal_handles)
     temporal_types = _context_temporal_wire_types(
-        choice_count,
-        temporal_handle_type,
-        temporal_handles,
-        duration_eligible=duration_eligible,
+        choice_count, temporal_handle_type, duration_eligible=duration_eligible
     )
     temporal_union = _discriminated_union(tuple(temporal_types.values()), "type")
     factor_types = _context_causal_factor_wire_types(
@@ -117,11 +114,8 @@ def _discriminated_union(
 def _context_temporal_wire_types(
     choice_count: int,
     handle_type: object,
-    handles: tuple[str, ...],
     *,
     duration_eligible: bool,
-    ordering_reference_handles: tuple[str, ...] | None = None,
-    model_prefix: str = "_ContextTemporal",
 ) -> dict[str, type[BaseModel]]:
     """Create exact request-local temporal branches for causal factors."""
     branch_specs: list[
@@ -170,25 +164,12 @@ def _context_temporal_wire_types(
         )
     result: dict[str, type[BaseModel]] = {}
     for branch, base, fields in branch_specs:
-        if branch == "ordering" and ordering_reference_handles is not None:
-            fields = {
-                **fields,
-                "reference_handle": (
-                    Literal.__getitem__((*ordering_reference_handles, "target_action")),
-                    Field(
-                        ...,
-                        json_schema_extra={
-                            "enum": list(ordering_reference_handles),
-                        },
-                    ),
-                ),
-            }
         fields = {
             "type": (Literal.__getitem__((branch,)), ...),
             **fields,
         }
         result[branch] = create_model(
-            f"{model_prefix}{branch.title().replace('_', '')}Draft{choice_count}",
+            f"_ContextTemporal{branch.title().replace('_', '')}Draft{choice_count}",
             __base__=base,
             **fields,
         )
