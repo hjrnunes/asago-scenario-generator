@@ -65,9 +65,8 @@ def test_request_schema_keeps_min_length_when_the_pattern_matches_empty() -> Non
         ),
     ],
 )
-@pytest.mark.parametrize("strict", [False, True])
 def test_stage5_request_schemas_have_no_pattern_with_length(
-    model: type[BaseModel], strict: bool
+    model: type[BaseModel],
 ) -> None:
-    schema = _json_schema_response_format(model, strict_json_schema=strict)
+    schema = _json_schema_response_format(model)
     assert _pattern_length_nodes(schema["json_schema"]["schema"]) == []

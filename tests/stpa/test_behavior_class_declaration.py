@@ -36,7 +36,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     _revision_patch_to_draft,
     check_hazard_graph_density,
 )
-from asago_scenario_generator.strict_schema import to_openai_strict_schema
+from asago_scenario_generator.stpa.infra.llm import _json_schema_response_format
 
 CLASSES = (
     "disclosure",
@@ -136,11 +136,10 @@ class TestProviderWire:
         "model",
         [_ProviderConstraint, _RevisionConstraintAddition, _RevisionConstraintEdit],
     )
-    def test_the_strict_wire_schema_requires_the_key_and_lists_the_classes(
+    def test_the_request_schema_lists_the_classes_and_allows_null(
         self, model: type
     ) -> None:
-        node = to_openai_strict_schema(model)
-        assert "behavior_class" in node["required"]
+        node = _json_schema_response_format(model)["json_schema"]["schema"]
         text = json.dumps(node["properties"]["behavior_class"])
         for name in CLASSES:
             assert f'"{name}"' in text

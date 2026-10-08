@@ -31,13 +31,12 @@ separate retry, made once per request, follows an HTTP 5xx status or a
 non-timeout connection error (`provider-calls.jsonl` records both attempts).
 Set
 `sampling_controls: false` to omit temperature, top-p, top-k, seed, and
-chat-template thinking controls. Set `strict_json_schema: true` to normalize
-Pydantic response schemas to OpenAI Structured Outputs form and restore
-defaulted fields when the provider returns null. Set `json_schema_strict: false`
-to send the original Pydantic schema with `"strict": false`; local Pydantic
-validation remains authoritative, and this setting takes precedence over
-`strict_json_schema` for the request schema. OpenRouter JSON-object and vLLM
-guided decoding compatibility paths are unchanged.
+chat-template thinking controls. The client accepts `strict_json_schema` only
+as `false` (or absent); `true` fails at client construction, and run records
+keep `strict_json_schema: false`. Set `json_schema_strict: false` to send the
+Pydantic schema with `"strict": false`; local Pydantic validation remains
+authoritative. OpenRouter JSON-object and vLLM guided decoding compatibility
+paths are unchanged.
 
 The transport sends a strict call's JSON Schema as `response_format` whether
 or not the profile sets `use_guided_decoding`. A guided vLLM endpoint decodes
