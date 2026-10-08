@@ -898,3 +898,23 @@ class TestCountRequests:
             _send(client, tmp_path)
 
         assert tally.requests == 2
+
+
+@pytest.mark.parametrize(
+    ("text", "expected"),
+    [
+        ('```json\n{"a": 1}\n```', '{"a": 1}'),
+        ('  ```JSON\n{"a": 1}\n[2]\n```  \n', '{"a": 1}\n[2]'),
+        ('```\n{"a": 1}\n```', '{"a": 1}'),
+        ('  {"a": 1}\n', '{"a": 1}'),
+        ('```json\n{"a": 1}', '```json\n{"a": 1}'),
+        ('```python\n{"a": 1}\n```', '```python\n{"a": 1}\n```'),
+        ("```json\n```", "```json\n```"),
+    ],
+)
+def test_strip_json_fence_returns_the_fenced_body_or_the_stripped_text(
+    text: str, expected: str
+) -> None:
+    from asago_scenario_generator.stpa.infra.llm_helpers import strip_json_fence
+
+    assert strip_json_fence(text) == expected
