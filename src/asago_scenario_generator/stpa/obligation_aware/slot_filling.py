@@ -818,7 +818,7 @@ def _unresolved_pair(
 
 
 def _draft_considerations(
-    response: SynthesisSlotResponse,
+    filled_slots: Iterable[SlotProviderEntry],
     request: SynthesisSlotRequest,
     compiled_slots: Mapping[str, ICASlot],
 ) -> tuple[ObligationIcaConsideration, ...]:
@@ -829,7 +829,7 @@ def _draft_considerations(
         for slot_id in route.slot_ids
     }
     values: list[ObligationIcaConsideration] = []
-    for entry in response.filled_slots:
+    for entry in filled_slots:
         if not isinstance(entry, SlotIcaDraft):
             continue
         slot = compiled_slots.get(entry.slot_id)
@@ -1602,7 +1602,7 @@ def _record_accepted_request(
     authoritative fill.
     """
     structured_pairs = _draft_considerations(
-        response, request, {**state.all_filled, **by_id}
+        response.filled_slots, request, {**state.all_filled, **by_id}
     )
     pair_by_key = {
         (pair.obligation_id, pair.slot_id): pair

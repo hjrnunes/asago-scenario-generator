@@ -1358,13 +1358,8 @@ def _compile_slot_payload(
             loss_analysis=request.loss_analysis,
             control_structure=request.control_structure,
         )
-    structured_response = SynthesisSlotResponse(
-        request_digest=request.semantic_digest,
-        filled_slots=tuple(drafts),
-        adapter_kind="fake",
-    )
     considerations = _draft_considerations(
-        structured_response,
+        sorted(drafts, key=lambda item: item.slot_id),
         request,
         slots,
     )
