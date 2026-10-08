@@ -7,6 +7,8 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import httpx
+import openai
 import pytest
 from pydantic import ValidationError
 
@@ -180,38 +182,69 @@ def test_interpreter_rejects_omitted_handle_before_verifier():
     assert seen[0].__name__ == "TargetInterpretationProviderResponse"
 
 
-def test_failed_safe_call_retains_stable_error_metadata_without_body_or_fake_duration():
-    request = _request()
-    client = SimpleNamespace(model="fixture-model")
+_PROVIDER_REQUEST = httpx.Request("POST", "https://secret.example/v1/chat")
 
+
+def _failed_interpretation(error: str, failure: BaseException):
+    adapter = TargetDiscoveryLlmInterpreter(SimpleNamespace(model="fixture-model"))
     with (
         patch(
             "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
-            return_value=CallOutcome(
-                None,
-                None,
-                "InternalServerError: Error code: 503 - "
-                "<html>Application is not available at https://secret.example</html>",
-                0,
-            ),
+            return_value=CallOutcome(None, None, error, 0, failure),
         ),
         pytest.raises(TargetDiscoveryLlmError) as raised,
     ):
-        adapter = TargetDiscoveryLlmInterpreter(client)
-        adapter.interpret(request)
-
+        adapter.interpret(_request())
     records = adapter.drain_call_records()
     assert len(records) == 1
-    record = records[0]
+    return records[0], str(raised.value)
+
+
+def test_failed_safe_call_retains_stable_error_metadata_without_body_or_fake_duration():
+    body = "<html>Application is not available at https://secret.example</html>"
+    failure = openai.InternalServerError(
+        f"Error code: 503 - {body}",
+        response=httpx.Response(503, request=_PROVIDER_REQUEST),
+        body=None,
+    )
+
+    record, message = _failed_interpretation(
+        f"InternalServerError: Error code: 503 - {body}", failure
+    )
+
     assert record["error_type"] == "InternalServerError"
     assert record["http_status"] == 503
     assert record["duration_ms"] is None
     assert "secret.example" not in str(record)
     assert "Application is not available" not in str(record)
-    assert (
-        str(raised.value)
-        == "interpretation call failed (InternalServerError, status=503)"
+    assert message == "interpretation call failed (InternalServerError, status=503)"
+
+
+def test_failed_safe_call_without_a_status_records_only_the_failure_class():
+    failure = openai.APITimeoutError(request=_PROVIDER_REQUEST)
+
+    record, message = _failed_interpretation(
+        "APITimeoutError: Request timed out.", failure
     )
+
+    assert record["error_type"] == "APITimeoutError"
+    assert "http_status" not in record
+    assert record["duration_ms"] is None
+    assert message == "interpretation call failed (APITimeoutError)"
+
+
+def test_failed_safe_call_reads_the_error_fields_from_the_failure_not_the_message():
+    failure = openai.InternalServerError(
+        "withheld",
+        response=httpx.Response(502, request=_PROVIDER_REQUEST),
+        body=None,
+    )
+
+    record, message = _failed_interpretation("provider detail withheld", failure)
+
+    assert record["error_type"] == "InternalServerError"
+    assert record["http_status"] == 502
+    assert message == "interpretation call failed (InternalServerError, status=502)"
 
 
 def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path):
