@@ -223,7 +223,6 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
         attack_tree=tree,
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
-        control_structure=_control_structure(),
     )
     handoff = build_scenario_handoff(
         envelope,
@@ -1054,7 +1053,6 @@ def test_handoff_names_an_operation_once_when_two_authorities_agree(tmp_path) ->
         attack_tree=tree,
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
-        control_structure=_control_structure(),
     )
 
     handoff = build_scenario_handoff(

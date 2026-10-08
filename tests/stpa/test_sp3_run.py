@@ -284,7 +284,6 @@ class TestFullRun:
             assert (Path(tmpdir) / "scenarios").exists()
             assert any(Path(tmpdir).glob("scenarios/*.yaml"))
             assert any(Path(tmpdir).glob("scenarios/*.feature"))
-            assert (Path(tmpdir) / "eval-scorecard.yaml").exists()
 
     def test_all_llm_calls_logged(self):
         cs = make_cs()
@@ -352,7 +351,7 @@ class TestFullRun:
             assert "stage5_context_user.j2" in manifest["prompt_hashes"]
             assert manifest["scenario_count"] == 2
 
-    def test_coverage_gaps_written(self):
+    def test_writes_no_scorecard_or_coverage_gaps(self):
         cs = make_cs()
         la = make_loss_analysis()
         ets = _make_ets(num_threats=2)
@@ -366,7 +365,10 @@ class TestFullRun:
                 loss_analysis=la,
                 run_dir=Path(tmpdir),
             )
-            assert (Path(tmpdir) / "coverage-gaps.json").exists()
+            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
+            assert not (Path(tmpdir) / "eval-scorecard.yaml").exists()
+            assert not (Path(tmpdir) / "coverage-gaps.json").exists()
+            assert "eval_scorecard_path" not in manifest
 
     def test_scenario_yaml_loads_as_handoff(self):
         cs = make_cs()
@@ -403,25 +405,6 @@ class TestFullRun:
                 run_dir=Path(tmpdir),
             )
             assert len(result.scenario_envelopes) == 3
-
-    def test_eval_scorecard_contains_coverage_gaps(self):
-        cs = make_cs()
-        la = make_loss_analysis()
-        ets = _make_ets(num_threats=2)
-        client = _setup_mock_client(2)
-
-        with TemporaryDirectory() as tmpdir:
-            run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
-            scorecard = yaml.safe_load(
-                (Path(tmpdir) / "eval-scorecard.yaml").read_text()
-            )
-            assert "coverage_gaps" in scorecard
 
     def test_max_workers_flag(self):
         cs = make_cs()
@@ -464,15 +447,11 @@ class TestModuleLayout:
     def test_all_modules_importable(self):
         from asago_scenario_generator.stpa.scenario_prod import (
             validators,
-            eval_metrics,
-            coverage,
             assembly,
             run,
         )
 
         assert validators is not None
-        assert eval_metrics is not None
-        assert coverage is not None
         assert assembly is not None
         assert run is not None
 

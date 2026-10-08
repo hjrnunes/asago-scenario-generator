@@ -33,7 +33,6 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.helpers.sp3_run import _make_ets
 from tests.helpers.unified_stage2 import _observations, _profile
-from asago_scenario_generator.stpa.models.scenario_envelope import SystemContext
 from tests.helpers.scenario_handoff_publication import (
     _client,
     _normal_semantics_payload,
@@ -459,18 +458,7 @@ def test_generic_capability_labels_never_substitute_for_observed_operations(
         "The assistant uses Klarna Backend Services API for order ORD-104."
     )
     result = _publish([payload], tmp_path)
-    envelope = result.scenario_envelopes[0].model_copy(
-        update={
-            "system_context": SystemContext(
-                target_responsibility_description="Refund controller",
-                target_control_action_description="Process refunds",
-                tool_inventory=["Klarna Backend Services API"],
-                active_zones=["input", "tool_execution"],
-                multi_agent=False,
-                has_persistent_memory=False,
-            )
-        }
-    )
+    envelope = result.scenario_envelopes[0]
 
     handoff = build_scenario_handoff(
         envelope,

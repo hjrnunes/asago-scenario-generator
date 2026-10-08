@@ -59,4 +59,3 @@ class STPARunManifest(BaseModel):
             "Recoverable stage diagnostics that did not prevent validated artifacts."
         ),
     )
-    eval_scorecard_path: str | None = None

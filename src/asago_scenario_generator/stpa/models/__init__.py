@@ -93,10 +93,8 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.models.scenario_envelope import (
-    ConsumerHints,
     GherkinSpec,
     ScenarioEnvelope,
-    SystemContext,
 )
 from asago_scenario_generator.stpa.models.scenario_context import (
     ReachableCapability,
@@ -259,8 +257,6 @@ __all__ = [
     "ScenarioSpec",
     "ThreatSource",
     # scenario_envelope
-    "ConsumerHints",
     "GherkinSpec",
     "ScenarioEnvelope",
-    "SystemContext",
 ]

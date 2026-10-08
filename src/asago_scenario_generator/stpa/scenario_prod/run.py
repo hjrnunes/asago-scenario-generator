@@ -82,8 +82,6 @@ from .stage5.shape_step import (
     observed_operation_names,
 )
 from .context import build_scenario_generation_context
-from .coverage import compute_coverage_gaps, write_coverage_gaps
-from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
 from .realized_operation import realized_operation
 from .target_profile_publication import publish_execution_target_profile
 from .presentation import render_scenario_summary
@@ -155,8 +153,6 @@ class SP3RunResult:
 
     scenario_specs: list[ScenarioSpec] = field(default_factory=list)
     scenario_envelopes: list[ScenarioEnvelope] = field(default_factory=list)
-    eval_scorecard: dict = field(default_factory=dict)
-    coverage_gaps: dict = field(default_factory=dict)
     stage_errors: list[str] = field(default_factory=list)
     validation_errors: list[str] = field(default_factory=list)
     # Phase 3.2 functional-test specs (``kind: none``).  They are persisted
@@ -227,9 +223,7 @@ def run_sp3(
         loss_analysis: SP1 loss analysis.
         run_dir: Directory for output artifacts.
         capability_profile: Optional SP1 capability profile for Stage 5
-            prompt grounding and envelope enrichment.  When provided,
-            envelopes are enriched with ``system_context`` and
-            ``consumer_hints`` blocks.
+            prompt grounding.
         max_workers: Worker count recorded in the run manifest.
         temperature: Explicit LLM temperature override. When omitted, use the
             resolved client temperature (default 0.4).
@@ -339,15 +333,13 @@ def run_sp3(
         scenario_specs = []
         scenario_envelopes = []
         functional_test_specs = []
-    all_validation_errors, coverage_gaps, eval_scorecard = _stage7_outputs(
+    all_validation_errors = _stage7_outputs(
         scenario_envelopes,
         enriched_threat_set,
         control_structure,
         loss_analysis,
     )
 
-    write_eval_scorecard(eval_scorecard, run_dir)
-    write_coverage_gaps(coverage_gaps, run_dir)
     _write_manifest(
         run_dir=run_dir,
         llm_client=llm_client,
@@ -367,8 +359,6 @@ def run_sp3(
     return SP3RunResult(
         scenario_specs=scenario_specs,
         scenario_envelopes=scenario_envelopes,
-        eval_scorecard=eval_scorecard,
-        coverage_gaps=coverage_gaps,
         stage_errors=stage_errors,
         validation_errors=all_validation_errors,
         candidate_outcomes=tuple(builder.terminal() for builder in candidate_builders),
@@ -531,8 +521,6 @@ def _run_stages_5_and_6(
     _persist_functional_test_candidates(
         functional_test_specs,
         inputs.scenarios_dir,
-        inputs.capability_profile,
-        inputs.control_structure,
         stage_errors,
         candidate_builders,
         loss_analysis=inputs.loss_analysis,
@@ -544,11 +532,9 @@ def _run_stages_5_and_6(
     )
     scenario_envelopes = _collect_stage6_artifacts(
         shaped_specs,
-        inputs.control_structure,
         inputs.loss_analysis,
         inputs.scenarios_dir,
         stage_errors,
-        capability_profile=inputs.capability_profile,
         candidate_builders=candidate_builders,
         environment_bound=profile is not None,
         enriched_operations=inputs.enriched_operations,
@@ -863,8 +849,6 @@ def _publish_stage6_artifacts(
 def _persist_functional_test_candidates(
     specs: list[ScenarioSpec],
     scenarios_dir: Path,
-    capability_profile: CapabilityProfile | None,
-    control_structure: ControlStructure,
     stage_errors: list[str],
     candidate_builders: list[_CandidateOutcomeBuilder] | None,
     *,
@@ -893,8 +877,6 @@ def _persist_functional_test_candidates(
                 attack_tree=tree,
                 gherkin_spec=gherkin,
                 gherkin_raw=gherkin.to_feature_text(),
-                capability_profile=capability_profile,
-                control_structure=control_structure,
             )
             _write_scenario_handoff_artifacts(
                 envelope,
@@ -930,12 +912,10 @@ def _persist_functional_test_candidates(
 
 def _render_stage6_candidate(
     spec: ScenarioSpec,
-    control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
     scenarios_dir: Path,
     stage_errors: list[str],
     *,
-    capability_profile: CapabilityProfile | None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
@@ -946,11 +926,7 @@ def _render_stage6_candidate(
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
     try:
-        envelope = _run_stage6_for_spec(
-            spec,
-            control_structure,
-            capability_profile=capability_profile,
-        )
+        envelope = _run_stage6_for_spec(spec)
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
         stage_errors.append(diagnostic)
@@ -998,12 +974,10 @@ def _mark_unresolved_stage6_candidates(
 
 def _collect_stage6_artifacts(
     scenario_specs: list[ScenarioSpec],
-    control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
     scenarios_dir: Path,
     stage_errors: list[str],
     *,
-    capability_profile: CapabilityProfile | None,
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     environment_bound: bool = False,
     enriched_operations: Mapping[str, str] | None = None,
@@ -1016,11 +990,9 @@ def _collect_stage6_artifacts(
     for spec in scenario_specs:
         envelope = _render_stage6_candidate(
             spec,
-            control_structure,
             loss_analysis,
             scenarios_dir,
             stage_errors,
-            capability_profile=capability_profile,
             candidate_builders=candidate_builders,
             environment_bound=environment_bound,
             enriched_operations=enriched_operations,
@@ -1082,34 +1054,15 @@ def _stage7_outputs(
     enriched_threat_set: EnrichedThreatSet,
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
-) -> tuple[list[str], dict, dict]:
-    """Validate accepted scenarios and derive coverage/evaluation outputs."""
+) -> list[str]:
+    """Validate accepted scenarios and their traceability."""
     validation_errors: list[str] = []
     for envelope in scenario_envelopes:
         _validate_envelope_stage7(envelope, loss_analysis, validation_errors)
     trace_errors = validate_traceability(
         scenario_envelopes, enriched_threat_set, control_structure, loss_analysis
     )
-    trace_error_msgs = _format_traceability_errors(trace_errors)
-    all_validation_errors = validation_errors + trace_error_msgs
-    coverage_gaps = compute_coverage_gaps(
-        enriched_threat_set,
-        control_structure,
-        scenario_envelopes,
-        loss_analysis,
-        precomputed_trace_errors=trace_errors,
-    )
-    eval_scorecard = compute_eval_scorecard(
-        scenario_envelopes,
-        enriched_threat_set,
-        control_structure,
-        loss_analysis,
-        stage_local_errors=validation_errors,
-        traceability_errors=trace_error_msgs,
-        coverage_gaps=coverage_gaps,
-        precomputed_trace_errors=trace_errors,
-    )
-    return all_validation_errors, coverage_gaps, eval_scorecard
+    return validation_errors + _format_traceability_errors(trace_errors)
 
 
 def _format_traceability_errors(errors: list[TraceabilityError]) -> list[str]:
@@ -1386,12 +1339,7 @@ def _validate_stage5_spec(
     )
 
 
-def _run_stage6_for_spec(
-    spec: ScenarioSpec,
-    control_structure: ControlStructure,
-    *,
-    capability_profile: CapabilityProfile | None = None,
-) -> ScenarioEnvelope:
+def _run_stage6_for_spec(spec: ScenarioSpec) -> ScenarioEnvelope:
     """Render one scenario's deterministic summary into its envelope.
 
     No execution projection is prepared: the scenario handoff does not carry
@@ -1407,8 +1355,6 @@ def _run_stage6_for_spec(
         attack_tree=tree,
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
-        capability_profile=capability_profile,
-        control_structure=control_structure,
     )
 
 
@@ -1644,7 +1590,6 @@ def _write_manifest(
         "validation_errors": validation_errors,
         "max_workers": max_workers,
         "stage_errors": stage_errors,
-        "eval_scorecard_path": "eval-scorecard.yaml",
     }
 
     manifest_path = run_dir / "run-manifest.yaml"
