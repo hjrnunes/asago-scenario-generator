@@ -123,6 +123,18 @@ def test_scenario_context_digests_keep_their_recorded_values(unit: str) -> None:
     assert mismatched == []
 
 
+@pytest.mark.parametrize(
+    ("payload", "error"),
+    [({"café": 1, "cafe\u0301": 2}, ValueError), ({1: "a"}, TypeError)],
+    ids=["nfc_collision", "non_string_key"],
+)
+def test_scenario_context_digest_rejects_keys_canonical_json_cannot_hold(
+    payload: dict[Any, Any], error: type[Exception]
+) -> None:
+    with pytest.raises(error):
+        semantic_digest(payload, frame="asago-scenario-generator:test:v1")
+
+
 def test_bundled_taxonomy_pins_keep_their_values() -> None:
     pins = EXPECTED["taxonomy_pins"]
 

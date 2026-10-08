@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
-import unicodedata
 from collections.abc import Sequence
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactor,
@@ -385,8 +383,7 @@ def validate_factor_evidence(
 
 def semantic_digest(value: Any, *, frame: str) -> str:
     """Return a version-framed digest over canonical JSON content."""
-    canonical = _canonical_json(value)
-    return hashlib.sha256(frame.encode() + b"\0" + canonical).hexdigest()
+    return compute_framed_digest(frame, value)
 
 
 def _context_digest(value: Any) -> str:
@@ -397,27 +394,3 @@ def _context_digest(value: Any) -> str:
     return semantic_digest(
         payload, frame="asago-scenario-generator:scenario-generation-context:v1"
     )
-
-
-def _canonical_json(value: Any) -> bytes:
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
-    return json.dumps(
-        _normalize(value),
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-
-
-def _normalize(value: Any) -> Any:
-    if isinstance(value, BaseModel):
-        return _normalize(value.model_dump(mode="json"))
-    if isinstance(value, str):
-        return unicodedata.normalize("NFC", value)
-    if isinstance(value, dict):
-        return {_normalize(key): _normalize(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_normalize(item) for item in value]
-    return value
