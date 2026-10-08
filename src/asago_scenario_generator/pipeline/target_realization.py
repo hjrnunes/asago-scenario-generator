@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any
 
 from asago_scenario_generator.models.target_realization import (
     CapabilityExposureDisposition,
@@ -77,60 +77,6 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import (
 )
 
 
-@runtime_checkable
-class TargetRealizationInterpreter(Protocol):
-    """Provider adapter for one target-realization prompt view."""
-
-    def __call__(
-        self, *, action: Mapping[str, Any], operations: Sequence[Mapping[str, Any]]
-    ) -> Any:
-        """Return one structured mapping response."""
-
-
-@runtime_checkable
-class TargetRealizationInterpreterFactory(Protocol):
-    """Factory for the provider adapter used by the pure seam."""
-
-    def __call__(self) -> TargetRealizationInterpreter:
-        """Construct the already-configured typed provider adapter."""
-
-
-@runtime_checkable
-class TargetRealizationExtensionInterpreter(Protocol):
-    """Provider adapter for one bounded additive extension attempt."""
-
-    def extend(
-        self, request: TargetRealizationExtensionRequest
-    ) -> TargetRealizationExtensionProviderResponse | Mapping[str, Any]:
-        """Return the one exact structured extension response."""
-
-
-@runtime_checkable
-class TargetRealizationExtensionFactory(Protocol):
-    """Factory for the single bounded target-extension adapter."""
-
-    def __call__(self) -> TargetRealizationExtensionInterpreter:
-        """Construct the already-configured extension adapter."""
-
-
-@runtime_checkable
-class TargetDerivedICAInterpreter(Protocol):
-    """Provider adapter for one batch of target-derived ICA findings."""
-
-    def __call__(
-        self, request: TargetDerivedICARequest
-    ) -> TargetDerivedICAProviderResponse | Mapping[str, Any]:
-        """Return the one exact target-derived finding response."""
-
-
-@runtime_checkable
-class TargetDerivedICAFactory(Protocol):
-    """Factory for the single target-derived ICA provider attempt."""
-
-    def __call__(self) -> TargetDerivedICAInterpreter:
-        """Construct the already-configured target-derived ICA adapter."""
-
-
 @dataclass(frozen=True)
 class TargetRealizationStpaProjection:
     """Validated STPA view for downstream SP3 consumers.
@@ -145,16 +91,6 @@ class TargetRealizationStpaProjection:
     ica_enumeration: ICAEnumeration
     target_derived_ica_findings: tuple[TargetDerivedICAFinding, ...]
     denominators: TargetRealizationDenominators
-
-    @property
-    def effective_control_structure(self) -> ControlStructure:
-        """Return the additive control structure used by downstream SP3."""
-        return self.control_structure
-
-    @property
-    def effective_ica_enumeration(self) -> ICAEnumeration:
-        """Return the additive ICA enumeration used by downstream SP3."""
-        return self.ica_enumeration
 
 
 @dataclass
@@ -182,7 +118,7 @@ class _ExtensionCompilationState:
 
 
 def _interpreter_for_observations(
-    factory: TargetRealizationInterpreterFactory | Callable[..., Any],
+    factory: Callable[..., Any],
     observations: Sequence[TargetOperationObservation],
 ) -> Any:
     return _construct_interpreter(factory) if observations else None
@@ -389,11 +325,9 @@ def _require_rows_cover_baseline(
 def realize_target_operations(
     baseline: SystemicStpaBaseline,
     profile: ExecutionTargetProfile,
-    interpreter_factory: TargetRealizationInterpreterFactory | Callable[..., Any],
+    interpreter_factory: Callable[..., Any],
     *,
-    extension_factory: TargetRealizationExtensionFactory
-    | Callable[..., Any]
-    | None = None,
+    extension_factory: Callable[..., Any] | None = None,
     baseline_rows: Sequence[TargetRealizationRow] | None = None,
 ) -> TargetRealizationResult:
     """Map exact observed operations to an immutable systemic baseline.
@@ -458,7 +392,7 @@ def realize_target_operations(
 def realize_target_derived_icas(
     baseline: SystemicStpaBaseline,
     realization: TargetRealizationResult,
-    finder_factory: TargetDerivedICAFactory | Callable[..., Any],
+    finder_factory: Callable[..., Any],
 ) -> TargetRealizationResult:
     """Compile verified target-derived ICA findings into an additive view.
 
@@ -507,7 +441,7 @@ def realize_target_derived_icas(
 def _attempt_target_derived_ica_findings(
     baseline: SystemicStpaBaseline,
     realization: TargetRealizationResult,
-    finder_factory: TargetDerivedICAFactory | Callable[..., Any],
+    finder_factory: Callable[..., Any],
 ) -> tuple[tuple[TargetDerivedICAFinding, ...], tuple[str, ...]]:
     derived_slots = realization.target_derived_ica_slots
     if not derived_slots:
@@ -548,7 +482,7 @@ def _target_operation_context(
 
 
 def _invoke_and_compile_target_derived_icas(
-    finder_factory: TargetDerivedICAFactory | Callable[..., Any],
+    finder_factory: Callable[..., Any],
     request: TargetDerivedICARequest,
     baseline: SystemicStpaBaseline,
     realization: TargetRealizationResult,
@@ -1519,7 +1453,7 @@ def _run_bounded_target_extension(
     observations: Sequence[TargetOperationObservation],
     records: list[TargetOperationRecord],
     interpreter: Any,
-    extension_factory: TargetRealizationExtensionFactory | Callable[..., Any] | None,
+    extension_factory: Callable[..., Any] | None,
 ) -> tuple[
     tuple[SystemicControlAction, ...],
     tuple[TargetDerivedICASlot, ...],
@@ -1549,7 +1483,7 @@ def _eligible_extension_operations(
 
 
 def _extension_interpreter(
-    extension_factory: TargetRealizationExtensionFactory | Callable[..., Any] | None,
+    extension_factory: Callable[..., Any] | None,
     interpreter: Any,
 ) -> Any:
     if extension_factory is not None:
@@ -1565,7 +1499,7 @@ def _extension_interpreter(
     return extension if callable(extension) else None
 
 
-def _construct_extension_adapter(factory: Any) -> TargetRealizationExtensionInterpreter:
+def _construct_extension_adapter(factory: Any) -> Any:
     """Construct one typed extension adapter without guessing call shapes."""
     if not callable(factory):
         raise TypeError("extension factory must be a zero-argument callable")
@@ -2665,13 +2599,7 @@ def _text_or_none(value: Any) -> str | None:
 
 
 __all__ = [
-    "TargetDerivedICAFactory",
-    "TargetDerivedICAInterpreter",
     "TargetRealizationStpaProjection",
-    "TargetRealizationInterpreter",
-    "TargetRealizationInterpreterFactory",
-    "TargetRealizationExtensionInterpreter",
-    "TargetRealizationExtensionFactory",
     "observed_operations",
     "reconcile_declared_observed_capabilities",
     "realize_baseline_rows",
