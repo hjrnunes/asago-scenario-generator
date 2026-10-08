@@ -29,8 +29,6 @@ def _run_consideration(
     adapters: SynthesisAdapters,
 ) -> StageRun:
     """Run the initial complete structural consideration pass."""
-    if adapters.consider is None:
-        raise ValueError("synthesis has no obligation consideration adapter")
     result = adapters.consider(
         briefs=briefs,
         plan=plan,
@@ -56,11 +54,6 @@ def _run_revision(
 ) -> StageRun:
     """Attempt the one bounded additive structural revision."""
     trigger_ids, gap_ids = _revision_trigger_metadata(gaps)
-    if adapters.revise is None:
-        return StageRun(
-            _LocalRevisionOutcome("technical_failure", trigger_ids, gap_ids),
-            diagnostics=("upstream gaps retained: no structural revision adapter",),
-        )
     diagnostics: tuple[str, ...] = ()
     try:
         result = adapters.revise(
@@ -87,8 +80,7 @@ def _run_revision(
 class _LocalRevisionOutcome:
     """A revision outcome decided without a revision result.
 
-    It covers no gaps, no revision adapter, a failed call, and an empty
-    result, and carries ``RevisionRunResult``'s evidence fields empty so every
+    It covers no gaps, a failed call, and an empty result, and carries ``RevisionRunResult``'s evidence fields empty so every
     reader sees one shape.
     """
 
@@ -172,7 +164,7 @@ def _run_bounded_revision(
         final_loss = revision_result.final_loss_analysis or baseline_loss
         final_control = revision_result.final_control_structure or baseline_control
 
-    if revision_applied and resolved.recheck is not None:
+    if revision_applied:
         rechecked = resolved.recheck(
             briefs=applicable_briefs,
             plan=plan,

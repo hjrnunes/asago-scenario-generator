@@ -60,8 +60,6 @@ def _prepare_capability_profile(
     adapters: SynthesisAdapters,
 ) -> StageRun:
     """Resolve the one shared profile through the preparation adapter."""
-    if adapters.prepare_capability is None:
-        raise ValueError("synthesis requires a capability preparation adapter")
     # The observed target decides only the KC sub-codes its verified facts
     # settle; it arrives beside the systemic view, as it does for the baseline.
     profile = adapters.prepare_capability(
@@ -172,8 +170,6 @@ def _run_plan(
     adapters: SynthesisAdapters,
 ) -> StageRun:
     """Run Phase 1 before any baseline STPA adapter work."""
-    if adapters.plan_obligations is None:
-        raise ValueError("synthesis has no Phase 1 planning adapter")
     plan = adapters.plan_obligations(
         taxonomy_inputs=taxonomy_inputs,
         inputs=_systemic_inputs(inputs),
@@ -198,8 +194,6 @@ def _build_briefs(
     adapters: SynthesisAdapters,
 ) -> StageRun:
     """Build exact neutral briefs for applicable obligations."""
-    if adapters.build_briefs is None:
-        raise ValueError("synthesis has no neutral obligation brief adapter")
     result = adapters.build_briefs(
         plan=plan,
         inputs=_systemic_inputs(inputs),
@@ -220,8 +214,6 @@ def _run_baseline(
     adapters: SynthesisAdapters,
 ) -> StageRun:
     """Run ordinary SP1 over the shared profile and reviewed risks."""
-    if adapters.baseline is None:
-        raise ValueError("synthesis has no baseline STPA adapter")
     baseline_inputs = _systemic_inputs(inputs)
     result = adapters.baseline(
         model_runtime=adapters.model_runtime,

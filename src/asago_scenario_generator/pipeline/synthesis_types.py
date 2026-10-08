@@ -1,22 +1,17 @@
-"""Request, stage ports, adapters, and result of one synthesis run."""
+"""Request, stage adapters, and result of one synthesis run."""
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, field, fields, replace
 from enum import Enum
 from pathlib import Path
-from typing import Any, Mapping, NamedTuple, Protocol
+from typing import Any, Mapping, NamedTuple
 
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
-from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
 from asago_scenario_generator.pipeline.obligation_contracts import (
     QualificationFactsInput,
     RiskCardInput,
-    TaxonomyObligationInputs,
-)
-from asago_scenario_generator.pipeline.projection_contracts import (
-    CapabilityFactSnapshot,
 )
 from asago_scenario_generator.pipeline.synthesis_values import _dump
 from asago_scenario_generator.stpa.infra.provider_record import ReplayFill
@@ -202,306 +197,6 @@ def _systemic_inputs(inputs: SynthesisInputs) -> SynthesisInputs:
     )
 
 
-class CapabilityPort(Protocol):
-    """Prepare the shared capability profile."""
-
-    def __call__(
-        self,
-        *,
-        model_runtime: ModelRuntime | None,
-        inputs: SynthesisInputs,
-        output_dir: Path,
-    ) -> CapabilityProfile: ...
-
-
-class TaxonomyInputsPort(Protocol):
-    """Build the closed Phase 1 planner input graph."""
-
-    def __call__(
-        self,
-        *,
-        inputs: SynthesisInputs,
-        capability_profile: CapabilityProfile,
-        capability_snapshot: CapabilityFactSnapshot,
-        risk_cards: tuple[Any, ...],
-        qualification_facts: Any,
-        output_dir: Path,
-    ) -> TaxonomyObligationInputs: ...
-
-
-class PlanPort(Protocol):
-    """Plan taxonomy obligations from the pinned input graph."""
-
-    def __call__(
-        self,
-        *,
-        taxonomy_inputs: TaxonomyObligationInputs,
-        inputs: SynthesisInputs,
-        output_dir: Path,
-    ) -> TaxonomyObligationPlan: ...
-
-
-class BriefsPort(Protocol):
-    """Build the neutral obligation briefs."""
-
-    def __call__(
-        self,
-        *,
-        plan: TaxonomyObligationPlan,
-        inputs: SynthesisInputs,
-        capability_snapshot: CapabilityFactSnapshot,
-        taxonomy_inputs: TaxonomyObligationInputs,
-    ) -> Any: ...
-
-
-class BaselinePort(Protocol):
-    """Run the ordinary SP1 baseline."""
-
-    def __call__(
-        self,
-        *,
-        model_runtime: ModelRuntime | None,
-        inputs: SynthesisInputs,
-        use_case: str,
-        risk_cards: tuple[Any, ...],
-        capability_profile: CapabilityProfile,
-        capability_snapshot: CapabilityFactSnapshot,
-        taxonomy_inputs: TaxonomyObligationInputs,
-        plan: TaxonomyObligationPlan,
-        output_dir: Path,
-        max_workers: int,
-        execution_target_profile: ExecutionTargetProfile | None,
-        target_observations: TargetObservationSnapshot | None,
-    ) -> Any: ...
-
-
-class ConsiderPort(Protocol):
-    """Route each applicable obligation once against the baseline."""
-
-    def __call__(
-        self,
-        *,
-        briefs: Any,
-        plan: TaxonomyObligationPlan,
-        loss_analysis: Any,
-        control_structure: Any,
-        inputs: SynthesisInputs,
-        capability_snapshot: CapabilityFactSnapshot,
-        obligation_adapter: Any | None,
-        output_dir: Path,
-        max_workers: int,
-    ) -> Any: ...
-
-
-class RevisePort(Protocol):
-    """Attempt the one additive structural revision for route gaps."""
-
-    def __call__(
-        self,
-        *,
-        gaps: tuple[Any, ...],
-        plan: TaxonomyObligationPlan,
-        loss_analysis: Any,
-        control_structure: Any,
-        inputs: SynthesisInputs,
-        capability_snapshot: CapabilityFactSnapshot,
-        obligation_adapter: Any | None,
-        output_dir: Path,
-    ) -> Any: ...
-
-
-class RecheckPort(Protocol):
-    """Route every applicable obligation again after an applied revision."""
-
-    def __call__(
-        self,
-        *,
-        briefs: Any,
-        plan: TaxonomyObligationPlan,
-        loss_analysis: Any,
-        control_structure: Any,
-        revision: Any,
-        inputs: SynthesisInputs,
-        capability_snapshot: CapabilityFactSnapshot,
-        obligation_adapter: Any | None,
-        output_dir: Path,
-    ) -> Any: ...
-
-
-class FillIcasPort(Protocol):
-    """Fill the final ICA slots with routed obligation evidence."""
-
-    def __call__(
-        self,
-        *,
-        routes: tuple[Any, ...],
-        briefs: Any,
-        plan: TaxonomyObligationPlan,
-        loss_analysis: Any,
-        control_structure: Any,
-        capability_profile: CapabilityProfile,
-        capability_snapshot: CapabilityFactSnapshot,
-        inputs: SynthesisInputs,
-        obligation_adapter: Any | None,
-        output_dir: Path,
-        max_workers: int,
-    ) -> Any: ...
-
-
-class TargetRealizePort(Protocol):
-    """Realize the systemic ICAs against the observed target.
-
-    ``operation_enrichment`` is the pre-ICA enrichment value, or ``None`` when
-    no enrichment ran; its rows are the run's one matching of control actions
-    to operations, which the realization reuses instead of matching again.
-    """
-
-    def __call__(
-        self,
-        *,
-        model_runtime: ModelRuntime | None,
-        loss_analysis: Any,
-        control_structure: Any,
-        ica_enumeration: Any,
-        capability_profile: CapabilityProfile,
-        execution_target_profile: ExecutionTargetProfile,
-        operation_enrichment: Any | None,
-        inputs: SynthesisInputs,
-        output_dir: Path,
-    ) -> Any: ...
-
-
-class EnrichActionsPort(Protocol):
-    """Ground the logical control actions in the observed target."""
-
-    def __call__(
-        self,
-        *,
-        model_runtime: ModelRuntime | None,
-        loss_analysis: Any,
-        control_structure: Any,
-        capability_profile: CapabilityProfile,
-        execution_target_profile: ExecutionTargetProfile | None,
-        inputs: SynthesisInputs,
-        output_dir: Path,
-    ) -> Any: ...
-
-
-class GovernPort(Protocol):
-    """Place governance-only risks on control actions; ``None`` means no stage."""
-
-    def __call__(
-        self,
-        *,
-        briefs: Any,
-        paths: Any,
-        loss_analysis: Any,
-        control_structure: Any,
-        inputs: SynthesisInputs,
-        obligation_adapter: Any | None,
-        output_dir: Path,
-    ) -> Any: ...
-
-
-class ScenariosPort(Protocol):
-    """Run ordinary SP3 from the final ICA enumeration."""
-
-    def __call__(
-        self,
-        *,
-        model_runtime: ModelRuntime | None,
-        ica_enumeration: Any,
-        briefs: Any,
-        routes: tuple[Any, ...],
-        ica_considerations: tuple[Any, ...],
-        plan: TaxonomyObligationPlan,
-        loss_analysis: Any,
-        control_structure: Any,
-        capability_profile: CapabilityProfile,
-        capability_snapshot: CapabilityFactSnapshot,
-        execution_target_profile: ExecutionTargetProfile | None,
-        target_realization: Any | None,
-        target_observations: TargetObservationSnapshot | None,
-        enriched_operations: Mapping[str, str],
-        inputs: SynthesisInputs,
-        output_dir: Path,
-        max_workers: int,
-    ) -> Any: ...
-
-
-class AccountPort(Protocol):
-    """Build the provisional obligation accounting."""
-
-    def __call__(
-        self,
-        *,
-        plan: TaxonomyObligationPlan,
-        consideration: Any,
-        routes: tuple[Any, ...],
-        ica_enumeration: Any,
-        ica_considerations: tuple[Any, ...],
-        ica_verification: Any | None,
-        source_pins: tuple[Any, ...],
-        scenario_result: Any,
-        loss_analysis: Any,
-        control_structure: Any,
-        inputs: SynthesisInputs,
-        capability_snapshot: CapabilityFactSnapshot,
-        output_dir: Path,
-    ) -> Any: ...
-
-
-class RealizePort(Protocol):
-    """Assess scenario realization separately from ICA accounting."""
-
-    def __call__(
-        self,
-        *,
-        accounting: Any,
-        ica_considerations: tuple[Any, ...],
-        ica_enumeration: Any,
-        scenario_specs: tuple[Any, ...],
-        scenario_result: Any,
-    ) -> Any: ...
-
-
-class PersistPlanPort(Protocol):
-    """Write the Phase 1 plan and return its path (None: the default name)."""
-
-    def __call__(
-        self, *, output_dir: Path, plan: TaxonomyObligationPlan
-    ) -> Path | str | None: ...
-
-
-class PersistArtifactPort(Protocol):
-    """Write one sidecar artifact and return its path (None: the default name)."""
-
-    def __call__(self, *, output_dir: Path, artifact: Any) -> Path | str | None: ...
-
-
-class PersistManifestPort(Protocol):
-    """Write the manifest and return its path (None: the default name)."""
-
-    def __call__(self, *, output_dir: Path, manifest: Any) -> Path | str | None: ...
-
-
-class ReportPort(Protocol):
-    """Render the read-only report and return its path."""
-
-    def __call__(
-        self,
-        *,
-        output_dir: Path,
-        manifest: Any,
-        plan: TaxonomyObligationPlan,
-        consideration: Any,
-        accounting: Any,
-        realization: Any,
-        target_realization: Any | None,
-        scenario_result: Any,
-    ) -> Path | str | None: ...
-
-
 class StageRun(NamedTuple):
     """One stage's value with the errors and call records it produced.
 
@@ -522,32 +217,29 @@ class SynthesisAdapters:
     Every field is optional so the production defaults can be selected lazily,
     while tests can provide a completely deterministic object.  The
     ``from_object`` constructor reads each port from the callable attribute
-    of the same name.
+    of the same name.  The stage runners in ``synthesis_baseline``,
+    ``synthesis_consideration``, ``synthesis_governance``, and
+    ``synthesis_scenarios`` call each port with keyword arguments only and
+    name the arguments it receives.
     """
 
-    prepare_capability: CapabilityPort | None = None
-    build_taxonomy_inputs: TaxonomyInputsPort | None = None
-    plan_obligations: PlanPort | None = None
-    build_briefs: BriefsPort | None = None
-    baseline: BaselinePort | None = None
-    consider: ConsiderPort | None = None
-    revise: RevisePort | None = None
-    recheck: RecheckPort | None = None
-    fill_icas: FillIcasPort | None = None
-    target_realize: TargetRealizePort | None = None
-    enrich_actions: EnrichActionsPort | None = None
-    scenarios: ScenariosPort | None = None
-    account: AccountPort | None = None
-    realize: RealizePort | None = None
-    govern: GovernPort | None = None
+    prepare_capability: Callable[..., Any] | None = None
+    build_taxonomy_inputs: Callable[..., Any] | None = None
+    plan_obligations: Callable[..., Any] | None = None
+    build_briefs: Callable[..., Any] | None = None
+    baseline: Callable[..., Any] | None = None
+    consider: Callable[..., Any] | None = None
+    revise: Callable[..., Any] | None = None
+    recheck: Callable[..., Any] | None = None
+    fill_icas: Callable[..., Any] | None = None
+    target_realize: Callable[..., Any] | None = None
+    enrich_actions: Callable[..., Any] | None = None
+    scenarios: Callable[..., Any] | None = None
+    account: Callable[..., Any] | None = None
+    realize: Callable[..., Any] | None = None
+    govern: Callable[..., Any] | None = None
     obligation_adapter: Any | None = None
-    persist_plan: PersistPlanPort | None = None
-    persist_consideration: PersistArtifactPort | None = None
-    persist_accounting: PersistArtifactPort | None = None
-    persist_realization: PersistArtifactPort | None = None
-    persist_target_realization: PersistArtifactPort | None = None
-    report: ReportPort | None = None
-    manifest: PersistManifestPort | None = None
+    persist_target_realization: Callable[..., Any] | None = None
     model_runtime: ModelRuntime | None = None
 
     @classmethod

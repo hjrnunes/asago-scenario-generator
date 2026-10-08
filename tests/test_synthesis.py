@@ -19,6 +19,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
 )
 from asago_scenario_generator.pipeline import synthesis as synthesis_module
+from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
 from asago_scenario_generator.pipeline.obligation_contracts import (
     RiskCardInput,
     QualificationFactsInput,
@@ -36,50 +37,48 @@ from asago_scenario_generator.pipeline.synthesis import (
     SynthesisAdapters,
     SynthesisInputs,
     SynthesisRunStatus,
-    _accounting_source_pins,
-    _assert_taxonomy_input_identity,
-    _declared_capability_labels,
-    _default_baseline,
-    _dump,
-    _ica_considerations,
-    _ica_verification,
-    _ordinary_icas,
-    _scenario_generation_status,
-    _systemic_inputs,
     run_synthesis,
-    _run_accounting,
-    _build_synthesis_scenario_contexts,
-    _close_consideration_artifact,
 )
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _manifest_prompt_call_evidence,
     _manifest_provider_evidence,
+    _scenario_generation_status,
     _total_prompt_tokens,
 )
+from asago_scenario_generator.pipeline.synthesis_types import _systemic_inputs
 from asago_scenario_generator.stpa.infra.call_log import append_call_log
 from asago_scenario_generator.pipeline.synthesis_baseline import (
-    _build_briefs,
+    _assert_taxonomy_input_identity,
     _prepare_capability_profile,
-    _run_baseline,
-    _run_plan,
 )
 from asago_scenario_generator.pipeline.synthesis_consideration import (
-    _run_consideration,
+    _close_consideration_artifact,
 )
 from asago_scenario_generator.pipeline.synthesis_defaults import (
+    _default_baseline,
     _default_prepare_capability,
     _default_revision,
     _default_scenarios,
     _default_target_realize,
+    _production_defaults,
+    _resolve_adapters,
     _resolve_obligation_provider,
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
+    _accounting_source_pins,
+    _build_synthesis_scenario_contexts,
+    _run_accounting,
     _run_ica_verification,
-    _run_realization,
     _run_scenarios,
-    _run_target_realization,
 )
-from asago_scenario_generator.pipeline.synthesis_values import _semantic_digest
+from asago_scenario_generator.pipeline.synthesis_values import (
+    _declared_capability_labels,
+    _dump,
+    _ica_considerations,
+    _ica_verification,
+    _ordinary_icas,
+    _semantic_digest,
+)
 from asago_scenario_generator.report.synthesis import (
     _candidate_outcomes_html,
     render_synthesis_report,
@@ -764,6 +763,7 @@ def test_default_baseline_preserves_explicit_paths_and_risk_fallback(
         capability_profile="profile",
         loss_analysis_path=pinned_loss_analysis_path,
         output_dir=tmp_path,
+        model_runtime=ModelRuntime.for_inputs(inputs),
     )
 
     assert result is baseline_result
@@ -1853,6 +1853,7 @@ def test_accounting_receives_the_verified_ordinary_ica_enumeration() -> None:
         inputs=SimpleNamespace(output_dir=Path(".")),
         snapshot=SimpleNamespace(),
         adapters=SynthesisAdapters(account=account),
+        slot_evidence=wrapped,
     )
 
     assert run.value is expected
@@ -2016,36 +2017,6 @@ def test_scenarios_receive_the_unprojected_pairs_beside_the_projected_icas() -> 
     )
 
     assert received["ica_enumeration"] is projected
-    assert received["ica_considerations"] == (pair,)
-
-
-def test_scenarios_without_slot_evidence_read_the_pairs_from_their_icas() -> None:
-    pair = _slot_pair()
-    fill = _slot_fill(pair, IcaHazardVerificationBatch(batch_id="verification"))
-    received: dict[str, object] = {}
-
-    def scenarios(**kwargs: object) -> object:
-        received.update(kwargs)
-        return object()
-
-    _run_scenarios(
-        fill,
-        (),
-        (),
-        SimpleNamespace(),
-        SimpleNamespace(),
-        SimpleNamespace(),
-        SimpleNamespace(),
-        SimpleNamespace(
-            output_dir=Path("."),
-            execution_target_profile=None,
-            target_observations=None,
-            max_workers=1,
-        ),
-        SimpleNamespace(),
-        SynthesisAdapters(scenarios=scenarios),
-    )
-
     assert received["ica_considerations"] == (pair,)
 
 
@@ -2514,46 +2485,37 @@ def test_synthesis_rejects_a_missing_or_empty_stage_result(
         run_synthesis(_inputs(tmp_path), adapters)
 
 
-def test_stage_runners_require_their_adapter(tmp_path: Path) -> None:
-    """Each stage names its missing port; the production defaults fill them."""
-    inputs = _miniklarna_target_package(tmp_path).inputs
-    empty = SynthesisAdapters()
-    scenario_result = SimpleNamespace(scenario_specs=())
-    stages = {
-        "capability preparation adapter": lambda: _prepare_capability_profile(
-            inputs, empty
-        ),
-        "Phase 1 planning adapter": lambda: _run_plan(None, inputs, empty),
-        "neutral obligation brief adapter": lambda: _build_briefs(
-            None, inputs, None, None, empty
-        ),
-        "baseline STPA adapter": lambda: _run_baseline(
-            inputs, None, None, None, None, empty
-        ),
-        "obligation consideration adapter": lambda: _run_consideration(
-            (), None, None, None, inputs, None, empty
-        ),
-        "target-realization adapter": lambda: _run_target_realization(
-            ica_enumeration=final_ica_result(),
-            loss_analysis=None,
-            control_structure=None,
-            capability_profile=None,
-            inputs=inputs,
-            adapters=empty,
-        ),
-        "obligation accounting adapter": lambda: _run_accounting(
-            None, None, (), final_ica_result(), None, None, None, inputs, None, empty
-        ),
-        "scenario realization adapter": lambda: _run_realization(
-            accounting=None,
-            ica_enumeration=final_ica_result(),
-            scenario_result=scenario_result,
-            adapters=empty,
-        ),
+def test_resolution_fills_every_stage_port_from_the_defaults() -> None:
+    """The stage runners call these ports unchecked: resolution never leaves one unset.
+
+    Only the taxonomy-input port and the persistence writer have no default.
+    """
+    defaults = _production_defaults()
+
+    resolved = _resolve_adapters(SynthesisAdapters())
+
+    assert {
+        name
+        for name in SynthesisAdapters.__dataclass_fields__
+        if getattr(defaults, name) is not None
+    } == {
+        "prepare_capability",
+        "plan_obligations",
+        "build_briefs",
+        "baseline",
+        "consider",
+        "revise",
+        "recheck",
+        "fill_icas",
+        "target_realize",
+        "enrich_actions",
+        "scenarios",
+        "account",
+        "realize",
+        "govern",
     }
-    for name, run in stages.items():
-        with pytest.raises(ValueError, match=f"synthesis (requires a|has no) {name}"):
-            run()
+    for name in SynthesisAdapters.__dataclass_fields__:
+        assert getattr(resolved, name) is getattr(defaults, name)
 
 
 def _other_profile_realization(**_) -> TargetRealizationResult:

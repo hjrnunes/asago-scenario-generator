@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -19,13 +20,8 @@ from asago_scenario_generator.pipeline.obligation_persistence import (
 )
 from asago_scenario_generator.pipeline.synthesis_types import (
     MANIFEST_FILENAME,
-    PLAN_FILENAME,
     REPORT_FILENAME,
-    PersistArtifactPort,
-    PersistManifestPort,
-    ReportPort,
     StageRun,
-    SynthesisAdapters,
     SynthesisInputs,
 )
 from asago_scenario_generator.pipeline.synthesis_values import _dump
@@ -56,20 +52,9 @@ def _persist_prepared_profile(output_dir: Path, profile: CapabilityProfile) -> P
     return path
 
 
-def _persist_plan(
-    output_dir: Path,
-    plan: Any,
-    adapters: SynthesisAdapters,
-) -> StageRun:
-    """Persist the Phase 1 plan through its adapter and verify a reload."""
-    if adapters.persist_plan is not None:
-        result = adapters.persist_plan(
-            output_dir=output_dir,
-            plan=plan,
-        )
-        path = Path(result) if result is not None else output_dir / PLAN_FILENAME
-    else:
-        path = write_taxonomy_obligation_plan(output_dir, plan)
+def _persist_plan(output_dir: Path, plan: Any) -> StageRun:
+    """Persist the Phase 1 plan; the caller verifies a reload."""
+    path = write_taxonomy_obligation_plan(output_dir, plan)
     return StageRun(path, calls=("persist_plan",))
 
 
@@ -81,20 +66,8 @@ def _reload_persisted_plan(plan: Any, path: Path) -> Any:
     return reloaded
 
 
-def _persist_sidecar(
-    output_dir: Path,
-    filename: str,
-    artifact: Any,
-    writer: PersistArtifactPort | None,
-    label: str,
-) -> Path:
+def _persist_sidecar(output_dir: Path, filename: str, artifact: Any) -> Path:
     """Write one closed artifact atomically, then perform a best-effort reload."""
-    if writer is not None:
-        result = writer(output_dir=output_dir, artifact=artifact)
-        path = Path(result) if result is not None else output_dir / filename
-        if not path.exists():
-            raise ValueError(f"{label} persistence adapter did not write {path}")
-        return path
     path = output_dir / filename
     content = _artifact_yaml(artifact)
     atomic_write_text(path, content)
@@ -106,43 +79,30 @@ def _persist_slot_hazard_offers(output_dir: Path, report: Any | None) -> Path | 
     """Publish the slot hazard offer report when the slot filler sent requests."""
     if report is None:
         return None
-    return _persist_sidecar(
-        output_dir, SLOT_HAZARD_OFFERS_FILENAME, report, None, "slot hazard offers"
-    )
+    return _persist_sidecar(output_dir, SLOT_HAZARD_OFFERS_FILENAME, report)
 
 
 def _persist_target_realization(
     output_dir: Path,
     artifact: Any | None,
-    writer: PersistArtifactPort | None,
+    writer: Callable[..., Any] | None,
 ) -> Path | None:
     """Publish the additive target lens only when a target was supplied."""
     if artifact is None:
         return None
     if writer is None:
         return write_target_realization(output_dir, artifact)
-    path = _persist_sidecar(
-        output_dir,
-        TARGET_REALIZATION_FILENAME,
-        artifact,
-        writer,
-        "target_realization",
+    result = writer(output_dir=output_dir, artifact=artifact)
+    path = (
+        Path(result) if result is not None else output_dir / TARGET_REALIZATION_FILENAME
     )
+    if not path.exists():
+        raise ValueError(f"target_realization persistence adapter did not write {path}")
     return path
 
 
-def _persist_manifest(
-    output_dir: Path,
-    manifest: Any,
-    writer: PersistManifestPort | None,
-) -> Path:
+def _persist_manifest(output_dir: Path, manifest: Any) -> Path:
     """Atomically publish and verify the top-level synthesis manifest."""
-    if writer is not None:
-        result = writer(output_dir=output_dir, manifest=manifest)
-        path = Path(result) if result is not None else output_dir / MANIFEST_FILENAME
-        if not path.exists():
-            raise ValueError(f"manifest persistence adapter did not write {path}")
-        return path
     path = output_dir / MANIFEST_FILENAME
     atomic_write_text(path, _artifact_yaml(manifest))
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
@@ -160,21 +120,8 @@ def _render_report(
     realization: Any,
     target_realization: Any,
     scenario_result: Any,
-    renderer: ReportPort | None,
 ) -> Path | None:
     """Render the read-only synthesis report after all normative sidecars."""
-    if renderer is not None:
-        result = renderer(
-            output_dir=output_dir,
-            manifest=manifest,
-            plan=plan,
-            consideration=consideration,
-            accounting=accounting,
-            realization=realization,
-            target_realization=target_realization,
-            scenario_result=scenario_result,
-        )
-        return Path(result) if result is not None else None
     try:
         from asago_scenario_generator.report.synthesis import render_synthesis_report
 

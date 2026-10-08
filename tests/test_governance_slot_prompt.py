@@ -235,7 +235,7 @@ def test_the_provider_fills_a_slot_for_a_governance_route(tmp_path) -> None:
 
 
 def test_a_governance_finding_projects_to_a_governance_scenario_consideration() -> None:
-    from asago_scenario_generator.pipeline.synthesis_defaults import _findings_by_ica
+    from asago_scenario_generator.pipeline.synthesis_scenarios import _findings_by_ica
 
     briefs, _, _, _ = _setup("risk-b")
     pair = SimpleNamespace(

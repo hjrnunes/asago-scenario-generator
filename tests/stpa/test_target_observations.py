@@ -7,10 +7,8 @@ import json
 import pytest
 import yaml
 
-from asago_scenario_generator.pipeline.synthesis import (
-    SynthesisInputs,
-    _systemic_inputs,
-)
+from asago_scenario_generator.pipeline.synthesis import SynthesisInputs
+from asago_scenario_generator.pipeline.synthesis_types import _systemic_inputs
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
     CoverageAnalysis,
