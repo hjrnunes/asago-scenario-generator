@@ -24,3 +24,6 @@ cases:
       - STPA
       - User input surfaces
       - zones_active
+      - "## Quality requirements"
+      - Do not infer tools from security constraints
+      - Security constraints describe what SHOULD exist, not what DOES exist

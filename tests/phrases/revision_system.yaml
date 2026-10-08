@@ -17,3 +17,5 @@ cases:
       - You may DISMISS a finding if you judge it to be a false positive
       - connect properly
       - modified_responsibilities list must contain ONLY responsibilities you are CHANGING
+    forbidden:
+      - STPA-Sec
