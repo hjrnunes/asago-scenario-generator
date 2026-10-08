@@ -1,0 +1,15 @@
+template: mechanism_verification_system.j2
+cases:
+  mechanism-item:
+    required:
+      - stays within one conversation
+      - needs no tool, retrieval, or memory
+      - the selected control action produces the response the attack ends in
+      - govern the consequence the mechanism names
+      - A constraint on that consequence is not an adjacent concern
+      - poisoned tool or source output being interpreted as an instruction
+      - Do not infer missing architecture
+      - "`insufficient_evidence`"
+    once:
+      - "Accepted example:"
+      - "Rejected example:"

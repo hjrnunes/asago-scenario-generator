@@ -1,0 +1,16 @@
+template: ica_hazard_verification_system.j2
+cases:
+  verification-request:
+    required:
+      - '"if A, require B"'
+      - supervisor signs OR an automated check passes
+      - missing supervisor sign-off alone
+      - unspecified specialist
+      - "`insufficient_evidence`, not a repaired story"
+      - provider (provider input)
+      - customer (customer output)
+      - different_action
+      - "`absence_loss_ids`"
+      - "`absence_consequence`"
+    forbidden:
+      - NOT_PROVIDED

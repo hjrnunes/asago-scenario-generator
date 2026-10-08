@@ -36,9 +36,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     SecurityConstraint,
 )
-from pathlib import Path
-from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.system_model import control_structure
 from tests.helpers.ica_hazard_verification import (
     _finding_pair,
     _request,
@@ -149,16 +146,6 @@ def test_routing_provider_wire_does_not_expose_mapping_strength() -> None:
     assert "mapping_strength" not in assessment.get("properties", {})
 
 
-def test_verification_prompt_explains_conditional_and_alternative_controls() -> None:
-    system, _ = build_ica_hazard_verification_prompts((_request(),))
-
-    assert '"if A, require B"' in system
-    assert "supervisor signs OR an automated check passes" in system
-    assert "missing supervisor sign-off alone" in system
-    assert "unspecified specialist" in system
-    assert "`insufficient_evidence`, not a repaired story" in system
-
-
 def test_verification_request_projects_action_recipient_and_direction() -> None:
     enumeration, loss_analysis, control_structure = _stpa_inputs()
     action = ControlAction.model_validate(
@@ -210,28 +197,12 @@ def test_verification_prompt_compares_provider_input_with_customer_output() -> N
     negative = IcaHazardVerificationRequest.model_validate(negative_payload)
     positive = IcaHazardVerificationRequest.model_validate(positive_payload)
 
-    system, user = build_ica_hazard_verification_prompts((negative, positive))
+    _system, user = build_ica_hazard_verification_prompts((negative, positive))
 
-    assert "provider (provider input)" in system
-    assert "customer (customer output)" in system
-    assert "different_action" in system
     assert "action_recipient: the borrowing member" in user
     assert "action_direction: output" in user
     assert "Send the record to a storage provider" in user
     assert "Show the record to the borrowing member" in user
-
-
-def test_loss_method_preserves_triggers_without_inventing_measurement() -> None:
-
-    loader = TemplateLoader(Path(control_structure.__file__).parent / "prompts")
-    for template in ("stage1a_risk_system.j2", "stage1a_gap_system.j2"):
-        rendered = loader.render_prompt(template)
-        assert (
-            "Constraints are requirements, not observations of installed controls"
-            in rendered
-        )
-        assert "identity-confidence score falls below 0.8" in rendered
-        assert "unless that score and threshold were supplied" in rendered
 
 
 def test_request_scopes_multi_hazard_constraint_to_ica_hazard() -> None:

@@ -55,6 +55,9 @@ cases:
       - Adversary action is selection context, not the grammar of the hazard
       - system state
       - cause or attack mechanism
+      - Constraints are requirements, not observations of installed controls
+      - identity-confidence score falls below 0.8
+      - unless that score and threshold were supplied
     once:
       - Express each constraint as the safe relationship
     forbidden:

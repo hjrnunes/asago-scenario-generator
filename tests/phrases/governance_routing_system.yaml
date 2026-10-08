@@ -1,0 +1,11 @@
+template: governance_routing_system.j2
+cases:
+  governance-rows:
+    required:
+      - "`placements`"
+      - "`risk_id`"
+      - "`targets`"
+      - "`target_id`"
+      - "`reason`"
+      - hypothesis
+      - exactly one entry for each
