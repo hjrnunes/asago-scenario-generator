@@ -169,7 +169,7 @@ def _run_synthesis(
     )
 
     plan = log.take(_run_plan(taxonomy_inputs, inputs, resolved))
-    plan_path = log.take(_persist_plan(output_dir, plan, resolved))
+    plan_path = log.take(_persist_plan(output_dir, plan))
     plan = _reload_persisted_plan(plan, plan_path)
 
     briefs = log.take(
@@ -369,25 +369,11 @@ def _run_synthesis(
         )
     )
     consideration_path = _persist_sidecar(
-        output_dir,
-        CONSIDERATION_FILENAME,
-        consideration,
-        resolved.persist_consideration,
-        "consideration",
+        output_dir, CONSIDERATION_FILENAME, consideration
     )
-    accounting_path = _persist_sidecar(
-        output_dir,
-        ACCOUNTING_FILENAME,
-        accounting,
-        resolved.persist_accounting,
-        "accounting",
-    )
+    accounting_path = _persist_sidecar(output_dir, ACCOUNTING_FILENAME, accounting)
     realization_path = _persist_sidecar(
-        output_dir,
-        SCENARIO_REALIZATION_FILENAME,
-        realization,
-        resolved.persist_realization,
-        "realization",
+        output_dir, SCENARIO_REALIZATION_FILENAME, realization
     )
     hazard_offers_path = _persist_slot_hazard_offers(output_dir, hazard_offers)
     target_realization_path = _persist_target_realization(
@@ -427,7 +413,7 @@ def _run_synthesis(
         call_records=session.call_log.entries(output_dir),
         replay_fill=session.fill_summary(),
     )
-    manifest_path = _persist_manifest(output_dir, manifest, resolved.manifest)
+    manifest_path = _persist_manifest(output_dir, manifest)
 
     report_path = _render_report(
         output_dir,
@@ -438,7 +424,6 @@ def _run_synthesis(
         realization,
         target_realization,
         scenario_result,
-        resolved.report,
     )
 
     artifact_paths = _artifact_paths(

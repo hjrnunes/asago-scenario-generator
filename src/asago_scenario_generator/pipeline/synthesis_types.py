@@ -239,13 +239,7 @@ class SynthesisAdapters:
     realize: Callable[..., Any] | None = None
     govern: Callable[..., Any] | None = None
     obligation_adapter: Any | None = None
-    persist_plan: Callable[..., Any] | None = None
-    persist_consideration: Callable[..., Any] | None = None
-    persist_accounting: Callable[..., Any] | None = None
-    persist_realization: Callable[..., Any] | None = None
     persist_target_realization: Callable[..., Any] | None = None
-    report: Callable[..., Any] | None = None
-    manifest: Callable[..., Any] | None = None
     model_runtime: ModelRuntime | None = None
 
     @classmethod
