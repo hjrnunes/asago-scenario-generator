@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-import json
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -44,6 +43,7 @@ from ..condition_check import (
     ConditionCheckOutcome,
     ConditionUniverse,
     build_condition_universe,
+    target_observation_fact_values,
     check_discriminating_condition,
     condition_failure_message,
     condition_findings,
@@ -453,7 +453,7 @@ def _validate_safe_outcome_refs(
     normalizations: list[Stage5Normalization] | None,
 ) -> SafeObservableOutcome:
     """Require supplied record and fact references, moving record paths to facts."""
-    allowed_facts = _target_observation_fact_refs(target_observations)
+    allowed_facts = set(target_observation_fact_values(target_observations))
     if outcome.record_refs:
         allowed_records = (
             {item.observation_ref for item in target_observations.observations}
@@ -716,41 +716,6 @@ def _stage5_observed_operation_names(
     if target_operation is not None:
         return (target_operation.operation_id,)
     return ()
-
-
-def _target_observation_fact_refs(
-    target_observations: TargetObservationSnapshot | None,
-) -> set[str]:
-    """Return deterministic fact references exposed by target observations."""
-
-    if target_observations is None:
-        return set()
-    refs: set[str] = set()
-    for observation in target_observations.observations:
-        prefix = observation.observation_ref
-        if observation.source_arguments:
-            refs.update(
-                f"{prefix}.arguments.{name}" for name in observation.source_arguments
-            )
-        if observation.content_format != "json":
-            continue
-        try:
-            content = json.loads(observation.content)
-        except (TypeError, ValueError):
-            continue
-        _collect_json_fact_refs(content, prefix, refs)
-    return refs
-
-
-def _collect_json_fact_refs(value: object, prefix: str, refs: set[str]) -> None:
-    """Collect object-key paths without inventing array or scalar aliases."""
-
-    if not isinstance(value, Mapping):
-        return
-    for key, child in value.items():
-        path = f"{prefix}.{key}"
-        refs.add(path)
-        _collect_json_fact_refs(child, path, refs)
 
 
 def _validate_attacker_bdi_cardinality(
