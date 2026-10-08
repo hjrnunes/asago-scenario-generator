@@ -241,7 +241,7 @@ accepted condition honoured, declined, or ignored the family in
 `condition-families.yaml` next to `testability.yaml`. The sidecar is a
 diagnostic and does not affect acceptance.
 
-Normal Stage 5 validation corrects three unambiguous slips in place instead
+Normal Stage 5 validation corrects four unambiguous slips in place instead
 of spending the correction request on them:
 
 - A `safe_observable_outcome.record_refs` entry that is a supplied record or
@@ -254,6 +254,11 @@ of spending the correction request on them:
   `observable: true` with that pair. Any other contradiction still fails.
 - An intention that cites at least one declared causal factor drops its
   undeclared handles; an intention with no declared handle still fails.
+- A `command_attempt` safe outcome with no `operation_name` takes the
+  operation of the only supported observation criterion when that criterion
+  has the same claim level and evidence and names one operation
+  (`safe_outcome_operation_from_only_supported_criterion`). Without such a
+  criterion the missing operation still fails.
 
 Each correction is recorded in
 `<run_dir>/stage5-normalizations/<context_digest>.yaml` as
@@ -366,20 +371,9 @@ the gap's constraint) and `rationale`. Code appends the findings to the slot;
 a failed supplement keeps the slot as validated. The slot response still
 reports one provider call; `calls.jsonl` records the supplement separately.
 
-A Stage 5 causal factor may carry one STPA-Sec `mechanism`. Each source
-choice lists its `feedback_source_kind`, its trust, and its
-`compatible_mechanisms`:
-
-| Mechanism | Factor kinds | Feedback sources |
-| --- | --- | --- |
-| `none` (default, omitted) | any | any |
-| `accepted_untrusted_claim` | process-model flaw, sensor anomaly | user message, conversation history |
-| `injected_instruction` | sensor anomaly | retrieved content |
-| `backend_non_enforcement` | actuator anomaly | not applicable |
-
-An incompatible mechanism fails with `mechanism_source_mismatch:` and spends
-the existing validation retry. The scenario specification's causal factor
-records the mechanism. The handoff contract does not carry the field.
+Each Stage 5 source choice lists its `feedback_source_kind` and whether it is
+`untrusted`. An untrusted source carries information an adversary can author;
+it does not establish attacker access by itself.
 
 Each Stage 5 draft check that rejects a response raises a typed
 `ValidationIssueError` with one `IssueCode` (`stage5/issues.py`). The error
@@ -391,6 +385,19 @@ followed by the available causal handles. A failure without a code gets the
 general instruction and the handles, with no code lines. The publication
 note for a dropped discriminating condition names the code of the final
 attempt's issue, not text found in its message.
+
+Three rejections that once failed as plain errors carry codes:
+
+- `safe_outcome_fact_ref_not_supplied`: a `safe_observable_outcome.fact_refs`
+  entry names no supplied fact. The detail adds one line per path with the
+  nearest supplied parent path and its type, for example
+  "`TARGET-STATE.payment_plans.PLAN-12.plan_id` is not supplied; the nearest
+  supplied path is `TARGET-STATE.payment_plans.PLAN-12` (object)". Code does
+  not rewrite the path; the model chooses the fact.
+- `attacker_intentions_missing`: an adversarial draft lists no attacker
+  intention.
+- `safe_outcome_claim_missing`: an observable safe outcome has no claim level
+  or evidence.
 
 ## Target-realization extension
 
