@@ -1,0 +1,11 @@
+template: critic_system.j2
+cases:
+  no-probes:
+    required:
+      - An explicit requirement may still justify a proposed missing safeguard
+      - Report source/function omissions as structural gaps
+      - a recommendation is not an observed installed capability
+      - >-
+        An attack path requires supplied attacker access and the relevant
+        operation or state
+      - Do not infer a recipient, mechanism, or misuse from hazard

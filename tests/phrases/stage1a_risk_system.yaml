@@ -1,0 +1,49 @@
+template: stage1a_risk_system.j2
+cases:
+  no-variables:
+    required:
+      - Every hazard references at least one valid local loss handle
+      - "## Quality requirements"
+      - "### Hazard specificity"
+      - at least one specific component
+      - too generic
+      - greenhouse air remains above the crop's safe temperature limit
+      - 'Not a hazard: "the temperature sensor fails"'
+      - "### Loss specificity"
+      - concrete consequences
+      - "### Acronym expansion"
+      - Personally Identifiable Information (PII)
+      - short form alone is acceptable
+      - "## Relevance and causal follow-up"
+      - not require an adversary
+      - concrete attack path for inclusion
+      - Adversarial relevance is a later
+      - >-
+        A stated permission, authorization, or conditional exception remains
+        part of the behavior being analyzed.
+      - A hazardous state is not evidence that an attacker reached it
+      - Do not require an adversary, entry point, or concrete attack path for inclusion
+      - authorized account-record lookup is likewise not itself a loss
+      - An authorized account-record lookup is likewise not itself a loss
+      - recipient not authorized by the request
+      - preserve the authorized recipient and quantity
+      - a later causal question
+      - Treat source-stated authenticated or otherwise authorized operations
+      - >-
+        safe relationship among the source-established action, authorization
+        or request, and intended effect
+      - Do not blanket-ban a permitted function or invent a secondary verifier
+      - preserve a supplied human-review trigger
+      - For a warehouse dispatch service
+      - dispatches the wrong quantity
+      - secondary review step
+    once:
+      - Express each constraint as the safe relationship
+    forbidden:
+      - patient chatbot
+      - refund processing API
+      - Klarna
+      - Focus on adversary-actionable threats
+      - Omit operational risks with no adversarial vector
+    ordered:
+      - ["## Structural requirements", "## Quality requirements"]

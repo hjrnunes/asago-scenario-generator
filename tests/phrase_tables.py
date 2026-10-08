@@ -35,6 +35,10 @@ from asago_scenario_generator.models.target_realization import (
     TargetOperationReference,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.models.control_structure import (
+    ProcessModelPart,
+    Responsibility,
+)
 from asago_scenario_generator.stpa.scenario_prod._constants import (
     PROMPTS_DIR as STAGE5_PROMPTS_DIR,
 )
@@ -79,6 +83,19 @@ NEUTRAL_STATUS = {
     "requirements": [],
     "capability_profile": None,
     "responsibilities": [],
+}
+
+ONE_RESPONSIBILITY = {
+    **NEUTRAL_STATUS,
+    "responsibilities": [
+        Responsibility(
+            resp_id="RESP-1",
+            description="Authorizes requests",
+            process_model_parts=[
+                ProcessModelPart(pm_id="PM-1-1", description="Request state")
+            ],
+        )
+    ],
 }
 
 EMPTY_STRUCTURE = {
@@ -160,6 +177,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "no-stated-rules": _system_model(stated_rules=False),
     "records-service": _system_model(**RECORDS_SERVICE),
     "neutral-status": _system_model(**NEUTRAL_STATUS),
+    "one-responsibility": _system_model(**ONE_RESPONSIBILITY),
     "test-use-case": _system_model(
         use_case_text="Test use case", selected_constraints=[]
     ),

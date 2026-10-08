@@ -1,4 +1,9 @@
-"""Tests for Stage 1 prompt quality (updated for stage1a split + stage1b revision)."""
+"""Tests for Stage 1 prompt quality (updated for stage1a split + stage1b revision).
+
+The fixed Stage 1a and Stage 2 wording lives in the phrase tables under
+``tests/phrases/``; this module keeps the input-dependent checks, the
+template-source checks, the Stage 1b checks and the rendering properties.
+"""
 
 from __future__ import annotations
 
@@ -14,9 +19,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 
-_STAGE1A_RISK_SYSTEM = "stage1a_risk_system.j2"
 _STAGE1A_RISK_USER = "stage1a_risk_user.j2"
-_STAGE1A_GAP_SYSTEM = "stage1a_gap_system.j2"
 _STAGE1A_GAP_USER = "stage1a_gap_user.j2"
 _STAGE1B_SYSTEM = "stage1b_system.j2"
 
@@ -42,57 +45,8 @@ def _render(template_name: str, **variables: object) -> str:
 
 
 # ---------------------------------------------------------------------------
-# stage1a_risk_system quality checks
+# stage1a_risk_user rendering and source checks
 # ---------------------------------------------------------------------------
-
-
-def test_pqf_01_stage1a_risk_quality_section_follows_structural_requirements() -> None:
-    text = _text(_STAGE1A_RISK_SYSTEM)
-    assert "## Quality requirements" in text
-    assert text.index("## Quality requirements") > text.index(
-        "## Structural requirements"
-    )
-
-
-def test_pqf_02_stage1a_risk_hazard_specificity_patterns() -> None:
-    text = _render(_STAGE1A_RISK_SYSTEM)
-    assert "### Hazard specificity" in text
-    assert "at least one specific component" in text
-    assert "too generic" in text
-    assert "greenhouse air remains above the crop's safe temperature limit" in text
-    assert 'Not a hazard: "the temperature sensor fails"' in text
-    assert "patient chatbot" not in text
-    assert "refund processing API" not in text
-
-
-def test_pqf_03_stage1a_risk_loss_specificity() -> None:
-    text = _text(_STAGE1A_RISK_SYSTEM)
-    assert "### Loss specificity" in text
-    assert "concrete consequences" in text
-
-
-def test_pqf_04_stage1a_risk_acronym_expansion() -> None:
-    text = _text(_STAGE1A_RISK_SYSTEM)
-    assert "### Acronym expansion" in text
-    assert "Personally Identifiable Information (PII)" in text
-    assert "short form alone is acceptable" in text
-
-
-def test_call2a_asks_for_a_content_support_variable_on_content_outputs() -> None:
-    """A responsibility that states content needs a variable whose values can
-    express unsupported content, or no context row can describe it."""
-    text = " ".join(_render("stage2_call2a_system.j2").split())
-    assert "output states facts, advice, or other content to a recipient" in text
-    assert "whether that content is supported by a source" in text
-    assert "no context can express wrong or unsupported content" in text
-
-
-def test_pqf_05_stage1a_risk_adversary_actionable() -> None:
-    text = _text(_STAGE1A_RISK_SYSTEM)
-    assert "## Relevance and causal follow-up" in text
-    assert "not require an adversary" in text
-    assert "concrete attack path for inclusion" in text
-    assert "Adversarial relevance is a later" in text
 
 
 def test_pqf_06_stage1a_risk_user_renders_with_use_case_and_risk_cards() -> None:
@@ -116,15 +70,6 @@ def test_pqf_06_stage1a_risk_user_renders_with_use_case_and_risk_cards() -> None
     assert "Test risk" in rendered
 
 
-def test_pqf_07_stage1a_risk_user_empty_risk_cards() -> None:
-    rendered = _render(
-        _STAGE1A_RISK_USER,
-        use_case_text="Test use case",
-        risk_cards=[],
-    )
-    assert "No organizational risks provided" in rendered
-
-
 def test_pqf_08_stage1a_risk_user_preserves_jinja_variables() -> None:
     text = _text(_STAGE1A_RISK_USER)
     assert "{{ use_case_text }}" in text
@@ -133,23 +78,8 @@ def test_pqf_08_stage1a_risk_user_preserves_jinja_variables() -> None:
 
 
 # ---------------------------------------------------------------------------
-# stage1a_gap_system quality checks
+# stage1a_gap_user rendering and source checks
 # ---------------------------------------------------------------------------
-
-
-def test_pqf_09_stage1a_gap_system_has_gap_analysis_method() -> None:
-    text = _text(_STAGE1A_GAP_SYSTEM)
-    assert "## Gap analysis method" in text
-    assert "Architectural components" in text
-    assert "Integration points" in text
-
-
-def test_pqf_10_stage1a_gap_system_adversary_actionable() -> None:
-    text = _text(_STAGE1A_GAP_SYSTEM)
-    assert "## Relevance and causal follow-up" in text
-    assert "not require an adversary" in text
-    assert "concrete attack path for inclusion" in text
-    assert "missing attack evidence does not exclude an otherwise grounded gap" in text
 
 
 def test_pqf_11_stage1a_gap_user_renders_with_existing_analysis() -> None:
@@ -181,8 +111,6 @@ def test_pqf_11_stage1a_gap_user_renders_with_existing_analysis() -> None:
     assert "L-1" in rendered
     assert "H-1" in rendered
     assert "SC-1" in rendered
-    assert "request-local `handle`" in rendered
-    assert "compiler assigns their canonical IDs" in rendered
     assert "kc_subcodes" in rendered.lower() or "KC1.1" in rendered
 
 
@@ -306,17 +234,3 @@ class TestTemplateRenderingProperties:
             _STAGE1A_RISK_USER, use_case_text=use_case_text, risk_cards=[]
         )
         assert "No organizational risks provided" in rendered
-
-    @given(use_case_text=_st_safe_text)
-    @settings(max_examples=20, deadline=None)
-    def test_pqp_06_stage1a_risk_quality_section_follows_structural_in_render(
-        self,
-        use_case_text: str,
-    ) -> None:
-        """In rendered stage1a_risk_system, Quality requirements follows Structural."""
-        rendered = _render(_STAGE1A_RISK_SYSTEM)
-        assert "## Structural requirements" in rendered
-        assert "## Quality requirements" in rendered
-        assert rendered.index("## Quality requirements") > rendered.index(
-            "## Structural requirements"
-        )
