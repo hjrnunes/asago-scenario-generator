@@ -19,6 +19,7 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     Stage1Profile,
     ToolInventoryEntry,
+    derive_zones_from_kc,
     inject_kc_subcodes_display,
 )
 from asago_scenario_generator.request_schema import (
@@ -33,10 +34,20 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.kc_decision import (
+    KcDecisionRecord,
+    apply_kc_facts,
+    target_kc_decision,
+    vote_kc_subcodes,
+)
 
 STAGE = "stage_1b"
 STEP = "capability_profile"
+KC_DECISION_FILENAME = "capability-kc-decision.yaml"
 
 
 def _validate_promotion(draft: Stage1Profile) -> Stage1Profile:
@@ -101,12 +112,21 @@ def derive_capability_profile(
     run_dir: Path,
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
+    samples: int = 1,
+    target_profile: ExecutionTargetProfile | None = None,
 ) -> CapabilityProfile:
     """Run Stage 1b: derive capability profile from use-case text.
 
-    Makes a single LLM call producing a Stage1Profile, promotes it to a
-    CapabilityProfile, logs the call, writes the output to
-    capability-profile.yaml, and returns the validated model.
+    Sends the same Stage1Profile request *samples* times.  The KC sub-codes
+    are the vote of the successful draws (:func:`vote_kc_subcodes`); entry
+    points, tool inventory, and confidence come from the first successful
+    draw.  A draw that fails after its correction is left out of the vote;
+    the stage fails only when every draw fails.  The verified facts of an
+    observed *target_profile* then force the codes they decide in or out
+    (:func:`target_kc_decision`); the request itself never sees the target.
+    The draws, the counts, the fact decisions with their reasons, and the
+    decided codes land in ``capability-kc-decision.yaml``; the profile in
+    ``capability-profile.yaml``.
 
     Stage 1b has zero dependency on Stage 1a — no loss analysis context
     is passed to the prompt.
@@ -117,13 +137,18 @@ def derive_capability_profile(
         run_dir: Directory for output artifacts.
         template_loader: Optional template loader (defaults to SP1 prompts dir).
         temperature: LLM temperature (default 0.4).
+        samples: Number of draws the KC vote takes (at least 1).
+        target_profile: Optional observed execution target profile whose
+            verified facts decide some KC sub-codes.
 
     Returns:
         Validated CapabilityProfile model.
 
     Raises:
-        StageError: If the LLM call fails or the response fails validation.
+        StageError: If every draw fails or the decided profile is invalid.
     """
+    if samples < 1:
+        raise ValueError("samples must be at least 1")
     loader = template_loader or TemplateLoader(PROMPTS_DIR)
 
     system_prompt = loader.render_prompt("stage1b_system.j2")
@@ -132,27 +157,88 @@ def derive_capability_profile(
         use_case_text=use_case_text,
     )
 
-    outcome = call_with_policy(
+    drafts, errors = _sample_drafts(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=stage1_profile_request_model(llm_client),
         run_dir=run_dir,
-        stage=STAGE,
-        step=STEP,
-        policy=CorrectionPolicy(validation_retries=1, include_response=True),
         temperature=temperature,
+        samples=samples,
     )
-    if outcome.error is not None:
-        raise StageError(stage=STAGE, step=STEP, message=outcome.error)
 
-    capability_profile = outcome.value.to_capability_profile()
+    draws = [draft.kc_subcodes for draft in drafts]
+    facts = target_kc_decision(target_profile)
+    kc_subcodes = apply_kc_facts(vote_kc_subcodes(draws), facts)
+    capability_profile = _decided_profile(drafts, kc_subcodes)
+    write_yaml(
+        KcDecisionRecord.of(
+            samples=samples,
+            draws=draws,
+            failed_draws=errors,
+            facts=facts,
+            kc_subcodes=capability_profile.kc_subcodes,
+        ),
+        run_dir / KC_DECISION_FILENAME,
+    )
     write_yaml(
         capability_profile,
         run_dir / "capability-profile.yaml",
         post_process=inject_kc_subcodes_display,
     )
     return capability_profile
+
+
+def _sample_drafts(
+    *,
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    run_dir: Path,
+    temperature: float,
+    samples: int,
+) -> tuple[list[Stage1Profile], list[str]]:
+    """Send the Stage 1b request *samples* times; return the drafts and errors."""
+    drafts: list[Stage1Profile] = []
+    errors: list[str] = []
+    for index in range(1, samples + 1):
+        outcome = call_with_policy(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=stage1_profile_request_model(llm_client),
+            run_dir=run_dir,
+            stage=STAGE,
+            step=STEP if index == 1 else f"{STEP}_vote_{index}",
+            policy=CorrectionPolicy(validation_retries=1, include_response=True),
+            temperature=temperature,
+        )
+        if outcome.error is not None:
+            errors.append(outcome.error)
+        else:
+            drafts.append(outcome.value)
+    if not drafts:
+        raise StageError(stage=STAGE, step=STEP, message=errors[-1])
+    return drafts, errors
+
+
+def _decided_profile(
+    drafts: list[Stage1Profile], kc_subcodes: list[str]
+) -> CapabilityProfile:
+    """Promote the first draft that can carry *kc_subcodes*.
+
+    A decided code may activate tool execution that the first draft listed
+    no tools for; the first draft with a tool inventory then supplies the
+    non-KC fields.
+    """
+    base = drafts[0]
+    if "tool_execution" in derive_zones_from_kc(kc_subcodes):
+        base = next((draft for draft in drafts if draft.tool_inventory), base)
+    try:
+        return base.model_copy(
+            update={"kc_subcodes": kc_subcodes}
+        ).to_capability_profile()
+    except ValueError as exc:
+        raise StageError(stage=STAGE, step=STEP, message=str(exc)) from exc
 
 
 def load_capability_profile(profile_path: Path) -> CapabilityProfile:

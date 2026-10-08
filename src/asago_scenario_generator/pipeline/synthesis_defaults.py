@@ -136,9 +136,17 @@ def _default_prepare_capability(
     *,
     inputs: SynthesisInputs,
     model_runtime: ModelRuntime | None = None,
+    execution_target_profile: ExecutionTargetProfile | None = None,
     **_: Any,
 ) -> Any:
-    """Resolve a profile through the existing STPA profile adapter."""
+    """Resolve a profile through the existing STPA profile adapter.
+
+    The KC sub-codes are a vote over ``KC_VOTE_SAMPLES`` draws, and the
+    verified facts of the observed target decide the codes they settle.
+    """
+    from asago_scenario_generator.stpa.system_model.kc_decision import (
+        KC_VOTE_SAMPLES,
+    )
     from asago_scenario_generator.stpa.system_model.profile import (
         derive_capability_profile,
     )
@@ -152,6 +160,8 @@ def _default_prepare_capability(
         run_dir=inputs.output_dir,
         template_loader=TemplateLoader(PROMPTS_DIR),
         temperature=runtime.temperature(),
+        samples=KC_VOTE_SAMPLES,
+        target_profile=execution_target_profile,
     )
 
 
