@@ -29,6 +29,7 @@ from asago_scenario_generator.models.obligation_funnel import ObligationStopReas
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
 )
+from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferSummary
 
 
 OBLIGATION_ACCOUNTING_SCHEMA_VERSION = "stpa-obligation-accounting-v1"
@@ -314,6 +315,11 @@ class ObligationAccounting(SemanticDigestMixin, CanonicalYamlMixin, _AccountingM
     source_pins: tuple[ArtifactPin, ...] = Field(min_length=1)
     rows: tuple[ObligationAccountingRow, ...]
     summary: ObligationAccountingSummary
+    # Read from the slot hazard offer report the same run wrote; left out when
+    # a caller supplies none, so earlier artifacts keep their bytes.
+    slot_hazard_offers: SlotHazardOfferSummary | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def canonicalize_validate_and_digest(self) -> "ObligationAccounting":

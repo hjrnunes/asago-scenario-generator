@@ -27,6 +27,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationRoute,
 )
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferReport
 
 
 def _require_plan(value: Any) -> TaxonomyObligationPlan:
@@ -839,6 +840,7 @@ def build_obligation_accounting(
     ica_verification: Any | None = None,
     ica_enumeration: Any | None = None,
     governance_routes: Iterable[ObligationRoute] = (),
+    hazard_offers: SlotHazardOfferReport | None = None,
 ) -> ObligationAccounting:
     """Derive one provisional row per Phase 1 obligation.
 
@@ -846,6 +848,8 @@ def build_obligation_accounting(
     emits a correspondence or coverage disposition. Governance routes are the
     final routes of governance-only rows; a row with a finding on each routed
     slot is credited without leaving the governance-only disposition.
+    ``hazard_offers`` is the run's slot hazard offer report; accounting
+    carries its summary.
     """
     plan = _require_plan(plan)
     if not isinstance(consideration, ObligationConsideration):
@@ -873,6 +877,7 @@ def build_obligation_accounting(
         source_pins=pins,
         rows=rows,
         summary=_accounting_summary(rows),
+        slot_hazard_offers=hazard_offers.summary if hazard_offers else None,
     )
 
 

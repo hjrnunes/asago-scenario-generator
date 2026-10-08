@@ -11,6 +11,9 @@ import yaml
 from asago_scenario_generator.manifest import atomic_write_text
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+from asago_scenario_generator.models.slot_hazard_offer import (
+    SLOT_HAZARD_OFFERS_FILENAME,
+)
 from asago_scenario_generator.pipeline.obligation_persistence import (
     write_taxonomy_obligation_plan,
 )
@@ -97,6 +100,15 @@ def _persist_sidecar(
     atomic_write_text(path, content)
     _verify_yaml_round_trip(artifact, path)
     return path
+
+
+def _persist_slot_hazard_offers(output_dir: Path, report: Any | None) -> Path | None:
+    """Publish the slot hazard offer report when the slot filler sent requests."""
+    if report is None:
+        return None
+    return _persist_sidecar(
+        output_dir, SLOT_HAZARD_OFFERS_FILENAME, report, None, "slot hazard offers"
+    )
 
 
 def _persist_target_realization(
@@ -189,8 +201,11 @@ def _artifact_paths(
     target_realization_path: Path | None,
     operation_enrichment: Any | None,
     report_path: Path | None,
+    hazard_offers_path: Path | None = None,
 ) -> dict[str, Path]:
     """Add each optional published artifact to the always-written ones."""
+    if hazard_offers_path is not None:
+        artifact_paths[hazard_offers_path.name] = hazard_offers_path
     if target_realization_path is not None:
         artifact_paths[TARGET_REALIZATION_FILENAME] = target_realization_path
     if operation_enrichment is not None:
