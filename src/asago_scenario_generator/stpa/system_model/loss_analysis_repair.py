@@ -3358,7 +3358,9 @@ def run_targeted_repair(
     else:
         request = _reference_request(plan, loader=loader, use_case_text=use_case_text)
 
-    def parse_repair(result: LLMResult) -> LossAnalysisDraft:
+    def parse_repair(
+        result: LLMResult, _cleanup: list[dict[str, Any]]
+    ) -> LossAnalysisDraft:
         response = parse_llm_result(result, request.wire_model)
         proposals = request.proposals(response) if request.proposals else None
         try:
@@ -3387,7 +3389,7 @@ def run_targeted_repair(
         policy=CorrectionPolicy(),
         temperature=temperature,
         max_completion_tokens=max_completion_tokens,
-        result_parser=parse_repair,
+        response_parser=parse_repair,
     )
     draft, error_msg = outcome.value, outcome.error
     # No typed outcome means the call failed outside the merge's typed errors:

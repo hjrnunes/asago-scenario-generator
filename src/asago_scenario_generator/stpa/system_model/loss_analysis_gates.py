@@ -28,6 +28,7 @@ import re
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass, field, replace
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -2350,7 +2351,9 @@ def _run_graph_revision_call(
         stated_rules=list(stated_rules),
     )
 
-    def parse_revision(result: LLMResult) -> LossAnalysisDraft:
+    def parse_revision(
+        result: LLMResult, _cleanup: list[dict[str, Any]]
+    ) -> LossAnalysisDraft:
         attempt = _RevisionAttempt()
         attempts_out.append(attempt)
         try:
@@ -2399,7 +2402,7 @@ def _run_graph_revision_call(
         ),
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-        result_parser=parse_revision,
+        response_parser=parse_revision,
         result_validator=validate_revision,
     )
     revised = outcome.value

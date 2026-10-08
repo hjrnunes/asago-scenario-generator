@@ -315,7 +315,7 @@ class TargetRealizationLlmInterpreter:
             ),
             temperature=self._temperature,
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
-            result_parser_with_cleanup=_parse_extension_response,
+            response_parser=_parse_extension_response,
             result_validator=lambda value: _validate_extension_response(value, request),
         )
         result, _call, error = outcome.value, outcome.result, outcome.error

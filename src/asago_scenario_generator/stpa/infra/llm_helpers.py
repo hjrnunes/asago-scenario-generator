@@ -431,7 +431,7 @@ class _SafeCallState:
     prompt_audit: PromptAudit | None = None
     raw_result_validation_failed: bool = False
     result_validation_failed: bool = False
-    result_parser_failed: bool = False
+    response_parser_failed: bool = False
     draft_parsed: bool = False
     semantic_validation_passed: bool = False
     cleanup_transformations: list[dict[str, Any]] = field(default_factory=list)
@@ -472,7 +472,7 @@ def _failure_class(
         (
             state.raw_result_validation_failed,
             isinstance(error, (ValidationError, TypeError)),
-            state.result_parser_failed,
+            state.response_parser_failed,
         )
     ):
         return "answered_schema_failure"
@@ -569,10 +569,7 @@ def _parse_and_validate_result(
     result: LLMResult,
     response_format: type[_T],
     allow_unvalidated: bool,
-    result_parser: Callable[[LLMResult], _T] | None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
-    ),
+    response_parser: Callable[[LLMResult, list[dict[str, Any]]], _T] | None,
     result_validator: Callable[[_T], _T | None] | None,
     state: _SafeCallState,
 ) -> _T:
@@ -582,15 +579,12 @@ def _parse_and_validate_result(
             result,
             response_format,
             allow_unvalidated,
-            result_parser=result_parser,
-            result_parser_with_cleanup=result_parser_with_cleanup,
+            response_parser=response_parser,
             cleanup_transformations=state.cleanup_transformations,
         )
         state.draft_parsed = True
     except Exception:
-        state.result_parser_failed = (
-            result_parser is not None or result_parser_with_cleanup is not None
-        )
+        state.response_parser_failed = response_parser is not None
         raise
     if result_validator is None:
         return model
@@ -616,10 +610,7 @@ def _perform_safe_call(
     allow_unvalidated: bool,
     raw_result_validator: Callable[[Any], None] | None,
     result_validator: Callable[[_T], _T | None] | None,
-    result_parser: Callable[[LLMResult], _T] | None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
-    ),
+    response_parser: Callable[[LLMResult, list[dict[str, Any]]], _T] | None,
     slot_id: str | None,
     scenario_id: str | None,
     prompt_template_hashes: Mapping[str, str] | None,
@@ -651,8 +642,7 @@ def _perform_safe_call(
         state.result,
         response_format,
         allow_unvalidated,
-        result_parser,
-        result_parser_with_cleanup,
+        response_parser,
         result_validator,
         state,
     )
@@ -762,7 +752,7 @@ def _validation_retry_requested(
         isinstance(error, ValidationError)
         or state.raw_result_validation_failed
         or state.result_validation_failed
-        or state.result_parser_failed
+        or state.response_parser_failed
     )
 
 
@@ -927,20 +917,15 @@ def _parse_structured_result(
     result: LLMResult,
     response_format: type[_T],
     allow_unvalidated: bool,
-    result_parser: Callable[[LLMResult], _T] | None = None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
-    ) = None,
+    response_parser: (Callable[[LLMResult, list[dict[str, Any]]], _T] | None) = None,
     cleanup_transformations: list[dict[str, Any]] | None = None,
 ) -> _T:
     """Validate a structured result, with a tolerant fallback when requested."""
-    if result_parser_with_cleanup is not None:
-        return result_parser_with_cleanup(
+    if response_parser is not None:
+        return response_parser(
             result,
             cleanup_transformations if cleanup_transformations is not None else [],
         )
-    if result_parser is not None:
-        return result_parser(result)
     try:
         return parse_llm_result(
             result,
@@ -1123,10 +1108,7 @@ def call_with_policy(
     allow_unvalidated: bool = False,
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[_T], _T | None] | None = None,
-    result_parser: Callable[[LLMResult], _T] | None = None,
-    result_parser_with_cleanup: (
-        Callable[[LLMResult, list[dict[str, Any]]], _T] | None
-    ) = None,
+    response_parser: (Callable[[LLMResult, list[dict[str, Any]]], _T] | None) = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
 ) -> CallOutcome[_T]:
     """Request a structured response, correcting it as ``policy`` allows.
@@ -1161,14 +1143,13 @@ def call_with_policy(
             to models built through the tolerant unvalidated path. A
             validator that returns a model publishes that model, which is
             logged and returned, in place of the parsed one.
-        result_parser: Optional stage-local parser for semantic responses. The
-            parser receives the raw ``LLMResult`` and must return a validated
-            response model. It is useful when a stage needs stricter wire
-            validation than the shared compatibility decoder provides.
-        result_parser_with_cleanup: Optional stage-local parser variant that
-            also receives the mutable cleanup-transformation list used by the
-            durable call record. Use this when parsing applies a response
-            correction that must remain distinguishable from model output.
+        response_parser: Optional stage-local parser for semantic responses.
+            It receives the raw ``LLMResult`` and the mutable
+            cleanup-transformation list of the durable call record, and must
+            return a validated response model. Use it when a stage needs
+            stricter wire validation than the shared compatibility decoder
+            provides; a parser that applies a response correction appends it
+            to the list so the record keeps it apart from model output.
     """
     json_retries_remaining = policy.json_retries
     validation_retries_remaining = policy.validation_retries
@@ -1200,8 +1181,7 @@ def call_with_policy(
                     allow_unvalidated=allow_unvalidated,
                     raw_result_validator=raw_result_validator,
                     result_validator=result_validator,
-                    result_parser=result_parser,
-                    result_parser_with_cleanup=result_parser_with_cleanup,
+                    response_parser=response_parser,
                     slot_id=slot_id,
                     scenario_id=scenario_id,
                     prompt_template_hashes=prompt_template_hashes,

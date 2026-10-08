@@ -1556,7 +1556,7 @@ class ObligationAwareLLMAdapter:
             stage=f"{self.stage_prefix}_ica_hazard_verification",
             step=step,
             policy=CorrectionPolicy(validation_retries=_ICA_VERIFICATION_REPAIRS),
-            result_parser_with_cleanup=repair.parse,
+            response_parser=repair.parse,
             result_validator=repair.validate,
             temperature=self.controls.temperature,
             max_completion_tokens=min(
