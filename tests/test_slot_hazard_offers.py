@@ -18,6 +18,10 @@ from asago_scenario_generator.stpa.obligation_aware.hazard_offer import (
     build_slot_hazard_offer_report,
     main_rule_offer,
     own_offer,
+    slot_offer,
+)
+from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    build_synthesis_slot_prompts,
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import build_neutral_briefs
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
@@ -163,3 +167,54 @@ def test_a_report_with_another_schema_version_is_rejected() -> None:
 
     with pytest.raises(ValueError, match="Unsupported schema version"):
         SlotHazardOfferReport.from_yaml(data)
+
+
+def test_routing_keeps_a_slots_own_hazards_in_its_offer() -> None:
+    offer = slot_offer(two_hazard_loss_analysis(), (route_to_first_slot(),))
+
+    assert offer.hazard_ids == ("H-1", "H-2")
+    assert offer.constraint_ids == ("SC-1", "SC-2")
+
+
+def test_routing_adds_a_routed_hazard_the_slot_does_not_own() -> None:
+    route = route_to_first_slot().model_copy(
+        update={"hazard_ids": ("H-9",), "constraint_ids": ("SC-9",)}
+    )
+
+    offer = slot_offer(two_hazard_loss_analysis(), (route,))
+
+    assert offer.hazard_ids == ("H-1", "H-2", "H-9")
+    assert offer.constraint_ids == ("SC-1", "SC-2", "SC-9")
+
+
+def test_a_routed_slot_no_longer_shrinks_and_the_earlier_rule_stays_counted() -> None:
+    report = report_for(routed=True)
+
+    routed = next(item for item in report.slots if item.slot_id == first_slot_id())
+    assert routed.offered_hazard_ids == ("H-1", "H-2")
+    assert routed.missing_own_hazard_ids == ()
+    assert routed.missing_own_constraint_ids == ()
+    assert routed.main_rule_missing_own_hazard_ids == ("H-2",)
+    assert report.summary.shrunk_slots == 0
+    assert report.summary.shrunk_slots_under_main_rule == 1
+
+
+def test_a_routed_slot_prompt_shows_the_hazards_no_route_names() -> None:
+    request = next(
+        item
+        for item in routed_requests()
+        if first_slot_id() in {slot.slot_id for slot in item.slots}
+    )
+
+    _system, user = build_synthesis_slot_prompts(
+        target_id=request.target_id,
+        slots=request.slots,
+        routed_briefs=request.routed_briefs,
+        routed_routes=request.routed_routes,
+        loss_analysis=request.loss_analysis,
+        control_structure=request.control_structure,
+    )
+
+    index = user.split("Compact target STPA index:", 1)[1].split("Obligation", 1)[0]
+    assert "id: H-2" in index
+    assert "id: SC-2" in index

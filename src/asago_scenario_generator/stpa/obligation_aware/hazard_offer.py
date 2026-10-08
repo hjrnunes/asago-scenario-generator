@@ -4,7 +4,8 @@ A slot's own offer is what its request shows when no obligation is routed to
 it: every hazard and security constraint of the loss analysis.  The earlier
 rule (``main_rule_offer``) replaced that offer with the routed obligations'
 hazards and constraints whenever a route named the slot, so routing could
-hide the slot's own hazards from ICA analysis.
+hide the slot's own hazards from ICA analysis.  ``slot_offer`` keeps the own
+offer and adds whatever routing names.
 """
 
 from __future__ import annotations
@@ -52,8 +53,14 @@ def main_rule_offer(loss_analysis: Any, routes: Sequence[Any]) -> HazardOffer:
 
 
 def slot_offer(loss_analysis: Any, routes: Sequence[Any]) -> HazardOffer:
-    """Return the hazards and constraints a slot request shows."""
-    return main_rule_offer(loss_analysis, routes)
+    """Return the slot's own offer plus the routed hazards and constraints.
+
+    Routing adds to a slot's offer and never removes the slot's own hazards.
+    """
+    routed = HazardOffer(
+        _routed_ids(routes, "hazard_ids"), _routed_ids(routes, "constraint_ids")
+    )
+    return _union((own_offer(loss_analysis), routed))
 
 
 def _union(offers: Iterable[HazardOffer]) -> HazardOffer:
