@@ -28,8 +28,6 @@ from asago_scenario_generator.pipeline.projection_qualification import (
     _authoritative_records_type_check,
     _catalog_content_pin,
     _qualify_authoritative_records,
-    _resolve_projection_budget,
-    _sorted_emitted_candidates,
     _sorted_infeasibilities,
     _sorted_limitations,
 )
@@ -46,7 +44,7 @@ def _derived_candidates(
             if previous is not None and previous != candidate:
                 raise ValueError("candidate-v2 identity collision")
             by_identity[candidate.candidate_id] = candidate
-    return _sorted_emitted_candidates(by_identity)
+    return tuple(by_identity[key] for key in sorted(by_identity))
 
 
 def _qualification_traces(
@@ -163,7 +161,9 @@ def _allocate_authoritative_batch(
     allocator.probe_truncation()
     batch = ProjectionBatch(
         capability_fact_snapshot_digest=snapshot.snapshot_digest,
-        candidates=_sorted_emitted_candidates(allocator.by_identity),
+        candidates=tuple(
+            allocator.by_identity[key] for key in sorted(allocator.by_identity)
+        ),
         infeasibilities=_sorted_infeasibilities(issues),
         limitations=_sorted_limitations(allocator.build_limitations()),
     )
@@ -173,10 +173,9 @@ def _allocate_authoritative_batch(
 def _deferred_projection_candidates(
     allocator: _AuthoritativeCandidateAllocator,
     batch: ProjectionBatch,
-    retain_deferred: bool,
 ) -> tuple[Any, ...]:
     """Continue bounded derivation and return only non-emitted candidates."""
-    if retain_deferred and not allocator.work_exhausted:
+    if not allocator.work_exhausted:
         # Continue from the same iterators only for truthful, bounded
         # observation.  ``batch`` above is deliberately immutable and already
         # reflects the established public API's limits and issue inventory.
@@ -187,38 +186,6 @@ def _deferred_projection_candidates(
         candidate
         for candidate in _derived_candidates(allocator)
         if candidate.candidate_id not in emitted_ids
-    )
-
-
-def _project_authoritative_observation(
-    records: Sequence[dict[str, Any]],
-    taxonomy_resolver: TaxonomyResolver,
-    snapshot: CapabilityFactSnapshot,
-    *,
-    budget: ProjectionBudget | None,
-    retain_deferred: bool,
-) -> AuthoritativeProjectionObservation:
-    """Run one authoritative projection with an optional observation tail."""
-    _authoritative_records_type_check(records)
-    resolved_budget = _resolve_projection_budget(budget)
-    snapshot.assert_integrity()
-    candidate_groups, issues = _qualified_projection_groups(
-        records,
-        taxonomy_resolver,
-        snapshot,
-    )
-    allocator, batch = _allocate_authoritative_batch(
-        resolved_budget,
-        candidate_groups,
-        issues,
-        snapshot,
-    )
-    deferred = _deferred_projection_candidates(allocator, batch, retain_deferred)
-    return AuthoritativeProjectionObservation(
-        batch=batch,
-        deferred_candidates=deferred,
-        rejected_candidates=_rejected_candidates(issues, allocator),
-        qualification_traces=_qualification_traces(candidate_groups),
     )
 
 
@@ -237,10 +204,24 @@ def project_authoritative_candidate_observations(
     binding is an actually validated candidate.  Tool and integration slots
     bind only resources that support every required operation.
     """
-    return _project_authoritative_observation(
+    _authoritative_records_type_check(records)
+    resolved_budget = budget or ProjectionBudget()
+    snapshot.assert_integrity()
+    candidate_groups, issues = _qualified_projection_groups(
         records,
         taxonomy_resolver,
         snapshot,
-        budget=budget,
-        retain_deferred=True,
+    )
+    allocator, batch = _allocate_authoritative_batch(
+        resolved_budget,
+        candidate_groups,
+        issues,
+        snapshot,
+    )
+    deferred = _deferred_projection_candidates(allocator, batch)
+    return AuthoritativeProjectionObservation(
+        batch=batch,
+        deferred_candidates=deferred,
+        rejected_candidates=_rejected_candidates(issues, allocator),
+        qualification_traces=_qualification_traces(candidate_groups),
     )

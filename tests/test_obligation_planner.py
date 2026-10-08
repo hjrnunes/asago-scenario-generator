@@ -20,6 +20,7 @@ from asago_scenario_generator.models.attack_pattern_contracts import (
     AuthoritativeFactReference,
     EvaluatedFactEvidence,
 )
+from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.pipeline.obligation_contracts import (
     TaxonomyObligationInputs,
@@ -39,7 +40,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionBatch,
     ProjectionBudget,
     ProjectionLimitation,
-    canonical_json_bytes,
 )
 from asago_scenario_generator.pipeline.projection_qualification import (
     compute_authoritative_catalog_pin,

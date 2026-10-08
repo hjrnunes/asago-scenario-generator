@@ -1,0 +1,58 @@
+zones_active:
+- input
+- reasoning
+- tool_execution
+entry_points:
+- name: Customer Chat Interface (App/Web)
+  entry_point_type: other
+  direction: bidirectional
+  controllability: direct
+  entry_point_id: ep:v1:bad851d5de2f16d304d8e9f501f4b2d5
+- name: Retrieved Knowledge Base (RAG)
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:7a41831eeb9a0ca56225aaf38cdc01ea
+- name: Klarna Backend API Responses
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:395ac227aee8fd9201cc15188ff33c33
+confidence: high
+kc_subcodes:
+- KC1.1
+- KC2.1
+- KC5.3
+- KC6.1.2
+- KC6.3.2
+- KC6.3.3
+- KCX-HITL
+tool_inventory:
+- name: Klarna Backend Service API
+  description: Integration with Klarna's backend to manage customer financial data
+    and transactions.
+  supported_operations:
+  - retrieve_data
+  - transmit_data
+  tool_id: tool:v1:91fd9b83b506308cc1f3b17a0ebcde6f
+- name: RAG Knowledge Base
+  description: Retrieval-Augmented Generation (RAG) system containing Klarna's policies,
+    terms, and product information.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:8a5f50b89890f0c53ff99cf09262f7e5
+entry_point_completeness: inferred_partial
+entry_point_evidence: []
+tool_inventory_completeness: inferred_partial
+tool_inventory_evidence: []
+has_persistent_memory: false
+multi_agent: false
+hitl: true
+kc_subcodes_display:
+  KC1.1: Large Language Model (LLM)
+  KC2.1: Predefined workflows
+  KC5.3: Managed API
+  KC6.1.2: Extensive API access
+  KC6.3.2: Database full CRUD
+  KC6.3.3: RAG context data sources
+  KCX-HITL: System has human-in-the-loop review or approval controls

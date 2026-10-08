@@ -14,13 +14,12 @@ from asago_scenario_generator.models.attack_pattern_projection import StepOmissi
 from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
+from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
     Digest,
-    ProjectionBudget,
     ProjectionIssue,
     _canonical_json,
-    _content_pin,
     _evaluate_preconditions,
     _evaluate_projection_conditions,
     _normalize_semantic_order,
@@ -28,28 +27,14 @@ from asago_scenario_generator.pipeline.projection_contracts import (
 )
 
 
-def _resolve_projection_budget(
-    budget: ProjectionBudget | None,
-) -> ProjectionBudget:
-    """Return the caller budget, or a default projection budget."""
-    return budget or ProjectionBudget()
-
-
 def _catalog_content_pin(
     qualified: list[tuple[AttackPattern, str]],
 ) -> str:
     """Pin the ordered, deduplicated qualified pattern catalog."""
-    return _content_pin(
+    return compute_framed_digest(
         "asago-scenario-generator:authoritative-catalog:v1",
         [pattern_pin for _, pattern_pin in qualified],
     )
-
-
-def _sorted_emitted_candidates(
-    by_identity: dict[str, Any],
-) -> tuple[Any, ...]:
-    """Return emitted candidates ordered by candidate id."""
-    return tuple(by_identity[key] for key in sorted(by_identity))
 
 
 def _infeasibility_key(item: ProjectionIssue) -> tuple[Any, ...]:
@@ -69,16 +54,11 @@ def _sorted_infeasibilities(
     return tuple(sorted(_dedupe_projection_issues(issues), key=_infeasibility_key))
 
 
-def _limitation_key(item: Any) -> tuple[str, str]:
-    """Return the deterministic ordering key for a limitation."""
-    return (item.pattern_id, item.code)
-
-
 def _sorted_limitations(
     limitations: list[Any],
 ) -> tuple[Any, ...]:
     """Return limitations in deterministic order."""
-    return tuple(sorted(limitations, key=_limitation_key))
+    return tuple(sorted(limitations, key=lambda item: (item.pattern_id, item.code)))
 
 
 def _authoritative_records_type_check(records: Any) -> None:
@@ -196,16 +176,6 @@ def _profile_gate_failure_issue(
     return None
 
 
-def _results_contain_unknown(results: Any) -> bool:
-    """True when any evaluated result is unresolved."""
-    return any(item.result == "unknown" for item in results)
-
-
-def _results_contain_false(results: Any) -> bool:
-    """True when any evaluated result is false."""
-    return any(item.result == "false" for item in results)
-
-
 def _unresolved_condition_issue(
     pattern: AttackPattern,
     condition_results: Any,
@@ -320,14 +290,14 @@ def _precondition_results_or_none(
 ) -> Any:
     """Return precondition results, or None after recording a gate issue."""
     precondition_results = _evaluate_preconditions(pattern, selected, snapshot)
-    if _results_contain_unknown(precondition_results):
+    if any(item.result == "unknown" for item in precondition_results):
         issues.append(
             _unresolved_precondition_issue(
                 pattern, condition_results, precondition_results
             )
         )
         return None
-    if _results_contain_false(precondition_results):
+    if any(item.result == "false" for item in precondition_results):
         issues.append(
             _false_precondition_issue(pattern, condition_results, precondition_results)
         )
@@ -346,7 +316,7 @@ def _profile_and_condition_gate(
         issues.append(profile_issue)
         return None
     condition_results = _evaluate_projection_conditions(pattern, snapshot)
-    if _results_contain_unknown(condition_results):
+    if any(item.result == "unknown" for item in condition_results):
         issues.append(_unresolved_condition_issue(pattern, condition_results))
         return None
     return condition_results
@@ -395,18 +365,6 @@ def compute_authoritative_catalog_pin(
     persisted candidate must not depend on whether its binding variant would
     be rediscovered under an arbitrary projection budget.
     """
-    qualified: dict[str, str] = {}
-    for raw in records:
-        pattern = validate_attack_pattern(raw, taxonomy_resolver)
-        pattern = AttackPattern.model_validate(
-            _normalize_semantic_order(pattern.model_dump(mode="json"))
-        )
-        pattern_pin = _pattern_pin(pattern)
-        previous = qualified.get(pattern.id)
-        if previous is not None and previous != pattern_pin:
-            raise ValueError("conflicting authoritative records share one pattern id")
-        qualified[pattern.id] = pattern_pin
-    return _content_pin(
-        "asago-scenario-generator:authoritative-catalog:v1",
-        [qualified[pattern_id] for pattern_id in sorted(qualified)],
+    return _catalog_content_pin(
+        _qualify_authoritative_records(records, taxonomy_resolver)
     )

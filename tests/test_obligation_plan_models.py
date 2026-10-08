@@ -41,6 +41,23 @@ def test_version_framed_digest_lives_in_a_neutral_shared_leaf() -> None:
     assert not hasattr(output, "compute_framed_digest")
 
 
+def test_input_normalization_keeps_validated_models_and_rejects_collisions() -> None:
+    """Raw planner input is NFC-normalized around models it already holds."""
+    canonical = import_module("asago_scenario_generator.models.canonical")
+    model = RiskReference(risk_id="R-1", risk_name="e\u0301")
+
+    normalized = canonical.normalize_unicode(
+        {"cafe\u0301": [model, ("o\u0301",)]}, keep_models=True
+    )
+
+    assert normalized == {"café": [model, ["ó"]]}
+    assert normalized["café"][0] is model
+    with pytest.raises(ValueError, match="collide after NFC"):
+        canonical.normalize_unicode(
+            {"café": 1, "cafe\u0301": [model]}, keep_models=True
+        )
+
+
 def _raw_plan() -> dict[str, Any]:
     """Return a mutable JSON representation of one valid generated plan."""
     return make_plan().model_dump(mode="json")
@@ -233,6 +250,47 @@ def test_conflicting_readings_serialize_only_when_present() -> None:
     ]
     # Round-trip keeps the readings under extra="forbid".
     assert QualificationFactEvidence.model_validate(conflict_dump) == conflicting
+
+
+def test_conflicting_readings_are_retained_only_as_a_contradiction() -> None:
+    """Readings need a contradictory status and at least two sources."""
+    fact = {
+        "namespace": "profile",
+        "fact_id": "agent.can_call_payment_tool",
+        "value_type": "boolean",
+        "property_path": ["can_call_payment_tool"],
+    }
+    readings = [
+        {"value": True, "source": "profile-a"},
+        {"value": False, "source": "profile-b"},
+    ]
+    with pytest.raises(ValidationError, match="only beside a contradictory"):
+        QualificationFactEvidence.model_validate(
+            {"fact": fact, "status": "unknown", "readings": readings}
+        )
+    with pytest.raises(ValidationError, match="at least two readings"):
+        QualificationFactEvidence.model_validate(
+            {"fact": fact, "status": "contradictory", "readings": readings[:1]}
+        )
+
+
+def test_planner_inputs_validate_into_the_persisted_models() -> None:
+    """Risk cards and qualification facts need no conversion before persisting."""
+    contracts = import_module("asago_scenario_generator.pipeline.obligation_contracts")
+    fact = {
+        "namespace": "profile",
+        "fact_id": "agent.can_call_payment_tool",
+        "value_type": "boolean",
+        "property_path": ["can_call_payment_tool"],
+    }
+
+    card = contracts.RiskCardInput(risk_id="R-1", evidence=[{"text": "reviewed"}])
+    facts = contracts.QualificationFactsInput.model_validate(
+        [{"fact": fact, "status": "present", "value": True}]
+    )
+
+    assert type(card) is RiskReference
+    assert all(type(item) is QualificationFactEvidence for item in facts.facts.values())
 
 
 def test_plan_requires_nonempty_taxonomy_pins_and_nonnegative_summary() -> None:

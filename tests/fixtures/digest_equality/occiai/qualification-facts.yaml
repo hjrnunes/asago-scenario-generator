@@ -1,0 +1,180 @@
+# PROPOSED qualification facts for the MiniOcciAI baseline. NOT REVIEWED.
+#
+# Derived 2026-09-11 from tmp/use-case-occiAI-guy-nhs-v1.txt only (plus the
+# mini-agents occiai tool surface for the retrieval fact). No MiniKlarna
+# interpretation is copied beyond the shared fact-id vocabulary, and no gold
+# case content was consulted. The owner must review and accept or amend
+# every row before any run consumes this file; an unreviewed draft must
+# never be marked reviewed. Per-fact citations are in the comment beside
+# each row; the payload itself is schema-exact (no extra fields).
+#
+# Coverage: all 13 capability fact IDs referenced by the catalog
+# qualification matrix. Explicit non-present rows are semantically
+# identical to omitting them (the planner defaults a missing fact key to
+# absent in `_qualification_facts_state`), so this file is behaviorally
+# comparable with the owner-reviewed 7-row MiniKlarna facts.
+#
+# Scope assumption (recorded 2026-09-11, facts and observation review,
+# item 5 of the independent audit): the use-case document is treated as
+# the authoritative and complete description of the system's
+# capabilities, so the affirmative description of where records go (the
+# EHR upload for clinicians) is accepted as evidence that no
+# cross-session assistant memory exists.
+#
+# Reclassification 2026-09-11 later (owner-directed, second bounded work
+# package, item 5): the owner chose the stricter reading for every fact
+# the use case is merely silent on. The four `unknown` rows below
+# (feedback_loop, long_term_memory, planning_interface,
+# reflection_mechanism) are exactly those rows: no passage describes
+# them, so their stamps record missing information, not described
+# absence. The `absent` rows keep affirmative anchors (the use case
+# describes the mechanisms that exist and none of them is the
+# capability). long_term_memory moves absent -> unknown under this
+# ruling: its absence stamp rested on the scope assumption above, not on
+# a described memory mechanism. planning_interface is unknown here and
+# absent on MiniAirbnb because the Airbnb use case affirmatively
+# describes internal tool selection while this use case says only that
+# the chatbot answers and escalates. The reclassified plan was
+# recomputed offline through the exact production planning path (see
+# facts-observation-review-20260911.md addendum and
+# facts-review/unknown-reclassified-comparison.json): 152 rows match
+# the corrected-facts plan row-for-row except 12 rows (AP-T6-01,
+# AP-T6-04, and AP-T6-05 on atlas-jailbreaking, atlas-prompt-injection,
+# atlas-prompt-priming, and atlas-social-hacking-attack), whose
+# qualification_disposition moves contradictory_evidence ->
+# missing_evidence because the cond.reflection_mechanism precondition
+# now reads unresolved instead of false; scope dispositions, applicable
+# counts (52), summary tallies, and candidate records are unchanged on
+# every row, and every obligation identity digest changes (the identity
+# payload covers the capability snapshot, which embeds the facts
+# state). The earlier long_term_memory-only recompute was fully
+# row-identical; the full reclassification is not, and unchanged
+# downstream counts are not proof the reading is correct.
+schema_version: '1'
+facts:
+# absent: the use case describes education, questionnaires, and EHR
+# integration, and no code execution.
+- fact:
+    namespace: profile
+    fact_id: capabilities.code_interpreter
+    value_type: boolean
+    property_path: []
+  status: absent
+# present: "The system collects patient questionnaire responses, chatbot
+# interaction transcripts, and referral information" - patient-supplied
+# content enters model context.
+- fact:
+    namespace: profile
+    fact_id: capabilities.external_content_ingestion
+    value_type: boolean
+    property_path: []
+  status: present
+  value: true
+# unknown (reclassified 2026-09-11 later, owner-directed stricter
+# reading): the use case is silent on self-correction or retraining
+# loops; silence is missing information, not described absence.
+- fact:
+    namespace: profile
+    fact_id: capabilities.feedback_loop
+    value_type: boolean
+    property_path: []
+  status: unknown
+# unknown (reclassified 2026-09-11 later, owner-directed stricter
+# reading; earlier corrected present -> absent 2026-09-11): the catalog
+# condition requires persistence across sessions, written back for
+# future interactions (attack-patterns-halluc-intent,
+# cond.long_term_memory). The use case's "Collected information is
+# summarised and uploaded to the patient's electronic health record" is
+# a clinical-record data flow for clinicians, not an assistant memory
+# the chatbot reads in later sessions, and no passage describes
+# cross-session assistant memory. The earlier present stamp mis-read the
+# EHR upload as assistant memory; the absent stamp then rested on the
+# recorded scope assumption (the document treated as complete); under
+# the stricter reading no passage establishes either presence or
+# absence, so the stamp records missing information. MiniKlarna's
+# classification was not copied.
+- fact:
+    namespace: profile
+    fact_id: capabilities.long_term_memory
+    value_type: boolean
+    property_path: []
+  status: unknown
+# unknown (reclassified 2026-09-11 later, owner-directed stricter
+# reading): the use case says only that the chatbot answers patient
+# questions and escalates to clinicians; it is silent on any planning
+# surface, so the stamp records missing information, not described
+# absence. (MiniAirbnb's planning_interface stays absent: that use case
+# affirmatively describes the CoT workflow selecting tools internally.)
+- fact:
+    namespace: profile
+    fact_id: capabilities.planning_interface
+    value_type: boolean
+    property_path: []
+  status: unknown
+# unknown (reclassified 2026-09-11 later, owner-directed stricter
+# reading): the use case is silent on any self-reflection pass; silence
+# is missing information, not described absence.
+- fact:
+    namespace: profile
+    fact_id: capabilities.reflection_mechanism
+    value_type: boolean
+    property_path: []
+  status: unknown
+# present: education content is grounded in per-hospital customizable
+# material ("Content is customisable per hospital"); the target exposes
+# get_education and ask_clinical_question over approved material.
+- fact:
+    namespace: profile
+    fact_id: capabilities.retrieval_corpus
+    value_type: boolean
+    property_path: []
+  status: present
+  value: true
+# absent: per-hospital customization is content configuration performed by
+# administrators; the assistant generates no infrastructure configuration.
+- fact:
+    namespace: profile
+    fact_id: capabilities.infrastructure_config_generation
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: no deployment pipeline is operated or generated through the
+# portal.
+- fact:
+    namespace: profile
+    fact_id: capabilities.deployment_pipeline
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: questionnaires and escalation are pre-built workflows; the
+# chatbot answers questions and calls fixed tools, generating no workflows.
+- fact:
+    namespace: profile
+    fact_id: capabilities.workflow_generation
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: no model-generated workflows are persisted.
+- fact:
+    namespace: profile
+    fact_id: capabilities.workflow_persistence
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: the chatbot answers patient questions and calls fixed tools; it
+# does not translate natural-language commands into stored executable
+# command or configuration definitions.
+- fact:
+    namespace: profile
+    fact_id: capabilities.nl_command_translation
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: one patient-facing chatbot; escalation transfers to human staff,
+# not to peer agents.
+- fact:
+    namespace: profile
+    fact_id: capabilities.inter_agent_messaging
+    value_type: boolean
+    property_path: []
+  status: absent

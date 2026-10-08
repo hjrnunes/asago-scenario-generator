@@ -150,6 +150,20 @@ class QualificationFactEvidence(_ContractModel):
             )
         return self
 
+    @model_validator(mode="after")
+    def readings_document_a_contradiction(self) -> QualificationFactEvidence:
+        """Retain conflicting readings only as two or more contradicting sources."""
+        if not self.readings:
+            return self
+        if self.status != "contradictory":
+            raise ValueError(
+                "conflicting readings are retained only beside a "
+                "contradictory qualification fact"
+            )
+        if len(self.readings) < 2:
+            raise ValueError("a conflicting fact retains at least two readings")
+        return self
+
 
 class FactEvaluationEvidence(_ContractModel):
     """Typed condition or precondition result retained by Phase 1."""

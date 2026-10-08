@@ -93,16 +93,22 @@ class FrozenList(list[Any]):
         return self
 
 
-def normalize_unicode(value: Any) -> Any:
-    """Recursively NFC-normalize supported canonical values."""
+def normalize_unicode(value: Any, *, keep_models: bool = False) -> Any:
+    """Recursively NFC-normalize supported canonical values.
+
+    With ``keep_models``, validated models pass through unchanged, so raw input
+    can be normalized before typed validation without dumping nested models.
+    """
     if isinstance(value, BaseModel):
+        if keep_models:
+            return value
         return normalize_unicode(value.model_dump(mode="json"))
     if isinstance(value, str):
         return unicodedata.normalize("NFC", value)
     if isinstance(value, dict):
-        return _normalize_mapping(value)
+        return _normalize_mapping(value, keep_models)
     if isinstance(value, (list, tuple)):
-        return [normalize_unicode(item) for item in value]
+        return [normalize_unicode(item, keep_models=keep_models) for item in value]
     return value
 
 
@@ -115,7 +121,7 @@ def unique_sorted_strings(values: tuple[str, ...], label: str) -> tuple[str, ...
     return tuple(sorted(values))
 
 
-def _normalize_mapping(value: dict[Any, Any]) -> dict[str, Any]:
+def _normalize_mapping(value: dict[Any, Any], keep_models: bool) -> dict[str, Any]:
     """Normalize one mapping while preserving unique canonical key identity."""
     normalized: dict[str, Any] = {}
     for key, item in value.items():
@@ -124,7 +130,7 @@ def _normalize_mapping(value: dict[Any, Any]) -> dict[str, Any]:
         normalized_key = unicodedata.normalize("NFC", key)
         if normalized_key in normalized:
             raise ValueError("canonical mapping keys collide after NFC normalization")
-        normalized[normalized_key] = normalize_unicode(item)
+        normalized[normalized_key] = normalize_unicode(item, keep_models=keep_models)
     return normalized
 
 

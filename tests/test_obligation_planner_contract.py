@@ -26,14 +26,17 @@ from asago_scenario_generator.models.attack_pattern import (
     AttackPattern,
     compute_chain_semantic_digest,
 )
-from asago_scenario_generator.models.canonical import FrozenDict, FrozenList
+from asago_scenario_generator.models.canonical import (
+    FrozenDict,
+    FrozenList,
+    canonical_json_bytes,
+)
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.pipeline.obligation_contracts import (
     CompatibilityPolicyInput,
     CrossTaxonomyMappingInput,
     QualificationFactsInput,
     RiskCardInput,
-    RiskEvidenceInput,
     SSSOMMappingInput,
     _freeze_nested_collections,
     compute_mapping_bundle_digest,
@@ -45,7 +48,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionBudget,
     capture_capability_snapshot,
     CapabilityFactSnapshot,
-    canonical_json_bytes,
     ProjectionBatch,
     ProjectionIssue,
     RejectedProjectionCandidate,
@@ -61,7 +63,10 @@ from tests.helpers.projection_factory import (
     get_test_resolver,
     get_test_snapshot,
 )
-from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+from asago_scenario_generator.models.obligation_plan import (
+    RiskEvidence,
+    TaxonomyObligationPlan,
+)
 from asago_scenario_generator.pipeline.obligation_persistence import (
     write_taxonomy_obligation_plan,
 )
@@ -165,7 +170,7 @@ def test_deferred_tail_does_not_continue_after_work_exhaustion() -> None:
         limitations=(),
     )
 
-    assert _deferred_projection_candidates(allocator, batch, True) == ()
+    assert _deferred_projection_candidates(allocator, batch) == ()
     fill_round_robin.assert_not_called()
 
 
@@ -185,14 +190,14 @@ def test_deferred_tail_sets_allocator_retention_before_continuing() -> None:
         limitations=(),
     )
 
-    assert _deferred_projection_candidates(allocator, batch, True) == ()
+    assert _deferred_projection_candidates(allocator, batch) == ()
     assert allocator.retain_deferred is True
     fill_round_robin.assert_called_once_with()
 
 
 def test_nested_freezing_dispatch_handles_every_supported_shape() -> None:
     """Nested input copies preserve models and freeze every collection kind."""
-    evidence = RiskEvidenceInput(text="reviewed")
+    evidence = RiskEvidence(text="reviewed")
     already_frozen_mapping = FrozenDict({"value": "stable"})
     already_frozen_list = FrozenList(["stable"])
 

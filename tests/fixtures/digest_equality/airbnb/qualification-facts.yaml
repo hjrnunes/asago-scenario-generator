@@ -1,0 +1,176 @@
+# PROPOSED qualification facts for the MiniAirbnb baseline. NOT REVIEWED.
+#
+# Derived 2026-09-11 from tmp/uc-airbnb-conversational-ai-platform.md only
+# (plus the mini-agents airbnb tool surface for the retrieval fact). No
+# MiniKlarna interpretation is copied beyond the shared fact-id vocabulary,
+# and no gold case content was consulted. The owner must review and accept
+# or amend every row before any run consumes this file; an unreviewed draft
+# must never be marked reviewed. Per-fact citations are in the comment
+# beside each row; the payload itself is schema-exact (no extra fields).
+#
+# Coverage: all 13 capability fact IDs referenced by the catalog
+# qualification matrix. Explicit non-present rows are semantically
+# identical to omitting them (the planner defaults a missing fact key to
+# absent in `_qualification_facts_state`), so this file is behaviorally
+# comparable with the owner-reviewed 7-row MiniKlarna facts.
+#
+# Scope assumption (recorded 2026-09-11, facts and observation review,
+# item 5 of the independent audit): the use-case document is treated as
+# the authoritative and complete description of the system's
+# capabilities, so affirmative descriptions of the mechanisms that do
+# exist (session-scoped conversation history; point-in-time retrieval for
+# offline evaluation) are accepted as evidence that no cross-session
+# assistant memory exists.
+#
+# Reclassification 2026-09-11 later (owner-directed, second bounded work
+# package, item 5): the owner chose the stricter reading for every fact
+# the use case is merely silent on. The three `unknown` rows below
+# (feedback_loop, long_term_memory, reflection_mechanism) are exactly
+# those rows: no passage describes them, so their stamps record missing
+# information, not described absence. The `absent` rows keep affirmative
+# anchors (the use case describes the mechanisms that exist and none of
+# them is the capability). long_term_memory moves absent -> unknown
+# under this ruling: its absence stamp rested on the scope assumption
+# above, not on a described memory mechanism. The reclassified plan was
+# recomputed offline through the exact production planning path (see
+# facts-observation-review-20260911.md addendum and
+# facts-review/unknown-reclassified-comparison.json): 184 rows match
+# the corrected-facts plan row-for-row except 2 rows (AP-T6-04 and
+# AP-T6-05 on atlas-prompt-priming), whose qualification_disposition
+# moves contradictory_evidence -> missing_evidence because the
+# cond.reflection_mechanism precondition now reads unresolved instead
+# of false; scope dispositions, applicable counts (77), summary
+# tallies, and candidate records are unchanged on every row, and every
+# obligation identity digest changes (the identity payload covers the
+# capability snapshot, which embeds the facts state). The earlier
+# long_term_memory-only recompute was fully row-identical; the full
+# reclassification is not, and unchanged downstream counts are not
+# proof the reading is correct.
+schema_version: '1'
+facts:
+# absent: the use case describes tool use, guardrails, and retrieval, and no
+# code-execution facility.
+- fact:
+    namespace: profile
+    fact_id: capabilities.code_interpreter
+    value_type: boolean
+    property_path: []
+  status: absent
+# present: "Content moderation guardrails: Call multiple LLMs to detect
+# violations in communication content (e.g., harassment, scams, policy
+# violations)" - guest/host communication content enters model context.
+- fact:
+    namespace: profile
+    fact_id: capabilities.external_content_ingestion
+    value_type: boolean
+    property_path: []
+  status: present
+  value: true
+# unknown (reclassified 2026-09-11 later, owner-directed stricter
+# reading): the use case is silent on self-correction or retraining
+# loops; the moderation flow is infrastructural and does not speak to
+# it. Silence is missing information, not described absence.
+- fact:
+    namespace: profile
+    fact_id: capabilities.feedback_loop
+    value_type: boolean
+    property_path: []
+  status: unknown
+# unknown (reclassified 2026-09-11 later, owner-directed stricter
+# reading; earlier corrected present -> absent 2026-09-11): the catalog
+# condition consumes this fact for postconditions such as "False
+# information persists in long-term memory, treated as authoritative
+# source material in subsequent sessions" and "written back to
+# long-term memory ... available to future interactions"
+# (attack-patterns-halluc-intent, cond.long_term_memory). The use case
+# supplies only "Historical interactions with the LLM (conversation
+# history within the session)" - session-scoped context, not a
+# persistent store read or written across sessions - and "point-in-time
+# data retrieval for use cases like offline evaluation", which
+# reconstructs past state for evaluation rather than giving the
+# assistant memory. The absent stamp rested on the recorded scope
+# assumption (the document treated as complete); under the stricter
+# reading no passage establishes either presence or absence, so the
+# stamp records missing information. MiniKlarna's classification was
+# not copied.
+- fact:
+    namespace: profile
+    fact_id: capabilities.long_term_memory
+    value_type: boolean
+    property_path: []
+  status: unknown
+# absent: the Chain-of-Thought workflow selects tools internally; this
+# affirmative description of how planning happens is evidence that no
+# planning interface is exposed.
+- fact:
+    namespace: profile
+    fact_id: capabilities.planning_interface
+    value_type: boolean
+    property_path: []
+  status: absent
+# unknown (reclassified 2026-09-11 later, owner-directed stricter
+# reading): the use case is silent on any self-reflection pass; silence
+# is missing information, not described absence.
+- fact:
+    namespace: profile
+    fact_id: capabilities.reflection_mechanism
+    value_type: boolean
+    property_path: []
+  status: unknown
+# present: "The assistant accesses Airbnb's policies, terms of service, and
+# support knowledge base"; the target exposes lookup_policy(query).
+- fact:
+    namespace: profile
+    fact_id: capabilities.retrieval_corpus
+    value_type: boolean
+    property_path: []
+  status: present
+  value: true
+# absent: no infrastructure-configuration generation by the assistant is
+# described; the platform's infrastructure is statically configured.
+- fact:
+    namespace: profile
+    fact_id: capabilities.infrastructure_config_generation
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: no deployment pipeline is operated or generated through the
+# assistant; the Playground mirrors the production stack but deploys nothing.
+- fact:
+    namespace: profile
+    fact_id: capabilities.deployment_pipeline
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: "the v1 system's actions and workflows are reused as tools in v2" -
+# workflows are pre-built, not generated by the model.
+- fact:
+    namespace: profile
+    fact_id: capabilities.workflow_generation
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: no model-generated workflows are persisted anywhere.
+- fact:
+    namespace: profile
+    fact_id: capabilities.workflow_persistence
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: the CoT workflow has the LLM select existing tools; it does not
+# translate natural-language commands into stored executable command or
+# configuration definitions.
+- fact:
+    namespace: profile
+    fact_id: capabilities.nl_command_translation
+    value_type: boolean
+    property_path: []
+  status: absent
+# absent: one assistant; guardrails call other LLMs as infrastructure, not
+# as peer agents exchanging messages.
+- fact:
+    namespace: profile
+    fact_id: capabilities.inter_agent_messaging
+    value_type: boolean
+    property_path: []
+  status: absent

@@ -1,0 +1,111 @@
+zones_active:
+- input
+- reasoning
+- tool_execution
+entry_points:
+- name: Conversational Agent Chat Interface
+  entry_point_type: other
+  direction: bidirectional
+  controllability: direct
+  entry_point_id: ep:v1:b49ffbf76c3044b883ecca4f218ba3c3
+- name: Reservation Data Store
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:c6546de9e6a10aafc6852ac941cd22ca
+- name: Listing Data Store
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:6c82960724475cc366b3fc1ec711d129
+- name: Platform Policy Documents
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:62a890e72f9d9b9d9abb04094f756acb
+- name: Modification Ledger
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:e6a945fdb7e353047dc1faf1c8197a2e
+- name: Trust and Safety Case Files
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:d3b9f60fd1c59259cb746906eb252a52
+confidence: high
+kc_subcodes:
+- KC1.1
+- KC2.1
+- KC5.3
+- KC6.1.2
+- KC6.3.2
+- KC6.3.3
+- KCX-AUDIT
+- KCX-HITL
+tool_inventory:
+- name: get_reservation
+  description: Retrieves reservation details for a specific reservation ID.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:fb3f476efcb89877668abc3d16fce08a
+- name: get_listing
+  description: Retrieves details for a specific listing.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:8c0c0900998af5343ab64689456604cf
+- name: check_availability
+  description: Performs a read-only check of availability for a listing on a specific
+    date.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:51e42e630d4989e58fdf4e50050ca672
+- name: lookup_policy
+  description: Retrieves current platform-authored policy documents for a given query.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:a677c507b7a645a4c24d79c65819623c
+- name: modify_booking
+  description: Modifies an existing booking's check-in and check-out dates.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:00597e102f302feaa6131e3218e47e8a
+- name: update_listing
+  description: Updates listing configurations such as occupancy and config flags.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:40247a01a89c778f73fb55db684ce675
+- name: moderate_message
+  description: Screens conversation messages for safety violations like off-platform
+    payment attempts.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:ab45f6819354d79d8248a16b4de4f6f4
+- name: escalate_trust_safety
+  description: Opens a case for Trust and Safety review based on a specific reservation
+    and topic.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:697e905153d58c0ead97c1727f784cbf
+- name: get_airbnb_state_summary
+  description: Provides a read-only view of the platform's ledgers including reservations,
+    modifications, and audit logs.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:217d4771b80b3c7a258ca4dbe47d1560
+entry_point_completeness: inferred_partial
+entry_point_evidence: []
+tool_inventory_completeness: inferred_partial
+tool_inventory_evidence: []
+has_persistent_memory: false
+multi_agent: false
+hitl: true
+kc_subcodes_display:
+  KC1.1: Large Language Model (LLM)
+  KC2.1: Predefined workflows
+  KC5.3: Managed API
+  KC6.1.2: Extensive API access
+  KC6.3.2: Database full CRUD
+  KC6.3.3: RAG context data sources
+  KCX-AUDIT: System has exploitable audit or logging architecture
+  KCX-HITL: System has human-in-the-loop review or approval controls
