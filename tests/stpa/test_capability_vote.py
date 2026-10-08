@@ -19,7 +19,11 @@ from tests.stpa.sp1_helpers import MockLLMClient
 def _draw(*codes: str, tool: str = "orders_api") -> dict:
     return {
         "entry_points": [
-            {"name": "User chat messages", "direction": "input", "controllability": "direct"}
+            {
+                "name": "User chat messages",
+                "direction": "input",
+                "controllability": "direct",
+            }
         ],
         "confidence": "medium",
         "kc_subcodes": ["KC1.1", *codes],

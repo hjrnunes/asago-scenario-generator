@@ -151,9 +151,7 @@ def target_kc_decision(profile: ExecutionTargetProfile | None) -> KcFactDecision
     if profile is None:
         return KcFactDecision()
     verified = _verified(profile)
-    return _combine(
-        (_database_access(profile, verified), _retrieval_source(verified))
-    )
+    return _combine((_database_access(profile, verified), _retrieval_source(verified)))
 
 
 def vote_kc_subcodes(draws: Sequence[Collection[str]]) -> list[str]:

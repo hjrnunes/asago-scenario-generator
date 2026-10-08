@@ -213,7 +213,9 @@ def _decided_profile(
     if "tool_execution" in derive_zones_from_kc(kc_subcodes):
         base = next((draft for draft in drafts if draft.tool_inventory), base)
     try:
-        return base.model_copy(update={"kc_subcodes": kc_subcodes}).to_capability_profile()
+        return base.model_copy(
+            update={"kc_subcodes": kc_subcodes}
+        ).to_capability_profile()
     except ValueError as exc:
         raise StageError(stage=STAGE, step=STEP, message=str(exc)) from exc
 
