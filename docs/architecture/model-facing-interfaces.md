@@ -347,8 +347,11 @@ under `context_tables`, the budget and, per action, the number of
 combinations, the rows shown, and the values no row shows. The Stage 3
 prompt does not say that a table is a sample.
 Stage 3 receives the rows of its target's actions, and a finding may cite one
-row of its own slot's action as its `context_row`; any other row fails and
-spends the existing retry. The cited assignments become the ICA's
+row of its own slot's action as its `context_row`; any other row fails
+provider validation and spends the existing retry, so a row of a sibling
+action reaches the correction request instead of leaving the slot
+unresolved. A slot that slot filling leaves unresolved keeps its own reason
+through ICA verification. The cited assignments become the ICA's
 `process_model_context`. The table does not limit which deviations are
 unsafe: a finding whose unsafe context no row expresses uses
 `context_row: null`.

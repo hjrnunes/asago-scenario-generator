@@ -239,12 +239,19 @@ deviation field or UCA category. The deterministic compiler applies the exact
 the authoritative slot before validating and publishing the ICA. The prompt
 view carries that slot's action temporality and a closed local reference slice;
 the provider is never asked to infer a value that deterministic validation
-already owns. Nested structural-revision objects are validated before merge,
+already owns. The slice offers every loss-analysis hazard and security
+constraint, plus any a route to the slot names: routing adds to a slot's
+offer and never removes the slot's own hazards. `slot-hazard-offers.yaml`
+records, per slot, the own hazards, the offered hazards, the own hazards and
+constraints missing from the offer, and the same for the earlier rule (only
+the routed hazards whenever a route named the slot); accounting carries its
+summary as `slot_hazard_offers`. Nested structural-revision objects are validated before merge,
 and the run distinguishes a requested revision from one actually applied.
 
 The root atomically publishes `taxonomy-obligation-plan.yaml`,
 `obligation-consideration.yaml`, `obligation-accounting.yaml`,
-`scenario-realization.yaml`, and `synthesis-manifest.yaml`. Accounting joins
+`scenario-realization.yaml`, `synthesis-manifest.yaml`, and, when slot
+filling sent requests, `slot-hazard-offers.yaml`. Accounting joins
 exact obligation/slot, ICA,
 `EXEC:*`, hazard, and constraint evidence but makes no correspondence
 or coverage claim. Scenario realization separately records whether that exact
