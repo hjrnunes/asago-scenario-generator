@@ -2729,8 +2729,10 @@ def test_default_target_realization_runs_both_passes_with_the_run_client(
         built.append(("finder", client, run_dir, temperature))
         return "finder"
 
+    rows = ("row-1",)
+
     def realize_operations(baseline, profile, factory, *, baseline_rows):
-        assert baseline_rows is None
+        assert baseline_rows is rows
         passes.append(("operations", baseline, profile, factory()))
         return "mapped"
 
@@ -2754,6 +2756,7 @@ def test_default_target_realization_runs_both_passes_with_the_run_client(
         ica_enumeration=enumeration,
         capability_profile=synthesis_capability_profile(),
         execution_target_profile=package.profile,
+        operation_enrichment=SimpleNamespace(rows=rows),
         inputs=package.inputs,
         output_dir=tmp_path,
         model_runtime=_runtime(client),

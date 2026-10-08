@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from asago_scenario_generator.models.target_realization import SystemicStpaBaseline
 from asago_scenario_generator.pipeline.target_realization import (
+    observed_operations,
+    realize_baseline_rows,
     realize_target_operations,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -232,7 +234,7 @@ class _ExtensionInterpreter:
 
     accepted_operation_id = "schedule_payment"
 
-    def __call__(self, request):
+    def extend(self, request):
         self.requests.append(request)
         accepted = [
             operation
@@ -305,8 +307,26 @@ class _ExtensionFactory:
         return self.interpreter
 
 
-def _target_extended_result(baseline=None):
+def _realize(baseline, profile, interpreter_factory, **kwargs):
+    """Match the baseline the way enrichment does, then realize with its rows.
+
+    Production realization always receives the pre-ICA enrichment rows; this
+    builds those rows with the same interpreter before calling the seam.
+    """
+    observations = observed_operations(profile)
+    interpreter = interpreter_factory() if observations else None
+    rows, _diagnostics = realize_baseline_rows(baseline, observations, interpreter)
     return realize_target_operations(
+        baseline,
+        profile,
+        lambda: interpreter,
+        baseline_rows=rows,
+        **kwargs,
+    )
+
+
+def _target_extended_result(baseline=None):
+    return _realize(
         baseline or _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),

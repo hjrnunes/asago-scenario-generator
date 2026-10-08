@@ -389,9 +389,13 @@ def _default_target_realize(
 
     The pre-ICA enrichment already matched every control action to the
     observed operations, so its rows become the realization's baseline rows
-    and this stage makes no map or verify call.  Without an enrichment the
-    stage matches the actions itself.
+    and this stage makes no map or verify call.  Both stages run for the same
+    observed profiles, so a missing enrichment is a wiring error.
     """
+    if operation_enrichment is None:
+        raise ValueError(
+            "target realization needs the pre-ICA operation enrichment rows"
+        )
     from asago_scenario_generator.models.target_realization import (
         SystemicStpaBaseline,
     )
@@ -420,9 +424,7 @@ def _default_target_realize(
         baseline,
         execution_target_profile,
         lambda: interpreter,
-        baseline_rows=None
-        if operation_enrichment is None
-        else operation_enrichment.rows,
+        baseline_rows=operation_enrichment.rows,
     )
     finder = TargetDerivedICALlmFinder(
         model_runtime.client,

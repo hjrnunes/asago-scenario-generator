@@ -17,7 +17,6 @@ from tests.helpers.target_realization import (
     _ExtensionFactory,
     _Interpreter,
     _profile,
-    _UnmappedInterpreter,
 )
 
 
@@ -79,18 +78,13 @@ def test_realization_given_baseline_rows_still_runs_the_extension_once():
     assert result.rows == rows
 
 
-def test_realization_without_baseline_rows_maps_each_action_itself():
-    interpreter = _UnmappedInterpreter()
-    calls: list[str] = []
+def test_realization_requires_baseline_rows():
+    interpreter = _ForbiddenInterpreter()
 
-    def counting(*, action, operations):
-        calls.append(action["control_action_id"])
-        return interpreter(action=action, operations=operations)
+    with pytest.raises(TypeError, match="baseline_rows"):
+        realize_target_operations(_baseline(), _profile(), lambda: interpreter)
 
-    result = realize_target_operations(_baseline(), _profile(), lambda: counting)
-
-    assert calls == ["CA-1-1"]
-    assert result.rows[0].disposition is TargetRealizationDisposition.unmapped
+    assert interpreter.map_calls == 0
 
 
 @pytest.mark.parametrize(
@@ -198,15 +192,42 @@ def test_synthesis_makes_one_map_call_per_control_action_in_total(
     ]
 
 
-def test_synthesis_without_an_enrichment_maps_in_target_realization_once(
-    tmp_path, monkeypatch
-):
-    result, log = _run_default_synthesis(tmp_path, monkeypatch, enrich=False)
+def test_default_adapter_requires_the_enrichment_rows(tmp_path, monkeypatch):
+    from asago_scenario_generator.pipeline.synthesis_defaults import (
+        _default_target_realize,
+    )
+    from tests.helpers.synthesis_fixture import (
+        baseline_control_structure,
+        baseline_loss_analysis,
+        final_ica_result,
+        synthesis_capability_profile,
+    )
+    from tests.test_synthesis import _miniklarna_target_package, _runtime
 
-    assert log == [("target_realization", "CA-1-1")]
-    assert [row.control_action_id for row in result.target_realization.rows] == [
-        "CA-1-1"
-    ]
+    log: list[tuple[str, str]] = []
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.target_realization."
+        "TargetRealizationLlmInterpreter",
+        lambda client, run_dir, *, temperature, call_variant: _CountingLlmInterpreter(
+            call_variant, log
+        ),
+    )
+    package = _miniklarna_target_package(tmp_path)
+
+    with pytest.raises(ValueError, match="operation enrichment"):
+        _default_target_realize(
+            loss_analysis=baseline_loss_analysis(),
+            control_structure=baseline_control_structure(),
+            ica_enumeration=final_ica_result().ica_enumeration,
+            capability_profile=synthesis_capability_profile(),
+            execution_target_profile=package.profile,
+            operation_enrichment=None,
+            inputs=package.inputs,
+            output_dir=tmp_path,
+            model_runtime=_runtime(object()),
+        )
+
+    assert log == []
 
 
 def test_default_adapter_hands_the_enrichment_rows_to_realization(
