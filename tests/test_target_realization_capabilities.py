@@ -6,9 +6,6 @@ from asago_scenario_generator.models.target_realization import (
     CapabilityExposureDisposition as Disposition,
     SystemicStpaBaseline,
 )
-from asago_scenario_generator.pipeline.target_realization import (
-    realize_target_operations,
-)
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
@@ -26,7 +23,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from tests.helpers.target_realization import _Interpreter, _profile
+from tests.helpers.target_realization import _Interpreter, _profile, _realize
 
 # Interpreter evidence, the compiler-owned verified-pair reference, and the
 # verifier evidence, deduplicated and sorted.
@@ -103,7 +100,7 @@ class _UnverifiedInterpreter(_Interpreter):
 
 
 def _rows(baseline, profile, interpreter) -> dict[str, tuple]:
-    result = realize_target_operations(baseline, profile, lambda: interpreter)
+    result = _realize(baseline, profile, lambda: interpreter)
     return {
         row.capability: (row.declared, row.observed, row.disposition, row.evidence_refs)
         for row in result.capability_reconciliation

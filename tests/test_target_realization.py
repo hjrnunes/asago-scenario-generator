@@ -83,6 +83,7 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     _target_operation_for_context,
 )
 from tests.helpers.target_realization import (
+    _realize,
     _ExtensionFactory,
     _ExtensionInterpreter,
     _Interpreter,
@@ -127,7 +128,7 @@ def test_realize_target_operations_selects_one_exact_observed_operation_and_is_a
     before = baseline.model_dump(mode="json")
     interpreter = _Interpreter()
 
-    result = realize_target_operations(baseline, _profile(), lambda: interpreter)
+    result = _realize(baseline, _profile(), lambda: interpreter)
 
     assert result.rows[0].disposition is TargetRealizationDisposition.supported
     assert result.rows[0].selected_operation == TargetOperationReference(
@@ -181,7 +182,7 @@ def test_realize_target_operations_captures_attested_recipient_context(
     )
     interpreter = _Interpreter()
 
-    realize_target_operations(baseline, _profile(), lambda: interpreter)
+    _realize(baseline, _profile(), lambda: interpreter)
 
     action_view = interpreter.calls[0][0]
     assert action_view["target"] == expected_target
@@ -192,9 +193,7 @@ def test_realize_target_operations_captures_attested_recipient_context(
 
 
 def test_verified_pair_gets_compiler_owned_evidence_when_provider_omits_refs():
-    result = realize_target_operations(
-        _baseline(), _profile(), lambda: _NoVerifierEvidenceInterpreter()
-    )
+    result = _realize(_baseline(), _profile(), lambda: _NoVerifierEvidenceInterpreter())
 
     row = result.rows[0]
     assert row.disposition is TargetRealizationDisposition.supported
@@ -229,9 +228,7 @@ def test_handoff_mapping_retains_typed_operation_without_claiming_approval():
         baseline_id="baseline:approval-counterexample",
     )
 
-    result = realize_target_operations(
-        baseline, escalation_profile, lambda: _Interpreter()
-    )
+    result = _realize(baseline, escalation_profile, lambda: _Interpreter())
 
     assert result.rows[0].disposition is TargetRealizationDisposition.supported
     assert result.rows[0].selected_operation is not None
@@ -271,7 +268,7 @@ def test_exact_observation_selects_tool_call_without_changing_conceptual_effect(
 
 
 def test_every_observed_operation_gets_one_accounting_record():
-    result = realize_target_operations(_baseline(), _profile(), lambda: _Interpreter())
+    result = _realize(_baseline(), _profile(), lambda: _Interpreter())
 
     assert {record.operation_ref.identity for record in result.operation_records} == {
         (mcp_resource_id("target:mini", "schedule_payment"), "schedule_payment"),
@@ -313,7 +310,7 @@ def test_target_absence_keeps_every_baseline_action_unmapped():
         interpretations=(),
     )
 
-    result = realize_target_operations(_baseline(), profile, lambda: _Interpreter())
+    result = _realize(_baseline(), profile, lambda: _Interpreter())
 
     assert len(result.rows) == 1
     assert result.rows[0].disposition is TargetRealizationDisposition.unmapped
@@ -323,14 +320,20 @@ def test_target_absence_keeps_every_baseline_action_unmapped():
 
 def test_public_seam_rejects_untyped_baseline_or_profile_values():
     with pytest.raises(TypeError, match="SystemicStpaBaseline"):
-        realize_target_operations({}, _profile(), lambda: _Interpreter())
-    with pytest.raises(TypeError, match="ExecutionTargetProfile"):
-        realize_target_operations(_baseline(), {}, lambda: _Interpreter())
-    with pytest.raises(TypeError, match="SystemicStpaBaseline"):
-        realize_target_operations(SimpleNamespace(), _profile(), lambda: _Interpreter())
+        realize_target_operations(
+            {}, _profile(), lambda: _Interpreter(), baseline_rows=()
+        )
     with pytest.raises(TypeError, match="ExecutionTargetProfile"):
         realize_target_operations(
-            _baseline(), SimpleNamespace(), lambda: _Interpreter()
+            _baseline(), {}, lambda: _Interpreter(), baseline_rows=()
+        )
+    with pytest.raises(TypeError, match="SystemicStpaBaseline"):
+        realize_target_operations(
+            SimpleNamespace(), _profile(), lambda: _Interpreter(), baseline_rows=()
+        )
+    with pytest.raises(TypeError, match="ExecutionTargetProfile"):
+        realize_target_operations(
+            _baseline(), SimpleNamespace(), lambda: _Interpreter(), baseline_rows=()
         )
 
 
@@ -415,7 +418,7 @@ def test_realization_keeps_ambiguous_and_unmapped_rows_visible():
             "rationale": "No unique exact relationship was established.",
         }
 
-    result = realize_target_operations(baseline, _profile(), lambda: interpret)
+    result = _realize(baseline, _profile(), lambda: interpret)
 
     assert [row.disposition for row in result.rows] == [
         TargetRealizationDisposition.ambiguous,
@@ -485,7 +488,7 @@ def test_interpreter_cannot_select_an_operation_outside_the_observed_inventory()
         }
 
     with pytest.raises(ValueError, match="observed inventory"):
-        realize_target_operations(_baseline(), _profile(), lambda: interpret)
+        _realize(_baseline(), _profile(), lambda: interpret)
 
 
 class _DerivedFindingInterpreter:
@@ -534,7 +537,7 @@ def test_bounded_extension_is_one_call_and_additive_for_uncovered_operations():
     before = baseline.model_dump(mode="json")
     extension_factory = _ExtensionFactory()
 
-    result = realize_target_operations(
+    result = _realize(
         baseline,
         _profile(),
         lambda: _UnmappedInterpreter(),
@@ -588,15 +591,15 @@ def test_bounded_extension_is_one_call_and_additive_for_uncovered_operations():
 
 def test_bounded_extension_enumerates_all_eligible_ordinary_uca_categories():
     class _NoSlotProposal(_ExtensionInterpreter):
-        def __call__(self, request):
-            response = super().__call__(request)
+        def extend(self, request):
+            response = super().extend(request)
             response["outcomes"][0]["ica_slots"] = ()
             return response
 
     extension_factory = _ExtensionFactory()
     extension_factory.interpreter = _NoSlotProposal()
 
-    result = realize_target_operations(
+    result = _realize(
         _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),
@@ -614,12 +617,12 @@ def test_bounded_extension_retains_unanswered_operations_and_calls_factory_once(
     extension_factory = _ExtensionFactory()
 
     class _EmptyExtension:
-        def __call__(self, request):
+        def extend(self, request):
             del request
             return {"outcomes": ()}
 
     extension_factory.interpreter = _EmptyExtension()
-    result = realize_target_operations(
+    result = _realize(
         _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),
@@ -652,7 +655,7 @@ def test_bounded_extension_batches_all_uncovered_operations_into_one_request():
     profile = ExecutionTargetProfile.model_validate(profile_payload)
     extension_factory = _ExtensionFactory()
 
-    realize_target_operations(
+    _realize(
         _baseline(),
         profile,
         lambda: _UnmappedInterpreter(),
@@ -671,7 +674,7 @@ def test_bounded_extension_rescues_an_uncovered_read_only_operation():
     extension_factory = _ExtensionFactory()
     extension_factory.interpreter.accepted_operation_id = "get_payment"
 
-    result = realize_target_operations(
+    result = _realize(
         _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),
@@ -707,7 +710,7 @@ def test_bounded_extension_keeps_a_rejected_read_only_operation_uncovered():
     extension_factory = _ExtensionFactory()
     extension_factory.interpreter.accepted_operation_id = None
 
-    result = realize_target_operations(
+    result = _realize(
         _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),
@@ -746,7 +749,7 @@ def test_bounded_extension_treats_an_ambiguous_read_only_operation_as_eligible()
     extension_factory = _ExtensionFactory()
     extension_factory.interpreter.accepted_operation_id = None
 
-    result = realize_target_operations(
+    result = _realize(
         _baseline(),
         _profile(),
         lambda: interpret,
@@ -762,7 +765,7 @@ def test_bounded_extension_treats_an_ambiguous_read_only_operation_as_eligible()
     )
 
 
-def test_bounded_extension_prefers_explicit_extend_method_on_dual_adapter():
+def test_bounded_extension_uses_the_interpreter_extend_without_a_factory():
     class _DualAdapter:
         def __init__(self):
             self.extension_calls = 0
@@ -794,19 +797,14 @@ def test_bounded_extension_prefers_explicit_extend_method_on_dual_adapter():
 
     adapter = _DualAdapter()
 
-    realize_target_operations(
-        _baseline(),
-        _profile(),
-        lambda: adapter,
-        extension_factory=lambda: adapter,
-    )
+    _realize(_baseline(), _profile(), lambda: adapter)
 
     assert adapter.extension_calls == 1
 
 
 def test_bounded_extension_rejects_invented_operation_identity():
     class _InventedExtension:
-        def __call__(self, request):
+        def extend(self, request):
             del request
             return {
                 "outcomes": (
@@ -823,7 +821,7 @@ def test_bounded_extension_rejects_invented_operation_identity():
             }
 
     with pytest.raises(ValueError, match="observed target operation"):
-        realize_target_operations(
+        _realize(
             _baseline(),
             _profile(),
             lambda: _UnmappedInterpreter(),
@@ -833,7 +831,7 @@ def test_bounded_extension_rejects_invented_operation_identity():
 
 def test_bounded_extension_rejects_provider_authored_action_identity():
     class _CollidingExtension:
-        def __call__(self, request):
+        def extend(self, request):
             operation = request.operations[0]
             return {
                 "outcomes": (
@@ -860,7 +858,7 @@ def test_bounded_extension_rejects_provider_authored_action_identity():
             }
 
     with pytest.raises(ValidationError, match="control_action_id"):
-        realize_target_operations(
+        _realize(
             _baseline(),
             _profile(),
             lambda: _UnmappedInterpreter(),
@@ -952,7 +950,7 @@ class _Attempt4ShapeExtension(_ExtensionInterpreter):
     actions are unaffected by the hold.
     """
 
-    def __call__(self, request):
+    def extend(self, request):
         self.requests.append(request)
         outcomes = []
         for operation in request.operations:
@@ -995,7 +993,7 @@ def test_bounded_extension_holds_responsibility_target_with_typed_reason():
     extension_factory = _ExtensionFactory()
     extension_factory.interpreter = _Attempt4ShapeExtension()
 
-    result = realize_target_operations(
+    result = _realize(
         baseline,
         _both_state_changing_profile(),
         lambda: _UnmappedInterpreter(),
@@ -1034,7 +1032,7 @@ def test_held_responsibility_target_extension_keeps_stpa_projection_valid():
     )
     extension_factory = _ExtensionFactory()
     extension_factory.interpreter = _Attempt4ShapeExtension()
-    realization = realize_target_operations(
+    realization = _realize(
         baseline,
         _both_state_changing_profile(),
         lambda: _UnmappedInterpreter(),
@@ -1069,8 +1067,8 @@ def test_held_responsibility_target_extension_keeps_stpa_projection_valid():
 
 def test_bounded_extension_tool_target_still_compiles_unchanged():
     class _ProcessTargetExtension(_ExtensionInterpreter):
-        def __call__(self, request):
-            response = super().__call__(request)
+        def extend(self, request):
+            response = super().extend(request)
             response["outcomes"][0]["control_action"] = {
                 "controller_id": "RESP-1",
                 "target": {"type": "controlled_process", "id": "CP-1"},
@@ -1094,7 +1092,7 @@ def test_bounded_extension_tool_target_still_compiles_unchanged():
     extension_factory = _ExtensionFactory()
     extension_factory.interpreter = _ProcessTargetExtension()
 
-    result = realize_target_operations(
+    result = _realize(
         baseline,
         _profile(),
         lambda: _UnmappedInterpreter(),
@@ -1262,7 +1260,7 @@ def test_target_derived_both_operations_reach_stage5_with_exact_constraints():
     )
 
     class _BothExtensionInterpreter:
-        def __call__(self, request):
+        def extend(self, request):
             return {
                 "outcomes": tuple(
                     {
@@ -1293,7 +1291,7 @@ def test_target_derived_both_operations_reach_stage5_with_exact_constraints():
             }
 
     before = baseline.model_dump(mode="json")
-    realization = realize_target_operations(
+    realization = _realize(
         baseline,
         profile,
         lambda: _UnmappedInterpreter(),
@@ -1475,7 +1473,7 @@ def test_target_derived_effective_view_keeps_baseline_findings_in_union():
 
 
 def test_target_derived_finder_is_not_called_without_target_derived_slots():
-    result = realize_target_operations(_baseline(), _profile(), lambda: _Interpreter())
+    result = _realize(_baseline(), _profile(), lambda: _Interpreter())
     finder_factory = _DerivedFindingFactory()
 
     enhanced = realize_target_derived_icas(
@@ -1696,9 +1694,7 @@ def test_target_derived_finder_rejects_unknown_hazard_reference():
 
 
 def test_target_realization_persistence_is_atomic_and_exactly_named(tmp_path):
-    artifact = realize_target_operations(
-        _baseline(), _profile(), lambda: _Interpreter()
-    )
+    artifact = _realize(_baseline(), _profile(), lambda: _Interpreter())
 
     path = write_target_realization(tmp_path, artifact)
 

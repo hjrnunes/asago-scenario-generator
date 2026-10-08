@@ -18,15 +18,12 @@ from asago_scenario_generator.stpa.target_realization import (
     TargetDerivedICALlmFinder,
     TargetRealizationLlmInterpreter,
 )
-from asago_scenario_generator.pipeline.target_realization import (
-    realize_target_operations,
-)
 from asago_scenario_generator.stpa.target_realization.provider import (
     _validate_extension_response,
 )
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.helpers.target_realization import _baseline, _profile
+from tests.helpers.target_realization import _baseline, _profile, _realize
 from tests.helpers.target_realization_provider import (
     _payment_draft,
     _payment_ica_request,
@@ -402,7 +399,7 @@ def test_public_realization_prompt_serializes_frozen_profile_schema(tmp_path):
     )
     adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.4)
 
-    result = realize_target_operations(_baseline(), _profile(), lambda: adapter)
+    result = _realize(_baseline(), _profile(), lambda: adapter)
 
     assert result.rows[0].selected_operation is not None
     assert result.rows[0].selected_operation.identity == (
@@ -627,7 +624,7 @@ def test_target_extension_salvage_keeps_rejection_without_rationale_diagnostic(
     )
     adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
 
-    result = realize_target_operations(_baseline(), _profile(), lambda: adapter)
+    result = _realize(_baseline(), _profile(), lambda: adapter)
 
     assert len(client.calls) == 3
     assert any(
@@ -680,7 +677,7 @@ def test_target_extension_keeps_partial_final_response_and_pipeline_diagnostics(
     )
     adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
 
-    result = realize_target_operations(_baseline(), _profile(), lambda: adapter)
+    result = _realize(_baseline(), _profile(), lambda: adapter)
 
     assert result.target_derived_control_actions == ()
     assert any(
@@ -799,7 +796,7 @@ def test_target_extension_salvages_valid_outcomes_when_one_stays_invalid(
     )
     adapter = TargetRealizationLlmInterpreter(client, tmp_path, temperature=0.2)
 
-    result = realize_target_operations(_baseline(), _profile(), lambda: adapter)
+    result = _realize(_baseline(), _profile(), lambda: adapter)
 
     assert result.target_derived_control_actions == ()
     assert any(
