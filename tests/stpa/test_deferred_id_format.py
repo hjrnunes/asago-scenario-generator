@@ -10,6 +10,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlledProcess,
     CoordinationLink,
+    ElementRef,
     FeedbackChannel,
     ProcessModelPart,
     Responsibility,
@@ -63,3 +64,38 @@ def test_deferred_context_still_applies_other_field_rules():
             {"cp_id": "CP-RESERVATIONS", "description": ""},
             context=ASSEMBLY_DEFERRED,
         )
+
+
+_MISTYPED = [
+    (ElementRef, {"type": "user_message", "id": "RESP-1"}, "type"),
+    (
+        ControlAction,
+        {"ca_id": "CA-1-1", "description": "d", "temporality": "x"},
+        "temporality",
+    ),
+    (
+        ControlAction,
+        {"ca_id": "CA-1-1", "description": "d", "effect_kind": "x"},
+        "effect_kind",
+    ),
+    (
+        ControlAction,
+        {
+            "ca_id": "CA-1-1",
+            "description": "d",
+            "target": {"type": "responsibility", "id": "RESP-2"},
+            "effect_kind": "tool_call",
+        },
+        "effect_kind",
+    ),
+]
+
+
+@pytest.mark.parametrize(("model", "data", "field"), _MISTYPED)
+def test_deferred_context_leaves_unknown_kinds_for_assembly(model, data, field):
+    with pytest.raises(ValidationError):
+        model.model_validate(data)
+
+    parsed = model.model_validate(data, context=ASSEMBLY_DEFERRED)
+
+    assert getattr(parsed, field) == data[field]

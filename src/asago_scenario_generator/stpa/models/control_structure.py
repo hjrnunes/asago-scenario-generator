@@ -17,9 +17,19 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from enum import Enum
 from types import MappingProxyType
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Annotated
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from pydantic import (
+    AfterValidator,
+    BaseModel,
+    Field,
+    StrictStr,
+    ValidationError,
+    ValidationInfo,
+    ValidatorFunctionWrapHandler,
+    field_validator,
+    model_validator,
+)
 
 from asago_scenario_generator.stpa.models._validation import check_duplicate_ids
 
@@ -41,6 +51,29 @@ def _assembly_deferred(info: ValidationInfo | None) -> bool:
     """Return whether *info* carries the :data:`ASSEMBLY_DEFERRED` context."""
     context = info.context if info is not None else None
     return bool(context and context.get("defer_to_assembly"))
+
+
+def _non_blank(value: str) -> str:
+    """Require a visible character while keeping the string exactly."""
+    if not value.strip():
+        raise ValueError("must be a non-empty string")
+    return value
+
+
+NonBlankStr = Annotated[StrictStr, AfterValidator(_non_blank)]
+"""Model-written text that must show a character; the string is kept as written."""
+
+
+def _keep_when_deferred(
+    value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+) -> object:
+    """Validate *value*, or keep an invalid string under ASSEMBLY_DEFERRED."""
+    try:
+        return handler(value)
+    except ValidationError:
+        if _assembly_deferred(info) and isinstance(value, str):
+            return value
+        raise
 
 
 def _validate_id_format(
@@ -171,6 +204,14 @@ class ElementRef(BaseModel):
     type: ReferenceType
     id: str  # RESP-* or CP-*
 
+    @field_validator("type", mode="wrap")
+    @classmethod
+    def keep_deferred_type(
+        cls, value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+    ) -> object:
+        """Under ASSEMBLY_DEFERRED, leave an unknown type for assembly to reject."""
+        return _keep_when_deferred(value, handler, info)
+
 
 class ResponsibilityConstraint(BaseModel):
     """A constraint on a responsibility."""
@@ -290,9 +331,19 @@ class ControlAction(BaseModel):
             v, "ca_id", "CA-X-Y", "CA-1-1", r"^CA-\d+-\d+$", info
         )
 
+    @field_validator("effect_kind", "temporality", mode="wrap")
+    @classmethod
+    def keep_deferred_kind(
+        cls, value: object, handler: ValidatorFunctionWrapHandler, info: ValidationInfo
+    ) -> object:
+        """Under ASSEMBLY_DEFERRED, leave an unknown kind for assembly to reject."""
+        return _keep_when_deferred(value, handler, info)
+
     @model_validator(mode="before")
     @classmethod
-    def infer_responsibility_message_effect(cls, value: object) -> object:
+    def infer_responsibility_message_effect(
+        cls, value: object, info: ValidationInfo
+    ) -> object:
         """Derive the only valid effect for a responsibility target.
 
         Responsibility-to-responsibility actions are messages between
@@ -301,7 +352,9 @@ class ControlAction(BaseModel):
         downstream execution planner never has to choose between contradictory
         typed facts.  A ``before`` validator keeps the model immutable during
         post-validation; tolerant Stage 2 parsing calls the shared helper
-        explicitly because it uses ``model_construct``.
+        explicitly because it uses ``model_construct``.  Under
+        ASSEMBLY_DEFERRED an invalid or conflicting effect is left for the
+        assembled structure to reject.
         """
         if not isinstance(value, dict):
             return value
@@ -319,8 +372,12 @@ class ControlAction(BaseModel):
             try:
                 normalized = ControlActionEffectKind(effect_kind)
             except (TypeError, ValueError) as exc:
+                if _assembly_deferred(info):
+                    return value
                 raise ValueError("invalid effect_kind") from exc
             if normalized is not ControlActionEffectKind.agent_message:
+                if _assembly_deferred(info):
+                    return value
                 raise ValueError(
                     "control actions targeting a responsibility must use "
                     "effect_kind='agent_message'"

@@ -15,26 +15,38 @@ from __future__ import annotations
 import copy
 import logging
 import re
-from collections.abc import Mapping
-from enum import Enum
 from pathlib import Path
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationInfo, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    StrictStr,
+    ValidationInfo,
+    field_validator,
+)
 
 from asago_scenario_generator.models.capability_profile import (
     ZONE_DISPLAY_NAMES,
     CapabilityProfile,
     build_kc_subcodes_display,
 )
-from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
+from asago_scenario_generator.stpa.infra.llm import (
+    DEFAULT_TEMPERATURE,
+    LLMClient,
+    LLMResult,
+)
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
+    decode_content,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import (
+    ASSEMBLY_DEFERRED,
     ControlStructure,
+    NonBlankStr,
     ControlledProcess,
     CoordinationLink,
     FeedbackSourceKind,
@@ -177,354 +189,122 @@ class RevisionDelta(BaseModel):
     dismissed_gaps: list[str] = Field(default_factory=list)
 
 
-def _validate_revision_delta_carrier(value: Any) -> None:
-    """Validate the revision wire shape before tolerant model construction.
+# Revision IDs keep any non-empty source text: ``id_normalization`` maps each
+# one to the element's final structural position after the merge.
+_Text = NonBlankStr
 
-    The revision call intentionally keeps malformed *identifiers* tolerant:
-    ``id_normalization`` can map a source identifier to the element's final
-    structural position.  That tolerance must not extend to the object graph
-    itself, though.  In particular, tolerant construction turns an omitted
-    ``coordination_mechanism`` into ``None`` and would otherwise let merge code
-    fail while dereferencing it.  This validator therefore checks the nested
-    carrier shape and scalar/container types while leaving the actual ID
-    formats and cross-references to the existing normalization pass.
 
-    Top-level fields remain backward-compatible and may be omitted (they have
-    empty-list defaults), but any field that is supplied must be a list.
+class _RevisionWire(BaseModel):
+    """A closed object of the revision wire: unknown fields are errors."""
+
+    model_config = ConfigDict(extra="forbid")
+
+
+class _RevisionRef(_RevisionWire):
+    # ``type`` stays text so the assembled structure, not the carrier,
+    # rejects an unknown reference type.
+    type: _Text
+    id: _Text
+
+
+class _RevisionConstraint(_RevisionWire):
+    rc_id: _Text
+    description: _Text
+
+
+class _RevisionProcessModelPart(_RevisionWire):
+    pm_id: _Text
+    description: _Text
+    feedback_source: _RevisionRef | None = None
+    values: list[_Text] = []
+    evidence_refs: list[_Text] = []
+
+
+class _RevisionControlAction(_RevisionWire):
+    ca_id: _Text
+    description: _Text
+    target: _RevisionRef | None = None
+    effect_kind: StrictStr | None = None
+    temporality: StrictStr | None = None
+    operation: _Text | None = None
+    process_model_refs: list[_Text] = []
+
+
+class _RevisionFeedbackChannel(_RevisionWire):
+    fb_id: _Text
+    description: _Text
+    updates: _Text
+    source: _RevisionRef | None = None
+    source_kind: FeedbackSourceKind | None = None
+
+
+class _RevisionResponsibility(_RevisionWire):
+    resp_id: _Text
+    description: _Text
+    responsibility_constraints: list[_RevisionConstraint] = []
+    security_constraint_refs: list[_Text] = []
+    process_model_parts: list[_RevisionProcessModelPart] = []
+    control_actions: list[_RevisionControlAction] = []
+    feedback_channels: list[_RevisionFeedbackChannel] = []
+
+
+class _RevisionControlledProcess(_RevisionWire):
+    cp_id: _Text
+    description: _Text
+
+
+class _RevisionMechanism(_RevisionWire):
+    cm_id: _Text
+    description: _Text
+    payload: StrictStr
+
+
+class _RevisionLink(_RevisionWire):
+    link_id: _Text
+    source: _Text
+    target: _Text
+    shared_pm: _Text
+    coordination_mechanism: _RevisionMechanism
+    description: _Text
+
+
+class _RevisionDeltaWire(_RevisionWire):
+    """The revision response as the model must write it.
+
+    Every object is closed and every collection that is present must be a
+    list; an omitted collection is empty.  IDs, reference types, and action
+    kinds stay as written for normalization and assembly to settle.
     """
-    if not isinstance(value, Mapping):
-        raise ValueError("RevisionDelta response must be a JSON object")
-    expected = set(RevisionDelta.model_fields)
-    unknown = set(value) - expected
-    if unknown:
-        raise ValueError(
-            "RevisionDelta contains unknown top-level fields: "
-            + ", ".join(sorted(unknown))
-        )
-    for field_name in expected:
-        field_value = value.get(field_name, [])
-        if not isinstance(field_value, list):
-            raise ValueError(f"RevisionDelta {field_name} must be a list")
 
-    _validate_revision_delta_collections(value)
-    _validate_revision_dismissed_gaps(value.get("dismissed_gaps", []))
+    new_responsibilities: list[_RevisionResponsibility] = []
+    new_controlled_processes: list[_RevisionControlledProcess] = []
+    new_coordination_links: list[_RevisionLink] = []
+    modified_responsibilities: list[_RevisionResponsibility] = []
+    dismissed_gaps: list[_Text] = []
 
 
-def _validate_revision_delta_collections(value: Mapping[str, Any]) -> None:
-    """Validate the four nested object collections in a revision delta."""
-    for field_name, validator in (
-        ("new_responsibilities", _validate_revision_responsibility),
-        ("modified_responsibilities", _validate_revision_responsibility),
-        ("new_controlled_processes", _validate_revision_controlled_process),
-        ("new_coordination_links", _validate_revision_coordination_link),
-    ):
-        _validate_revision_objects(value.get(field_name, []), validator, field_name)
+def _validate_revision_wire(value: Any) -> None:
+    """Reject a revision response whose carrier breaks the wire models."""
+    _RevisionDeltaWire.model_validate(value)
 
 
-def _valid_revision_gap(value: Any) -> bool:
-    """Return whether a dismissed-gap source string carries content."""
-    return isinstance(value, str) and bool(value.strip())
+def _revision_delta_from_wire(value: Any) -> RevisionDelta:
+    """Build the delta from a carrier that passed the wire models."""
+    return RevisionDelta.model_validate(value, context=ASSEMBLY_DEFERRED)
 
 
-def _validate_revision_dismissed_gaps(values: list[Any]) -> None:
-    """Require each dismissed gap to retain a meaningful source string."""
-    for index, gap in enumerate(values):
-        if not _valid_revision_gap(gap):
-            raise ValueError(
-                "RevisionDelta dismissed_gaps[{}] must be a non-empty string".format(
-                    index
-                )
-            )
+def _parse_revision_delta(value: Any) -> RevisionDelta:
+    """Parse one decoded revision response."""
+    _validate_revision_wire(value)
+    return _revision_delta_from_wire(value)
 
 
-def _validate_revision_objects(
-    values: list[Any],
-    validator: Any,
-    field_name: str,
-) -> None:
-    """Apply one nested carrier validator with a stable field path."""
-    for index, item in enumerate(values):
-        try:
-            validator(item)
-        except ValueError as exc:
-            raise ValueError(f"{field_name}[{index}]: {exc}") from exc
-
-
-def _require_revision_mapping(
-    value: Any,
-    *,
-    path: str,
-    fields: set[str],
-) -> Mapping[str, Any]:
-    """Require an object with exactly the fields known by its Pydantic type."""
-    if not isinstance(value, Mapping):
-        raise ValueError(f"{path} must be an object")
-    unknown = set(value) - fields
-    if unknown:
-        raise ValueError(
-            f"{path} contains unknown field(s): " + ", ".join(sorted(unknown))
-        )
-    return value
-
-
-def _require_revision_text(
-    value: Any,
-    *,
-    path: str,
-    non_empty: bool = True,
-) -> None:
-    """Require a string, optionally enforcing the model's minimum length."""
-    if not isinstance(value, str):
-        raise ValueError(f"{path} must be a string")
-    if non_empty and not value.strip():
-        raise ValueError(f"{path} must be a non-empty string")
-
-
-def _require_revision_id(value: Any, *, path: str) -> None:
-    """Require a repairable source identifier without imposing its format."""
-    # Source IDs such as ``new-controller`` are deliberately accepted here;
-    # the high-level normalization policy rewrites them deterministically.
-    _require_revision_text(value, path=path)
-
-
-def _require_revision_list(
-    value: Any,
-    *,
-    path: str,
-    item_validator: Any | None = None,
-) -> None:
-    """Require a JSON array and validate each item when requested."""
-    if not isinstance(value, list):
-        raise ValueError(f"{path} must be a list")
-    if item_validator is not None:
-        for index, item in enumerate(value):
-            try:
-                item_validator(item)
-            except ValueError as exc:
-                raise ValueError(f"{path}[{index}]: {exc}") from exc
-
-
-def _validate_revision_element_ref(value: Any, *, path: str) -> None:
-    """Validate the complete shape of a responsibility/process reference."""
-    ref = _require_revision_mapping(value, path=path, fields={"type", "id"})
-    _require_revision_text(ref.get("type"), path=f"{path}.type")
-    _require_revision_id(ref.get("id"), path=f"{path}.id")
-
-
-def _validate_revision_responsibility_constraint(value: Any, *, path: str) -> None:
-    """Validate one nested responsibility constraint."""
-    item = _require_revision_mapping(
-        value,
-        path=path,
-        fields={"rc_id", "description"},
-    )
-    _require_revision_id(item.get("rc_id"), path=f"{path}.rc_id")
-    _require_revision_text(item.get("description"), path=f"{path}.description")
-
-
-def _validate_revision_process_model_part(value: Any, *, path: str) -> None:
-    """Validate one nested process-model part."""
-    item = _require_revision_mapping(
-        value,
-        path=path,
-        fields={"pm_id", "description", "feedback_source", "values", "evidence_refs"},
-    )
-    for name in ("values", "evidence_refs"):
-        _require_revision_list(
-            item.get(name, []),
-            path=f"{path}.{name}",
-            item_validator=lambda nested, name=name: _require_revision_text(
-                nested, path=f"{path}.{name}[]"
-            ),
-        )
-    _require_revision_id(item.get("pm_id"), path=f"{path}.pm_id")
-    _require_revision_text(item.get("description"), path=f"{path}.description")
-    if "feedback_source" in item and item["feedback_source"] is not None:
-        _validate_revision_element_ref(
-            item["feedback_source"], path=f"{path}.feedback_source"
-        )
-
-
-def _validate_optional_revision_ref(
-    item: Mapping[str, Any],
-    *,
-    field_name: str,
-    path: str,
-) -> None:
-    """Validate an optional typed element reference when it is present."""
-    value = item.get(field_name)
-    if value is not None:
-        _validate_revision_element_ref(value, path=f"{path}.{field_name}")
-
-
-def _validate_revision_enum_fields(
-    item: Mapping[str, Any],
-    *,
-    path: str,
-) -> None:
-    """Validate optional effect/temporality display metadata values."""
-    for name in ("effect_kind", "temporality"):
-        value = item.get(name)
-        if value is not None and not isinstance(value, (str, Enum)):
-            raise ValueError(f"{path}.{name} must be a string")
-
-
-def _validate_revision_control_action(value: Any, *, path: str) -> None:
-    """Validate one nested control action and its optional typed metadata."""
-    item = _require_revision_mapping(
-        value,
-        path=path,
-        fields={
-            "ca_id",
-            "description",
-            "target",
-            "effect_kind",
-            "temporality",
-            "operation",
-            "process_model_refs",
-        },
-    )
-    _require_revision_id(item.get("ca_id"), path=f"{path}.ca_id")
-    if item.get("operation") is not None:
-        _require_revision_text(item["operation"], path=f"{path}.operation")
-    _require_revision_list(
-        item.get("process_model_refs", []),
-        path=f"{path}.process_model_refs",
-        item_validator=lambda nested: _require_revision_id(
-            nested, path=f"{path}.process_model_refs[]"
-        ),
-    )
-    _require_revision_text(item.get("description"), path=f"{path}.description")
-    _validate_optional_revision_ref(item, field_name="target", path=path)
-    _validate_revision_enum_fields(item, path=path)
-
-
-def _validate_revision_feedback_channel(value: Any, *, path: str) -> None:
-    """Validate one nested feedback channel."""
-    item = _require_revision_mapping(
-        value,
-        path=path,
-        fields={"fb_id", "description", "updates", "source", "source_kind"},
-    )
-    _require_revision_id(item.get("fb_id"), path=f"{path}.fb_id")
-    source_kind = item.get("source_kind")
-    if source_kind is not None and source_kind not in {
-        kind.value for kind in FeedbackSourceKind
-    }:
-        raise ValueError(
-            f"{path}.source_kind must be one of: "
-            + ", ".join(kind.value for kind in FeedbackSourceKind)
-        )
-    _require_revision_text(item.get("description"), path=f"{path}.description")
-    _require_revision_id(item.get("updates"), path=f"{path}.updates")
-    if "source" in item and item["source"] is not None:
-        _validate_revision_element_ref(item["source"], path=f"{path}.source")
-
-
-def _validate_revision_responsibility(value: Any) -> None:
-    """Validate a complete responsibility object before tolerant decoding."""
-    item = _require_revision_mapping(
-        value,
-        path="responsibility",
-        fields={
-            "resp_id",
-            "description",
-            "responsibility_constraints",
-            "security_constraint_refs",
-            "process_model_parts",
-            "control_actions",
-            "feedback_channels",
-        },
-    )
-    _require_revision_id(item.get("resp_id"), path="responsibility.resp_id")
-    _require_revision_text(item.get("description"), path="responsibility.description")
-    _require_revision_list(
-        item.get("responsibility_constraints", []),
-        path="responsibility.responsibility_constraints",
-        item_validator=lambda nested: _validate_revision_responsibility_constraint(
-            nested, path="responsibility.responsibility_constraints[]"
-        ),
-    )
-    _require_revision_list(
-        item.get("security_constraint_refs", []),
-        path="responsibility.security_constraint_refs",
-        item_validator=lambda nested: _require_revision_id(
-            nested, path="responsibility.security_constraint_refs[]"
-        ),
-    )
-    _require_revision_list(
-        item.get("process_model_parts", []),
-        path="responsibility.process_model_parts",
-        item_validator=lambda nested: _validate_revision_process_model_part(
-            nested, path="responsibility.process_model_parts[]"
-        ),
-    )
-    _require_revision_list(
-        item.get("control_actions", []),
-        path="responsibility.control_actions",
-        item_validator=lambda nested: _validate_revision_control_action(
-            nested, path="responsibility.control_actions[]"
-        ),
-    )
-    _require_revision_list(
-        item.get("feedback_channels", []),
-        path="responsibility.feedback_channels",
-        item_validator=lambda nested: _validate_revision_feedback_channel(
-            nested, path="responsibility.feedback_channels[]"
-        ),
-    )
-
-
-def _validate_revision_controlled_process(value: Any) -> None:
-    """Validate a complete controlled-process object."""
-    item = _require_revision_mapping(
-        value,
-        path="controlled_process",
-        fields={"cp_id", "description"},
-    )
-    _require_revision_id(item.get("cp_id"), path="controlled_process.cp_id")
-    _require_revision_text(
-        item.get("description"), path="controlled_process.description"
-    )
-
-
-def _validate_revision_coordination_mechanism(value: Any, *, path: str) -> None:
-    """Validate the required nested coordination mechanism object."""
-    item = _require_revision_mapping(
-        value,
-        path=path,
-        fields={"cm_id", "description", "payload"},
-    )
-    _require_revision_id(item.get("cm_id"), path=f"{path}.cm_id")
-    _require_revision_text(item.get("description"), path=f"{path}.description")
-    _require_revision_text(item.get("payload"), path=f"{path}.payload", non_empty=False)
-
-
-def _validate_revision_coordination_link(value: Any) -> None:
-    """Validate a complete link, including endpoints and its mechanism."""
-    item = _require_revision_mapping(
-        value,
-        path="coordination_link",
-        fields={
-            "link_id",
-            "source",
-            "target",
-            "shared_pm",
-            "coordination_mechanism",
-            "description",
-        },
-    )
-    _require_revision_id(item.get("link_id"), path="coordination_link.link_id")
-    for endpoint in ("source", "target", "shared_pm"):
-        _require_revision_id(item.get(endpoint), path=f"coordination_link.{endpoint}")
-    if "coordination_mechanism" not in item:
-        raise ValueError("coordination_link.coordination_mechanism is required")
-    _validate_revision_coordination_mechanism(
-        item["coordination_mechanism"],
-        path="coordination_link.coordination_mechanism",
-    )
-    _require_revision_text(
-        item.get("description"), path="coordination_link.description"
+def _parse_revision_result(
+    result: LLMResult, cleanup_transformations: list[dict[str, Any]]
+) -> RevisionDelta:
+    """Parse a revision response that ``_validate_revision_wire`` accepted."""
+    return _revision_delta_from_wire(
+        decode_content(result, cleanup_transformations=cleanup_transformations)
     )
 
 
@@ -834,10 +614,11 @@ def run_revision(
         ),
         temperature=temperature,
         max_completion_tokens=REVISION_MAX_COMPLETION_TOKENS,
-        # Keep the wire envelope closed, then preserve malformed source IDs
-        # until the complete stitched structure can normalize references.
+        # ``allow_unvalidated`` keeps the request a JSON object without a
+        # schema; the wire models below are the response contract.
         allow_unvalidated=True,
-        raw_result_validator=_validate_revision_delta_carrier,
+        raw_result_validator=_validate_revision_wire,
+        result_parser_with_cleanup=_parse_revision_result,
     )
     revision_delta, error_msg = outcome.value, outcome.error
     if error_msg is not None:
