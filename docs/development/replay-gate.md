@@ -24,6 +24,9 @@ and compares every output file with the recording.
    ```
 
    Without a `stage.json`, give the recorded `generate ...` arguments after `--`.
+   The gate deletes its temporary scratch directory when it finishes; to inspect
+   the copied inputs, the replayed output, and `run.log`, pass `--work-dir DIR`,
+   which the gate keeps.
 
 A pass means the change preserved behaviour for those recordings: every request
 the code sent matched a recorded one, and every output matched. A refactor that

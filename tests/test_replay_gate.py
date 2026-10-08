@@ -6,6 +6,7 @@ import json
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -422,6 +423,79 @@ def test_cli_reads_run_arguments_after_a_separator(
     assert code == 0, capsys.readouterr().out
     assert seen["arguments"] == ["generate", "--output-dir", "/runs/r1/output"]
     assert "PASS" in capsys.readouterr().out
+
+
+@pytest.fixture
+def scratch_root(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Point the default temporary directory at an empty folder."""
+    root = tmp_path / "scratch-root"
+    root.mkdir()
+    monkeypatch.setattr(tempfile, "tempdir", str(root))
+    return root
+
+
+def _gate_with_runner(recorded: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real_gate = run_gate
+
+    def fake_gate(path: Path, **kwargs: Any) -> Any:
+        return real_gate(path, runner=_copying_runner(recorded), **kwargs)
+
+    monkeypatch.setattr(replay_gate, "run_gate", fake_gate)
+
+
+def test_run_gate_removes_the_scratch_directory_it_created(
+    trees, tmp_path: Path, scratch_root: Path
+) -> None:
+    recorded = _stage(tmp_path, trees[0])
+    result = run_gate(recorded, runner=_copying_runner(recorded))
+    assert result.passed, result.differences
+    assert list(scratch_root.iterdir()) == []
+
+
+def test_cli_without_a_work_dir_removes_its_scratch_directory(
+    trees,
+    tmp_path: Path,
+    scratch_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    recorded = _stage(tmp_path, trees[0])
+    _gate_with_runner(recorded, monkeypatch)
+    assert main(["check", str(recorded)]) == 0, capsys.readouterr().out
+    assert list(scratch_root.iterdir()) == []
+    assert "log:" not in capsys.readouterr().out
+
+
+def test_cli_failure_without_a_work_dir_says_how_to_keep_the_scratch_files(
+    trees,
+    tmp_path: Path,
+    scratch_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    recorded = _stage(tmp_path, trees[0], exit_code=1)
+    _gate_with_runner(recorded, monkeypatch)
+    assert main(["check", str(recorded)]) == 1
+    assert list(scratch_root.iterdir()) == []
+    out = capsys.readouterr().out
+    assert "rerun with --work-dir DIR to keep the scratch files" in out
+    assert out.splitlines()[-1] == "FAIL"
+
+
+def test_cli_keeps_the_work_dir_it_was_given(
+    trees,
+    tmp_path: Path,
+    scratch_root: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys,
+) -> None:
+    recorded = _stage(tmp_path, trees[0])
+    work = tmp_path / "work"
+    _gate_with_runner(recorded, monkeypatch)
+    assert main(["check", str(recorded), "--work-dir", str(work)]) == 0
+    assert (work / "output").is_dir()
+    assert f"(log: {work / 'run.log'})" in capsys.readouterr().out
+    assert list(scratch_root.iterdir()) == []
 
 
 def test_prepare_run_requires_a_recorded_output_dir(tmp_path: Path) -> None:

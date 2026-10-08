@@ -596,9 +596,25 @@ def run_gate(
     work: Path | None = None,
     runner: Callable[[list[str], dict[str, str]], int] | None = None,
 ) -> GateResult:
-    """Replay *recorded* through the current code and compare the outputs."""
+    """Replay *recorded* through the current code and compare the outputs.
+
+    Without *work*, the replay runs in a temporary directory that is removed
+    before this returns; pass *work* to keep the scratch files.
+    """
+    if work is not None:
+        return _run_gate_in(work, recorded, arguments, stage_json, runner)
+    with tempfile.TemporaryDirectory(prefix="replay-gate-") as scratch:
+        return _run_gate_in(Path(scratch), recorded, arguments, stage_json, runner)
+
+
+def _run_gate_in(
+    work: Path,
+    recorded: Path,
+    arguments: Sequence[str] | None,
+    stage_json: Path | None,
+    runner: Callable[[list[str], dict[str, str]], int] | None,
+) -> GateResult:
     recorded = recorded.resolve()
-    work = Path(tempfile.mkdtemp(prefix="replay-gate-")) if work is None else work
     work.mkdir(parents=True, exist_ok=True)
     if arguments:
         args, expected_exit_code = list(arguments), 0
@@ -653,12 +669,13 @@ def run_gate(
     return result
 
 
-def _report(result: GateResult, work: Path, limit: int) -> str:
+def _report(result: GateResult, work: Path | None, limit: int) -> str:
+    """Render *result*; *work* is the kept scratch directory, if any."""
+    log = "" if work is None else f" (log: {work / 'run.log'})"
     lines = [
         f"recorded:  {result.recorded}",
         f"replayed:  {result.replayed}",
-        f"exit code: {result.exit_code}, recorded {result.expected_exit_code} "
-        f"(log: {work / 'run.log'})",
+        f"exit code: {result.exit_code}, recorded {result.expected_exit_code}{log}",
         f"time:      {result.seconds:.1f}s",
         f"files:     {result.files_compared} compared",
     ]
@@ -675,6 +692,8 @@ def _report(result: GateResult, work: Path, limit: int) -> str:
     if result.differences:
         lines.append(f"differences: {len(result.differences)} file(s)")
         lines += [f"  {item}" for item in result.differences[:limit]]
+    if work is None and not result.passed:
+        lines.append("rerun with --work-dir DIR to keep the scratch files")
     lines.append("PASS" if result.passed else "FAIL")
     return "\n".join(lines)
 
@@ -700,7 +719,9 @@ def main(argv: Iterable[str] | None = None) -> int:
         help="file whose 'argv' holds the recorded command (default: ../stage.json)",
     )
     check.add_argument(
-        "--work-dir", type=Path, help="scratch directory (default: a new temp dir)"
+        "--work-dir",
+        type=Path,
+        help="scratch directory to keep (default: a temporary one, removed afterwards)",
     )
     check.add_argument("--show", type=int, default=10, help="differences to print")
     parser.epilog = check.epilog = (
@@ -712,14 +733,13 @@ def main(argv: Iterable[str] | None = None) -> int:
         split = items.index("--")
         items, arguments = items[:split], items[split + 1 :]
     options = parser.parse_args(items)
-    work = options.work_dir or Path(tempfile.mkdtemp(prefix="replay-gate-"))
     result = run_gate(
         options.recorded,
         arguments=arguments,
         stage_json=options.stage_json,
-        work=work,
+        work=options.work_dir,
     )
-    print(_report(result, work, options.show))
+    print(_report(result, options.work_dir, options.show))
     return 0 if result.passed else 1
 
 
