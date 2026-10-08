@@ -43,26 +43,6 @@ class McpTargetDiscoveryInputs(ClosedCanonicalModel):
     verifier_id: StrictStr = Field(default="asago-target-verifier-v1", min_length=1)
     model_profile: StrictStr | None = Field(default=None, min_length=1)
     model_name: StrictStr | None = Field(default=None, min_length=1)
-    active_inspection_tool_names: tuple[StrictStr, ...] = ()
-    max_active_inspection_calls: StrictInt = Field(default=8, ge=0, le=32)
-
-    @model_validator(mode="after")
-    def validate_active_inspection(self) -> "McpTargetDiscoveryInputs":
-        names = tuple(sorted(self.active_inspection_tool_names))
-        if len(names) != len(set(names)):
-            raise ValueError("active_inspection_tool_names must be unique")
-        if any(not name for name in names):
-            raise ValueError("active_inspection_tool_names must be non-empty")
-        object.__setattr__(self, "active_inspection_tool_names", names)
-        if self.mode is DiscoveryMode.schema_only and names:
-            raise ValueError(
-                "active_inspection_tool_names require disposable_test_environment"
-            )
-        if names and self.max_active_inspection_calls == 0:
-            raise ValueError(
-                "active inspection names require max_active_inspection_calls > 0"
-            )
-        return self
 
 
 class McpInventoryPage(ClosedCanonicalModel):
@@ -92,9 +72,6 @@ class McpInventoryAdapter(Protocol):
 
     def list_tools(self, cursor: str | None = None) -> InventoryAdapterResponse:
         """Return one tools/list page; pagination is protocol-owned."""
-
-    def call_tool(self, tool_name: str, arguments: Mapping[str, Any]) -> Any:
-        """Call one tool only when disposable inspection is explicitly enabled."""
 
 
 class TargetInterpretationRequest(ClosedCanonicalModel):

@@ -445,206 +445,6 @@ def test_protocol_failure_does_not_persist_runtime_error_text(tmp_path):
     assert "secret.example" not in serialized
 
 
-def test_active_inspection_requires_explicit_disposable_mode():
-    payload = {"tools": [{"name": "read", "inputSchema": {"type": "object"}}]}
-    adapter = InMemoryInventory(payload)
-    result = discover_mcp_target(
-        _inputs(
-            mode="disposable_test_environment",
-            active_inspection_tool_names=("read",),
-        ),
-        adapter,
-        InMemoryInterpreter(),
-    )
-    assert adapter.tool_calls == [("read", {})]
-    assert any(call["kind"] == "tool_call" for call in result.calls)
-
-
-def test_active_inspection_skips_unverified_tools_without_calling_them():
-    payload = {"tools": [{"name": "read", "inputSchema": {"type": "object"}}]}
-    adapter = InMemoryInventory(payload)
-    result = discover_mcp_target(
-        _inputs(
-            mode="disposable_test_environment",
-            active_inspection_tool_names=("read",),
-        ),
-        adapter,
-        None,
-    )
-
-    assert adapter.tool_calls == []
-    assert any(
-        item.code.value == "active_inspection_disabled" for item in result.diagnostics
-    )
-
-
-def test_active_inspection_calls_only_verified_read_only_tools_with_empty_input():
-    payload = {
-        "tools": [
-            {"name": "read", "inputSchema": {"type": "object"}},
-            {
-                "name": "read_with_arg",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"order_id": {"type": "string"}},
-                    "required": ["order_id"],
-                },
-            },
-            {"name": "write", "inputSchema": {"type": "object"}},
-        ]
-    }
-    adapter = InMemoryInventory(payload)
-
-    class InspectionInterpreter(InMemoryInterpreter):
-        def interpret(self, request):
-            self.requests.append(request)
-            drafts = []
-            for tool in request.tools:
-                drafts.append(
-                    TargetInterpretationDraft(
-                        tool_handle=tool.handle,
-                        disposition=TargetInterpretationDisposition.supported,
-                        likely_effect=(
-                            TargetOperationEffect.update
-                            if tool.name == "write"
-                            else TargetOperationEffect.read
-                        ),
-                        likely_state_effect=(
-                            TargetStateEffect.may_change
-                            if tool.name == "write"
-                            else TargetStateEffect.none
-                        ),
-                        semantic_roles=("writer",)
-                        if tool.name == "write"
-                        else ("reader",),
-                        evidence_refs=(f"inventory:tool:{tool.name}:description",),
-                        rationale="The quoted description supports this label.",
-                    )
-                )
-            return TargetInterpretationResponse(interpretations=tuple(drafts))
-
-    result = discover_mcp_target(
-        _inputs(
-            mode="disposable_test_environment",
-            active_inspection_tool_names=("read", "read_with_arg", "write"),
-        ),
-        adapter,
-        InspectionInterpreter(),
-    )
-
-    assert adapter.tool_calls == [("read", {})]
-    disabled = [
-        item.tool_name
-        for item in result.diagnostics
-        if item.code.value == "active_inspection_disabled"
-    ]
-    assert disabled == ["read_with_arg", "write"]
-
-
-def test_active_inspection_allows_optional_arguments_with_empty_input():
-    payload = {
-        "tools": [
-            {
-                "name": "read_optional",
-                "inputSchema": {
-                    "type": "object",
-                    "properties": {"limit": {"type": "integer"}},
-                },
-            }
-        ]
-    }
-    adapter = InMemoryInventory(payload)
-
-    result = discover_mcp_target(
-        _inputs(
-            mode="disposable_test_environment",
-            active_inspection_tool_names=("read_optional",),
-        ),
-        adapter,
-        InMemoryInterpreter(),
-    )
-
-    assert adapter.tool_calls == [("read_optional", {})]
-    assert not any(
-        item.code.value == "active_inspection_disabled" for item in result.diagnostics
-    )
-
-
-def test_skipped_active_inspections_do_not_consume_call_limit():
-    payload = {
-        "tools": [
-            {"name": "a_write", "inputSchema": {"type": "object"}},
-            {"name": "b_read", "inputSchema": {"type": "object"}},
-        ]
-    }
-    adapter = InMemoryInventory(payload)
-
-    class MixedInterpreter(InMemoryInterpreter):
-        def interpret(self, request):
-            self.requests.append(request)
-            return TargetInterpretationResponse(
-                interpretations=tuple(
-                    TargetInterpretationDraft(
-                        tool_handle=tool.handle,
-                        disposition=TargetInterpretationDisposition.supported,
-                        likely_effect=(
-                            TargetOperationEffect.update
-                            if tool.name == "a_write"
-                            else TargetOperationEffect.read
-                        ),
-                        likely_state_effect=(
-                            TargetStateEffect.may_change
-                            if tool.name == "a_write"
-                            else TargetStateEffect.none
-                        ),
-                        semantic_roles=("writer",),
-                        evidence_refs=(f"inventory:tool:{tool.name}:description",),
-                        rationale="The observed row supports this label.",
-                    )
-                    for tool in request.tools
-                )
-            )
-
-    discover_mcp_target(
-        _inputs(
-            mode="disposable_test_environment",
-            active_inspection_tool_names=("a_write", "b_read"),
-            max_active_inspection_calls=1,
-        ),
-        adapter,
-        MixedInterpreter(),
-    )
-
-    assert adapter.tool_calls == [("b_read", {})]
-
-
-def test_active_inspection_reports_requested_tools_past_call_limit():
-    payload = {
-        "tools": [
-            {"name": "a_read", "inputSchema": {"type": "object"}},
-            {"name": "b_read", "inputSchema": {"type": "object"}},
-        ]
-    }
-    adapter = InMemoryInventory(payload)
-    result = discover_mcp_target(
-        _inputs(
-            mode="disposable_test_environment",
-            active_inspection_tool_names=("a_read", "b_read"),
-            max_active_inspection_calls=1,
-        ),
-        adapter,
-        InMemoryInterpreter(),
-    )
-
-    assert adapter.tool_calls == [("a_read", {})]
-    assert any(
-        item.tool_name == "b_read"
-        and item.code.value == "active_inspection_disabled"
-        and "maximum call limit" in item.detail
-        for item in result.diagnostics
-    )
-
-
 def test_inventory_preserves_nonsecret_schema_values_and_redacts_secrets_but_hashes_source():
     raw_input_schema = {
         "type": "object",
@@ -864,45 +664,23 @@ def test_draft_validation_rejects_each_invalid_reference_shape():
     assert diagnostic is not None
 
 
-def test_active_inspection_reports_unobserved_requested_tools():
-    result = discover_mcp_target(
-        _inputs(
-            mode="disposable_test_environment",
-            active_inspection_tool_names=("missing",),
-        ),
-        InMemoryInventory({"tools": []}),
-        None,
-    )
-    assert any(
-        item.tool_name == "missing" and item.code.value == "active_inspection_failure"
-        for item in result.diagnostics
-    )
-
-
 @pytest.mark.parametrize(
-    ("overrides", "message"),
+    "overrides",
     [
-        ({"active_inspection_tool_names": ("b", "a", "b")}, "must be unique"),
-        ({"active_inspection_tool_names": ("",)}, "must be non-empty"),
-        (
-            {"mode": "schema_only", "active_inspection_tool_names": ("a",)},
-            "require disposable_test_environment",
-        ),
-        (
-            {"active_inspection_tool_names": ("a",), "max_active_inspection_calls": 0},
-            "max_active_inspection_calls > 0",
-        ),
+        {"mode": "disposable_test_environment"},
+        {"active_inspection_tool_names": ("a",)},
+        {"max_active_inspection_calls": 1},
     ],
-    ids=["duplicate", "empty-name", "schema-only", "zero-calls"],
+    ids=["disposable-mode", "inspection-names", "inspection-limit"],
 )
-def test_inputs_reject_unusable_active_inspection(overrides, message):
-    with pytest.raises(ValueError, match=message):
-        _inputs(**{"mode": "disposable_test_environment", **overrides})
+def test_inputs_reject_active_inspection_controls(overrides):
+    with pytest.raises(ValueError):
+        _inputs(**overrides)
 
 
-def test_inputs_sort_active_inspection_names():
-    inputs = _inputs(
-        mode="disposable_test_environment", active_inspection_tool_names=("b", "a")
-    )
+def test_scan_controls_record_no_inspection_keys():
+    controls = discover_mcp_target(
+        _inputs(), InMemoryInventory({"tools": []}), None
+    ).controls
 
-    assert inputs.active_inspection_tool_names == ("a", "b")
+    assert not any("inspection" in key for key in controls)
