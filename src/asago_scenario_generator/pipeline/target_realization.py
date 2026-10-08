@@ -124,13 +124,6 @@ class _ExtensionCompilationState:
     diagnostics: list[str]
 
 
-def _interpreter_for_observations(
-    factory: Callable[..., Any],
-    observations: Sequence[TargetOperationObservation],
-) -> Any:
-    return _construct_interpreter(factory) if observations else None
-
-
 def realize_baseline_rows(
     baseline: SystemicStpaBaseline,
     observations: Sequence[TargetOperationObservation],
@@ -332,10 +325,9 @@ def _require_rows_cover_baseline(
 def realize_target_operations(
     baseline: SystemicStpaBaseline,
     profile: ExecutionTargetProfile,
-    interpreter_factory: Callable[..., Any],
+    extension_factory: Callable[[], Any],
     *,
     baseline_rows: Sequence[TargetRealizationRow],
-    extension_factory: Callable[..., Any] | None = None,
 ) -> TargetRealizationResult:
     """Map exact observed operations to an immutable systemic baseline.
 
@@ -351,11 +343,11 @@ def realize_target_operations(
     :func:`realize_baseline_rows`).  The seam adopts those rows and makes no
     map or verify call, so a run matches each action to the target once.
 
-    The bounded extension uses one adapter shape: an object whose
-    ``extend(request)`` receives one ``TargetRealizationExtensionRequest``.
-    ``extension_factory``, when supplied, is constructed at most once and must
-    return such an adapter; otherwise the interpreter's own ``extend`` is
-    used, and an interpreter without one leaves uncovered operations
+    ``extension_factory`` takes no arguments and returns the bounded
+    extension adapter: an object whose ``extend(request)`` receives one
+    ``TargetRealizationExtensionRequest``.  The factory is called once, and
+    only when an observed operation lacks a supported baseline row.  An
+    adapter without a callable ``extend`` leaves each such operation
     diagnosed.  Accepted additions are compiled as target-derived records
     after the baseline rows.
     """
@@ -364,7 +356,6 @@ def realize_target_operations(
     baseline.assert_integrity()
     _assert_profile_integrity(profile)
     observations = observed_operations(profile)
-    interpreter = _interpreter_for_observations(interpreter_factory, observations)
     _require_rows_cover_baseline(baseline, baseline_rows)
     rows = list(baseline_rows)
     records = _build_operation_records(observations, rows)
@@ -373,7 +364,6 @@ def realize_target_operations(
             baseline=baseline,
             observations=observations,
             records=records,
-            interpreter=interpreter,
             extension_factory=extension_factory,
         )
     )
@@ -1345,15 +1335,14 @@ def _run_bounded_target_extension(
     baseline: SystemicStpaBaseline,
     observations: Sequence[TargetOperationObservation],
     records: list[TargetOperationRecord],
-    interpreter: Any,
-    extension_factory: Callable[..., Any] | None,
+    extension_factory: Callable[[], Any],
 ) -> _ExtensionResult:
     """Apply at most one additive extension attempt to uncovered operations."""
     eligible = _eligible_extension_operations(records)
     if not eligible:
         return _ExtensionResult()
-    extension = _extension_interpreter(extension_factory, interpreter)
-    if extension is None:
+    extension = getattr(extension_factory(), "extend", None)
+    if not callable(extension):
         return _missing_extension_result(eligible)
     return _attempt_target_extension(
         baseline, observations, records, eligible, extension
@@ -1368,26 +1357,6 @@ def _eligible_extension_operations(
         for record in records
         if record.disposition is not TargetRealizationDisposition.supported
     )
-
-
-def _extension_interpreter(
-    extension_factory: Callable[..., Any] | None,
-    interpreter: Any,
-) -> Any:
-    """Return the bound ``extend`` of the one extension adapter, if any."""
-    if extension_factory is not None:
-        return _construct_extension_adapter(extension_factory)
-    extension = getattr(interpreter, "extend", None)
-    return extension if callable(extension) else None
-
-
-def _construct_extension_adapter(factory: Any) -> Callable[..., Any]:
-    if not callable(factory):
-        raise TypeError("extension factory must be a zero-argument callable")
-    extend = getattr(factory(), "extend", None)
-    if not callable(extend):
-        raise TypeError("extension factory did not return an adapter with extend")
-    return extend
 
 
 def _missing_extension_result(

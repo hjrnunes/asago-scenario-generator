@@ -307,11 +307,12 @@ class _ExtensionFactory:
         return self.interpreter
 
 
-def _realize(baseline, profile, interpreter_factory, **kwargs):
+def _realize(baseline, profile, interpreter_factory, *, extension_factory=None):
     """Match the baseline the way enrichment does, then realize with its rows.
 
     Production realization always receives the pre-ICA enrichment rows; this
-    builds those rows with the same interpreter before calling the seam.
+    builds those rows with the same interpreter before calling the seam.  The
+    extension adapter is that interpreter unless ``extension_factory`` is given.
     """
     observations = observed_operations(profile)
     interpreter = interpreter_factory() if observations else None
@@ -319,9 +320,8 @@ def _realize(baseline, profile, interpreter_factory, **kwargs):
     return realize_target_operations(
         baseline,
         profile,
-        lambda: interpreter,
+        extension_factory or (lambda: interpreter),
         baseline_rows=rows,
-        **kwargs,
     )
 
 

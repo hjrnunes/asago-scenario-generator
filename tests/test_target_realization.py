@@ -803,18 +803,24 @@ def test_bounded_extension_uses_the_interpreter_extend_without_a_factory():
     assert adapter.extension_calls == 1
 
 
-def test_extension_factory_must_return_an_adapter_with_extend():
+def test_extension_adapter_without_extend_leaves_each_operation_diagnosed():
     class _PlainCallableExtension:
         def __call__(self, request):
             raise AssertionError("a plain callable is not an extension adapter")
 
-    with pytest.raises(TypeError, match="adapter with extend"):
-        _realize(
-            _baseline(),
-            _profile(),
-            lambda: _UnmappedInterpreter(),
-            extension_factory=lambda: _PlainCallableExtension(),
-        )
+    result = _realize(
+        _baseline(),
+        _profile(),
+        lambda: _UnmappedInterpreter(),
+        extension_factory=lambda: _PlainCallableExtension(),
+    )
+
+    assert result.target_derived_control_actions == ()
+    assert sorted(result.diagnostics) == [
+        "no extension outcome for observed operation "
+        f"{mcp_resource_id('target:mini', name)}/{name}"
+        for name in ("get_payment", "schedule_payment")
+    ]
 
 
 def test_bounded_extension_rejects_invented_operation_identity():
