@@ -37,6 +37,8 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.obligation_aware.briefs import split_by_budget
+from asago_scenario_generator.stpa.obligation_aware.calls import call_with_feedback
 from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisControls
 from asago_scenario_generator.stpa.obligation_aware.governance_prompts import (
     build_governance_routing_prompts,
@@ -171,18 +173,7 @@ def _governance_batches(
         )
         return budget.count(f"{system}\n{user}") <= budget.usable_input_tokens
 
-    batches: list[list[NeutralObligationBrief]] = []
-    for brief in ordered:
-        current = batches[-1] if batches else None
-        if (
-            current is not None
-            and len(current) < max_batch_size
-            and fits([*current, brief])
-        ):
-            current.append(brief)
-        else:
-            batches.append([brief])
-    return tuple(tuple(item) for item in batches)
+    return split_by_budget(ordered, max_batch_size, fits)
 
 
 def _target_slots(slots: Sequence[SlotPlaceholder]) -> dict[str, tuple[str, ...]]:
@@ -244,12 +235,6 @@ def _feedback(errors: Mapping[str, str]) -> str:
     )
 
 
-def _call(adapter, request, feedback):
-    if feedback is None:
-        return adapter.route_governance(request)
-    return adapter.route_governance(request, correction_feedback=feedback)
-
-
 def _attempt(
     adapter,
     request: GovernanceRoutingRequest,
@@ -262,7 +247,7 @@ def _attempt(
 ]:
     """Make one call; a malformed answer fails every risk, a budget error escapes."""
     try:
-        response = _call(adapter, request, feedback)
+        response = call_with_feedback(adapter.route_governance, request, feedback)
         if not isinstance(response, GovernanceRoutingResponse):
             raise TypeError("governance adapter returned an unsupported response")
         accepted, errors = _check_response(response, request, covers)

@@ -34,7 +34,9 @@ from asago_scenario_generator.stpa.obligation_aware.briefs import (
     build_neutral_brief,
     build_neutral_briefs,
     create_obligation_batches,
+    split_by_budget,
 )
+from asago_scenario_generator.stpa.obligation_aware.calls import call_with_feedback
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     AnalysisControls,
     StructuralAnalysisAdapter,
@@ -86,8 +88,6 @@ def _budgeted_obligation_batches(
     ordered = tuple(sorted(briefs, key=lambda item: item.obligation_id))
     if budget is None:
         return create_obligation_batches(ordered, max_batch_size)
-    batches: list[tuple[NeutralObligationBrief, ...]] = []
-    current: list[NeutralObligationBrief] = []
 
     def fits(values: Sequence[NeutralObligationBrief]) -> bool:
         system, user = build_structural_routing_prompts(
@@ -98,19 +98,7 @@ def _budgeted_obligation_batches(
         )
         return budget.count(f"{system}\n{user}") <= budget.usable_input_tokens
 
-    for brief in ordered:
-        if len(current) >= max_batch_size:
-            batches.append(tuple(current))
-            current = []
-        candidate = (*current, brief)
-        if current and not fits(candidate):
-            batches.append(tuple(current))
-            current = [brief]
-        else:
-            current = list(candidate)
-    if current:
-        batches.append(tuple(current))
-    return tuple(batches)
+    return split_by_budget(ordered, max_batch_size, fits)
 
 
 def _default_controls(
@@ -566,17 +554,6 @@ def _request_for_batch(
     )
 
 
-def _call_route(
-    adapter: Any,
-    request: StructuralRoutingRequest,
-    feedback: str | None,
-) -> Any:
-    """Call the routing stage, passing one bounded schema correction if any."""
-    if feedback is None:
-        return adapter.route(request)
-    return adapter.route(request, correction_feedback=feedback)
-
-
 def _routing_validation_feedback(error: BaseException) -> str:
     """Give one stable, field-specific repair instruction for a route retry."""
     detail = " ".join(str(error).replace("\r", " ").replace("\n", " ").split())
@@ -881,8 +858,8 @@ def _route_batch(
     for attempt in range(controls.validation_retries + 1):
         try:
             with count_requests(sent):
-                raw = _call_route(
-                    adapter,
+                raw = call_with_feedback(
+                    adapter.route,
                     request,
                     None if attempt == 0 else _routing_validation_feedback(error),
                 )

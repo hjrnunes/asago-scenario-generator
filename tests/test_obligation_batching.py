@@ -17,6 +17,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_governance_briefs,
 )
 from asago_scenario_generator.stpa.obligation_aware import governance_routing, routing
+from asago_scenario_generator.stpa.obligation_aware.calls import call_with_feedback
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     StructuralRevisionResponse,
     StructuralRoutingResponse,
@@ -365,3 +366,15 @@ def test_slot_evidence_digests_the_response_unless_it_carries_one():
         "attempt_count": 2,
         "outcome": "unresolved",
     }
+
+
+def test_a_stage_call_passes_correction_feedback_only_when_there_is_some():
+    seen: list[tuple] = []
+
+    def stage(request, **kwargs):
+        seen.append((request, kwargs))
+        return "answer"
+
+    assert call_with_feedback(stage, "r1", None) == "answer"
+    assert call_with_feedback(stage, "r2", "fix it") == "answer"
+    assert seen == [("r1", {}), ("r2", {"correction_feedback": "fix it"})]

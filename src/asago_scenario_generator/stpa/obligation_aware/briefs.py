@@ -6,8 +6,8 @@ use it without an import cycle.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
-from typing import Any
+from collections.abc import Callable, Mapping, Sequence
+from typing import Any, TypeVar
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_consideration import (
@@ -17,6 +17,8 @@ from asago_scenario_generator.models.obligation_plan import (
     TaxonomyObligation,
     TaxonomyObligationPlan,
 )
+
+_Item = TypeVar("_Item")
 
 
 def _catalog_map(
@@ -156,3 +158,25 @@ def create_obligation_batches(
         tuple(ordered[index : index + max_batch_size])
         for index in range(0, len(ordered), max_batch_size)
     )
+
+
+def split_by_budget(
+    ordered: Sequence[_Item],
+    max_batch_size: int,
+    fits: Callable[[Sequence[_Item]], bool],
+) -> tuple[tuple[_Item, ...], ...]:
+    """Fill each batch in order until it is full or *fits* rejects the next item.
+
+    A lone item always starts a batch, even when it does not fit by itself, and
+    *fits* is asked only about a non-empty batch plus the candidate.
+    """
+    batches: list[tuple[_Item, ...]] = []
+    current: list[_Item] = []
+    for item in ordered:
+        if current and (len(current) >= max_batch_size or not fits((*current, item))):
+            batches.append(tuple(current))
+            current = []
+        current.append(item)
+    if current:
+        batches.append(tuple(current))
+    return tuple(batches)
