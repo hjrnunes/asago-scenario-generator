@@ -499,7 +499,7 @@ def test_run_synthesis_records_into_its_output_directory(
 
     assert synthesis.run_synthesis(inputs, None) == "result"
     assert seen["session"].record_dir == output_dir
-    assert not seen["session"].replaying
+    assert seen["session"].replayer is None
 
 
 def test_run_synthesis_hands_its_session_to_the_default_model_runtime(

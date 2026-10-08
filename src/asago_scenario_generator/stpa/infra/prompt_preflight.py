@@ -214,16 +214,6 @@ class PromptAudit:
             or self.input_tokens <= self.usable_input_tokens
         )
 
-    @property
-    def prompt_digest(self) -> str:
-        """Compatibility alias for the rendered prompt digest."""
-        return self.rendered_prompt_digest
-
-    @property
-    def provider_call_allowed(self) -> bool:
-        """Compatibility alias for :attr:`ok`."""
-        return self.ok
-
 
 def _view_items(value: Any, path: str = "") -> Iterable[tuple[str, Any]]:
     """Yield recursively reachable view field names and values."""

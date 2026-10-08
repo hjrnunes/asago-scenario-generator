@@ -519,10 +519,6 @@ class ProviderCallSession:
         self._sequence = self._existing_records()
 
     @property
-    def replaying(self) -> bool:
-        return self.replayer is not None
-
-    @property
     def replay_only(self) -> bool:
         """Whether every request is served from the record (no endpoint needed)."""
         return self.replayer is not None and self._ledger is None

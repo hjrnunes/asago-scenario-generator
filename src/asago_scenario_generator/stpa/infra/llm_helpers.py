@@ -104,7 +104,7 @@ def _prompt_audit_fields(audit: PromptAudit | None) -> dict[str, Any]:
         "maximum_completion_tokens": audit.maximum_completion_tokens,
         "safety_margin": audit.safety_margin,
         "usable_input_tokens": audit.usable_input_tokens,
-        "provider_call_allowed": audit.provider_call_allowed,
+        "provider_call_allowed": audit.ok,
         "errors": list(audit.errors),
     }
     return {
