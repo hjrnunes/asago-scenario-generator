@@ -59,13 +59,21 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def _content_pin(value: Any, frame: str) -> str:
-    """Pin one evidence value without retaining a second serialized copy."""
+def _content_pin(
+    value: Any, frame: str, *, jsonable: bool = True, stringify: bool = False
+) -> str:
+    """Pin one evidence value without retaining a second serialized copy.
+
+    *jsonable* converts models and mappings first; *stringify* serializes any
+    other non-JSON value through ``str``. The cleanup-transformation pins use
+    ``jsonable=False, stringify=True``; the response pins use the defaults.
+    """
     payload = json.dumps(
-        _jsonable(value),
+        _jsonable(value) if jsonable else value,
         ensure_ascii=False,
         sort_keys=True,
         separators=(",", ":"),
+        default=str if stringify else None,
     )
     return _sha256(f"{frame}\n{payload}")
 

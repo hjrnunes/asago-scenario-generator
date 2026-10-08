@@ -2,10 +2,9 @@
 
 from __future__ import annotations
 
-import os
-import tempfile
 from pathlib import Path
 
+from asago_scenario_generator.manifest import atomic_write_bytes
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
@@ -33,39 +32,8 @@ def publish_execution_target_profile(
         raise TargetProfilePublicationError("profile must be an ExecutionTargetProfile")
     profile.assert_integrity()
     profile_path = destination.resolve() / EXECUTION_TARGET_PROFILE_NAME
-    _atomic_write(profile_path, profile.canonical_json_bytes())
+    atomic_write_bytes(profile_path, profile.canonical_json_bytes())
     return profile_path
-
-
-def _atomic_write(path: Path, content: bytes) -> None:
-    """Atomically replace one final path with durable bytes."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary_path = Path(temporary_name)
-    try:
-        with os.fdopen(fd, "wb") as handle:
-            handle.write(content)
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary_path, path)
-        _fsync_directory(path.parent)
-    except BaseException:
-        try:
-            temporary_path.unlink(missing_ok=True)
-        except OSError:
-            pass
-        raise
-
-
-def _fsync_directory(path: Path) -> None:
-    try:
-        descriptor = os.open(path, os.O_RDONLY)
-    except OSError:
-        return
-    try:
-        os.fsync(descriptor)
-    finally:
-        os.close(descriptor)
 
 
 __all__ = [

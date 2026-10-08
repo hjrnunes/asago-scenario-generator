@@ -117,7 +117,6 @@ class TestInfraLLMComplete:
     def _make_mock_client(
         self,
         content="response",
-        parsed=None,
         prompt_tokens=100,
         completion_tokens=50,
         usage="default",
@@ -127,7 +126,6 @@ class TestInfraLLMComplete:
 
         mock_msg = MagicMock()
         mock_msg.content = content
-        mock_msg.parsed = parsed if parsed is not None else content
 
         mock_choice = MagicMock()
         mock_choice.message = mock_msg
@@ -145,7 +143,6 @@ class TestInfraLLMComplete:
 
         client._client = MagicMock()
         client._client.chat.completions.create.return_value = mock_response
-        client._client.beta.chat.completions.parse.return_value = mock_response
         return client
 
     def test_complete_unstructured_returns_content(self):
@@ -158,11 +155,14 @@ class TestInfraLLMComplete:
         assert result.duration_ms >= 0
         assert result.duration_ms < 60000
 
-    def test_complete_structured_returns_parsed(self):
-        """Complete with response_format returns parsed content."""
-        client = self._make_mock_client(parsed={"key": "value"})
-        result = client.complete("system", "user", response_format=dict)
-        assert result.content == {"key": "value"}
+    def test_strict_completion_rejects_a_non_pydantic_response_format(self):
+        """A strict structured request needs a Pydantic schema; none is sent."""
+        client = self._make_mock_client()
+
+        with pytest.raises(TypeError, match="Pydantic model class"):
+            client.complete("system", "user", response_format=dict)
+
+        assert not client._client.method_calls
 
     def test_complete_allow_unvalidated_uses_raw_content(self):
         """Unvalidated structured calls return raw JSON for post-processing."""
@@ -178,7 +178,6 @@ class TestInfraLLMComplete:
         assert client._client.chat.completions.create.call_args.kwargs[
             "response_format"
         ] == {"type": "json_object"}
-        assert not client._client.beta.chat.completions.parse.called
 
     def test_qwen_controls_use_supported_request_body(self):
         """Thinking and strict output use the vLLM-supported request fields."""
@@ -212,7 +211,7 @@ class TestInfraLLMComplete:
         assert "chat_template_kwargs" not in sent["extra_body"]
 
     def test_openrouter_structured_completion_uses_json_object_compatibility(self):
-        """OpenRouter bypasses the unsupported beta parse endpoint."""
+        """OpenRouter structured output uses JSON-object mode."""
         client = self._make_mock_client(content='{"key": "value"}')
         client.base_url = "https://openrouter.ai/api/v1"
 
@@ -222,7 +221,6 @@ class TestInfraLLMComplete:
         assert client._client.chat.completions.create.call_args.kwargs[
             "response_format"
         ] == {"type": "json_object"}
-        assert not client._client.beta.chat.completions.parse.called
 
     def test_openrouter_structured_prompt_carries_exact_schema(self):
         """Portable JSON mode still gives the model the exact field contract."""
@@ -520,7 +518,6 @@ def test_request_completion_always_uses_create_and_the_first_choice(
 
     assert returned == content
     client._client.chat.completions.create.assert_called_once()
-    client._client.beta.chat.completions.parse.assert_not_called()
     if strict_schema:
         sent = client._client.chat.completions.create.call_args.kwargs
         assert sent["response_format"] == _json_schema_response_format(_Schema)

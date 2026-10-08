@@ -243,7 +243,7 @@ RULES: list[Rule] = [
         "library, and the model-client dependencies",
         allowed=(
             STPA,
-            f"{PACKAGE}.strict_schema",
+            f"{PACKAGE}.request_schema",
             f"{PACKAGE}.model_profiles",
             "openai",
             "httpx",  # the OpenAI SDK's transport: its exceptions carry httpx objects

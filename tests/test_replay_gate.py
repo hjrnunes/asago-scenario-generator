@@ -12,11 +12,12 @@ from typing import Any
 import pytest
 import yaml
 
+import replay_gate
 from asago_scenario_generator.pipeline.synthesis import (
     _MANIFEST_DOMAIN,
     _digest_payload,
 )
-from asago_scenario_generator.replay_gate import (
+from replay_gate import (
     ALLOWED_DIFFERENCES,
     Difference,
     GateResult,
@@ -320,7 +321,8 @@ def test_the_network_guard_refuses_and_logs_outbound_connections(
     script = (
         "import socket, sys\n"
         "from pathlib import Path\n"
-        "from asago_scenario_generator.replay_gate import install_network_guard\n"
+        f"sys.path.insert(0, {str(Path(replay_gate.__file__).parent)!r})\n"
+        "from replay_gate import install_network_guard\n"
         f"install_network_guard(Path({str(log)!r}))\n"
         "try:\n"
         "    socket.create_connection(('127.0.0.1', 9), timeout=1)\n"
@@ -404,7 +406,7 @@ def test_cli_reads_run_arguments_after_a_separator(
         seen.update(kwargs, path=path)
         return run_gate(path, runner=_copying_runner(recorded), **kwargs)
 
-    monkeypatch.setattr("asago_scenario_generator.replay_gate.run_gate", fake_gate)
+    monkeypatch.setattr(replay_gate, "run_gate", fake_gate)
     code = main(
         [
             "check",

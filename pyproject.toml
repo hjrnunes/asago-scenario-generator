@@ -61,7 +61,8 @@ testpaths = ["tests"]
 # Resolve the package from the rootdir-relative src tree so pytest runs inside
 # isolated mutation-worker copies import the copy being mutated rather than an
 # editable-installed absolute path to the live workspace.
-pythonpath = ["src"]
+# The replay gate is development tooling in scripts/, outside the package.
+pythonpath = ["src", "scripts"]
 # Without this, collection walks scratch and worktree directories and picks
 # up stray `test_*.py` files that are not part of any suite.
 # This setting REPLACES pytest's defaults rather than extending them, so the

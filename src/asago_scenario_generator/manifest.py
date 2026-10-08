@@ -7,14 +7,14 @@ import tempfile
 from pathlib import Path
 
 
-def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Path:
-    """Write text to *path* atomically using temp file + os.replace."""
+def atomic_write_bytes(path: Path, content: bytes) -> Path:
+    """Write bytes to *path* atomically using temp file + os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(
         dir=path.parent, suffix=".tmp", prefix=path.name
     )
     try:
-        with os.fdopen(tmp_fd, "w", encoding=encoding) as f:
+        with os.fdopen(tmp_fd, "wb") as f:
             f.write(content)
             f.flush()
             os.fsync(f.fileno())
@@ -27,10 +27,15 @@ def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Path
             os.fsync(dir_fd)
         finally:
             os.close(dir_fd)
-    except Exception:
+    except BaseException:
         try:
             os.unlink(tmp_path)
         except OSError:
             pass
         raise
     return path
+
+
+def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Path:
+    """Write text to *path* atomically using temp file + os.replace."""
+    return atomic_write_bytes(path, content.encode(encoding))

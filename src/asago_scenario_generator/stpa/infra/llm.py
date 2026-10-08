@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from openai import LengthFinishReasonError, OpenAI, RateLimitError
@@ -21,11 +22,7 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     ProviderCallSession,
 )
 from asago_scenario_generator.stpa.infra.transport_retry import retry_once
-from asago_scenario_generator.strict_schema import (
-    portable_request_schema,
-    strip_null_fields,
-    to_openai_strict_schema,
-)
+from asago_scenario_generator.request_schema import portable_request_schema
 
 DEFAULT_TEMPERATURE: float = 0.4
 
@@ -255,7 +252,6 @@ def _apply_legacy_json_fallback(
     response_format: type[BaseModel] | None,
     use_guided_json: bool,
     *,
-    strict_json_schema: bool = False,
     json_schema_strict: bool = True,
     openrouter_compatibility: bool = False,
 ) -> None:
@@ -270,17 +266,13 @@ def _apply_legacy_json_fallback(
     extra_kwargs["response_format"] = (
         _json_schema_response_format(
             response_format,
-            strict_json_schema=strict_json_schema,
             json_schema_strict=json_schema_strict if not use_guided_json else True,
         )
         if (
             _is_pydantic_model_type(response_format)
             and (
                 use_guided_json
-                or (
-                    not openrouter_compatibility
-                    and (strict_json_schema or not json_schema_strict)
-                )
+                or (not openrouter_compatibility and not json_schema_strict)
             )
         )
         else {"type": "json_object"}
@@ -297,24 +289,23 @@ def _plain_value(value: Any) -> Any:
     """Convert provider usage objects into JSON-compatible values."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    if isinstance(value, dict):
-        return {str(key): _plain_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_plain_value(item) for item in value]
-    return _plain_object(value)
-
-
-def _plain_object(value: Any) -> Any:
-    """Convert a model or attribute-bearing usage object; stringify anything else."""
     if isinstance(value, BaseModel):
         return value.model_dump(mode="json")
+    if isinstance(value, (list, tuple)):
+        return [_plain_value(item) for item in value]
+    items = _plain_items(value)
+    if items is None:
+        return str(value)
+    return {str(key): _plain_value(item) for key, item in items}
+
+
+def _plain_items(value: Any) -> Any:
+    """Return the key-value pairs of a mapping or public object attributes."""
+    if isinstance(value, Mapping):
+        return value.items()
     if hasattr(value, "__dict__"):
-        return {
-            str(key): _plain_value(item)
-            for key, item in vars(value).items()
-            if not key.startswith("_")
-        }
-    return str(value)
+        return [(k, v) for k, v in vars(value).items() if not k.startswith("_")]
+    return None
 
 
 def _usage_details(response: Any) -> dict[str, Any]:
@@ -369,8 +360,6 @@ def _raise_if_length_without_content(response: Any) -> None:
 def _locally_parse_response_content(
     content: Any,
     response_format: type[BaseModel],
-    *,
-    strip_transport_nulls: bool = True,
 ) -> Any:
     """Parse strict structured content after raw response capture.
 
@@ -383,19 +372,9 @@ def _locally_parse_response_content(
         return content
     try:
         if isinstance(content, dict):
-            return response_format.model_validate(
-                strip_null_fields(content, response_format)
-                if strip_transport_nulls
-                else content
-            )
+            return response_format.model_validate(content)
         if isinstance(content, str):
-            return response_format.model_validate(
-                (
-                    strip_null_fields(json.loads(content), response_format)
-                    if strip_transport_nulls
-                    else json.loads(content)
-                )
-            )
+            return response_format.model_validate(json.loads(content))
     except Exception:  # noqa: BLE001 - retain raw content for safe parsing
         return content
     return content
@@ -405,8 +384,6 @@ def _parse_strict_response_content(
     content: Any,
     response_format: type[BaseModel] | None,
     request_unvalidated: bool,
-    *,
-    strip_transport_nulls: bool = True,
 ) -> Any:
     """Apply local strict validation only after raw provider evidence exists."""
     if (
@@ -415,11 +392,7 @@ def _parse_strict_response_content(
         or not _is_pydantic_model_type(response_format)
     ):
         return content
-    return _locally_parse_response_content(
-        content,
-        response_format,
-        strip_transport_nulls=strip_transport_nulls,
-    )
+    return _locally_parse_response_content(content, response_format)
 
 
 def _top_k_extra_body(top_k: int | None) -> dict[str, Any]:
@@ -439,7 +412,6 @@ def _thinking_extra_body(enable_thinking: bool | None) -> dict[str, Any]:
 def _json_schema_response_format(
     response_format: type[BaseModel],
     *,
-    strict_json_schema: bool = False,
     json_schema_strict: bool = True,
 ) -> dict[str, Any]:
     """Build the OpenAI-compatible JSON Schema request shape."""
@@ -448,11 +420,7 @@ def _json_schema_response_format(
         "json_schema": {
             "name": response_format.__name__,
             "strict": json_schema_strict,
-            "schema": (
-                to_openai_strict_schema(response_format)
-                if strict_json_schema and json_schema_strict
-                else portable_request_schema(response_format.model_json_schema())
-            ),
+            "schema": portable_request_schema(response_format.model_json_schema()),
         },
     }
 
@@ -560,9 +528,12 @@ class LLMClient:
         self.sampling_controls = (
             True if sampling_controls is None else sampling_controls
         )
-        self.strict_json_schema = (
-            False if strict_json_schema is None else strict_json_schema
-        )
+        if strict_json_schema:
+            raise ValueError(
+                "strict_json_schema: true is not supported; set "
+                "strict_json_schema: false or remove the key from the profile"
+            )
+        self.strict_json_schema = False
         self.json_schema_strict = (
             True if json_schema_strict is None else json_schema_strict
         )
@@ -632,47 +603,19 @@ class LLMClient:
     ) -> tuple[Any, Any]:
         """Request a completion and return its response plus extracted content."""
         if response_format is not None and not allow_unvalidated:
-            if _is_pydantic_model_type(response_format):
-                # ``beta.parse`` can raise a Pydantic error before exposing
-                # the raw provider message.  Request the same strict schema
-                # through the ordinary completion seam, then validate only
-                # after the raw content and usage have been captured.
-                request_kwargs = {
-                    **extra_kwargs,
-                    "response_format": _json_schema_response_format(
-                        response_format,
-                        strict_json_schema=self.strict_json_schema,
-                        json_schema_strict=self.json_schema_strict,
-                    ),
-                }
-                response = self._send(
-                    "chat.completions.create",
-                    model=self.model,
-                    messages=messages,
-                    **request_kwargs,
+            if not _is_pydantic_model_type(response_format):
+                raise TypeError(
+                    "a strict structured completion needs a Pydantic model class "
+                    f"as response_format, got {response_format!r}"
                 )
-                _raise_if_length_without_content(response)
-                return response, _response_content(response)
-            response = self._send(
-                "beta.chat.completions.parse",
-                model=self.model,
-                messages=messages,
-                response_format=response_format,
+            # Validate only after the raw content and usage have been captured.
+            extra_kwargs = {
                 **extra_kwargs,
-            )
-            parsed = getattr(
-                getattr(_response_choice(response), "message", None),
-                "parsed",
-                None,
-            )
-            # Some compatible structured endpoints return valid provider JSON
-            # but leave the SDK's ``parsed`` slot empty.  Returning raw content
-            # lets the shared parser classify it without losing response
-            # evidence.
-            _raise_if_length_without_content(response)
-            return response, parsed if parsed is not None else _response_content(
-                response
-            )
+                "response_format": _json_schema_response_format(
+                    response_format,
+                    json_schema_strict=self.json_schema_strict,
+                ),
+            }
 
         response = self._send(
             "chat.completions.create",
@@ -771,7 +714,6 @@ class LLMClient:
             request_unvalidated,
             response_format,
             use_guided_json,
-            strict_json_schema=self.strict_json_schema,
             json_schema_strict=self.json_schema_strict,
             openrouter_compatibility=_json_object_compatibility(
                 self.base_url, response_format
@@ -810,10 +752,7 @@ class LLMClient:
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
         usage = _token_usage(response)
         content = _parse_strict_response_content(
-            content,
-            response_format,
-            request_unvalidated,
-            strip_transport_nulls=self.strict_json_schema and self.json_schema_strict,
+            content, response_format, request_unvalidated
         )
 
         return LLMResult(

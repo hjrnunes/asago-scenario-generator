@@ -9,7 +9,7 @@ Every other client must receive exactly the schemas producer main sent before
 this tightening existed, so the non-guided tests pin SHA-256 digests of the
 ``response_format`` payloads that producer main ``d5fce78`` builds.  The
 digests hash ``json.dumps(payload, separators=(",", ":"), ensure_ascii=False)``
-of ``_json_schema_response_format(model, strict_json_schema=...)`` for the
+of ``_json_schema_response_format(model)`` for the
 model main passes at each call site (discovery with seven tools), computed in
 a ``git archive d5fce78`` export with its locked environment.
 """
@@ -72,45 +72,29 @@ from tests.helpers.stage1a_targeted_repair import (
 
 # The risk-derivation digests changed when constraints gained ``behavior_class``.
 MAIN_DIGESTS = {
-    ("stage1b_capability_profile", False): (
+    "stage1b_capability_profile": (
         "ab17e8274325f9be4b0c86c86494c9566bbe00a26ecbb0b1af5d314a3c2d1d2c"
     ),
-    ("stage1b_capability_profile", True): (
-        "fe6f58836b0d634cfdb80c8ebf21ce75eb6627ce879f8f8641cbf08a7fc89331"
-    ),
-    ("stage1a_risk_derivation", False): (
+    "stage1a_risk_derivation": (
         "c26dc0e12297ccb243736622720573fd501a2fe5b6ef3397ff3c8137c676c8ba"
     ),
-    ("stage1a_risk_derivation", True): (
-        "c01d407405d10fc38a31c0a5394d1378dfd74f426369ae9a05e413a465e4b7f8"
-    ),
-    ("stage1a_disposition_repair", False): (
+    "stage1a_disposition_repair": (
         "6e86fb6d7d1a202dc65d04d1c987d40e30969330e346d94572c928c12d3aa2e6"
     ),
-    ("stage1a_disposition_repair", True): (
-        "5de15cb04610c319f97f689a8a844b75f6a7922c4783031ba7b9b813334b2cce"
-    ),
-    ("discovery_interpretation_7", False): (
+    "discovery_interpretation_7": (
         "941ce861f35b89cd8681f3a7f3a94582955bfbbffb53ca4fc763d9ab9cce681e"
     ),
-    ("discovery_interpretation_7", True): (
-        "6aa51bf245c5beefe470007979b605dffc007c6177bcdb2e0aa2ecf069972d45"
-    ),
-    ("discovery_verification_7", False): (
+    "discovery_verification_7": (
         "8f24b80bba35c569da905ba2068e0bcb45ced274a2747d7bee4ef67f862fc039"
-    ),
-    ("discovery_verification_7", True): (
-        "87d1621d2c9a7dbd89a9a220556545eaf6c2487629eb52e25b8177838c17040e"
     ),
 }
 
 
 def _assert_main_payload(name: str, model: type) -> None:
-    for strict in (False, True):
-        payload = _json_schema_response_format(model, strict_json_schema=strict)
-        text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
-        digest = hashlib.sha256(text.encode()).hexdigest()
-        assert digest == MAIN_DIGESTS[name, strict], (name, strict)
+    payload = _json_schema_response_format(model)
+    text = json.dumps(payload, separators=(",", ":"), ensure_ascii=False)
+    digest = hashlib.sha256(text.encode()).hexdigest()
+    assert digest == MAIN_DIGESTS[name], name
 
 
 def _guided(client: MockLLMClient) -> MockLLMClient:

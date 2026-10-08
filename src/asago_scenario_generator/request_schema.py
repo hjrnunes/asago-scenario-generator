@@ -11,7 +11,8 @@ still write the exact correction feedback.
 from __future__ import annotations
 
 import copy
-from collections.abc import Callable, Iterable
+import re
+from collections.abc import Callable, Iterable, Mapping
 from typing import Any, TypeVar
 
 from pydantic import BaseModel
@@ -138,7 +139,42 @@ def uses_guided_decoding(llm_client: object) -> bool:
     return getattr(llm_client, "use_guided_decoding", False) is True
 
 
+def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
+    """Return a copy of ``schema`` that guided decoders can compile.
+
+    vLLM's xgrammar backend rejects a string schema that combines ``pattern``
+    with ``minLength`` or ``maxLength``.  When the pattern cannot match an
+    empty string, ``minLength: 1`` adds nothing and is dropped here.  The
+    response is still validated against the original Pydantic model.
+    """
+
+    def portable(node: Any) -> Any:
+        if isinstance(node, Mapping):
+            converted = {key: portable(value) for key, value in node.items()}
+            pattern = converted.get("pattern")
+            if (
+                isinstance(pattern, str)
+                and converted.get("minLength") == 1
+                and _pattern_rejects_empty(pattern)
+            ):
+                del converted["minLength"]
+            return converted
+        if isinstance(node, list):
+            return [portable(value) for value in node]
+        return copy.deepcopy(node)
+
+    return portable(schema)
+
+
+def _pattern_rejects_empty(pattern: str) -> bool:
+    try:
+        return re.search(pattern, "") is None
+    except re.error:
+        return False
+
+
 __all__ = [
+    "portable_request_schema",
     "string_enum",
     "string_items_enum",
     "uses_guided_decoding",

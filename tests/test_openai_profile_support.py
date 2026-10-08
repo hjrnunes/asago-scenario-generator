@@ -17,17 +17,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
 )
-from asago_scenario_generator.strict_schema import (
-    strip_null_fields,
-    to_openai_strict_schema,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    _ContextScenarioSemanticsPayload,
-)
-from asago_scenario_generator.stpa.target_realization.provider import (
-    TargetRealizationDraft,
-    TargetRealizationExtensionProviderResponse,
-)
 
 
 class _NestedModel(BaseModel):
@@ -86,16 +75,6 @@ def _infra_client(**kwargs) -> LLMClient:
         client = LLMClient(base_url="https://api.openai.com/v1", **kwargs)
     client._client = MagicMock()
     return client
-
-
-def _walk(schema: object):
-    if isinstance(schema, dict):
-        yield schema
-        for value in schema.values():
-            yield from _walk(value)
-    elif isinstance(schema, list):
-        for value in schema:
-            yield from _walk(value)
 
 
 def test_existing_sampling_kwargs_remain_byte_identical() -> None:
@@ -239,29 +218,28 @@ def test_a_5xx_gets_the_transport_retry_on_the_same_tier_not_the_fallback() -> N
     assert [call.kwargs["service_tier"] for call in calls] == ["flex", "flex"]
 
 
-def test_strict_schema_request_and_null_round_trip() -> None:
-    client = _infra_client(strict_json_schema=True)
-    client._client.chat.completions.create.return_value = _response()
+def test_strict_json_schema_true_fails_at_client_construction() -> None:
+    with pytest.raises(ValueError, match="strict_json_schema"):
+        _infra_client(strict_json_schema=True)
+
+
+@pytest.mark.parametrize("value", [None, False])
+def test_strict_json_schema_false_is_accepted_and_recorded_as_false(value) -> None:
+    client = _infra_client(strict_json_schema=value)
+    client._client.chat.completions.create.return_value = _response(
+        '{"required":"ok","nested":{"name":"n"}}'
+    )
 
     result = client.complete("system", "user", response_format=_ProfileResponse)
 
     sent = client._client.chat.completions.create.call_args.kwargs
-    schema = sent["response_format"]["json_schema"]["schema"]
-    assert sent["response_format"]["type"] == "json_schema"
     assert sent["response_format"]["json_schema"]["strict"] is True
-    assert set(schema["required"]) == set(schema["properties"])
-    assert "null" in str(schema["properties"]["optional"])
-    assert result.content == _ProfileResponse(
-        required="ok",
-        nested=_NestedModel(name="n"),
-    )
+    assert "default" in str(sent["response_format"]["json_schema"]["schema"])
+    assert result.request_controls["strict_json_schema"] is False
 
 
 def test_non_strict_schema_uses_original_schema_and_local_validation() -> None:
-    client = _infra_client(
-        strict_json_schema=True,
-        json_schema_strict=False,
-    )
+    client = _infra_client(json_schema_strict=False)
     client._client.chat.completions.create.return_value = _response(
         '{"required":"ok","nested":{"name":"n"}}'
     )
@@ -286,10 +264,7 @@ def test_non_strict_schema_uses_original_schema_and_local_validation() -> None:
 
 
 def test_non_strict_schema_does_not_accept_invalid_local_content(tmp_path) -> None:
-    client = _infra_client(
-        strict_json_schema=True,
-        json_schema_strict=False,
-    )
+    client = _infra_client(json_schema_strict=False)
     client._client.chat.completions.create.return_value = _response(
         '{"required":"ok","nested":{"name":"n"},"optional":null}'
     )
@@ -312,26 +287,8 @@ def test_non_strict_schema_does_not_accept_invalid_local_content(tmp_path) -> No
     assert "optional" in error
 
 
-def test_non_strict_schema_wins_over_strict_schema_conversion() -> None:
-    client = _infra_client(
-        strict_json_schema=True,
-        json_schema_strict=False,
-    )
-    client._client.chat.completions.create.return_value = _response(
-        '{"required":"ok","nested":{"name":"n"}}'
-    )
-
-    client.complete("system", "user", response_format=_ProfileResponse)
-
-    sent_schema = client._client.chat.completions.create.call_args.kwargs[
-        "response_format"
-    ]["json_schema"]
-    assert sent_schema["strict"] is False
-    assert sent_schema["schema"] == _ProfileResponse.model_json_schema()
-
-
-def test_openrouter_keeps_json_object_compatibility_when_strict_is_enabled() -> None:
-    client = _infra_client(strict_json_schema=True)
+def test_openrouter_keeps_json_object_compatibility_for_structured_calls() -> None:
+    client = _infra_client()
     client.base_url = "https://openrouter.ai/api/v1"
     client._client.chat.completions.create.return_value = _response(
         '{"required":"ok","nested":{"name":"n"}}'
@@ -342,50 +299,6 @@ def test_openrouter_keeps_json_object_compatibility_when_strict_is_enabled() -> 
     sent = client._client.chat.completions.create.call_args.kwargs
     assert sent["response_format"] == {"type": "json_object"}
     assert isinstance(result.content, str)
-
-
-@pytest.mark.parametrize(
-    "model",
-    [
-        TargetRealizationDraft,
-        TargetRealizationExtensionProviderResponse,
-        _ContextScenarioSemanticsPayload,
-    ],
-)
-def test_real_producer_models_convert_to_openai_strict_schema(model) -> None:
-    schema = to_openai_strict_schema(model)
-
-    for node in _walk(schema):
-        assert "default" not in node
-        assert "oneOf" not in node
-        assert "allOf" not in node
-        if node.get("type") == "object":
-            assert node["additionalProperties"] is False
-            assert set(node.get("required", ())) == set(node.get("properties", ()))
-
-
-def test_null_stripping_recurses_through_nested_models_and_list_items() -> None:
-    raw = {
-        "required": "ok",
-        "nested": {"name": "n", "count": None},
-        "optional": None,
-        "maybe": {"name": "m", "count": None},
-        "items": [{"name": "i", "count": None}],
-        "maybe_items": [{"name": "mi", "count": None}],
-        "maybe_map": {"entry": {"name": "mm", "count": None}},
-    }
-
-    stripped = strip_null_fields(raw, _ProfileResponse)
-
-    assert stripped == {
-        "required": "ok",
-        "nested": {"name": "n"},
-        "maybe": {"name": "m"},
-        "items": [{"name": "i"}],
-        "maybe_items": [{"name": "mi"}],
-        "maybe_map": {"entry": {"name": "mm"}},
-    }
-    assert _ProfileResponse.model_validate(stripped).nested.count == 3
 
 
 def test_reasoning_length_failure_is_logged_with_reasoning_usage(tmp_path) -> None:
