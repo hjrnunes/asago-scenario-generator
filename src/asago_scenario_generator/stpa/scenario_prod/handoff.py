@@ -58,6 +58,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
+    render_feature_text,
 )
 from asago_scenario_generator.stpa.observation_contract import (
     OBSERVATION_CONTRACT_SCHEMA,
@@ -257,16 +258,14 @@ class HandoffGherkin(HandoffModel):
 
     def to_feature_text(self) -> str:
         """Render the declarative spec to Gherkin ``.feature`` text."""
-        lines: list[str] = [f"Feature: {self.feature}", f"Scenario: {self.scenario}"]
-        for step in self.given:
-            lines.append(f"  {step}")
-        for step in self.when:
-            lines.append(f"  {step}")
-        for step in self.then_expected:
-            lines.append(f"  {step}")
-        for step in self.then_unsafe_alternative:
-            lines.append(f"  # Unsafe alternative (non-executable): {step}")
-        return "\n".join(lines) + "\n"
+        return render_feature_text(
+            self.feature,
+            self.scenario,
+            self.given,
+            self.when,
+            self.then_expected,
+            self.then_unsafe_alternative,
+        )
 
 
 _TOOL_CALL_CONDITION_PAIRING: dict[str, Any] = {

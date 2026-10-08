@@ -41,17 +41,35 @@ class GherkinSpec(BaseModel):
         comment so the real Gherkin parser exposes only the safe executable
         sequence to downstream adapters.
         """
-        lines: list[str] = [f"Feature: {self.feature}"]
-        lines.append(f"Scenario: {self.scenario}")
-        for step in self.given:
-            lines.append(f"  {step}")
-        for step in self.when:
-            lines.append(f"  {step}")
-        for step in self.then_expected:
-            lines.append(f"  {step}")
-        for step in self.then_actual:
-            lines.append(f"  # Unsafe alternative (non-executable): {step}")
-        return "\n".join(lines) + "\n"
+        return render_feature_text(
+            self.feature,
+            self.scenario,
+            self.given,
+            self.when,
+            self.then_expected,
+            self.then_actual,
+        )
+
+
+def render_feature_text(
+    feature: str,
+    scenario: str,
+    given: list[str],
+    when: list[str],
+    then_expected: list[str],
+    then_unsafe: list[str],
+) -> str:
+    """Render Gherkin text: the Given steps form the Background."""
+    lines: list[str] = [f"Feature: {feature}"]
+    if given:
+        lines.append("  Background:")
+        lines.extend(f"    {step}" for step in given)
+    lines.append(f"  Scenario: {scenario}")
+    lines.extend(f"    {step}" for step in [*when, *then_expected])
+    lines.extend(
+        f"    # Unsafe alternative (non-executable): {step}" for step in then_unsafe
+    )
+    return "\n".join(lines) + "\n"
 
 
 class SystemContext(BaseModel):
