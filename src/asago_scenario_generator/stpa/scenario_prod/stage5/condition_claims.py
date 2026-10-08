@@ -29,9 +29,7 @@ from asago_scenario_generator.stpa.tool_call_condition import REASON_STATE_ONLY
 
 from ..condition_check import ConditionFinding
 from ..tool_call_binding import bind_tool_call_condition
-
-POLARITY_INVERTED = "discriminating_condition_polarity_inverted"
-NO_CALL = "discriminating_condition_no_call"
+from .issues import IssueCode
 
 
 @dataclass(frozen=True)
@@ -87,7 +85,7 @@ def _inverted_not_called(
             and comparison.operation == unsafe_operation
         ):
             yield ConditionFinding(
-                POLARITY_INVERTED,
+                IssueCode.discriminating_condition_polarity_inverted,
                 f"comparisons[{index}] is not_called {unsafe_operation}, but the "
                 f"unsafe control action provides {unsafe_operation} incorrectly "
                 f"(category {UCAType.incorrect.value}), so the unsafe behavior "
@@ -111,7 +109,7 @@ def _no_call(
         return
     named = operation or "the claimed operation"
     yield ConditionFinding(
-        NO_CALL,
+        IssueCode.discriminating_condition_no_call,
         f"{status.detail}, but the safe outcome claims a command_attempt on "
         f"{named}, which is checked on tool calls. Add a comparison on an "
         f"argument of {named}, or name in record_selection.argument_values "
