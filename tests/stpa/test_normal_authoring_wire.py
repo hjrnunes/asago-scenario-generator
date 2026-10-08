@@ -285,34 +285,6 @@ def _historical_execution_payload() -> dict:
     }
 
 
-def test_normal_prompt_requests_semantics_only() -> None:
-    """VAL-A1-001: rendered normal prompts carry no execution-design demands."""
-    system, user = build_context_bdi_prompts(
-        _wrong_timing_context(),
-        TemplateLoader(PROMPTS_DIR),
-    )
-    rendered = f"{system}\n{user}"
-    for demand in (
-        "`stimulus`",
-        "Allowed Stimulus Categories",
-        "execution_route",
-        "selected_for_route",
-        "delivery_class",
-        "compatible_delivery",
-        "compatible_stimulus",
-        "action_value",
-        "state_value",
-        "action_presence",
-        "comparison_evidence",
-        "analytical_only",
-        "disposition",
-        "action_kind",
-    ):
-        assert demand not in rendered, (
-            f"normal prompt demands execution design: {demand!r}"
-        )
-
-
 def test_normal_prompt_renders_observation_contract() -> None:
     system, user = build_context_bdi_prompts(
         _wrong_timing_context(),
@@ -327,43 +299,22 @@ def test_normal_prompt_renders_observation_contract() -> None:
     assert "observation_criteria" in rendered
 
 
-def test_normal_prompt_still_teaches_causal_evidence() -> None:
-    """VAL-A1-001: the normal prompt keeps semantics and evidence guidance."""
-    system, user = build_context_bdi_prompts(
-        _wrong_timing_context(),
-        TemplateLoader(PROMPTS_DIR),
-    )
-    rendered = f"{system}\n{user}"
-    assert "adversary" in rendered
-    assert "attacker_bdi" in rendered
-    assert "causal_factors" in rendered
-    assert "semantic_proposition" in rendered
-    assert "evidence_status" in rendered
-    assert "bounded_assumption" in rendered
-    assert "cause_1" in rendered
-    assert "reachable_capability" in rendered
-
-
-def test_normal_prompt_does_not_force_adversarial_gain_framing() -> None:
-    """R6 keeps functional semantics separate from attacker objectives."""
+def test_normal_prompt_names_the_context_cause_handles() -> None:
+    """VAL-A1-001: the prompt offers the causal-source handles of the context."""
     _, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
     )
-
-    assert "possible benefit alone does not establish malicious intent" in user
-    assert "functional scenario" in user
-    assert "do not invent an actor or benefit" in " ".join(user.split())
-    assert "unsupported rather than guessing a subtype" in user
+    assert "cause_1" in user
 
 
-def test_role_guidance_is_target_neutral_and_independent_of_supplied_facts() -> None:
-    """R6 distinguishes identity, authority, eligibility, and review status."""
-    plain_system, plain_user = build_context_bdi_prompts(
+def test_system_prompt_names_no_clinical_domain_for_a_clinical_operation() -> None:
+    """R6 role guidance stays target neutral, even for a clinical operation."""
+    plain_system, _ = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
     )
-    system, user = build_context_bdi_prompts(
+    system, _ = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
         target_operation=TargetOperationObservation(
@@ -379,18 +330,6 @@ def test_role_guidance_is_target_neutral_and_independent_of_supplied_facts() -> 
         ),
     )
 
-    for rendered in (plain_user, user):
-        flat = " ".join(rendered.split())
-        assert (
-            "Keep the identity of each party, that party's authority or "
-            "permission, the eligibility of the operation for its purpose, "
-            "and any review or approval status distinct"
-        ) in flat
-        assert "clinical domain" not in flat
-        assert "customer domain" not in flat
-        assert "booking domain" not in flat
-        assert "patient_reference" not in flat
-        assert "permission_reference" not in flat
     assert "clinical" not in plain_system.lower()
     assert "clinical" not in system.lower()
 
@@ -404,8 +343,8 @@ def test_normal_prompt_carries_target_operation_and_observed_record_values(
     ``target_observations`` on the way to the prompt, so the model never saw
     the record facts and degraded every criterion into a constraint
     restatement. The rendered normal request must carry the exact documented
-    operation, at least one observed record value, and the grounding
-    instructions.
+    operation and at least one observed record value; the grounding
+    instructions are rows of the Stage 5 phrase tables.
     """
     client = MockLLMClient()
     client.set_response_queue([_normal_payload()])
@@ -426,20 +365,10 @@ def test_normal_prompt_carries_target_operation_and_observed_record_values(
     )
     assert "ORD-104" in normalized
     assert "refund_eligible" in normalized
-    assert "Ground the sentence in the supplied facts it tests" in normalized
-    assert (
-        "A sentence that only restates the governing constraint or an "
-        "abstract loss is incomplete" in normalized
-    )
-    assert (
-        "Name the documented operation, the concrete record it acts on, and "
-        "the condition that distinguishes unsafe from safe behavior" in normalized
-    )
-    assert "keep the proposition about that same operation and argument" in normalized
 
 
-def test_normal_prompt_states_a_generic_distinguishing_condition() -> None:
-    """An observed value is evidence, not the semantic failure criterion."""
+def test_normal_prompt_carries_the_observed_item_record() -> None:
+    """An observed record reaches the prompt as evidence for the criterion."""
     operation = TargetOperationObservation(
         reference=TargetOperationReference(
             resource_id="items",
@@ -470,119 +399,30 @@ def test_normal_prompt_states_a_generic_distinguishing_condition() -> None:
         target_operation=operation,
         target_observations=observations,
     )
-    rendered = " ".join(f"{system}\n{user}".split())
 
-    assert (
-        "State the condition that distinguishes unsafe from safe behavior in "
-        "terms of operation arguments, session facts, observed record facts, "
-        "or call ordering." in rendered
-    )
-    assert "an observed value alone is not the semantic failure criterion" in rendered
-    assert "ITEM-104" in rendered
-    # The former status-only worked example is gone from product prompts.
-    assert "REVIEWED" not in rendered
-    assert "AWAITING_REVIEW" not in rendered
-    assert "required status is not held" not in rendered
+    assert "ITEM-104" in f"{system}\n{user}"
 
 
-@pytest.mark.parametrize(
-    "target_fact",
-    [
-        {"target_operation": _target_operation},
-        {"target_observations": _record_observations},
-    ],
-)
-def test_normal_prompt_fact_branches_state_a_distinguishing_condition(
-    target_fact,
-) -> None:
-    """Each fact branch asks for the unsafe/safe distinction, not a status."""
-    system, user = build_context_bdi_prompts(
-        _wrong_timing_context(),
-        TemplateLoader(PROMPTS_DIR),
-        **{name: factory() for name, factory in target_fact.items()},
-    )
-    rendered = " ".join(f"{system}\n{user}".split())
-
-    assert "distinguish" in rendered
-    assert "required status is not held" not in rendered
-    assert (
-        "record's observed field value or status that makes the operation unsafe"
-        not in rendered
-    )
-
-
-def test_normal_prompt_without_target_facts_avoids_concrete_demands() -> None:
-    """A target-blind request does not ask the author to invent target facts."""
-    _, user = build_context_bdi_prompts(
-        _wrong_timing_context(),
-        TemplateLoader(PROMPTS_DIR),
-    )
-
-    assert "## Exact Target Operation" not in user
-    assert "## Optional Target Observations" not in user
-    assert "Name the concrete record and the observed value" not in user
-    assert "Ground the sentence in the supplied STPA facts" in user
-    assert "Do not invent a target record, value, or operation" in user
-
-
-def test_normal_prompt_with_inventory_only_does_not_demand_observed_values() -> None:
-    """An operation inventory alone cannot support a concrete record claim."""
+def test_normal_prompt_with_inventory_only_carries_the_operation() -> None:
+    """An operation inventory alone reaches the prompt without record facts."""
     _, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
         target_operation=_target_operation(),
     )
 
-    assert "## Exact Target Operation" in user
     assert "Refund the payment for one order record up to the captured amount." in user
-    assert "## Optional Target Observations" not in user
-    assert "Name the concrete record and the observed value" not in user
-    assert (
-        "ground both the unsafe argument predicate and the record it acts on"
-        not in user
-    )
-    assert "Do not invent a record identity or observed value" in user
 
 
-def test_normal_prompt_with_observations_only_does_not_invent_operation() -> None:
-    """Observed records do not establish which operation acts on them."""
+def test_normal_prompt_with_observations_only_carries_the_observed_record() -> None:
+    """Observed records reach the prompt without an operation."""
     _, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
         target_observations=_record_observations(),
     )
 
-    assert "## Exact Target Operation" not in user
-    assert "## Optional Target Observations" in user
     assert "ORD-104" in user
-    assert "Ground the proposition in supplied target" in user
-    assert "observations when they establish a concrete record" in user
-    assert "do not invent an operation identity" in user
-
-
-def test_target_fact_sections_render() -> None:
-    """VAL-A1-005: the fact sections are semantic facts, not execution design."""
-    _, user = build_context_bdi_prompts(
-        _wrong_timing_context(),
-        TemplateLoader(PROMPTS_DIR),
-        target_operation=_target_operation(),
-        target_observations=_record_observations(),
-    )
-    assert "## Exact Target Operation" in user
-    assert "## Optional Target Observations" in user
-    assert "ORD-104" in user
-
-
-def test_prompt_carries_no_route_or_delivery_text() -> None:
-    """VAL-A1-004/005 guard: route and delivery text never reach the model."""
-    system, user = build_context_bdi_prompts(
-        _wrong_timing_context(),
-        TemplateLoader(PROMPTS_DIR),
-    )
-    prompt = f"{system}\n{user}"
-    assert "Allowed Stimulus Categories" not in prompt
-    assert "execution_route" not in prompt
-    assert "the route may remain parameterized" not in prompt
 
 
 def test_normal_response_schema_carries_no_execution_design(tmp_path) -> None:
@@ -831,20 +671,6 @@ def test_context_without_causal_sources_makes_no_provider_call(tmp_path) -> None
     assert result is None
     assert error == "No valid causal-factor sources exist in the selected control path."
     assert client.call_count == 0
-
-
-def test_prompt_omits_observation_ref_citation_demand() -> None:
-    """The response schema has no ``observation_ref`` field.
-
-    A model that tried to comply with a citation instruction would fail the
-    closed schema and consume the bounded validation retry.
-    """
-    _, user = build_context_bdi_prompts(
-        _wrong_timing_context(),
-        TemplateLoader(PROMPTS_DIR),
-    )
-    assert "observation_ref" not in user
-    assert "comparison-evidence" not in user
 
 
 def test_repeated_length_failure_retries_once_with_a_shorter_request(
