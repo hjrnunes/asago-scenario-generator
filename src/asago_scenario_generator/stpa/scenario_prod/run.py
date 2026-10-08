@@ -312,17 +312,15 @@ def run_sp3(
         run_dir, execution_target_profile, stage_errors
     )
     if profile_published:
-        scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
-            llm_client,
-            enriched_threat_set,
-            control_structure,
-            loss_analysis,
-            run_dir,
-            scenarios_dir,
-            loader,
-            temperature,
-            stage_errors,
-            candidate_builders,
+        inputs = _SP3Inputs(
+            llm_client=llm_client,
+            enriched_threat_set=enriched_threat_set,
+            control_structure=control_structure,
+            loss_analysis=loss_analysis,
+            run_dir=run_dir,
+            scenarios_dir=scenarios_dir,
+            loader=loader,
+            temperature=temperature,
             capability_profile=capability_profile,
             scenario_contexts=scenario_contexts,
             execution_target_profile=execution_target_profile,
@@ -333,6 +331,9 @@ def run_sp3(
             stage_1a_source=stage_1a_source,
             condition_families=condition_families,
             shape_config=shape_config,
+        )
+        scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
+            inputs, stage_errors, candidate_builders
         )
     else:
         scenario_specs = []
@@ -444,64 +445,71 @@ def _verify_target_realization(
         raise ValueError("target_realization profile pin does not match target profile")
 
 
+@dataclass(frozen=True)
+class _SP3Inputs:
+    """The resolved run_sp3 inputs Stages 5 and 6 read; never mutated."""
+
+    llm_client: LLMClient
+    enriched_threat_set: EnrichedThreatSet
+    control_structure: ControlStructure
+    loss_analysis: LossAnalysis
+    run_dir: Path
+    scenarios_dir: Path
+    loader: TemplateLoader
+    temperature: float | None
+    capability_profile: CapabilityProfile | None
+    scenario_contexts: Mapping[str, ScenarioGenerationContext] | None
+    execution_target_profile: ExecutionTargetProfile | None
+    target_realization: TargetRealizationResult | None
+    target_observations: TargetObservationSnapshot | None
+    observation_contract: ObservationContract
+    enriched_operations: Mapping[str, str] | None
+    stage_1a_source: Stage1aSource | None
+    condition_families: Sequence[CandidateFamilyPlan] | None
+    shape_config: ShapeStepConfig
+
+
 def _run_stages_5_and_6(
-    llm_client: LLMClient,
-    enriched_threat_set: EnrichedThreatSet,
-    control_structure: ControlStructure,
-    loss_analysis: LossAnalysis,
-    run_dir: Path,
-    scenarios_dir: Path,
-    loader: TemplateLoader,
-    temperature: float | None,
+    inputs: _SP3Inputs,
     stage_errors: list[str],
     candidate_builders: list[_CandidateOutcomeBuilder],
-    *,
-    capability_profile: CapabilityProfile | None,
-    scenario_contexts: Mapping[str, ScenarioGenerationContext] | None,
-    execution_target_profile: ExecutionTargetProfile | None,
-    target_realization: TargetRealizationResult | None,
-    target_observations: TargetObservationSnapshot | None,
-    observation_contract: ObservationContract,
-    enriched_operations: Mapping[str, str] | None,
-    stage_1a_source: Stage1aSource | None,
-    condition_families: Sequence[CandidateFamilyPlan] | None,
-    shape_config: ShapeStepConfig,
 ) -> tuple[list[ScenarioSpec], list[Any], list[ScenarioSpec]]:
     """Generate Stage 5 specs, persist functional tests, and build envelopes.
 
     Returns the non-functional scenario specs, their Stage 6 envelopes, and
     the functional-test specs.
     """
-    environment_bound = execution_target_profile is not None
-    observed_operations = observed_operation_names(execution_target_profile)
+    run_dir = inputs.run_dir
+    profile = inputs.execution_target_profile
+    observed_operations = observed_operation_names(profile)
     scenario_specs = _collect_stage5_specs(
-        llm_client,
-        enriched_threat_set,
-        control_structure,
-        loss_analysis,
+        inputs.llm_client,
+        inputs.enriched_threat_set,
+        inputs.control_structure,
+        inputs.loss_analysis,
         run_dir,
-        loader,
-        temperature,
+        inputs.loader,
+        inputs.temperature,
         stage_errors,
-        capability_profile=capability_profile,
-        scenario_contexts=scenario_contexts,
-        execution_target_profile=execution_target_profile,
-        target_realization=target_realization,
-        target_observations=target_observations,
-        observation_contract=observation_contract,
+        capability_profile=inputs.capability_profile,
+        scenario_contexts=inputs.scenario_contexts,
+        execution_target_profile=profile,
+        target_realization=inputs.target_realization,
+        target_observations=inputs.target_observations,
+        observation_contract=inputs.observation_contract,
         candidate_builders=candidate_builders,
-        content_surface=content_surface_facts(capability_profile),
-        condition_families=condition_families,
+        content_surface=content_surface_facts(inputs.capability_profile),
+        condition_families=inputs.condition_families,
     )
     functional_test_specs = [spec for spec in scenario_specs if spec.is_functional_test]
     shaped_specs = apply_shape_step(
         [spec for spec in scenario_specs if not spec.is_functional_test],
-        llm_client=llm_client,
+        llm_client=inputs.llm_client,
         run_dir=run_dir,
-        execution_target_profile=execution_target_profile,
-        config=shape_config,
-        temperature=temperature,
-        loader=loader,
+        execution_target_profile=profile,
+        config=inputs.shape_config,
+        temperature=inputs.temperature,
+        loader=inputs.loader,
     )
     # Deduplication follows the shape step: a duplicate group keeps the
     # scenario whose shape the model proposed.
@@ -517,36 +525,36 @@ def _run_stages_5_and_6(
         ),
         encoding="utf-8",
     )
-    if condition_families is not None:
+    if inputs.condition_families is not None:
         _write_condition_families(
-            run_dir, candidate_builders, condition_families, scenario_specs
+            run_dir, candidate_builders, inputs.condition_families, scenario_specs
         )
     _persist_functional_test_candidates(
         functional_test_specs,
-        scenarios_dir,
-        capability_profile,
-        control_structure,
+        inputs.scenarios_dir,
+        inputs.capability_profile,
+        inputs.control_structure,
         stage_errors,
         candidate_builders,
-        loss_analysis=loss_analysis,
-        environment_bound=environment_bound,
-        enriched_operations=enriched_operations,
+        loss_analysis=inputs.loss_analysis,
+        environment_bound=profile is not None,
+        enriched_operations=inputs.enriched_operations,
         observed_operations=observed_operations,
-        stage_1a_source=stage_1a_source,
+        stage_1a_source=inputs.stage_1a_source,
         deduplication_by_scenario=deduplication_by_scenario,
     )
     scenario_envelopes = _collect_stage6_artifacts(
         shaped_specs,
-        control_structure,
-        loss_analysis,
-        scenarios_dir,
+        inputs.control_structure,
+        inputs.loss_analysis,
+        inputs.scenarios_dir,
         stage_errors,
-        capability_profile=capability_profile,
+        capability_profile=inputs.capability_profile,
         candidate_builders=candidate_builders,
-        environment_bound=environment_bound,
-        enriched_operations=enriched_operations,
+        environment_bound=profile is not None,
+        enriched_operations=inputs.enriched_operations,
         observed_operations=observed_operations,
-        stage_1a_source=stage_1a_source,
+        stage_1a_source=inputs.stage_1a_source,
         deduplication_by_scenario=deduplication_by_scenario,
     )
     return shaped_specs, scenario_envelopes, functional_test_specs
