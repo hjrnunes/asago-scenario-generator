@@ -18,14 +18,16 @@ from asago_scenario_generator.models.obligation_plan import (
     TaxonomyObligationPlan,
     derive_obligation_summary,
 )
-from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.models.canonical import (
+    canonical_json_bytes,
+    compute_framed_digest,
+)
 import asago_scenario_generator.pipeline.obligation_contracts as _contracts
 from asago_scenario_generator.pipeline.projection_authoritative import (
     project_authoritative_candidate_observations,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
-    canonical_json_bytes,
     required_fact_references,
 )
 from asago_scenario_generator.pipeline.projection_qualification import (

@@ -17,13 +17,15 @@ from asago_scenario_generator.models.attack_pattern import (
     EntryPointResourceReference,
     ToolResourceReference,
 )
+from asago_scenario_generator.models.canonical import (
+    canonical_json_bytes,
+    compute_framed_digest,
+    normalize_unicode,
+)
 from asago_scenario_generator.pipeline.projection_contracts import (
-    _digest,
-    _normalize_unicode,
     _resource_id,
     _resource_id_allowed,
     _restriction_blocks,
-    canonical_json_bytes,
     compute_execution_requirements_digest,
 )
 
@@ -67,7 +69,7 @@ def test_canonical_json_bytes_is_deterministic_and_nfc(value: object) -> None:
     second = canonical_json_bytes(value)
     assert first == second
     decoded = json.loads(first.decode("utf-8"))
-    assert decoded == _normalize_unicode(value)
+    assert decoded == normalize_unicode(value)
 
 
 @settings(max_examples=_MAX_EXAMPLES, deadline=None)
@@ -165,7 +167,7 @@ def test_entry_point_resource_id_is_the_canonical_identifier(
 def test_digest_uses_domain_separator() -> None:
     """Domain-separated digests differ from a bare SHA-256 of the payload."""
     payload = {"pattern_id": "AP-T1-01"}
-    digest = _digest("asago-scenario-generator:candidate:v2", payload)
+    digest = compute_framed_digest("asago-scenario-generator:candidate:v2", payload)
     bare = hashlib.sha256(canonical_json_bytes(payload)).hexdigest()
     assert digest != bare
     assert len(digest) == 64

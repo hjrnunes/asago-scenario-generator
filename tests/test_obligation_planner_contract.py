@@ -26,7 +26,11 @@ from asago_scenario_generator.models.attack_pattern import (
     AttackPattern,
     compute_chain_semantic_digest,
 )
-from asago_scenario_generator.models.canonical import FrozenDict, FrozenList
+from asago_scenario_generator.models.canonical import (
+    FrozenDict,
+    FrozenList,
+    canonical_json_bytes,
+)
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.pipeline.obligation_contracts import (
     CompatibilityPolicyInput,
@@ -45,7 +49,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionBudget,
     capture_capability_snapshot,
     CapabilityFactSnapshot,
-    canonical_json_bytes,
     ProjectionBatch,
     ProjectionIssue,
     RejectedProjectionCandidate,

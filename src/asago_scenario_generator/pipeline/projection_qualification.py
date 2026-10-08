@@ -14,13 +14,13 @@ from asago_scenario_generator.models.attack_pattern_projection import StepOmissi
 from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
+from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
     Digest,
     ProjectionBudget,
     ProjectionIssue,
     _canonical_json,
-    _content_pin,
     _evaluate_preconditions,
     _evaluate_projection_conditions,
     _normalize_semantic_order,
@@ -39,7 +39,7 @@ def _catalog_content_pin(
     qualified: list[tuple[AttackPattern, str]],
 ) -> str:
     """Pin the ordered, deduplicated qualified pattern catalog."""
-    return _content_pin(
+    return compute_framed_digest(
         "asago-scenario-generator:authoritative-catalog:v1",
         [pattern_pin for _, pattern_pin in qualified],
     )
@@ -406,7 +406,7 @@ def compute_authoritative_catalog_pin(
         if previous is not None and previous != pattern_pin:
             raise ValueError("conflicting authoritative records share one pattern id")
         qualified[pattern.id] = pattern_pin
-    return _content_pin(
+    return compute_framed_digest(
         "asago-scenario-generator:authoritative-catalog:v1",
         [qualified[pattern_id] for pattern_id in sorted(qualified)],
     )

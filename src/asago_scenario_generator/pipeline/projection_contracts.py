@@ -8,9 +8,6 @@ same contracts without importing the public projection façade.
 
 from __future__ import annotations
 
-import hashlib
-import json
-import unicodedata
 from collections.abc import Iterable, Sequence
 from typing import Annotated, Any, Callable, Literal
 
@@ -44,6 +41,11 @@ from asago_scenario_generator.models.attack_pattern_projection import (
     ToolResourceReference,
     TrustBoundaryResourceReference,
 )
+from asago_scenario_generator.models.canonical import (
+    canonical_json_bytes,
+    compute_framed_digest,
+    normalize_unicode,
+)
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     is_attacker_accessible_ingress,
@@ -58,54 +60,8 @@ class ProjectionModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-def canonical_json_bytes(value: Any) -> bytes:
-    """Encode values using the projection digest contract's canonical JSON."""
-    if isinstance(value, BaseModel):
-        value = value.model_dump(mode="json")
-    value = _normalize_unicode(value)
-    return json.dumps(
-        value,
-        sort_keys=True,
-        separators=(",", ":"),
-        ensure_ascii=False,
-        allow_nan=False,
-    ).encode("utf-8")
-
-
 def _canonical_json(value: Any) -> str:
     return canonical_json_bytes(value).decode("utf-8")
-
-
-def _normalize_unicode(value: Any) -> Any:
-    """Apply the canonical contract's NFC rule to values and mapping keys."""
-    if isinstance(value, str):
-        return unicodedata.normalize("NFC", value)
-    if isinstance(value, dict):
-        return _normalized_mapping(value)
-    if isinstance(value, (list, tuple)):
-        normalized = [_normalize_unicode(item) for item in value]
-        return normalized if isinstance(value, list) else tuple(normalized)
-    return value
-
-
-def _normalized_mapping(value: dict[str, Any]) -> dict[str, Any]:
-    """Normalize mapping keys and values under the canonical NFC rule."""
-    normalized: dict[str, Any] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            raise TypeError("canonical JSON mapping keys must be strings")
-        normalized_key = unicodedata.normalize("NFC", key)
-        if normalized_key in normalized:
-            raise ValueError(
-                "canonical JSON mapping keys collide after NFC normalization"
-            )
-        normalized[normalized_key] = _normalize_unicode(item)
-    return normalized
-
-
-def _digest(domain: str, value: Any) -> str:
-    payload = domain.encode() + b"\0" + _canonical_json(value).encode("utf-8")
-    return hashlib.sha256(payload).hexdigest()
 
 
 EXECUTION_REQUIREMENTS_DIGEST_DOMAIN = (
@@ -120,7 +76,7 @@ def compute_execution_requirements_digest(requirements: Any) -> str:
         payloads.append(
             item.model_dump(mode="json") if hasattr(item, "model_dump") else item
         )
-    return _digest(EXECUTION_REQUIREMENTS_DIGEST_DOMAIN, payloads)
+    return compute_framed_digest(EXECUTION_REQUIREMENTS_DIGEST_DOMAIN, payloads)
 
 
 def _fact_key(reference: AuthoritativeFactReference) -> str:
@@ -411,7 +367,7 @@ def _sorted_canonical(items: Iterable[Any]) -> list[dict[str, Any]]:
 def _compute_snapshot_digest(
     profile: CapabilityProfile, facts: tuple[EvaluatedFactEvidence, ...]
 ) -> str:
-    return _digest(
+    return compute_framed_digest(
         "asago-scenario-generator:capability-fact-snapshot:v1",
         {
             "profile": _snapshot_resource_payload(profile),
@@ -522,7 +478,7 @@ _SEMANTICALLY_UNORDERED_FIELDS = {
 
 
 def _normalize_semantic_order(value: Any, field_name: str | None = None) -> Any:
-    value = _normalize_unicode(value)
+    value = normalize_unicode(value)
     if isinstance(value, dict):
         return {
             key: _normalize_semantic_order(item, key) for key, item in value.items()
@@ -997,10 +953,6 @@ def _evaluate_precondition(
     )
 
 
-def _content_pin(domain: str, value: Any) -> str:
-    return _digest(domain, value)
-
-
 def _chain_atlas_mappings(
     chain: CanonicalAttackChain,
 ) -> Iterable[ProjectedMapping]:
@@ -1055,7 +1007,7 @@ def _candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
         "canonical_ingress": ingress,
         "bindings": bindings,
     }
-    return f"cand:v2:{_digest('asago-scenario-generator:candidate:v2', identity)[:32]}"
+    return f"cand:v2:{compute_framed_digest('asago-scenario-generator:candidate:v2', identity)[:32]}"
 
 
 def _rejected_candidate_v2_id(
@@ -1070,7 +1022,7 @@ def _rejected_candidate_v2_id(
     )
     return (
         "cand:v2:"
-        + _digest(
+        + compute_framed_digest(
             "asago-scenario-generator:candidate-infeasible:v1",
             {
                 "pattern_id": pattern_id,
@@ -1083,7 +1035,7 @@ def _rejected_candidate_v2_id(
 
 def _pattern_pin(pattern: AttackPattern) -> str:
     prerequisites = pattern.prerequisite_capabilities
-    return _content_pin(
+    return compute_framed_digest(
         "asago-scenario-generator:authoritative-pattern:v1",
         {
             "id": pattern.id,

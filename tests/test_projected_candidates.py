@@ -28,6 +28,7 @@ from asago_scenario_generator.models.attack_pattern import (
     EqualityCondition,
     NotCondition,
 )
+from asago_scenario_generator.models.canonical import normalize_unicode
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     ConfidenceLevel,
@@ -57,8 +58,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     _restriction_blocks,
     _resource_id_allowed,
     _slot_reference_compatible,
-    _normalize_unicode,
-    _normalized_mapping,
     _resource_id,
     _resource_contained,
     _assert_snapshot_facts_uniquely_sorted,
@@ -2524,13 +2523,13 @@ class TestRemainingProjectionHelpers:
             (7, 7),
             (None, None),
             (["e\u0301", 1], ["é", 1]),
-            (("e\u0301", 2), ("é", 2)),
+            (("e\u0301", 2), ["é", 2]),
             ({"ca\u0301fe": {"o\u0301": "x"}}, {"cáfe": {"ó": "x"}}),
         ],
         ids=["string", "integer", "none", "list", "tuple", "nested_mapping"],
     )
     def test_normalize_unicode_nfc_and_container_recursion(self, value, expected):
-        assert _normalize_unicode(value) == expected
+        assert normalize_unicode(value) == expected
 
     @pytest.mark.parametrize(
         ("mapping", "error", "message"),
@@ -2542,10 +2541,10 @@ class TestRemainingProjectionHelpers:
     )
     def test_normalized_mapping_rejects(self, mapping, error, message):
         with pytest.raises(error, match=message):
-            _normalized_mapping(mapping)
+            normalize_unicode(mapping)
 
     def test_normalized_mapping_recurses_into_values(self):
-        assert _normalized_mapping({"a": ["e\u0301", {"c": "o\u0301"}]}) == {
+        assert normalize_unicode({"a": ["e\u0301", {"c": "o\u0301"}]}) == {
             "a": ["é", {"c": "ó"}]
         }
 
