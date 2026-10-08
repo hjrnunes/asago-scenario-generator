@@ -107,8 +107,6 @@ Run one final broad gate after all required execution:
 ```bash
 cd <producer-repo-root>
 ./scripts/quality.sh
-export ASAGO_SCENARIO_GENERATOR_APS_ROOT=/absolute/path/to/Acceptance-Pipeline-Specification
-./scripts/acceptance.sh
 uv run pytest tests/ -q
 ```
 
@@ -736,15 +734,12 @@ content.
 
 ```bash
 ./scripts/quality.sh
-./scripts/acceptance.sh
 uv run pytest tests/ -q
 ```
 
-The unit and default acceptance suites are deterministic and do not require an
-LLM endpoint.
-
-Gherkin files under `features/` are committed source. Acceptance IR, DRY
-reports, generated entrypoints, pipeline output, and harness state are ignored.
+The unit suite is deterministic and does not require an LLM endpoint. Unit
+tests pin behavior, and the phrase tables in `tests/phrases/*.yaml` pin prompt
+text. Pipeline output and harness state are ignored.
 See [the development methodology](docs/development/swarmforge.md) and
 [architecture overview](docs/architecture/overview.md).
 

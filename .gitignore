@@ -27,10 +27,6 @@ coverage.lcov
 # Generated project output
 output/
 tmp/
-acceptance/dry/
-acceptance/generated/
-build/acceptance/
-build/acceptance-mutation/
 
 # Secrets and local configuration
 .env
@@ -107,6 +103,3 @@ opencode.json
 data/reference-gym/
 tests/test_reference_gym_contract.py
 .swarmforge-droid/
-build/acceptance/ir/
-build/acceptance/dry/
-build/acceptance/generated/

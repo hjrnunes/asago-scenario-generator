@@ -39,14 +39,15 @@ uv sync --locked
 uv run asago-scenario-generator generate --help
 uv run pytest tests/path_to_changed_test.py -q
 ./scripts/quality.sh
-./scripts/acceptance.sh
 uv run pytest tests/ -q
 ```
 
 Use focused tests while implementing. Run the task's required broad gates once
 at delivery; repeat them only after a relevant change or unresolved failure.
-Deterministic tests must not contact model endpoints or targets. Generated
-acceptance files under `build/acceptance/` stay untracked.
+Deterministic tests must not contact model endpoints or targets. Pin behavior
+with unit tests under `tests/` and prompt text with rows in
+`tests/phrases/*.yaml`; the repository has no Gherkin acceptance layer, and the
+SwarmForge pipeline starts at the coder.
 
 ## Prompts and corrections
 
@@ -92,6 +93,6 @@ acceptance files under `build/acceptance/` stay untracked.
 | Prompt, response, grounding, or review change | `docs/architecture/model-facing-interfaces.md`, actual prompt builders and tests |
 | Live setup, frozen-package execution, cleanup | `asago-orch/docs/qualification.md`; modules live under `asago-orch/src/asago_orch/qualification/` |
 | Gold scoring or recovery claims | Scoring lives in the orch repo's score stage and uses `asago_orch.qualification.probe_detector` |
-| Acceptance behavior | `features/` and its corresponding `acceptance/` handler |
+| Development method and SwarmForge roles | `docs/development/swarmforge.md` |
 
 `AGENTS.md` is a symlink to this file. Edit `CLAUDE.md`; preserve the symlink.

@@ -677,16 +677,14 @@ request-specific values. Temporal outcomes reuse the factor-condition local
 handle resolver, and target-backed action-value predicates must name an observed
 input-schema argument.
 
-## Acceptance boundary
+## Test boundary
 
-`features/` contains the behavior contract. `acceptance/refresh_snapshot.py`
-uses the externally checked-out Acceptance Pipeline Specification tools to
-create ignored JSON IR, DRY reports, and pytest entrypoints under
-`build/acceptance/`. The committed runtime and handlers connect those generated
-entrypoints to public project behavior.
+Unit tests under `tests/` are the behavior contract, and the phrase tables in
+`tests/phrases/*.yaml` pin the rendered prompt text. Tests reach behavior
+through public seams with scripted model clients.
 
-Live LLM behavior is a separate opt-in boundary. Default unit and acceptance
-gates must remain deterministic and offline.
+Live LLM behavior is a separate opt-in boundary. The default unit gate must
+remain deterministic and offline.
 
 ## Persistence boundary
 
