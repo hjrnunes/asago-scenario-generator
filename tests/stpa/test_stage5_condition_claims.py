@@ -24,8 +24,6 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.condition_claims import (
-    NO_CALL,
-    POLARITY_INVERTED,
     condition_claim_findings,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.feedback import (
@@ -34,6 +32,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.feedback import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
+from asago_scenario_generator.stpa.scenario_prod.stage5.issues import IssueCode
 from tests.stpa.sp1_helpers import MockLLMClient
 
 from .test_discriminating_condition import (
@@ -105,7 +104,9 @@ def _findings(
 def test_not_called_on_the_incorrect_actions_operation_is_inverted() -> None:
     findings = _findings(_not_called())
 
-    assert [item.code for item in findings] == [POLARITY_INVERTED]
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_polarity_inverted
+    ]
     assert findings[0].detail == (
         "comparisons[0] is not_called refund_payment, but the unsafe control "
         "action provides refund_payment incorrectly (category INCORRECT), so "
@@ -143,7 +144,9 @@ def test_not_called_on_another_operation_is_not_judged(
 def test_state_only_condition_under_a_command_attempt_names_no_call() -> None:
     findings = _findings(_state_only(), uca_type=UCAType.wrong_timing)
 
-    assert [item.code for item in findings] == [NO_CALL]
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_no_call
+    ]
     assert findings[0].detail == (
         "the condition holds only state predicates, so it names no observable "
         "behavior, but the safe outcome claims a command_attempt on "
@@ -183,7 +186,13 @@ def test_checks_run_only_under_a_command_attempt_claim(condition, safe_outcome) 
     assert _findings(condition, safe_outcome=safe_outcome) == ()
 
 
-@pytest.mark.parametrize("code", [POLARITY_INVERTED, NO_CALL])
+@pytest.mark.parametrize(
+    "code",
+    [
+        IssueCode.discriminating_condition_polarity_inverted,
+        IssueCode.discriminating_condition_no_call,
+    ],
+)
 def test_each_code_has_repair_guidance(code) -> None:
     assert code in {item.value for item in _repair_guidance("TARGET-STATE")}
 
@@ -237,7 +246,7 @@ def test_stage5_corrects_an_inverted_not_called(tmp_path) -> None:
     assert result.discriminating_condition is not None
     assert client.call_count == 2
     correction = client.calls[1].user_prompt
-    assert f"{POLARITY_INVERTED}:" in correction
+    assert f"{IssueCode.discriminating_condition_polarity_inverted}:" in correction
     assert _findings(_not_called())[0].detail in correction
 
 
@@ -255,7 +264,7 @@ def test_stage5_routes_a_still_inverted_condition_to_analytical_only(
     assert result.discriminating_condition is None
     assert result.condition_omitted_reason == (
         "The discriminating condition failed validation after one correction "
-        f"({POLARITY_INVERTED}); {ANALYTICAL_NOTE}"
+        f"({IssueCode.discriminating_condition_polarity_inverted}); {ANALYTICAL_NOTE}"
     )
     assert result.observation_assessment.disposition == "analytical_only"
     assert client.call_count == 2
@@ -275,7 +284,9 @@ def test_stage5_routes_a_still_state_only_condition_to_analytical_only(
     assert result.discriminating_condition is None
     assert result.condition_omitted_reason == (
         "The discriminating condition failed validation after one correction "
-        f"({NO_CALL}); {ANALYTICAL_NOTE}"
+        f"({IssueCode.discriminating_condition_no_call}); {ANALYTICAL_NOTE}"
     )
-    assert f"{NO_CALL}:" in client.calls[1].user_prompt
+    assert (
+        f"{IssueCode.discriminating_condition_no_call}:" in client.calls[1].user_prompt
+    )
     assert client.call_count == 2

@@ -1,4 +1,4 @@
-"""Without a scenario context, Stage 5 assembly keeps the provider's outcome refs."""
+"""Without a scenario context, Stage 5 assembly takes the outcome refs from the threat."""
 
 from __future__ import annotations
 
@@ -88,16 +88,6 @@ def _refs(unsafe_outcome: UnsafeOutcomeDeclaration | None) -> tuple[list, list]:
         structure,
     )
     return spec.unsafe_outcome_hazard_refs, spec.unsafe_outcome_constraint_refs
-
-
-def test_declared_unsafe_outcome_supplies_the_consequence_refs() -> None:
-    outcome = UnsafeOutcomeDeclaration(
-        semantic_proposition="The refund is reported as processed.",
-        hazard_refs=("H-2",),
-        constraint_refs=("SC-2",),
-    )
-
-    assert _refs(outcome) == (["H-2"], ["SC-2"])
 
 
 def test_absent_unsafe_outcome_falls_back_to_the_threat_refs() -> None:

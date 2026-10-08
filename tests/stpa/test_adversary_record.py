@@ -40,8 +40,8 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     _validate_normal_adversary_response,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    _ContextStimulusDraft,
-    _ContextAdversaryDraft,
+    _ContextAdversarialDraft,
+    _ContextFunctionalAdversaryDraft,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.compile import (
     _materialize_adversary,
@@ -226,47 +226,25 @@ class TestStage5AdversaryWire:
 class TestAdversaryMaterialization:
     """Compiler-owned reach and gain derivation (Phase 3 deviations 7-8)."""
 
-    def _stimulus(self, category: str):
-        return _ContextStimulusDraft(
-            category=category,
-            description="The typed test stimulus.",
-        )
+    @pytest.mark.parametrize(
+        ("kind", "reach"),
+        (
+            ("third_party_via_content", AdversaryReach.retrieved_content),
+            ("malicious_customer", None),
+            ("external_attacker", None),
+        ),
+    )
+    def test_reach_derives_from_the_adversary_kind(self, kind, reach) -> None:
+        draft = _ContextAdversarialDraft(kind=kind, gain="A gain.")
 
-    def _draft(self, kind: str = "malicious_customer", gain: str = "A gain."):
-        return _ContextAdversaryDraft(kind=kind, gain=gain)
-
-    def test_reach_mapping_covers_the_delivery_primitives(self) -> None:
-        expected = {
-            "user_message": AdversaryReach.user_message,
-            "conversation": AdversaryReach.conversation,
-            "conversation_context": AdversaryReach.conversation,
-            "retrieved_content": AdversaryReach.retrieved_content,
-            "tool_content": AdversaryReach.retrieved_content,
-        }
-        for category, reach in expected.items():
-            assert (
-                _materialize_adversary(
-                    self._draft(), self._stimulus(category)
-                ).reaches_target_via
-                is reach
-            ), category
-
-    def test_unmapped_analytical_categories_persist_null_reach(self) -> None:
-        for category in ("file_upload", "traffic_load", "unknown"):
-            assert (
-                _materialize_adversary(
-                    self._draft(), self._stimulus(category)
-                ).reaches_target_via
-                is None
-            ), category
+        assert _materialize_adversary(draft).reaches_target_via is reach
 
     def test_kind_none_gain_is_the_fixed_marker(self) -> None:
         adversary = _materialize_adversary(
-            self._draft(kind="none", gain="echoed prompt text"),
-            self._stimulus("user_message"),
+            _ContextFunctionalAdversaryDraft(kind="none", gain="echoed prompt text")
         )
         assert adversary.gain == FUNCTIONAL_TEST_GAIN
-        assert adversary.gain != "echoed prompt text"
+        assert adversary.reaches_target_via is None
 
 
 class TestNormalPathContentSurface:

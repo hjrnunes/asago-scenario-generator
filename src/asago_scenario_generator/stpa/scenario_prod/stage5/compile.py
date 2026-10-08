@@ -35,9 +35,8 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
 )
 from ..condition_check import (
+    ConditionCheckOutcome,
     ConditionUniverse,
-    check_discriminating_condition,
-    condition_failure_message,
 )
 from ..tool_call_binding import bind_tool_call_condition
 from .wire import (
@@ -45,14 +44,12 @@ from .wire import (
     CausalFactorDeclaration,
     UnsafeOutcomeDeclaration,
     _CausalSourceChoice,
-    _ContextStimulusDraft,
 )
 from .conditions import (
     _resolve_temporal_condition,
 )
 from .validate import (
     FUNCTIONAL_TEST_GAIN,
-    _ADVERSARY_REACH_BY_STIMULUS,
     _normalize_provider_semantic_proposition,
     _validate_intention_factor_handles,
 )
@@ -76,9 +73,14 @@ _CONDITION_DISCARDED_UNGROUNDED = (
 def _discriminating_condition_result(
     condition: DiscriminatingCondition | None,
     universe: ConditionUniverse | None,
-    assessment: ObservationAssessment | None = None,
+    assessment: ObservationAssessment | None,
+    checked: ConditionCheckOutcome | None,
 ) -> tuple[DiscriminatingCondition | None, ConditionCheck | None, str | None]:
-    """Return the accepted condition, its code-owned check, and any omission."""
+    """Return the accepted condition, its code-owned check, and any omission.
+
+    ``checked`` is the passing check validation already ran on ``condition``;
+    validation checks every condition this function would keep.
+    """
 
     if condition is None or universe is None:
         return None, None, None
@@ -86,28 +88,20 @@ def _discriminating_condition_result(
         return None, None, _CONDITION_DISCARDED_ANALYTICAL
     if not universe.grounded:
         return None, None, _CONDITION_DISCARDED_UNGROUNDED
-    outcome = check_discriminating_condition(condition, universe)
-    if outcome.failures:
-        raise ValueError(condition_failure_message(outcome))
-    return outcome.condition, outcome.check, None
+    if checked is None:
+        raise ValueError("discriminating_condition reached compilation unchecked")
+    return checked.condition, checked.check, None
 
 
-def _materialize_adversary(
-    draft: BaseModel, stimulus: _ContextStimulusDraft | None
-) -> Adversary:
+def _materialize_adversary(draft: BaseModel) -> Adversary:
     """Derive the compiler-owned adversary fields (Phase 3 deviations 7-8).
 
-    ``reaches_target_via`` is a function of the stimulus category; an
-    analytical-only delivery (`file_upload`, `traffic_load`, `unknown`) has
-    none of the three primitives, so the persisted reach is null. A
-    ``kind: none`` record ignores the provider's gain text and carries the
-    fixed functional-test marker. The normal wire carries no stimulus, so
-    the reach stays null unless the adversary kind itself asserts content
-    reach; the producer makes no delivery claim the handoff could publish.
+    A ``kind: none`` record ignores the provider's gain text and carries the
+    fixed functional-test marker. The wire carries no stimulus, so the reach
+    stays null unless the adversary kind itself asserts content reach; the
+    producer makes no delivery claim the handoff could publish.
     """
-    if stimulus is not None:
-        reach = _ADVERSARY_REACH_BY_STIMULUS.get(stimulus.category)
-    elif draft.kind is AdversaryKind.third_party_via_content:
+    if draft.kind is AdversaryKind.third_party_via_content:
         reach = AdversaryReach.retrieved_content
     else:
         reach = None
@@ -128,6 +122,7 @@ def _materialize_normal_context_bdi(
     *,
     condition_universe: ConditionUniverse | None = None,
     condition_omitted_reason: str | None = None,
+    condition_outcome: ConditionCheckOutcome | None = None,
 ) -> BDIGenerationResult:
     """Compile a normal-path draft: semantics and evidence, no execution wire.
 
@@ -141,7 +136,7 @@ def _materialize_normal_context_bdi(
     factors = _materialize_context_factors(draft, choices, choices_by_handle, context)
     outcome = draft.unsafe_outcome
     _normalize_provider_semantic_proposition(outcome, context)
-    adversary = _materialize_adversary(draft.adversary, None)
+    adversary = _materialize_adversary(draft.adversary)
     criteria, contract, assessment = _normal_observation_assessment(
         outcome, observation_contract
     )
@@ -149,6 +144,7 @@ def _materialize_normal_context_bdi(
         getattr(outcome, "discriminating_condition", None),
         condition_universe,
         assessment,
+        condition_outcome,
     )
     omitted_reason = condition_omitted_reason or discarded_reason
     binding = bind_tool_call_condition(
@@ -164,10 +160,7 @@ def _materialize_normal_context_bdi(
         attacker_bdi=attacker_bdi,
         causal_factors=factors,
         unsafe_outcome=UnsafeOutcomeDeclaration(
-            condition=None,
             semantic_proposition=outcome.semantic_proposition,
-            hazard_refs=tuple(item.hazard_id for item in context.hazards),
-            constraint_refs=tuple(item.constraint_id for item in context.constraints),
         ),
         adversary=adversary,
         observation_criteria=criteria,

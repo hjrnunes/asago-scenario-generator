@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
-    scope_temporal_placeholder,
-)
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     AbsenceCondition,
     DelayCondition,
@@ -35,56 +32,6 @@ def _temporal_field_issue(detail: str) -> ValidationIssueError:
     return ValidationIssueError(IssueCode.missing_temporal_branch_field, detail)
 
 
-def _normalize_legacy_temporal_fields(payload: dict[str, object]) -> None:
-    """Translate old canonical temporal field names into local draft names."""
-    factors = payload.get("causal_factors")
-    if not isinstance(factors, Sequence) or isinstance(factors, (str, bytes)):
-        return
-    for factor in factors:
-        _normalize_legacy_temporal_factor(factor)
-
-
-def _normalize_legacy_temporal_factor(factor: object) -> None:
-    """Normalize one historical factor mapping in place when possible."""
-    if not isinstance(factor, Mapping):
-        return
-    temporal = factor.get("temporal_condition")
-    if not isinstance(temporal, Mapping):
-        return
-    normalized = dict(temporal)
-    _copy_first_legacy_temporal_field(
-        normalized,
-        "reference_handle",
-        (
-            "reference_ref",
-            "reference_step_id",
-            "reference_step_handle",
-            "source_handle",
-        ),
-    )
-    _copy_first_legacy_temporal_field(
-        normalized,
-        "until_step_handle",
-        ("until_step_id", "until_step"),
-    )
-    if isinstance(factor, dict):
-        factor["temporal_condition"] = normalized
-
-
-def _copy_first_legacy_temporal_field(
-    values: dict[str, object],
-    target_name: str,
-    legacy_names: Sequence[str],
-) -> None:
-    """Copy and remove the first matching historical temporal field."""
-    if target_name in values:
-        return
-    for old_name in legacy_names:
-        if old_name in values:
-            values[target_name] = values.pop(old_name)
-            return
-
-
 def _resolve_temporal_condition(
     draft: _ContextTemporalConditionWire | SemanticCondition | None,
     factor_handle: str,
@@ -97,9 +44,8 @@ def _resolve_temporal_condition(
     """Resolve one provider temporal draft into a canonical condition.
 
     ``factor_order`` is the declaration order used by the later execution
-    projection (``S-1`` … ``S-N`` and the final UCA step).  Structural IDs are
-    accepted only as a compatibility path when they are already present in
-    this exact selected context; no provider-authored identity is invented.
+    projection (``S-1`` … ``S-N`` and the final UCA step).  References resolve
+    only to the supplied handles; no provider-authored identity is invented.
     """
     if draft is None:
         return None
@@ -114,7 +60,7 @@ def _resolve_temporal_condition(
     if reference_handle is None:
         raise _temporal_field_issue("temporal condition requires a reference_handle")
     resolved_reference = _temporal_structural_reference_for_draft(
-        draft, reference_handle, by_handle, choices, context
+        draft, reference_handle, by_handle, context
     )
     return _build_temporal_condition(
         draft,
@@ -129,7 +75,6 @@ def _resolve_temporal_condition(
 def _temporal_structural_reference(
     handle: str,
     by_handle: Mapping[str, _CausalSourceChoice],
-    choices: Sequence[_CausalSourceChoice],
     context: ScenarioGenerationContext,
 ) -> str:
     """Resolve a local structural temporal reference to an exact ID."""
@@ -137,8 +82,6 @@ def _temporal_structural_reference(
         return context.target_control_path.control_action.action_id
     if handle in by_handle:
         return by_handle[handle].source_id
-    if handle in {choice.source_id for choice in choices}:
-        return handle
     raise _temporal_field_issue(
         "temporal reference_handle must name a supplied target_action or cause handle"
     )
@@ -148,27 +91,12 @@ def _temporal_structural_reference_for_draft(
     draft: _ContextTemporalConditionWire,
     reference_handle: str,
     by_handle: Mapping[str, _CausalSourceChoice],
-    choices: Sequence[_CausalSourceChoice],
     context: ScenarioGenerationContext,
 ) -> str | None:
     """Resolve only condition families that carry a structural reference."""
     if draft.type == "ordering":
         return None
-    return _temporal_structural_reference(reference_handle, by_handle, choices, context)
-
-
-def _temporal_step_index(handle: str) -> int | None:
-    """Parse one explicitly named local step, if its prefix is recognized."""
-    if handle.startswith("step_"):
-        prefix = "step_"
-    elif handle.startswith("S-"):
-        prefix = "S-"
-    else:
-        return None
-    try:
-        return int(handle.removeprefix(prefix))
-    except ValueError as exc:
-        raise ValueError("temporal step reference is malformed") from exc
+    return _temporal_structural_reference(reference_handle, by_handle, context)
 
 
 def _temporal_step_reference(
@@ -183,9 +111,6 @@ def _temporal_step_reference(
         return f"S-{factor_order[handle]}"
     if handle in by_handle:
         raise ValueError("temporal step reference must name a declared causal factor")
-    index = _temporal_step_index(handle)
-    if index is not None and 1 <= index <= len(factor_order) + 1:
-        return f"S-{index}"
     raise ValueError(
         "temporal step reference must name target_action or a declared cause handle"
     )
@@ -201,19 +126,10 @@ def _build_temporal_condition(
 ) -> SemanticCondition:
     """Construct one canonical semantic condition from resolved references."""
     if draft.type == "ordering":
-        reference_step = _temporal_step_reference(
-            reference_handle, factor_order, by_handle
-        )
-        if (
-            binding_scope == "outcome"
-            and reference_step == f"S-{len(factor_order) + 1}"
-        ):
-            raise ValueError(
-                "unsafe outcome ordering cannot compare the target action with itself; "
-                "name a distinct declared reference event without inventing one"
-            )
         return OrderingCondition(
-            reference_step_id=reference_step,
+            reference_step_id=_temporal_step_reference(
+                reference_handle, factor_order, by_handle
+            ),
             relation=draft.relation,  # type: ignore[arg-type]
         )
     if draft.type == "delay":
@@ -274,13 +190,27 @@ def _coerce_temporal_value(
             ),
         )
     if isinstance(value, SemanticBindingPlaceholder):
-        value = scope_temporal_placeholder(
-            value,
-            binding_scope,
-            field_name.removesuffix("_ms"),
+        value = _scope_temporal_placeholder(
+            value, binding_scope, field_name.removesuffix("_ms")
         )
     if value is None:
         raise _temporal_field_issue(
             f"{field_name} is required for the selected temporal condition"
         )
     return value
+
+
+def _scope_temporal_placeholder(
+    value: SemanticBindingPlaceholder, scope: str, field_name: str
+) -> SemanticBindingPlaceholder:
+    """Namespace one temporal placeholder to its factor and field.
+
+    Re-scoping is idempotent only for this factor and field: a provider may
+    copy another factor's reference, and that occurrence must still be
+    independently bindable.
+    """
+    expected_prefix = f"SEM-{scope}-{field_name}-"
+    if value.binding_ref.startswith(expected_prefix):
+        return value
+    base = value.binding_ref.removeprefix("SEM-")
+    return value.model_copy(update={"binding_ref": f"{expected_prefix}{base}"})

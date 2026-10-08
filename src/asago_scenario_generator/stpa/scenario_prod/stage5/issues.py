@@ -14,6 +14,13 @@ from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.llm_helpers import ExactFeedbackError
 
+from ..condition_check import (
+    LITERAL_UNSUPPORTED,
+    OPERAND_MISMATCH,
+    OPERATION_MISMATCH,
+    ORDER_UNSCOPED,
+)
+
 
 class IssueCode(StrEnum):
     """Stable code of one Stage 5 validation failure."""
@@ -27,16 +34,12 @@ class IssueCode(StrEnum):
     observation_operation_not_in_inventory = "observation_operation_not_in_inventory"
     discriminating_condition_missing = "discriminating_condition_missing"
     discriminating_condition_check_failed = "discriminating_condition_check_failed"
-    discriminating_condition_operand_mismatch = (
-        "discriminating_condition_operand_mismatch"
-    )
-    discriminating_condition_literal_unsupported = (
-        "discriminating_condition_literal_unsupported"
-    )
-    discriminating_condition_operation_mismatch = (
-        "discriminating_condition_operation_mismatch"
-    )
-    discriminating_condition_order_unscoped = "discriminating_condition_order_unscoped"
+    # condition_check sits below Stage 5 and cannot import this enum, so it
+    # owns these four strings.
+    discriminating_condition_operand_mismatch = OPERAND_MISMATCH
+    discriminating_condition_literal_unsupported = LITERAL_UNSUPPORTED
+    discriminating_condition_operation_mismatch = OPERATION_MISMATCH
+    discriminating_condition_order_unscoped = ORDER_UNSCOPED
     discriminating_condition_polarity_inverted = (
         "discriminating_condition_polarity_inverted"
     )

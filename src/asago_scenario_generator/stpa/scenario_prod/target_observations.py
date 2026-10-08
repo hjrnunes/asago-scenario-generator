@@ -151,10 +151,6 @@ class TargetObservationSnapshot(ClosedCanonicalModel):
             records.append(record)
         return tuple(records)
 
-    def source_texts(self) -> dict[str, str]:
-        """Return exact observation text for comparison-evidence grounding."""
-        return {item.observation_ref: item.content for item in self.observations}
-
     def _content_payload(self) -> dict[str, Any]:
         return {
             "target_profile_digest": self.target_profile_digest,

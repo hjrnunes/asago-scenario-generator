@@ -118,14 +118,6 @@ class ConditionFamily:
     # selects the record whose field sets the limit.
     record_argument: str | None = None
 
-    @property
-    def candidate_record_paths(self) -> tuple[str, ...]:
-        """Return every candidate record path in candidate order."""
-
-        return tuple(
-            path for candidate in self.candidates for path in candidate.record_paths
-        )
-
     def as_log(self) -> dict[str, object]:
         """Return the plain mapping written to the family sidecar."""
 

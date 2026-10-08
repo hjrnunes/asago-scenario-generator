@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import copy
 from dataclasses import dataclass
-import json
 import re
 from collections.abc import Mapping, Sequence
 from typing import Any
@@ -31,20 +30,20 @@ from asago_scenario_generator.stpa.observation_contract import (
     SafeObservableOutcome,
     assess_observation_criteria,
 )
-from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AdversaryKind,
-    AdversaryReach,
 )
 from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
 )
 from ..condition_check import (
+    ConditionCheckOutcome,
     ConditionUniverse,
     build_condition_universe,
+    target_observation_fact_values,
     check_discriminating_condition,
     condition_failure_message,
     condition_findings,
@@ -53,11 +52,8 @@ from ..condition_check import (
 from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
 from .wire import (
-    StimulusCategory,
-    UnsafeOutcomeDeclaration,
     _CausalSourceChoice,
     _ContextAdversarialDraft,
-    _ContextAdversaryDraft,
     _ContextAttackerBDIDraft,
     _ContextFunctionalAdversaryDraft,
     _ContextSemanticOutcomeDraft,
@@ -89,28 +85,19 @@ _PROSE_STRUCTURAL_REFERENCE = re.compile(
 )
 
 
-_ADVERSARY_REACH_BY_STIMULUS = {
-    StimulusCategory.user_message: AdversaryReach.user_message,
-    StimulusCategory.conversation: AdversaryReach.conversation,
-    StimulusCategory.conversation_context: AdversaryReach.conversation,
-    StimulusCategory.retrieved_content: AdversaryReach.retrieved_content,
-    StimulusCategory.tool_content: AdversaryReach.retrieved_content,
-}
-
-
 # Phase 3 deviation 8: a ``kind: none`` record is a functional test whose
 # gain is compiler-owned bookkeeping, never provider text.
 FUNCTIONAL_TEST_GAIN = "Functional test: no adversary gains from this unsafe outcome."
 
 
-def normalize_gain_text(value: str) -> str:
+def _normalize_gain_text(value: str) -> str:
     """Collapse a gain or constraint sentence for substring comparison."""
     collapsed = re.sub(r"\s+", " ", value.strip().casefold())
     return collapsed.strip(" \t.,;:!\"'()")
 
 
 def _validate_adversary_gain(
-    adversary: _ContextAdversaryDraft,
+    adversary: _ContextAdversarialDraft,
     context: ScenarioGenerationContext,
 ) -> None:
     """Reject a gain that restates a governing constraint instead of a benefit."""
@@ -119,9 +106,9 @@ def _validate_adversary_gain(
             "adversarial scenarios require a non-empty gain; functional "
             "kind 'none' must omit gain"
         )
-    normalized_gain = normalize_gain_text(adversary.gain)
+    normalized_gain = _normalize_gain_text(adversary.gain)
     for constraint in context.constraints:
-        if normalized_gain in normalize_gain_text(constraint.description):
+        if normalized_gain in _normalize_gain_text(constraint.description):
             raise ValueError(
                 f"adversary gain restates constraint {constraint.constraint_id}: "
                 "say what the adversary gets, not what the constraint forbids"
@@ -138,6 +125,7 @@ def _validate_normal_provider_payload(
     execution_target_profile: ExecutionTargetProfile | None = None,
     target_observations: TargetObservationSnapshot | None = None,
     condition_required: bool = True,
+    condition_universe: ConditionUniverse | None = None,
 ) -> _NormalDraftCheck:
     """Validate normal-path scenario semantics; never artifact feasibility.
 
@@ -195,19 +183,19 @@ def _validate_normal_provider_payload(
         value.causal_factors, choices, context
     )
     _validate_context_condition_reference_closure(
-        value.causal_factors,
-        None,
-        choices,
-        context,
+        value.causal_factors, choices, context
     )
+    condition_outcome = None
     if observation_contract is not None:
         safe_outcome = getattr(outcome, "safe_observable_outcome", None)
         # Last, so the correction for a draft that fails another check as well
         # names that check: a failed condition can still be dropped afterwards.
-        _validate_discriminating_condition(
+        condition_outcome = _validate_discriminating_condition(
             getattr(outcome, "discriminating_condition", None),
             assessment,
-            build_condition_universe(
+            condition_universe
+            if condition_universe is not None
+            else build_condition_universe(
                 execution_target_profile=execution_target_profile,
                 target_operation=target_operation,
                 target_observations=target_observations,
@@ -224,7 +212,11 @@ def _validate_normal_provider_payload(
                 safe_outcome=safe_outcome,
             ),
         )
-    return _NormalDraftCheck(draft=value, normalizations=tuple(normalizations))
+    return _NormalDraftCheck(
+        draft=value,
+        normalizations=tuple(normalizations),
+        condition_outcome=condition_outcome,
+    )
 
 
 @dataclass(frozen=True)
@@ -235,6 +227,8 @@ class _NormalDraftCheck:
     normalizations: tuple[Stage5Normalization, ...]
     # Where a condition-less command attempt was moved; None when it was not.
     route: str | None = None
+    # The check of the draft's condition; None when no condition was checked.
+    condition_outcome: ConditionCheckOutcome | None = None
 
 
 def _normal_adversary_and_outcome(
@@ -459,7 +453,7 @@ def _validate_safe_outcome_refs(
     normalizations: list[Stage5Normalization] | None,
 ) -> SafeObservableOutcome:
     """Require supplied record and fact references, moving record paths to facts."""
-    allowed_facts = _target_observation_fact_refs(target_observations)
+    allowed_facts = set(target_observation_fact_values(target_observations))
     if outcome.record_refs:
         allowed_records = (
             {item.observation_ref for item in target_observations.observations}
@@ -572,21 +566,22 @@ def _validate_discriminating_condition(
     required: bool = True,
     named_operations: frozenset[str] = frozenset(),
     claim: ConditionClaim | None = None,
-) -> None:
+) -> ConditionCheckOutcome | None:
     """Require a resolvable, record-consistent condition for executable scenarios.
 
     A failure here is a result-validator failure, so the existing Stage 5
     validation retry delivers the exact message as the one correction call.
     A condition on an analytical-only or ungrounded scenario is not an error:
     materialization discards it and records why. ``claim`` holds the
-    scenario fields the condition must agree with.
+    scenario fields the condition must agree with. Returns the passing check,
+    or ``None`` when no condition was checked.
     """
 
     if assessment.disposition == "analytical_only" or not universe.grounded:
-        return
+        return None
     if condition is None:
         _require_condition(required)
-        return
+        return None
     outcome = check_discriminating_condition(condition, universe)
     message = condition_failure_message(outcome)
     if message is not None:
@@ -598,6 +593,7 @@ def _validate_discriminating_condition(
         named_operations=named_operations,
         claim=claim,
     )
+    return outcome
 
 
 def _require_condition(required: bool) -> None:
@@ -722,41 +718,6 @@ def _stage5_observed_operation_names(
     return ()
 
 
-def _target_observation_fact_refs(
-    target_observations: TargetObservationSnapshot | None,
-) -> set[str]:
-    """Return deterministic fact references exposed by target observations."""
-
-    if target_observations is None:
-        return set()
-    refs: set[str] = set()
-    for observation in target_observations.observations:
-        prefix = observation.observation_ref
-        if observation.source_arguments:
-            refs.update(
-                f"{prefix}.arguments.{name}" for name in observation.source_arguments
-            )
-        if observation.content_format != "json":
-            continue
-        try:
-            content = json.loads(observation.content)
-        except (TypeError, ValueError):
-            continue
-        _collect_json_fact_refs(content, prefix, refs)
-    return refs
-
-
-def _collect_json_fact_refs(value: object, prefix: str, refs: set[str]) -> None:
-    """Collect object-key paths without inventing array or scalar aliases."""
-
-    if not isinstance(value, Mapping):
-        return
-    for key, child in value.items():
-        path = f"{prefix}.{key}"
-        refs.add(path)
-        _collect_json_fact_refs(child, path, refs)
-
-
 def _validate_attacker_bdi_cardinality(
     attacker_bdi: _ContextAttackerBDIDraft,
     adversary: BaseModel,
@@ -804,17 +765,15 @@ def _validate_normal_adversary_response(
 
 def _validate_context_condition_reference_closure(
     factor_drafts: Sequence[BaseModel],
-    outcome_condition: object,
     choices: Sequence[_CausalSourceChoice],
     context: ScenarioGenerationContext,
 ) -> None:
-    """Keep every structural condition reference in the exported closure.
+    """Keep every structural temporal reference in the exported closure.
 
     Stage 6 exports declared causal-factor sources and the selected action.
     The provider prompt may explain a larger path slice, but an undeclared
     sibling process-model identity cannot become a condition reference after
-    Stage 5 succeeds.  The normal path passes ``outcome_condition=None``
-    because its unsafe outcome carries no executable condition.
+    Stage 5 succeeds.
     """
     choices_by_handle = {choice.handle: choice for choice in choices}
     declared_refs = {
@@ -827,11 +786,6 @@ def _validate_context_condition_reference_closure(
             declared_refs,
             owner=f"causal factor {factor.source_handle}",
         )
-    _validate_one_context_condition_reference(
-        outcome_condition,
-        declared_refs,
-        owner="unsafe outcome",
-    )
 
 
 def _validate_one_context_condition_reference(
@@ -1070,33 +1024,4 @@ def _prune_undeclared_handles(
                 normalized=kept,
                 reason="undeclared_intention_handles_pruned",
             )
-        )
-
-
-def _validate_unsafe_outcome_for_target(
-    unsafe_outcome: UnsafeOutcomeDeclaration,
-    uca_type: UCAType,
-    control_action_id: str,
-) -> None:
-    """Keep provider-authored unsafe semantics inside the requested ICA."""
-    accepted = {
-        UCAType.not_provided: {"action_presence"},
-        UCAType.incorrect: {"action_value", "state_value"},
-        UCAType.wrong_timing: {"ordering", "delay", "window", "absence"},
-        UCAType.wrong_duration: {"duration"},
-    }
-    condition = unsafe_outcome.condition
-    if condition.type not in accepted[uca_type]:
-        raise ValueError(
-            f"unsafe outcome condition '{condition.type}' is incompatible with "
-            f"the selected UCA '{uca_type.value}'"
-        )
-    # A typed action condition is the one place the provider may repeat the
-    # target action identity.  It remains semantic condition data, never a
-    # causal-source selection; deterministic code requires exact equality.
-    condition_action = getattr(condition, "control_action_id", None)
-    if condition_action is not None and condition_action != control_action_id:
-        raise ValueError(
-            "unsafe outcome condition control_action_id must equal the selected "
-            "target action"
         )

@@ -25,6 +25,7 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 )
 from ..condition_family import ConditionFamily, family_prompt_view
 from ..condition_check import (
+    ConditionUniverse,
     build_condition_universe,
     condition_fact_listing,
 )
@@ -53,6 +54,7 @@ def build_context_bdi_prompts(
     target_observations: TargetObservationSnapshot | None = None,
     observation_contract: ObservationContract | None = None,
     condition_family: ConditionFamily | None = None,
+    condition_universe: ConditionUniverse | None = None,
 ) -> tuple[str, str]:
     """Render Stage 5 from only the immutable context and output contract.
 
@@ -60,11 +62,8 @@ def build_context_bdi_prompts(
     carries no stimulus, delivery or executable-condition demands. A
     ``condition_family`` hint renders only where the condition is requested.
     """
-    scenario_context_yaml = yaml.dump(
+    scenario_context_yaml = _yaml_dump(
         _stage5_prompt_context(scenario_context),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
     )
     source_choices = _causal_source_choices(scenario_context)
     if not source_choices:
@@ -87,11 +86,12 @@ def build_context_bdi_prompts(
     has_target_observations = target_observations is not None
     # The response schema carries the condition key only with an observation
     # contract, so the prompt describes it under the same gate.
-    condition_universe = build_condition_universe(
-        execution_target_profile=execution_target_profile,
-        target_operation=target_operation,
-        target_observations=target_observations,
-    )
+    if condition_universe is None:
+        condition_universe = build_condition_universe(
+            execution_target_profile=execution_target_profile,
+            target_operation=target_operation,
+            target_observations=target_observations,
+        )
     has_condition_references = (
         observation_contract is not None and condition_universe.grounded
     )
@@ -158,11 +158,8 @@ def _observation_contract_prompt_values(
 ) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
     if observation_contract is None:
         return "No observation contract was supplied.", (), ()
-    contract_yaml = yaml.dump(
+    contract_yaml = _yaml_dump(
         observation_contract.model_dump(mode="json", exclude_none=True),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
     )
     available_kinds = tuple(
         item.kind for item in observation_contract.capture if item.available
@@ -451,7 +448,7 @@ def _temporal_reference_choices_yaml(
         }
         for choice in choices
     )
-    return yaml.dump(
+    return _yaml_dump(
         {
             "choices": references,
             "outcome_ordering_reference_handles": [choice.handle for choice in choices],
@@ -464,9 +461,6 @@ def _temporal_reference_choices_yaml(
                 "structural IDs here."
             ),
         },
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
     )
 
 
