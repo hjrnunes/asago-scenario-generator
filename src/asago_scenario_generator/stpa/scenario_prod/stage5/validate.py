@@ -181,10 +181,7 @@ def _validate_normal_provider_payload(
         value.causal_factors, choices, context
     )
     _validate_context_condition_reference_closure(
-        value.causal_factors,
-        None,
-        choices,
-        context,
+        value.causal_factors, choices, context
     )
     if observation_contract is not None:
         safe_outcome = getattr(outcome, "safe_observable_outcome", None)
@@ -790,17 +787,15 @@ def _validate_normal_adversary_response(
 
 def _validate_context_condition_reference_closure(
     factor_drafts: Sequence[BaseModel],
-    outcome_condition: object,
     choices: Sequence[_CausalSourceChoice],
     context: ScenarioGenerationContext,
 ) -> None:
-    """Keep every structural condition reference in the exported closure.
+    """Keep every structural temporal reference in the exported closure.
 
     Stage 6 exports declared causal-factor sources and the selected action.
     The provider prompt may explain a larger path slice, but an undeclared
     sibling process-model identity cannot become a condition reference after
-    Stage 5 succeeds.  The normal path passes ``outcome_condition=None``
-    because its unsafe outcome carries no executable condition.
+    Stage 5 succeeds.
     """
     choices_by_handle = {choice.handle: choice for choice in choices}
     declared_refs = {
@@ -813,11 +808,6 @@ def _validate_context_condition_reference_closure(
             declared_refs,
             owner=f"causal factor {factor.source_handle}",
         )
-    _validate_one_context_condition_reference(
-        outcome_condition,
-        declared_refs,
-        owner="unsafe outcome",
-    )
 
 
 def _validate_one_context_condition_reference(
