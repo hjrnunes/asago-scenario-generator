@@ -7,6 +7,8 @@ import pytest
 from tests.phrase_tables import (
     CASES,
     KINDS,
+    OBLIGATION_AWARE_BUILDS,
+    OBLIGATION_AWARE_PROMPTS_DIR,
     PhraseCheck,
     failures,
     load_table,
@@ -37,6 +39,15 @@ def test_phrase_table_is_well_formed(path) -> None:
             assert phrases and len(set(map(str, phrases))) == len(phrases)
             nested = kind == "ordered"
             assert all(isinstance(p, list) == nested for p in phrases)
+
+
+@pytest.mark.parametrize("case", sorted(OBLIGATION_AWARE_BUILDS))
+def test_obligation_aware_case_renders_the_builder_output(case: str) -> None:
+    build, templates = OBLIGATION_AWARE_BUILDS[case]
+    assert all(
+        template_path(t).parent == OBLIGATION_AWARE_PROMPTS_DIR for t in templates
+    )
+    assert tuple(CASES[case](template) for template in templates) == build()
 
 
 def test_failures_name_the_table_case_and_phrase() -> None:
