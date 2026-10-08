@@ -54,7 +54,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Container, Iterable
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Union
 
@@ -1340,17 +1340,12 @@ class ObligationRepairPlan:
 
 @dataclass(frozen=True)
 class DroppedObligation:
-    """An obligation the repair dropped because its span stays outside the rule.
-
-    ``constraint_dropped`` is true when the drop left its constraint without
-    any obligation, so the merge dropped the constraint too.
-    """
+    """An obligation the repair dropped because its span stays outside the rule."""
 
     constraint_id: str
     obligation_id: str
     rule_span: str
     rule: str
-    constraint_dropped: bool = False
 
     @property
     def identity(self) -> str:
@@ -2438,23 +2433,6 @@ def _merge_selected_constraints(
     return merged_by_constraint
 
 
-def _drop_emptied_constraints(
-    merged_by_constraint: dict[str, list[RepairObligation]],
-    dropped: list[DroppedObligation],
-) -> set[str]:
-    """Mark and return the constraints whose last obligation was dropped."""
-    emptied = {
-        constraint_id
-        for constraint_id, entries in merged_by_constraint.items()
-        if not entries and any(item.constraint_id == constraint_id for item in dropped)
-    }
-    dropped[:] = [
-        replace(item, constraint_dropped=item.constraint_id in emptied)
-        for item in dropped
-    ]
-    return emptied
-
-
 def _constraint_payload_with_obligations(
     constraint: SecurityConstraint,
     merged_by_constraint: dict[str, list[RepairObligation]],
@@ -2489,9 +2467,9 @@ def merge_obligation_repair(
     A corrected ``rule_span`` that a unique whitespace or ellipsis match maps
     onto the rule is replaced by the rule text it denotes and appended to
     *span_repairs*.  A corrected entry whose ``rule_span`` still is not part
-    of the rule is dropped, and a constraint left without any obligation is
-    dropped with it.  Both are appended to *dropped*.  Both lists are emptied
-    first, so the caller can record them.
+    of the rule is dropped and appended to *dropped*; its constraint stays,
+    even with no obligation left.  Both lists are emptied first, so the caller
+    can record them.
     """
     dropped = dropped if dropped is not None else []
     dropped.clear()
@@ -2504,11 +2482,9 @@ def merge_obligation_repair(
     merged_by_constraint = _merge_selected_constraints(
         plan, selected_constraint_order, by_id, dropped, span_repairs
     )
-    emptied = _drop_emptied_constraints(merged_by_constraint, dropped)
     merged_constraints = [
         _constraint_payload_with_obligations(constraint, merged_by_constraint)
         for constraint in plan.prior.security_constraints
-        if constraint.constraint_id not in emptied
     ]
     return LossAnalysisDraft.model_validate(
         {
@@ -3148,24 +3124,15 @@ def _record_dropped_obligations(
 ) -> None:
     """Record each obligation dropped for a span outside its rule."""
     for item in dropped:
-        consequence = (
-            "; its constraint had no other obligation, so the constraint was "
-            "dropped with it"
-            if item.constraint_dropped
-            else ""
-        )
         _record_warnings(
             (
                 f"{step} rule_span {item.identity} dropped: "
-                f"{item.rule_span!r} does not occur in the rule{consequence}",
+                f"{item.rule_span!r} does not occur in the rule",
             ),
             normalization_warnings,
         )
         if repair_record is None:
             continue
-        applied: dict[str, Any] = {"dropped_entries": [item.obligation_id]}
-        if item.constraint_dropped:
-            applied["constraint_dropped"] = item.constraint_id
         repair_record.add(
             stage=step,
             attempt="repair",
@@ -3174,10 +3141,10 @@ def _record_dropped_obligations(
             reason=(
                 "the corrected rule_span is still not a contiguous substring "
                 "of the constraint rule (compared case-insensitively), so the "
-                f"obligation was dropped{consequence}."
+                "obligation was dropped."
             ),
             proposed={"rule_span": item.rule_span, "rule": item.rule},
-            applied=applied,
+            applied={"dropped_entries": [item.obligation_id]},
             outcome="dropped",
             raw_step=step + _REPAIR_STEP_SUFFIX,
         )

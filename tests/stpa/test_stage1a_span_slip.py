@@ -229,9 +229,10 @@ def test_a_corrected_span_that_a_repair_maps_is_kept(tmp_path) -> None:
     ) in warnings
 
 
-def test_a_constraint_that_loses_its_last_obligation_is_dropped(tmp_path) -> None:
+def test_a_constraint_that_loses_its_last_obligation_is_kept(tmp_path) -> None:
     risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN)])
     repair = _obligation_repair("SC-1", [_entry("O1", UNMAPPABLE_SPAN)])
+    warnings: list[str] = []
     client = MockLLMClient()
     client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
     client.set_response_for(ObligationRepairResponse, repair)
@@ -241,17 +242,43 @@ def test_a_constraint_that_loses_its_last_obligation_is_dropped(tmp_path) -> Non
         use_case_text=_USE_CASE,
         risk_cards=_occiai_cards(),
         run_dir=tmp_path,
+        normalization_warnings=warnings,
     )
 
     assert [c.constraint_id for c in result.security_constraints] == [
-        f"SC-{number}" for number in range(2, 8)
+        f"SC-{number}" for number in range(1, 8)
     ]
+    assert result.security_constraints[0].obligations == []
     (dropped,) = _dropped_entries(tmp_path)
-    assert dropped["applied"] == {
-        "dropped_entries": ["O1"],
-        "constraint_dropped": "SC-1",
-    }
-    assert "constraint was dropped" in dropped["reason"]
+    assert dropped["applied"] == {"dropped_entries": ["O1"]}
+    assert dropped["reason"].endswith("so the obligation was dropped.")
+    (warning,) = [w for w in warnings if "rule_span SC-1/O1 dropped" in w]
+    assert warning.endswith("does not occur in the rule")
+
+
+def test_a_gap_constraint_left_without_obligations_keeps_the_chain_complete(
+    tmp_path,
+) -> None:
+    gap = _gap_constraint_defect_response()
+    gap["security_constraints"][0]["obligations"] = [_entry("O1", UNMAPPABLE_SPAN)]
+    repair = _obligation_repair("SC-8", [_entry("O1", UNMAPPABLE_SPAN)])
+    client = MockLLMClient()
+    client.set_response_for(LossAnalysisDraft, [_complete_risk_response(), gap])
+    client.set_response_for(ObligationRepairResponse, repair)
+
+    result = derive_loss_analysis(
+        llm_client=client,
+        use_case_text=_USE_CASE,
+        risk_cards=_occiai_cards(),
+        run_dir=tmp_path,
+    )
+
+    gap_constraint = result.security_constraints[7]
+    assert gap_constraint.constraint_id == "SC-8"
+    assert gap_constraint.related_hazards == ["H-8"]
+    assert gap_constraint.obligations == []
+    (dropped,) = _dropped_entries(tmp_path)
+    assert (dropped["stage"], dropped["identity"]) == ("gap_analysis", "SC-8/O1")
 
 
 def test_gap_analysis_drops_an_obligation_whose_span_stays_unmapped(tmp_path) -> None:

@@ -491,8 +491,9 @@ before. The corrected entry's `rule_span` gets the same mapping; a mapped span
 is a `rule_span_repaired` entry with `attempt: repair` and a normalization
 warning. When the corrected entry's `rule_span` still is not part of the rule
 and nothing else in the entry broke the repair's scope, code drops that
-obligation instead of stopping the run. A constraint left with no obligation is
-dropped with it. Each drop is a `rule_span_dropped` entry (outcome `dropped`,
+obligation instead of stopping the run. A constraint left with no obligation
+stays in the graph with an empty `obligations` list, so its hazard stays
+covered. Each drop is a `rule_span_dropped` entry (outcome `dropped`,
 the span and the rule under `proposed`) in `loss-analysis-repair.yaml` and a
 normalization warning; the dropped obligation has no `repair` entry. The drop
 applies to `risk_derivation` and `gap_analysis`; the graph revision keeps its
