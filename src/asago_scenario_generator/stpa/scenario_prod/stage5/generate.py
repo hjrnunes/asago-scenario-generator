@@ -56,9 +56,6 @@ from .sources import (
     _causal_source_choices,
 )
 from .condition_routing import route_without_condition
-from .conditions import (
-    _normalize_legacy_temporal_fields,
-)
 from .records import (
     _write_stage5_normalization_record,
 )
@@ -439,7 +436,6 @@ def _call_bdi_with_bounded_length_retry(
 def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseModel:
     """Parse the contextual provider payload without compiler-owned fields.
 
-    Historical temporal field spellings remain a narrow parse convenience.
     Route/factor migration is deliberately not performed: the context wire
     contract exposes no route, factor-route binding or delivery selector.
     """
@@ -452,9 +448,6 @@ def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseM
         payload = json.loads(_decode_provider_json_text(content))
     else:
         return parse_llm_result(result, response_format)
-    if isinstance(payload, Mapping):
-        payload = dict(payload)
-        _normalize_legacy_temporal_fields(payload)
     return response_format.model_validate(payload)
 
 

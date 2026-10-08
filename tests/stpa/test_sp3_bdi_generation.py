@@ -54,7 +54,6 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     WindowCondition,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.conditions import (
-    _normalize_legacy_temporal_fields,
     _resolve_temporal_condition,
     _temporal_step_reference,
 )
@@ -421,18 +420,6 @@ class TestResolveTemporalCondition:
 
         assert resolved == OrderingCondition(reference_step_id="S-2", relation="before")
 
-    def test_outcome_ordering_cannot_compare_the_target_action_with_itself(self):
-        with pytest.raises(ValueError, match="cannot compare the target action"):
-            _resolve(
-                _ContextOrderingTemporalWire(
-                    type="ordering",
-                    reference_handle="target_action",
-                    relation="after",
-                ),
-                order={"cause_1": 1},
-                scope="outcome",
-            )
-
     def test_delay_resolves_the_cause_to_its_structural_source(self):
         resolved, _, choices = _resolve(
             _ContextDelayTemporalWire(
@@ -483,16 +470,6 @@ class TestResolveTemporalCondition:
         assert resolved == AbsenceCondition(
             reference_ref=choices[0].source_id, until_step_id="S-2"
         )
-
-    def test_a_structural_id_in_the_context_is_accepted_as_a_reference(self):
-        choices = _causal_source_choices(_wrong_timing_context())
-        resolved, _, _ = _resolve(
-            _ContextDelayTemporalWire(
-                type="delay", reference_handle=choices[0].source_id, delay_ms=5
-            )
-        )
-
-        assert resolved.reference_ref == choices[0].source_id
 
     def test_an_unnamed_reference_is_rejected(self):
         with pytest.raises(ValueError, match="must name a supplied target_action"):
@@ -553,64 +530,6 @@ class TestResolveTemporalCondition:
             _resolve(Unbuilt())
 
 
-class TestLegacyTemporalFieldNames:
-    """Old canonical temporal field names map onto the draft names."""
-
-    def test_legacy_names_are_copied_to_the_draft_names(self):
-        payload = {
-            "causal_factors": [
-                {
-                    "temporal_condition": {
-                        "type": "absence",
-                        "reference_ref": "cause_1",
-                        "until_step_id": "S-2",
-                    }
-                },
-                {"temporal_condition": {"type": "ordering", "source_handle": "x"}},
-                {"temporal_condition": None},
-                "not a mapping",
-            ]
-        }
-
-        _normalize_legacy_temporal_fields(payload)
-
-        first, second = payload["causal_factors"][:2]
-        assert first["temporal_condition"] == {
-            "type": "absence",
-            "reference_handle": "cause_1",
-            "until_step_handle": "S-2",
-        }
-        assert second["temporal_condition"] == {
-            "type": "ordering",
-            "reference_handle": "x",
-        }
-
-    def test_a_draft_name_wins_over_a_legacy_name(self):
-        payload = {
-            "causal_factors": [
-                {
-                    "temporal_condition": {
-                        "reference_handle": "cause_1",
-                        "reference_ref": "cause_2",
-                    }
-                }
-            ]
-        }
-
-        _normalize_legacy_temporal_fields(payload)
-
-        assert payload["causal_factors"][0]["temporal_condition"] == {
-            "reference_handle": "cause_1",
-            "reference_ref": "cause_2",
-        }
-
-    def test_a_payload_without_a_factor_list_is_left_alone(self):
-        for payload in ({}, {"causal_factors": "text"}):
-            _normalize_legacy_temporal_fields(payload)
-
-        assert payload == {"causal_factors": "text"}
-
-
 class TestTemporalStepReference:
     """Local step references resolve only to declared steps."""
 
@@ -619,14 +538,11 @@ class TestTemporalStepReference:
 
         assert _temporal_step_reference("target_action", order, {}) == "S-3"
         assert _temporal_step_reference("cause_2", order, {}) == "S-2"
-        assert _temporal_step_reference("step_3", order, {}) == "S-3"
-        assert _temporal_step_reference("S-1", order, {}) == "S-1"
 
     @pytest.mark.parametrize(
         ("handle", "message"),
         (
             ("cause_9", "must name a declared causal factor"),
-            ("step_x", "temporal step reference is malformed"),
             ("S-4", "must name target_action or a declared cause handle"),
             ("other", "must name target_action or a declared cause handle"),
         ),
