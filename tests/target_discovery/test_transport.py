@@ -35,8 +35,8 @@ class _PaginatedRequestParams:
 
 def _install_sdk(monkeypatch: pytest.MonkeyPatch, sdk: _Sdk) -> None:
     @asynccontextmanager
-    async def sse_client(url: str, headers: dict[str, str]):
-        sdk.connections.append({"url": url, "headers": headers})
+    async def sse_client(url: str, headers: dict[str, str], **kwargs: Any):
+        sdk.connections.append({"url": url, "headers": headers, **kwargs})
         yield ("read-stream", "write-stream")
 
     class ClientSession:
@@ -95,6 +95,18 @@ class TestAdapterConstruction:
 
         assert sdk.connections[0]["headers"] == {"Authorization": "Bearer token"}
         assert sdk.connections[1]["headers"] == {}
+
+    def test_timeout_reaches_the_sse_client(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        sdk = _Sdk()
+        _install_sdk(monkeypatch, sdk)
+
+        HttpMcpInventoryAdapter("http://host/sse", timeout=12.5).list_tools()
+        HttpMcpInventoryAdapter("http://host/sse").list_tools()
+
+        assert sdk.connections[0]["timeout"] == 12.5
+        assert sdk.connections[1]["timeout"] == 30.0
 
 
 class TestListTools:

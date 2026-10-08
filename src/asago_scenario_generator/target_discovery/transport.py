@@ -59,7 +59,9 @@ class HttpMcpInventoryAdapter:
                 "live MCP scanning requires the optional 'target-discovery' extra"
             ) from exc
         try:
-            async with sse_client(self._server_url, headers=self._headers) as streams:
+            async with sse_client(
+                self._server_url, headers=self._headers, timeout=self._timeout
+            ) as streams:
                 async with ClientSession(*streams) as session:
                     await session.initialize()
                     # The installed SDK exposes paging through the
