@@ -39,7 +39,7 @@ one of two ways, and `capability-kc-decision.yaml` records both:
    A fact-decided code overrides the vote. The target profile never enters
    the Stage 1b request; the request stays the use-case text alone.
 2. **Model vote.** Every other code comes from the model. Stage 1b sends the
-   same request `KC_VOTE_SAMPLES` (9) times and keeps a code that at least
+   same request `KC_VOTE_SAMPLES` (18) times and keeps a code that at least
    `KC_VOTE_SHARE` (one third) of the successful draws select. The threshold
    sits below a majority because a sampled draw omits a grounded code more
    often than it invents one. A draw that fails after its one correction is

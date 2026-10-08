@@ -2659,7 +2659,7 @@ def test_default_capability_preparation_uses_the_run_client(
             call["target_profile"],
         )
         for call in calls
-    ] == [(client, inputs.use_case, inputs.output_dir, 0.25, 9, target)]
+    ] == [(client, inputs.use_case, inputs.output_dir, 0.25, 18, target)]
 
 
 def test_capability_preparation_receives_the_target_beside_the_systemic_view(

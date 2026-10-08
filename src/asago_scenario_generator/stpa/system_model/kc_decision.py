@@ -33,9 +33,11 @@ from asago_scenario_generator.stpa.models.execution_classification import (
 # A code that one draw in three selects is kept: the prompt asks for every
 # grounded code, and a sampled draw more often omits a code than invents one.
 KC_VOTE_SHARE = Fraction(1, 3)
-# Draws per product Stage 1b: with one third, a code selected in half of the
-# single draws is kept about nine times in ten (lane p-kc baseline).
-KC_VOTE_SAMPLES = 9
+# Draws per product Stage 1b. Draws within one run agree with each other more
+# than independent draws would, so the vote needs more of them than a
+# binomial estimate suggests; nine draws left two targets below a mean
+# pairwise Jaccard of 0.9 across runs.
+KC_VOTE_SAMPLES = 18
 
 DATABASE_READ_ONLY = "KC6.3.1"
 DATABASE_FULL_CRUD = "KC6.3.2"
