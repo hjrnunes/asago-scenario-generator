@@ -242,7 +242,7 @@ class TestEnrichControlActions:
             loss_analysis=single_hazard_loss_analysis(),
             control_structure=structure,
             profile=_profile(),
-            interpreter_factory=_VerifiedInterpreter,
+            interpreter=_VerifiedInterpreter(),
         )
 
         action = next(
@@ -267,7 +267,7 @@ class TestEnrichControlActions:
             loss_analysis=single_hazard_loss_analysis(),
             control_structure=_control_structure(),
             profile=_profile(),
-            interpreter_factory=_VerifiedInterpreter,
+            interpreter=_VerifiedInterpreter(),
         )
 
         record = enrichment.record
@@ -299,7 +299,7 @@ class TestEnrichControlActions:
             loss_analysis=single_hazard_loss_analysis(),
             control_structure=_control_structure(),
             profile=_profile(),
-            interpreter_factory=_NoVerifierEvidence,
+            interpreter=_NoVerifierEvidence(),
         )
 
         action = enrichment.control_structure.responsibilities[0].control_actions[0]
@@ -314,7 +314,7 @@ class TestEnrichControlActions:
             loss_analysis=single_hazard_loss_analysis(),
             control_structure=_control_structure(),
             profile=_profile(),
-            interpreter_factory=_UnsupportedInterpreter,
+            interpreter=_UnsupportedInterpreter(),
         )
 
         assert (
@@ -346,7 +346,7 @@ class TestEnrichControlActions:
                 loss_analysis=single_hazard_loss_analysis(),
                 control_structure=_control_structure(),
                 profile=_profile(),
-                interpreter_factory=_InventedInterpreter,
+                interpreter=_InventedInterpreter(),
             )
 
     def test_provider_failure_is_fatal(self):
@@ -359,7 +359,7 @@ class TestEnrichControlActions:
                 loss_analysis=single_hazard_loss_analysis(),
                 control_structure=_control_structure(),
                 profile=_profile(),
-                interpreter_factory=_BrokenInterpreter,
+                interpreter=_BrokenInterpreter(),
             )
 
 

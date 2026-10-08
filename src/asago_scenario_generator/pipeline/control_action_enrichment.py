@@ -113,7 +113,7 @@ def enrich_control_actions(
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
     profile: ExecutionTargetProfile,
-    interpreter_factory: Any,
+    interpreter: Any,
 ) -> ControlActionEnrichment:
     """Match observed operations to the logical control actions and enrich.
 
@@ -143,7 +143,7 @@ def enrich_control_actions(
     rows, diagnostics = realize_baseline_rows(
         baseline,
         observations,
-        interpreter_factory() if observations else None,
+        interpreter if observations else None,
     )
     enriched_structure, enriched_ids, record_rows = _specialize_supported_actions(
         control_structure,
