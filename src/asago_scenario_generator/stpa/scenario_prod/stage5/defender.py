@@ -58,10 +58,7 @@ def populate_defender_bdi(
         for pm in resp.process_model_parts
     ]
 
-    desires = [
-        _defender_desire(resp.resp_id, constraint)
-        for constraint in _responsibility_desire_constraints(constraints)
-    ]
+    desires = [_defender_desire(resp.resp_id, constraint) for constraint in constraints]
     if not desires:
         desires = [
             DefenderDesire(
@@ -105,15 +102,6 @@ def _populate_coordination_bdi(
         desires=desires,
         intentions=_coordination_intentions(responsibilities),
     )
-
-
-def _responsibility_desire_constraints(
-    selected: Sequence[ScenarioConstraint],
-) -> tuple[ScenarioConstraint, ...]:
-    """Return exact selected constraints for a contextual scenario."""
-    if selected:
-        return tuple(selected)
-    return ()
 
 
 def _defender_desire(
