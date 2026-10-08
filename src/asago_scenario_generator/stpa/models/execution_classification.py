@@ -24,9 +24,7 @@ from asago_scenario_generator.models.canonical import (
 
 
 EXECUTION_TARGET_PROFILE_SCHEMA_VERSION = "execution-target-profile-v1"
-EXECUTION_TARGET_PROFILE_DIGEST_FRAME = EXECUTION_TARGET_PROFILE_SCHEMA_VERSION
 MCP_INVENTORY_SCHEMA_VERSION = "mcp-inventory-v1"
-MCP_INVENTORY_DIGEST_FRAME = MCP_INVENTORY_SCHEMA_VERSION
 SHA256_PATTERN = r"^[0-9a-f]{64}$"
 
 
@@ -262,7 +260,7 @@ class McpToolObservation(_Model):
 class McpInventoryObservation(_DigestModel):
     """Content-addressed normalized result of one MCP ``tools/list``."""
 
-    _digest_domain = MCP_INVENTORY_DIGEST_FRAME
+    _digest_domain = MCP_INVENTORY_SCHEMA_VERSION
     schema_version: Literal[MCP_INVENTORY_SCHEMA_VERSION] = MCP_INVENTORY_SCHEMA_VERSION
     target_id: StrictStr = Field(min_length=1)
     authorization_scope_id: StrictStr = Field(min_length=1)
@@ -481,11 +479,6 @@ class TargetSemanticInterpretation(_Model):
         object.__setattr__(self, "evidence_refs", evidence)
         return self
 
-    @property
-    def agreement(self) -> InterpreterVerifierAgreement:
-        """Compatibility spelling for the typed interpreter/verifier state."""
-        return self.interpreter_verifier_agreement
-
 
 class TargetDiscoveryDiagnostic(_Model):
     """One retained scanner or interpretation diagnostic."""
@@ -618,7 +611,7 @@ def _validate_mcp_interpretations(
 class ExecutionTargetProfile(_DigestModel):
     """Closed, content-addressed execution target profile produced by discovery."""
 
-    _digest_domain = EXECUTION_TARGET_PROFILE_DIGEST_FRAME
+    _digest_domain = EXECUTION_TARGET_PROFILE_SCHEMA_VERSION
     schema_version: Literal[EXECUTION_TARGET_PROFILE_SCHEMA_VERSION] = (
         EXECUTION_TARGET_PROFILE_SCHEMA_VERSION
     )
@@ -711,21 +704,6 @@ class ExecutionTargetProfile(_DigestModel):
                 raise ValueError(
                     "simulation profiles require simulation_behavior for every resource"
                 )
-
-    @property
-    def profile_id(self) -> str:
-        """Return the target ID under the retired profile vocabulary."""
-        return self.target_id
-
-    @property
-    def environment_id(self) -> str:
-        """Return the target ID under the retired environment vocabulary."""
-        return self.target_id
-
-    @property
-    def authority(self) -> SemanticAuthority:
-        """Return semantic authority; the wire field is no longer overloaded."""
-        return self.semantic_authority
 
 
 def mcp_resource_id(target_id: str, tool_name: str) -> str:
