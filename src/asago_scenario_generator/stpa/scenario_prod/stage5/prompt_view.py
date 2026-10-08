@@ -62,11 +62,8 @@ def build_context_bdi_prompts(
     carries no stimulus, delivery or executable-condition demands. A
     ``condition_family`` hint renders only where the condition is requested.
     """
-    scenario_context_yaml = yaml.dump(
+    scenario_context_yaml = _yaml_dump(
         _stage5_prompt_context(scenario_context),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
     )
     source_choices = _causal_source_choices(scenario_context)
     if not source_choices:
@@ -161,11 +158,8 @@ def _observation_contract_prompt_values(
 ) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
     if observation_contract is None:
         return "No observation contract was supplied.", (), ()
-    contract_yaml = yaml.dump(
+    contract_yaml = _yaml_dump(
         observation_contract.model_dump(mode="json", exclude_none=True),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
     )
     available_kinds = tuple(
         item.kind for item in observation_contract.capture if item.available
@@ -454,7 +448,7 @@ def _temporal_reference_choices_yaml(
         }
         for choice in choices
     )
-    return yaml.dump(
+    return _yaml_dump(
         {
             "choices": references,
             "outcome_ordering_reference_handles": [choice.handle for choice in choices],
@@ -467,9 +461,6 @@ def _temporal_reference_choices_yaml(
                 "structural IDs here."
             ),
         },
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
     )
 
 
