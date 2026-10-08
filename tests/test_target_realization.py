@@ -2039,6 +2039,42 @@ def test_operation_input_schema_rejects_non_json_values(
         )
 
 
+def _operation(**fields: object) -> TargetOperationObservation:
+    return TargetOperationObservation(
+        reference=TargetOperationReference(resource_id="R-1", operation_id="op"),
+        **fields,
+    )
+
+
+def test_operation_arguments_come_from_the_schema_properties() -> None:
+    schema = {"properties": {"b": {"type": "string"}, "a": {"type": "number"}}}
+
+    assert _operation(input_schema=schema).argument_names == ("a", "b")
+    assert _operation(
+        input_schema=schema, argument_names=("b", "a")
+    ).argument_names == ("a", "b")
+
+
+def test_operation_without_schema_properties_keeps_its_declared_arguments() -> None:
+    declared = _operation(argument_names=("b", "a"), input_schema={"properties": None})
+
+    assert declared.argument_names == ("a", "b")
+    assert _operation(input_schema={"properties": None}).argument_names == ()
+
+
+def test_operation_rejects_schema_properties_that_are_not_a_mapping() -> None:
+    with pytest.raises(ValueError, match="properties must be a mapping"):
+        _operation(input_schema={"properties": ["a", "b"]})
+
+
+def test_operation_rejects_arguments_that_disagree_with_the_schema() -> None:
+    with pytest.raises(ValueError, match="argument_names must match"):
+        _operation(
+            input_schema={"properties": {"a": {"type": "string"}}},
+            argument_names=("b",),
+        )
+
+
 def _verified_pair(action: str) -> str:
     return f"target-realization:verified-pair:{action}:mcp:r/op"
 
