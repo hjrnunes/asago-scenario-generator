@@ -54,7 +54,10 @@ enums, a turn count from 1 to 4 and identifiers (see
 `handoff-v3` kits and digest domains stay unchanged; the producer has one
 handoff model, `ScenarioHandoffV4`, and checks the frozen kits against their
 own `schema.json`, the ownership scan, the framed digest, and their recorded
-codes. `scripts/gen_handoff_kit.py` regenerates the v4 kit and the lock; every
+codes. The ownership scan reads its forbidden keys and prose patterns from
+`ownership-rules.json` beside the kits; the lock pins that file and the
+consumer mirrors it, so both sides enforce one list.
+`scripts/gen_handoff_kit.py` regenerates the v4 kit and the lock; every
 file must come out byte-identical. The v3 and v4 kits carry the cases every
 reader runs: ownership cases, schema cases (`invalid/schema-*.json`, one broken
 field each), and for v3 the `refund-bound.json` valid case. Each invalid case's
