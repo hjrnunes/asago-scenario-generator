@@ -19,3 +19,11 @@ cases:
       - Preserve source-stated authorization and conditional exceptions
       - Keep distinct source-named functions distinct
       - Coordination links are required when
+      - Deterministic code has already checked
+      - Do not return an
+      - integrity_findings
+    forbidden:
+      - ConnectionSet
+      - Poh
+      - STPA-Sec
+      - connection_assignments

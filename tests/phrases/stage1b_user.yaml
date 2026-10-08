@@ -5,3 +5,5 @@ cases:
       - Security Constraints
       - Loss Analysis
       - loss_analysis
+      - all_losses
+      - security_constraints

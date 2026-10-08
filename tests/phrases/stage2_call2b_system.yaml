@@ -27,3 +27,8 @@ cases:
         Declare a controlled process only when the source establishes the
         external entity or interface
       - control action target
+      - at least N feedback channels
+      - at least one feedback channel
+    forbidden:
+      - Poh
+      - STPA-Sec

@@ -16,3 +16,11 @@ cases:
       - KC6.3.3 (RAG) implies an indirect entry point at the knowledge base / document store
       - every KC code, entry point, and tool must be traceable to a specific capability described in the use-case text
       - every tool must be explicitly mentioned or directly implied by the use-case description
+      - KC1 — Language Models
+      - KC6 — Operational Environment
+      - KCX — Extended Capabilities
+    forbidden:
+      - Entry point category checklist
+      - STPA
+      - User input surfaces
+      - zones_active

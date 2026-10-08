@@ -1,0 +1,9 @@
+template: stage2_call1_system.j2
+cases:
+  no-variables:
+    forbidden:
+      - Do NOT use implementation-specific terms
+      - Poh
+      - STPA-Sec
+    required:
+      - solution-neutral

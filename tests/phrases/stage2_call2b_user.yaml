@@ -20,6 +20,7 @@ cases:
       - session record
       - risk flag
       - physical alarm
+      - responsibilities
   one-responsibility:
     required:
       - "Governing security constraints:"

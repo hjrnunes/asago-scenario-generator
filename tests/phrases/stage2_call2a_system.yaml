@@ -41,3 +41,10 @@ cases:
       - "Check the capability profile's active zones"
       - Do NOT copy PM entries as RCs
       - "Every rc_id MUST start with \"RC-\", never \"PM-\"."
+      - PM-X-Y
+      - RC-X-Y
+    forbidden:
+      - Control Actions
+      - Feedback Channels
+      - Poh
+      - STPA-Sec
