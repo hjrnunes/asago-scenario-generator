@@ -11,10 +11,6 @@ import pytest
 from openai.types.chat import ChatCompletion
 
 from asago_scenario_generator.stpa.infra import transport_retry
-from asago_scenario_generator.stpa.infra.llm_helpers import (
-    CorrectionPolicy,
-    call_with_policy,
-)
 from asago_scenario_generator.stpa.infra.provider_record import (
     RECORD_FILENAME,
     CallIdentity,
@@ -32,6 +28,7 @@ from tests.helpers.provider_call_record import (
 )
 from tests.helpers.transport_retry import (
     _REQUEST,
+    _call,
     _connection_error,
     _failing_then,
     _status_error,
@@ -326,16 +323,3 @@ def test_a_replay_that_asks_for_more_requests_than_recorded_still_fails(
             _complete(client)
             with pytest.raises(Exception):
                 client.complete("s", "another", response_format=_Answer)
-
-
-def _call(client: Any, tmp_path: Path) -> Any:
-    return call_with_policy(
-        llm_client=client,
-        system_prompt="s",
-        user_prompt="u",
-        response_format=_Answer,
-        run_dir=tmp_path,
-        stage="stage_x",
-        step="call_answer",
-        policy=CorrectionPolicy(),
-    )

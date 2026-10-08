@@ -4,32 +4,17 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Any
 
 from asago_scenario_generator.stpa.infra.llm_helpers import (
-    CorrectionPolicy,
-    call_with_policy,
     count_requests,
 )
-from tests.helpers.provider_call_record import _Answer, _answer, _client, _Provider
+from tests.helpers.provider_call_record import _answer, _client, _Provider
 from tests.helpers.transport_retry import (
+    _call,
     _connection_error,
     _failing_then,
     _status_error,
 )
-
-
-def _call(client: Any, tmp_path: Path) -> Any:
-    return call_with_policy(
-        llm_client=client,
-        system_prompt="s",
-        user_prompt="u",
-        response_format=_Answer,
-        run_dir=tmp_path,
-        stage="stage_x",
-        step="call_answer",
-        policy=CorrectionPolicy(),
-    )
 
 
 def test_a_retried_call_counts_both_requests(tmp_path: Path) -> None:
