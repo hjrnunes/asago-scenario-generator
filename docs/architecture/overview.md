@@ -87,7 +87,7 @@ the frozen content, immediate pre-dispatch dependency checks, command/reply
 receipts, and separate backend/state observations. A command-level detector
 does not establish a completed backend effect.
 
-The current workflow is producer `generate` → `scenario-handoff-v3` →
+The current workflow is producer `generate` → `scenario-handoff-v4` →
 consumer `generate` → consumer `check`. The dated source-cited accounting
 corrections and independent evidence axes are in
 [the R9 reconciliation report](../development/qualification-reports/r9-reconciliation-2026-09-17.md).
