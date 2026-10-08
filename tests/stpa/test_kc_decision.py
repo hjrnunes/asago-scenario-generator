@@ -3,47 +3,12 @@
 from __future__ import annotations
 
 from asago_scenario_generator.stpa.models.execution_classification import (
-    ExecutionTargetProfile,
     InventoryCompleteness,
-    TargetSemanticInterpretation,
 )
 from asago_scenario_generator.stpa.system_model.kc_decision import (
     target_kc_decision,
 )
-from tests.helpers.execution_classification import _target_profile
-
-
-def _tool(
-    name: str,
-    *,
-    effect: str = "read",
-    state: str = "none",
-    roles: tuple[str, ...] = (),
-    disposition: str = "supported",
-    agreement: str = "agree",
-) -> TargetSemanticInterpretation:
-    return TargetSemanticInterpretation(
-        resource_id=f"mcp:target-1:{name}",
-        tool_name=name,
-        disposition=disposition,
-        likely_effect=effect,
-        likely_state_effect=state,
-        semantic_roles=roles,
-        evidence_refs=(f"inventory:tool:{name}:description",),
-        rationale="fixture interpretation",
-        interpreter_verifier_agreement=agreement,
-    )
-
-
-def _profile(
-    *tools: TargetSemanticInterpretation,
-    completeness: InventoryCompleteness = InventoryCompleteness.observed_complete,
-) -> ExecutionTargetProfile:
-    # The rules read only the interpretations and the completeness claim, so
-    # the copy skips the inventory closure that the fixture's single tool sets.
-    return _target_profile().model_copy(
-        update={"interpretations": tools, "inventory_completeness": completeness}
-    )
+from tests.helpers.kc_decision import kc_profile as _profile, kc_tool as _tool
 
 
 def test_no_profile_decides_nothing() -> None:

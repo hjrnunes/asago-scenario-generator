@@ -165,6 +165,11 @@ def vote_kc_subcodes(draws: Sequence[Collection[str]]) -> list[str]:
     )
 
 
+def apply_kc_facts(kc_subcodes: Iterable[str], facts: KcFactDecision) -> list[str]:
+    """Return *kc_subcodes* with the fact-decided codes forced in or out."""
+    return sorted((set(kc_subcodes) - facts.absent) | facts.present)
+
+
 class KcDecisionRecord(BaseModel):
     """How Stage 1b decided its KC sub-codes, as ``capability-kc-decision.yaml``."""
 
@@ -175,6 +180,10 @@ class KcDecisionRecord(BaseModel):
     draws: list[list[str]]
     failed_draws: list[str]
     counts: dict[str, int]
+    voted: list[str]
+    fact_present: list[str]
+    fact_absent: list[str]
+    fact_reasons: dict[str, str]
     kc_subcodes: list[str]
 
     @classmethod
@@ -184,6 +193,7 @@ class KcDecisionRecord(BaseModel):
         samples: int,
         draws: list[list[str]],
         failed_draws: list[str],
+        facts: KcFactDecision,
         kc_subcodes: list[str],
     ) -> KcDecisionRecord:
         counts = Counter(code for draw in draws for code in set(draw))
@@ -193,5 +203,9 @@ class KcDecisionRecord(BaseModel):
             draws=draws,
             failed_draws=failed_draws,
             counts=dict(sorted(counts.items())),
+            voted=vote_kc_subcodes(draws),
+            fact_present=sorted(facts.present),
+            fact_absent=sorted(facts.absent),
+            fact_reasons=dict(sorted(facts.reasons.items())),
             kc_subcodes=kc_subcodes,
         )

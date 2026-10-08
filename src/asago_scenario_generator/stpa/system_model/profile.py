@@ -34,9 +34,14 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.kc_decision import (
     KcDecisionRecord,
+    apply_kc_facts,
+    target_kc_decision,
     vote_kc_subcodes,
 )
 
@@ -108,6 +113,7 @@ def derive_capability_profile(
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     samples: int = 1,
+    target_profile: ExecutionTargetProfile | None = None,
 ) -> CapabilityProfile:
     """Run Stage 1b: derive capability profile from use-case text.
 
@@ -115,9 +121,12 @@ def derive_capability_profile(
     are the vote of the successful draws (:func:`vote_kc_subcodes`); entry
     points, tool inventory, and confidence come from the first successful
     draw.  A draw that fails after its correction is left out of the vote;
-    the stage fails only when every draw fails.  The draws, the counts, and
-    the decided codes land in ``capability-kc-decision.yaml``; the profile
-    in ``capability-profile.yaml``.
+    the stage fails only when every draw fails.  The verified facts of an
+    observed *target_profile* then force the codes they decide in or out
+    (:func:`target_kc_decision`); the request itself never sees the target.
+    The draws, the counts, the fact decisions with their reasons, and the
+    decided codes land in ``capability-kc-decision.yaml``; the profile in
+    ``capability-profile.yaml``.
 
     Stage 1b has zero dependency on Stage 1a — no loss analysis context
     is passed to the prompt.
@@ -129,6 +138,8 @@ def derive_capability_profile(
         template_loader: Optional template loader (defaults to SP1 prompts dir).
         temperature: LLM temperature (default 0.4).
         samples: Number of draws the KC vote takes (at least 1).
+        target_profile: Optional observed execution target profile whose
+            verified facts decide some KC sub-codes.
 
     Returns:
         Validated CapabilityProfile model.
@@ -167,13 +178,16 @@ def derive_capability_profile(
     if not drafts:
         raise StageError(stage=STAGE, step=STEP, message=errors[-1])
 
-    kc_subcodes = vote_kc_subcodes([draft.kc_subcodes for draft in drafts])
+    draws = [draft.kc_subcodes for draft in drafts]
+    facts = target_kc_decision(target_profile)
+    kc_subcodes = apply_kc_facts(vote_kc_subcodes(draws), facts)
     capability_profile = _decided_profile(drafts, kc_subcodes)
     write_yaml(
         KcDecisionRecord.of(
             samples=samples,
-            draws=[draft.kc_subcodes for draft in drafts],
+            draws=draws,
             failed_draws=errors,
+            facts=facts,
             kc_subcodes=capability_profile.kc_subcodes,
         ),
         run_dir / KC_DECISION_FILENAME,

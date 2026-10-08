@@ -12,6 +12,7 @@ from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile,
 )
 from tests.helpers.calls_log import read_calls_jsonl
+from tests.helpers.kc_decision import kc_profile, kc_tool
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
@@ -106,3 +107,47 @@ def test_every_draw_failing_ends_the_stage(tmp_path) -> None:
             run_dir=tmp_path,
             samples=2,
         )
+
+
+def test_observed_target_facts_override_the_vote(tmp_path) -> None:
+    client = MockLLMClient()
+    client.set_response_for(
+        Stage1Profile,
+        [_draw("KC6.3.1", "KC2.1"), _draw("KC6.3.1"), _draw("KC6.3.1")],
+    )
+    target = kc_profile(
+        kc_tool("policy", roles=("text_search",)),
+        kc_tool("refund", effect="execute", state="changes"),
+    )
+
+    profile = derive_capability_profile(
+        llm_client=client,
+        use_case_text="Test use case",
+        run_dir=tmp_path,
+        samples=3,
+        target_profile=target,
+    )
+
+    assert profile.kc_subcodes == ["KC1.1", "KC2.1", "KC6.3.2", "KC6.3.3"]
+    record = yaml.safe_load((tmp_path / "capability-kc-decision.yaml").read_text())
+    assert record["voted"] == ["KC1.1", "KC2.1", "KC6.3.1"]
+    assert record["fact_present"] == ["KC6.3.2", "KC6.3.3"]
+    assert record["fact_absent"] == ["KC6.3.1"]
+    assert "refund" in record["fact_reasons"]["KC6.3.2"]
+    assert record["kc_subcodes"] == profile.kc_subcodes
+
+
+def test_a_target_profile_does_not_change_the_request(tmp_path) -> None:
+    prompts = []
+    for run_dir, target in ((tmp_path / "a", None), (tmp_path / "b", kc_profile())):
+        client = MockLLMClient()
+        client.set_response_for(Stage1Profile, _draw())
+        derive_capability_profile(
+            llm_client=client,
+            use_case_text="Test use case",
+            run_dir=run_dir,
+            target_profile=target,
+        )
+        prompts.append([(c.system_prompt, c.user_prompt) for c in client.calls])
+
+    assert prompts[0] == prompts[1]
