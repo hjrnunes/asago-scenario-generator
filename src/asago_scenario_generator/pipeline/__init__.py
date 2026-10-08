@@ -7,7 +7,6 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_neutral_obligation_briefs,
     build_obligation_accounting,
     create_obligation_batches,
-    derive_obligation_accounting,
     validate_obligation_routes,
 )
 from asago_scenario_generator.pipeline.scenario_realization import (
@@ -33,7 +32,6 @@ __all__ = [
     "build_obligation_accounting",
     "build_scenario_realization_assessment",
     "create_obligation_batches",
-    "derive_obligation_accounting",
     "reconcile_declared_observed_capabilities",
     "realize_target_derived_icas",
     "realize_target_operations",
