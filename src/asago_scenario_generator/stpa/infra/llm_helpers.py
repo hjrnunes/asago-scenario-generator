@@ -219,12 +219,6 @@ def _remove_markdown_fence(value: str) -> tuple[str, str | None]:
     return body, body
 
 
-def _decode_json_text(value: str) -> Any:
-    """Decode JSON using the shared cleanup policy."""
-    decoded, _transformations = _decode_json_text_with_evidence(value)
-    return decoded
-
-
 class StageError(Exception):
     """Exception carrying stage and step context for a failed LLM call.
 
