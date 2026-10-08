@@ -10,7 +10,6 @@ from asago_scenario_generator.stpa.infra.call_log import (
     append_call_log,
     make_call_log_entry,
 )
-from asago_scenario_generator.stpa.infra.calls_html import render_calls_html
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call,
@@ -42,8 +41,6 @@ __all__ = [
     # call_log
     "append_call_log",
     "make_call_log_entry",
-    # calls_html
-    "render_calls_html",
     # model_profiles
     "load_profile",
     # yaml_io

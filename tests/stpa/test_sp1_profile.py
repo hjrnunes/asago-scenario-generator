@@ -17,11 +17,8 @@ from asago_scenario_generator.models.capability_profile import (
     classify_entry_point,
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
-from asago_scenario_generator.stpa.system_model.profile import (
-    derive_capability_profile,
-    load_capability_profile,
-)
+from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
+from asago_scenario_generator.stpa.system_model.profile import derive_capability_profile
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
@@ -112,27 +109,6 @@ class TestStage1bProfile:
             "retrieve_data",
             "transmit_data",
         )
-
-    def test_cp_03_profile_flag_skips_llm_call(self, tmp_path):
-        """Profile flag skips the LLM call."""
-        # Write a pre-built profile
-        profile = Stage1Profile(
-            entry_points=[
-                {
-                    "name": "User chat",
-                    "direction": "input",
-                    "controllability": "direct",
-                },
-            ],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC4.3", "KC6.1.1"],
-            tool_inventory=[{"name": "tool1", "description": "A tool"}],
-        ).to_capability_profile()
-        profile_path = tmp_path / "capability-profile.yaml"
-        write_yaml(profile, profile_path)
-
-        loaded = load_capability_profile(profile_path)
-        assert isinstance(loaded, CapabilityProfile)
 
     def test_cp_05_call_logged_with_stage_1b(self, tmp_path):
         """Call log entry has stage stage_1b."""

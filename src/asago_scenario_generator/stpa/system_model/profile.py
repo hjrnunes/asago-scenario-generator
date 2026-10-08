@@ -33,7 +33,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     call_with_policy,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
+from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
@@ -239,17 +239,3 @@ def _decided_profile(
         ).to_capability_profile()
     except ValueError as exc:
         raise StageError(stage=STAGE, step=STEP, message=str(exc)) from exc
-
-
-def load_capability_profile(profile_path: Path) -> CapabilityProfile:
-    """Load a pre-built capability profile from a YAML file.
-
-    Used when the --profile flag is provided to skip Stage 1b.
-
-    Args:
-        profile_path: Path to capability-profile.yaml.
-
-    Returns:
-        Validated CapabilityProfile model.
-    """
-    return read_yaml(profile_path, CapabilityProfile)

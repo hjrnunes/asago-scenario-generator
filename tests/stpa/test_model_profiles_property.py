@@ -1,4 +1,4 @@
-"""Property-based tests for model profile loading and calls HTML rendering.
+"""Property-based tests for model profile loading.
 
 These tests verify invariants that should hold across broad input ranges:
 
@@ -10,13 +10,6 @@ These tests verify invariants that should hold across broad input ranges:
   absent from the result; optional fields present are preserved.
 - **Empty required field rejection**: An empty-string required field always
   raises ValueError.
-- **Summary conservation**: The HTML summary totals always equal the sum
-  of individual call entries.
-- **Success/failure conservation**: success_count + failure_count == total.
-- **Self-contained HTML**: The output always contains a <style> tag and
-  never references an external stylesheet.
-- **Entry coverage**: Every entry's step name appears in the rendered HTML.
-- **Empty input zeroing**: An empty JSONL always produces zero totals.
 """
 
 from __future__ import annotations
@@ -25,13 +18,11 @@ from __future__ import annotations
 import yaml
 from hypothesis import HealthCheck, given, settings, strategies as st, assume
 
-from asago_scenario_generator.stpa.infra.calls_html import render_calls_html
 from asago_scenario_generator.stpa.infra.model_profiles import (
     OPTIONAL_FIELDS,
     REQUIRED_FIELDS,
     load_profile,
 )
-from tests.helpers.calls_html import _write_calls_jsonl
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -230,183 +221,3 @@ class TestUnknownProfileRejection:
             )
         except KeyError:
             pass  # expected
-
-
-# ---------------------------------------------------------------------------
-# Calls HTML rendering property tests
-# ---------------------------------------------------------------------------
-
-st_step_name = st.from_regex(r"call_[a-z0-9_]+", fullmatch=True)
-st_stage_name = st.from_regex(r"stage_[a-z0-9_]+", fullmatch=True)
-st_model_name = st.from_regex(r"[a-z][a-z0-9.-]*", fullmatch=True)
-
-st_call_entry = st.fixed_dictionaries(
-    {
-        "stage": st_stage_name,
-        "step": st_step_name,
-        "model": st_model_name,
-        "prompt_tokens": st.integers(min_value=0, max_value=100000),
-        "completion_tokens": st.integers(min_value=0, max_value=100000),
-        "duration_ms": st.integers(min_value=0, max_value=999999),
-        "success": st.booleans(),
-    }
-)
-
-
-class TestCallsHtmlSummaryConservation:
-    """Summary totals always equal the sum of individual entries."""
-
-    @given(entries=st.lists(st_call_entry, min_size=0, max_size=20))
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_total_calls_equals_entry_count(self, tmp_path, entries):
-        """Total calls in summary equals the number of entries."""
-        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
-        output_path = tmp_path / "calls.html"
-        render_calls_html(calls_path, output_path)
-        html = output_path.read_text(encoding="utf-8")
-
-        total = len(entries)
-        success = sum(1 for e in entries if e.get("success", True))
-        failure = total - success
-        prompt_tokens = sum(e["prompt_tokens"] for e in entries)
-        completion_tokens = sum(e["completion_tokens"] for e in entries)
-        duration = sum(e["duration_ms"] for e in entries)
-
-        # The summary table should contain these values.
-        # We check for the total calls and success/failure counts.
-        assert str(total) in html, f"Total calls {total} not found in HTML"
-        assert str(success) in html, f"Success count {success} not found in HTML"
-        assert str(failure) in html, f"Failure count {failure} not found in HTML"
-        assert str(prompt_tokens) in html, f"Prompt tokens {prompt_tokens} not found"
-        assert str(completion_tokens) in html, (
-            f"Completion tokens {completion_tokens} not found"
-        )
-        assert str(duration) in html, f"Duration {duration} not found"
-
-    @given(entries=st.lists(st_call_entry, min_size=0, max_size=20))
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_success_plus_failure_equals_total(self, tmp_path, entries):
-        """success_count + failure_count == total_calls invariant."""
-        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
-        output_path = tmp_path / "calls.html"
-        render_calls_html(calls_path, output_path)
-        assert output_path.exists()
-
-        total = len(entries)
-        success = sum(1 for e in entries if e.get("success", True))
-        failure = total - success
-        assert success + failure == total
-
-
-class TestCallsHtmlSelfContained:
-    """The HTML output is always self-contained with inline CSS."""
-
-    @given(entries=st.lists(st_call_entry, min_size=0, max_size=10))
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_html_contains_style_tag(self, tmp_path, entries):
-        """The output always contains a <style> tag."""
-        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
-        output_path = tmp_path / "calls.html"
-        render_calls_html(calls_path, output_path)
-        html = output_path.read_text(encoding="utf-8")
-        assert "<style>" in html
-
-    @given(entries=st.lists(st_call_entry, min_size=0, max_size=10))
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_html_has_no_external_stylesheet(self, tmp_path, entries):
-        """The output never references an external stylesheet."""
-        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
-        output_path = tmp_path / "calls.html"
-        render_calls_html(calls_path, output_path)
-        html = output_path.read_text(encoding="utf-8")
-        assert 'rel="stylesheet"' not in html
-
-    @given(entries=st.lists(st_call_entry, min_size=0, max_size=10))
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_html_is_valid_doctype(self, tmp_path, entries):
-        """The output always starts with a DOCTYPE declaration."""
-        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
-        output_path = tmp_path / "calls.html"
-        render_calls_html(calls_path, output_path)
-        html = output_path.read_text(encoding="utf-8")
-        assert html.startswith("<!DOCTYPE html>")
-
-
-class TestCallsHtmlEntryCoverage:
-    """Every entry's step name appears in the rendered HTML."""
-
-    @given(
-        entries=st.lists(
-            st_call_entry, min_size=1, max_size=15, unique_by=lambda e: e["step"]
-        )
-    )
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_all_steps_in_html(self, tmp_path, entries):
-        """Every entry's step name appears in the detail table."""
-        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
-        output_path = tmp_path / "calls.html"
-        render_calls_html(calls_path, output_path)
-        html = output_path.read_text(encoding="utf-8")
-        for entry in entries:
-            assert entry["step"] in html, f"Step '{entry['step']}' not found in HTML"
-
-
-class TestCallsHtmlEmptyInput:
-    """An empty JSONL always produces zero totals."""
-
-    @given(data=st.just(None))
-    @settings(
-        max_examples=5,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_empty_jsonl_zero_totals(self, tmp_path, data):
-        """An empty JSONL always produces zero totals and valid HTML."""
-        calls_path = _write_calls_jsonl(tmp_path / "empty.jsonl", [])
-        output_path = tmp_path / "empty.html"
-        render_calls_html(calls_path, output_path)
-        html = output_path.read_text(encoding="utf-8")
-        assert "<style>" in html
-        assert "0" in html  # total calls = 0
-
-
-class TestCallsHtmlRenderReturnsPath:
-    """render_calls_html always returns the output path it was given."""
-
-    @given(entries=st.lists(st_call_entry, min_size=0, max_size=10))
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_returns_output_path(self, tmp_path, entries):
-        """The returned path equals the output_path argument."""
-        calls_path = _write_calls_jsonl(tmp_path / "calls.jsonl", entries)
-        output_path = tmp_path / "output.html"
-        result = render_calls_html(calls_path, output_path)
-        assert result == output_path
-        assert output_path.exists()

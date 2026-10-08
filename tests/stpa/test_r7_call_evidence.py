@@ -19,7 +19,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     call_with_policy,
     log_llm_call_failure,
 )
-from asago_scenario_generator.stpa.infra.calls_html import _sum_metric
 from asago_scenario_generator.stpa.infra.manifest_helpers import count_calls_by_stage
 from tests.helpers.calls_log import read_calls_jsonl
 
@@ -361,20 +360,3 @@ def test_a_stage_with_only_blocked_entries_reports_zero_calls(tmp_path: Path) ->
     )
 
     assert count_calls_by_stage(tmp_path) == {"s": {"call_count": 0, "total_tokens": 0}}
-
-
-def test_sum_metric_treats_absent_values_as_zero() -> None:
-    entries = [
-        {"prompt_tokens": 2},
-        {"prompt_tokens": None},
-        {},
-    ]
-
-    assert _sum_metric(entries, "prompt_tokens") == 2
-    assert (
-        _sum_metric(
-            [{"completion_tokens": 3}, {"completion_tokens": 4}],
-            "completion_tokens",
-        )
-        == 7
-    )
