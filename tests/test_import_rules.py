@@ -610,6 +610,7 @@ SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "id_normalization": 0,
     "loss_analysis_repair": 0,
     "rule_span_repair": 0,
+    "quote_normalization": 0,
     "heuristics": 1,
     "loss_analysis": 1,
     "loss_analysis_gates": 2,

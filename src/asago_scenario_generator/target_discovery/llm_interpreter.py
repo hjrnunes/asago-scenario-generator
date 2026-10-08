@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import re
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -186,8 +185,8 @@ class TargetDiscoveryLlmError(RuntimeError):
 
     def __init__(self, kind: str, error: BaseException) -> None:
         self.kind = kind
-        self.error_type = _stable_error_type(error)
-        self.http_status = _stable_http_status(error)
+        self.error_type = type(error).__name__
+        self.http_status = _failure_http_status(error)
         status = f", status={self.http_status}" if self.http_status is not None else ""
         super().__init__(f"{kind} call failed ({self.error_type}{status})")
 
@@ -355,7 +354,7 @@ class TargetDiscoveryLlmInterpreter:
                 )
             parsed, result = outcome.value, outcome.result
             if outcome.error is not None:
-                error = _CallFailure(outcome.error)
+                error = outcome.failure or RuntimeError("safe_llm_call failed")
         except BaseException as exc:  # noqa: BLE001 - provider boundary
             error = exc
         self._call_records.append(
@@ -406,20 +405,6 @@ class TargetDiscoveryLlmInterpreter:
         _record_error(record, error)
         _record_verification_digest(record, response_for_record)
         return record
-
-
-class _CallFailure(RuntimeError):
-    """Internal marker retaining safe provider class/status metadata."""
-
-    def __init__(self, message: str) -> None:
-        # ``call_with_policy`` returns a display string rather than the original
-        # exception.  Keep only a stable class prefix and labelled HTTP status;
-        # never retain the provider body, endpoint, or other message detail.
-        # The "safe_llm_call" label stays: scanner call records persist it as
-        # ``error_type`` and the message.
-        self.error_type = _error_type_from_message(message) or "safe_llm_call"
-        self.http_status = _http_status_from_message(message)
-        super().__init__("safe_llm_call failed")
 
 
 def _record_prompts(
@@ -490,76 +475,29 @@ def _base_call_record(
 
 
 def _record_error(record: dict[str, Any], error: BaseException | None) -> None:
-    """Attach stable error metadata without provider message details."""
+    """Attach the failure's class and HTTP status, never its message."""
     if error is None:
         return
-    record["error_type"] = _stable_error_type(error)
-    http_status = _stable_http_status(error)
+    record["error_type"] = type(error).__name__
+    http_status = _failure_http_status(error)
     if http_status is not None:
         record["http_status"] = http_status
 
 
-_ERROR_TYPE_PREFIX = re.compile(r"^\s*([A-Za-z_][A-Za-z0-9_.]*)\s*:")
-_HTTP_STATUS_LABEL = re.compile(
-    r"\b(?:error\s+code|http(?:[_\s-]?status)|status(?:[_\s-]?code)?)"
-    r"\s*[:=]?\s*(\d{3})\b",
-    re.IGNORECASE,
-)
-
-
-def _error_type_from_message(message: str) -> str | None:
-    """Extract only a stable exception-class prefix from helper text."""
-    match = _ERROR_TYPE_PREFIX.match(message)
-    return match.group(1) if match is not None else None
-
-
 def _coerce_http_status(value: Any) -> int | None:
-    """Return a conventional HTTP status while rejecting arbitrary values."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int) and 100 <= value <= 599:
-        return int(value)
-    if isinstance(value, str) and value.isdigit():
-        parsed = int(value)
-        if 100 <= parsed <= 599:
-            return parsed
+    """Return a conventional integer HTTP status while rejecting other values."""
+    if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+        return value
     return None
 
 
-def _http_status_from_message(message: str) -> int | None:
-    """Extract a labelled HTTP status without retaining the source message."""
-    match = _HTTP_STATUS_LABEL.search(message)
-    return _coerce_http_status(match.group(1)) if match is not None else None
-
-
-def _exception_http_status(error: BaseException) -> int | None:
-    """Read a status from common exception/response attributes only."""
-    for attribute in ("http_status", "status_code"):
-        status = _coerce_http_status(getattr(error, attribute, None))
-        if status is not None:
-            return status
-    response = getattr(error, "response", None)
-    return _coerce_http_status(getattr(response, "status_code", None))
-
-
-def _stable_error_type(error: BaseException) -> str:
-    """Return an explicit or parsed error class, never a provider message."""
-    explicit = getattr(error, "error_type", None)
-    if isinstance(explicit, str) and explicit:
-        return explicit
-    parsed = _error_type_from_message(str(error))
-    return parsed or type(error).__name__
-
-
-def _stable_http_status(error: BaseException) -> int | None:
-    """Return status metadata from a safe marker or exception attributes."""
-    explicit = _coerce_http_status(getattr(error, "http_status", None))
-    if explicit is not None:
-        return explicit
-    status = _exception_http_status(error)
+def _failure_http_status(error: BaseException) -> int | None:
+    """Read the status an SDK error carries on itself or on its response."""
+    status = _coerce_http_status(getattr(error, "status_code", None))
     if status is not None:
         return status
-    return _http_status_from_message(str(error))
+    response = getattr(error, "response", None)
+    return _coerce_http_status(getattr(response, "status_code", None))
 
 
 def _result_duration(result: LLMResult | None) -> int | None:

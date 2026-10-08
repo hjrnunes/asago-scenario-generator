@@ -595,13 +595,13 @@ coverage claims or manufacture an evidence selection.
 
 ## Presentation validation
 
-Normal product execution uses deterministic hypothesis summaries. Stage 7
-validates their narrative, tree, structured Gherkin, and feature text against
-that exact scenario's deterministic summary. Shared factor-evidence and
-loss/hazard-reference checks remain active. The explicitly selected
-model-authored presentation mode retains its legacy root-label and PM-reference
-format checks. The mode comes from the run configuration, never from guessing
-whether an artifact looks deterministic.
+Product execution uses deterministic hypothesis summaries: Stage 6 stores the
+narrative, tree, structured Gherkin, and feature text that
+`render_scenario_summary` returns for the scenario, unchanged. Stage 7 checks
+that the tree's factor evidence covers the selected causal factors and that
+the Gherkin cites only known loss and hazard IDs, then checks cross-scenario
+traceability. It does not re-run the Stage 5 spec validators, whose input the
+shape step changes only in `attack_shape`.
 
 The deterministic summary builds one connected account from the selected
 semantic proposition, established context, supported actor evidence, defender

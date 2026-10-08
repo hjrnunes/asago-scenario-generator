@@ -86,9 +86,9 @@ from .coverage import compute_coverage_gaps, write_coverage_gaps
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
 from .realized_operation import realized_operation
 from .target_profile_publication import publish_execution_target_profile
-from .presentation import render_scenario_summary, validate_scenario_summary
+from .presentation import render_scenario_summary
 from .handoff import (
-    ScenarioHandoff,
+    ScenarioHandoffV4,
     Stage1aSource,
     build_scenario_handoff,
     handoff_ownership_violations,
@@ -341,7 +341,6 @@ def run_sp3(
         functional_test_specs = []
     all_validation_errors, coverage_gaps, eval_scorecard = _stage7_outputs(
         scenario_envelopes,
-        scenario_specs,
         enriched_threat_set,
         control_structure,
         loss_analysis,
@@ -791,7 +790,7 @@ def _write_scenario_handoff_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
-) -> ScenarioHandoff:
+) -> ScenarioHandoffV4:
     """Write the versioned scenario handoff for one published scenario.
 
     The normal product run publishes scenario meaning only: narrative, attack
@@ -1080,20 +1079,14 @@ def _publish_execution_target_profile(
 
 def _stage7_outputs(
     scenario_envelopes: list[ScenarioEnvelope],
-    scenario_specs: list[ScenarioSpec],
     enriched_threat_set: EnrichedThreatSet,
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
 ) -> tuple[list[str], dict, dict]:
     """Validate accepted scenarios and derive coverage/evaluation outputs."""
     validation_errors: list[str] = []
-    _run_stage7_validations(
-        scenario_envelopes,
-        scenario_specs,
-        control_structure,
-        loss_analysis,
-        validation_errors,
-    )
+    for envelope in scenario_envelopes:
+        _validate_envelope_stage7(envelope, loss_analysis, validation_errors)
     trace_errors = validate_traceability(
         scenario_envelopes, enriched_threat_set, control_structure, loss_analysis
     )
@@ -1391,41 +1384,6 @@ def _validate_stage5_spec(
         ),
         stage_errors,
     )
-    context = spec.scenario_context
-    if context is not None:
-        stage_errors.extend(_contextual_stage5_errors(spec))
-
-
-def _contextual_stage5_errors(spec: ScenarioSpec) -> list[str]:
-    """Validate exact intention references in one context."""
-    context = spec.scenario_context
-    if context is None:
-        return []
-    return _intention_reference_errors(spec, _allowed_intention_refs(context))
-
-
-def _allowed_intention_refs(context: ScenarioGenerationContext) -> set[str]:
-    """Return exact structural IDs that an intention may cite."""
-    path = context.target_control_path
-    return {
-        *(item.element_id for item in path.process_model_parts),
-        *(item.element_id for item in path.feedback),
-        path.control_action.action_id,
-        *(item.action_id for item in path.related_control_actions),
-    }
-
-
-def _intention_reference_errors(
-    spec: ScenarioSpec,
-    allowed_refs: set[str],
-) -> list[str]:
-    """Report intentions that cite none of the selected path identities."""
-    return [
-        "Attacker BDI intention has no exact structural reference "
-        f"from the selected scenario context: {intention!r}"
-        for intention in spec.attacker_bdi.intentions
-        if not any(reference in intention for reference in allowed_refs)
-    ]
 
 
 def _run_stage6_for_spec(
@@ -1454,36 +1412,6 @@ def _run_stage6_for_spec(
     )
 
 
-def _run_stage7_validations(
-    envelopes: list[ScenarioEnvelope],
-    specs: list[ScenarioSpec],
-    control_structure: ControlStructure,
-    loss_analysis: LossAnalysis,
-    validation_errors: list[str],
-) -> None:
-    """Run Stage 7 validations on all specs and envelopes."""
-    for spec in specs:
-        _validate_spec_stage7(spec, control_structure, validation_errors)
-
-    for env in envelopes:
-        _validate_envelope_stage7(env, loss_analysis, validation_errors)
-
-
-def _validate_spec_stage7(
-    spec: ScenarioSpec,
-    control_structure: ControlStructure,
-    validation_errors: list[str],
-) -> None:
-    """Run stage-local validators for a single spec in Stage 7."""
-    _extend_validation_errors(
-        (
-            validate_bdi_grounding(spec, control_structure),
-            validate_vulnerability_completeness(spec),
-        ),
-        validation_errors,
-    )
-
-
 def _validate_envelope_stage7(
     envelope: ScenarioEnvelope,
     loss_analysis: LossAnalysis,
@@ -1498,7 +1426,6 @@ def _validate_envelope_stage7(
         ),
         validation_errors,
     )
-    validation_errors.extend(validate_scenario_summary(envelope))
 
     id_text = _envelope_gherkin_text(envelope)
     if id_text:

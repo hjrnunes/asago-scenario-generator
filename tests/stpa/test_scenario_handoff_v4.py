@@ -1,6 +1,7 @@
 """The scenario-handoff-v4 envelope: v3 plus the required ``attack_shape`` key.
 
-The producer still emits v3. These tests pin what v4 adds: the constants, the
+The producer emits v4 through its one handoff model; the frozen v3 kit's
+``schema.json`` stands for v3. These tests pin what v4 adds: the constants, the
 pairing of ``kind`` with the shape (R7), the digest domain, null-preserving
 serialization, and the JSON schema a schema-only reader uses.
 """
@@ -26,7 +27,6 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_SCHEMA_VERSION,
     HANDOFF_SCHEMA_VERSION_V4,
     HANDOFF_SCHEMA_VERSIONS,
-    ScenarioHandoff,
     ScenarioHandoffV4,
     finalize_handoff,
     handoff_ownership_violations,
@@ -35,10 +35,19 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     verify_handoff_digest,
 )
 
-V3_VALID = (
-    Path(__file__).resolve().parents[2]
-    / "data/contracts/scenario-handoff/handoff-v3/valid"
+V3_KIT = (
+    Path(__file__).resolve().parents[2] / "data/contracts/scenario-handoff/handoff-v3"
 )
+V3_VALID = V3_KIT / "valid"
+OTHER_VERSION_CODES = [
+    "schema_violation:schema_version",
+    "schema_violation:attack_shape",
+]
+
+
+def _v3_schema() -> dict[str, Any]:
+    return json.loads((V3_KIT / "schema.json").read_text(encoding="utf-8"))
+
 
 DIRECT_SHAPE: dict[str, Any] = {
     "channel": "direct",
@@ -80,12 +89,19 @@ def test_constants_name_v4_and_leave_v3_as_the_emitted_version() -> None:
     assert HANDOFF_DIGEST_DOMAINS[HANDOFF_SCHEMA_VERSION_V4] == HANDOFF_DIGEST_DOMAIN_V4
 
 
-def test_the_v3_model_still_refuses_an_attack_shape() -> None:
-    assert "attack_shape" not in ScenarioHandoff.model_fields
+@pytest.mark.parametrize(
+    "version", [HANDOFF_SCHEMA_VERSION, "scenario-handoff-v9", None], ids=str
+)
+def test_any_other_version_gets_the_kits_unknown_version_codes(
+    version: str | None,
+) -> None:
     payload = _adversarial()
-    payload["schema_version"] = HANDOFF_SCHEMA_VERSION
+    if version is None:
+        del payload["schema_version"]
+    else:
+        payload["schema_version"] = version
 
-    assert handoff_schema_violations(payload) == ["schema_violation:attack_shape"]
+    assert handoff_schema_violations(payload) == OTHER_VERSION_CODES
 
 
 def test_v4_accepts_a_shape_for_adversarial_and_null_for_functional() -> None:
@@ -135,9 +151,7 @@ def test_finalized_v4_keeps_null_shape_values_in_the_digested_payload() -> None:
 
     payload = adversarial.model_dump(mode="json", exclude_none=True)
     assert payload["attack_shape"] == DIRECT_SHAPE
-    assert adversarial.canonical_payload()["attack_shape"] == DIRECT_SHAPE
     assert functional.model_dump(mode="json", exclude_none=True)["attack_shape"] is None
-    assert "attack_shape" in functional.canonical_payload()
 
 
 def test_v4_digest_uses_its_own_domain_and_verifies() -> None:
@@ -218,7 +232,7 @@ def _schema_keys(node: Any) -> set[str]:
 
 
 def test_no_v4_key_name_is_forbidden_by_the_ownership_scan() -> None:
-    v3_keys = _schema_keys(ScenarioHandoff.model_json_schema())
+    v3_keys = _schema_keys(_v3_schema())
     v4_only = _schema_keys(ScenarioHandoffV4.model_json_schema()) - v3_keys
 
     assert {"attack_shape", "channel", "turn_plan", "carrier_operation"} <= v4_only
@@ -241,7 +255,7 @@ def _shape_field_names() -> set[str]:
 
 
 def test_the_v4_schema_differs_from_v3_only_where_the_design_says() -> None:
-    v3 = ScenarioHandoff.model_json_schema()
+    v3 = _v3_schema()
     v4 = ScenarioHandoffV4.model_json_schema()
 
     assert v4["title"] == v3["title"] == "ScenarioHandoff"

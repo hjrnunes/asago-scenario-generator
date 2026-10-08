@@ -16,14 +16,13 @@ exclusion is verified by :func:`handoff_ownership_violations`, which is the
 ownership boundary enforced by the negative tests.
 
 Schema version: the builder emits :class:`ScenarioHandoffV4`
-(:data:`HANDOFF_SCHEMA_VERSION_V4`), which adds the ``attack_shape`` contract.
-:data:`HANDOFF_SCHEMA_VERSION` stays at v3: it names the version a payload
-without ``schema_version`` is read as. :class:`ScenarioHandoffV1`,
-:class:`ScenarioHandoffV2` and :class:`ScenarioHandoff` (v3) still read sealed
-handoffs from earlier runs.
-The paired contract kits live
-in ``data/contracts/scenario-handoff/`` and the consumer vendors them
-byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
+(:data:`HANDOFF_SCHEMA_VERSION_V4`), the only handoff model. The v1, v2 and v3
+kits in ``data/contracts/scenario-handoff/`` stay frozen for their readers,
+with their version constants and digest domains; their committed
+``schema.json`` files are the authority for them. :data:`HANDOFF_SCHEMA_VERSION`
+stays at v3: it names the digest domain a payload without ``schema_version``
+is framed in. The consumer vendors the kits byte-for-byte, the same
+discipline as ``data/contracts/target-profile/``.
 """
 
 from __future__ import annotations
@@ -270,10 +269,56 @@ class HandoffGherkin(HandoffModel):
         return "\n".join(lines) + "\n"
 
 
-class ScenarioHandoffV1(HandoffModel):
-    """The versioned scenario handoff envelope."""
+_TOOL_CALL_CONDITION_PAIRING: dict[str, Any] = {
+    "if": {
+        "properties": {
+            "tool_call_condition_status": {
+                "properties": {"status": {"const": TOOL_CALL_CONDITION_BOUND}}
+            }
+        }
+    },
+    "then": {
+        "required": ["tool_call_condition"],
+        "properties": {"tool_call_condition": {"type": "object"}},
+    },
+    "else": {"properties": {"tool_call_condition": {"type": "null"}}},
+}
 
-    schema_version: Literal["scenario-handoff-v1"] = HANDOFF_SCHEMA_VERSION_V1
+
+class ScenarioHandoffV4(HandoffModel):
+    """The versioned scenario handoff envelope (v4).
+
+    v4 adds ``attack_shape``: the structure of an adversarial scenario's
+    attack (channel, planned turns, planted item), made only of closed enums,
+    bounded integers and identifiers, never attack text. The key is required;
+    its value is an object for ``kind: adversarial`` and ``null`` for
+    ``kind: functional``.
+    """
+
+    # The committed schema.json is this model's JSON schema, byte for byte, so
+    # the field order, this title, and the docstring above are contract.
+    # One schema object allows one if/then/else, so the two pairings move into
+    # allOf. Readers that use only the schema's required and properties keys
+    # are unaffected.
+    model_config = ConfigDict(
+        extra="forbid",
+        title="ScenarioHandoff",
+        json_schema_extra={
+            "allOf": [
+                _TOOL_CALL_CONDITION_PAIRING,
+                {
+                    "if": {
+                        "properties": {"kind": {"const": "adversarial"}},
+                        "required": ["kind"],
+                    },
+                    "then": {"properties": {"attack_shape": {"type": "object"}}},
+                    "else": {"properties": {"attack_shape": {"type": "null"}}},
+                },
+            ]
+        },
+    )
+
+    schema_version: Literal["scenario-handoff-v4"] = HANDOFF_SCHEMA_VERSION_V4
     scenario_id: str
     scenario_version: int = 1
     kind: Literal["adversarial", "functional"]
@@ -301,40 +346,6 @@ class ScenarioHandoffV1(HandoffModel):
         exclude_if=lambda value: value is None,
     )
     content_digest: str = ""
-
-    @field_validator(
-        "semantic_failure_criterion",
-        "safe_alternative",
-        "narrative",
-        "hypothesis_framing",
-    )
-    @classmethod
-    def _require_text(cls, value: str) -> str:
-        if not value or not value.strip():
-            raise ValueError("handoff text field must not be blank")
-        return value
-
-    def canonical_payload(self) -> dict[str, Any]:
-        """Return the digest-covered document without its own digest field."""
-        payload = self.model_dump(mode="json", exclude_none=True)
-        payload.pop("content_digest", None)
-        return payload
-
-
-class ScenarioHandoffV2(ScenarioHandoffV1):
-    """The versioned scenario handoff envelope (v2).
-
-    v2 adds the Stage 5 ``discriminating_condition`` and its code-owned
-    ``condition_check``. Both are null for analytical-only scenarios and for
-    requests that supplied no target operations or observations.
-    ``condition_omitted_reason`` explains a null condition that Stage 5
-    produced but did not publish.
-    """
-
-    # The frozen v2 kit schema carries this title.
-    model_config = ConfigDict(extra="forbid", title="ScenarioHandoff")
-
-    schema_version: Literal["scenario-handoff-v2"] = HANDOFF_SCHEMA_VERSION_V2
     discriminating_condition: DiscriminatingCondition | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
@@ -348,9 +359,32 @@ class ScenarioHandoffV2(ScenarioHandoffV1):
         min_length=1,
         exclude_if=lambda value: value is None,
     )
+    tool_call_condition_status: ToolCallConditionStatus
+    tool_call_condition: ToolCallCondition | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
+    attack_shape: AttackShape | None = Field(
+        description=(
+            "Object for adversarial scenarios; null for functional scenarios. "
+            "Required, so a producer must decide."
+        ),
+    )
+
+    @field_validator(
+        "semantic_failure_criterion",
+        "safe_alternative",
+        "narrative",
+        "hypothesis_framing",
+    )
+    @classmethod
+    def _require_text(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("handoff text field must not be blank")
+        return value
 
     @model_validator(mode="after")
-    def validate_condition_fields(self) -> "ScenarioHandoffV2":
+    def validate_condition_fields(self) -> "ScenarioHandoffV4":
         """Keep the condition, its check, and an omission note consistent."""
 
         if (self.discriminating_condition is None) != (self.condition_check is None):
@@ -366,46 +400,8 @@ class ScenarioHandoffV2(ScenarioHandoffV1):
             )
         return self
 
-
-_TOOL_CALL_CONDITION_PAIRING: dict[str, Any] = {
-    "if": {
-        "properties": {
-            "tool_call_condition_status": {
-                "properties": {"status": {"const": TOOL_CALL_CONDITION_BOUND}}
-            }
-        }
-    },
-    "then": {
-        "required": ["tool_call_condition"],
-        "properties": {"tool_call_condition": {"type": "object"}},
-    },
-    "else": {"properties": {"tool_call_condition": {"type": "null"}}},
-}
-
-
-class ScenarioHandoff(ScenarioHandoffV2):
-    """The versioned scenario handoff envelope (v3).
-
-    v3 adds the Stage 5 binding of the discriminating condition to a
-    ready-to-evaluate tool-call condition. ``tool_call_condition_status``
-    says whether binding produced one and, when not, why; the bound
-    ``tool_call_condition`` holds only argument and literal operands and is
-    present exactly when the status is ``bound``.
-    """
-
-    # The if/then/else mirrors validate_tool_call_condition so consumers that
-    # validate only against schema.json enforce the same pairing.
-    model_config = ConfigDict(json_schema_extra=_TOOL_CALL_CONDITION_PAIRING)
-
-    schema_version: Literal["scenario-handoff-v3"] = HANDOFF_SCHEMA_VERSION
-    tool_call_condition_status: ToolCallConditionStatus
-    tool_call_condition: ToolCallCondition | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-    )
-
     @model_validator(mode="after")
-    def validate_tool_call_condition(self) -> "ScenarioHandoff":
+    def validate_tool_call_condition(self) -> "ScenarioHandoffV4":
         """Publish a tool-call condition exactly when the status is bound."""
 
         bound = self.tool_call_condition_status.status == TOOL_CALL_CONDITION_BOUND
@@ -415,44 +411,6 @@ class ScenarioHandoff(ScenarioHandoffV2):
                 "tool_call_condition_status is bound"
             )
         return self
-
-
-class ScenarioHandoffV4(ScenarioHandoff):
-    """The versioned scenario handoff envelope (v4).
-
-    v4 adds ``attack_shape``: the structure of an adversarial scenario's
-    attack (channel, planned turns, planted item), made only of closed enums,
-    bounded integers and identifiers, never attack text. The key is required;
-    its value is an object for ``kind: adversarial`` and ``null`` for
-    ``kind: functional``.
-    """
-
-    # One schema object allows one if/then/else, so the two pairings move into
-    # allOf. Readers that use only the schema's required and properties keys
-    # are unaffected.
-    model_config = ConfigDict(
-        json_schema_extra={
-            "allOf": [
-                _TOOL_CALL_CONDITION_PAIRING,
-                {
-                    "if": {
-                        "properties": {"kind": {"const": "adversarial"}},
-                        "required": ["kind"],
-                    },
-                    "then": {"properties": {"attack_shape": {"type": "object"}}},
-                    "else": {"properties": {"attack_shape": {"type": "null"}}},
-                },
-            ]
-        },
-    )
-
-    schema_version: Literal["scenario-handoff-v4"] = HANDOFF_SCHEMA_VERSION_V4
-    attack_shape: AttackShape | None = Field(
-        description=(
-            "Object for adversarial scenarios; null for functional scenarios. "
-            "Required, so a producer must decide."
-        ),
-    )
 
     @model_validator(mode="after")
     def validate_attack_shape_kind(self) -> "ScenarioHandoffV4":
@@ -483,14 +441,6 @@ class ScenarioHandoffV4(ScenarioHandoff):
         return data
 
 
-_HANDOFF_MODELS: dict[str, type[ScenarioHandoffV1]] = {
-    HANDOFF_SCHEMA_VERSION_V1: ScenarioHandoffV1,
-    HANDOFF_SCHEMA_VERSION_V2: ScenarioHandoffV2,
-    HANDOFF_SCHEMA_VERSION: ScenarioHandoff,
-    HANDOFF_SCHEMA_VERSION_V4: ScenarioHandoffV4,
-}
-
-
 def handoff_payload_digest(payload: dict[str, Any]) -> str:
     """Return the framed content digest for a v1, v2, v3, or v4 handoff payload."""
     version = payload.get("schema_version", HANDOFF_SCHEMA_VERSION)
@@ -500,7 +450,7 @@ def handoff_payload_digest(payload: dict[str, Any]) -> str:
     return compute_framed_digest(domain, payload)
 
 
-def finalize_handoff(handoff: ScenarioHandoffV1) -> ScenarioHandoffV1:
+def finalize_handoff(handoff: ScenarioHandoffV4) -> ScenarioHandoffV4:
     """Return the handoff with its content digest computed and verified."""
     payload = handoff.model_dump(mode="json", exclude_none=True)
     payload.pop("content_digest", None)
@@ -510,7 +460,7 @@ def finalize_handoff(handoff: ScenarioHandoffV1) -> ScenarioHandoffV1:
     return handoff.model_copy(update={"content_digest": digest})
 
 
-def verify_handoff_digest(handoff: ScenarioHandoffV1) -> None:
+def verify_handoff_digest(handoff: ScenarioHandoffV4) -> None:
     """Fail closed when a handoff's recorded digest does not match its bytes."""
     payload = handoff.model_dump(mode="json", exclude_none=True)
     payload.pop("content_digest", None)
@@ -555,17 +505,26 @@ def handoff_ownership_violations(payload: dict[str, Any]) -> list[str]:
     return violations
 
 
-def handoff_schema_violations(payload: dict[str, Any]) -> list[str]:
-    """Return ``schema_violation:<top-level field>`` codes for one payload.
+#: The v4 kit's ``schema-unknown-version`` case records these codes: they are
+#: what the retired v3 model reported for it, and the kit stays byte-identical.
+_OTHER_VERSION_VIOLATIONS = (
+    "schema_violation:schema_version",
+    "schema_violation:attack_shape",
+)
 
-    The payload's ``schema_version`` selects the v1, v2, v3, or v4 model; any
-    other value is validated against v3 and is itself a schema violation.
-    An empty list means the closed schema accepts the payload.
+
+def handoff_schema_violations(payload: dict[str, Any]) -> list[str]:
+    """Return ``schema_violation:<top-level field>`` codes for one v4 payload.
+
+    A payload with any other ``schema_version`` gets
+    :data:`_OTHER_VERSION_VIOLATIONS`, the codes the frozen v4 kit records for
+    its unknown-version case. An empty list means the closed schema accepts
+    the payload.
     """
-    version = payload.get("schema_version", HANDOFF_SCHEMA_VERSION)
-    model = _HANDOFF_MODELS.get(version, ScenarioHandoff)
+    if payload.get("schema_version") != HANDOFF_SCHEMA_VERSION_V4:
+        return list(_OTHER_VERSION_VIOLATIONS)
     try:
-        model.model_validate(payload)
+        ScenarioHandoffV4.model_validate(payload)
     except ValidationError as exc:
         violations: list[str] = []
         for error in exc.errors():
@@ -655,7 +614,6 @@ def _safe_alternative(envelope: ScenarioEnvelope) -> str:
 
 def _documented_operations(
     envelope: ScenarioEnvelope,
-    loss_analysis: LossAnalysis | None,
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
 ) -> list[HandoffOperation]:
@@ -881,7 +839,6 @@ def _sourced_facts(
 
 def _assumptions_and_unknowns(
     envelope: ScenarioEnvelope,
-    loss_analysis: LossAnalysis | None,
     environment_bound: bool,
 ) -> list[str]:
     unknowns = [
@@ -994,12 +951,10 @@ def build_scenario_handoff(
         governing_rules=_governing_rules(envelope),
         lineage=_lineage(envelope),
         documented_operations=_documented_operations(
-            envelope, loss_analysis, enriched_operations, observed_operations
+            envelope, enriched_operations, observed_operations
         ),
         sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source),
-        assumptions_and_unknowns=_assumptions_and_unknowns(
-            envelope, loss_analysis, environment_bound
-        ),
+        assumptions_and_unknowns=_assumptions_and_unknowns(envelope, environment_bound),
         observation=_observation_metadata(envelope),
         discriminating_condition=envelope.scenario_spec.discriminating_condition,
         condition_check=envelope.scenario_spec.condition_check,
@@ -1041,13 +996,8 @@ def _tool_call_condition(
     return binding.status, binding.condition
 
 
-def render_handoff_feature(handoff: ScenarioHandoff) -> str:
-    """Render the declarative Gherkin feature text for a handoff."""
-    return handoff.gherkin.to_feature_text()
-
-
 def write_scenario_handoff(
-    handoff: ScenarioHandoff,
+    handoff: ScenarioHandoffV4,
     scenarios_dir: Path,
 ) -> tuple[Path, Path]:
     """Write the handoff YAML and its declarative ``.feature`` companion."""
@@ -1056,7 +1006,7 @@ def write_scenario_handoff(
     handoff_path = scenarios_dir / f"{handoff.scenario_id}.yaml"
     feature_path = scenarios_dir / f"{handoff.scenario_id}.feature"
     write_yaml(handoff, handoff_path)
-    feature_path.write_text(render_handoff_feature(handoff), encoding="utf-8")
+    feature_path.write_text(handoff.gherkin.to_feature_text(), encoding="utf-8")
     return handoff_path, feature_path
 
 
@@ -1085,9 +1035,6 @@ __all__ = [
     "HandoffObservation",
     "HandoffOperation",
     "HandoffRule",
-    "ScenarioHandoff",
-    "ScenarioHandoffV1",
-    "ScenarioHandoffV2",
     "ScenarioHandoffV4",
     "Stage1aSource",
     "build_scenario_handoff",
@@ -1095,7 +1042,6 @@ __all__ = [
     "handoff_ownership_violations",
     "handoff_payload_digest",
     "handoff_schema_violations",
-    "render_handoff_feature",
     "verify_handoff_digest",
     "write_scenario_handoff",
 ]

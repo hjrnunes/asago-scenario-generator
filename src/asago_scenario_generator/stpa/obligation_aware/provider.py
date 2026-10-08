@@ -12,7 +12,7 @@ from functools import lru_cache, partial
 from pathlib import Path
 from typing import Annotated, Any, Literal, Mapping, Sequence, Union
 
-from pydantic import Field, conlist, create_model, field_validator, model_validator
+from pydantic import Field, create_model, field_validator, model_validator
 
 from asago_scenario_generator.models.artifact_pin import ObligationId
 from asago_scenario_generator.models.obligation_consideration import (
@@ -109,7 +109,15 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _validate_finding_semantics,
     compile_slot_provider_entry,
 )
-from asago_scenario_generator.stpa.obligation_aware.stpa_index import build_stpa_index
+from asago_scenario_generator.stpa.obligation_aware.payload_types import (
+    exact_length_payload_type,
+    require_non_negative_count,
+    require_positive_count,
+)
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    StpaIndex,
+    build_stpa_index,
+)
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 _SYNTHESIS_MAX_COMPLETION_TOKENS = 8192
@@ -423,17 +431,14 @@ def _routing_provider_payload_type(
     makes an otherwise-valid empty/default response impossible at the native
     structured-output boundary.
     """
-    if type(route_count) is not int or route_count <= 0:
-        raise ValueError("route_count must be a positive integer")
-    routes = conlist(
-        _routing_exact_identity_union(obligation_ids),
-        min_length=route_count,
-        max_length=route_count,
-    )
-    return create_model(
+    require_positive_count(route_count, "route_count")
+    return exact_length_payload_type(
         f"_RoutingProviderPayload{route_count}",
-        __base__=_RoutingProviderPayload,
-        routes=(routes, ...),
+        _RoutingProviderPayload,
+        "routes",
+        _routing_exact_identity_union(obligation_ids),
+        route_count,
+        module=__name__,
     )
 
 
@@ -648,34 +653,28 @@ class _IcaHazardCorrectionPayload(_Model):
 @lru_cache(maxsize=16)
 def _mechanism_verdict_payload_type(verdict_count: int) -> type[_Model]:
     """Build a strict verifier payload for every selected route."""
-    if type(verdict_count) is not int or verdict_count <= 0:
-        raise ValueError("verdict_count must be a positive integer")
-    verdicts = conlist(
-        _MechanismVerdict,
-        min_length=verdict_count,
-        max_length=verdict_count,
-    )
-    return create_model(
+    require_positive_count(verdict_count, "verdict_count")
+    return exact_length_payload_type(
         f"_MechanismVerdictPayload{verdict_count}",
-        __base__=_MechanismVerdictPayload,
-        verdicts=(verdicts, ...),
+        _MechanismVerdictPayload,
+        "verdicts",
+        _MechanismVerdict,
+        verdict_count,
+        module=__name__,
     )
 
 
 @lru_cache(maxsize=16)
 def _ica_hazard_provider_payload_type(verdict_count: int) -> type[_Model]:
     """Build a strict provider payload for an exact ICA batch cardinality."""
-    if type(verdict_count) is not int or verdict_count <= 0:
-        raise ValueError("verdict_count must be a positive integer")
-    verdicts = conlist(
-        _IcaHazardProviderVerdict,
-        min_length=verdict_count,
-        max_length=verdict_count,
-    )
-    return create_model(
+    require_positive_count(verdict_count, "verdict_count")
+    return exact_length_payload_type(
         f"_IcaHazardProviderPayload{verdict_count}",
-        __base__=_IcaHazardProviderPayload,
-        verdicts=(verdicts, ...),
+        _IcaHazardProviderPayload,
+        "verdicts",
+        _IcaHazardProviderVerdict,
+        verdict_count,
+        module=__name__,
     )
 
 
@@ -753,17 +752,12 @@ def _slot_path_ids(
     request: StructuralRoutingRequest, route: ObligationRoute
 ) -> tuple[str, ...]:
     """Resolve verifier context from authoritative slots, not optional echoes."""
-    responsibilities = {
-        item.resp_id: item for item in request.control_structure.responsibilities
-    }
-    links = {
-        item.link_id: item for item in request.control_structure.coordination_links
-    }
+    index = build_stpa_index(request.control_structure)
     selected_slots = _selected_verifier_slots(request, route)
     return tuple(
         identity
         for slot in selected_slots
-        for identity in _one_slot_path_ids(slot, responsibilities, links)
+        for identity in _one_slot_path_ids(slot, index)
     )
 
 
@@ -774,24 +768,22 @@ def _selected_verifier_slots(
     return tuple(slot for slot in request.slots if slot.slot_id in route.slot_ids)
 
 
-def _one_slot_path_ids(
-    slot: Any, responsibilities: dict[str, Any], links: dict[str, Any]
-) -> tuple[str, ...]:
+def _one_slot_path_ids(slot: Any, index: StpaIndex) -> tuple[str, ...]:
     """Dispatch one selected slot to its authoritative path projector."""
     if slot.responsibility is not None:
         return _responsibility_slot_path_ids(
-            responsibilities[slot.responsibility], slot.control_action
+            index.responsibilities[slot.responsibility], slot.control_action
         )
-    return _optional_coordination_slot_path_ids(slot, links)
+    return _optional_coordination_slot_path_ids(slot, index)
 
 
 def _optional_coordination_slot_path_ids(
-    slot: Any, links: dict[str, Any]
+    slot: Any, index: StpaIndex
 ) -> tuple[str, ...]:
     """Project a coordination slot, or no path for a malformed placeholder."""
     if slot.coordination_link is None:
         return ()
-    return _coordination_slot_path_ids(links[slot.coordination_link])
+    return _coordination_slot_path_ids(index.coordination_links[slot.coordination_link])
 
 
 def _responsibility_slot_path_ids(
@@ -1119,17 +1111,15 @@ def _slot_provider_payload_type(
     constraint_ids: tuple[str, ...] = (),
 ) -> type[_Model]:
     """Build a provider payload constrained to one request's exact counts."""
-    _require_positive_count(slot_count, "slot_count")
-    _require_non_negative_count(required_pair_count, "required_pair_count")
-    filled_slots = conlist(
-        _slot_exact_constraint_type(constraint_ids),
-        min_length=slot_count,
-        max_length=slot_count,
-    )
-    return create_model(
+    require_positive_count(slot_count, "slot_count")
+    require_non_negative_count(required_pair_count, "required_pair_count")
+    return exact_length_payload_type(
         f"_SlotProviderPayload{slot_count}Pairs{required_pair_count}",
-        __base__=_SlotProviderPayload,
-        filled_slots=(filled_slots, ...),
+        _SlotProviderPayload,
+        "filled_slots",
+        _slot_exact_constraint_type(constraint_ids),
+        slot_count,
+        module=__name__,
     )
 
 
@@ -1153,18 +1143,6 @@ def _slot_exact_constraint_type(constraint_ids: tuple[str, ...]) -> type[_Model]
         __base__=_SlotProviderDraft,
         findings=(tuple[finding, ...], ()),
     )
-
-
-def _require_positive_count(value: int, name: str) -> None:
-    """Reject booleans and non-positive dynamic-schema counts."""
-    if type(value) is not int or value <= 0:
-        raise ValueError(f"{name} must be a positive integer")
-
-
-def _require_non_negative_count(value: int, name: str) -> None:
-    """Reject booleans and negative dynamic-schema counts."""
-    if type(value) is not int or value < 0:
-        raise ValueError(f"{name} must be a non-negative integer")
 
 
 def _required_pair_keys(
@@ -1227,6 +1205,7 @@ def _validate_slot_payload_semantics(
         for route in request.routed_routes
         for slot_id in route.slot_ids
     }
+    index = build_stpa_index(request.control_structure)
     for value in payload.filled_slots:
         expected = expected_by_id.get(value.slot_id)
         if expected is None:
@@ -1236,7 +1215,7 @@ def _validate_slot_payload_semantics(
         # the same deterministic source used by the compiler, but does not
         # create an ICA or alter the model's prose.
         _owner, action, _target_process, process_models, feedback = _slot_authority(
-            expected, request.control_structure
+            expected, index
         )
         for finding in draft.findings:
             _validate_finding_semantics(

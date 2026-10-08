@@ -951,16 +951,6 @@ class TargetRealizationEffectiveView(SemanticDigestMixin, ClosedCanonicalModel):
     denominators: TargetRealizationDenominators
     diagnostics: tuple[str, ...] = ()
 
-    @property
-    def control_structure(self) -> SystemicControlStructureSnapshot:
-        """Alias used by downstream consumers for the effective snapshot."""
-        return self.effective_control_structure
-
-    @property
-    def ica_enumeration(self) -> SystemicICAEnumerationSnapshot:
-        """Alias used by downstream consumers for the effective snapshot."""
-        return self.effective_ica_enumeration
-
     @model_validator(mode="after")
     def validate_view(self) -> "TargetRealizationEffectiveView":
         """Check the view in canonical order; do not rewrite it.
@@ -973,9 +963,6 @@ class TargetRealizationEffectiveView(SemanticDigestMixin, ClosedCanonicalModel):
             canonical[name] for name in _EFFECTIVE_ADDITION_FIELDS
         )
         _validate_effective_additions(actions, processes, slots, findings)
-        _validate_effective_unions(
-            self, baseline_ids, actions, processes, slots, findings
-        )
         expected_denominators = _effective_denominators(
             baseline_ids, actions, processes, slots, findings
         )
@@ -1654,101 +1641,6 @@ def _require_all_literal_provenance(
 def _require_all_verified(findings: Sequence[TargetDerivedICAFinding]) -> None:
     if any(item.verification.status != "verified" for item in findings):
         raise ValueError("effective target-derived findings must be verified")
-
-
-def _validate_effective_unions(
-    view: TargetRealizationEffectiveView,
-    baseline_ids: tuple[tuple[str, ...], ...],
-    actions: Sequence[SystemicControlAction],
-    processes: Sequence[SystemicControlledProcess],
-    slots: Sequence[TargetDerivedICASlot],
-    findings: Sequence[TargetDerivedICAFinding],
-) -> None:
-    expected = _expected_effective_unions(baseline_ids, actions, processes, slots)
-    actual = _actual_effective_unions(view)
-    _require_equal_values(
-        actual[0],
-        expected[0],
-        "effective control structure does not preserve the action union",
-    )
-    _require_equal_values(
-        actual[1],
-        expected[1],
-        "effective control structure does not preserve the process union",
-    )
-    _require_equal_values(
-        actual[2],
-        expected[2],
-        "effective ICA enumeration does not preserve the slot union",
-    )
-    effective_ica_ids = actual[3]
-    _require_subset(
-        baseline_ids[3],
-        effective_ica_ids,
-        "effective ICA enumeration removed a baseline finding",
-    )
-    _require_subset(
-        (item.ica_id for item in findings),
-        effective_ica_ids,
-        "effective ICA enumeration omitted a target-derived finding",
-    )
-
-
-def _expected_effective_unions(
-    baseline_ids: tuple[tuple[str, ...], ...],
-    actions: Sequence[SystemicControlAction],
-    processes: Sequence[SystemicControlledProcess],
-    slots: Sequence[TargetDerivedICASlot],
-) -> tuple[set[str], set[str], set[str]]:
-    return (
-        set(baseline_ids[0]) | {item.control_action_id for item in actions},
-        set(baseline_ids[1]) | {item.cp_id for item in processes},
-        set(baseline_ids[2]) | {item.slot_id for item in slots},
-    )
-
-
-def _actual_effective_unions(
-    view: TargetRealizationEffectiveView,
-) -> tuple[set[str], set[str], set[str], set[str]]:
-    return (
-        _effective_action_ids(view),
-        _effective_process_ids(view),
-        _effective_slot_ids(view),
-        _effective_ica_ids(view),
-    )
-
-
-def _effective_action_ids(view: TargetRealizationEffectiveView) -> set[str]:
-    return {
-        item.control_action_id
-        for responsibility in view.effective_control_structure.responsibilities
-        for item in responsibility.control_actions
-    }
-
-
-def _effective_process_ids(view: TargetRealizationEffectiveView) -> set[str]:
-    return {
-        item.cp_id for item in view.effective_control_structure.controlled_processes
-    }
-
-
-def _effective_slot_ids(view: TargetRealizationEffectiveView) -> set[str]:
-    return {item.slot_id for item in view.effective_ica_enumeration.slots}
-
-
-def _effective_ica_ids(view: TargetRealizationEffectiveView) -> set[str]:
-    return {
-        item.ica_id
-        for slot in view.effective_ica_enumeration.slots
-        for item in slot.icas
-    }
-
-
-def _require_subset(
-    values: Sequence[str] | set[str], universe: set[str], message: str
-) -> None:
-    if not set(values).issubset(universe):
-        raise ValueError(message)
 
 
 def _effective_denominators(

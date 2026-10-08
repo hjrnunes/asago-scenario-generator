@@ -64,7 +64,10 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     PromptContractAudit,
 )
 from asago_scenario_generator.stpa.obligation_aware.hazard_offer import slot_offer
-from asago_scenario_generator.stpa.obligation_aware.stpa_index import build_stpa_index
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    StpaIndex,
+    build_stpa_index,
+)
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 
@@ -819,26 +822,18 @@ def _project_coordination_context(
 
 def _slot_target_process(
     slot: SlotPlaceholder,
-    responsibilities: Sequence[Any],
+    selected_owner_ids: set[str],
+    index: StpaIndex,
     refs: dict[str, PromptReference],
 ) -> PromptReference | None:
-    """Resolve a responsibility slot's controlled-process edge."""
-    if not slot.responsibility:
+    """Resolve a responsibility slot's controlled-process edge.
+
+    Only owners among the selected responsibilities resolve; a slot owned by
+    any other responsibility has no edge in this view.
+    """
+    if not slot.responsibility or slot.responsibility not in selected_owner_ids:
         return None
-    responsibility = next(
-        (item for item in responsibilities if item.resp_id == slot.responsibility),
-        None,
-    )
-    if responsibility is None:
-        return None
-    control_action = next(
-        (
-            item
-            for item in responsibility.control_actions
-            if item.ca_id == slot.control_action
-        ),
-        None,
-    )
+    control_action = index.slot_path(slot).action
     if control_action is None:
         return None
     return _element_reference(control_action.target, refs)
@@ -852,6 +847,8 @@ def _project_slot_context(
 ) -> list[ProviderSlot]:
     """Project exact slot identities and their local control-path meaning."""
     all_cp_ids = {item.id for item in _controlled_process_refs(control_structure)}
+    index = build_stpa_index(control_structure)
+    selected_owner_ids = {item.resp_id for item in responsibilities}
     views: list[ProviderSlot] = []
     for slot in slots:
         owner = refs.get(slot.responsibility) if slot.responsibility else None
@@ -859,7 +856,7 @@ def _project_slot_context(
             id=slot.control_action,
             description=slot.control_action,
         )
-        target_process = _slot_target_process(slot, responsibilities, refs)
+        target_process = _slot_target_process(slot, selected_owner_ids, index, refs)
         views.append(
             ProviderSlot(
                 id=slot.slot_id,

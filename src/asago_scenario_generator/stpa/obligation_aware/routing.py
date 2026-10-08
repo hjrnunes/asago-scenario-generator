@@ -8,7 +8,6 @@ import functools
 from typing import Any, Literal
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
-from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
@@ -17,7 +16,6 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationSemanticAssessment,
 )
 from asago_scenario_generator.models.obligation_plan import (
-    TaxonomyObligation,
     TaxonomyObligationPlan,
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
@@ -31,6 +29,16 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudgetExceeded,
     resolve_adapter_prompt_budget,
 )
+from asago_scenario_generator.stpa.obligation_aware.briefs import (
+    build_neutral_brief,
+    build_neutral_briefs,
+    create_obligation_batches,
+    split_by_budget,
+)
+from asago_scenario_generator.stpa.obligation_aware.calls import (
+    call_evidence,
+    call_with_feedback,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     AnalysisControls,
     StructuralAnalysisAdapter,
@@ -43,7 +51,10 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_structural_routing_prompts,
     mapping_strength_for_brief,
 )
-from asago_scenario_generator.stpa.obligation_aware.stpa_index import build_stpa_index
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    StpaIndex,
+    build_stpa_index,
+)
 from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     SlotPlaceholder,
     create_slots,
@@ -82,8 +93,6 @@ def _budgeted_obligation_batches(
     ordered = tuple(sorted(briefs, key=lambda item: item.obligation_id))
     if budget is None:
         return create_obligation_batches(ordered, max_batch_size)
-    batches: list[tuple[NeutralObligationBrief, ...]] = []
-    current: list[NeutralObligationBrief] = []
 
     def fits(values: Sequence[NeutralObligationBrief]) -> bool:
         system, user = build_structural_routing_prompts(
@@ -94,136 +103,7 @@ def _budgeted_obligation_batches(
         )
         return budget.count(f"{system}\n{user}") <= budget.usable_input_tokens
 
-    for brief in ordered:
-        if len(current) >= max_batch_size:
-            batches.append(tuple(current))
-            current = []
-        candidate = (*current, brief)
-        if current and not fits(candidate):
-            batches.append(tuple(current))
-            current = [brief]
-        else:
-            current = list(candidate)
-    if current:
-        batches.append(tuple(current))
-    return tuple(batches)
-
-
-def _catalog_map(
-    attack_pattern_catalog: Sequence[AttackPattern] | Mapping[str, AttackPattern],
-) -> dict[str, AttackPattern]:
-    """Index a typed attack-pattern catalog by exact pattern identity."""
-    values = (
-        attack_pattern_catalog.values()
-        if isinstance(attack_pattern_catalog, Mapping)
-        else attack_pattern_catalog
-    )
-    result: dict[str, AttackPattern] = {}
-    for pattern in values:
-        if not isinstance(pattern, AttackPattern):
-            raise TypeError("attack_pattern_catalog must contain AttackPattern values")
-        if pattern.id in result:
-            raise ValueError(
-                f"attack pattern catalog contains duplicate id {pattern.id}"
-            )
-        result[pattern.id] = pattern
-    return result
-
-
-def _resource_references(row: TaxonomyObligation) -> tuple[Any, ...]:
-    """Copy exact typed resource identities without copying candidate records."""
-    references: dict[str, Any] = {}
-    for candidate in row.candidate_records:
-        for binding in candidate.resource_bindings:
-            reference = binding.resource_ref
-            references[reference.model_dump_json()] = reference
-    return tuple(references[key] for key in sorted(references))
-
-
-def build_neutral_brief(
-    plan: TaxonomyObligationPlan,
-    row: TaxonomyObligation,
-    pattern: AttackPattern,
-) -> NeutralObligationBrief:
-    """Build one neutral STPA question from one applicable Phase 1 row.
-
-    The brief intentionally contains no canonical chain steps and no
-    candidate projection.  Qualification is copied, not used as a filter.
-    """
-    if not isinstance(plan, TaxonomyObligationPlan):
-        raise TypeError("plan must be a TaxonomyObligationPlan")
-    if not isinstance(row, TaxonomyObligation):
-        raise TypeError("row must be a TaxonomyObligation")
-    if row.scope_disposition != "applicable":
-        raise ValueError("neutral briefs may only be built for applicable rows")
-    if row.attack_pattern_id != pattern.id:
-        raise ValueError("brief pattern does not match the obligation row")
-    if row.attack_pattern_semantic_digest != pattern.canonical_chain.semantic_digest:
-        raise ValueError("brief pattern digest does not match the obligation row")
-    return NeutralObligationBrief(
-        obligation_id=row.obligation_id,
-        risk_ref=row.risk_ref,
-        attack_pattern_id=pattern.id,
-        attack_pattern_name=pattern.name,
-        attack_pattern_description=pattern.description,
-        attack_pattern_semantic_digest=pattern.canonical_chain.semantic_digest,
-        taxonomy_chain=row.taxonomy_chain,
-        prerequisite_capabilities=pattern.prerequisite_capabilities,
-        qualification_disposition=row.qualification_disposition,
-        applicability_evidence=row.evidence,
-        resource_references=_resource_references(row),
-        candidate_ids=tuple(item.candidate_id for item in row.candidate_records),
-        plan_digest=plan.semantic_digest,
-        catalog_pins=plan.catalog_pins,
-        mapping_pins=plan.mapping_pins,
-    )
-
-
-def build_neutral_briefs(
-    plan: TaxonomyObligationPlan,
-    attack_pattern_catalog: Sequence[AttackPattern] | Mapping[str, AttackPattern],
-) -> tuple[NeutralObligationBrief, ...]:
-    """Build one brief for every applicable obligation in canonical order."""
-    if not isinstance(plan, TaxonomyObligationPlan):
-        raise TypeError("plan must be a TaxonomyObligationPlan")
-    plan.assert_integrity()
-    catalog = _catalog_map(attack_pattern_catalog)
-    briefs: list[NeutralObligationBrief] = []
-    for row in plan.obligations:
-        if row.scope_disposition != "applicable":
-            continue
-        if row.attack_pattern_id is None:
-            raise ValueError(
-                f"applicable obligation {row.obligation_id} has no pattern"
-            )
-        pattern = catalog.get(row.attack_pattern_id)
-        if pattern is None:
-            raise ValueError(
-                f"applicable obligation {row.obligation_id} has no catalog pattern"
-            )
-        briefs.append(build_neutral_brief(plan, row, pattern))
-    return tuple(sorted(briefs, key=lambda item: item.obligation_id))
-
-
-def create_obligation_batches(
-    briefs: Sequence[NeutralObligationBrief],
-    max_batch_size: int,
-) -> tuple[tuple[NeutralObligationBrief, ...], ...]:
-    """Partition briefs into stable, canonical batches."""
-    if type(max_batch_size) is not int:
-        raise TypeError("max_batch_size must be an integer")
-    if max_batch_size <= 0:
-        raise ValueError("max_batch_size must be positive")
-    ordered = tuple(sorted(briefs, key=lambda item: item.obligation_id))
-    if any(not isinstance(item, NeutralObligationBrief) for item in ordered):
-        raise TypeError("briefs must contain NeutralObligationBrief values")
-    ids = tuple(item.obligation_id for item in ordered)
-    if len(ids) != len(set(ids)):
-        raise ValueError("briefs must contain unique obligation IDs")
-    return tuple(
-        tuple(ordered[index : index + max_batch_size])
-        for index in range(0, len(ordered), max_batch_size)
-    )
+    return split_by_budget(ordered, max_batch_size, fits)
 
 
 def _default_controls(
@@ -406,31 +286,25 @@ def _infer_targeted_path(
     if not selected_slots:
         raise ValueError("targeted route requires a non-empty selected slot path")
 
-    responsibilities = {
-        item.resp_id: item for item in control_structure.responsibilities
-    }
-    processes = {item.cp_id: item for item in control_structure.controlled_processes}
-    links = {item.link_id: item for item in control_structure.coordination_links}
+    index = build_stpa_index(control_structure)
     path = _InferredRoutePath()
 
     for slot in selected_slots:
-        _infer_slot_path(slot, responsibilities, processes, links, path)
+        _infer_slot_path(slot, index, path)
 
     return path.as_tuple()
 
 
 def _infer_slot_path(
     slot: SlotPlaceholder,
-    responsibilities: dict[str, Any],
-    processes: dict[str, Any],
-    links: dict[str, Any],
+    index: StpaIndex,
     path: "_InferredRoutePath",
 ) -> None:
     path.actions.add(slot.control_action)
     if slot.responsibility is not None:
-        _infer_owned_slot_path(slot, responsibilities, processes, path)
+        _infer_owned_slot_path(slot, index, path)
     elif slot.coordination_link is not None:
-        _infer_coordination_slot_path(slot, links, path)
+        _infer_coordination_slot_path(slot, index, path)
     else:
         raise ValueError(f"slot {slot.slot_id} has no owner or coordination path")
 
@@ -463,18 +337,18 @@ class _InferredRoutePath:
 
 def _infer_owned_slot_path(
     slot: SlotPlaceholder,
-    responsibilities: dict[str, Any],
-    processes: dict[str, Any],
+    index: StpaIndex,
     path: _InferredRoutePath,
 ) -> None:
     """Add the owner, process, and owner context of a responsibility slot."""
-    responsibility = responsibilities.get(slot.responsibility)
+    resolved = index.slot_path(slot)
+    responsibility = resolved.owner
     if responsibility is None:
         raise ValueError(
             f"slot {slot.slot_id} has unknown owning responsibility "
             f"{slot.responsibility}"
         )
-    process_id = _owned_action_process_id(slot, responsibility, processes)
+    process_id = _owned_action_process_id(slot, resolved.action, index)
     path.controllers.add(slot.responsibility)
     path.responsibilities.add(slot.responsibility)
     path.processes.add(process_id)
@@ -485,17 +359,9 @@ def _infer_owned_slot_path(
 
 
 def _owned_action_process_id(
-    slot: SlotPlaceholder, responsibility: Any, processes: dict[str, Any]
+    slot: SlotPlaceholder, action: Any | None, index: StpaIndex
 ) -> str:
     """Return the controlled process the slot's owned action targets."""
-    action = next(
-        (
-            item
-            for item in responsibility.control_actions
-            if item.ca_id == slot.control_action
-        ),
-        None,
-    )
     if action is None:
         raise ValueError(
             f"slot {slot.slot_id} action {slot.control_action} is not owned "
@@ -506,7 +372,7 @@ def _owned_action_process_id(
             f"action {action.ca_id} has no controlled-process target for "
             "the selected route"
         )
-    if action.target.id not in processes:
+    if action.target.id not in index.controlled_processes:
         raise ValueError(
             f"action {action.ca_id} targets unknown controlled process "
             f"{action.target.id}"
@@ -516,11 +382,11 @@ def _owned_action_process_id(
 
 def _infer_coordination_slot_path(
     slot: SlotPlaceholder,
-    links: dict[str, Any],
+    index: StpaIndex,
     path: _InferredRoutePath,
 ) -> None:
     """Add the issuing source, link, and shared state of a coordination slot."""
-    link = links.get(slot.coordination_link)
+    link = index.slot_path(slot).link
     if link is None:
         raise ValueError(
             f"slot {slot.slot_id} has unknown coordination link "
@@ -679,17 +545,6 @@ def _request_for_batch(
     )
 
 
-def _call_route(
-    adapter: Any,
-    request: StructuralRoutingRequest,
-    feedback: str | None,
-) -> Any:
-    """Call the routing stage, passing one bounded schema correction if any."""
-    if feedback is None:
-        return adapter.route(request)
-    return adapter.route(request, correction_feedback=feedback)
-
-
 def _routing_validation_feedback(error: BaseException) -> str:
     """Give one stable, field-specific repair instruction for a route retry."""
     detail = " ".join(str(error).replace("\r", " ").replace("\n", " ").split())
@@ -811,18 +666,14 @@ def _call_evidence(
     outcome: Literal["accepted", "unresolved", "technical_failure"] = "accepted",
 ) -> ConsiderationCallEvidence:
     """Build shared call evidence for one routing batch."""
-    response_digest = response.response_digest or compute_framed_digest(
-        ROUTING_RESPONSE_DIGEST_DOMAIN,
-        response.model_dump(mode="json"),
-    )
-    return ConsiderationCallEvidence(
-        call_id=f"stpa-route:{request.batch_id}",
+    return call_evidence(
+        f"stpa-route:{request.batch_id}",
+        attempts,
+        outcome,
         request_digest=request.semantic_digest,
-        response_digest=response_digest,
-        model_profile=request.controls.model_profile,
-        model_name=request.controls.model_name,
-        attempt_count=attempts,
-        outcome=outcome,
+        controls=request.controls,
+        response=response,
+        digest_domain=ROUTING_RESPONSE_DIGEST_DOMAIN,
     )
 
 
@@ -994,8 +845,8 @@ def _route_batch(
     for attempt in range(controls.validation_retries + 1):
         try:
             with count_requests(sent):
-                raw = _call_route(
-                    adapter,
+                raw = call_with_feedback(
+                    adapter.route,
                     request,
                     None if attempt == 0 else _routing_validation_feedback(error),
                 )
@@ -1159,13 +1010,12 @@ def _exhausted_batch_result(
 ]:
     """Mark every batch obligation unresolved after validation is exhausted."""
     detail = f"{request.batch_id} exhausted validation: {type(error).__name__}: {error}"
-    evidence = ConsiderationCallEvidence(
-        call_id=f"stpa-route:{request.batch_id}",
+    evidence = call_evidence(
+        f"stpa-route:{request.batch_id}",
+        attempts,
+        "unresolved",
         request_digest=request.semantic_digest,
-        model_profile=request.controls.model_profile,
-        model_name=request.controls.model_name,
-        attempt_count=attempts,
-        outcome="unresolved",
+        controls=request.controls,
     )
     return request, _unresolved_routes(request, error), evidence, detail
 

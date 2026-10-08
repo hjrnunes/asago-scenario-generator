@@ -33,6 +33,11 @@ from typing import TYPE_CHECKING, Any, Literal
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.loss_analysis import span_quotes_rule
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.quote_normalization import (
+    REPAIR_FOLD,
+    REPAIR_IGNORED,
+    normalize_with_index,
+)
 
 if TYPE_CHECKING:
     from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
@@ -42,27 +47,6 @@ if TYPE_CHECKING:
 RULE_SPAN_REPAIR_KIND = "rule_span_repaired"
 RuleSpanRepairKind = Literal["whitespace", "ellipsis"]
 
-_TYPOGRAPHIC = str.maketrans(
-    {
-        "\u2018": "'",
-        "\u2019": "'",
-        "\u201a": "'",
-        "\u201b": "'",
-        "\u2032": "'",
-        "\u201c": '"',
-        "\u201d": '"',
-        "\u201e": '"',
-        "\u201f": '"',
-        "\u2033": '"',
-        "\u2010": "-",
-        "\u2011": "-",
-        "\u2012": "-",
-        "\u2013": "-",
-        "\u2014": "-",
-        "\u2015": "-",
-        "\u2212": "-",
-    }
-)
 _ELLIPSIS = re.compile(r"\s*(?:\.{3,}|\u2026)\s*")
 
 
@@ -229,22 +213,7 @@ def _accepted(
 
 def _normalize(text: str) -> tuple[str, list[int]]:
     """Normalize ``text`` and map each output character to its source index."""
-    chars: list[str] = []
-    index: list[int] = []
-    pending_space: int | None = None
-    for position, char in enumerate(text):
-        if char.isspace():
-            if chars and pending_space is None:
-                pending_space = position
-            continue
-        if pending_space is not None:
-            chars.append(" ")
-            index.append(pending_space)
-            pending_space = None
-        for folded in char.translate(_TYPOGRAPHIC).casefold():
-            chars.append(folded)
-            index.append(position)
-    return "".join(chars), index
+    return normalize_with_index(text, REPAIR_FOLD, REPAIR_IGNORED)
 
 
 def _occurrences(haystack: str, needle: str) -> list[int]:

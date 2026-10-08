@@ -157,17 +157,13 @@ def validate_tree_factor_evidence_coverage(
     complete normalized evidence phrase), and structural
     references outside the selected path are rejected unless they are exact
     sources for grounded defender BDI evidence. Additional declared factors
-    may remain provenance-only. Empty-factor legacy fixtures are kept valid
-    for compatibility with the historical diagnostic adapter.
+    may remain provenance-only.
 
     The check is deliberately structural: it never treats an adversarial verb
     as proof of access and never imports taxonomy mechanism text into the
     allowed evidence set.
     """
     factors = _selected_tree_factors(scenario_spec)
-    if not factors:
-        return ValidationResult.success()
-
     tree_text = _flatten_tree_to_text(attack_tree)
     normalized_tree = _normalize_evidence_text(tree_text)
     errors: list[str] = []

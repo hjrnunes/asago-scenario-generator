@@ -45,6 +45,11 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.system_model.quote_normalization import (
+    MATCHER_FOLD,
+    MATCHER_IGNORED,
+    normalize_with_index,
+)
 
 STAGE = "stage_1a"
 STEP_EXTRACT = "stated_rule_extraction"
@@ -72,23 +77,6 @@ MIN_VERB_STEM_CHARS = 4
 
 STATUS_COMPLETED = "completed"
 STATUS_UNAVAILABLE = "unavailable"
-
-_TYPOGRAPHIC = str.maketrans(
-    {
-        "\u2018": "'",
-        "\u2019": "'",
-        "\u201c": '"',
-        "\u201d": '"',
-        "\u2010": "-",
-        "\u2011": "-",
-        "\u2013": "-",
-        "\u2014": "-",
-        "\u2212": "-",
-    }
-)
-# Markdown emphasis and code markers carry no wording; models routinely drop
-# them when quoting, so both sides ignore them.
-_IGNORED_MARKUP = frozenset("*`")
 
 
 # ---------------------------------------------------------------------------
@@ -357,24 +345,7 @@ _UNMAPPED = _Verdict(status="unavailable", reason="no mapping")
 
 def _normalize(text: str) -> tuple[str, list[int]]:
     """Normalize ``text`` and map each output character to its source index."""
-    chars: list[str] = []
-    index: list[int] = []
-    pending_space: int | None = None
-    for position, char in enumerate(text):
-        if char in _IGNORED_MARKUP:
-            continue
-        if char.isspace():
-            if chars and pending_space is None:
-                pending_space = position
-            continue
-        if pending_space is not None:
-            chars.append(" ")
-            index.append(pending_space)
-            pending_space = None
-        for folded in char.translate(_TYPOGRAPHIC).casefold():
-            chars.append(folded)
-            index.append(position)
-    return "".join(chars), index
+    return normalize_with_index(text, MATCHER_FOLD, MATCHER_IGNORED)
 
 
 def normalized_text(text: str) -> str:
@@ -734,7 +705,7 @@ def _constraints_locating(
 
 def _term_words(text: str) -> list[str]:
     """Casefold, unify typographic variants, and split on punctuation."""
-    folded = text.translate(_TYPOGRAPHIC).casefold()
+    folded = text.translate(MATCHER_FOLD).casefold()
     return re.findall(r"[^\W_]+", folded)
 
 

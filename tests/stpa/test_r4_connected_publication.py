@@ -13,10 +13,8 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     DefenderIntention,
 )
 from asago_scenario_generator.stpa.models.scenario_context import DescribedElement
-from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
-    validate_scenario_summary,
 )
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_tree_factor_evidence_coverage,
@@ -213,21 +211,6 @@ def test_unsupported_structural_text_is_sanitized_without_tree_evidence():
     assert tree["source_uncertainty"]
 
 
-def test_summary_validation_accepts_the_deterministic_projection():
-    spec = _spec()
-    narrative, tree, gherkin = render_scenario_summary(spec)
-    envelope = assemble_envelope(
-        scenario_id=spec.scenario_id,
-        scenario_spec=spec,
-        narrative=narrative,
-        attack_tree=tree,
-        gherkin_spec=gherkin,
-        gherkin_raw=gherkin.to_feature_text(),
-    )
-
-    assert validate_scenario_summary(envelope) == []
-
-
 def test_tree_allows_a_unique_responsibility_source_in_actor_evidence():
     spec = _spec()
     context = spec.scenario_context
@@ -274,6 +257,23 @@ def test_grounded_secondary_defender_intention_is_accepted_as_tree_evidence():
     validation = validate_tree_factor_evidence_coverage(tree, spec)
     assert validation.passed, validation.errors
     assert "CA-1-2" in str(tree)
+
+
+def test_tree_coverage_accepts_the_evidence_phrase_and_reports_gaps_and_bridges():
+    spec = _spec()
+    factor = spec.causal_factors[0]
+    assert factor.source_id not in factor.description
+    by_evidence = {"root": "Outcome", "children": [factor.description]}
+
+    assert validate_tree_factor_evidence_coverage(by_evidence, spec).passed
+
+    unrelated = {"root": "Outcome", "children": ["The caller exploits PM-9-9."]}
+    assert validate_tree_factor_evidence_coverage(unrelated, spec).errors == [
+        f"Attack tree does not cover declared causal factor {factor.source_id} "
+        "with its declared evidence.",
+        "Attack tree references unsupported causal bridge PM-9-9; "
+        "only selected-path and declared-factor evidence is allowed.",
+    ]
 
 
 def test_functional_publication_keeps_structural_causality_without_attacker():
