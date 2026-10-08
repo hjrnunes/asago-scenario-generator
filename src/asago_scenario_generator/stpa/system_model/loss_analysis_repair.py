@@ -74,11 +74,11 @@ from asago_scenario_generator.request_schema import (
 )
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
-    StageError,
-    _decode_json_text,
-    parse_llm_result,
     CorrectionPolicy,
+    StageError,
     call_with_policy,
+    decode_content,
+    parse_llm_result,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -87,8 +87,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     Loss,
     LossAnalysisDraft,
     Obligation,
+    RiskAccounting,
     RiskDisposition,
     SecurityConstraint,
+    account_for_risk_cards,
     span_quotes_rule,
 )
 from asago_scenario_generator.stpa.system_model.rule_span_repair import (
@@ -1514,53 +1516,40 @@ def select_disposition_repairs(
     replaces exactly those rows and preserves every other row.
     """
     supplied_ids = [card.risk_id for card in risk_cards]
-    counts, undeclared, unknown = _tally_disposition_rows(draft, set(supplied_ids))
-    reasons = _disposition_repair_reasons(supplied_ids, counts, undeclared)
+    accounting = account_for_risk_cards(
+        [*draft.risk_card_losses, *draft.use_case_losses],
+        draft.risk_dispositions,
+        supplied_ids,
+    )
+    reasons = _disposition_repair_reasons(supplied_ids, accounting)
     selected = tuple(card_id for card_id in supplied_ids if card_id in reasons)
     reason_pairs = tuple((card_id, "; ".join(reasons[card_id])) for card_id in selected)
+    unknown = {
+        finding.risk_ref
+        for finding in accounting.findings
+        if finding.kind == "unsupplied"
+    }
     return selected, reason_pairs, tuple(sorted(unknown))
 
 
-def _tally_disposition_rows(
-    draft: LossAnalysisDraft,
-    supplied: set[str],
-) -> tuple[dict[str, int], dict[str, list[str]], set[str]]:
-    """Count rows per supplied card, collect undeclared cited losses and unknown refs."""
-    declared_losses = {
-        loss.loss_id for loss in draft.risk_card_losses + draft.use_case_losses
-    }
-    counts: dict[str, int] = {}
-    undeclared: dict[str, list[str]] = {}
-    unknown: set[str] = set()
-    for row in draft.risk_dispositions:
-        if row.risk_ref not in supplied:
-            unknown.add(row.risk_ref)
-            continue
-        counts[row.risk_ref] = counts.get(row.risk_ref, 0) + 1
-        if row.disposition == "cited":
-            missing = [
-                loss_id for loss_id in row.loss_ids if loss_id not in declared_losses
-            ]
-            if missing:
-                undeclared.setdefault(row.risk_ref, []).extend(missing)
-    return counts, undeclared, unknown
-
-
 def _disposition_repair_reasons(
-    supplied_ids: list[str],
-    counts: dict[str, int],
-    undeclared: dict[str, list[str]],
+    supplied_ids: list[str], accounting: RiskAccounting
 ) -> dict[str, list[str]]:
     """Return the repair reasons of each supplied card that needs one."""
+    undeclared: dict[str, list[str]] = {}
+    for finding in accounting.findings:
+        if finding.kind == "undeclared_losses":
+            undeclared.setdefault(finding.risk_ref, []).extend(finding.loss_ids)
     reasons: dict[str, list[str]] = {}
     for card_id in supplied_ids:
-        if counts.get(card_id, 0) == 0:
+        rows = accounting.row_counts.get(card_id, 0)
+        if rows == 0:
             reasons.setdefault(card_id, []).append(
                 "no risk_dispositions entry was returned for this supplied card"
             )
-        elif counts[card_id] > 1:
+        elif rows > 1:
             reasons.setdefault(card_id, []).append(
-                f"{counts[card_id]} duplicate risk_dispositions entries were "
+                f"{rows} duplicate risk_dispositions entries were "
                 "returned; exactly one is required"
             )
         if card_id in undeclared:
@@ -1797,7 +1786,7 @@ def _salvage_first_response(
         content = content.model_dump(mode="json")
     if isinstance(content, str):
         try:
-            content = _decode_json_text(content)
+            content = decode_content(first_result)
         except ValueError as exc:
             return UnsupportedRepair(f"the response body never decoded as JSON ({exc})")
     if not isinstance(content, dict):

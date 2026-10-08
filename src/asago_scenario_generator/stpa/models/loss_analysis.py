@@ -5,6 +5,7 @@ SP1 output, consumed by SP1 Stage 2, SP2 Stage 3, and SP3 Stage 7.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import date
 from enum import Enum
 from typing import Literal, get_args
@@ -499,3 +500,118 @@ def stamp_proposed_direction(analysis: LossAnalysis | LossAnalysisDraft) -> None
         constraint.direction_authority = "proposed" if constraint.obligations else None
         constraint.reviewed_by = None
         constraint.reviewed_on = None
+
+
+DispositionFindingKind = Literal["unsupplied", "undeclared_losses", "empty_reason"]
+
+
+@dataclass(frozen=True)
+class DispositionFinding:
+    """A disposition row the accounting rules reject."""
+
+    kind: DispositionFindingKind
+    risk_ref: str
+    # The cited loss IDs the response never declared, in row order.
+    loss_ids: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class RiskContradiction:
+    """A not_applicable card that losses cite (spec rule 1.1(4))."""
+
+    risk_ref: str
+    citing_loss_ids: tuple[str, ...]
+
+    def text(self) -> str:
+        return (
+            f"'{self.risk_ref}' is marked not_applicable but is cited by loss "
+            + ", ".join(self.citing_loss_ids)
+        )
+
+
+@dataclass(frozen=True)
+class RiskAccounting:
+    """What the dispositions say about the supplied risk cards.
+
+    ``findings`` and ``contradictions`` follow row order.  Each caller words
+    its own message and decides which of these it enforces.
+    """
+
+    findings: tuple[DispositionFinding, ...]
+    contradictions: tuple[RiskContradiction, ...]
+    # Supplied cards no row names, in supplied order.
+    missing: tuple[str, ...]
+    # Rows per risk_ref, supplied or not.
+    row_counts: dict[str, int]
+
+    @property
+    def duplicates(self) -> tuple[str, ...]:
+        """Every risk_ref with more than one row, sorted."""
+        return tuple(sorted(ref for ref, rows in self.row_counts.items() if rows > 1))
+
+
+def account_for_risk_cards(
+    losses: list[Loss],
+    dispositions: list[RiskDisposition],
+    supplied_ids: list[str],
+) -> RiskAccounting:
+    """Read ``dispositions`` against the supplied cards and the declared ``losses``.
+
+    A cited row is faulty when it names a loss absent from ``losses``; a
+    not_applicable row, when its reason is blank.  A card a loss lists in
+    ``source_risk_cards`` contradicts a not_applicable row for that card.  A
+    cited row's own loss registry is authoritative for the card, so the loss
+    may name further cards.
+    """
+    supplied = set(supplied_ids)
+    declared = {loss.loss_id for loss in losses}
+    row_counts: dict[str, int] = {}
+    findings: list[DispositionFinding] = []
+    for disposition in dispositions:
+        row_counts[disposition.risk_ref] = row_counts.get(disposition.risk_ref, 0) + 1
+        finding = _disposition_finding(disposition, supplied, declared)
+        if finding is not None:
+            findings.append(finding)
+    return RiskAccounting(
+        findings=tuple(findings),
+        contradictions=_loss_contradictions(losses, dispositions),
+        missing=tuple(card_id for card_id in supplied_ids if card_id not in row_counts),
+        row_counts=row_counts,
+    )
+
+
+def _disposition_finding(
+    disposition: RiskDisposition, supplied: set[str], declared: set[str]
+) -> DispositionFinding | None:
+    ref = disposition.risk_ref
+    if ref not in supplied:
+        return DispositionFinding("unsupplied", ref)
+    if disposition.disposition == "cited":
+        undeclared = tuple(
+            loss_id for loss_id in disposition.loss_ids if loss_id not in declared
+        )
+        return (
+            DispositionFinding("undeclared_losses", ref, undeclared)
+            if undeclared
+            else None
+        )
+    if not disposition.reason or not disposition.reason.strip():
+        return DispositionFinding("empty_reason", ref)
+    return None
+
+
+def _loss_contradictions(
+    losses: list[Loss], dispositions: list[RiskDisposition]
+) -> tuple[RiskContradiction, ...]:
+    found: list[RiskContradiction] = []
+    for disposition in dispositions:
+        if disposition.disposition != "not_applicable":
+            continue
+        citing = sorted(
+            loss.loss_id
+            for loss in losses
+            if disposition.risk_ref in loss.source_risk_cards
+        )
+        if citing:
+            found.append(RiskContradiction(disposition.risk_ref, tuple(citing)))
+    return tuple(found)
