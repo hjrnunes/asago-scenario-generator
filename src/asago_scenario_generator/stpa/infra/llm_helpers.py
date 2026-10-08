@@ -872,9 +872,20 @@ def _validation_error_lines(error: ValidationError) -> list[str]:
     items = error.errors(include_url=False, include_context=False, include_input=False)
     return [
         f"- {'.'.join(str(part) for part in item['loc']) or 'response'}: "
-        f"{item['msg']} ({item['type']})"
+        f"{_model_facing_message(item)} ({item['type']})"
         for item in items[:8]
     ]
+
+
+def _model_facing_message(item: Mapping[str, Any]) -> str:
+    """Return the error message with no private wire class name in it.
+
+    Pydantic words a ``model_type`` failure as "... or instance of <Class>",
+    and the class is an internal wire model the response never mentions.
+    """
+    if item["type"] == "model_type":
+        return "Input should be an object"
+    return str(item["msg"])
 
 
 def _truncated(message: str, limit: int) -> str:

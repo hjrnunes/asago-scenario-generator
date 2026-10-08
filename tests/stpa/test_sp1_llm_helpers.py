@@ -323,6 +323,18 @@ def _validation_error() -> ValidationError:
     raise AssertionError("expected a validation error")
 
 
+class _ParentModel(BaseModel):
+    child: _SampleModel
+
+
+def _model_type_error() -> ValidationError:
+    try:
+        _ParentModel.model_validate({"child": "not an object"})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("expected a validation error")
+
+
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
@@ -331,6 +343,10 @@ def _validation_error() -> ValidationError:
             "ValidationError:\n- name: Field required (missing)\n"
             "- value: Input should be a valid integer, unable to parse string as an"
             " integer (int_parsing)",
+        ),
+        (
+            _model_type_error(),
+            "ValidationError:\n- child: Input should be an object (model_type)",
         ),
         (
             json.JSONDecodeError("Expecting value", "{x", 1),
@@ -344,7 +360,15 @@ def _validation_error() -> ValidationError:
         (RuntimeError("z" * 801), "RuntimeError: " + "z" * 797 + "..."),
         (RuntimeError("a\n  b"), "RuntimeError: a b"),
     ],
-    ids=["validation", "json", "exact-long", "exact", "generic-long", "generic"],
+    ids=[
+        "validation",
+        "model-type",
+        "json",
+        "exact-long",
+        "exact",
+        "generic-long",
+        "generic",
+    ],
 )
 def test_compact_validation_error_describes_each_error_kind(
     error: Exception, expected: str
