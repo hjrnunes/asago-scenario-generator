@@ -148,6 +148,11 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             f"observation_ref values ({supplied_records}); put record and field "
             "paths in fact_refs."
         ),
+        IssueCode.safe_outcome_fact_ref_not_supplied: (
+            "safe_observable_outcome.fact_refs lists only supplied fact paths, "
+            "copied exactly; for each path the error lists, cite the supplied "
+            "path that states the fact, or remove the reference."
+        ),
         IssueCode.safe_outcome_observability_mismatch: (
             "set safe_observable_outcome.observable=true with the claim_level "
             "and evidence of a supported observation criterion when the "

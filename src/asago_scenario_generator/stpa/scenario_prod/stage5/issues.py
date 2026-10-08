@@ -45,6 +45,7 @@ class IssueCode(StrEnum):
     )
     discriminating_condition_no_call = "discriminating_condition_no_call"
     safe_outcome_record_ref_not_supplied = "safe_outcome_record_ref_not_supplied"
+    safe_outcome_fact_ref_not_supplied = "safe_outcome_fact_ref_not_supplied"
     safe_outcome_observability_mismatch = "safe_outcome_observability_mismatch"
     intention_handle_undeclared = "intention_handle_undeclared"
     mechanism_source_mismatch = "mechanism_source_mismatch"

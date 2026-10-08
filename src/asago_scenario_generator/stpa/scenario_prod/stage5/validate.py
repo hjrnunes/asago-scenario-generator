@@ -453,13 +453,14 @@ def _validate_safe_outcome_refs(
     normalizations: list[Stage5Normalization] | None,
 ) -> SafeObservableOutcome:
     """Require supplied record and fact references, moving record paths to facts."""
-    allowed_facts = set(target_observation_fact_values(target_observations))
+    fact_values = target_observation_fact_values(target_observations)
+    allowed_facts = set(fact_values)
+    allowed_records = (
+        {item.observation_ref for item in target_observations.observations}
+        if target_observations is not None
+        else set()
+    )
     if outcome.record_refs:
-        allowed_records = (
-            {item.observation_ref for item in target_observations.observations}
-            if target_observations is not None
-            else set()
-        )
         outcome = _move_record_paths_to_fact_refs(
             outcome, allowed_records, allowed_facts, normalizations
         )
@@ -473,11 +474,57 @@ def _validate_safe_outcome_refs(
     if outcome.fact_refs:
         unknown_facts = sorted(set(outcome.fact_refs) - allowed_facts)
         if unknown_facts:
-            raise ValueError(
+            raise ExactIssueError(
+                IssueCode.safe_outcome_fact_ref_not_supplied,
                 "safe observable outcome fact_refs must name supplied facts: "
                 + ", ".join(unknown_facts)
+                + "".join(
+                    "\n- "
+                    + _nearest_supplied_parent(path, fact_values, allowed_records)
+                    for path in unknown_facts
+                ),
             )
     return outcome
+
+
+def _nearest_supplied_parent(
+    path: str, fact_values: Mapping[str, object], records: set[str]
+) -> str:
+    """Name the longest supplied path that *path* extends, with its JSON type."""
+    parts = path.split(".")
+    for end in range(len(parts) - 1, 0, -1):
+        parent = ".".join(parts[:end])
+        if parent in fact_values:
+            kind = _json_type(fact_values[parent])
+        elif parent in records:
+            kind = "record"
+        else:
+            continue
+        return (
+            f"`{path}` is not supplied; the nearest supplied path is "
+            f"`{parent}` ({kind})"
+        )
+    return f"`{path}` is not supplied; no supplied path contains it"
+
+
+# bool before number: a JSON boolean is a Python int.
+_JSON_TYPES: tuple[tuple[type | tuple[type, ...], str], ...] = (
+    (Mapping, "object"),
+    ((list, tuple), "array"),
+    (bool, "boolean"),
+    ((int, float), "number"),
+    (str, "string"),
+    (type(None), "null"),
+)
+
+
+def _json_type(value: object) -> str:
+    """Return the JSON type name of an observed fact value."""
+    return next(
+        (name for kinds, name in _JSON_TYPES if isinstance(value, kinds)),
+        # condition_check marks a path observed twice with different values.
+        "ambiguous",
+    )
 
 
 def _move_record_paths_to_fact_refs(

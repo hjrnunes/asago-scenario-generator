@@ -26,6 +26,9 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.issues import (
     ValidationIssueError,
     issues_of,
 )
+from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
+    _nearest_supplied_parent,
+)
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.normal_authoring_wire import (
     _normal_payload,
@@ -202,6 +205,49 @@ def test_correction_lists_only_the_code_that_was_raised(tmp_path) -> None:
     assert "Return one complete corrected provider response." in retry_prompt
 
 
+def test_an_unsupplied_fact_ref_names_its_nearest_supplied_parent(tmp_path) -> None:
+    payload = _command_attempt_payload(
+        ["TARGET-STATE"],
+        ["TARGET-STATE.widgets.W-2.widget_id", "TARGET-STATE.order_id"],
+    )
+
+    client, (result, error) = _generate(
+        tmp_path,
+        payload,
+        target_operation=_target_operation(),
+        target_observations=_nested_observations(),
+    )
+
+    assert result is None
+    assert "safe_outcome_fact_ref_not_supplied:" in error
+    retry_prompt = client.calls[1].user_prompt
+    assert "- safe_outcome_fact_ref_not_supplied:" in retry_prompt
+    assert (
+        "- `TARGET-STATE.widgets.W-2.widget_id` is not supplied; the nearest "
+        "supplied path is `TARGET-STATE.widgets.W-2` (object)"
+    ) in retry_prompt
+    assert "`TARGET-STATE.order_id` is not supplied" not in retry_prompt
+
+
+def test_an_unsupplied_fact_ref_under_an_unsupplied_record_has_no_parent(
+    tmp_path,
+) -> None:
+    payload = _command_attempt_payload([], ["OTHER-STATE.order_id"])
+
+    client, (result, error) = _generate(
+        tmp_path,
+        payload,
+        target_operation=_target_operation(),
+        target_observations=_nested_observations(),
+    )
+
+    assert result is None
+    retry_prompt = client.calls[1].user_prompt
+    assert (
+        "- `OTHER-STATE.order_id` is not supplied; no supplied path contains it"
+    ) in retry_prompt
+
+
 def test_an_unknown_operation_name_raises_its_own_code(tmp_path) -> None:
     payload = _command_attempt_payload([], [])
     payload["unsafe_outcome"]["observation_criteria"][0]["operation_name"] = (
@@ -359,3 +405,28 @@ def test_a_failure_without_a_code_gets_no_code_lines(tmp_path) -> None:
     assert "Stable repair codes" not in retry_prompt
     assert "Correct only the fields identified by the validation error" in retry_prompt
     assert "Return one complete corrected provider response." in retry_prompt
+
+
+@pytest.mark.parametrize(
+    ("value", "name"),
+    (
+        ({"a": 1}, "object"),
+        ([1], "array"),
+        (True, "boolean"),
+        (2.5, "number"),
+        ("x", "string"),
+        (None, "null"),
+        (object(), "ambiguous"),
+    ),
+)
+def test_a_parent_fact_is_named_by_its_json_type(value, name) -> None:
+    assert (
+        _nearest_supplied_parent("A.b.c", {"A.b": value}, {"A"})
+        == f"`A.b.c` is not supplied; the nearest supplied path is `A.b` ({name})"
+    )
+
+
+def test_a_supplied_record_is_the_parent_of_last_resort() -> None:
+    assert _nearest_supplied_parent("A.b.c", {}, {"A"}) == (
+        "`A.b.c` is not supplied; the nearest supplied path is `A` (record)"
+    )
