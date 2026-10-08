@@ -434,7 +434,7 @@ def _default_target_realize(
     return realize_target_derived_icas(
         baseline,
         mapped,
-        lambda: finder,
+        finder,
     )
 
 

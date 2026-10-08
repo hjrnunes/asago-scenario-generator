@@ -10,7 +10,7 @@ record is edited in this pass.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
@@ -383,7 +383,7 @@ def realize_target_operations(
 def realize_target_derived_icas(
     baseline: SystemicStpaBaseline,
     realization: TargetRealizationResult,
-    finder_factory: Callable[..., Any],
+    finder: Any,
 ) -> TargetRealizationResult:
     """Compile verified target-derived ICA findings into an additive view.
 
@@ -394,6 +394,11 @@ def realize_target_derived_icas(
     realization value.  The returned value carries ``effective_view`` with
     the baseline and target-derived control/ICA unions; the original baseline
     and the input realization are untouched.
+
+    ``finder`` is the finding adapter: a callable that receives one
+    ``TargetDerivedICARequest``.  A finder that is not callable, or that
+    raises, becomes a ``target-derived ICA finding provider failed``
+    diagnostic.
 
     A provider may return a finding only for a known target-derived slot and
     must use the exact slot-relative ICA identity.  Only findings carrying a
@@ -412,7 +417,7 @@ def realize_target_derived_icas(
     findings, diagnostics = _attempt_target_derived_ica_findings(
         baseline,
         realization,
-        finder_factory,
+        finder,
     )
 
     effective_view = _build_effective_view(
@@ -432,7 +437,7 @@ def realize_target_derived_icas(
 def _attempt_target_derived_ica_findings(
     baseline: SystemicStpaBaseline,
     realization: TargetRealizationResult,
-    finder_factory: Callable[..., Any],
+    finder: Any,
 ) -> tuple[tuple[TargetDerivedICAFinding, ...], tuple[str, ...]]:
     derived_slots = realization.target_derived_ica_slots
     if not derived_slots:
@@ -446,7 +451,7 @@ def _attempt_target_derived_ica_findings(
         target_operation_context=_target_operation_context(realization),
     )
     return _invoke_and_compile_target_derived_icas(
-        finder_factory,
+        finder,
         request,
         baseline,
         realization,
@@ -473,14 +478,13 @@ def _target_operation_context(
 
 
 def _invoke_and_compile_target_derived_icas(
-    finder_factory: Callable[..., Any],
+    finder: Any,
     request: TargetDerivedICARequest,
     baseline: SystemicStpaBaseline,
     realization: TargetRealizationResult,
 ) -> tuple[tuple[TargetDerivedICAFinding, ...], tuple[str, ...]]:
     try:
-        interpreter = _construct_interpreter(finder_factory)
-        response = _invoke_target_derived_ica_interpreter(interpreter, request)
+        response = _invoke_target_derived_ica_interpreter(finder, request)
     except Exception as exc:  # noqa: BLE001 - retain provider-boundary diagnostics
         return (), (
             f"target-derived ICA finding provider failed: {type(exc).__name__}: {exc}",
@@ -1304,18 +1308,6 @@ def _assert_profile_integrity(profile: ExecutionTargetProfile) -> None:
     if not callable(checker):
         raise TypeError("execution target profile must expose assert_integrity")
     checker()
-
-
-def _construct_interpreter(factory: Any) -> Any:
-    if not callable(factory):
-        raise TypeError("interpreter factory must be a zero-argument callable")
-    # Factories have one explicit shape.  Do not inspect signatures or retry a
-    # failed call with a different arity: a TypeError raised by an adapter is a
-    # provider failure, not evidence that another calling convention is valid.
-    interpreter = factory()
-    if not callable(interpreter):
-        raise TypeError("interpreter factory did not return a callable adapter")
-    return interpreter
 
 
 def _invoke_interpreter(

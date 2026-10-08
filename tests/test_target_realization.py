@@ -320,20 +320,16 @@ def test_target_absence_keeps_every_baseline_action_unmapped():
 
 def test_public_seam_rejects_untyped_baseline_or_profile_values():
     with pytest.raises(TypeError, match="SystemicStpaBaseline"):
-        realize_target_operations(
-            {}, _profile(), lambda: _Interpreter(), baseline_rows=()
-        )
+        realize_target_operations({}, _profile(), _Interpreter(), baseline_rows=())
     with pytest.raises(TypeError, match="ExecutionTargetProfile"):
-        realize_target_operations(
-            _baseline(), {}, lambda: _Interpreter(), baseline_rows=()
-        )
+        realize_target_operations(_baseline(), {}, _Interpreter(), baseline_rows=())
     with pytest.raises(TypeError, match="SystemicStpaBaseline"):
         realize_target_operations(
-            SimpleNamespace(), _profile(), lambda: _Interpreter(), baseline_rows=()
+            SimpleNamespace(), _profile(), _Interpreter(), baseline_rows=()
         )
     with pytest.raises(TypeError, match="ExecutionTargetProfile"):
         realize_target_operations(
-            _baseline(), SimpleNamespace(), lambda: _Interpreter(), baseline_rows=()
+            _baseline(), SimpleNamespace(), _Interpreter(), baseline_rows=()
         )
 
 
@@ -518,18 +514,6 @@ class _DerivedFindingInterpreter:
                 },
             )
         }
-
-
-class _DerivedFindingFactory:
-    def __init__(self, *, verification_status="verified"):
-        self.calls = 0
-        self.interpreter = _DerivedFindingInterpreter(
-            verification_status=verification_status
-        )
-
-    def __call__(self):
-        self.calls += 1
-        return self.interpreter
 
 
 def test_bounded_extension_is_one_call_and_additive_for_uncovered_operations():
@@ -1056,7 +1040,7 @@ def test_held_responsibility_target_extension_keeps_stpa_projection_valid():
     realization = realize_target_derived_icas(
         baseline,
         realization,
-        _DerivedFindingFactory(),
+        _DerivedFindingInterpreter(),
     )
 
     projection = project_target_realization_to_stpa(
@@ -1151,16 +1135,16 @@ def test_target_derived_slots_compile_to_verified_findings_and_effective_union()
     baseline = _baseline()
     before = baseline.model_dump(mode="json")
     realization = _target_extended_result(baseline)
-    finder_factory = _DerivedFindingFactory()
+    finder = _DerivedFindingInterpreter()
 
     enhanced = realize_target_derived_icas(
         baseline,
         realization,
-        finder_factory,
+        finder,
     )
 
-    assert len(finder_factory.interpreter.requests) == 1
-    request = finder_factory.interpreter.requests[0]
+    assert len(finder.requests) == 1
+    request = finder.requests[0]
     assert request.baseline == baseline
     assert tuple(item.slot_id for item in request.target_derived_ica_slots) == (
         "RESP-1:CA-1-2:INCORRECT",
@@ -1344,7 +1328,7 @@ def test_target_derived_both_operations_reach_stage5_with_exact_constraints():
     enhanced = realize_target_derived_icas(
         baseline,
         realization,
-        lambda: _BothDerivedFindingInterpreter(),
+        _BothDerivedFindingInterpreter(),
     )
     assert baseline.model_dump(mode="json") == before
     assert {
@@ -1466,7 +1450,7 @@ def test_target_derived_effective_view_keeps_baseline_findings_in_union():
     enhanced = realize_target_derived_icas(
         baseline,
         realization,
-        _DerivedFindingFactory(),
+        _DerivedFindingInterpreter(),
     )
 
     effective = enhanced.effective_view
@@ -1487,25 +1471,37 @@ def test_target_derived_effective_view_keeps_baseline_findings_in_union():
 
 def test_target_derived_finder_is_not_called_without_target_derived_slots():
     result = _realize(_baseline(), _profile(), lambda: _Interpreter())
-    finder_factory = _DerivedFindingFactory()
+    finder = _DerivedFindingInterpreter()
 
     enhanced = realize_target_derived_icas(
         _baseline(),
         result,
-        finder_factory,
+        finder,
     )
 
-    assert finder_factory.interpreter.requests == []
+    assert finder.requests == []
     assert enhanced.target_derived_ica_findings == ()
     assert enhanced.effective_view is not None
     assert enhanced.effective_view.denominators.target_derived_ica_slots == 0
+
+
+def test_a_finder_that_is_not_callable_becomes_a_provider_failure_diagnostic():
+    enhanced = realize_target_derived_icas(
+        _baseline(), _target_extended_result(), object()
+    )
+
+    assert enhanced.target_derived_ica_findings == ()
+    assert (
+        "target-derived ICA finding provider failed: TypeError: "
+        "target-derived ICA finder is not callable"
+    ) in enhanced.diagnostics
 
 
 def test_effective_view_validation_checks_order_and_canonicalization_attests_it():
     enhanced = realize_target_derived_icas(
         _baseline(),
         _target_extended_result(),
-        _DerivedFindingFactory(verification_status="unverified"),
+        _DerivedFindingInterpreter(verification_status="unverified"),
     )
     view = enhanced.effective_view
     assert view is not None and view.diagnostics
@@ -1539,7 +1535,7 @@ def test_unverified_target_derived_finding_is_excluded_but_slot_remains_traceabl
     enhanced = realize_target_derived_icas(
         _baseline(),
         realization,
-        _DerivedFindingFactory(verification_status="unverified"),
+        _DerivedFindingInterpreter(verification_status="unverified"),
     )
 
     assert enhanced.target_derived_ica_findings == ()
@@ -1592,7 +1588,7 @@ def test_target_derived_finding_compiles_exact_owner_constraint_when_provider_om
     enhanced = realize_target_derived_icas(
         baseline,
         realization,
-        lambda: _OmittedConstraint(),
+        _OmittedConstraint(),
     )
 
     assert len(enhanced.target_derived_ica_findings) == 1
@@ -1633,7 +1629,7 @@ def test_target_derived_finding_without_owner_constraint_is_explicitly_unresolve
     enhanced = realize_target_derived_icas(
         baseline,
         realization,
-        lambda: _UnownedConstraint(),
+        _UnownedConstraint(),
     )
 
     assert enhanced.target_derived_ica_findings == ()
@@ -1674,7 +1670,7 @@ def test_target_derived_finder_rejects_invented_slot_and_alias_fields():
         realize_target_derived_icas(
             _baseline(),
             realization,
-            lambda: _InventedSlot(),
+            _InventedSlot(),
         )
 
 
@@ -1702,7 +1698,7 @@ def test_target_derived_finder_rejects_unknown_hazard_reference():
         realize_target_derived_icas(
             _baseline(),
             realization,
-            lambda: _UnknownHazard(),
+            _UnknownHazard(),
         )
 
 
@@ -1911,7 +1907,7 @@ def test_stpa_projection_returns_valid_additive_models_without_mutating_authorit
     realization = realize_target_derived_icas(
         baseline,
         realization,
-        _DerivedFindingFactory(),
+        _DerivedFindingInterpreter(),
     )
     before_loss = loss_analysis.model_dump(mode="json")
     before_structure = control_structure.model_dump(mode="json")
@@ -2215,7 +2211,7 @@ def test_union_projection_and_effective_view_bytes_are_pinned():
         extension=extension,
     )
     realization = realize_target_derived_icas(
-        baseline, realization, _DerivedFindingFactory()
+        baseline, realization, _DerivedFindingInterpreter()
     )
 
     projection = project_target_realization_to_stpa(
