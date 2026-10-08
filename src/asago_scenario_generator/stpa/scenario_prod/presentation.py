@@ -850,8 +850,8 @@ def _render_shape_gherkin(
         then_expected=_keyed(
             "Then",
             [
-                f"the scenario fails if {account['criterion']}",
-                f"the safe alternative is {_safe_alternative(account)}",
+                f"the scenario fails if: {account['criterion']}",
+                f"the safe alternative is: {_safe_alternative(account)}",
             ],
         ),
         then_actual=[],
@@ -939,7 +939,7 @@ def _planted_item(shape: AttackShape) -> list[str]:
     record = f" (record {item.record_ref})" if item.record_ref else ""
     controller = _CONTROLLER_WORDS[indirect.party_relation.controller.value]
     steps = [
-        f"the attacker has planted a {item.content_kind.value.replace('_', ' ')} item"
+        f"the attacker has planted {_item_kind(item.content_kind.value)}"
         f"{record}, controlled by {controller}, in what "
         f"{indirect.carrier_operation} returns"
     ]
@@ -979,7 +979,11 @@ def _render_shape_narrative(account: dict[str, Any], shape: AttackShape) -> str:
     lines = ["Test hypothesis, not an observed execution result.", f"Actor: {actor}."]
     if adversary is not None:
         lines.append(f"Goal: {adversary.gain}")
-    approach = [] if attacker is None else [i.strip() for i in attacker.intentions]
+    approach = (
+        []
+        if attacker is None
+        else [_SOURCE_TAG.sub("", item).strip() for item in attacker.intentions]
+    )
     if any(approach):
         lines.append("Approach: " + " ".join(item for item in approach if item))
     lines.append(f"Channel: {_channel_text(shape)}")
@@ -998,12 +1002,21 @@ def _channel_text(shape: AttackShape) -> str:
     if indirect is None:
         return _CHANNEL_WORDS[shape.channel]
     controller = _CONTROLLER_WORDS[indirect.party_relation.controller.value]
-    kind = indirect.data_item.content_kind.value.replace("_", " ")
+    kind = _item_kind(indirect.data_item.content_kind.value)
     return (
-        f"indirect; the attacker plants a {kind} item, controlled by {controller}, "
+        f"indirect; the attacker plants {kind}, controlled by {controller}, "
         f"in what {indirect.carrier_operation} returns, and the benign user's turns "
         "lead the agent to read it."
     )
+
+
+_SOURCE_TAG = re.compile(r"\s*\[structural sources:[^\]]*\]")
+
+
+def _item_kind(content_kind: str) -> str:
+    words = content_kind.replace("_", " ")
+    article = "an" if words[:1] in "aeiou" else "a"
+    return f"{article} {words} item"
 
 
 def _sentence(text: str) -> str:

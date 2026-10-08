@@ -130,7 +130,8 @@ def test_indirect_gherkin_has_a_background_with_ownership_facts_and_the_planted_
     assert 'TARGET-STATE.orders.ORD-201.customer_id is "CUST002"' in background
     assert 'TARGET-STATE.authenticated_customer_id is "CUST001"' in background
     assert f"the discriminating condition holds: {STATEMENT}" in background
-    assert "planted" in background and "what lookup_order returns" in background
+    assert "planted an order content item (record ORD-201)" in background
+    assert "what lookup_order returns" in background
     assert "PM-1-1" not in text
 
 
@@ -154,9 +155,9 @@ def test_indirect_turns_name_the_benign_user_and_the_carrier():
 def test_gherkin_then_states_the_failure_criterion_and_the_safe_alternative():
     spec = _adversarial()
     gherkin = render_scenario_presentation(spec)[2]
-    assert gherkin.then_expected[0].startswith("Then the scenario fails if ")
+    assert gherkin.then_expected[0].startswith("Then the scenario fails if: ")
     assert spec.unsafe_outcome_semantic_proposition in gherkin.then_expected[0]
-    assert gherkin.then_expected[1].startswith("And the safe alternative is ")
+    assert gherkin.then_expected[1].startswith("And the safe alternative is: ")
     assert gherkin.then_actual == []
 
 
@@ -216,3 +217,15 @@ def test_shape_step_summary_is_unchanged_by_the_presentation():
         "Test hypothesis — not an observed execution result.\nScenario kind: adversarial."
     )
     assert render_scenario_summary(spec)[0] != render_scenario_presentation(spec)[0]
+
+
+def test_narrative_approach_drops_structural_source_tags():
+    spec = _adversarial()
+    attacker = spec.attacker_bdi.model_copy(
+        update={"intentions": ["Use a foreign order. [structural sources: PM-1-4]"]}
+    )
+    narrative = render_scenario_presentation(
+        spec.model_copy(update={"attacker_bdi": attacker})
+    )[0]
+    assert "Approach: Use a foreign order.\n" in narrative
+    assert "an order content item" in narrative
