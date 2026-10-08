@@ -782,8 +782,9 @@ def _validate_attacker_bdi_cardinality(
             "adversarial scenarios require a non-empty attacker desires list"
         )
     if not attacker_bdi.intentions:
-        raise ValueError(
-            "adversarial scenarios require a non-empty attacker_bdi.intentions list"
+        raise ValidationIssueError(
+            IssueCode.attacker_intentions_missing,
+            "adversarial scenarios require a non-empty attacker_bdi.intentions list",
         )
 
 

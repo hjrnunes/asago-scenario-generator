@@ -248,6 +248,22 @@ def test_an_unsupplied_fact_ref_under_an_unsupplied_record_has_no_parent(
     ) in retry_prompt
 
 
+def test_an_adversary_without_intentions_raises_its_own_code(tmp_path) -> None:
+    payload = _command_attempt_payload([], [])
+    payload["attacker_bdi"]["intentions"] = []
+
+    client, (result, error) = _generate(
+        tmp_path,
+        payload,
+        target_operation=_target_operation(),
+        target_observations=_nested_observations(),
+    )
+
+    assert result is None
+    assert "attacker_intentions_missing:" in error
+    assert "- attacker_intentions_missing:" in client.calls[1].user_prompt
+
+
 def test_an_unknown_operation_name_raises_its_own_code(tmp_path) -> None:
     payload = _command_attempt_payload([], [])
     payload["unsafe_outcome"]["observation_criteria"][0]["operation_name"] = (
