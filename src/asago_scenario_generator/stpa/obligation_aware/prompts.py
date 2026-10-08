@@ -64,13 +64,18 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     PromptContractAudit,
 )
 from asago_scenario_generator.stpa.obligation_aware.hazard_offer import slot_offer
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import build_stpa_index
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 
 PROMPT_TEMPLATES_DIR = Path(__file__).with_name("prompt_templates")
 _TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
 
-_PROHIBITED_PROMPT_KEYS = (
+# One list serves two matchers: the local audit rejects a view key equal to an
+# entry, and the repository preflight rejects a key with an entry as one of its
+# snake_case words (a plural ``s`` included).  Multi-word entries therefore act
+# only as exact keys.
+PROHIBITED_PROMPT_FIELDS = (
     "semantic_digest",
     "plan_digest",
     "catalog_pins",
@@ -82,6 +87,12 @@ _PROHIBITED_PROMPT_KEYS = (
     "source_path",
     "artifact_path",
     "raw_mapping",
+    "digest",
+    "pin",
+    "score",
+    "mitigation",
+    "provider_call",
+    "schema_name",
 )
 _ABSOLUTE_PATH = re.compile(r"(?:^|[\s\"'])/(?:Users|private|tmp|var|home)/")
 _STRUCTURAL_REFERENCE_TOKEN = re.compile(
@@ -136,7 +147,7 @@ def audit_prompt_contract(
         view_type = type(prompt_view).__name__
         payload = prompt_view.model_dump(mode="json")
     field_names = _prompt_field_names(payload)
-    for key in _PROHIBITED_PROMPT_KEYS:
+    for key in PROHIBITED_PROMPT_FIELDS:
         if key in field_names:
             issues.append(f"prohibited prompt field leaked: {key}")
     issues.extend(_rendered_prompt_issues(system_prompt, user_prompt, opaque_handles))
@@ -512,43 +523,12 @@ def _mapping_relations(detail: str) -> tuple[str, ...]:
         raise ValueError("mapping evidence is not a typed mapping path") from exc
 
 
-def _reference_map(control_structure: ControlStructure) -> dict[str, PromptReference]:
-    """Build explained references for the structural records."""
-    result: dict[str, PromptReference] = {}
-    for responsibility in control_structure.responsibilities:
-        result[responsibility.resp_id] = PromptReference(
-            id=responsibility.resp_id,
-            description=responsibility.description,
-        )
-        for child in responsibility.responsibility_constraints:
-            result[child.rc_id] = PromptReference(
-                id=child.rc_id, description=child.description
-            )
-        for child in responsibility.process_model_parts:
-            result[child.pm_id] = PromptReference(
-                id=child.pm_id, description=child.description
-            )
-        for child in responsibility.control_actions:
-            result[child.ca_id] = PromptReference(
-                id=child.ca_id, description=child.description
-            )
-        for child in responsibility.feedback_channels:
-            result[child.fb_id] = PromptReference(
-                id=child.fb_id, description=child.description
-            )
-    for process in control_structure.controlled_processes:
-        result[process.cp_id] = PromptReference(
-            id=process.cp_id, description=process.description
-        )
-    for link in control_structure.coordination_links:
-        result[link.link_id] = PromptReference(
-            id=link.link_id, description=link.description
-        )
-        result[link.coordination_mechanism.cm_id] = PromptReference(
-            id=link.coordination_mechanism.cm_id,
-            description=link.coordination_mechanism.description,
-        )
-    return result
+def _prompt_references(descriptions: Mapping[str, str]) -> dict[str, PromptReference]:
+    """Explain each described ID as a prompt reference."""
+    return {
+        identity: PromptReference(id=identity, description=description)
+        for identity, description in descriptions.items()
+    }
 
 
 def _element_reference(
@@ -602,45 +582,12 @@ def _context_references(
     loss_analysis: LossAnalysis | None,
 ) -> dict[str, PromptReference]:
     """Build the explanatory reference table used by every context helper."""
-    refs = _reference_map(control_structure)
-    if loss_analysis is None:
-        return refs
-    if not isinstance(loss_analysis, LossAnalysis):
+    if loss_analysis is not None and not isinstance(loss_analysis, LossAnalysis):
         raise TypeError("loss_analysis must be a LossAnalysis")
-    refs.update(_loss_analysis_references(loss_analysis))
-    return refs
-
-
-def _loss_analysis_references(
-    loss_analysis: LossAnalysis,
-) -> dict[str, PromptReference]:
-    """Project explanatory references for loss-analysis records."""
-    return {
-        **{
-            item.constraint_id: PromptReference(
-                id=item.constraint_id,
-                description=item.description,
-            )
-            for item in loss_analysis.security_constraints
-        },
-        **{
-            item.hazard_id: PromptReference(
-                id=item.hazard_id,
-                description=item.description,
-            )
-            for item in loss_analysis.hazards
-        },
-        **{
-            item.loss_id: PromptReference(
-                id=item.loss_id,
-                description=item.description,
-            )
-            for item in (
-                *loss_analysis.risk_card_losses,
-                *loss_analysis.use_case_losses,
-            )
-        },
-    }
+    index = build_stpa_index(control_structure, loss_analysis)
+    return _prompt_references(
+        {**index.structural_descriptions(), **index.loss_descriptions()}
+    )
 
 
 def _description_references(
@@ -1195,7 +1142,9 @@ def _revision_related_context(
     control_structure: ControlStructure,
 ) -> tuple[PromptReference, ...]:
     """Select compact existing context relevant to one typed gap."""
-    refs = _reference_map(control_structure)
+    refs = _prompt_references(
+        build_stpa_index(control_structure).structural_descriptions()
+    )
     values: list[PromptReference] = []
     if gap.concept_type in {"loss", "hazard", "constraint"}:
         for item in (
@@ -1269,14 +1218,8 @@ def project_revision_context(
     )
 
 
-def _route_payload(
-    route: ObligationRoute,
-    *,
-    briefs: dict[str, NeutralObligationBrief],
-    target_index: ProviderTargetIndex,
-) -> ProviderRoutedRoute:
+def _route_payload(route: ObligationRoute) -> ProviderRoutedRoute:
     """Project one route with opaque handles and explained target references."""
-    del briefs, target_index  # The question/index carry the descriptive context.
     return ProviderRoutedRoute(
         route_handle=route.route_id or "route-without-derived-id",
         obligation_handle=route.obligation_id,
@@ -1323,7 +1266,7 @@ def project_ica_target_context(
         if route.obligation_id in brief_map
     )
     routes = tuple(
-        _route_payload(route, briefs=brief_map, target_index=target_index).model_copy(
+        _route_payload(route).model_copy(
             update={
                 "route_handle": handles[route.obligation_id],
                 "obligation_handle": handles[route.obligation_id],
@@ -1535,6 +1478,13 @@ def build_structural_routing_prompts(
         control_structure=control_structure,
         slots=slots,
     )
+    return render_structural_routing_prompts(context, loss_analysis=loss_analysis)
+
+
+def render_structural_routing_prompts(
+    context: ProviderRoutingContext, *, loss_analysis: LossAnalysis
+) -> tuple[str, str]:
+    """Render system/user prompts from an already projected routing view."""
     routing_targeted_example, routing_unresolved_example = _routing_wire_examples()
     system = _TEMPLATE_LOADER.render_prompt(
         "structural_routing_system.j2",
@@ -1574,8 +1524,6 @@ def build_mechanism_verification_prompts(
 
 def build_ica_hazard_verification_prompts(
     requests: Sequence[Any],
-    *,
-    correction_feedback: Mapping[str, str] | None = None,
 ) -> tuple[str, str]:
     """Render the narrow independent verifier prompt for final ICAs.
 
@@ -1584,7 +1532,6 @@ def build_ica_hazard_verification_prompts(
     Previous verdicts remain call bookkeeping, not evidence for this independent
     reading of the current finding.
     """
-    del correction_feedback
     if not requests:
         raise ValueError("ICA hazard verification requires at least one request")
     payloads: list[dict[str, Any]] = []
@@ -1644,6 +1591,13 @@ def build_structural_revision_prompts(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
     )
+    return render_structural_revision_prompts(context)
+
+
+def render_structural_revision_prompts(
+    context: ProviderRevisionContext,
+) -> tuple[str, str]:
+    """Render revision prompts from an already projected revision view."""
     system = _TEMPLATE_LOADER.render_prompt(
         "structural_revision_system.j2",
         instructions=context.instructions,
@@ -1666,7 +1620,7 @@ def build_synthesis_slot_prompts(
     control_structure: ControlStructure,
 ) -> tuple[str, str]:
     """Build an ordinary-Stage-3, target-scoped structured ICA prompt."""
-    target_index, questions, routes = project_ica_target_context(
+    projection = project_ica_target_context(
         target_id=target_id,
         slots=slots,
         routed_briefs=routed_briefs,
@@ -1674,6 +1628,21 @@ def build_synthesis_slot_prompts(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
     )
+    return render_synthesis_slot_prompts(projection, target_id=target_id, slots=slots)
+
+
+def render_synthesis_slot_prompts(
+    projection: tuple[
+        ProviderTargetIndex,
+        tuple[ProviderObligationQuestion | ProviderGovernanceQuestion, ...],
+        tuple[ProviderRoutedRoute, ...],
+    ],
+    *,
+    target_id: str,
+    slots: Sequence[SlotPlaceholder],
+) -> tuple[str, str]:
+    """Render the ICA target prompt from an already projected target view."""
+    target_index, questions, routes = projection
     slot_ids = {slot.slot_id for slot in slots}
     required_pairs = [
         {
@@ -1705,6 +1674,7 @@ def build_synthesis_slot_prompts(
 
 
 __all__ = [
+    "PROHIBITED_PROMPT_FIELDS",
     "audit_prompt_contract",
     "build_structural_revision_prompts",
     "build_structural_routing_prompts",
@@ -1712,6 +1682,9 @@ __all__ = [
     "build_ica_hazard_verification_prompts",
     "build_ica_hazard_correction_prompts",
     "build_synthesis_slot_prompts",
+    "render_structural_revision_prompts",
+    "render_structural_routing_prompts",
+    "render_synthesis_slot_prompts",
     "authoritative_hazard_constraint_pairs",
     "local_obligation_handles",
     "project_control_structure_context",

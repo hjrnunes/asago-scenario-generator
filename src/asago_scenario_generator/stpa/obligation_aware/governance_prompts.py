@@ -107,6 +107,13 @@ def build_governance_routing_prompts(
         control_structure=control_structure,
         slots=slots,
     )
+    return render_governance_routing_prompts(context)
+
+
+def render_governance_routing_prompts(
+    context: GovernanceRoutingContext,
+) -> tuple[str, str]:
+    """Render governance prompts from an already projected governance view."""
     system = _TEMPLATE_LOADER.render_prompt(
         "governance_routing_system.j2",
         row_count=len(context.rows),

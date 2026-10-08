@@ -32,6 +32,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     StructuralRevisionDelta,
     StructuralConceptKind,
 )
+from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionTemporality,
     ControlStructure,
@@ -100,6 +101,17 @@ class AnalysisControls(_Model):
     context_window: int | None = Field(gt=0, strict=True, default=None)
     maximum_completion_tokens: int | None = Field(gt=0, strict=True, default=None)
     safety_margin: int | None = Field(ge=0, strict=True, default=None)
+
+
+def default_synthesis_controls(*, max_batch_size: int = 8) -> AnalysisControls:
+    """Return the controls a stage uses when its caller supplies none."""
+    return AnalysisControls(
+        model_profile="synthesis",
+        model_name="caller-supplied",
+        deadline_seconds=300.0,
+        temperature=DEFAULT_TEMPERATURE,
+        max_batch_size=max_batch_size,
+    )
 
 
 class StructuralRoutingRequest(_DigestModel):
@@ -264,6 +276,14 @@ class RevisionGapDecision(_Model):
     gap_handle: str = Field(min_length=1)
     disposition: Literal["propose_addition", "dismiss_unsupported", "unresolved"]
     rationale: str = Field(min_length=1)
+
+
+DEVIATION_FIELD_BY_UCA_TYPE: dict[UCAType, str] = {
+    UCAType.not_provided: "not_provided_context",
+    UCAType.incorrect: "incorrect_value_or_effect",
+    UCAType.wrong_timing: "timing_deviation",
+    UCAType.wrong_duration: "duration_deviation",
+}
 
 
 class IcaDeviationDraft(_Model):
@@ -871,6 +891,7 @@ class SlotAnalysisAdapter(Protocol):
 
 
 __all__ = [
+    "DEVIATION_FIELD_BY_UCA_TYPE",
     "AnalysisControls",
     "ArtifactPin",
     "BoundedStructuralRevision",
@@ -945,4 +966,5 @@ __all__ = [
     "SynthesisSlotFillResult",
     "SynthesisSlotRequest",
     "SynthesisSlotResponse",
+    "default_synthesis_controls",
 ]

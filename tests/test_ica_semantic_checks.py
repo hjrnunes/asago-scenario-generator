@@ -64,11 +64,6 @@ def test_verifier_classifies_without_seeing_the_proposed_category():
     assert "uca_type:" not in user
     assert "uca_definition:" not in user
     assert "slot_id:" not in user
-    corrected_prompts = build_ica_hazard_verification_prompts(
-        (request,),
-        correction_feedback={request.ica_id: "Previously rejected as INCORRECT"},
-    )
-    assert corrected_prompts == build_ica_hazard_verification_prompts((request,))
 
 
 def test_unqualified_supported_claim_cannot_skip_semantic_checks():

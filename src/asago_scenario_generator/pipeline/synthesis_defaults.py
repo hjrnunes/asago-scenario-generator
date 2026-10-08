@@ -341,16 +341,17 @@ def _default_recheck(
 ) -> Any:
     """Run the sole complete post-revision routing pass through SP2."""
     from asago_scenario_generator.stpa.obligation_aware.routing import (
-        recheck_obligations,
+        route_obligations,
     )
 
     provider = obligation_adapter or _resolve_obligation_provider(inputs, output_dir)
-    return recheck_obligations(
+    return route_obligations(
         provider,
         briefs=briefs,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         controls=_provider_controls(provider, inputs),
+        purpose="recheck",
     )
 
 

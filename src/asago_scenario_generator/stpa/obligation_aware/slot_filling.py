@@ -15,7 +15,6 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
     ObligationRoute,
 )
-from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.infra.llm_helpers import count_requests
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
@@ -36,6 +35,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
+    DEVIATION_FIELD_BY_UCA_TYPE,
     AnalysisControls,
     IcaFindingDraft,
     ObligationIcaDraft,
@@ -45,6 +45,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotFillResult,
     SynthesisSlotRequest,
     SynthesisSlotResponse,
+    default_synthesis_controls,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_synthesis_slot_prompts,
@@ -324,12 +325,7 @@ def build_synthesis_slot_requests(
                 + ", ".join(sorted(unknown))
             )
     if controls is None:
-        controls = AnalysisControls(
-            model_profile="synthesis",
-            model_name="caller-supplied",
-            deadline_seconds=300.0,
-            temperature=DEFAULT_TEMPERATURE,
-        )
+        controls = default_synthesis_controls()
     requests: list[SynthesisSlotRequest] = []
     for target, target_kind, target_slots in _group_slots(slots):
         routed_briefs, routed_routes = _routed_for_target(target_slots, briefs, routes)
@@ -634,12 +630,7 @@ def _validate_finding_type(
     action_description: str,
 ) -> None:
     """Validate the one UCA-specific deviation field and its wording."""
-    expected_field = {
-        UCAType.not_provided: "not_provided_context",
-        UCAType.incorrect: "incorrect_value_or_effect",
-        UCAType.wrong_timing: "timing_deviation",
-        UCAType.wrong_duration: "duration_deviation",
-    }[slot.uca_type]
+    expected_field = DEVIATION_FIELD_BY_UCA_TYPE[slot.uca_type]
     if finding.deviation.field_name != expected_field:
         raise ValueError(
             f"{slot.uca_type.value} requires the {expected_field} deviation field"
@@ -827,7 +818,7 @@ def _unresolved_pair(
 
 
 def _draft_considerations(
-    response: SynthesisSlotResponse,
+    filled_slots: Iterable[SlotProviderEntry],
     request: SynthesisSlotRequest,
     compiled_slots: Mapping[str, ICASlot],
 ) -> tuple[ObligationIcaConsideration, ...]:
@@ -838,7 +829,7 @@ def _draft_considerations(
         for slot_id in route.slot_ids
     }
     values: list[ObligationIcaConsideration] = []
-    for entry in response.filled_slots:
+    for entry in filled_slots:
         if not isinstance(entry, SlotIcaDraft):
             continue
         slot = compiled_slots.get(entry.slot_id)
@@ -1611,7 +1602,7 @@ def _record_accepted_request(
     authoritative fill.
     """
     structured_pairs = _draft_considerations(
-        response, request, {**state.all_filled, **by_id}
+        response.filled_slots, request, {**state.all_filled, **by_id}
     )
     pair_by_key = {
         (pair.obligation_id, pair.slot_id): pair
@@ -1724,15 +1715,11 @@ def fill_synthesis_slots(
     return SlotFillRunResult(result=final)
 
 
-fill_slots = fill_synthesis_slots
-
-
 __all__ = [
     "SlotFillRunResult",
     "build_synthesis_slot_requests",
     "compile_ica_slot_draft",
     "compile_slot_provider_entry",
-    "fill_slots",
     "fill_synthesis_slots",
     "final_slot_universe",
 ]

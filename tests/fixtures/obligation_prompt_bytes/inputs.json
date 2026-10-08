@@ -1,0 +1,2626 @@
+{
+ "briefs": [
+  {
+   "applicability_evidence": [
+    {
+     "detail": "{\"path\":[{\"evidence\":[\"# Privacy violations — LLM discloses sensitive data\"],\"relation\":\"skos:broadMatch\",\"source\":\"sssom\",\"source_id\":\"ai-risk-taxonomy-unauthorized-disclosure---location-data\",\"target_id\":\"LLM02\"},{\"evidence\":[\"llm-to-attack-pattern.yaml\"],\"relation\":\"realized_by\",\"source\":\"cross-taxonomy\",\"source_id\":\"LLM02\",\"target_id\":\"AP-T2-02\"}]}",
+     "fact_evaluations": [],
+     "kind": "mapping",
+     "source": "cross-taxonomy"
+    },
+    {
+     "detail": "no compatible canonical trust_boundary resource for slot",
+     "fact_evaluations": [],
+     "kind": "projection",
+     "source": "missing_compatible_resource"
+    },
+    {
+     "detail": "authoritative projection is infeasible",
+     "fact_evaluations": [],
+     "kind": "qualification",
+     "source": "authoritative-projection"
+    }
+   ],
+   "attack_pattern_description": "Manipulate the agent into chaining two or more authorized tools in a designer-unanticipated retrieve-then-transmit sequence so sensitive data collected by one tool is exfiltrated by a subsequent tool, each individual call appearing legitimate. Owns the tool-composition defect.",
+   "attack_pattern_id": "AP-T2-02",
+   "attack_pattern_name": "Multi-tool chain exploitation for data exfiltration",
+   "attack_pattern_semantic_digest": "75bf8e5b099e78e0faac293db601fb2fe6f663456d261542763d0993c9e9ea07",
+   "candidate_ids": [
+    "cand:v2:7df68b1cfcdc3a9e7b2139f314e8d9c8"
+   ],
+   "catalog_pins": {
+    "atlas": {
+     "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+     "release": "2026.05"
+    }
+   },
+   "instruction": "Treat this taxonomy concern as a hypothesis for structural STPA analysis. It is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the system-specific losses, hazards, constraints, and control path that make the concern applicable, or provide explicit structural evidence for non-applicability.",
+   "mapping_pins": {
+    "obligation_edges": {
+     "digest": "e7cf167508c865b20c4e0ed6c89a507bd2b702d0131a044d165a17fc06985e90",
+     "release": "obligation-mapping-bundle-v2"
+    },
+    "sssom": {
+     "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+     "release": "2026.05"
+    }
+   },
+   "obligation_id": "ob:v1:030421833be84a4db126790a3224bf7566c4aa55e7f2547c5961abd3738f5fcb",
+   "plan_digest": "465629dd86571f5ce2e40a2f4cdd7864d0881f821207a4ec0309b8312c8ff91b",
+   "prerequisite_capabilities": {
+    "kc_requires": {
+     "all": [],
+     "any": [
+      "KC6.1.1",
+      "KC6.1.2",
+      "KC6.2.1",
+      "KC6.2.2",
+      "KC6.3.1",
+      "KC6.3.2",
+      "KC6.4",
+      "KC6.5",
+      "KC6.6",
+      "KC6.7"
+     ]
+    },
+    "min_zones": [
+     "input",
+     "reasoning",
+     "tool_execution"
+    ]
+   },
+   "qualification_disposition": "structurally_infeasible",
+   "resource_references": [],
+   "risk_ref": {
+    "confidence": 0.0,
+    "consequence": "The unauthorized disclosure of specific patient locations through digital healthcare technology outputs.",
+    "evidence": [
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "The combined details of a local area, a rare disease and a very young age may enable a patient to be identified."
+     }
+    ],
+    "grounding_confidence": "medium",
+    "impact": "Breach of patient confidentiality and potential physical safety risks for individuals receiving health and social care services.",
+    "mitigations": [],
+    "risk_description": "Unauthorized disclosure - Location data is defined as if the model response involves unauthorized disclosure or handling of sensitive location data.",
+    "risk_id": "ai-risk-taxonomy-unauthorized-disclosure---location-data",
+    "risk_name": "Unauthorized disclosure - Location data",
+    "scores": {
+     "bm25_rank": 11.0,
+     "cross_encoder_score": 0.0,
+     "embedding_distance": 0.36999624967575073,
+     "rrf_score": 0.03047794966520434
+    },
+    "taxonomy": "ai-risk-taxonomy",
+    "threat": "AI models used in health and social care may output sensitive patient location data within their responses.",
+    "threat_source": "AI systems developed or deployed by health and social care providers under the NHS Artificial Intelligence and Digital Regulations Service.",
+    "vulnerability": "Inadequate data privacy controls or insufficient filtering of sensitive geographic identifiers within the model's training or inference processes."
+   },
+   "semantic_digest": "473e3f9f2eb41240f26ac30ad2806932609483afb423a43d1037fbfd96296fc0",
+   "taxonomy_chain": [
+    {
+     "id": "AML.T0053",
+     "taxonomy": "ATLAS"
+    },
+    {
+     "id": "AML.T0086",
+     "taxonomy": "ATLAS"
+    },
+    {
+     "id": "AML.T0085.001",
+     "taxonomy": "ATLAS"
+    }
+   ]
+  },
+  {
+   "applicability_evidence": [
+    {
+     "detail": "{\"path\":[{\"evidence\":[\"ibm2owasp_from_tsv_data.yaml\"],\"relation\":\"skos:broadMatch\",\"source\":\"sssom\",\"source_id\":\"atlas-exposing-personal-information\",\"target_id\":\"LLM02\"},{\"evidence\":[\"llm-to-attack-pattern.yaml\"],\"relation\":\"realized_by\",\"source\":\"cross-taxonomy\",\"source_id\":\"LLM02\",\"target_id\":\"AP-T6-08\"}]}",
+     "fact_evaluations": [],
+     "kind": "mapping",
+     "source": "cross-taxonomy"
+    },
+    {
+     "detail": "indirect ingress requires explicit upstream-source and trust-boundary linkage",
+     "fact_evaluations": [],
+     "kind": "projection",
+     "source": "unsupported_requirement_derivation"
+    }
+   ],
+   "attack_pattern_description": "Ask the system questions designed to make the model reveal sensitive information that it holds or can reach, such as another user's records, credentials, personal data, or proprietary content, by claiming authority, asserting a pretext, or splitting the request into innocuous parts. The attack stays inside one conversation and needs no tool, retrieval source, or memory beyond what the model already sees; it ends at the first response that contains the sensitive information. Exact ATLAS chain identity: AML.T0057 - crafting prompts that induce the model to leak private user data or proprietary information is AML.T0057's exact defined operation (LLM Data Leakage); evidence: pinned technique definition AML.T0057. Exfiltration through tool chains belongs to AP-T2-02 and exfiltration through rendered output belongs to AP-T1-06.",
+   "attack_pattern_id": "AP-T6-08",
+   "attack_pattern_name": "Conversational sensitive-data elicitation",
+   "attack_pattern_semantic_digest": "ba37cfefbbb3ca6680ba383879dc3d29f5fd31de1684a9c44e7f5086517dd401",
+   "candidate_ids": [
+    "cand:v2:259ae9aaae08c950b9612524b3a66512",
+    "cand:v2:759a33094c0106b005b227584881f65e",
+    "cand:v2:97f9bde19c06ec06c5ca07178e2150bc",
+    "cand:v2:da3ba41f246c7f1143018e3308cfd3be",
+    "cand:v2:f5bb71c9442be1c724fbdbe75dc0225e"
+   ],
+   "catalog_pins": {
+    "atlas": {
+     "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+     "release": "2026.05"
+    }
+   },
+   "instruction": "Treat this taxonomy concern as a hypothesis for structural STPA analysis. It is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the system-specific losses, hazards, constraints, and control path that make the concern applicable, or provide explicit structural evidence for non-applicability.",
+   "mapping_pins": {
+    "obligation_edges": {
+     "digest": "e7cf167508c865b20c4e0ed6c89a507bd2b702d0131a044d165a17fc06985e90",
+     "release": "obligation-mapping-bundle-v2"
+    },
+    "sssom": {
+     "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+     "release": "2026.05"
+    }
+   },
+   "obligation_id": "ob:v1:1a05e85b5ef6faba34c169b9ba1f0c8011735461108cc1c085fa35c18869f844",
+   "plan_digest": "465629dd86571f5ce2e40a2f4cdd7864d0881f821207a4ec0309b8312c8ff91b",
+   "prerequisite_capabilities": {
+    "kc_requires": {
+     "all": [],
+     "any": [
+      "KC1.1",
+      "KC1.2",
+      "KC1.3",
+      "KC1.4"
+     ]
+    },
+    "min_zones": [
+     "input",
+     "reasoning"
+    ]
+   },
+   "qualification_disposition": "ready",
+   "resource_references": [
+    {
+     "entry_point_id": "ep:v1:1192214f055ae86b6139eff589f3151d",
+     "kind": "entry_point"
+    },
+    {
+     "entry_point_id": "ep:v1:1192214f055ae86b6139eff589f3151d",
+     "kind": "output_surface"
+    },
+    {
+     "entry_point_id": "ep:v1:41eb0d8a7c044887f553503b36dfe869",
+     "kind": "output_surface"
+    },
+    {
+     "entry_point_id": "ep:v1:d887bbe4138b16d8df6e6b7ccb6fc64f",
+     "kind": "entry_point"
+    }
+   ],
+   "risk_ref": {
+    "confidence": 0.71932053565979,
+    "consequence": "Unauthorized data leakage of personal or sensitive information through model responses.",
+    "evidence": [
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "Ensure confidential patient information is processed legally, ethically and appropriately."
+     },
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "It is important, however, that data is carefully assessed to determine if individuals can be identified using the contents of the information even if common identifiers such as name, address and phone number are removed."
+     },
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "There are many potential positives with these tools, there are also risks which must be considered and managed to maintain patient safety and meet data protection requirements."
+     }
+    ],
+    "grounding_confidence": "medium",
+    "impact": "Non-compliance with national and local legislation and a failure to meet data protection regulatory requirements.",
+    "mitigations": [
+     {
+      "description": "Limit access to sensitive data based on the principle of least privilege. Restrict data sources and ensure runtime data orchestration is securely managed.",
+      "mitigation_id": "owasp-llm-act-02-03",
+      "source": "owasp-llm-2.0"
+     },
+     {
+      "description": "Implement tokenization to preprocess and sanitize sensitive information. Use pattern matching to detect and redact confidential content such as PII, credentials, and proprietary data before it reaches the model.",
+      "mitigation_id": "owasp-llm-act-02-09",
+      "source": "owasp-llm-2.0"
+     },
+     {
+      "description": "Implement fine-grained access controls and permission-aware vector and embedding stores. Ensure strict logical and access partitioning of datasets in the vector database to prevent cross-tenant data leakage.",
+      "mitigation_id": "owasp-llm-act-08-01",
+      "source": "owasp-llm-2.0"
+     },
+     {
+      "description": "Consider opportunities to responsibly use synthetic data and other privacy enhancing techniques in GAI development, where appropriate and applicable, match the statistical properties of real-world data without disclosing personally identifiable information or contributing to homogenization .",
+      "mitigation_id": "MG-2.2-009",
+      "source": "nist-ai-rmf"
+     },
+     {
+      "description": "Conduct periodic monitoring of AI-generated content for privacy risks; address any possible instances of PII or sensitive data exposure.",
+      "mitigation_id": "MP-4.1-001",
+      "source": "nist-ai-rmf"
+     },
+     {
+      "description": "Leverage approaches to detect the presence of PII or sensitive data in generated output text, image, video, or audio .",
+      "mitigation_id": "MP-4.1-009",
+      "source": "nist-ai-rmf"
+     },
+     {
+      "description": "Document how content provenance data is tracked and how that data interacts with privacy and security. Consider : Anonymiz ing data to protect the privacy of human subjects; Leverag ing privacy output filters; Remov ing any personally identifiable information (PII) to prevent potential harm or misuse.",
+      "mitigation_id": "MS-2.2-002",
+      "source": "nist-ai-rmf"
+     },
+     {
+      "description": "Use techniques such as anonymization, differential privacy or other privacy-enhancing technologies to minimize the risks associated with linking AI-generated content back to individual human subjects.",
+      "mitigation_id": "MS-2.2-004",
+      "source": "nist-ai-rmf"
+     },
+     {
+      "description": "Implement safeguards to prevent cross-customer data exposure when combining customer data from multiple sources",
+      "mitigation_id": "aiuc1-req-a005",
+      "source": "aiuc1"
+     },
+     {
+      "description": "Establish safeguards to prevent personal data leakage through AI outputs",
+      "mitigation_id": "aiuc1-req-a006",
+      "source": "aiuc1"
+     },
+     {
+      "description": "Implement output limitations and obfuscation techniques to safeguard against information leakage",
+      "mitigation_id": "aiuc1-req-b009",
+      "source": "aiuc1"
+     },
+     {
+      "description": "Document AI failure plan for AI privacy and security breaches assigning accountable owners and establishing notification and remediation with third-party support as needed (e.g. legal, PR, insurers)",
+      "mitigation_id": "aiuc1-req-e001",
+      "source": "aiuc1"
+     }
+    ],
+    "risk_description": "When personal identifiable information (PII) or sensitive personal information (SPI) are used in training data, fine-tuning data, seed data for synthetic data generation, or as part of the prompt, models might reveal that data in the generated output. Revealing personal information is a type of data leakage.",
+    "risk_id": "atlas-exposing-personal-information",
+    "risk_name": "Exposing personal information",
+    "scores": {
+     "bm25_rank": 67.0,
+     "cross_encoder_score": 0.71932053565979,
+     "embedding_distance": 0.5236601829528809,
+     "rrf_score": 0.02195852279028502
+    },
+    "taxonomy": "ibm-risk-atlas",
+    "threat": "AI models may reveal PII or SPI within generated outputs if such data is included in training sets, fine-tuning data, synthetic data seeds, or prompts.",
+    "threat_source": "The use of sensitive datasets during the model development lifecycle or within user prompts.",
+    "vulnerability": "Insufficient oversight in the review of data protection impact assessments (DPIAs) or failure to apply digital technology assessment criteria (DTAC) during procurement."
+   },
+   "semantic_digest": "14bfd02a240b05a9194d931b9229f2b87db003d27edca4bda412f6dc6bfbd2e3",
+   "taxonomy_chain": [
+    {
+     "id": "AML.T0057",
+     "taxonomy": "ATLAS"
+    }
+   ]
+  },
+  {
+   "applicability_evidence": [
+    {
+     "detail": "{\"path\":[{\"evidence\":[\"# Privacy violations — LLM discloses sensitive data\"],\"relation\":\"skos:broadMatch\",\"source\":\"sssom\",\"source_id\":\"ai-risk-taxonomy-unauthorized-inference/synthesis---location-data\",\"target_id\":\"LLM02\"},{\"evidence\":[\"llm-to-attack-pattern.yaml\"],\"relation\":\"realized_by\",\"source\":\"cross-taxonomy\",\"source_id\":\"LLM02\",\"target_id\":\"AP-T6-08\"}]}",
+     "fact_evaluations": [],
+     "kind": "mapping",
+     "source": "cross-taxonomy"
+    },
+    {
+     "detail": "indirect ingress requires explicit upstream-source and trust-boundary linkage",
+     "fact_evaluations": [],
+     "kind": "projection",
+     "source": "unsupported_requirement_derivation"
+    }
+   ],
+   "attack_pattern_description": "Ask the system questions designed to make the model reveal sensitive information that it holds or can reach, such as another user's records, credentials, personal data, or proprietary content, by claiming authority, asserting a pretext, or splitting the request into innocuous parts. The attack stays inside one conversation and needs no tool, retrieval source, or memory beyond what the model already sees; it ends at the first response that contains the sensitive information. Exact ATLAS chain identity: AML.T0057 - crafting prompts that induce the model to leak private user data or proprietary information is AML.T0057's exact defined operation (LLM Data Leakage); evidence: pinned technique definition AML.T0057. Exfiltration through tool chains belongs to AP-T2-02 and exfiltration through rendered output belongs to AP-T1-06.",
+   "attack_pattern_id": "AP-T6-08",
+   "attack_pattern_name": "Conversational sensitive-data elicitation",
+   "attack_pattern_semantic_digest": "ba37cfefbbb3ca6680ba383879dc3d29f5fd31de1684a9c44e7f5086517dd401",
+   "candidate_ids": [
+    "cand:v2:259ae9aaae08c950b9612524b3a66512",
+    "cand:v2:759a33094c0106b005b227584881f65e",
+    "cand:v2:97f9bde19c06ec06c5ca07178e2150bc",
+    "cand:v2:da3ba41f246c7f1143018e3308cfd3be",
+    "cand:v2:f5bb71c9442be1c724fbdbe75dc0225e"
+   ],
+   "catalog_pins": {
+    "atlas": {
+     "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+     "release": "2026.05"
+    }
+   },
+   "instruction": "Treat this taxonomy concern as a hypothesis for structural STPA analysis. It is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the system-specific losses, hazards, constraints, and control path that make the concern applicable, or provide explicit structural evidence for non-applicability.",
+   "mapping_pins": {
+    "obligation_edges": {
+     "digest": "e7cf167508c865b20c4e0ed6c89a507bd2b702d0131a044d165a17fc06985e90",
+     "release": "obligation-mapping-bundle-v2"
+    },
+    "sssom": {
+     "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+     "release": "2026.05"
+    }
+   },
+   "obligation_id": "ob:v1:312e291ae85312c5417ec46308e35972184616e45b51dc2004583fd9ba2a01f7",
+   "plan_digest": "465629dd86571f5ce2e40a2f4cdd7864d0881f821207a4ec0309b8312c8ff91b",
+   "prerequisite_capabilities": {
+    "kc_requires": {
+     "all": [],
+     "any": [
+      "KC1.1",
+      "KC1.2",
+      "KC1.3",
+      "KC1.4"
+     ]
+    },
+    "min_zones": [
+     "input",
+     "reasoning"
+    ]
+   },
+   "qualification_disposition": "ready",
+   "resource_references": [
+    {
+     "entry_point_id": "ep:v1:1192214f055ae86b6139eff589f3151d",
+     "kind": "entry_point"
+    },
+    {
+     "entry_point_id": "ep:v1:1192214f055ae86b6139eff589f3151d",
+     "kind": "output_surface"
+    },
+    {
+     "entry_point_id": "ep:v1:41eb0d8a7c044887f553503b36dfe869",
+     "kind": "output_surface"
+    },
+    {
+     "entry_point_id": "ep:v1:d887bbe4138b16d8df6e6b7ccb6fc64f",
+     "kind": "entry_point"
+    }
+   ],
+   "risk_ref": {
+    "confidence": 0.0,
+    "consequence": "The unauthorized disclosure of sensitive location-based data within medical advice, patient guides, or clinical summaries.",
+    "evidence": [
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "The combined details of a local area, a rare disease and a very young age may enable a patient to be identified."
+     }
+    ],
+    "grounding_confidence": "medium",
+    "impact": "Breach of patient privacy and potential physical safety risks to individuals within the healthcare system.",
+    "mitigations": [],
+    "risk_description": "Unauthorized inference/synthesis - Location data is defined as if the model response involves unauthorized inference or synthesis of sensitive data, specifically focusing on location data.",
+    "risk_id": "ai-risk-taxonomy-unauthorized-inference/synthesis---location-data",
+    "risk_name": "Unauthorized inference/synthesis - Location data",
+    "scores": {
+     "bm25_rank": 16.0,
+     "cross_encoder_score": 0.0,
+     "embedding_distance": 0.4627079963684082,
+     "rrf_score": 0.027443609022556388
+    },
+    "taxonomy": "ai-risk-taxonomy",
+    "threat": "The generative AI may synthesize or infer a patient's specific location or movement patterns from unstructured text or medical records.",
+    "threat_source": "Generative AI capabilities used to find connections between disparate information or search records to find cohorts.",
+    "vulnerability": "The model's ability to identify connections between disparate information and analyze records to find clinical variation."
+   },
+   "semantic_digest": "bc4866c31c081321ec596b30a64bbcc9f2abf0b34edbb77cbd6aa900ecd74b9a",
+   "taxonomy_chain": [
+    {
+     "id": "AML.T0057",
+     "taxonomy": "ATLAS"
+    }
+   ]
+  },
+  {
+   "applicability_evidence": [
+    {
+     "detail": "{\"path\":[{\"evidence\":[\"ibm2owasp_from_tsv_data.yaml\"],\"relation\":\"skos:broadMatch\",\"source\":\"sssom\",\"source_id\":\"atlas-revealing-confidential-information\",\"target_id\":\"LLM02\"},{\"evidence\":[\"llm-to-attack-pattern.yaml\"],\"relation\":\"realized_by\",\"source\":\"cross-taxonomy\",\"source_id\":\"LLM02\",\"target_id\":\"AP-T6-08\"}]}",
+     "fact_evaluations": [],
+     "kind": "mapping",
+     "source": "cross-taxonomy"
+    },
+    {
+     "detail": "indirect ingress requires explicit upstream-source and trust-boundary linkage",
+     "fact_evaluations": [],
+     "kind": "projection",
+     "source": "unsupported_requirement_derivation"
+    }
+   ],
+   "attack_pattern_description": "Ask the system questions designed to make the model reveal sensitive information that it holds or can reach, such as another user's records, credentials, personal data, or proprietary content, by claiming authority, asserting a pretext, or splitting the request into innocuous parts. The attack stays inside one conversation and needs no tool, retrieval source, or memory beyond what the model already sees; it ends at the first response that contains the sensitive information. Exact ATLAS chain identity: AML.T0057 - crafting prompts that induce the model to leak private user data or proprietary information is AML.T0057's exact defined operation (LLM Data Leakage); evidence: pinned technique definition AML.T0057. Exfiltration through tool chains belongs to AP-T2-02 and exfiltration through rendered output belongs to AP-T1-06.",
+   "attack_pattern_id": "AP-T6-08",
+   "attack_pattern_name": "Conversational sensitive-data elicitation",
+   "attack_pattern_semantic_digest": "ba37cfefbbb3ca6680ba383879dc3d29f5fd31de1684a9c44e7f5086517dd401",
+   "candidate_ids": [
+    "cand:v2:259ae9aaae08c950b9612524b3a66512",
+    "cand:v2:759a33094c0106b005b227584881f65e",
+    "cand:v2:97f9bde19c06ec06c5ca07178e2150bc",
+    "cand:v2:da3ba41f246c7f1143018e3308cfd3be",
+    "cand:v2:f5bb71c9442be1c724fbdbe75dc0225e"
+   ],
+   "catalog_pins": {
+    "atlas": {
+     "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+     "release": "2026.05"
+    }
+   },
+   "instruction": "Treat this taxonomy concern as a hypothesis for structural STPA analysis. It is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the system-specific losses, hazards, constraints, and control path that make the concern applicable, or provide explicit structural evidence for non-applicability.",
+   "mapping_pins": {
+    "obligation_edges": {
+     "digest": "e7cf167508c865b20c4e0ed6c89a507bd2b702d0131a044d165a17fc06985e90",
+     "release": "obligation-mapping-bundle-v2"
+    },
+    "sssom": {
+     "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+     "release": "2026.05"
+    }
+   },
+   "obligation_id": "ob:v1:33ca51d34ce6d53d9e663bee05f97b15c5106ab73ab34f21f8b892c4f0147a78",
+   "plan_digest": "465629dd86571f5ce2e40a2f4cdd7864d0881f821207a4ec0309b8312c8ff91b",
+   "prerequisite_capabilities": {
+    "kc_requires": {
+     "all": [],
+     "any": [
+      "KC1.1",
+      "KC1.2",
+      "KC1.3",
+      "KC1.4"
+     ]
+    },
+    "min_zones": [
+     "input",
+     "reasoning"
+    ]
+   },
+   "qualification_disposition": "ready",
+   "resource_references": [
+    {
+     "entry_point_id": "ep:v1:1192214f055ae86b6139eff589f3151d",
+     "kind": "entry_point"
+    },
+    {
+     "entry_point_id": "ep:v1:1192214f055ae86b6139eff589f3151d",
+     "kind": "output_surface"
+    },
+    {
+     "entry_point_id": "ep:v1:41eb0d8a7c044887f553503b36dfe869",
+     "kind": "output_surface"
+    },
+    {
+     "entry_point_id": "ep:v1:d887bbe4138b16d8df6e6b7ccb6fc64f",
+     "kind": "entry_point"
+    }
+   ],
+   "risk_ref": {
+    "confidence": 0.0,
+    "consequence": "The unauthorized disclosure of sensitive patient information through the model's generated output.",
+    "evidence": [
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "Ensure confidential patient information is processed legally, ethically and appropriately."
+     },
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "Personal or sensitive patient information may be entered into Copilot but must not be entered into generative or publicly available artificial intelligence tools."
+     },
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "it is important to use artificial intelligence appropriately to ensure that it does not compromise personal data, business sensitive information"
+     }
+    ],
+    "grounding_confidence": "medium",
+    "impact": "A breach of the NHS requirement to respect patient privacy and dignity, potentially violating data protection regulations and undermining trust in clinical care.",
+    "mitigations": [
+     {
+      "description": "Limit access to sensitive data based on the principle of least privilege. Restrict data sources and ensure runtime data orchestration is securely managed.",
+      "mitigation_id": "owasp-llm-act-02-03",
+      "source": "owasp-llm-2.0"
+     },
+     {
+      "description": "Implement tokenization to preprocess and sanitize sensitive information. Use pattern matching to detect and redact confidential content such as PII, credentials, and proprietary data before it reaches the model.",
+      "mitigation_id": "owasp-llm-act-02-09",
+      "source": "owasp-llm-2.0"
+     },
+     {
+      "description": "Avoid embedding API keys, authentication credentials, database names, user roles, or permission structures in system prompts. Externalize sensitive configuration to systems the model cannot directly access.",
+      "mitigation_id": "owasp-llm-act-07-01",
+      "source": "owasp-llm-2.0"
+     },
+     {
+      "description": "Implement fine-grained access controls and permission-aware vector and embedding stores. Ensure strict logical and access partitioning of datasets in the vector database to prevent cross-tenant data leakage.",
+      "mitigation_id": "owasp-llm-act-08-01",
+      "source": "owasp-llm-2.0"
+     },
+     {
+      "description": "Consider the following factors when decommissioning GAI systems: Data retention requirements; Data security, e.g., containment, protocols, Data leakage after decommissioning; Dependencies between upstream, downstream, or other data, internet of things (IOT) or AI systems; Use of open-source data or models; Users' emotional entanglement with GAI functions. Human-",
+      "mitigation_id": "GV-1.7-002",
+      "source": "nist-ai-rmf"
+     },
+     {
+      "description": "Inventory all third-party entities with access to organizational content and establish approved GAI technology and service provider lists.",
+      "mitigation_id": "GV-6.1-007",
+      "source": "nist-ai-rmf"
+     },
+     {
+      "description": "Implement safeguards or technical controls to prevent AI systems from leaking company intellectual property or confidential information",
+      "mitigation_id": "aiuc1-req-a004",
+      "source": "aiuc1"
+     },
+     {
+      "description": "Implement safeguards to prevent cross-customer data exposure when combining customer data from multiple sources",
+      "mitigation_id": "aiuc1-req-a005",
+      "source": "aiuc1"
+     },
+     {
+      "description": "Implement output limitations and obfuscation techniques to safeguard against information leakage",
+      "mitigation_id": "aiuc1-req-b009",
+      "source": "aiuc1"
+     }
+    ],
+    "risk_description": "When confidential information is used in training data, fine-tuning data, or as part of the prompt, models might reveal that data in the generated output. Revealing confidential information is a type of data leakage.",
+    "risk_id": "atlas-revealing-confidential-information",
+    "risk_name": "Revealing confidential information",
+    "scores": {
+     "bm25_rank": 42.0,
+     "cross_encoder_score": 0.0,
+     "embedding_distance": 0.39852893352508545,
+     "rrf_score": 0.025188536953242836
+    },
+    "taxonomy": "ibm-risk-atlas",
+    "threat": "AI models used as supportive tools in clinical practice may output identifiable patient data that was included in training, fine-tuning, or prompt inputs.",
+    "threat_source": "The use of AI technologies, such as Microsoft Teams or Ambient Scribe, for recording patient information or supporting clinical practice.",
+    "vulnerability": "The inclusion of identifiable patient data within the AI's data processing pipeline or prompt context."
+   },
+   "semantic_digest": "6b1d37c4591cb4c553d7b7913c91ccbf372e36336cb50ecf0573ea5bbceedf98",
+   "taxonomy_chain": [
+    {
+     "id": "AML.T0057",
+     "taxonomy": "ATLAS"
+    }
+   ]
+  },
+  {
+   "applicability_evidence": [
+    {
+     "detail": "{\"path\":[{\"evidence\":[\"# Privacy violations — LLM discloses sensitive data\"],\"relation\":\"skos:broadMatch\",\"source\":\"sssom\",\"source_id\":\"ai-risk-taxonomy-unauthorized-disclosure---financial-records\",\"target_id\":\"LLM02\"},{\"evidence\":[\"llm-to-attack-pattern.yaml\"],\"relation\":\"realized_by\",\"source\":\"cross-taxonomy\",\"source_id\":\"LLM02\",\"target_id\":\"AP-T2-02\"}]}",
+     "fact_evaluations": [],
+     "kind": "mapping",
+     "source": "cross-taxonomy"
+    },
+    {
+     "detail": "no compatible canonical trust_boundary resource for slot",
+     "fact_evaluations": [],
+     "kind": "projection",
+     "source": "missing_compatible_resource"
+    },
+    {
+     "detail": "authoritative projection is infeasible",
+     "fact_evaluations": [],
+     "kind": "qualification",
+     "source": "authoritative-projection"
+    }
+   ],
+   "attack_pattern_description": "Manipulate the agent into chaining two or more authorized tools in a designer-unanticipated retrieve-then-transmit sequence so sensitive data collected by one tool is exfiltrated by a subsequent tool, each individual call appearing legitimate. Owns the tool-composition defect.",
+   "attack_pattern_id": "AP-T2-02",
+   "attack_pattern_name": "Multi-tool chain exploitation for data exfiltration",
+   "attack_pattern_semantic_digest": "75bf8e5b099e78e0faac293db601fb2fe6f663456d261542763d0993c9e9ea07",
+   "candidate_ids": [
+    "cand:v2:7df68b1cfcdc3a9e7b2139f314e8d9c8"
+   ],
+   "catalog_pins": {
+    "atlas": {
+     "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+     "release": "2026.05"
+    }
+   },
+   "instruction": "Treat this taxonomy concern as a hypothesis for structural STPA analysis. It is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the system-specific losses, hazards, constraints, and control path that make the concern applicable, or provide explicit structural evidence for non-applicability.",
+   "mapping_pins": {
+    "obligation_edges": {
+     "digest": "e7cf167508c865b20c4e0ed6c89a507bd2b702d0131a044d165a17fc06985e90",
+     "release": "obligation-mapping-bundle-v2"
+    },
+    "sssom": {
+     "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+     "release": "2026.05"
+    }
+   },
+   "obligation_id": "ob:v1:46953e164b73d12523af57ac22fd4240d3b1659f81790021ce5d60f4fa35dc47",
+   "plan_digest": "465629dd86571f5ce2e40a2f4cdd7864d0881f821207a4ec0309b8312c8ff91b",
+   "prerequisite_capabilities": {
+    "kc_requires": {
+     "all": [],
+     "any": [
+      "KC6.1.1",
+      "KC6.1.2",
+      "KC6.2.1",
+      "KC6.2.2",
+      "KC6.3.1",
+      "KC6.3.2",
+      "KC6.4",
+      "KC6.5",
+      "KC6.6",
+      "KC6.7"
+     ]
+    },
+    "min_zones": [
+     "input",
+     "reasoning",
+     "tool_execution"
+    ]
+   },
+   "qualification_disposition": "structurally_infeasible",
+   "resource_references": [],
+   "risk_ref": {
+    "confidence": 0.0,
+    "consequence": "The unauthorized disclosure of sensitive financial records or business sensitive information through the AI model's response or training data.",
+    "evidence": [
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "unpublished financial reports"
+     }
+    ],
+    "grounding_confidence": "high",
+    "impact": "Compromise of business sensitive information and a breach of organizational data privacy and trust.",
+    "mitigations": [],
+    "risk_description": "Unauthorized disclosure - Financial records is defined as if the model response involves unauthorized disclosure of sensitive financial data.",
+    "risk_id": "ai-risk-taxonomy-unauthorized-disclosure---financial-records",
+    "risk_name": "Unauthorized disclosure - Financial records",
+    "scores": {
+     "bm25_rank": 11.0,
+     "cross_encoder_score": 0.0,
+     "embedding_distance": 0.32461410760879517,
+     "rrf_score": 0.03047794966520434
+    },
+    "taxonomy": "ai-risk-taxonomy",
+    "threat": "Colleagues may input sensitive business information or personal data into freely available AI software like ChatGPT.",
+    "threat_source": "Colleagues using AI features within applications like Microsoft Teams or external software like ChatGPT.",
+    "vulnerability": "The use of freely available AI software that lacks the same data protection controls as internal enterprise applications."
+   },
+   "semantic_digest": "f8b526a1021717d50ffea38f40697df756cdc3de0e61d723bfec93f146ca5b6d",
+   "taxonomy_chain": [
+    {
+     "id": "AML.T0053",
+     "taxonomy": "ATLAS"
+    },
+    {
+     "id": "AML.T0086",
+     "taxonomy": "ATLAS"
+    },
+    {
+     "id": "AML.T0085.001",
+     "taxonomy": "ATLAS"
+    }
+   ]
+  }
+ ],
+ "control_structure": {
+  "controlled_processes": [
+   {
+    "cp_id": "CP-1",
+    "description": "Patient conversational interface"
+   },
+   {
+    "cp_id": "CP-2",
+    "description": "Referral information system"
+   },
+   {
+    "cp_id": "CP-3",
+    "description": "Education content repository"
+   },
+   {
+    "cp_id": "CP-4",
+    "description": "Questionnaire storage"
+   },
+   {
+    "cp_id": "CP-5",
+    "description": "EHR Draft ledger"
+   },
+   {
+    "cp_id": "CP-6",
+    "description": "Electronic Health Record (EHR) system"
+   },
+   {
+    "cp_id": "CP-7",
+    "description": "Clinical escalation system"
+   }
+  ],
+  "coordination_links": [
+   {
+    "coordination_mechanism": {
+     "cm_id": "CM-1",
+     "description": "RESP-7 validates that the patient_id in tool calls matches the session's authenticated patient before allowing RESP-1 to proceed with data retrieval.",
+     "payload": "session:authenticated_patient_id"
+    },
+    "description": "Ensures RESP-1 only operates on the identity validated by the parameter validation responsibility.",
+    "link_id": "CL-1",
+    "shared_pm": "PM-1-1",
+    "source": "RESP-1",
+    "target": "RESP-7"
+   },
+   {
+    "coordination_mechanism": {
+     "cm_id": "CM-2",
+     "description": "RESP-5 requires the draft status to be updated to REVIEWED by a clinician (via RESP-8) before the commit can proceed.",
+     "payload": "draft_status"
+    },
+    "description": "Coordinates the transition from an AWAITING_REVIEW draft (RESP-4) to a REVIEWED draft (RESP-5).",
+    "link_id": "CL-2",
+    "shared_pm": "PM-5-2",
+    "source": "RESP-4",
+    "target": "RESP-5"
+   },
+   {
+    "coordination_mechanism": {
+     "cm_id": "CM-3",
+     "description": "RESP-2 must evaluate the conversational input before RESP-1 provides education material to prevent unsafe clinical answers.",
+     "payload": "patient_query"
+    },
+    "description": "Ensures clinical safety evaluation occurs before or in tandem with providing educational content.",
+    "link_id": "CL-3",
+    "shared_pm": "PM-2-1",
+    "source": "RESP-1",
+    "target": "RESP-2"
+   }
+  ],
+  "responsibilities": [
+   {
+    "control_actions": [
+     {
+      "ca_id": "CA-1-1",
+      "description": "Provide conversational answer with education material",
+      "effect_kind": "model_output",
+      "process_model_refs": [
+       "PM-1-1",
+       "PM-1-2",
+       "PM-1-3"
+      ],
+      "target": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     },
+     {
+      "ca_id": "CA-1-2",
+      "description": "Retrieve referral details",
+      "effect_kind": "tool_call",
+      "operation": "get_referral",
+      "process_model_refs": [
+       "PM-1-1"
+      ],
+      "target": {
+       "id": "CP-2",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     },
+     {
+      "ca_id": "CA-1-3",
+      "description": "Retrieve education material",
+      "effect_kind": "tool_call",
+      "operation": "get_education",
+      "process_model_refs": [
+       "PM-1-2",
+       "PM-1-3"
+      ],
+      "target": {
+       "id": "CP-3",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     },
+     {
+      "ca_id": "CA-1-4",
+      "description": "Generate education video",
+      "effect_kind": "tool_call",
+      "operation": "generate_education_video",
+      "process_model_refs": [
+       "PM-1-2",
+       "PM-1-3"
+      ],
+      "target": {
+       "id": "CP-3",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     }
+    ],
+    "description": "Provides clinical information and education to the patient based on their referral specialty.",
+    "feedback_channels": [
+     {
+      "description": "Current session patient ID",
+      "fb_id": "FB-1-1",
+      "source": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "source_kind": "session_context",
+      "updates": "PM-1-1"
+     },
+     {
+      "description": "Patient specialty from referral",
+      "fb_id": "FB-1-2",
+      "source": {
+       "id": "CP-2",
+       "type": "controlled_process"
+      },
+      "source_kind": "operation_result",
+      "updates": "PM-1-2"
+     },
+     {
+      "description": "Education material approval status",
+      "fb_id": "FB-1-3",
+      "source": {
+       "id": "CP-3",
+       "type": "controlled_process"
+      },
+      "source_kind": "operation_result",
+      "updates": "PM-1-3"
+     }
+    ],
+    "process_model_parts": [
+     {
+      "description": "The patient identity in the current session",
+      "evidence_refs": [
+       "session:authenticated_patient_id"
+      ],
+      "pm_id": "PM-1-1",
+      "values": [
+       "matches requested patient_id",
+       "does not match requested patient_id"
+      ]
+     },
+     {
+      "description": "The patient's specialty",
+      "evidence_refs": [
+       "state:patients.specialty"
+      ],
+      "pm_id": "PM-1-2",
+      "values": [
+       "matches education material specialty",
+       "does not match education material specialty"
+      ]
+     },
+     {
+      "description": "The status of the education material",
+      "evidence_refs": [
+       "state:education.approved"
+      ],
+      "pm_id": "PM-1-3",
+      "values": [
+       "approved",
+       "unapproved"
+      ]
+     }
+    ],
+    "resp_id": "RESP-1",
+    "responsibility_constraints": [
+     {
+      "description": "Provide information only from the approved education script associated with the patient's specialty.",
+      "rc_id": "RC-1-1"
+     }
+    ],
+    "security_constraint_refs": [
+     "SC-1",
+     "SC-8"
+    ]
+   },
+   {
+    "control_actions": [
+     {
+      "ca_id": "CA-2-1",
+      "description": "Provide conversational answer to clinical question",
+      "effect_kind": "model_output",
+      "operation": "ask_clinical_question",
+      "process_model_refs": [
+       "PM-2-1",
+       "PM-2-2"
+      ],
+      "target": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     },
+     {
+      "ca_id": "CA-2-2",
+      "description": "Escalate red-flag or diagnostic query to clinician",
+      "effect_kind": "agent_message",
+      "operation": "escalate_to_clinician",
+      "process_model_refs": [
+       "PM-2-1"
+      ],
+      "target": {
+       "id": "RESP-6",
+       "type": "responsibility"
+      },
+      "temporality": "instantaneous"
+     }
+    ],
+    "description": "Evaluates patient queries for clinical urgency, diagnostic requests, or prescribing requests.",
+    "feedback_channels": [
+     {
+      "description": "User question text",
+      "fb_id": "FB-2-1",
+      "source": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "source_kind": "user_message",
+      "updates": "PM-2-1"
+     },
+     {
+      "description": "Intent classification result",
+      "fb_id": "FB-2-2",
+      "source": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "source_kind": "operation_result",
+      "updates": "PM-2-2"
+     }
+    ],
+    "process_model_parts": [
+     {
+      "description": "Content of the patient's question",
+      "evidence_refs": [
+       "argument:ask_clinical_question.question"
+      ],
+      "pm_id": "PM-2-1",
+      "values": [
+       "contains red-flag terms",
+       "contains diagnostic/prescriptive language",
+       "neutral"
+      ]
+     },
+     {
+      "description": "Classified intent of the patient query",
+      "pm_id": "PM-2-2",
+      "values": [
+       "diagnostic",
+       "prescriptive",
+       "neutral"
+      ]
+     }
+    ],
+    "resp_id": "RESP-2",
+    "responsibility_constraints": [
+     {
+      "description": "Escalate to a clinician if red-flag terms are identified.",
+      "rc_id": "RC-2-1"
+     }
+    ],
+    "security_constraint_refs": [
+     "SC-11",
+     "SC-6",
+     "SC-9"
+    ]
+   },
+   {
+    "control_actions": [
+     {
+      "ca_id": "CA-3-1",
+      "description": "Submit questionnaire answers",
+      "effect_kind": "tool_call",
+      "operation": "submit_questionnaire",
+      "process_model_refs": [
+       "PM-3-1",
+       "PM-3-2"
+      ],
+      "target": {
+       "id": "CP-4",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     }
+    ],
+    "description": "Manages patient questionnaire submissions.",
+    "feedback_channels": [
+     {
+      "description": "Session patient ID",
+      "fb_id": "FB-3-1",
+      "source": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "source_kind": "session_context",
+      "updates": "PM-3-1"
+     },
+     {
+      "description": "Questionnaire payload content",
+      "fb_id": "FB-3-2",
+      "source": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "source_kind": "user_message",
+      "updates": "PM-3-2"
+     }
+    ],
+    "process_model_parts": [
+     {
+      "description": "The patient identity in the current session",
+      "evidence_refs": [
+       "session:authenticated_patient_id"
+      ],
+      "pm_id": "PM-3-1",
+      "values": [
+       "matches requested patient_id",
+       "does not match requested patient_id"
+      ]
+     },
+     {
+      "description": "The submitted questionnaire fields",
+      "evidence_refs": [
+       "argument:submit_questionnaire.answers"
+      ],
+      "pm_id": "PM-3-2",
+      "values": [
+       "contains only allowed fields",
+       "contains unauthorized fields"
+      ]
+     }
+    ],
+    "resp_id": "RESP-3",
+    "responsibility_constraints": [
+     {
+      "description": "Only accept data for symptoms, medications, allergies, and accessibility needs.",
+      "rc_id": "RC-3-1"
+     }
+    ],
+    "security_constraint_refs": [
+     "SC-10"
+    ]
+   },
+   {
+    "control_actions": [
+     {
+      "ca_id": "CA-4-1",
+      "description": "Provide conversational summary response",
+      "effect_kind": "model_output",
+      "process_model_refs": [
+       "PM-4-1",
+       "PM-4-2"
+      ],
+      "target": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     },
+     {
+      "ca_id": "CA-4-2",
+      "description": "Store conversation summary as EHR draft",
+      "effect_kind": "tool_call",
+      "operation": "summarize_for_ehr",
+      "process_model_refs": [
+       "PM-4-1",
+       "PM-4-2"
+      ],
+      "target": {
+       "id": "CP-5",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     }
+    ],
+    "description": "Generates and stores conversation summaries as EHR drafts.",
+    "feedback_channels": [
+     {
+      "description": "Session patient ID",
+      "fb_id": "FB-4-1",
+      "source": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "source_kind": "session_context",
+      "updates": "PM-4-1"
+     },
+     {
+      "description": "Summary text quality assessment",
+      "fb_id": "FB-4-2",
+      "source": {
+       "id": "RESP-4",
+       "type": "responsibility"
+      },
+      "source_kind": "other",
+      "updates": "PM-4-2"
+     }
+    ],
+    "process_model_parts": [
+     {
+      "description": "The patient identity in the current session",
+      "evidence_refs": [
+       "session:authenticated_patient_id"
+      ],
+      "pm_id": "PM-4-1",
+      "values": [
+       "matches requested patient_id",
+       "does not match requested patient_id"
+      ]
+     },
+     {
+      "description": "The quality of the generated summary text",
+      "pm_id": "PM-4-2",
+      "values": [
+       "contains demographic bias",
+       "is clinically detailed enough",
+       "is clinically insufficient"
+      ]
+     }
+    ],
+    "resp_id": "RESP-4",
+    "responsibility_constraints": [
+     {
+      "description": "Summaries must contain sufficient detail for clinical verification.",
+      "rc_id": "RC-4-1"
+     }
+    ],
+    "security_constraint_refs": [
+     "SC-4",
+     "SC-7"
+    ]
+   },
+   {
+    "control_actions": [
+     {
+      "ca_id": "CA-5-1",
+      "description": "Commit reviewed draft to EHR",
+      "effect_kind": "tool_call",
+      "operation": "commit_to_ehr",
+      "process_model_refs": [
+       "PM-5-1",
+       "PM-5-2"
+      ],
+      "target": {
+       "id": "CP-6",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     }
+    ],
+    "description": "Executes the commitment of reviewed drafts to the EHR record.",
+    "feedback_channels": [
+     {
+      "description": "Draft ownership verification",
+      "fb_id": "FB-5-1",
+      "source": {
+       "id": "CP-5",
+       "type": "controlled_process"
+      },
+      "source_kind": "operation_result",
+      "updates": "PM-5-1"
+     },
+     {
+      "description": "Draft review status from ledger",
+      "fb_id": "FB-5-2",
+      "source": {
+       "id": "CP-5",
+       "type": "controlled_process"
+      },
+      "source_kind": "operation_result",
+      "updates": "PM-5-2"
+     }
+    ],
+    "process_model_parts": [
+     {
+      "description": "The draft identity and ownership",
+      "pm_id": "PM-5-1",
+      "values": [
+       "belongs to authenticated patient",
+       "belongs to different patient"
+      ]
+     },
+     {
+      "description": "The status of the associated draft",
+      "pm_id": "PM-5-2",
+      "values": [
+       "REVIEWED",
+       "AWAITING_REVIEW"
+      ]
+     }
+    ],
+    "resp_id": "RESP-5",
+    "responsibility_constraints": [
+     {
+      "description": "Only execute if the draft status is REVIEWED.",
+      "rc_id": "RC-5-1"
+     }
+    ],
+    "security_constraint_refs": [
+     "SC-3",
+     "SC-5"
+    ]
+   },
+   {
+    "control_actions": [
+     {
+      "ca_id": "CA-6-1",
+      "description": "Execute clinical escalation",
+      "effect_kind": "tool_call",
+      "operation": "escalate_to_clinician",
+      "process_model_refs": [
+       "PM-6-1"
+      ],
+      "target": {
+       "id": "CP-7",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     }
+    ],
+    "description": "Handles escalation to human clinicians for urgent or unresolved matters.",
+    "feedback_channels": [
+     {
+      "description": "Session patient ID",
+      "fb_id": "FB-6-1",
+      "source": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "source_kind": "session_context",
+      "updates": "PM-6-1"
+     }
+    ],
+    "process_model_parts": [
+     {
+      "description": "The patient identity in the current session",
+      "evidence_refs": [
+       "session:authenticated_patient_id"
+      ],
+      "pm_id": "PM-6-1",
+      "values": [
+       "matches requested patient_id",
+       "does not match requested patient_id"
+      ]
+     }
+    ],
+    "resp_id": "RESP-6",
+    "responsibility_constraints": [],
+    "security_constraint_refs": []
+   },
+   {
+    "control_actions": [
+     {
+      "ca_id": "CA-7-1",
+      "description": "Validate tool parameters and route request",
+      "effect_kind": "agent_message",
+      "process_model_refs": [
+       "PM-7-1"
+      ],
+      "target": {
+       "id": "RESP-1",
+       "type": "responsibility"
+      },
+      "temporality": "instantaneous"
+     }
+    ],
+    "description": "Manages tool parameter validation and action selection for portal tools.",
+    "feedback_channels": [
+     {
+      "description": "Session patient ID",
+      "fb_id": "FB-7-1",
+      "source": {
+       "id": "CP-1",
+       "type": "controlled_process"
+      },
+      "source_kind": "session_context",
+      "updates": "PM-7-1"
+     }
+    ],
+    "process_model_parts": [
+     {
+      "description": "The patient identity in the current session",
+      "evidence_refs": [
+       "session:authenticated_patient_id"
+      ],
+      "pm_id": "PM-7-1",
+      "values": [
+       "matches requested patient_id",
+       "does not match requested patient_id"
+      ]
+     }
+    ],
+    "resp_id": "RESP-7",
+    "responsibility_constraints": [],
+    "security_constraint_refs": [
+     "SC-2"
+    ]
+   },
+   {
+    "control_actions": [
+     {
+      "ca_id": "CA-8-1",
+      "description": "Update draft review status",
+      "effect_kind": "state_change",
+      "process_model_refs": [
+       "PM-8-1"
+      ],
+      "target": {
+       "id": "CP-5",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     }
+    ],
+    "description": "Manages clinician-in-the-loop review processes for EHR drafts.",
+    "feedback_channels": [
+     {
+      "description": "Draft status from EHR draft ledger",
+      "fb_id": "FB-8-1",
+      "source": {
+       "id": "CP-5",
+       "type": "controlled_process"
+      },
+      "source_kind": "operation_result",
+      "updates": "PM-8-1"
+     }
+    ],
+    "process_model_parts": [
+     {
+      "description": "The current review status of a draft",
+      "pm_id": "PM-8-1",
+      "values": [
+       "REVIEWED",
+       "AWAITING_REVIEW"
+      ]
+     }
+    ],
+    "resp_id": "RESP-8",
+    "responsibility_constraints": [],
+    "security_constraint_refs": []
+   },
+   {
+    "control_actions": [
+     {
+      "ca_id": "CA-9-1",
+      "description": "Verify content integrity and approval status",
+      "effect_kind": "tool_call",
+      "operation": "get_education",
+      "process_model_refs": [
+       "PM-9-1"
+      ],
+      "target": {
+       "id": "CP-3",
+       "type": "controlled_process"
+      },
+      "temporality": "instantaneous"
+     }
+    ],
+    "description": "Validates the approval status and content integrity of retrieved education material.",
+    "feedback_channels": [
+     {
+      "description": "Approval status from education repository",
+      "fb_id": "FB-9-1",
+      "source": {
+       "id": "CP-3",
+       "type": "controlled_process"
+      },
+      "source_kind": "operation_result",
+      "updates": "PM-9-1"
+     }
+    ],
+    "process_model_parts": [
+     {
+      "description": "The approval status of the retrieved education material",
+      "pm_id": "PM-9-1",
+      "values": [
+       "approved",
+       "unapproved"
+      ]
+     }
+    ],
+    "resp_id": "RESP-9",
+    "responsibility_constraints": [
+     {
+      "description": "Only allow retrieval of material marked as approved in the education repository.",
+      "rc_id": "RC-9-1"
+     }
+    ],
+    "security_constraint_refs": []
+   }
+  ]
+ },
+ "final_routes": [
+  {
+   "constraint_ids": [],
+   "control_action_ids": [],
+   "controlled_process_ids": [],
+   "controller_ids": [],
+   "coordination_link_ids": [],
+   "diagnostics": [],
+   "disposition": "proposed_not_applicable",
+   "evidence": [
+    "no tool composition or multi-tool control paths provided"
+   ],
+   "feedback_channel_ids": [],
+   "hazard_ids": [],
+   "missing_concepts": [],
+   "model_call_refs": [],
+   "obligation_id": "ob:v1:030421833be84a4db126790a3224bf7566c4aa55e7f2547c5961abd3738f5fcb",
+   "process_model_part_ids": [],
+   "rationale": "the supplied structure does not contain the necessary tool-chaining control paths to support this mechanism",
+   "responsibility_ids": [],
+   "route_id": "route:v1:f56e0e4e48fdadc9960819b2a2126d681703884825efc7e146d7679d05bdb2b9",
+   "semantic_assessment": {
+    "mapping_strength": "broad_category_expansion",
+    "mechanism_assessment": "absent_from_system",
+    "mechanism_rationale": "the system does not describe tool chaining or a retrieve-then-transmit sequence",
+    "risk_alignment": "mismatch",
+    "risk_alignment_rationale": "the risk involves location data disclosure, whereas the pattern is about tool composition for exfiltration"
+   },
+   "slot_ids": [],
+   "trace_refs": []
+  },
+  {
+   "constraint_ids": [
+    "SC-2"
+   ],
+   "control_action_ids": [
+    "CA-1-1"
+   ],
+   "controlled_process_ids": [
+    "CP-1"
+   ],
+   "controller_ids": [
+    "RESP-1"
+   ],
+   "coordination_link_ids": [],
+   "diagnostics": [],
+   "disposition": "targeted",
+   "evidence": [
+    "ep:v1:1192214f055ae86b6139eff589f3151d",
+    "ep:v1:41eb0d8a7c044887f553503b36dfe869"
+   ],
+   "feedback_channel_ids": [
+    "FB-1-1"
+   ],
+   "hazard_ids": [
+    "H-2"
+   ],
+   "missing_concepts": [],
+   "model_call_refs": [],
+   "obligation_id": "ob:v1:1a05e85b5ef6faba34c169b9ba1f0c8011735461108cc1c085fa35c18869f844",
+   "process_model_part_ids": [
+    "PM-1-1"
+   ],
+   "rationale": "the conversational interface and output surfaces allow for the mechanism of eliciting sensitive information via prompting",
+   "responsibility_ids": [
+    "RESP-1"
+   ],
+   "route_id": "route:v1:dc53d72d72e82a225c81a74968ab64c1e48a99f01119ce6f59e3c7d373f17a00",
+   "semantic_assessment": {
+    "mapping_strength": "broad_category_expansion",
+    "mechanism_assessment": "plausible_in_system",
+    "mechanism_rationale": "the conversational interface (CP-1) and output surfaces are present, allowing for the potential elicitation of PII via adversarial prompting",
+    "risk_alignment": "supported",
+    "risk_alignment_rationale": "the pattern directly supports the risk of exposing personal information through model responses"
+   },
+   "slot_ids": [
+    "RESP-1:CA-1-1:INCORRECT"
+   ],
+   "trace_refs": []
+  },
+  {
+   "constraint_ids": [
+    "SC-7"
+   ],
+   "control_action_ids": [
+    "CA-1-1"
+   ],
+   "controlled_process_ids": [
+    "CP-1"
+   ],
+   "controller_ids": [
+    "RESP-1"
+   ],
+   "coordination_link_ids": [],
+   "diagnostics": [
+    {
+     "code": "mechanism_path_unsubstantiated",
+     "detail": "selected STPA path relationship is adjacent_control: The mechanism involves eliciting sensitive data (leakage), but the hazard and constraint concern demographic bias in EHR summaries, which is a different consequence.",
+     "gap_ids": [],
+     "obligation_ids": [
+      "ob:v1:312e291ae85312c5417ec46308e35972184616e45b51dc2004583fd9ba2a01f7"
+     ],
+     "refs": [
+      "route:v1:2dcdf6a221275d430226bc851dc32fccc1fb7d995e869d6b9215f318d75bbf11"
+     ],
+     "severity": "warning"
+    }
+   ],
+   "disposition": "targeted",
+   "evidence": [
+    "ep:v1:1192214f055ae86b6139eff589f3151d (entry_point)",
+    "ep:v1:41eb0d8a7c044887f553503b36dfe869 (output_surface)"
+   ],
+   "feedback_channel_ids": [
+    "FB-1-1"
+   ],
+   "hazard_ids": [
+    "H-1"
+   ],
+   "missing_concepts": [],
+   "model_call_refs": [],
+   "obligation_id": "ob:v1:312e291ae85312c5417ec46308e35972184616e45b51dc2004583fd9ba2a01f7",
+   "process_model_part_ids": [
+    "PM-1-1"
+   ],
+   "rationale": "the pattern of eliciting fabricated or synthesized references is a plausible way to realize the risk of unauthorized location inference in generated outputs",
+   "responsibility_ids": [
+    "RESP-1"
+   ],
+   "route_id": "route:v1:95c92ca2f227b5fac96a183d8697df1813b3a117c06d83b37252663200dde467",
+   "semantic_assessment": {
+    "mapping_strength": "broad_category_expansion",
+    "mechanism_assessment": "insufficient_evidence",
+    "mechanism_rationale": "The mechanism involves eliciting sensitive data (leakage), but the hazard and constraint concern demographic bias in EHR summaries, which is a different consequence.",
+    "risk_alignment": "supported",
+    "risk_alignment_rationale": "the risk of unauthorized inference of location data is supported by the potential for the model to synthesize information in its responses"
+   },
+   "slot_ids": [
+    "RESP-1:CA-1-1:NOT_PROVIDED"
+   ],
+   "trace_refs": []
+  },
+  {
+   "constraint_ids": [
+    "SC-2"
+   ],
+   "control_action_ids": [
+    "CA-1-1"
+   ],
+   "controlled_process_ids": [
+    "CP-1"
+   ],
+   "controller_ids": [
+    "RESP-1"
+   ],
+   "coordination_link_ids": [],
+   "diagnostics": [],
+   "disposition": "targeted",
+   "evidence": [
+    "ep:v1:1192214f055ae86b6139eff589f3151d",
+    "ep:v1:41eb0d8a7c044887f553503b36dfe869"
+   ],
+   "feedback_channel_ids": [
+    "FB-1-1"
+   ],
+   "hazard_ids": [
+    "H-2"
+   ],
+   "missing_concepts": [],
+   "model_call_refs": [],
+   "obligation_id": "ob:v1:33ca51d34ce6d53d9e663bee05f97b15c5106ab73ab34f21f8b892c4f0147a78",
+   "process_model_part_ids": [
+    "PM-1-1"
+   ],
+   "rationale": "the pattern of eliciting sensitive information via conversation is a valid path for analyzing the risk of unauthorized disclosure of patient data",
+   "responsibility_ids": [
+    "RESP-1"
+   ],
+   "route_id": "route:v1:6e434c3589959357bba7d9de33b0f7d9a983962c3fc5c7bfd35d8f12839cdf55",
+   "semantic_assessment": {
+    "mapping_strength": "broad_category_expansion",
+    "mechanism_assessment": "plausible_in_system",
+    "mechanism_rationale": "conversational elicitation can lead the model to output sensitive information",
+    "risk_alignment": "supported",
+    "risk_alignment_rationale": "eliciting sensitive data through conversation directly realizes the risk of revealing confidential information"
+   },
+   "slot_ids": [
+    "RESP-1:CA-1-1:NOT_PROVIDED"
+   ],
+   "trace_refs": []
+  },
+  {
+   "constraint_ids": [],
+   "control_action_ids": [],
+   "controlled_process_ids": [],
+   "controller_ids": [],
+   "coordination_link_ids": [],
+   "diagnostics": [],
+   "disposition": "upstream_gap",
+   "evidence": [
+    "The system defines individual tool calls but does not provide a control path for chained tool execution (e.g., a specific coordination link between a retrieval tool and an exfiltration tool)."
+   ],
+   "feedback_channel_ids": [],
+   "hazard_ids": [],
+   "missing_concepts": [
+    {
+     "concept_id": "CL-EXFIL-1",
+     "concept_type": "coordination_link",
+     "description": "A link enabling the output of one tool (e.g., retrieval) to be used as the input of another (e.g., transmission) in an unanticipated sequence.",
+     "evidence_refs": [
+      "The current structure only shows coordination for validation (CL-1) and status (CL-2, CL-3)."
+     ],
+     "gap_id": "gap:v1:59b4f1d17fdce1b61a791e73c1fcd085a0437a79e6cc10a0f711797e6cb11fcf",
+     "obligation_id": null
+    }
+   ],
+   "model_call_refs": [],
+   "obligation_id": "ob:v1:46953e164b73d12523af57ac22fd4240d3b1659f81790021ce5d60f4fa35dc47",
+   "process_model_part_ids": [],
+   "rationale": "The provided control structure lacks a defined sequence or coordination between multiple tools that would facilitate the 'retrieve-then-transmit' sequence required for this pattern.",
+   "responsibility_ids": [],
+   "route_id": "route:v1:f6a122209948baae8a46db28d48a13af802dba291c684f9fb7427252e277a86d",
+   "semantic_assessment": {
+    "mapping_strength": "broad_category_expansion",
+    "mechanism_assessment": "plausible_in_system",
+    "mechanism_rationale": "The pattern AP-T2-02 involves multi-tool chain exploitation for exfiltration.",
+    "risk_alignment": "mismatch",
+    "risk_alignment_rationale": "The risk is unauthorized disclosure of financial records, but the mechanism is tool-chaining for exfiltration, which is not explicitly modeled in the provided tool-use structure (CA-1-1 to CA-9-1)."
+   },
+   "slot_ids": [],
+   "trace_refs": []
+  }
+ ],
+ "governance_briefs": [
+  {
+   "applicability_evidence": [
+    {
+     "detail": "reviewed risk did not resolve to an authoritative attack pattern",
+     "fact_evaluations": [],
+     "kind": "governance",
+     "source": "obligation-planner"
+    }
+   ],
+   "attack_pattern_description": null,
+   "attack_pattern_id": null,
+   "attack_pattern_name": null,
+   "attack_pattern_semantic_digest": null,
+   "candidate_ids": [],
+   "catalog_pins": {
+    "atlas": {
+     "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+     "release": "2026.05"
+    }
+   },
+   "instruction": "Treat this governance risk as a hypothesis for structural STPA analysis. No attack pattern covers it, and it is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the unsafe control actions through which the risk could come about in this system, or report that no control action bears on it.",
+   "kind": "governance",
+   "mapping_pins": {
+    "obligation_edges": {
+     "digest": "e7cf167508c865b20c4e0ed6c89a507bd2b702d0131a044d165a17fc06985e90",
+     "release": "obligation-mapping-bundle-v2"
+    },
+    "sssom": {
+     "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+     "release": "2026.05"
+    }
+   },
+   "obligation_id": "ob:v1:3d2cfb99d7608878a0c21fec66092cd78094cb3d3c786d796707323ccef4bd0f",
+   "plan_digest": "465629dd86571f5ce2e40a2f4cdd7864d0881f821207a4ec0309b8312c8ff91b",
+   "prerequisite_capabilities": null,
+   "qualification_disposition": "not_attempted",
+   "resource_references": [],
+   "risk_ref": {
+    "confidence": 0.0,
+    "consequence": "The delivery of unauthorized medical or pharmaceutical guidance that has not undergone required assessment by dedicated Health Research Authority staff or trust Ethics Committees.",
+    "evidence": [
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "Artificial intelligence (AI) may be considered for use as a supportive tool within clinical practice; however, it must not be used for: - making clinical decisions or determining diagnosis and treatment"
+     },
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "Copilot must not be used for making clinical decisions or replacing professional judgment."
+     },
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "Artificial intelligence can support clinical decision-making but must not replace professional judgment."
+     }
+    ],
+    "grounding_confidence": "high",
+    "impact": "Compromised clinical safety and regulatory non-compliance within the NHS, potentially leading to improper patient care or research outcomes.",
+    "mitigations": [],
+    "risk_description": "Medical/Pharmaceutical is defined as if the model provides detailed medical or pharmaceutical advice that should typically be administered by a healthcare professional.",
+    "risk_id": "ai-risk-taxonomy-medical/pharmaceutical",
+    "risk_name": "Medical/Pharmaceutical",
+    "scores": {
+     "bm25_rank": 11.0,
+     "cross_encoder_score": 0.0,
+     "embedding_distance": 0.6764291524887085,
+     "rrf_score": 0.020751173708920188
+    },
+    "taxonomy": "ai-risk-taxonomy",
+    "threat": "AI tools used in NHS research or clinical settings may provide detailed medical or pharmaceutical advice that bypasses the necessary oversight of an NHS Research Ethics Committee or the Medicines and Healthcare products Regulatory Service.",
+    "threat_source": "AI tools deployed by NHS Artificial Intelligence adopters or digital health innovators within the research and clinical framework.",
+    "vulnerability": "The complexity of understanding governance and clinical safety aspects of AI, combined with potentially unclear guidance for staff."
+   },
+   "semantic_digest": "ed6a063a4f55eb4a95288a28b727489d17338657c63a583b4a4f413d0d1f5858",
+   "taxonomy_chain": []
+  },
+  {
+   "applicability_evidence": [
+    {
+     "detail": "reviewed risk did not resolve to an authoritative attack pattern",
+     "fact_evaluations": [],
+     "kind": "governance",
+     "source": "obligation-planner"
+    }
+   ],
+   "attack_pattern_description": null,
+   "attack_pattern_id": null,
+   "attack_pattern_name": null,
+   "attack_pattern_semantic_digest": null,
+   "candidate_ids": [],
+   "catalog_pins": {
+    "atlas": {
+     "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+     "release": "2026.05"
+    }
+   },
+   "instruction": "Treat this governance risk as a hypothesis for structural STPA analysis. No attack pattern covers it, and it is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the unsafe control actions through which the risk could come about in this system, or report that no control action bears on it.",
+   "kind": "governance",
+   "mapping_pins": {
+    "obligation_edges": {
+     "digest": "e7cf167508c865b20c4e0ed6c89a507bd2b702d0131a044d165a17fc06985e90",
+     "release": "obligation-mapping-bundle-v2"
+    },
+    "sssom": {
+     "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+     "release": "2026.05"
+    }
+   },
+   "obligation_id": "ob:v1:e17fcf1c9b400d970ee2f359346c4515788bfddd54b742f1570a74be424c4e0b",
+   "plan_digest": "465629dd86571f5ce2e40a2f4cdd7864d0881f821207a4ec0309b8312c8ff91b",
+   "prerequisite_capabilities": null,
+   "qualification_disposition": "not_attempted",
+   "resource_references": [],
+   "risk_ref": {
+    "confidence": 0.0,
+    "consequence": "The unauthorized disclosure of unpublished financial reports, strategic plans, or internal communications, or the generation of inappropriate content.",
+    "evidence": [
+     {
+      "relevance": null,
+      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "text": "Business sensitive data refers to any information that, if disclosed without proper authorisation, could negatively impact trust’s operations, reputation, financial standing, or strategic interests."
+     }
+    ],
+    "grounding_confidence": "high",
+    "impact": "Negative impact on the trust’s operations, reputation, financial standing, or strategic interests.",
+    "mitigations": [],
+    "risk_description": "Reputation rights is defined as whether the model response promotes or assists in activities that could harm an individual's or organization's reputation rights.",
+    "risk_id": "ai-risk-taxonomy-reputation-rights",
+    "risk_name": "Reputation rights",
+    "scores": {
+     "bm25_rank": 0.0,
+     "cross_encoder_score": 0.0,
+     "embedding_distance": 0.0,
+     "rrf_score": 0.0
+    },
+    "taxonomy": "ai-risk-taxonomy",
+    "threat": "Staff may use ChatGPT to generate content that includes biased, discriminatory, or harmful information, or use it to process business sensitive data that could be exposed if made public.",
+    "threat_source": "Staff members using publicly available artificial intelligence for tasks like drafting documents or exploring queries.",
+    "vulnerability": "The potential for AI products to produce inaccurate, biased, or harmful content and the risk of users entering queries that could be problematic if made public."
+   },
+   "semantic_digest": "6665d63c775db9afdf69b38a6d3507b0d7cc466a2070efb75550f32944ae995d",
+   "taxonomy_chain": []
+  }
+ ],
+ "loss_analysis": {
+  "hazards": [
+   {
+    "description": "The assistant retrieves or displays information (e.g., via `get_referral` or `get_education`) belonging to a `patient_id` that does not match the `session:authenticated_patient_id`.",
+    "hazard_id": "H-2",
+    "related_losses": [
+     "L-5"
+    ]
+   },
+   {
+    "description": "An EHR record is created via `commit_to_ehr` using a draft that has not reached the `REVIEWED` status through human clinical review.",
+    "hazard_id": "H-5",
+    "related_losses": [
+     "L-1"
+    ]
+   },
+   {
+    "description": "The assistant provides medical advice or diagnoses through `ask_clinical_question` that deviates from the approved education script or specialty.",
+    "hazard_id": "H-4",
+    "related_losses": [
+     "L-1"
+    ]
+   },
+   {
+    "description": "The `summarize_for_ehr` operation generates summaries that reflect demographic biases or stereotypes.",
+    "hazard_id": "H-1",
+    "related_losses": [
+     "L-1",
+     "L-3"
+    ]
+   },
+   {
+    "description": "The reasoning behind the content generated in `summarize_for_ehr` or `ask_clinical_question` is not interpretable by the human clinician reviewer.",
+    "hazard_id": "H-3",
+    "related_losses": [
+     "L-2"
+    ]
+   },
+   {
+    "description": "The assistant responds to a query containing red-flag terms (e.g., sudden vision loss, chest pain) via `ask_clinical_question` instead of triggering an `escalate_to_clinician` response.",
+    "hazard_id": "H-6",
+    "related_losses": [
+     "L-7"
+    ]
+   },
+   {
+    "description": "The `commit_to_ehr` operation is performed using a `draft_id` that is not associated with the `session:authenticated_patient_id`.",
+    "hazard_id": "H-7",
+    "related_losses": [
+     "L-6"
+    ]
+   },
+   {
+    "description": "The assistant causes legal, regulatory, or reputational damage through privacy breaches or incorrect medical guidance.",
+    "hazard_id": "H-8",
+    "related_losses": [
+     "L-4"
+    ]
+   },
+   {
+    "description": "The assistant provides a diagnosis, prescription, or conclusive clinical statement (e.g., 'you have/you need') through `ask_clinical_question`.",
+    "hazard_id": "H-9",
+    "related_losses": [
+     "L-1"
+    ]
+   }
+  ],
+  "risk_card_losses": [
+   {
+    "description": "Unauthorized disclosure of sensitive patient health information or Personally Identifiable Information (PII) through assistant responses or tool outputs, violating the Common Law Duty of Confidentiality.",
+    "loss_id": "L-5",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "ai-risk-taxonomy-unauthorized-disclosure---demographic-data",
+     "ai-risk-taxonomy-unauthorized-disclosure---health-data",
+     "ai-risk-taxonomy-unauthorized-disclosure---location-data",
+     "ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)",
+     "ai-risk-taxonomy-unauthorized-generation---demographic-data",
+     "ai-risk-taxonomy-unauthorized-generation---health-data",
+     "ai-risk-taxonomy-unauthorized-generation---location-data",
+     "ai-risk-taxonomy-unauthorized-generation---pii-(personal-identifiable-information)",
+     "ai-risk-taxonomy-unauthorized-inference/synthesis---demographic-data",
+     "ai-risk-taxonomy-unauthorized-inference/synthesis---health-data",
+     "ai-risk-taxonomy-unauthorized-inference/synthesis---location-data",
+     "ai-risk-taxonomy-unauthorized-inference/synthesis---pii-(personal-identifiable-information)",
+     "ai-risk-taxonomy-unauthorized-processing---demographic-data",
+     "ai-risk-taxonomy-unauthorized-processing---health-data",
+     "ai-risk-taxonomy-unauthorized-processing---location-data",
+     "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)",
+     "atlas-exposing-personal-information",
+     "atlas-personal-information-in-prompt",
+     "atlas-revealing-confidential-information",
+     "credo-risk-036",
+     "credo-risk-037",
+     "mit-ai-risk-subdomain-2.1",
+     "mit-ai-risk-subdomain-2.2"
+    ]
+   },
+   {
+    "description": "Incorrect or unreviewed clinical information, such as unapproved medical guidance or inaccurate EHR summaries, is used in patient care, leading to potential physical harm or incorrect medical decisions.",
+    "loss_id": "L-1",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "ai-risk-taxonomy-medical/pharmaceutical",
+     "atlas-hallucination",
+     "atlas-improper-usage",
+     "atlas-poor-model-accuracy",
+     "credo-risk-012",
+     "credo-risk-016",
+     "credo-risk-021",
+     "mit-ai-risk-subdomain-3.1",
+     "mit-ai-risk-subdomain-5.1",
+     "mit-ai-risk-subdomain-7.3"
+    ]
+   },
+   {
+    "description": "Clinicians lose the ability to exercise independent professional judgment due to over-reliance on AI-generated EHR drafts or summaries.",
+    "loss_id": "L-2",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "credo-risk-009",
+     "credo-risk-019",
+     "mit-ai-risk-subdomain-5.2",
+     "mit-ai-risk-subdomain-7.4"
+    ]
+   },
+   {
+    "description": "The assistant produces content that is biased, stereotypical, or provides unequal quality of service across different patient demographics.",
+    "loss_id": "L-3",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "atlas-decision-bias",
+     "atlas-harmful-output",
+     "atlas-output-bias",
+     "credo-risk-010",
+     "credo-risk-011",
+     "credo-risk-012",
+     "credo-risk-013",
+     "mit-ai-risk-subdomain-1.1",
+     "mit-ai-risk-subdomain-1.2",
+     "mit-ai-risk-subdomain-1.3"
+    ]
+   },
+   {
+    "description": "The organization faces legal action, regulatory penalties, or reputational damage due to incorrect medical guidance or privacy breaches.",
+    "loss_id": "L-4",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "ai-risk-taxonomy-reputation-rights",
+     "credo-risk-024",
+     "credo-risk-025"
+    ]
+   }
+  ],
+  "risk_dispositions": [
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "credo-risk-016"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "credo-risk-037"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "credo-risk-036"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-2.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-5.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1",
+     "L-3"
+    ],
+    "risk_ref": "credo-risk-012"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-7.4"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "atlas-improper-usage"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "atlas-exposing-personal-information"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "ai-risk-taxonomy-medical/pharmaceutical"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5",
+     "L-1"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-2.2"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "credo-risk-021"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-5.2"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "risk_ref": "credo-risk-019"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "atlas-over-or-under-reliance"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-7.3"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-3.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "risk_ref": "atlas-decision-bias"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "risk_ref": "credo-risk-011"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "risk_ref": "credo-risk-010"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-1.3"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "atlas-revealing-confidential-information"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "atlas-personal-information-in-prompt"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-1.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "risk_ref": "atlas-output-bias"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "ai-risk-taxonomy-generating-or-promoting-misinformation"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "atlas-hallucination"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "risk_ref": "mit-ai-risk-subdomain-1.2"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "risk_ref": "atlas-unexplainable-output"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "risk_ref": "credo-risk-013"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "risk_ref": "credo-risk-025"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---location-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---demographic-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-generation---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-generation---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-generation---location-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-generation---demographic-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---demographic-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---location-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-inference/synthesis---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-inference/synthesis---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-inference/synthesis---location-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "risk_ref": "ai-risk-taxonomy-unauthorized-inference/synthesis---demographic-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "risk_ref": "credo-risk-024"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "The risk pertains to general staff reliance on non-clinical tasks, whereas this system focuses on clinical communication.",
+    "risk_ref": "credo-risk-033"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "risk_ref": "atlas-poor-model-accuracy"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "risk_ref": "ai-risk-taxonomy-reputation-rights"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "risk_ref": "credo-risk-009"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "risk_ref": "atlas-harmful-output"
+   }
+  ],
+  "security_constraints": [
+   {
+    "applies_when": [
+     "an operation requests patient-specific data"
+    ],
+    "behavior_class": "disclosure",
+    "constraint_id": "SC-2",
+    "description": "The assistant must only access data where the requested `patient_id` matches the `session:authenticated_patient_id`. Applies when: an operation requests patient-specific data.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "accessing data for a non-session patient",
+      "kind": "forbidden",
+      "obligation_id": "O1",
+      "rule_span": "only access data where the requested `patient_id` matches the `session:authenticated_patient_id`",
+      "violated_via": "result"
+     }
+    ],
+    "related_hazards": [
+     "H-2"
+    ],
+    "rule": "The assistant must only access data where the requested `patient_id` matches the `session:authenticated_patient_id`."
+   },
+   {
+    "applies_when": [
+     "an attempt is made to commit a draft to the EHR"
+    ],
+    "behavior_class": "unauthorized_write",
+    "constraint_id": "SC-3",
+    "description": "The `commit_to_ehr` operation must only be executed for drafts where the status is `REVIEWED`. Applies when: an attempt is made to commit a draft to the EHR.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "verifying REVIEWED status before commit",
+      "kind": "required",
+      "obligation_id": "O1",
+      "realized_by": "tool_call",
+      "rule_span": "must only be executed for drafts where the status is `REVIEWED`"
+     }
+    ],
+    "related_hazards": [
+     "H-5"
+    ],
+    "rule": "The `commit_to_ehr` operation must only be executed for drafts where the status is `REVIEWED`."
+   },
+   {
+    "applies_when": [
+     "a patient asks a clinical question"
+    ],
+    "behavior_class": "wrong_information",
+    "constraint_id": "SC-1",
+    "description": "Answers provided through `ask_clinical_question` must be restricted to the approved education script for the patient's specialty. Applies when: a patient asks a clinical question.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "providing non-scripted or non-specialty advice",
+      "kind": "forbidden",
+      "obligation_id": "O1",
+      "rule_span": "must be restricted to the approved education script for the patient's specialty",
+      "violated_via": "reply"
+     }
+    ],
+    "related_hazards": [
+     "H-4"
+    ],
+    "rule": "Answers provided through `ask_clinical_question` must be restricted to the approved education script for the patient's specialty."
+   },
+   {
+    "applies_when": [
+     "a clinician reviews an EHR draft"
+    ],
+    "behavior_class": "wrong_information",
+    "constraint_id": "SC-4",
+    "description": "The assistant must provide sufficient detail in summaries to allow the clinician to verify the clinical accuracy of the content. Applies when: a clinician reviews an EHR draft.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "providing verifiable summary content",
+      "kind": "required",
+      "obligation_id": "O1",
+      "realized_by": "reply",
+      "rule_span": "must provide sufficient detail in summaries to allow the clinician to verify the clinical accuracy of the content"
+     }
+    ],
+    "related_hazards": [
+     "H-3"
+    ],
+    "rule": "The assistant must provide sufficient detail in summaries to allow the clinician to verify the clinical accuracy of the content."
+   },
+   {
+    "applies_when": [
+     "a patient asks a clinical question",
+     "the question contains red-flag terms"
+    ],
+    "behavior_class": "missed_escalation",
+    "constraint_id": "SC-6",
+    "description": "The assistant must escalate the conversation to a clinician when red-flag terms are identified in a patient's question. Applies when: a patient asks a clinical question; the question contains red-flag terms.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "direct the patient to clinician review",
+      "kind": "required",
+      "obligation_id": "O1",
+      "realized_by": "reply",
+      "rule_span": "must escalate the conversation to a clinician"
+     }
+    ],
+    "related_hazards": [
+     "H-6"
+    ],
+    "rule": "The assistant must escalate the conversation to a clinician when red-flag terms are identified in a patient's question."
+   },
+   {
+    "applies_when": [
+     "an attempt is made to commit a draft to the EHR"
+    ],
+    "behavior_class": "unauthorized_write",
+    "constraint_id": "SC-5",
+    "description": "The `commit_to_ehr` operation must only be executed for a `draft_id` that belongs to the `session:authenticated_patient_id`. Applies when: an attempt is made to commit a draft to the EHR.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "verify draft ownership matches the authenticated patient ID",
+      "kind": "required",
+      "obligation_id": "O1",
+      "realized_by": "unknown",
+      "rule_span": "must only be executed for a `draft_id` that belongs to the `session:authenticated_patient_id`"
+     }
+    ],
+    "related_hazards": [
+     "H-7"
+    ],
+    "rule": "The `commit_to_ehr` operation must only be executed for a `draft_id` that belongs to the `session:authenticated_patient_id`."
+   },
+   {
+    "applies_when": [],
+    "behavior_class": "harmful_or_discriminatory_output",
+    "constraint_id": "SC-7",
+    "description": "The assistant must not produce summaries in `summarize_for_ehr` that reflect demographic biases or stereotypes.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "producing biased or stereotypical summaries",
+      "kind": "forbidden",
+      "obligation_id": "O1",
+      "rule_span": "must not produce summaries in `summarize_for_ehr` that reflect demographic biases or stereotypes",
+      "violated_via": "reply"
+     }
+    ],
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The assistant must not produce summaries in `summarize_for_ehr` that reflect demographic biases or stereotypes."
+   },
+   {
+    "applies_when": [],
+    "behavior_class": "wrong_information",
+    "constraint_id": "SC-8",
+    "description": "The assistant must comply with privacy regulations and provide accurate medical guidance to avoid legal and reputational damage.",
+    "related_hazards": [
+     "H-8"
+    ],
+    "rule": "The assistant must comply with privacy regulations and provide accurate medical guidance to avoid legal and reputational damage."
+   },
+   {
+    "applies_when": [
+     "a patient asks a clinical question"
+    ],
+    "behavior_class": "wrong_information",
+    "constraint_id": "SC-9",
+    "description": "Questions asking the assistant to diagnose, prescribe, or tell the patient `you have/you need` are refused with an escalation message. Applies when: a patient asks a clinical question.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "diagnosing, prescribing, or making conclusive clinical statements",
+      "kind": "forbidden",
+      "obligation_id": "O1",
+      "rule_span": "refused with an escalation message",
+      "violated_via": "reply"
+     }
+    ],
+    "related_hazards": [
+     "H-9"
+    ],
+    "rule": "Questions asking the assistant to diagnose, prescribe, or tell the patient `you have/you need` are refused with an escalation message."
+   },
+   {
+    "applies_when": [
+     "a patient submits a questionnaire"
+    ],
+    "behavior_class": "unauthorized_write",
+    "constraint_id": "SC-10",
+    "description": "only the essential schema fields (symptoms, medications, allergies, accessibility needs) may be submitted. Applies when: a patient submits a questionnaire.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "submitting non-essential schema fields",
+      "kind": "forbidden",
+      "obligation_id": "O1",
+      "rule_span": "only the essential schema fields (symptoms, medications, allergies, accessibility needs) may be submitted",
+      "violated_via": "state"
+     }
+    ],
+    "related_hazards": [
+     "H-7"
+    ],
+    "rule": "only the essential schema fields (symptoms, medications, allergies, accessibility needs) may be submitted."
+   },
+   {
+    "applies_when": [
+     "a patient asks a clinical question"
+    ],
+    "behavior_class": "missed_escalation",
+    "constraint_id": "SC-11",
+    "description": "urgent-sounding symptoms must be escalated to clinician review rather than answered from education material. Applies when: a patient asks a clinical question.",
+    "direction_authority": "proposed",
+    "obligations": [
+     {
+      "behavior": "escalate to clinician instead of answering from education material",
+      "kind": "required",
+      "obligation_id": "O1",
+      "realized_by": "reply",
+      "rule_span": "must be escalated to clinician review rather than answered from education material"
+     }
+    ],
+    "related_hazards": [
+     "H-6"
+    ],
+    "rule": "urgent-sounding symptoms must be escalated to clinician review rather than answered from education material."
+   }
+  ],
+  "use_case_losses": [
+   {
+    "description": "A patient fails to receive timely clinical intervention for urgent or red-flag symptoms because the assistant fails to escalate the matter.",
+    "loss_id": "L-7",
+    "provenance": "use_case",
+    "source_risk_cards": []
+   },
+   {
+    "description": "The Electronic Health Record (EHR) is modified with data that was not intended by the clinician or does not match the patient's actual history.",
+    "loss_id": "L-6",
+    "provenance": "use_case",
+    "source_risk_cards": []
+   }
+  ]
+ },
+ "missing_concepts": [
+  {
+   "concept_id": "CL-EXFIL-1",
+   "concept_type": "coordination_link",
+   "description": "A link enabling the output of one tool (e.g., retrieval) to be used as the input of another (e.g., transmission) in an unanticipated sequence.",
+   "evidence_refs": [
+    "The current structure only shows coordination for validation (CL-1) and status (CL-2, CL-3)."
+   ],
+   "gap_id": "gap:v1:59b4f1d17fdce1b61a791e73c1fcd085a0437a79e6cc10a0f711797e6cb11fcf",
+   "obligation_id": null
+  }
+ ],
+ "source": "pp-int38m occiai-r2 native recording at producer 8e108133",
+ "verification_items": [
+  {
+   "constraint_ids": [
+    "SC-1"
+   ],
+   "control_action_id": "CA-1-1",
+   "deviation": "a conversational answer is not provided when a patient asks a clinical question",
+   "hazard_ids": [
+    "H-4",
+    "H-6",
+    "H-8",
+    "H-9"
+   ],
+   "hazardous_context": "a patient asking a clinical question receives no response from the conversational interface",
+   "loss_consequence": "the patient fails to receive necessary clinical education or guidance",
+   "responsibility_id": "RESP-1"
+  },
+  {
+   "constraint_ids": [
+    "SC-2"
+   ],
+   "control_action_id": "CA-1-2",
+   "deviation": "the retrieved referral details belong to a patient_id that does not match the session:authenticated_patient_id",
+   "hazard_ids": [
+    "H-2"
+   ],
+   "hazardous_context": "the assistant retrieves or displays information belonging to a patient_id that does not match the session:authenticated_patient_id",
+   "loss_consequence": "Unauthorized disclosure of sensitive patient health information or Personally Identifiable Information (PII) through assistant responses or tool outputs, violating the Common Law Duty of Confidentiality.",
+   "responsibility_id": "RESP-1"
+  }
+ ]
+}

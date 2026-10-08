@@ -45,6 +45,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     classify_ica_semantics,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
+    DEVIATION_FIELD_BY_UCA_TYPE,
     AnalysisControls,
     DraftControlAction,
     DraftControlledProcess,
@@ -86,19 +87,20 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     unproven_absence_verdict,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    PROHIBITED_PROMPT_FIELDS,
     audit_prompt_contract,
     build_ica_hazard_correction_prompts,
     build_ica_hazard_verification_prompts,
     build_mechanism_verification_prompts,
-    build_structural_revision_prompts,
-    build_structural_routing_prompts,
-    build_synthesis_slot_prompts,
     local_obligation_handles,
     mapping_strength_for_brief,
     obligation_prompt_template_hashes,
     project_obligation_routing_context,
     project_ica_target_context,
     project_revision_context,
+    render_structural_revision_prompts,
+    render_structural_routing_prompts,
+    render_synthesis_slot_prompts,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _draft_considerations,
@@ -107,6 +109,7 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _validate_finding_semantics,
     compile_slot_provider_entry,
 )
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import build_stpa_index
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 _SYNTHESIS_MAX_COMPLETION_TOKENS = 8192
@@ -114,16 +117,6 @@ _ICA_VERIFICATION_REPAIRS = 1
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
 _MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS = 1024
 _MECHANISM_VERIFICATION_REPAIRS = 1
-_PROMPT_PROHIBITED_FIELDS = (
-    "digest",
-    "pin",
-    "score",
-    "mitigation",
-    "provider_call",
-    "schema_name",
-    "source_path",
-    "artifact_path",
-)
 
 
 def _reference_pairs(value: Any) -> tuple[tuple[str, str], ...]:
@@ -285,7 +278,7 @@ def _preflight(
             accounted_handles=handles,
             selectable_references=pairs,
             authoritative_references=pairs,
-            prohibited_fields=_PROMPT_PROHIBITED_FIELDS,
+            prohibited_fields=PROHIBITED_PROMPT_FIELDS,
             output_schema=output_schema,
             valid_example=valid_example,
             budget=resolve_prompt_budget(
@@ -687,28 +680,27 @@ def _ica_hazard_provider_payload_type(verdict_count: int) -> type[_Model]:
 
 
 def _structural_descriptions(request: StructuralRoutingRequest) -> dict[str, str]:
-    """Index only exact structural descriptions available to the verifier."""
-    result: dict[str, str] = {}
-    for responsibility in request.control_structure.responsibilities:
-        result[responsibility.resp_id] = responsibility.description
-        for item in responsibility.control_actions:
-            result[item.ca_id] = item.description
-        for item in responsibility.process_model_parts:
-            result[item.pm_id] = item.description
-        for item in responsibility.feedback_channels:
-            result[item.fb_id] = item.description
-    for item in request.control_structure.coordination_links:
-        result[item.link_id] = item.description
-        result[item.coordination_mechanism.cm_id] = (
-            item.coordination_mechanism.description
+    """Index only exact structural descriptions available to the verifier.
+
+    Responsibility constraints and losses stay out: the verifier has no
+    description for them.
+    """
+    index = build_stpa_index(request.control_structure, request.loss_analysis)
+    return {
+        identity: record.description
+        for records in (
+            index.responsibilities,
+            index.control_actions,
+            index.process_model_parts,
+            index.feedback_channels,
+            index.coordination_links,
+            index.coordination_mechanisms,
+            index.controlled_processes,
+            index.hazards,
+            index.security_constraints,
         )
-    for item in request.control_structure.controlled_processes:
-        result[item.cp_id] = item.description
-    for item in request.loss_analysis.hazards:
-        result[item.hazard_id] = item.description
-    for item in request.loss_analysis.security_constraints:
-        result[item.constraint_id] = item.description
-    return result
+        for identity, record in records.items()
+    }
 
 
 def _verification_handles(routes: Sequence[ObligationRoute]) -> dict[str, str]:
@@ -1312,12 +1304,7 @@ def _materialize_slot_draft(
     expected: SlotPlaceholder,
 ) -> SlotIcaDraft:
     """Bind provider prose to the authoritative UCA type of one exact slot."""
-    field_name = {
-        "NOT_PROVIDED": "not_provided_context",
-        "INCORRECT": "incorrect_value_or_effect",
-        "WRONG_TIMING": "timing_deviation",
-        "WRONG_DURATION": "duration_deviation",
-    }[expected.uca_type.value]
+    field_name = DEVIATION_FIELD_BY_UCA_TYPE[expected.uca_type]
     findings = tuple(
         IcaFindingDraft(
             deviation=IcaDeviationDraft.model_validate({field_name: finding.deviation}),
@@ -1362,13 +1349,8 @@ def _compile_slot_payload(
             loss_analysis=request.loss_analysis,
             control_structure=request.control_structure,
         )
-    structured_response = SynthesisSlotResponse(
-        request_digest=request.semantic_digest,
-        filled_slots=tuple(drafts),
-        adapter_kind="fake",
-    )
     considerations = _draft_considerations(
-        structured_response,
+        sorted(drafts, key=lambda item: item.slot_id),
         request,
         slots,
     )
@@ -1437,17 +1419,14 @@ class ObligationAwareLLMAdapter:
         correction_feedback: str | None = None,
     ) -> StructuralRoutingResponse:
         """Run the named structural-routing provider stage."""
-        system_prompt, user_prompt = build_structural_routing_prompts(
-            briefs=request.briefs,
-            loss_analysis=request.loss_analysis,
-            control_structure=request.control_structure,
-            slots=request.slots,
-        )
         routing_view = project_obligation_routing_context(
             briefs=request.briefs,
             loss_analysis=request.loss_analysis,
             control_structure=request.control_structure,
             slots=request.slots,
+        )
+        system_prompt, user_prompt = render_structural_routing_prompts(
+            routing_view, loss_analysis=request.loss_analysis
         )
         user_prompt = _with_correction_feedback(user_prompt, correction_feedback)
         _preflight(
@@ -1583,10 +1562,7 @@ class ObligationAwareLLMAdapter:
         if not requests:
             return ()
         request_by_ref = _ica_review_requests(requests)
-        system_prompt, user_prompt = build_ica_hazard_verification_prompts(
-            requests,
-            correction_feedback=correction_feedback,
-        )
+        system_prompt, user_prompt = build_ica_hazard_verification_prompts(requests)
         step = "correction" if correction_feedback else "initial"
         payload_type = _ica_hazard_provider_payload_type(len(requests))
         repair = _AbsenceEvidenceRepair(
@@ -1672,16 +1648,12 @@ class ObligationAwareLLMAdapter:
 
     def revise(self, request: StructuralRevisionRequest) -> StructuralRevisionResponse:
         """Run the single named additive-revision provider stage."""
-        system_prompt, user_prompt = build_structural_revision_prompts(
-            gaps=request.gaps,
-            loss_analysis=request.baseline_loss_analysis,
-            control_structure=request.baseline_control_structure,
-        )
         revision_view = project_revision_context(
             gaps=request.gaps,
             loss_analysis=request.baseline_loss_analysis,
             control_structure=request.baseline_control_structure,
         )
+        system_prompt, user_prompt = render_structural_revision_prompts(revision_view)
         _preflight(
             view=revision_view,
             system_prompt=system_prompt,
@@ -1750,7 +1722,7 @@ class ObligationAwareLLMAdapter:
         """Run the named target-scoped ICA slot provider stage."""
         expected_slot_ids = frozenset(slot.slot_id for slot in request.slots)
         expected_pair_keys = _required_pair_keys(request)
-        system_prompt, user_prompt = build_synthesis_slot_prompts(
+        projection = project_ica_target_context(
             target_id=request.target_id,
             slots=request.slots,
             routed_briefs=request.routed_briefs,
@@ -1758,14 +1730,10 @@ class ObligationAwareLLMAdapter:
             loss_analysis=request.loss_analysis,
             control_structure=request.control_structure,
         )
-        target_view, target_questions, target_routes = project_ica_target_context(
-            target_id=request.target_id,
-            slots=request.slots,
-            routed_briefs=request.routed_briefs,
-            routed_routes=request.routed_routes,
-            loss_analysis=request.loss_analysis,
-            control_structure=request.control_structure,
+        system_prompt, user_prompt = render_synthesis_slot_prompts(
+            projection, target_id=request.target_id, slots=request.slots
         )
+        target_view, target_questions, target_routes = projection
         # The target index is the typed view; obligation and route handles are
         # independently checked in the rendered prompt as copy-only values.
         _preflight(

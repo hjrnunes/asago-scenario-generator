@@ -22,7 +22,6 @@ from asago_scenario_generator.models.obligation_plan import (
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     RequestTally,
     count_requests,
@@ -37,12 +36,14 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     StructuralAnalysisAdapter,
     StructuralRoutingRequest,
     StructuralRoutingResponse,
+    default_synthesis_controls,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     authoritative_hazard_constraint_pairs,
     build_structural_routing_prompts,
     mapping_strength_for_brief,
 )
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import build_stpa_index
 from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     SlotPlaceholder,
     create_slots,
@@ -231,13 +232,7 @@ def _default_controls(
 ) -> AnalysisControls:
     """Resolve controls without changing the caller's immutable controls."""
     if controls is None:
-        return AnalysisControls(
-            model_profile="synthesis",
-            model_name="caller-supplied",
-            deadline_seconds=300.0,
-            temperature=DEFAULT_TEMPERATURE,
-            max_batch_size=max_batch_size,
-        )
+        return default_synthesis_controls(max_batch_size=max_batch_size)
     if not isinstance(controls, AnalysisControls):
         raise TypeError("controls must be AnalysisControls")
     if controls.max_batch_size == max_batch_size:
@@ -267,55 +262,19 @@ def _reference_sets(
     slots: Sequence[SlotPlaceholder],
 ) -> dict[str, set[str]]:
     """Build exact namespaces accepted by structural routing."""
+    index = build_stpa_index(control_structure, loss_analysis)
     return {
         "slot": {item.slot_id for item in slots},
-        "hazard": {item.hazard_id for item in loss_analysis.hazards},
-        "constraint": _constraint_reference_ids(control_structure, loss_analysis),
-        "controller": {item.resp_id for item in control_structure.responsibilities}
-        | {item.link_id for item in control_structure.coordination_links},
-        "responsibility": {item.resp_id for item in control_structure.responsibilities},
-        "action": _action_reference_ids(control_structure),
-        "pm": _responsibility_child_ids(
-            control_structure, "process_model_parts", "pm_id"
-        ),
-        "fb": _responsibility_child_ids(
-            control_structure, "feedback_channels", "fb_id"
-        ),
-        "cp": {item.cp_id for item in control_structure.controlled_processes},
-        "link": {item.link_id for item in control_structure.coordination_links},
-    }
-
-
-def _responsibility_child_ids(
-    control_structure: ControlStructure, children_attr: str, id_attr: str
-) -> set[str]:
-    return {
-        getattr(item, id_attr)
-        for responsibility in control_structure.responsibilities
-        for item in getattr(responsibility, children_attr)
-    }
-
-
-def _constraint_reference_ids(
-    control_structure: ControlStructure, loss_analysis: LossAnalysis
-) -> set[str]:
-    """Return security-constraint and responsibility-constraint IDs."""
-    return {item.constraint_id for item in loss_analysis.security_constraints} | {
-        item.rc_id
-        for responsibility in control_structure.responsibilities
-        for item in responsibility.responsibility_constraints
-    }
-
-
-def _action_reference_ids(control_structure: ControlStructure) -> set[str]:
-    """Return control-action and coordination-mechanism IDs."""
-    return {
-        item.ca_id
-        for responsibility in control_structure.responsibilities
-        for item in responsibility.control_actions
-    } | {
-        item.coordination_mechanism.cm_id
-        for item in control_structure.coordination_links
+        "hazard": set(index.hazards),
+        "constraint": set(index.security_constraints)
+        | set(index.responsibility_constraints),
+        "controller": set(index.responsibilities) | set(index.coordination_links),
+        "responsibility": set(index.responsibilities),
+        "action": set(index.control_actions) | set(index.coordination_mechanisms),
+        "pm": set(index.process_model_parts),
+        "fb": set(index.feedback_channels),
+        "cp": set(index.controlled_processes),
+        "link": set(index.coordination_links),
     }
 
 
@@ -1282,34 +1241,10 @@ def route_obligations(
     )
 
 
-def recheck_obligations(
-    adapter: StructuralAnalysisAdapter,
-    *,
-    briefs: Sequence[NeutralObligationBrief],
-    loss_analysis: LossAnalysis,
-    control_structure: ControlStructure,
-    slots: Sequence[SlotPlaceholder] | None = None,
-    controls: AnalysisControls | None = None,
-    max_batch_size: int | None = None,
-) -> RoutingRunResult:
-    """Run one bounded, complete recheck against the final structure."""
-    return route_obligations(
-        adapter,
-        briefs=briefs,
-        loss_analysis=loss_analysis,
-        control_structure=control_structure,
-        slots=slots,
-        controls=controls,
-        max_batch_size=max_batch_size,
-        purpose="recheck",
-    )
-
-
 __all__ = [
     "RoutingRunResult",
     "build_neutral_brief",
     "build_neutral_briefs",
     "create_obligation_batches",
-    "recheck_obligations",
     "route_obligations",
 ]
