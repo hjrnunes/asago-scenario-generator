@@ -833,7 +833,7 @@ def _prepare_current_provider_repair_input(
     """
     if result is None:
         return None
-    raw = _decode_repair_content(result.content)
+    raw = _decode_repair_content(result)
     if raw is None or not _is_current_local_wire(raw, response_format):
         return None
     provider = _validate_provider_structure(raw, response_format)
@@ -883,15 +883,16 @@ def _handle_id_map(
     }
 
 
-def _decode_repair_content(content: object) -> dict | None:
+def _decode_repair_content(result: LLMResult) -> dict | None:
     """Return a private JSON-object copy of a response body, if it has one."""
+    content = result.content
     if isinstance(content, BaseModel):
         raw = content.model_dump(mode="json")
     elif isinstance(content, dict):
         raw = deepcopy(content)
     elif isinstance(content, str):
         try:
-            raw = json.loads(content)
+            raw = decode_content(result)
         except json.JSONDecodeError:
             return None
     else:
@@ -1960,7 +1961,7 @@ def _missing_repair_input_reason(
             reason = "wire violation outside the approved repair scope"
     if first_result is not None and isinstance(first_result.content, str):
         try:
-            json.loads(first_result.content)
+            decode_content(first_result)
         except (TypeError, json.JSONDecodeError):
             reason = "the response body never decoded as JSON"
     return reason

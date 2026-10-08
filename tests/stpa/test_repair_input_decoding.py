@@ -126,6 +126,11 @@ def test_undecodable_or_non_object_bodies_are_not_adapted(content: Any) -> None:
     assert _adapt(content) is None
 
 
+@pytest.mark.parametrize("make_body", [_fenced, _trailing_comma])
+def test_fenced_and_trailing_comma_text_is_adapted(make_body: Any) -> None:
+    _assert_adapted(_adapt(make_body()))
+
+
 def test_reason_names_an_undecodable_text_body() -> None:
     assert _missing_repair_input_reason(None, _result("{broken")) == NEVER_DECODED
 
@@ -137,6 +142,11 @@ def test_reason_stays_the_default_for_a_body_that_decodes(content: Any) -> None:
 
 def test_reason_stays_the_default_without_a_result() -> None:
     assert _missing_repair_input_reason(None, None) == DEFAULT_REASON
+
+
+@pytest.mark.parametrize("make_body", [_fenced, _trailing_comma])
+def test_reason_does_not_call_a_cleanable_body_undecodable(make_body: Any) -> None:
+    assert _missing_repair_input_reason(None, _result(make_body())) == DEFAULT_REASON
 
 
 def _salvage(content: Any) -> Any:

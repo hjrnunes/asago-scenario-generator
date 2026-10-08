@@ -74,11 +74,11 @@ from asago_scenario_generator.request_schema import (
 )
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
-    StageError,
-    _decode_json_text,
-    parse_llm_result,
     CorrectionPolicy,
+    StageError,
     call_with_policy,
+    decode_content,
+    parse_llm_result,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -1797,7 +1797,7 @@ def _salvage_first_response(
         content = content.model_dump(mode="json")
     if isinstance(content, str):
         try:
-            content = _decode_json_text(content)
+            content = decode_content(first_result)
         except ValueError as exc:
             return UnsupportedRepair(f"the response body never decoded as JSON ({exc})")
     if not isinstance(content, dict):
