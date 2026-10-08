@@ -58,32 +58,6 @@ class _SecretFailingClient:
         raise RuntimeError("POST https://private.example/v1 token=sk-secret-value")
 
 
-class _CompatibilityClient:
-    model = "offline-test-model"
-
-    def __init__(self) -> None:
-        self.calls = 0
-
-    def complete(self, **kwargs: Any) -> LLMResult:
-        self.calls += 1
-        if "allow_unvalidated" in kwargs:
-            raise TypeError("unexpected keyword argument 'allow_unvalidated'")
-        return LLMResult(
-            content='{"value": 3}',
-            prompt_tokens=2,
-            completion_tokens=1,
-            duration_ms=1,
-        )
-
-
-class _CompatibilityFailureClient(_CompatibilityClient):
-    def complete(self, **kwargs: Any) -> LLMResult:
-        self.calls += 1
-        if "allow_unvalidated" in kwargs:
-            raise TypeError("unexpected keyword argument 'allow_unvalidated'")
-        raise RuntimeError("provider unavailable")
-
-
 def _entries(run_dir: Path) -> list[dict[str, Any]]:
     return read_calls_jsonl(run_dir)
 
@@ -271,36 +245,6 @@ def test_retry_attempts_have_distinct_identity_and_raw_evidence(tmp_path: Path) 
     assert entries[0]["raw_response"] == first
     assert entries[1]["raw_response"] == second
     assert entries[0]["failure_class"] == "answered_malformed"
-
-
-def test_compatibility_fallback_is_explicit_without_duplicate_provider_evidence(
-    tmp_path: Path,
-) -> None:
-    client = _CompatibilityClient()
-
-    parsed, error = _call(tmp_path, client, allow_unvalidated=True)
-
-    assert error is None
-    assert parsed == _Payload(value=3)
-    entries = _entries(tmp_path)
-    assert len(entries) == 1
-    assert client.calls == 2
-    assert entries[0]["request_controls"]["compatibility_fallback"] is True
-
-
-def test_failed_compatibility_fallback_keeps_one_typed_attempt(
-    tmp_path: Path,
-) -> None:
-    client = _CompatibilityFailureClient()
-
-    parsed, error = _call(tmp_path, client, allow_unvalidated=True)
-
-    assert parsed is None
-    assert error == "RuntimeError: provider unavailable"
-    entries = _entries(tmp_path)
-    assert len(entries) == 1
-    assert entries[0]["failure_class"] == "provider_failure"
-    assert entries[0]["request_controls"]["compatibility_fallback"] is True
 
 
 def test_absent_provider_usage_is_unavailable_not_zero() -> None:

@@ -464,17 +464,6 @@ def _build_completion_kwargs(
     return completion_kwargs
 
 
-def _is_unsupported_unvalidated_error(
-    error: TypeError,
-    allow_unvalidated: bool,
-) -> bool:
-    """Check whether a client rejected the optional compatibility argument."""
-    if not allow_unvalidated:
-        return False
-    message = str(error)
-    return "unexpected keyword argument" in message and "allow_unvalidated" in message
-
-
 def _result_usage(
     result: LLMResult | None,
 ) -> tuple[int | None, int | None, int]:
@@ -498,7 +487,6 @@ class _SafeCallState:
     cleanup_transformations: list[dict[str, Any]] = field(default_factory=list)
     cleaned_response: Any | None = None
     attempt_number: int = 1
-    compatibility_fallback: bool = False
     dispatched: bool = False
     transport_retries: int = 0
 
@@ -587,43 +575,21 @@ def _raw_response_for_failure(
 def _call_client(
     llm_client: LLMClient,
     completion_kwargs: dict[str, Any],
-    allow_unvalidated: bool,
     state: _SafeCallState,
 ) -> LLMResult:
     """Call a client, counting the transport retries the client makes."""
     with count_transport_retries() as retries:
         try:
-            return _call_client_with_compatibility_fallback(
-                llm_client, completion_kwargs, allow_unvalidated, state
-            )
+            return llm_client.complete(**completion_kwargs)
         finally:
             state.transport_retries += retries.count
-
-
-def _call_client_with_compatibility_fallback(
-    llm_client: LLMClient,
-    completion_kwargs: dict[str, Any],
-    allow_unvalidated: bool,
-    state: _SafeCallState,
-) -> LLMResult:
-    """Call a client, retrying once without unsupported compatibility kwargs."""
-    try:
-        return llm_client.complete(**completion_kwargs)
-    except TypeError as exc:
-        if not _is_unsupported_unvalidated_error(exc, allow_unvalidated):
-            raise
-        state.compatibility_fallback = True
-        completion_kwargs.pop("allow_unvalidated", None)
-        return llm_client.complete(**completion_kwargs)
 
 
 def _request_controls(
     result: LLMResult | None, state: _SafeCallState
 ) -> dict[str, Any]:
-    """Retain nonsecret controls and identify compatibility fallback reuse."""
+    """Retain nonsecret controls and the transport retry count."""
     controls = dict(result.request_controls) if result is not None else {}
-    if state.compatibility_fallback:
-        controls["compatibility_fallback"] = True
     if state.transport_retries:
         controls["transport_retries"] = state.transport_retries
     return controls
@@ -729,12 +695,7 @@ def _perform_safe_call(
     )
     state.attempt_number = attempt_number
     state.dispatched = True
-    state.result = _call_client(
-        llm_client,
-        completion_kwargs,
-        allow_unvalidated=allow_unvalidated,
-        state=state,
-    )
+    state.result = _call_client(llm_client, completion_kwargs, state=state)
     _validate_raw_result(state.result, raw_result_validator, state)
     model = _parse_and_validate_result(
         state.result,

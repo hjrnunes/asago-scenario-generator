@@ -375,6 +375,7 @@ class MockLLMClient:
         response_format: type | None = None,
         max_completion_tokens: int | None = None,
         temperature: float | None = None,
+        allow_unvalidated: bool = False,
     ) -> LLMResult:
         call = MockCall(
             system_prompt=system_prompt,

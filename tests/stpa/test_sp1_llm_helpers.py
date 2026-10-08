@@ -125,28 +125,6 @@ class _NoneFirstUnionModel(BaseModel):
     item: None | _NestedModel = None
 
 
-class _LegacyClient:
-    """Minimal client without the optional compatibility argument."""
-
-    model = "legacy-model"
-
-    def complete(
-        self,
-        *,
-        system_prompt,
-        user_prompt,
-        response_format,
-        temperature,
-        max_completion_tokens=None,
-    ):
-        return LLMResult(
-            content={"name": "legacy"},
-            prompt_tokens=1,
-            completion_tokens=2,
-            duration_ms=3,
-        )
-
-
 def _result(content) -> LLMResult:
     return LLMResult(
         content=content, prompt_tokens=0, completion_tokens=0, duration_ms=0
@@ -355,7 +333,7 @@ class TestParseLlmResultUnvalidated:
 
 
 class TestCallWithPolicyTolerantMode:
-    """allow_unvalidated defers validation and falls back for legacy clients."""
+    """allow_unvalidated defers validation; a client TypeError is not retried."""
 
     def test_tolerant_mode_is_passed_and_defers_validation(self, tmp_path):
         client = ScriptedClient([{"items": [{"item_id": "malformed"}]}])
@@ -365,13 +343,6 @@ class TestCallWithPolicyTolerantMode:
         assert outcome.error is None
         assert client.calls[0]["allow_unvalidated"] is True
         assert outcome.value.items[0].item_id == "malformed"
-
-    def test_a_client_that_rejects_the_flag_is_retried_without_it(self, tmp_path):
-        outcome = _send(_LegacyClient(), tmp_path, _SampleModel, allow_unvalidated=True)
-
-        assert outcome.error is None
-        assert outcome.result is not None
-        assert outcome.value.name == "legacy"
 
     def test_max_completion_tokens_is_forwarded(self, tmp_path):
         client = ScriptedClient([{"name": "ok", "unused": None}])
@@ -408,51 +379,27 @@ class TestCallWithPolicyTolerantMode:
         assert outcome.error is not None
         assert "malformed source ID" in outcome.error
 
+    @pytest.mark.parametrize("allow_unvalidated", [True, False])
     @pytest.mark.parametrize(
-        ("error", "allow_unvalidated", "attempts", "succeeds"),
+        "error",
         [
-            pytest.param(
-                "unexpected keyword argument 'allow_unvalidated'",
-                True,
-                2,
-                True,
-                id="flag_rejected_and_requested",
-            ),
-            pytest.param(
-                "unexpected keyword argument 'allow_unvalidated'",
-                False,
-                1,
-                False,
-                id="flag_rejected_but_not_requested",
-            ),
-            pytest.param(
-                "unexpected keyword argument 'response_format'",
-                True,
-                1,
-                False,
-                id="other_keyword_rejected",
-            ),
-            pytest.param(
-                "response_format is the wrong type",
-                True,
-                1,
-                False,
-                id="other_type_error",
-            ),
+            "unexpected keyword argument 'allow_unvalidated'",
+            "unexpected keyword argument 'response_format'",
+            "response_format is the wrong type",
         ],
     )
-    def test_compatibility_retry_is_tightly_gated(
-        self, tmp_path, error, allow_unvalidated, attempts, succeeds
+    def test_a_client_type_error_is_not_retried(
+        self, tmp_path, error, allow_unvalidated
     ):
         client = ScriptedClient([TypeError(error), {"item_id": "valid"}])
 
         outcome = _send(client, tmp_path, allow_unvalidated=allow_unvalidated)
 
-        assert len(client.calls) == attempts
-        assert (outcome.error is None) is succeeds
-        assert (outcome.value is not None) is succeeds
-        if not succeeds:
-            assert outcome.error == f"TypeError: {error}"
+        assert len(client.calls) == 1
+        assert outcome.value is None
+        assert outcome.error == f"TypeError: {error}"
+        [entry] = read_calls_jsonl(tmp_path)
+        assert "compatibility_fallback" not in entry.get("request_controls", {})
 
 
 class TestCallWithPolicyLogging:
