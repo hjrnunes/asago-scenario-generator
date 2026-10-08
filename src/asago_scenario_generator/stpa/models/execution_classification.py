@@ -433,13 +433,12 @@ class TargetProfileResource(_Model):
 
 
 def _input_schema_argument_names(input_schema: Mapping[str, Any]) -> tuple[str, ...]:
-    """Return the sorted property names of an input schema; null means none."""
-    schema_properties = input_schema.get("properties", {})
-    if schema_properties is None:
-        schema_properties = {}
-    if not isinstance(schema_properties, Mapping):
-        raise ValueError("input_schema.properties must be a mapping")
-    return tuple(sorted(str(name) for name in schema_properties))
+    """Return the sorted property names of an input schema.
+
+    Callers run ``_validate_json_schema`` first, which rejects a ``properties``
+    value that is not an object.
+    """
+    return tuple(sorted(str(name) for name in input_schema.get("properties", {})))
 
 
 class TargetSemanticInterpretation(_Model):
