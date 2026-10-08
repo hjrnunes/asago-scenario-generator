@@ -89,6 +89,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     Obligation,
     RiskDisposition,
     SecurityConstraint,
+    span_quotes_rule,
 )
 from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     rule_span_requirement,
@@ -728,9 +729,7 @@ def _salvage_rows(
 def _rule_span_defect(entry: dict, rule: str) -> bool:
     """Whether the entry's rule_span is not a substring of the rule, ignoring case."""
     span = entry.get("rule_span")
-    return not (
-        isinstance(span, str) and span.strip() and span.casefold() in rule.casefold()
-    )
+    return not (isinstance(span, str) and span.strip() and span_quotes_rule(rule, span))
 
 
 def salvage_provider_response(
@@ -2395,7 +2394,7 @@ def _check_permitted_value(
         if not (
             isinstance(span, str)
             and span.strip()
-            and span.casefold() in selected.constraint_rule.casefold()
+            and span_quotes_rule(selected.constraint_rule, span)
         ):
             raise RepairRejected(
                 f"repair_unrelated_field_edit: the corrected entry for "

@@ -117,6 +117,12 @@ def test_each_system_prompt_renders_the_requirement(template: str) -> None:
     assert _norm(rule_span_requirement()) in _norm(_render(template))
 
 
+def test_the_span_check_has_one_definition_in_the_models() -> None:
+    from asago_scenario_generator.stpa.models import loss_analysis as models
+
+    assert span_quotes_rule is models.span_quotes_rule
+
+
 def test_the_check_the_prompt_describes_ignores_case() -> None:
     rule = "The agent MUST NOT issue a second Refund."
 

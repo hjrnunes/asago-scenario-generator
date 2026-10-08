@@ -5,16 +5,11 @@ from __future__ import annotations
 from datetime import date
 
 import pytest
+from hypothesis import example, given, settings, strategies as st
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
     LossAnalysis,
-    LossAnalysisDraft,
-    LossProvenance,
-    RiskDisposition,
-    SecurityConstraint,
     stamp_proposed_direction,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
@@ -495,73 +490,6 @@ def test_merge_preserves_existing_canonical_ids() -> None:
     ]
 
 
-def test_merge_separates_local_scopes_and_keeps_risk_disposition_binding() -> None:
-    risk = LossAnalysisDraft(
-        risk_card_losses=[
-            Loss(
-                loss_id="shared_loss_handle",
-                description="Risk harm",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=["R1"],
-            )
-        ],
-        hazards=[
-            Hazard(
-                hazard_id="shared_hazard_handle",
-                description="Risk state",
-                related_losses=["shared_loss_handle"],
-            )
-        ],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="shared_constraint_handle",
-                rule="Protect risk state",
-                related_hazards=["shared_hazard_handle"],
-            )
-        ],
-        risk_dispositions=[
-            RiskDisposition(
-                risk_ref="R1",
-                disposition="cited",
-                loss_ids=["shared_loss_handle"],
-            )
-        ],
-    )
-    gap = LossAnalysisDraft(
-        use_case_losses=[
-            Loss(
-                loss_id="shared_loss_handle",
-                description="Use-case harm",
-                provenance=LossProvenance.use_case,
-            )
-        ],
-        hazards=[
-            Hazard(
-                hazard_id="shared_hazard_handle",
-                description="Use-case state",
-                related_losses=["shared_loss_handle"],
-            )
-        ],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="shared_constraint_handle",
-                rule="Protect use-case state",
-                related_hazards=["shared_hazard_handle"],
-            )
-        ],
-    )
-
-    merged = _merge_drafts(risk, gap)
-    assert [loss.loss_id for loss in merged.risk_card_losses] == ["L-1"]
-    assert [loss.loss_id for loss in merged.use_case_losses] == ["L-2"]
-    assert [hazard.hazard_id for hazard in merged.hazards] == ["H-1", "H-2"]
-    assert [constraint.constraint_id for constraint in merged.security_constraints] == [
-        "SC-1",
-        "SC-2",
-    ]
-    assert merged.risk_dispositions[0].loss_ids == ["L-1"]
-
-
 def test_delta_carries_untouched_records_and_restamps_revision() -> None:
     prior = _prior_analysis()
     patch = _Stage1aRevisionPatch.model_validate(
@@ -869,3 +797,122 @@ def test_patch_draft_shares_no_record_with_the_prior_graph() -> None:
         )
         for draft_item, prior_item in zip(draft_items, prior_items, strict=True)
     )
+
+
+_LOSS_REFS = st.sampled_from(["L-5", "L-8", "L-99"])
+_HAZARD_REFS = st.sampled_from(["H-4", "H-9", "H-99", "new_a", "new_b"])
+_TEXTS = st.sampled_from(
+    [
+        "Account records enter the wrong state.",
+        "Privacy records enter the wrong state.",
+        "Protect account records",
+        "Protect privacy records",
+        "A new state appears.",
+    ]
+)
+
+
+@st.composite
+def _revision_patches(draw) -> dict:
+    """Edits of existing records and additions, valid or not."""
+    hazard_edits = [
+        {
+            "hazard_id": hazard_id,
+            "description": draw(_TEXTS),
+            "related_losses": draw(st.lists(_LOSS_REFS, min_size=1, max_size=2)),
+        }
+        for hazard_id in draw(st.lists(st.sampled_from(["H-4", "H-9"]), max_size=2))
+    ]
+    hazard_additions = [
+        {
+            "handle": handle,
+            "description": draw(_TEXTS),
+            "related_losses": draw(st.lists(_LOSS_REFS, min_size=1, max_size=2)),
+        }
+        for handle in draw(
+            st.lists(st.sampled_from(["new_a", "new_b"]), max_size=2, unique=True)
+        )
+    ]
+    constraint_edits = [
+        {
+            "constraint_id": constraint_id,
+            "rule": rule,
+            "applies_when": [],
+            "related_hazards": draw(st.lists(_HAZARD_REFS, min_size=1, max_size=2)),
+        }
+        for constraint_id, rule in draw(
+            st.lists(
+                st.sampled_from(
+                    [
+                        ("SC-3", "Protect account records"),
+                        ("SC-7", "Protect privacy records"),
+                    ]
+                ),
+                max_size=2,
+            )
+        )
+    ]
+    constraint_additions = [
+        {
+            "handle": handle,
+            "rule": draw(_TEXTS),
+            "applies_when": [],
+            "related_hazards": draw(st.lists(_HAZARD_REFS, min_size=1, max_size=2)),
+        }
+        for handle in draw(
+            st.lists(st.sampled_from(["sc_a", "sc_b"]), max_size=2, unique=True)
+        )
+    ]
+    return {
+        "hazard_edits": hazard_edits,
+        "hazard_additions": hazard_additions,
+        "security_constraint_edits": constraint_edits,
+        "security_constraint_additions": constraint_additions,
+    }
+
+
+_ASSEMBLED = {"count": 0}
+
+
+@given(patch=_revision_patches())
+@example(
+    patch={
+        "hazard_edits": [],
+        "hazard_additions": [
+            {
+                "handle": "new_a",
+                "description": "A new state appears.",
+                "related_losses": ["L-5"],
+            }
+        ],
+        "security_constraint_edits": [],
+        "security_constraint_additions": [],
+    }
+)
+@settings(max_examples=200, deadline=None)
+def test_an_assembled_revision_keeps_every_prior_record(patch: dict) -> None:
+    """A patch that assembles keeps every loss exactly and every prior ID."""
+    prior = _prior_analysis()
+    try:
+        draft = _revision_patch_to_draft(
+            prior, _Stage1aRevisionPatch.model_validate(patch), []
+        )
+    except ValueError:
+        return
+    _ASSEMBLED["count"] += 1
+
+    def dumped(losses):
+        return [loss.model_dump(mode="json") for loss in losses]
+
+    assert dumped(draft.risk_card_losses) == dumped(prior.risk_card_losses)
+    assert dumped(draft.use_case_losses) == dumped(prior.use_case_losses)
+    assert {h.hazard_id for h in prior.hazards} <= {h.hazard_id for h in draft.hazards}
+    assert {c.constraint_id for c in prior.security_constraints} <= {
+        c.constraint_id for c in draft.security_constraints
+    }
+
+
+def test_the_revision_property_assembles_patches() -> None:
+    """The property above is not vacuous: patches do assemble."""
+    test_an_assembled_revision_keeps_every_prior_record()
+    assert _ASSEMBLED["count"] > 0

@@ -644,53 +644,6 @@ class LossAnalysisGatesArtifact(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _verify_revision_preserves_prior(
-    prior: LossAnalysis, revised: LossAnalysisDraft
-) -> None:
-    """Fail closed when an assembled revision drops or changes prior records."""
-    _verify_losses_preserved(prior, revised)
-    _verify_ids_kept(
-        {h.hazard_id for h in prior.hazards},
-        {h.hazard_id for h in revised.hazards},
-        "hazards",
-    )
-    _verify_ids_kept(
-        {c.constraint_id for c in prior.security_constraints},
-        {c.constraint_id for c in revised.security_constraints},
-        "security constraints",
-    )
-
-
-def _verify_losses_preserved(prior: LossAnalysis, revised: LossAnalysisDraft) -> None:
-    prior_losses = {
-        loss.loss_id: loss for loss in prior.risk_card_losses + prior.use_case_losses
-    }
-    revised_losses = {
-        loss.loss_id: loss
-        for loss in revised.risk_card_losses + revised.use_case_losses
-    }
-    if set(revised_losses) != set(prior_losses):
-        raise ValueError(
-            "graph revision must keep the loss registry exactly: "
-            f"expected {sorted(prior_losses)}, got {sorted(revised_losses)}"
-        )
-    for loss_id, baseline in prior_losses.items():
-        if revised_losses[loss_id].model_dump(mode="json") != baseline.model_dump(
-            mode="json"
-        ):
-            raise ValueError(
-                f"graph revision changed loss {loss_id}; losses are immutable"
-            )
-
-
-def _verify_ids_kept(prior_ids: set[str], revised_ids: set[str], label: str) -> None:
-    missing = prior_ids - revised_ids
-    if missing:
-        raise ValueError(
-            f"graph revision dropped {label}: " + ", ".join(sorted(missing))
-        )
-
-
 def _unknown_edit_targets(prior: LossAnalysis, decoded: object) -> str | None:
     """Name the edit targets of a decoded patch that the graph does not have.
 
@@ -860,7 +813,7 @@ def _addition_only_constraint_edit(
         f"meets the rule_span requirement in the extended rule. "
         f"{rule_span_requirement()}"
         for obligation in constraint.obligations
-        if obligation.rule_span.casefold() not in edit.rule.casefold()
+        if not span_quotes_rule(edit.rule, obligation.rule_span)
     )
     if edit.rule == constraint.rule and obligations == prior_obligations:
         return None
@@ -2326,33 +2279,7 @@ def gate_pinned_loss_analysis(
     accounting = check_risk_accounting(loss_analysis, risk_cards)
     density = check_hazard_graph_density(loss_analysis)
     if not accounting.passed:
-        _write_gates_artifact(
-            run_dir,
-            accounting=accounting,
-            density=density,
-            failing_checks=[],
-            revision_attempted=False,
-            revision_applied=False,
-        )
-        raise LossAnalysisGateError(
-            stage=STAGE,
-            step=STEP_GAP,
-            message="risk accounting gate failed: "
-            + "; ".join(
-                dict.fromkeys(
-                    [
-                        *accounting.missing_dispositions,
-                        *accounting.unaccounted_risk_refs,
-                    ]
-                )
-            ),
-            gate="risk_accounting",
-            failing_checks=(
-                *accounting.missing_dispositions,
-                *accounting.unaccounted_risk_refs,
-                *accounting.contradictions,
-            ),
-        )
+        _raise_accounting_failure(run_dir, accounting, density, None)
     if not density.passed:
         _write_gates_artifact(
             run_dir,
@@ -2501,8 +2428,11 @@ def _run_graph_revision_call(
 
 
 def _check_revision(prior: LossAnalysis, draft: LossAnalysisDraft) -> None:
-    """Raise when an assembled revision breaks the prior graph or validation."""
-    _verify_revision_preserves_prior(prior, draft)
+    """Raise when an assembled revision fails validation.
+
+    Assembly copies every prior loss and keeps every prior hazard and
+    constraint ID by construction (``_revision_patch_to_draft``).
+    """
     # In place on the draft, before validation, even when validation
     # then fails; the prior graph keeps its own constraint objects.
     stamp_proposed_direction(draft)

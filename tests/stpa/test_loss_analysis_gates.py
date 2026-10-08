@@ -194,6 +194,72 @@ class TestRiskAccountingCheck:
         assert report.unaccounted_risk_refs == ("atlas-002",)
 
 
+PINNED_ACCOUNTING_FAILURE_ARTIFACT = """\
+risk_accounting:
+  missing_dispositions:
+  - atlas-002
+  unaccounted_risk_refs:
+  - atlas-002
+  not_applicable_refs: []
+  cited_refs:
+  - atlas-001
+  contradictions: []
+  passed: false
+hazard_graph_density:
+  losses_without_hazard: []
+  constraints_without_hazard: []
+  hazards_without_constraint: []
+  subject_checks:
+  - constraint_id: SC-1
+    hazard_id: H-1
+    shared_phrases:
+    - unintended payment
+    passed: true
+  class_own_hazard_checks: []
+  constraint_classes:
+  - constraint_id: SC-1
+    behavior_class: unclassified
+  unclassified_constraints:
+  - SC-1
+failing_checks: []
+advisory_checks: []
+revision_attempted: false
+revision_applied: false
+revision_call_count: 0
+passed: false
+normalization_warnings: []
+revision_rounds: []
+post_review_corrections: []
+stated_rule_findings: []
+"""
+
+
+class TestPinnedAccountingFailure:
+    """A pinned graph that fails accounting stops with the derived path's error."""
+
+    def test_error_and_artifact_are_exact(self, tmp_path: Path) -> None:
+        analysis = LossAnalysis.model_validate(valid_risk_draft_dict())
+
+        with pytest.raises(gates_module.LossAnalysisGateError) as caught:
+            gates_module.gate_pinned_loss_analysis(
+                loss_analysis=analysis,
+                risk_cards=make_risk_cards(("atlas-001", "atlas-002")),
+                run_dir=tmp_path,
+            )
+
+        error = caught.value
+        assert str(error) == (
+            "stage_1a/gap_analysis: risk accounting gate failed: atlas-002"
+        )
+        assert error.gate == "risk_accounting"
+        assert error.failing_checks == ("atlas-002", "atlas-002")
+        assert error.revision_attempted is False
+        assert error.revision_call_count == 0
+        assert (tmp_path / "loss-analysis-gates.yaml").read_text(
+            encoding="utf-8"
+        ) == PINNED_ACCOUNTING_FAILURE_ARTIFACT
+
+
 class TestSubjectPhrases:
     def test_shared_noun_phrase_is_detected(self) -> None:
         constraint = "The agent must confirm every unintended payment before execution."

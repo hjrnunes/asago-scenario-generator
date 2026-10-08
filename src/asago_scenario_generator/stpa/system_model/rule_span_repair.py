@@ -31,6 +31,7 @@ from functools import cache
 from typing import TYPE_CHECKING, Any, Literal
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.models.loss_analysis import span_quotes_rule
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 
 if TYPE_CHECKING:
@@ -90,11 +91,6 @@ class RuleSpanRepairRecord:
             "original": self.repair.original,
             "repaired": self.repair.repaired,
         }
-
-
-def span_quotes_rule(rule: str, span: str) -> bool:
-    """Apply the same verbatim test as :class:`SecurityConstraint`."""
-    return span.casefold() in rule.casefold()
 
 
 @cache

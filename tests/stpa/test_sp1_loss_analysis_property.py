@@ -1,4 +1,4 @@
-"""Property-based tests for Stage 1a loss analysis merge/renumber invariants.
+"""Property-based tests for Stage 1a loss analysis merge invariants.
 
 These tests verify structural invariants that hold across broad input
 ranges for the two-call merge logic in ``loss_analysis.py``:
@@ -93,8 +93,8 @@ def _build_risk_draft(
 ) -> LossAnalysisDraft:
     """Build a valid risk-derivation draft.
 
-    Losses use non-sequential IDs starting from ``id_offset`` to stress
-    the renumbering logic.  Hazards reference the first loss; constraints
+    Losses use non-sequential IDs starting from ``id_offset`` to check
+    that the merge keeps them.  Hazards reference the first loss; constraints
     reference the first hazard.
     """
     risk_losses = [
@@ -162,7 +162,7 @@ def _build_gap_draft(
 class TestMergeDraftsProperties:
     """Property tests for _merge_drafts invariants.
 
-    These test the core merge/renumber logic directly, verifying that
+    These test the core merge logic directly, verifying that
     the merged LossAnalysis always satisfies structural invariants
     regardless of the input draft sizes or ID patterns.
     """
