@@ -20,6 +20,39 @@ input and output contracts so the deprecation story stays explicit.
   exists only while an input carries both the legacy fields and valid
   KC evidence.
 
+## How Stage 1b decides `kc_subcodes`
+
+The product path (`_default_prepare_capability`) decides each sub-code in
+one of two ways, and `capability-kc-decision.yaml` records both:
+
+1. **Observed facts.** If the run has an observed execution target profile,
+   `target_kc_decision` (`stpa/system_model/kc_decision.py`) reads only
+   interpretations with disposition `supported` and interpreter/verifier
+   agreement `agree`. Each rule names its codes and gives a reason:
+
+   | Fact | Present | Absent |
+   | --- | --- | --- |
+   | A verified tool with `likely_state_effect: changes` | `KC6.3.2` | `KC6.3.1` |
+   | An `observed_complete` inventory whose every tool is verified with `likely_state_effect: none` | | `KC6.3.2` |
+   | A verified tool with the `text_search` semantic role | `KC6.3.3` | |
+
+   A fact-decided code overrides the vote. The target profile never enters
+   the Stage 1b request; the request stays the use-case text alone.
+2. **Model vote.** Every other code comes from the model. Stage 1b sends the
+   same request `KC_VOTE_SAMPLES` (9) times and keeps a code that at least
+   `KC_VOTE_SHARE` (one third) of the successful draws select. The threshold
+   sits below a majority because a sampled draw omits a grounded code more
+   often than it invents one. A draw that fails after its one correction is
+   left out of the vote; the stage fails only when every draw fails. Entry
+   points, tool inventory, and confidence come from the first successful
+   draw, or from the first draw with a tool inventory when the decided codes
+   activate tool execution.
+
+No rule exists for a code whose catalog definition no observed fact settles
+(for example `KC2.1`, `KC4.x`, `KC5.x`, `KCX-HITL`, `KCX-AUDIT`): an
+escalation tool does not prove that a human reviews actions, and the
+qualification facts carry no per-code definition.
+
 ## Derivation
 
 | Field | True when |
