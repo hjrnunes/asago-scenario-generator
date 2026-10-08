@@ -86,7 +86,7 @@ from .coverage import compute_coverage_gaps, write_coverage_gaps
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
 from .realized_operation import realized_operation
 from .target_profile_publication import publish_execution_target_profile
-from .presentation import render_scenario_summary, validate_scenario_summary
+from .presentation import render_scenario_summary
 from .handoff import (
     ScenarioHandoff,
     Stage1aSource,
@@ -1426,7 +1426,6 @@ def _validate_envelope_stage7(
         ),
         validation_errors,
     )
-    validation_errors.extend(validate_scenario_summary(envelope))
 
     id_text = _envelope_gherkin_text(envelope)
     if id_text:

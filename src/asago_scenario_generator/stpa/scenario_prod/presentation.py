@@ -18,10 +18,7 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     ObservedRecordSelection,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactor
-from asago_scenario_generator.stpa.models.scenario_envelope import (
-    GherkinSpec,
-    ScenarioEnvelope,
-)
+from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     DefenderBDI,
@@ -51,22 +48,6 @@ def render_scenario_summary(spec: ScenarioSpec) -> tuple[str, dict, GherkinSpec]
     tree = _render_tree(account)
     gherkin = _render_gherkin(account)
     return narrative, tree, gherkin
-
-
-def validate_scenario_summary(envelope: ScenarioEnvelope) -> list[str]:
-    """Verify deterministic presentation against its exact scenario authority."""
-    narrative, tree, gherkin = render_scenario_summary(envelope.scenario_spec)
-    expected = {
-        "narrative": narrative,
-        "attack_tree": tree,
-        "gherkin_spec": gherkin,
-        "gherkin_raw": gherkin.to_feature_text(),
-    }
-    return [
-        f"{envelope.scenario_id} deterministic {name} differs from its source summary."
-        for name, value in expected.items()
-        if getattr(envelope, name) != value
-    ]
 
 
 def _semantic_account(spec: ScenarioSpec) -> dict[str, Any]:

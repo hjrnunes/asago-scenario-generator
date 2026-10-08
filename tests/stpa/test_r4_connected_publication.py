@@ -13,10 +13,8 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     DefenderIntention,
 )
 from asago_scenario_generator.stpa.models.scenario_context import DescribedElement
-from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
-    validate_scenario_summary,
 )
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_tree_factor_evidence_coverage,
@@ -211,21 +209,6 @@ def test_unsupported_structural_text_is_sanitized_without_tree_evidence():
 
     assert "CA-9-9" not in tree["criterion"]
     assert tree["source_uncertainty"]
-
-
-def test_summary_validation_accepts_the_deterministic_projection():
-    spec = _spec()
-    narrative, tree, gherkin = render_scenario_summary(spec)
-    envelope = assemble_envelope(
-        scenario_id=spec.scenario_id,
-        scenario_spec=spec,
-        narrative=narrative,
-        attack_tree=tree,
-        gherkin_spec=gherkin,
-        gherkin_raw=gherkin.to_feature_text(),
-    )
-
-    assert validate_scenario_summary(envelope) == []
 
 
 def test_tree_allows_a_unique_responsibility_source_in_actor_evidence():

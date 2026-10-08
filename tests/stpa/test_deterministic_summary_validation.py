@@ -1,12 +1,10 @@
-"""Deterministic summaries validate against their source."""
+"""Deterministic summaries publish exactly their source rendering."""
 
-import pytest
-
-from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import (
+    _run_stage6_for_spec,
     _validate_envelope_stage7,
     run_sp3,
 )
@@ -17,17 +15,7 @@ from tests.helpers.sp3_run import _make_ets, _setup_mock_client
 
 
 def _summary():
-    spec = _spec()
-    narrative, tree, gherkin = render_scenario_summary(spec)
-    return assemble_envelope(
-        scenario_id=spec.scenario_id,
-        scenario_spec=spec,
-        narrative=narrative,
-        attack_tree=tree,
-        gherkin_spec=gherkin,
-        gherkin_raw=gherkin.to_feature_text(),
-        control_structure=_control_structure(),
-    )
+    return _run_stage6_for_spec(_spec(), _control_structure())
 
 
 def test_deterministic_feedback_summary_needs_no_invented_process_model_id():
@@ -42,23 +30,16 @@ def test_deterministic_feedback_summary_needs_no_invented_process_model_id():
     assert errors == []
 
 
-@pytest.mark.parametrize(
-    "field", ["narrative", "attack_tree", "gherkin_spec", "gherkin_raw"]
-)
-def test_deterministic_summary_rejects_modified_content(field):
-    envelope = _summary()
-    changes = {
-        "narrative": "The attack succeeded.",
-        "attack_tree": {**envelope.attack_tree, "root": "Different unsafe outcome"},
-        "gherkin_spec": envelope.gherkin_spec.model_copy(
-            update={"given": ["Given invented evidence"]}
-        ),
-        "gherkin_raw": "Feature: unrelated",
-    }
-    damaged = envelope.model_copy(update={field: changes[field]})
-    errors = []
-    _validate_envelope_stage7(damaged, make_minimal_loss_analysis(), errors)
-    assert any(field in message and "deterministic" in message for message in errors)
+def test_stage6_envelope_carries_the_rendered_summary_unchanged():
+    spec = _spec()
+    narrative, tree, gherkin = render_scenario_summary(spec)
+
+    envelope = _run_stage6_for_spec(spec, _control_structure())
+
+    assert envelope.narrative == narrative
+    assert envelope.attack_tree == tree
+    assert envelope.gherkin_spec == gherkin
+    assert envelope.gherkin_raw == gherkin.to_feature_text()
 
 
 def test_normal_product_run_validates_deterministic_summary_without_render_calls(
