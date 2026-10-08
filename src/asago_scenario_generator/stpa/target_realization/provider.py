@@ -705,9 +705,11 @@ def _extension_action_view(
     proposal = outcome.control_action
     if proposal is None:  # pragma: no cover - caller guards accepted outcomes
         raise ValueError("accepted target extension requires control_action")
-    description = _operation_action_description(operation)
+    description = target_operation_action_description(operation)
     target = _extension_target_prompt_view(baseline, outcome)
-    controller = _controller_prompt_view(baseline, proposal.controller_id)
+    controller = baseline.control_structure.controller_prompt_view(
+        proposal.controller_id
+    )
     return {
         "control_action_id": (
             f"TARGET_EXTENSION:{operation.resource_id}:{operation.operation_id}"
@@ -731,16 +733,6 @@ def _extension_action_view(
     }
 
 
-def _controller_prompt_view(baseline: Any, controller_id: str) -> dict[str, Any]:
-    """Return controller identity with only baseline authority meaning."""
-    return {
-        "id": controller_id,
-        "description": baseline.control_structure.element_description(
-            "responsibility", controller_id
-        ),
-    }
-
-
 def _extension_target_prompt_view(baseline: Any, outcome: Any) -> dict[str, Any] | None:
     """Resolve an extension target from exact authority or its process proposal."""
     proposal = outcome.control_action
@@ -753,16 +745,7 @@ def _extension_target_prompt_view(baseline: Any, outcome: Any) -> dict[str, Any]
             "id": None,
             "description": process.description if process is not None else None,
         }
-    target = proposal.target
-    if target is None:
-        return None
-    return {
-        "type": target.type,
-        "id": target.id,
-        "description": baseline.control_structure.element_description(
-            target.type, target.id
-        ),
-    }
+    return baseline.control_structure.target_prompt_view(proposal.target)
 
 
 def _extension_semantic_context(
@@ -803,11 +786,6 @@ def _extension_semantic_context(
         ],
         "proposed_uca_categories": [item.uca_type for item in outcome.ica_slots],
     }
-
-
-def _operation_action_description(operation: Any) -> str:
-    """Render an exact observed operation meaning for verifier context."""
-    return target_operation_action_description(operation)
 
 
 def _require_provider_result(

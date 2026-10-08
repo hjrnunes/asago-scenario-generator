@@ -12,7 +12,7 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol, runtime_checkable
+from typing import Any, NamedTuple
 
 from asago_scenario_generator.models.target_realization import (
     CapabilityExposureDisposition,
@@ -77,60 +77,6 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import (
 )
 
 
-@runtime_checkable
-class TargetRealizationInterpreter(Protocol):
-    """Provider adapter for one target-realization prompt view."""
-
-    def __call__(
-        self, *, action: Mapping[str, Any], operations: Sequence[Mapping[str, Any]]
-    ) -> Any:
-        """Return one structured mapping response."""
-
-
-@runtime_checkable
-class TargetRealizationInterpreterFactory(Protocol):
-    """Factory for the provider adapter used by the pure seam."""
-
-    def __call__(self) -> TargetRealizationInterpreter:
-        """Construct the already-configured typed provider adapter."""
-
-
-@runtime_checkable
-class TargetRealizationExtensionInterpreter(Protocol):
-    """Provider adapter for one bounded additive extension attempt."""
-
-    def extend(
-        self, request: TargetRealizationExtensionRequest
-    ) -> TargetRealizationExtensionProviderResponse | Mapping[str, Any]:
-        """Return the one exact structured extension response."""
-
-
-@runtime_checkable
-class TargetRealizationExtensionFactory(Protocol):
-    """Factory for the single bounded target-extension adapter."""
-
-    def __call__(self) -> TargetRealizationExtensionInterpreter:
-        """Construct the already-configured extension adapter."""
-
-
-@runtime_checkable
-class TargetDerivedICAInterpreter(Protocol):
-    """Provider adapter for one batch of target-derived ICA findings."""
-
-    def __call__(
-        self, request: TargetDerivedICARequest
-    ) -> TargetDerivedICAProviderResponse | Mapping[str, Any]:
-        """Return the one exact target-derived finding response."""
-
-
-@runtime_checkable
-class TargetDerivedICAFactory(Protocol):
-    """Factory for the single target-derived ICA provider attempt."""
-
-    def __call__(self) -> TargetDerivedICAInterpreter:
-        """Construct the already-configured target-derived ICA adapter."""
-
-
 @dataclass(frozen=True)
 class TargetRealizationStpaProjection:
     """Validated STPA view for downstream SP3 consumers.
@@ -146,15 +92,14 @@ class TargetRealizationStpaProjection:
     target_derived_ica_findings: tuple[TargetDerivedICAFinding, ...]
     denominators: TargetRealizationDenominators
 
-    @property
-    def effective_control_structure(self) -> ControlStructure:
-        """Return the additive control structure used by downstream SP3."""
-        return self.control_structure
 
-    @property
-    def effective_ica_enumeration(self) -> ICAEnumeration:
-        """Return the additive ICA enumeration used by downstream SP3."""
-        return self.ica_enumeration
+class _ExtensionResult(NamedTuple):
+    """Target-derived additions and diagnostics from one extension attempt."""
+
+    actions: tuple[SystemicControlAction, ...] = ()
+    slots: tuple[TargetDerivedICASlot, ...] = ()
+    processes: tuple[SystemicControlledProcess, ...] = ()
+    diagnostics: tuple[str, ...] = ()
 
 
 @dataclass
@@ -182,7 +127,7 @@ class _ExtensionCompilationState:
 
 
 def _interpreter_for_observations(
-    factory: TargetRealizationInterpreterFactory | Callable[..., Any],
+    factory: Callable[..., Any],
     observations: Sequence[TargetOperationObservation],
 ) -> Any:
     return _construct_interpreter(factory) if observations else None
@@ -347,8 +292,8 @@ def _build_realization_result(
     result = TargetRealizationResult(
         baseline_id=baseline.baseline_id,
         baseline_digest=baseline.baseline_digest or baseline.compute_baseline_digest(),
-        profile_id=_profile_id(profile),
-        profile_digest=_profile_digest(profile),
+        profile_id=profile.target_id,
+        profile_digest=profile.semantic_digest,
         rows=tuple(rows),
         operation_records=tuple(records),
         capability_reconciliation=capabilities,
@@ -389,11 +334,9 @@ def _require_rows_cover_baseline(
 def realize_target_operations(
     baseline: SystemicStpaBaseline,
     profile: ExecutionTargetProfile,
-    interpreter_factory: TargetRealizationInterpreterFactory | Callable[..., Any],
+    interpreter_factory: Callable[..., Any],
     *,
-    extension_factory: TargetRealizationExtensionFactory
-    | Callable[..., Any]
-    | None = None,
+    extension_factory: Callable[..., Any] | None = None,
     baseline_rows: Sequence[TargetRealizationRow] | None = None,
 ) -> TargetRealizationResult:
     """Map exact observed operations to an immutable systemic baseline.
@@ -458,7 +401,7 @@ def realize_target_operations(
 def realize_target_derived_icas(
     baseline: SystemicStpaBaseline,
     realization: TargetRealizationResult,
-    finder_factory: TargetDerivedICAFactory | Callable[..., Any],
+    finder_factory: Callable[..., Any],
 ) -> TargetRealizationResult:
     """Compile verified target-derived ICA findings into an additive view.
 
@@ -507,7 +450,7 @@ def realize_target_derived_icas(
 def _attempt_target_derived_ica_findings(
     baseline: SystemicStpaBaseline,
     realization: TargetRealizationResult,
-    finder_factory: TargetDerivedICAFactory | Callable[..., Any],
+    finder_factory: Callable[..., Any],
 ) -> tuple[tuple[TargetDerivedICAFinding, ...], tuple[str, ...]]:
     derived_slots = realization.target_derived_ica_slots
     if not derived_slots:
@@ -548,7 +491,7 @@ def _target_operation_context(
 
 
 def _invoke_and_compile_target_derived_icas(
-    finder_factory: TargetDerivedICAFactory | Callable[..., Any],
+    finder_factory: Callable[..., Any],
     request: TargetDerivedICARequest,
     baseline: SystemicStpaBaseline,
     realization: TargetRealizationResult,
@@ -800,7 +743,11 @@ def _control_action_to_stpa(
         ca_id=snapshot.control_action_id,
         description=snapshot.description,
         target=_project_action_target(snapshot, controlled_process_ids),
-        effect_kind=_enum_effect_kind(snapshot.effect_kind),
+        effect_kind=(
+            None
+            if snapshot.effect_kind is None
+            else ControlActionEffectKind(snapshot.effect_kind)
+        ),
         temporality=_enum_temporality(snapshot.temporality),
     )
 
@@ -841,10 +788,6 @@ def _require_known_target_reference(
         )
 
 
-def _enum_effect_kind(value: str | None) -> ControlActionEffectKind | None:
-    return None if value is None else ControlActionEffectKind(value)
-
-
 def _enum_temporality(value: str | None) -> ControlActionTemporality | None:
     return None if value is None else ControlActionTemporality(value)
 
@@ -879,13 +822,19 @@ def _project_target_ica_slot(
     findings = tuple(
         sorted(findings_by_slot.get(slot.slot_id, ()), key=lambda item: item.ica_id)
     )
+    try:
+        uca_type = UCAType(slot.uca_type)
+    except ValueError as exc:
+        raise ValueError(
+            f"target-derived ICA slot has an unknown UCA type: {slot.uca_type}"
+        ) from exc
     return ICASlot(
         slot_id=slot.slot_id,
         responsibility=slot.responsibility,
         coordination_link=None,
         control_action=slot.control_action,
         action_temporality=_enum_temporality(slot.action_temporality),
-        uca_type=_enum_uca_type(slot.uca_type),
+        uca_type=uca_type,
         # A failed or omitted target-derived finding is unresolved, not a
         # reviewed N/A decision.  The shared ICASlot contract requires the
         # explicit unresolved state to retain the distinction.
@@ -912,15 +861,6 @@ def _project_target_icas(
         )
         for finding in findings
     ]
-
-
-def _enum_uca_type(value: str) -> UCAType:
-    try:
-        return UCAType(value)
-    except ValueError as exc:
-        raise ValueError(
-            f"target-derived ICA slot has an unknown UCA type: {value}"
-        ) from exc
 
 
 def _target_ica_unresolved_reason(
@@ -1519,17 +1459,12 @@ def _run_bounded_target_extension(
     observations: Sequence[TargetOperationObservation],
     records: list[TargetOperationRecord],
     interpreter: Any,
-    extension_factory: TargetRealizationExtensionFactory | Callable[..., Any] | None,
-) -> tuple[
-    tuple[SystemicControlAction, ...],
-    tuple[TargetDerivedICASlot, ...],
-    tuple[SystemicControlledProcess, ...],
-    tuple[str, ...],
-]:
+    extension_factory: Callable[..., Any] | None,
+) -> _ExtensionResult:
     """Apply at most one additive extension attempt to uncovered operations."""
     eligible = _eligible_extension_operations(records)
     if not eligible:
-        return (), (), (), ()
+        return _ExtensionResult()
     extension = _extension_interpreter(extension_factory, interpreter)
     if extension is None:
         return _missing_extension_result(eligible)
@@ -1549,7 +1484,7 @@ def _eligible_extension_operations(
 
 
 def _extension_interpreter(
-    extension_factory: TargetRealizationExtensionFactory | Callable[..., Any] | None,
+    extension_factory: Callable[..., Any] | None,
     interpreter: Any,
 ) -> Any:
     if extension_factory is not None:
@@ -1565,7 +1500,7 @@ def _extension_interpreter(
     return extension if callable(extension) else None
 
 
-def _construct_extension_adapter(factory: Any) -> TargetRealizationExtensionInterpreter:
+def _construct_extension_adapter(factory: Any) -> Any:
     """Construct one typed extension adapter without guessing call shapes."""
     if not callable(factory):
         raise TypeError("extension factory must be a zero-argument callable")
@@ -1585,17 +1520,11 @@ def _construct_extension_adapter(factory: Any) -> TargetRealizationExtensionInte
 
 def _missing_extension_result(
     eligible: Sequence[TargetOperationObservation],
-) -> tuple[
-    tuple[SystemicControlAction, ...],
-    tuple[TargetDerivedICASlot, ...],
-    tuple[SystemicControlledProcess, ...],
-    tuple[str, ...],
-]:
-    return (
-        (),
-        (),
-        (),
-        tuple(_extension_missing_diagnostic(item.reference) for item in eligible),
+) -> _ExtensionResult:
+    return _ExtensionResult(
+        diagnostics=tuple(
+            _extension_missing_diagnostic(item.reference) for item in eligible
+        )
     )
 
 
@@ -1605,12 +1534,7 @@ def _attempt_target_extension(
     records: list[TargetOperationRecord],
     eligible: Sequence[TargetOperationObservation],
     extension: Any,
-) -> tuple[
-    tuple[SystemicControlAction, ...],
-    tuple[TargetDerivedICASlot, ...],
-    tuple[SystemicControlledProcess, ...],
-    tuple[str, ...],
-]:
+) -> _ExtensionResult:
     request = TargetRealizationExtensionRequest(baseline=baseline, operations=eligible)
     try:
         response = _invoke_extension_interpreter(extension, request)
@@ -1628,20 +1552,12 @@ def _attempt_target_extension(
 def _extension_failure_result(
     eligible: Sequence[TargetOperationObservation],
     exc: Exception,
-) -> tuple[
-    tuple[SystemicControlAction, ...],
-    tuple[TargetDerivedICASlot, ...],
-    tuple[SystemicControlledProcess, ...],
-    tuple[str, ...],
-]:
-    return (
-        (),
-        (),
-        (),
-        tuple(
+) -> _ExtensionResult:
+    return _ExtensionResult(
+        diagnostics=tuple(
             [f"bounded target extension failed: {type(exc).__name__}: {exc}"]
             + [_extension_missing_diagnostic(item.reference) for item in eligible]
-        ),
+        )
     )
 
 
@@ -1665,12 +1581,7 @@ def _compile_extension_response(
     records: list[TargetOperationRecord],
     eligible: Sequence[TargetOperationObservation],
     response: Any,
-) -> tuple[
-    tuple[SystemicControlAction, ...],
-    tuple[TargetDerivedICASlot, ...],
-    tuple[SystemicControlledProcess, ...],
-    tuple[str, ...],
-]:
+) -> _ExtensionResult:
     """Compile one exact extension response without changing baseline facts."""
     state = _extension_compilation_state(baseline, observations, eligible, records)
     compiled = _compile_extension_provider_response(response)
@@ -1683,7 +1594,12 @@ def _compile_extension_response(
         if item.reference.identity
         not in {outcome.operation.identity for outcome in compiled.outcomes}
     )
-    return _extension_compilation_result(state)
+    return _ExtensionResult(
+        actions=tuple(state.derived_actions),
+        slots=tuple(state.derived_slots),
+        processes=tuple(state.derived_processes),
+        diagnostics=tuple(state.diagnostics),
+    )
 
 
 def _extension_compilation_state(
@@ -1694,14 +1610,18 @@ def _extension_compilation_state(
 ) -> _ExtensionCompilationState:
     controller_ids = _baseline_controller_ids(baseline)
     return _ExtensionCompilationState(
-        observed_by_identity=_observations_by_identity(observations),
-        eligible_ids=_operation_identities(eligible),
-        baseline_action_ids=_baseline_action_ids(baseline),
+        observed_by_identity={item.reference.identity: item for item in observations},
+        eligible_ids={item.reference.identity for item in eligible},
+        baseline_action_ids={
+            item.control_action_id for item in baseline.control_actions
+        },
         baseline_slot_ids=set(baseline.ica_slots),
         baseline_process_ids=_baseline_process_ids(baseline),
         controller_ids=controller_ids,
         element_ids=_baseline_element_ids(baseline),
-        record_by_identity=_record_indexes(records),
+        record_by_identity={
+            item.operation_ref.identity: index for index, item in enumerate(records)
+        },
         records=records,
         next_action_ordinal=_next_action_ordinals(
             controller_ids, baseline.control_actions
@@ -1723,30 +1643,8 @@ def _baseline_controller_ids(baseline: SystemicStpaBaseline) -> set[str]:
     return {item.resp_id for item in baseline.control_structure.responsibilities}
 
 
-def _observations_by_identity(
-    observations: Sequence[TargetOperationObservation],
-) -> dict[tuple[str, str], TargetOperationObservation]:
-    return {item.reference.identity: item for item in observations}
-
-
-def _operation_identities(
-    observations: Sequence[TargetOperationObservation],
-) -> set[tuple[str, str]]:
-    return {item.reference.identity for item in observations}
-
-
-def _baseline_action_ids(baseline: SystemicStpaBaseline) -> set[str]:
-    return {item.control_action_id for item in baseline.control_actions}
-
-
 def _baseline_process_ids(baseline: SystemicStpaBaseline) -> set[str]:
     return {item.cp_id for item in baseline.control_structure.controlled_processes}
-
-
-def _record_indexes(
-    records: Sequence[TargetOperationRecord],
-) -> dict[tuple[str, str], int]:
-    return {item.operation_ref.identity: index for index, item in enumerate(records)}
 
 
 def _next_action_ordinals(
@@ -1871,7 +1769,7 @@ def _compile_target_extension_action(
         # action's meaning.  Provider prose remains a rationale/evidence
         # input, but cannot collapse a loan-renewal or fee-waiver operation into a generic
         # "authorize backend mutation" placeholder.
-        description=_target_action_description(operation),
+        description=target_operation_action_description(operation),
         target=target,
         # An accepted MCP inventory operation is, by construction, a discrete
         # tool invocation. These execution facts are compiler-owned rather
@@ -1880,11 +1778,6 @@ def _compile_target_extension_action(
         temporality="instantaneous",
         provenance="target_derived",
     )
-
-
-def _target_action_description(operation: TargetOperationObservation) -> str:
-    """Keep additive action meaning anchored to exact observed operation facts."""
-    return target_operation_action_description(operation)
 
 
 def _compile_target_extension_target(
@@ -1975,8 +1868,9 @@ def _compile_target_extension_slots(
     controller_id: str,
 ) -> tuple[TargetDerivedICASlot, ...]:
     slots = []
+    # Every slot takes the compiler-owned action timing, not the proposal's.
+    temporality = action.temporality or "instantaneous"
     for proposal in _systematic_extension_slot_proposals(action.temporality):
-        temporality = _extension_slot_temporality(action, proposal)
         slot_id = _target_extension_slot_id(controller_id, action_id, proposal.uca_type)
         if slot_id in state.baseline_slot_ids:
             raise ValueError(
@@ -2039,12 +1933,6 @@ def _target_extension_slot_id(
     return f"{controller_id}:{action_id}:{uca_type}"
 
 
-def _extension_slot_temporality(action: Any, proposal: Any) -> Any:
-    """Align a target-derived slot with its compiler-owned action timing."""
-    del proposal
-    return getattr(action, "temporality", None) or "instantaneous"
-
-
 def _record_target_extension_support(
     state: _ExtensionCompilationState,
     identity: tuple[str, str],
@@ -2065,22 +1953,6 @@ def _record_target_extension_support(
         target_derived_control_action_id=action_id,
         evidence_refs=tuple(sorted(set(current.evidence_refs) | operation_evidence)),
         provenance="target_derived",
-    )
-
-
-def _extension_compilation_result(
-    state: _ExtensionCompilationState,
-) -> tuple[
-    tuple[SystemicControlAction, ...],
-    tuple[TargetDerivedICASlot, ...],
-    tuple[SystemicControlledProcess, ...],
-    tuple[str, ...],
-]:
-    return (
-        tuple(state.derived_actions),
-        tuple(state.derived_slots),
-        tuple(state.derived_processes),
-        tuple(state.diagnostics),
     )
 
 
@@ -2265,49 +2137,27 @@ def _resolve_response_selection(
     TargetOperationReference | None,
     str | None,
 ]:
-    disposition, selected = _normalize_response_selection(disposition, selected)
-    disposition, selected, rationale, verifier_failed = _apply_selection_verifier(
-        disposition, selected, verifier, rationale
+    """Keep a selection only when it is supported and verified; else diagnose."""
+    if disposition is not TargetRealizationDisposition.supported:
+        selected = None
+    elif selected is None:
+        disposition = TargetRealizationDisposition.contradictory
+    verifier_failed = selected is not None and not _verifier_supports_selection(
+        verifier
     )
-    diagnostic = _selection_diagnostic(
-        disposition,
-        action_id,
-        rationale,
-        verifier_failed,
+    if verifier_failed:
+        disposition, selected = _unverified_selection_disposition(verifier), None
+    unresolved = disposition in {
+        TargetRealizationDisposition.ambiguous,
+        TargetRealizationDisposition.contradictory,
+    }
+    diagnostic = (
+        f"baseline action {action_id} did not produce a "
+        "verifiable exact target operation"
+        if unresolved and (verifier_failed or not rationale)
+        else None
     )
     return disposition, selected, diagnostic
-
-
-def _normalize_response_selection(
-    disposition: TargetRealizationDisposition,
-    selected: TargetOperationReference | None,
-) -> tuple[TargetRealizationDisposition, TargetOperationReference | None]:
-    if disposition is TargetRealizationDisposition.supported and selected is None:
-        return TargetRealizationDisposition.contradictory, None
-    if disposition is not TargetRealizationDisposition.supported:
-        return disposition, None
-    return disposition, selected
-
-
-def _apply_selection_verifier(
-    disposition: TargetRealizationDisposition,
-    selected: TargetOperationReference | None,
-    verifier: TargetRealizationVerification,
-    rationale: str,
-) -> tuple[
-    TargetRealizationDisposition,
-    TargetOperationReference | None,
-    str,
-    bool,
-]:
-    if selected is None or _verifier_supports_selection(verifier):
-        return disposition, selected, rationale, False
-    return (
-        _unverified_selection_disposition(verifier),
-        None,
-        rationale or "provider mapping did not include verified evidence",
-        True,
-    )
 
 
 def _verifier_supports_selection(verifier: TargetRealizationVerification) -> bool:
@@ -2322,23 +2172,6 @@ def _unverified_selection_disposition(
         if verifier.status == "rejected"
         else TargetRealizationDisposition.ambiguous
     )
-
-
-def _selection_diagnostic(
-    disposition: TargetRealizationDisposition,
-    action_id: str,
-    rationale: str,
-    verifier_failed: bool,
-) -> str | None:
-    if disposition in {
-        TargetRealizationDisposition.ambiguous,
-        TargetRealizationDisposition.contradictory,
-    } and (verifier_failed or not rationale):
-        return (
-            f"baseline action {action_id} did not produce a "
-            "verifiable exact target operation"
-        )
-    return None
 
 
 def _compile_provider_response(response: Any) -> TargetRealizationProviderResponse:
@@ -2535,43 +2368,17 @@ def _operation_prompt_view(observation: TargetOperationObservation) -> dict[str,
 
 def _action_prompt_view(
     action: SystemicControlAction,
-    control_structure: SystemicControlStructureSnapshot | None = None,
+    control_structure: SystemicControlStructureSnapshot,
 ) -> dict[str, Any]:
     return {
         "control_action_id": action.control_action_id,
         "controller_id": action.controller_id,
-        "controller": _controller_prompt_view(action.controller_id, control_structure),
+        "controller": control_structure.controller_prompt_view(action.controller_id),
         "description": action.description,
-        "target": _target_prompt_view(action.target, control_structure),
+        "target": control_structure.target_prompt_view(action.target),
         "effect_kind": action.effect_kind,
         "temporality": action.temporality,
     }
-
-
-def _controller_prompt_view(
-    controller_id: str,
-    control_structure: SystemicControlStructureSnapshot | None,
-) -> dict[str, Any]:
-    """Return controller identity with only its attested explanation."""
-    description = None
-    if control_structure is not None:
-        description = control_structure.element_description(
-            "responsibility", controller_id
-        )
-    return {"id": controller_id, "description": description}
-
-
-def _target_prompt_view(
-    target: Any,
-    control_structure: SystemicControlStructureSnapshot | None,
-) -> dict[str, Any] | None:
-    """Resolve an action target from the attested structure, never from prose."""
-    if target is None:
-        return None
-    description = None
-    if control_structure is not None:
-        description = control_structure.element_description(target.type, target.id)
-    return {"type": target.type, "id": target.id, "description": description}
 
 
 def _capability_rows(
@@ -2647,14 +2454,6 @@ def _capability_value(value: str | CapabilityClaim) -> tuple[str, bool]:
     return value.capability, value.conflicting
 
 
-def _profile_id(profile: ExecutionTargetProfile) -> str:
-    return profile.target_id
-
-
-def _profile_digest(profile: ExecutionTargetProfile) -> str:
-    return profile.semantic_digest
-
-
 def _text_or_none(value: Any) -> str | None:
     if value is None:
         return None
@@ -2665,13 +2464,7 @@ def _text_or_none(value: Any) -> str | None:
 
 
 __all__ = [
-    "TargetDerivedICAFactory",
-    "TargetDerivedICAInterpreter",
     "TargetRealizationStpaProjection",
-    "TargetRealizationInterpreter",
-    "TargetRealizationInterpreterFactory",
-    "TargetRealizationExtensionInterpreter",
-    "TargetRealizationExtensionFactory",
     "observed_operations",
     "reconcile_declared_observed_capabilities",
     "realize_baseline_rows",

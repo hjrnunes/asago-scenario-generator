@@ -10,10 +10,10 @@ are copied from the target profile without semantic matching or rewriting.
 from __future__ import annotations
 
 from enum import Enum
-from typing import Any, ClassVar, Literal, Mapping, Sequence
+from typing import Any, ClassVar, Literal, Mapping, Sequence, TypeVar, get_args
 
 import yaml
-from pydantic import Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
@@ -31,6 +31,8 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 
+
+_Snapshot = TypeVar("_Snapshot", bound=BaseModel)
 
 TARGET_REALIZATION_SCHEMA_VERSION = "target-realization-v1"
 TARGET_REALIZATION_DIGEST_DOMAIN = "asago-scenario-generator:target-realization:v1"
@@ -355,6 +357,25 @@ class SystemicControlStructureSnapshot(ClosedCanonicalModel):
         }
         return descriptions[element_type].get(element_id)
 
+    def controller_prompt_view(self, controller_id: str) -> dict[str, Any]:
+        """Return a controller identity with only its attested description."""
+        return {
+            "id": controller_id,
+            "description": self.element_description("responsibility", controller_id),
+        }
+
+    def target_prompt_view(
+        self, target: SystemicElementReference | None
+    ) -> dict[str, Any] | None:
+        """Resolve an action target from this structure, never from prose."""
+        if target is None:
+            return None
+        return {
+            "type": target.type,
+            "id": target.id,
+            "description": self.element_description(target.type, target.id),
+        }
+
 
 class SystemicICA(ClosedCanonicalModel):
     """Closed snapshot of one ordinary ICA."""
@@ -517,9 +538,9 @@ class SystemicStpaBaseline(ClosedCanonicalModel):
         _require_stpa_authorities(loss_analysis, control_structure, ica_enumeration)
         draft = cls(
             baseline_id=baseline_id,
-            loss_analysis=_loss_analysis_snapshot(loss_analysis),
+            loss_analysis=_snapshot(SystemicLossAnalysisSnapshot, loss_analysis),
             control_structure=_control_structure_snapshot(control_structure),
-            ica_enumeration=_ica_snapshot(ica_enumeration),
+            ica_enumeration=_snapshot(SystemicICAEnumerationSnapshot, ica_enumeration),
             control_actions=tuple(
                 _control_action_snapshot(responsibility.resp_id, action)
                 for responsibility in control_structure.responsibilities
@@ -2173,196 +2194,64 @@ def _enum_value(value: object) -> str | None:
     return str(value.value) if isinstance(value, Enum) else str(value)
 
 
-def _loss_analysis_snapshot(value: LossAnalysis) -> SystemicLossAnalysisSnapshot:
-    return SystemicLossAnalysisSnapshot(
-        risk_card_losses=_loss_snapshots(value.risk_card_losses),
-        use_case_losses=_loss_snapshots(value.use_case_losses),
-        hazards=_hazard_snapshots(value.hazards),
-        security_constraints=_constraint_snapshots(value.security_constraints),
-    )
+def _snapshot(model: type[_Snapshot], value: Any, **overrides: Any) -> _Snapshot:
+    """Copy the fields ``model`` declares from one typed STPA value.
+
+    Nested STPA models become the snapshot type named by the field
+    annotation, lists become tuples, and enums become their string values.
+    A snapshot field the STPA type lacks keeps the snapshot default.
+    """
+    fields = {
+        name: _snapshot_value(info.annotation, getattr(value, name))
+        for name, info in model.model_fields.items()
+        if name not in overrides and hasattr(value, name)
+    }
+    return model(**fields, **overrides)
 
 
-def _loss_snapshots(values: Sequence[Any]) -> tuple[SystemicLoss, ...]:
-    return tuple(
-        SystemicLoss(
-            loss_id=item.loss_id,
-            description=item.description,
-            provenance=_enum_value(item.provenance) or "",
-            source_risk_cards=tuple(item.source_risk_cards),
-        )
-        for item in values
-    )
+def _snapshot_value(annotation: Any, value: Any) -> Any:
+    if isinstance(value, (list, tuple)):
+        return tuple(_snapshot_value(annotation, item) for item in value)
+    if isinstance(value, BaseModel):
+        return _snapshot(_snapshot_model(annotation), value)
+    return _enum_value(value) if isinstance(value, Enum) else value
 
 
-def _hazard_snapshots(values: Sequence[Any]) -> tuple[SystemicHazard, ...]:
-    return tuple(
-        SystemicHazard(
-            hazard_id=item.hazard_id,
-            description=item.description,
-            related_losses=tuple(item.related_losses),
-        )
-        for item in values
-    )
-
-
-def _constraint_snapshots(
-    values: Sequence[Any],
-) -> tuple[SystemicSecurityConstraint, ...]:
-    return tuple(
-        SystemicSecurityConstraint(
-            constraint_id=item.constraint_id,
-            description=item.description,
-            related_hazards=tuple(item.related_hazards),
-        )
-        for item in values
-    )
-
-
-def _element_reference(value: object) -> SystemicElementReference | None:
-    if value is None:
-        return None
-    return SystemicElementReference(type=_enum_value(value.type) or "", id=value.id)
+def _snapshot_model(annotation: Any) -> type[BaseModel]:
+    for candidate in (annotation, *get_args(annotation)):
+        if isinstance(candidate, type) and issubclass(candidate, BaseModel):
+            return candidate
+    raise TypeError(f"snapshot field {annotation!r} names no snapshot model")
 
 
 def _control_action_snapshot(
     controller_id: str, value: ControlAction
 ) -> SystemicControlAction:
-    return SystemicControlAction(
+    return _snapshot(
+        SystemicControlAction,
+        value,
         control_action_id=value.ca_id,
         controller_id=controller_id,
-        description=value.description,
-        target=_element_reference(value.target),
-        effect_kind=_enum_value(value.effect_kind),
-        temporality=_enum_value(value.temporality),
     )
 
 
 def _control_structure_snapshot(
     value: ControlStructure,
 ) -> SystemicControlStructureSnapshot:
-    return SystemicControlStructureSnapshot(
-        responsibilities=_responsibility_snapshots(value.responsibilities),
-        controlled_processes=_process_snapshots(value.controlled_processes),
-        coordination_links=_coordination_snapshots(value.coordination_links),
-    )
-
-
-def _responsibility_snapshots(
-    values: Sequence[Any],
-) -> tuple[SystemicResponsibility, ...]:
-    return tuple(_responsibility_snapshot(item) for item in values)
-
-
-def _responsibility_snapshot(value: Any) -> SystemicResponsibility:
-    return SystemicResponsibility(
-        resp_id=value.resp_id,
-        description=value.description,
-        responsibility_constraints=_responsibility_constraints(value),
-        security_constraint_refs=tuple(value.security_constraint_refs),
-        process_model_parts=_process_model_part_snapshots(value.process_model_parts),
-        control_actions=tuple(
-            _control_action_snapshot(value.resp_id, item)
-            for item in value.control_actions
-        ),
-        feedback_channels=_feedback_channel_snapshots(value.feedback_channels),
-    )
-
-
-def _responsibility_constraints(
-    value: Any,
-) -> tuple[SystemicResponsibilityConstraint, ...]:
-    return tuple(
-        SystemicResponsibilityConstraint(rc_id=item.rc_id, description=item.description)
-        for item in value.responsibility_constraints
-    )
-
-
-def _process_model_part_snapshots(
-    values: Sequence[Any],
-) -> tuple[SystemicProcessModelPart, ...]:
-    return tuple(
-        SystemicProcessModelPart(
-            pm_id=item.pm_id,
-            description=item.description,
-            feedback_source=_element_reference(item.feedback_source),
-        )
-        for item in values
-    )
-
-
-def _feedback_channel_snapshots(
-    values: Sequence[Any],
-) -> tuple[SystemicFeedbackChannel, ...]:
-    return tuple(
-        SystemicFeedbackChannel(
-            fb_id=item.fb_id,
-            description=item.description,
-            updates=item.updates,
-            source=_element_reference(item.source),
-        )
-        for item in values
-    )
-
-
-def _process_snapshots(
-    values: Sequence[Any],
-) -> tuple[SystemicControlledProcess, ...]:
-    return tuple(
-        SystemicControlledProcess(cp_id=item.cp_id, description=item.description)
-        for item in values
-    )
-
-
-def _coordination_snapshots(
-    values: Sequence[Any],
-) -> tuple[SystemicCoordinationLink, ...]:
-    return tuple(_coordination_snapshot(item) for item in values)
-
-
-def _coordination_snapshot(value: Any) -> SystemicCoordinationLink:
-    return SystemicCoordinationLink(
-        link_id=value.link_id,
-        source=value.source,
-        target=value.target,
-        shared_pm=value.shared_pm,
-        coordination_mechanism=SystemicCoordinationMechanism(
-            cm_id=value.coordination_mechanism.cm_id,
-            description=value.coordination_mechanism.description,
-            payload=value.coordination_mechanism.payload,
-        ),
-        description=value.description,
-    )
-
-
-def _ica_snapshot(value: ICAEnumeration) -> SystemicICAEnumerationSnapshot:
-    return SystemicICAEnumerationSnapshot(
-        slots=tuple(
-            SystemicICASlot(
-                slot_id=slot.slot_id,
-                responsibility=slot.responsibility,
-                coordination_link=slot.coordination_link,
-                control_action=slot.control_action,
-                action_temporality=_enum_value(slot.action_temporality),
-                uca_type=_enum_value(slot.uca_type) or "",
-                is_na=slot.is_na,
-                icas=tuple(
-                    SystemicICA(
-                        ica_id=ica.ica_id,
-                        ica_text=ica.ica_text,
-                        deviation=getattr(ica, "deviation", None),
-                        hazardous_context=ica.hazardous_context,
-                        loss_scenario=ica.loss_scenario,
-                        related_hazards=tuple(ica.related_hazards),
-                        related_constraints=tuple(ica.related_constraints),
-                        quality_warnings=tuple(ica.quality_warnings),
-                    )
-                    for ica in slot.icas
+    return _snapshot(
+        SystemicControlStructureSnapshot,
+        value,
+        responsibilities=tuple(
+            _snapshot(
+                SystemicResponsibility,
+                item,
+                control_actions=tuple(
+                    _control_action_snapshot(item.resp_id, action)
+                    for action in item.control_actions
                 ),
-                na_justification=slot.na_justification,
-                unresolved_reason=slot.unresolved_reason,
             )
-            for slot in value.slots
-        )
+            for item in value.responsibilities
+        ),
     )
 
 

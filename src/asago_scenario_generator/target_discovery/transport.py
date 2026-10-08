@@ -46,10 +46,6 @@ class HttpMcpInventoryAdapter:
         """Call MCP ``initialize`` + ``tools/list`` for one page."""
         return _run_sync(self._list_tools_async(cursor))
 
-    def call_tool(self, tool_name: str, arguments: Mapping[str, Any]) -> Any:
-        """Call one tool for explicit disposable-test inspection."""
-        return _run_sync(self._call_tool_async(tool_name, arguments))
-
     async def _list_tools_async(self, cursor: str | None) -> McpInventoryPage:
         try:
             from mcp import ClientSession
@@ -59,7 +55,9 @@ class HttpMcpInventoryAdapter:
                 "live MCP scanning requires the optional 'target-discovery' extra"
             ) from exc
         try:
-            async with sse_client(self._server_url, headers=self._headers) as streams:
+            async with sse_client(
+                self._server_url, headers=self._headers, timeout=self._timeout
+            ) as streams:
                 async with ClientSession(*streams) as session:
                     await session.initialize()
                     # The installed SDK exposes paging through the
@@ -84,29 +82,6 @@ class HttpMcpInventoryAdapter:
             next_cursor=next_cursor,
             complete=next_cursor is None,
         )
-
-    async def _call_tool_async(
-        self,
-        tool_name: str,
-        arguments: Mapping[str, Any],
-    ) -> Any:
-        try:
-            from mcp import ClientSession
-            from mcp.client.sse import sse_client
-        except ImportError as exc:  # pragma: no cover - exercised without extra
-            raise McpTransportError(
-                "live MCP scanning requires the optional 'target-discovery' extra"
-            ) from exc
-        try:
-            async with sse_client(self._server_url, headers=self._headers) as streams:
-                async with ClientSession(*streams) as session:
-                    await session.initialize()
-                    response = await session.call_tool(tool_name, dict(arguments))
-        except Exception as exc:  # noqa: BLE001 - normalize SDK failures
-            raise McpTransportError(
-                f"MCP tool call transport failed: {type(exc).__name__}: {exc}"
-            ) from exc
-        return _model_payload(response)
 
 
 def _run_sync(awaitable: Any) -> Any:

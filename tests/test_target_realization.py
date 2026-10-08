@@ -382,6 +382,13 @@ def test_from_stpa_requires_exact_typed_authorities():
         )
 
 
+def test_snapshot_field_without_a_snapshot_model_is_rejected():
+    from asago_scenario_generator.models import target_realization as models
+
+    with pytest.raises(TypeError, match="names no snapshot model"):
+        models._snapshot_model(tuple[str, ...])
+
+
 def test_realization_keeps_ambiguous_and_unmapped_rows_visible():
     baseline = _baseline_with_actions(
         [

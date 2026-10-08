@@ -11,7 +11,6 @@ from pydantic import ValidationError
 
 from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.models.execution_classification import (
-    DiscoveryMode,
     DiscoveryProvenance,
     ExecutionSurface,
     ExecutionTargetProfile,
@@ -107,9 +106,6 @@ def discover_mcp_target(
     calls.extend(interpretation_calls)
     diagnostics = list(inventory_diagnostics) + list(interpretation_diagnostics)
 
-    _run_optional_active_inspection(
-        inputs, inventory_adapter, inventory, interpretations, calls, diagnostics
-    )
     profile = _build_profile(
         inputs,
         inventory,
@@ -167,20 +163,6 @@ def _build_inventory(
         pagination_complete=pagination_complete,
         page_count=len(pages),
     )
-
-
-def _run_optional_active_inspection(
-    inputs: McpTargetDiscoveryInputs,
-    adapter: McpInventoryAdapter,
-    inventory: McpInventoryObservation,
-    interpretations: Sequence[TargetSemanticInterpretation],
-    calls: list[dict[str, Any]],
-    diagnostics: list[TargetDiscoveryDiagnostic],
-) -> None:
-    if inputs.mode is DiscoveryMode.disposable_test_environment:
-        _run_active_inspection(
-            inputs, adapter, inventory, interpretations, calls, diagnostics
-        )
 
 
 def _inventory_completeness(
@@ -445,9 +427,7 @@ def _next_inventory_cursor(
 def _scan_controls(inputs: McpTargetDiscoveryInputs) -> dict[str, Any]:
     """Return non-secret scanner controls for manifest accounting."""
     return {
-        "active_inspection_tool_names": list(inputs.active_inspection_tool_names),
         "interpretation_batch_size": inputs.interpretation_batch_size,
-        "max_active_inspection_calls": inputs.max_active_inspection_calls,
         "model_name": inputs.model_name,
         "model_profile": inputs.model_profile,
         "scanner_id": inputs.scanner_id,
@@ -1210,122 +1190,6 @@ def _unresolved_interpretation(
         evidence_refs=(view.evidence_refs[0],),
         rationale="No verified semantic interpretation was supplied.",
         interpreter_verifier_agreement=agreement,
-    )
-
-
-def _run_active_inspection(
-    inputs: McpTargetDiscoveryInputs,
-    adapter: McpInventoryAdapter,
-    inventory: McpInventoryObservation,
-    interpretations: Sequence[TargetSemanticInterpretation],
-    calls: list[dict[str, Any]],
-    diagnostics: list[TargetDiscoveryDiagnostic],
-) -> None:
-    """Perform only caller-named bounded inspection calls in disposable mode."""
-    known_names = {tool.name for tool in inventory.tools}
-    by_name = {item.tool_name: item for item in interpretations}
-    attempted_calls = 0
-    for name in inputs.active_inspection_tool_names:
-        if attempted_calls >= inputs.max_active_inspection_calls:
-            diagnostics.append(_active_limit_diagnostic(name))
-            continue
-        if name not in known_names:
-            diagnostics.append(_active_unknown_diagnostic(name))
-            continue
-        attempted_calls += _inspect_active_tool(
-            name,
-            adapter,
-            inventory,
-            by_name,
-            calls,
-            diagnostics,
-        )
-
-
-def _active_limit_diagnostic(name: str) -> TargetDiscoveryDiagnostic:
-    return _diagnostic(
-        TargetDiscoveryDiagnosticCode.active_inspection_disabled,
-        "active inspection skipped: maximum call limit reached",
-        tool_name=name,
-        severity=TargetDiscoverySeverity.warning,
-    )
-
-
-def _active_unknown_diagnostic(name: str) -> TargetDiscoveryDiagnostic:
-    return _diagnostic(
-        TargetDiscoveryDiagnosticCode.active_inspection_failure,
-        "active inspection requested an unobserved tool",
-        tool_name=name,
-        severity=TargetDiscoverySeverity.warning,
-    )
-
-
-def _inspect_active_tool(
-    name: str,
-    adapter: McpInventoryAdapter,
-    inventory: McpInventoryObservation,
-    interpretations: Mapping[str, TargetSemanticInterpretation],
-    calls: list[dict[str, Any]],
-    diagnostics: list[TargetDiscoveryDiagnostic],
-) -> int:
-    """Inspect one known tool and return one only when a call was attempted."""
-    tool = next(item for item in inventory.tools if item.name == name)
-    if not _active_inspection_allowed(tool, interpretations.get(name)):
-        diagnostics.append(
-            _diagnostic(
-                TargetDiscoveryDiagnosticCode.active_inspection_disabled,
-                "active inspection skipped: operation is not verified read-only",
-                tool_name=name,
-                severity=TargetDiscoverySeverity.warning,
-            )
-        )
-        return 0
-    try:
-        result = adapter.call_tool(name, {})
-    except Exception as exc:  # noqa: BLE001 - retain inspection failure
-        diagnostics.append(
-            _diagnostic(
-                TargetDiscoveryDiagnosticCode.active_inspection_failure,
-                f"active inspection failed: {type(exc).__name__}",
-                tool_name=name,
-                severity=TargetDiscoverySeverity.warning,
-            )
-        )
-        calls.append(
-            {
-                "kind": "tool_call",
-                "tool_name": name,
-                "status": "error",
-                "error_type": type(exc).__name__,
-            }
-        )
-        return 1
-    calls.append(
-        {
-            "kind": "tool_call",
-            "tool_name": name,
-            "status": "ok",
-            "arguments_digest": _digest_json({}),
-            "result_digest": _digest_json(result),
-        }
-    )
-    return 1
-
-
-def _active_inspection_allowed(
-    tool: McpToolObservation,
-    interpretation: TargetSemanticInterpretation | None,
-) -> bool:
-    """Allow only verified read/observe operations callable with empty input."""
-    return (
-        interpretation is not None
-        and interpretation.disposition is TargetInterpretationDisposition.supported
-        and interpretation.interpreter_verifier_agreement
-        is InterpreterVerifierAgreement.agree
-        and interpretation.likely_effect
-        in {TargetOperationEffect.read, TargetOperationEffect.observe}
-        and interpretation.likely_state_effect is TargetStateEffect.none
-        and not tool.input_schema.get("required", ())
     )
 
 

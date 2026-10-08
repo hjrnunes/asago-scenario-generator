@@ -172,7 +172,6 @@ class DiscoveryMode(str, Enum):
     """Whether discovery only observes the protocol or may call tools."""
 
     schema_only = "schema_only"
-    disposable_test_environment = "disposable_test_environment"
 
 
 class TargetDiscoveryDiagnosticCode(str, Enum):
