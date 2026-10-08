@@ -206,16 +206,30 @@ def _decode_json_text_with_evidence(
     return decoded, transformations
 
 
+def _fenced_json_body(value: str) -> str | None:
+    """Return the body inside one exact outer JSON Markdown fence, else None."""
+    lines = value.strip().splitlines()
+    if (
+        len(lines) >= 3
+        and lines[0].strip().lower() in {"```json", "```"}
+        and lines[-1].strip() == "```"
+    ):
+        return "\n".join(lines[1:-1])
+    return None
+
+
+def strip_json_fence(text: str) -> str:
+    """Return the body inside one exact outer JSON fence, else the stripped text."""
+    body = _fenced_json_body(text)
+    return text.strip() if body is None else body
+
+
 def _remove_markdown_fence(value: str) -> tuple[str, str | None]:
     """Remove one exact outer JSON Markdown fence when present."""
-    lines = value.strip().splitlines()
-    if len(lines) < 3:
+    body = _fenced_json_body(value)
+    if body is None:
         return value, None
-    if lines[0].strip().lower() not in {"```json", "```"}:
-        return value, None
-    if lines[-1].strip() != "```":
-        return value, None
-    return "\n".join(lines[1:-1]), "\n".join(lines[1:-1])
+    return body, body
 
 
 def _decode_json_text(value: str) -> Any:

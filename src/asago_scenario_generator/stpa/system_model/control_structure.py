@@ -32,6 +32,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     call_with_policy,
     decode_content,
     log_llm_call_failure,
+    strip_json_fence,
 )
 from asago_scenario_generator.stpa._model_data import raw_model_data
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -820,15 +821,7 @@ def _decode_control_element_payload(value: Any) -> dict[str, Any]:
     if isinstance(value, BaseModel):
         value = raw_model_data(value)
     elif isinstance(value, str):
-        text = value.strip()
-        lines = text.splitlines()
-        if (
-            len(lines) >= 3
-            and lines[0].strip().lower() in {"```json", "```"}
-            and lines[-1].strip() == "```"
-        ):
-            text = "\n".join(lines[1:-1])
-        value = json.loads(text)
+        value = json.loads(strip_json_fence(value))
     if not isinstance(value, dict):
         raise ValueError(
             "Call 2b response must be one JSON object containing control_actions, "
