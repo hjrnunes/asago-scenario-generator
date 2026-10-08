@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -21,9 +22,6 @@ from asago_scenario_generator.pipeline.synthesis_types import (
     MANIFEST_FILENAME,
     PLAN_FILENAME,
     REPORT_FILENAME,
-    PersistArtifactPort,
-    PersistManifestPort,
-    ReportPort,
     StageRun,
     SynthesisAdapters,
     SynthesisInputs,
@@ -85,7 +83,7 @@ def _persist_sidecar(
     output_dir: Path,
     filename: str,
     artifact: Any,
-    writer: PersistArtifactPort | None,
+    writer: Callable[..., Any] | None,
     label: str,
 ) -> Path:
     """Write one closed artifact atomically, then perform a best-effort reload."""
@@ -114,7 +112,7 @@ def _persist_slot_hazard_offers(output_dir: Path, report: Any | None) -> Path | 
 def _persist_target_realization(
     output_dir: Path,
     artifact: Any | None,
-    writer: PersistArtifactPort | None,
+    writer: Callable[..., Any] | None,
 ) -> Path | None:
     """Publish the additive target lens only when a target was supplied."""
     if artifact is None:
@@ -134,7 +132,7 @@ def _persist_target_realization(
 def _persist_manifest(
     output_dir: Path,
     manifest: Any,
-    writer: PersistManifestPort | None,
+    writer: Callable[..., Any] | None,
 ) -> Path:
     """Atomically publish and verify the top-level synthesis manifest."""
     if writer is not None:
@@ -160,7 +158,7 @@ def _render_report(
     realization: Any,
     target_realization: Any,
     scenario_result: Any,
-    renderer: ReportPort | None,
+    renderer: Callable[..., Any] | None,
 ) -> Path | None:
     """Render the read-only synthesis report after all normative sidecars."""
     if renderer is not None:
