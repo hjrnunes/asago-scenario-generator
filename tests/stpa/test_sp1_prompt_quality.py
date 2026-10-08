@@ -1,8 +1,8 @@
 """Tests for Stage 1 prompt quality (updated for stage1a split + stage1b revision).
 
-The fixed Stage 1a and Stage 2 wording lives in the phrase tables under
-``tests/phrases/``; this module keeps the input-dependent checks, the
-template-source checks, the Stage 1b checks and the rendering properties.
+The fixed Stage 1a, Stage 1b and Stage 2 wording lives in the phrase tables
+under ``tests/phrases/``; this module keeps the input-dependent checks, the
+template-source checks and the rendering properties.
 """
 
 from __future__ import annotations
@@ -21,7 +21,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 
 _STAGE1A_RISK_USER = "stage1a_risk_user.j2"
 _STAGE1A_GAP_USER = "stage1a_gap_user.j2"
-_STAGE1B_SYSTEM = "stage1b_system.j2"
 
 # System templates that take zero template variables — they are pure
 # static prompts whose rendered output equals their raw text.
@@ -122,31 +121,8 @@ def test_pqf_12_stage1a_gap_user_preserves_jinja_variables() -> None:
 
 
 # ---------------------------------------------------------------------------
-# stage1b revision quality checks
+# stage1b_user source checks
 # ---------------------------------------------------------------------------
-
-
-def test_pqf_13_stage1b_kc_taxonomy_in_prompt() -> None:
-    text = _text(_STAGE1B_SYSTEM)
-    assert "KC1 — Language Models" in text
-    assert "KC6 — Operational Environment" in text
-    assert "KCX — Extended Capabilities" in text
-
-
-def test_pqf_14_stage1b_no_stpa_terminology() -> None:
-    text = _text(_STAGE1B_SYSTEM)
-    assert "STPA" not in text
-
-
-def test_pqf_15_stage1b_no_zones_active_output() -> None:
-    text = _text(_STAGE1B_SYSTEM)
-    assert "zones_active" not in text
-
-
-def test_pqf_16_stage1b_no_entry_point_checklist() -> None:
-    text = _text(_STAGE1B_SYSTEM)
-    assert "User input surfaces" not in text
-    assert "Entry point category checklist" not in text
 
 
 def test_pqf_17_stage1b_user_no_loss_context() -> None:

@@ -3,12 +3,14 @@ cases:
   no-variables:
     required:
       - "## KC Sub-Code Taxonomy"
+      - "## Rules"
       - "## Tool Inventory"
       - "**controllability**: \"direct\" (attacker types input)"
       - "**direction**: \"input\" (attacker sends data in)"
       - "**name**: short description of the entry point"
       - A component can appear in both tool_inventory and entry_points
       - Do not infer capabilities speculatively
+      - Do not invent tools based on what a system like this might have
       - Identify every attacker-accessible ingress path
       - KC2.3 (multi-agent) implies entry points at inter-agent message channels
       - KC4.3+ (cross-session memory) implies entry points at the memory store

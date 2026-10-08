@@ -1,8 +1,7 @@
 """Regression tests for the SP1 prompt bug fixes.
 
-The fixed Stage 1a and Stage 2 wording lives in the phrase tables under
-``tests/phrases/``. The Stage 1b pins stay here while the capability-inference
-work on Stage 1b is in flight.
+The fixed Stage 1a, Stage 1b and Stage 2 wording lives in the phrase tables
+under ``tests/phrases/``.
 """
 
 from __future__ import annotations
@@ -14,27 +13,6 @@ from hypothesis import given, settings, strategies as st
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
-
-
-_STAGE1B_REQUIRED = (
-    "every tool must be explicitly mentioned or directly implied "
-    "by the use-case description",
-    "Do not invent tools based on what a system like this might have",
-)
-
-
-def test_stage1b_bug_fix_content_is_in_template() -> None:
-    text = (PROMPTS_DIR / "stage1b_system.j2").read_text()
-    assert all(fragment in text for fragment in _STAGE1B_REQUIRED)
-
-
-def test_stage1b_bug_fix_content_renders() -> None:
-    rendered = TemplateLoader(PROMPTS_DIR).render_prompt("stage1b_system.j2")
-    assert all(fragment in rendered for fragment in _STAGE1B_REQUIRED)
-
-
-def test_stage1b_bug_fixes_preserve_existing_sections() -> None:
-    assert "## Rules" in (PROMPTS_DIR / "stage1b_system.j2").read_text()
 
 
 @pytest.mark.parametrize("template_name", ("critic_system.j2", "revision_system.j2"))
