@@ -627,7 +627,6 @@ SYSTEM_MODEL_LAYERS: dict[str, int] = {
 
 SCENARIO_PROD_LAYERS: dict[str, int] = {
     "target_observations": 0,
-    "outcome_grounding": 0,
     # Discriminating-condition resolution depends only on models and the
     # target-observation snapshot; its state index depends only on models.
     "condition_check": 0,

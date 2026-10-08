@@ -4,9 +4,6 @@ from __future__ import annotations
 
 import re
 from collections.abc import Mapping, Sequence
-from asago_scenario_generator.stpa.scenario_prod.outcome_grounding import (
-    scope_temporal_placeholder,
-)
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     AbsenceCondition,
     DelayCondition,
@@ -193,13 +190,27 @@ def _coerce_temporal_value(
             ),
         )
     if isinstance(value, SemanticBindingPlaceholder):
-        value = scope_temporal_placeholder(
-            value,
-            binding_scope,
-            field_name.removesuffix("_ms"),
+        value = _scope_temporal_placeholder(
+            value, binding_scope, field_name.removesuffix("_ms")
         )
     if value is None:
         raise _temporal_field_issue(
             f"{field_name} is required for the selected temporal condition"
         )
     return value
+
+
+def _scope_temporal_placeholder(
+    value: SemanticBindingPlaceholder, scope: str, field_name: str
+) -> SemanticBindingPlaceholder:
+    """Namespace one temporal placeholder to its factor and field.
+
+    Re-scoping is idempotent only for this factor and field: a provider may
+    copy another factor's reference, and that occurrence must still be
+    independently bindable.
+    """
+    expected_prefix = f"SEM-{scope}-{field_name}-"
+    if value.binding_ref.startswith(expected_prefix):
+        return value
+    base = value.binding_ref.removeprefix("SEM-")
+    return value.model_copy(update={"binding_ref": f"{expected_prefix}{base}"})
