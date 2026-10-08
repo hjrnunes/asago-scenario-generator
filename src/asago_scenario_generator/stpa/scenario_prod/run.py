@@ -1384,41 +1384,6 @@ def _validate_stage5_spec(
         ),
         stage_errors,
     )
-    context = spec.scenario_context
-    if context is not None:
-        stage_errors.extend(_contextual_stage5_errors(spec))
-
-
-def _contextual_stage5_errors(spec: ScenarioSpec) -> list[str]:
-    """Validate exact intention references in one context."""
-    context = spec.scenario_context
-    if context is None:
-        return []
-    return _intention_reference_errors(spec, _allowed_intention_refs(context))
-
-
-def _allowed_intention_refs(context: ScenarioGenerationContext) -> set[str]:
-    """Return exact structural IDs that an intention may cite."""
-    path = context.target_control_path
-    return {
-        *(item.element_id for item in path.process_model_parts),
-        *(item.element_id for item in path.feedback),
-        path.control_action.action_id,
-        *(item.action_id for item in path.related_control_actions),
-    }
-
-
-def _intention_reference_errors(
-    spec: ScenarioSpec,
-    allowed_refs: set[str],
-) -> list[str]:
-    """Report intentions that cite none of the selected path identities."""
-    return [
-        "Attacker BDI intention has no exact structural reference "
-        f"from the selected scenario context: {intention!r}"
-        for intention in spec.attacker_bdi.intentions
-        if not any(reference in intention for reference in allowed_refs)
-    ]
 
 
 def _run_stage6_for_spec(
