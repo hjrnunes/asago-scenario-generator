@@ -78,7 +78,6 @@ def _build_manifest(
         operation_enrichment=operation_enrichment,
         ica_enumeration=ica_enumeration,
         scenario_result=scenario_result,
-        counts=counts,
     )
     scenario_counts = _manifest_scenario_counts(scenario_result, len(scenarios))
     run_status, run_status_reason = _scenario_generation_status(scenario_counts)
@@ -348,10 +347,8 @@ def _manifest_source_artifacts(
     operation_enrichment: Any | None = None,
     ica_enumeration: Any,
     scenario_result: Any,
-    counts: Mapping[str, int],
 ) -> dict[str, dict[str, str]]:
     """Build the complete source identity inventory for the run manifest."""
-    del counts  # reserved for future artifact-level accounting metadata
     baseline_loss = baseline.loss_analysis
     baseline_control = baseline.control_structure
     ordinary_icas = ica_enumeration.ica_enumeration

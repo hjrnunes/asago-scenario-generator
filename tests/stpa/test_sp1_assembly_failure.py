@@ -15,7 +15,12 @@ from asago_scenario_generator.models.capability_profile import Stage1Profile
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
+    Loss,
+    LossAnalysis,
     LossAnalysisDraft,
+    LossProvenance,
+    SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
@@ -36,15 +41,35 @@ from tests.stpa.sp1_helpers import (
     valid_stage1_profile_dict,
 )
 from asago_scenario_generator.stpa.system_model.critic import CriticFindings
-from tests.helpers.sp1_connection_set_merge import (
-    _make_loss_analysis,
-    _valid_requirement_set_dict,
-)
+from tests.helpers.sp1_control_structure import _valid_requirement_set_dict
 
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
+
+def _make_loss_analysis() -> LossAnalysis:
+    """One hazard, so the Call 3 semantic review needs one hazard entry."""
+    return LossAnalysis(
+        risk_card_losses=[],
+        use_case_losses=[
+            Loss(
+                loss_id="L-1",
+                description="Loss",
+                provenance=LossProvenance.use_case,
+            )
+        ],
+        hazards=[
+            Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"]),
+        ],
+        security_constraints=[
+            SecurityConstraint(constraint_id="SC-1", rule="C", related_hazards=["H-1"]),
+            SecurityConstraint(
+                constraint_id="SC-2", rule="C2", related_hazards=["H-1"]
+            ),
+        ],
+    )
 
 
 def _valid_loss_analysis_dict() -> dict:

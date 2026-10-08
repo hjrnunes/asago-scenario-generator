@@ -6,21 +6,8 @@ from asago_scenario_generator.pipeline.governance_rows import (
     select_governance_risks,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import RiskDisposition
-from tests.helpers.obligation_factory import make_plan
 from tests.stpa.helpers import make_minimal_loss_analysis
-from tests.helpers.governance import _pattern
-
-
-def _plan(*risk_ids: str):
-    mappings = [
-        {
-            "source_id": "risk-a",
-            "target_id": _pattern().id,
-            "relation": "exact_match",
-            "confidence": 1.0,
-        }
-    ]
-    return make_plan(risk_ids=("risk-a", *risk_ids), mappings=mappings)
+from tests.helpers.governance import _plan
 
 
 def _loss_analysis(*dispositions: RiskDisposition):

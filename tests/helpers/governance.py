@@ -69,7 +69,7 @@ def _pattern() -> AttackPattern:
     return AttackPattern.model_validate(get_test_raw_pattern())
 
 
-def _setup(*risk_ids: str):
+def _plan(*risk_ids: str):
     mappings = [
         {
             "source_id": "risk-a",
@@ -78,7 +78,11 @@ def _setup(*risk_ids: str):
             "confidence": 1.0,
         }
     ]
-    plan = make_plan(risk_ids=("risk-a", *risk_ids), mappings=mappings)
+    return make_plan(risk_ids=("risk-a", *risk_ids), mappings=mappings)
+
+
+def _setup(*risk_ids: str):
+    plan = _plan(*risk_ids)
     loss_analysis = make_minimal_loss_analysis().model_copy(
         update={
             "risk_dispositions": [

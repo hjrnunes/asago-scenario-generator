@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
-    TargetObservation,
     TargetObservationSnapshot,
 )
-from tests.helpers.normal_authoring_wire import _normal_payload
+from tests.helpers.normal_authoring_wire import _normal_payload, _state_snapshot
 
 
 # Generic conditions over the synthetic fixtures imported above.
@@ -39,19 +38,9 @@ OBSERVED_CONDITION = {
 
 def _nested_observations() -> TargetObservationSnapshot:
     """A quoted target state with a keyed record collection."""
-    return TargetObservationSnapshot.create(
-        target_profile_digest="a" * 64,
-        observations=(
-            TargetObservation(
-                observation_ref="TARGET-STATE",
-                kind="state",
-                content_format="json",
-                content=(
-                    '{"order_id": "ORD-104", "refund_eligible": false, '
-                    '"widgets": {"W-2": {"status": "open"}}}'
-                ),
-            ),
-        ),
+    return _state_snapshot(
+        '{"order_id": "ORD-104", "refund_eligible": false, '
+        '"widgets": {"W-2": {"status": "open"}}}'
     )
 
 

@@ -2,11 +2,21 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 import httpx
 import openai
 from openai.types.chat import ChatCompletion
-from tests.helpers.provider_call_record import _answer, _http_response, _Provider
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CorrectionPolicy,
+    call_with_policy,
+)
+from tests.helpers.provider_call_record import (
+    _Answer,
+    _answer,
+    _http_response,
+    _Provider,
+)
 
 
 _REQUEST = httpx.Request("POST", "https://provider.invalid/v1/chat")
@@ -40,3 +50,16 @@ def _failing_then(*failures: BaseException) -> _Provider:
         return _answer()
 
     return _Provider(respond)
+
+
+def _call(client: Any, tmp_path: Path) -> Any:
+    return call_with_policy(
+        llm_client=client,
+        system_prompt="s",
+        user_prompt="u",
+        response_format=_Answer,
+        run_dir=tmp_path,
+        stage="stage_x",
+        step="call_answer",
+        policy=CorrectionPolicy(),
+    )

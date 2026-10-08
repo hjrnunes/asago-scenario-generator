@@ -11,6 +11,7 @@ from __future__ import annotations
 import hashlib
 import json
 import unicodedata
+from collections.abc import Mapping
 from typing import Any, ClassVar, Self
 
 import yaml
@@ -110,6 +111,37 @@ def normalize_unicode(value: Any, *, keep_models: bool = False) -> Any:
     if isinstance(value, (list, tuple)):
         return [normalize_unicode(item, keep_models=keep_models) for item in value]
     return value
+
+
+def freeze_json(value: Any) -> Any:
+    """Recursively close JSON data into ``FrozenDict`` and ``FrozenList``.
+
+    A ``FrozenDict`` or ``FrozenList`` passes through unchanged and unchecked,
+    because an earlier call already closed it. Scalars pass through; a NaN float
+    raises ``ValueError``, and any other non-JSON value or non-string mapping
+    key raises ``TypeError``.
+    """
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return _checked_json_scalar(value)
+    if isinstance(value, FrozenDict | FrozenList):
+        return value
+    if isinstance(value, Mapping):
+        return _freeze_json_mapping(value)
+    if isinstance(value, (list, tuple)):
+        return FrozenList(freeze_json(item) for item in value)
+    raise TypeError("JSON data must contain only JSON values")
+
+
+def _checked_json_scalar(value: Any) -> Any:
+    if isinstance(value, float) and value != value:
+        raise ValueError("JSON data cannot contain NaN")
+    return value
+
+
+def _freeze_json_mapping(value: Mapping[Any, Any]) -> FrozenDict:
+    if any(not isinstance(key, str) for key in value):
+        raise TypeError("JSON mapping keys must be strings")
+    return FrozenDict({key: freeze_json(item) for key, item in value.items()})
 
 
 def unique_sorted_strings(values: tuple[str, ...], label: str) -> tuple[str, ...]:
@@ -220,6 +252,7 @@ __all__ = [
     "canonical_json_bytes",
     "canonical_yaml",
     "compute_framed_digest",
+    "freeze_json",
     "load_yaml_mapping",
     "normalize_unicode",
     "unique_sorted_strings",

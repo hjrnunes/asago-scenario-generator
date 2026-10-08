@@ -6,10 +6,10 @@ import pytest
 
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
+    McpToolObservation,
     ProfileBasis,
     SimulationBehavior,
     TargetProfileResource,
-    _freeze_json,
 )
 from tests.helpers.execution_classification import (
     _simulation_profile,
@@ -84,18 +84,21 @@ def test_target_profile_rejects_simulation_behavior() -> None:
         _profile_update(_target_profile(resources=(resource,)))
 
 
-def test_interface_json_freezing_covers_nested_and_rejected_values() -> None:
-    assert _freeze_json({"nested": [1, {"enabled": True}], "empty": None}) == {
-        "nested": [1, {"enabled": True}],
-        "empty": None,
-    }
-    assert _freeze_json("scalar") == "scalar"
-    with pytest.raises(TypeError, match="mapping keys"):
-        _freeze_json({1: "not-json"})
-    with pytest.raises(TypeError, match="only JSON values"):
-        _freeze_json(object())
-    with pytest.raises(ValueError, match="NaN"):
-        _freeze_json(float("nan"))
+@pytest.mark.parametrize("properties", (None, [], "query"))
+def test_input_schema_rejects_non_mapping_properties_before_names_derive(
+    properties: object,
+) -> None:
+    schema = {"type": "object", "properties": properties}
+    with pytest.raises(ValueError, match="not a valid JSON Schema"):
+        McpToolObservation(
+            name="lookup",
+            source_observation_sha256="1" * 64,
+            input_schema=schema,
+        )
+    payload = _target_profile().resources[0].model_dump(mode="json")
+    payload["input_schema"] = schema
+    with pytest.raises(ValueError, match="not a valid JSON Schema"):
+        TargetProfileResource.model_validate(payload)
 
 
 def test_reviewed_resource_requires_evidence() -> None:

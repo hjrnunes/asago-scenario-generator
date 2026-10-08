@@ -24,16 +24,13 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ResponsibilityConstraint,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
     LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     run_completeness_critic,
 )
+from tests.helpers.loss_analysis import single_hazard_loss_analysis
 from tests.helpers.stpa_builders import make_capability_profile
 from tests.stpa.sp1_helpers import MockLLMClient, valid_critic_findings_dict_no_gaps
 
@@ -92,33 +89,6 @@ def _structure() -> ControlStructure:
     )
 
 
-def _loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[],
-        use_case_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Unauthorised disclosure of customer records",
-                provenance=LossProvenance.use_case,
-            )
-        ],
-        hazards=[
-            Hazard(
-                hazard_id="H-1",
-                description="Retrieval returns records outside the session scope",
-                related_losses=["L-1"],
-            )
-        ],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1",
-                rule="Retrieval must be scoped to the active session",
-                related_hazards=["H-1"],
-            )
-        ],
-    )
-
-
 def _critic_user_prompt(
     tmp_path: Path,
     *,
@@ -165,7 +135,7 @@ def test_nested_elements_are_not_bare_identifier_lists(tmp_path: Path) -> None:
 
 def test_loss_analysis_renders_losses_hazards_and_constraints(tmp_path: Path) -> None:
     prompt = _critic_user_prompt(
-        tmp_path, loss_analysis=_loss_analysis(), call3_warnings=[_WARNING]
+        tmp_path, loss_analysis=single_hazard_loss_analysis(), call3_warnings=[_WARNING]
     )
 
     for fragment in (

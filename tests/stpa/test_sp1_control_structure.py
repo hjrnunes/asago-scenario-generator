@@ -1,6 +1,8 @@
 """Tests for SP1 Stage 2 — Control Structure derivation.
 
-Covers SP1-S2-01 through SP1-S2-15 from the Gherkin feature file.
+Covers SP1-S2-01 through SP1-S2-15 from the Gherkin feature file, and the
+coordination-link and controlled-process behavior that replaced the old
+ConnectionSet merge (ConnSet-01 through ConnSet-11).
 
 Stage 2 now has 4 calls:
   Call 1  — Requirements
@@ -18,8 +20,13 @@ from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
     ControlStructure,
+    ElementRef,
+    FeedbackChannel,
+    ProcessModelPart,
     ReferenceType,
+    Responsibility,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
@@ -29,6 +36,11 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     derive_control_structure,
     PROMPTS_DIR,
     _call_2a_responsibilities,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings,
+    run_revision,
+    RevisionDelta,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.calls_log import read_calls_jsonl
@@ -466,6 +478,7 @@ class TestStage2Derivation:
         assert yaml_file.exists()
         loaded = read_yaml(yaml_file, ControlStructure)
         assert isinstance(loaded, ControlStructure)
+        assert len(loaded.responsibilities) == 2
 
 
 class TestStage2PromptPassing:
@@ -499,3 +512,122 @@ class TestStage2PromptPassing:
         assert "RESP-1" in call3.user_prompt
         assert "RESP-2" in call3.user_prompt
         assert "CP-1" in call3.user_prompt
+
+
+class TestConnSetCoordination:
+    """ConnSet-01, -02, -07: Call 3 output and the final ControlStructure."""
+
+    def test_connset_01_call_3_response_format_is_coordination_analysis(self, tmp_path):
+        """Call 3's provider schema excludes code-owned integrity findings."""
+        client = _setup_mock_client()
+        derive_control_structure(
+            llm_client=client,
+            use_case_text="Test",
+            loss_analysis=_make_loss_analysis(),
+            run_dir=tmp_path,
+        )
+        # Call 3 is the fourth call (index 3)
+        call3 = client.calls[3]
+        assert issubclass(call3.response_format, _CoordinationProviderEnvelope)
+        assert set(call3.response_format.model_fields) == {
+            "coordination_links",
+            "semantic_review",
+        }
+
+    def test_connset_02_contains_coordination_links_and_cps(self, tmp_path):
+        """CoordinationAnalysis has CL-1, ControlElementSet has CP-1, FB-1-1 has source."""
+        client = _setup_mock_client()
+        derive_control_structure(
+            llm_client=client,
+            use_case_text="Test",
+            loss_analysis=_make_loss_analysis(),
+            run_dir=tmp_path,
+        )
+        cs = read_yaml(tmp_path / "control-structure.yaml", ControlStructure)
+        # Coordination link CL-1 present
+        cl_ids = {cl.link_id for cl in cs.coordination_links}
+        assert "CL-1" in cl_ids
+        # Controlled process CP-1 present
+        cp_ids = {cp.cp_id for cp in cs.controlled_processes}
+        assert "CP-1" in cp_ids
+        # FB-1-1 has source set (from ControlElementSet)
+        for resp in cs.responsibilities:
+            for fb in resp.feedback_channels:
+                if fb.fb_id == "FB-1-1":
+                    assert fb.source is not None
+                    assert fb.source.id == "CP-1"
+
+    def test_connset_07_controlled_process_present(self, tmp_path):
+        """Controlled process CP-1 from ControlElementSet appears in final CS."""
+        client = _setup_mock_client()
+        result = derive_control_structure(
+            llm_client=client,
+            use_case_text="Test",
+            loss_analysis=_make_loss_analysis(),
+            run_dir=tmp_path,
+        )
+        cs = result.control_structure
+        cp_ids = {cp.cp_id for cp in cs.controlled_processes}
+        assert "CP-1" in cp_ids
+
+
+class TestConnSet11RevisionUsesRevisionDelta:
+    """ConnSet-11: revision uses RevisionDelta as response format."""
+
+    def test_connset_11_revision_uses_revision_delta(self, tmp_path):
+        """run_revision uses response_format=RevisionDelta, not ControlStructure."""
+        client = MockLLMClient()
+        delta_dict = {
+            "new_responsibilities": [],
+            "new_controlled_processes": [],
+            "new_coordination_links": [],
+            "modified_responsibilities": [],
+        }
+        client.set_response_for(RevisionDelta, delta_dict)
+
+        cs = ControlStructure(
+            responsibilities=[
+                Responsibility(
+                    resp_id="RESP-1",
+                    description="Controller",
+                    process_model_parts=[
+                        ProcessModelPart(pm_id="PM-1-1", description="State")
+                    ],
+                    control_actions=[
+                        ControlAction(ca_id="CA-1-1", description="Action")
+                    ],
+                    feedback_channels=[
+                        FeedbackChannel(
+                            fb_id="FB-1-1",
+                            description="FB",
+                            updates="PM-1-1",
+                            source=ElementRef(
+                                type=ReferenceType.responsibility, id="RESP-1"
+                            ),
+                        )
+                    ],
+                )
+            ],
+        )
+        findings = CriticFindings(
+            gaps=[
+                {
+                    "gap_type": "missing_responsibility",
+                    "description": "Missing validation",
+                    "related_attack_path": "Attack",
+                    "suggested_remedy": "Add validation",
+                }
+            ],
+            checklist_results={"Input validation": "absent_unjustified"},
+            taxonomy_probe_results={},
+        )
+        revised, warnings = run_revision(
+            llm_client=client,
+            control_structure=cs,
+            critic_findings=findings,
+            use_case_text="Test",
+            run_dir=tmp_path,
+        )
+        assert isinstance(revised, ControlStructure)
+        # The revision call used response_format=RevisionDelta
+        assert client.calls[0].response_format is RevisionDelta

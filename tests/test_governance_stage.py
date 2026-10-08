@@ -18,25 +18,12 @@ from asago_scenario_generator.stpa.obligation_aware.governance_routing import (
     GovernanceRoutingResponse,
     GovernanceRoutingResult,
 )
-from tests.helpers.obligation_factory import make_plan
 from tests.helpers.synthesis_fixture import synthesis_inputs
 from tests.stpa.helpers import (
     make_minimal_control_structure,
     make_minimal_loss_analysis,
 )
-from tests.helpers.governance import _controls, _pattern, _setup
-
-
-def _plan(*risk_ids: str):
-    mappings = [
-        {
-            "source_id": "risk-a",
-            "target_id": _pattern().id,
-            "relation": "exact_match",
-            "confidence": 1.0,
-        }
-    ]
-    return make_plan(risk_ids=("risk-a", *risk_ids), mappings=mappings)
+from tests.helpers.governance import _controls, _plan, _setup
 
 
 def _loss(*cited: str):

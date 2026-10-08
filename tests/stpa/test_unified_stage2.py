@@ -7,6 +7,7 @@ from pathlib import Path
 import yaml
 
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from tests.helpers.prompt_budget import block_every_prompt
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -17,8 +18,6 @@ from tests.stpa.sp1_helpers import (
     valid_loss_analysis_dict,
     setup_sp1_mock_client,
 )
-from asago_scenario_generator.stpa.infra import llm_helpers as llm_helpers_module
-from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
@@ -181,16 +180,7 @@ def test_stage2_call_count_includes_a_json_decode_retry(tmp_path: Path):
 
 
 def test_blocked_stage2_records_zero_calls(tmp_path: Path, monkeypatch):
-    def blocked(*args, **kwargs):
-        raise PromptBudgetExceeded(
-            input_tokens=2,
-            usable_input_tokens=1,
-            context_window=1,
-            maximum_completion_tokens=1,
-            safety_margin=0,
-        )
-
-    monkeypatch.setattr(llm_helpers_module, "_preflight_configured_prompt", blocked)
+    block_every_prompt(monkeypatch)
     client, _ = _stage2_mock_client()
     stage_errors: list[str] = []
 

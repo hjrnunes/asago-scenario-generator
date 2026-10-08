@@ -46,6 +46,7 @@ from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     finalize_stated_rule_coverage,
     locate_quote,
 )
+from tests.helpers.prompt_budget import block_every_prompt
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -665,16 +666,7 @@ class TestGateRevisionTrigger:
     def test_blocked_rule_only_revision_records_zero_calls(
         self, tmp_path, monkeypatch
     ) -> None:
-        def blocked(*args, **kwargs):
-            raise PromptBudgetExceeded(
-                input_tokens=2,
-                usable_input_tokens=1,
-                context_window=1,
-                maximum_completion_tokens=1,
-                safety_margin=0,
-            )
-
-        monkeypatch.setattr(llm_helpers_module, "_preflight_configured_prompt", blocked)
+        block_every_prompt(monkeypatch)
         client = MockLLMClient()
         client.set_response_for(_Stage1aRevisionPatch, _rule_carrying_edit())
         analysis = _analysis()
@@ -1212,24 +1204,11 @@ class TestCheckRevision:
         assert assessment.revised_verdicts is None
 
 
-def _block_every_prompt(monkeypatch) -> None:
-    def blocked(*args, **kwargs):
-        raise PromptBudgetExceeded(
-            input_tokens=2,
-            usable_input_tokens=1,
-            context_window=1,
-            maximum_completion_tokens=1,
-            safety_margin=0,
-        )
-
-    monkeypatch.setattr(llm_helpers_module, "_preflight_configured_prompt", blocked)
-
-
 class TestCallCountCountsRequestsSent:
     """``call_count`` is the number of requests dispatched, not steps tried."""
 
     def test_blocked_extraction_sends_no_request(self, tmp_path, monkeypatch) -> None:
-        _block_every_prompt(monkeypatch)
+        block_every_prompt(monkeypatch)
         client = MockLLMClient()
 
         assessment = _assess(client, tmp_path, _fee_analysis())
@@ -1276,7 +1255,7 @@ class TestCallCountCountsRequestsSent:
         )
         assessment = _assess(client, tmp_path, _fee_analysis())
         assert assessment.call_count == 2
-        _block_every_prompt(monkeypatch)
+        block_every_prompt(monkeypatch)
 
         reason = assessment.check_revision(
             _fee_analysis(),
