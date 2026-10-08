@@ -73,15 +73,6 @@ from asago_scenario_generator.stpa.system_model import (
 from asago_scenario_generator.stpa.system_model.run import run_sp1 as _run
 
 
-def _valid_control_structure_dict() -> dict:
-    rs = valid_responsibility_set_dict()
-    return {
-        "responsibilities": rs["responsibilities"],
-        "controlled_processes": [],
-        "coordination_links": [],
-    }
-
-
 def _valid_critic_findings_dict() -> dict:
     return {
         "gaps": [

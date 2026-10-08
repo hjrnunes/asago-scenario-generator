@@ -111,15 +111,6 @@ def _valid_gap_draft_dict() -> dict:
     return valid_gap_draft_dict()
 
 
-def _valid_control_structure_dict() -> dict:
-    rs = valid_responsibility_set_dict()
-    return {
-        "responsibilities": rs["responsibilities"],
-        "controlled_processes": [],
-        "coordination_links": [],
-    }
-
-
 def _setup_valid_mock_client() -> MockLLMClient:
     """Set up a mock LLM client with valid responses for all stages."""
     client = MockLLMClient()
