@@ -178,22 +178,6 @@ class TestStage1bProfile:
                 run_dir=tmp_path,
             )
 
-    def test_cp_08_no_loss_context_in_prompt(self, tmp_path):
-        """The stage1b user prompt does not include loss-analysis context."""
-        client = MockLLMClient()
-        client.set_response_for(Stage1Profile, _valid_stage1_profile_dict())
-        derive_capability_profile(
-            llm_client=client,
-            use_case_text="Test use case",
-            run_dir=tmp_path,
-        )
-        assert len(client.calls) == 1
-        user_prompt = client.calls[0].user_prompt
-        assert "Loss Analysis Context" not in user_prompt
-        assert "loss_analysis" not in user_prompt
-        assert "all_losses" not in user_prompt
-        assert "security_constraints" not in user_prompt
-
     def test_cp_12_stage1_profile_no_bool_fields(self):
         """Stage1Profile model does not declare boolean capability fields."""
         field_names = set(S1P.model_fields.keys())
