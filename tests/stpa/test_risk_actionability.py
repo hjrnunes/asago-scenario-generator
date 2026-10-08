@@ -7,8 +7,6 @@ from pathlib import Path
 import yaml
 
 from asago_scenario_generator.models.risk_card import RiskCard
-from asago_scenario_generator.stpa.infra import llm_helpers as llm_helpers_module
-from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudgetExceeded
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.risk_actionability import (
@@ -17,6 +15,7 @@ from asago_scenario_generator.stpa.system_model.risk_actionability import (
     classify_risk_actionability,
 )
 
+from tests.helpers.prompt_budget import block_every_prompt
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
@@ -134,16 +133,7 @@ def test_failed_steps_count_every_sent_request(tmp_path: Path) -> None:
 
 
 def test_blocked_steps_record_zero_calls(tmp_path: Path, monkeypatch) -> None:
-    def blocked(*args, **kwargs):
-        raise PromptBudgetExceeded(
-            input_tokens=2,
-            usable_input_tokens=1,
-            context_window=1,
-            maximum_completion_tokens=1,
-            safety_margin=0,
-        )
-
-    monkeypatch.setattr(llm_helpers_module, "_preflight_configured_prompt", blocked)
+    block_every_prompt(monkeypatch)
     client = MockLLMClient()
 
     outcome = _classify(client, [_card("r-1")], tmp_path)
