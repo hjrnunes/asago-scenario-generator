@@ -33,6 +33,7 @@ from asago_scenario_generator.target_discovery import (
     TargetInterpretationRequest,
 )
 from asago_scenario_generator.target_discovery.llm_interpreter import (
+    _failure_http_status,
     _provider_response_model,
 )
 
@@ -245,6 +246,23 @@ def test_failed_safe_call_reads_the_error_fields_from_the_failure_not_the_messag
     assert record["error_type"] == "InternalServerError"
     assert record["http_status"] == 502
     assert message == "interpretation call failed (InternalServerError, status=502)"
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    (
+        (SimpleNamespace(status_code=429), 429),
+        (SimpleNamespace(response=SimpleNamespace(status_code=504)), 504),
+        (SimpleNamespace(status_code=True), None),
+        (SimpleNamespace(status_code=42), None),
+        (SimpleNamespace(status_code="503"), None),
+        (SimpleNamespace(), None),
+    ),
+)
+def test_failure_status_is_an_integer_http_status_on_the_error_or_its_response(
+    failure, expected
+):
+    assert _failure_http_status(failure) == expected
 
 
 def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path):

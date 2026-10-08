@@ -485,15 +485,9 @@ def _record_error(record: dict[str, Any], error: BaseException | None) -> None:
 
 
 def _coerce_http_status(value: Any) -> int | None:
-    """Return a conventional HTTP status while rejecting arbitrary values."""
-    if isinstance(value, bool):
-        return None
-    if isinstance(value, int) and 100 <= value <= 599:
-        return int(value)
-    if isinstance(value, str) and value.isdigit():
-        parsed = int(value)
-        if 100 <= parsed <= 599:
-            return parsed
+    """Return a conventional integer HTTP status while rejecting other values."""
+    if isinstance(value, int) and not isinstance(value, bool) and 100 <= value <= 599:
+        return value
     return None
 
 
