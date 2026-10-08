@@ -316,3 +316,14 @@ def test_every_obligation_aware_request_keeps_its_recorded_bytes(tmp_path) -> No
     assert sorted(actual) == sorted(expected)
     for name, value in expected.items():
         assert actual[name] == value, name
+
+
+def test_a_correction_verification_sends_the_initial_verification_prompt(
+    tmp_path,
+) -> None:
+    record = render_all(tmp_path)
+
+    assert (
+        record["ica_verification_correction"]["requests"]
+        == record["ica_verification"]["requests"]
+    )

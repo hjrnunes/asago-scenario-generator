@@ -1583,10 +1583,7 @@ class ObligationAwareLLMAdapter:
         if not requests:
             return ()
         request_by_ref = _ica_review_requests(requests)
-        system_prompt, user_prompt = build_ica_hazard_verification_prompts(
-            requests,
-            correction_feedback=correction_feedback,
-        )
+        system_prompt, user_prompt = build_ica_hazard_verification_prompts(requests)
         step = "correction" if correction_feedback else "initial"
         payload_type = _ica_hazard_provider_payload_type(len(requests))
         repair = _AbsenceEvidenceRepair(

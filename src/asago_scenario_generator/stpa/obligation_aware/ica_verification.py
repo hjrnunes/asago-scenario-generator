@@ -1662,7 +1662,6 @@ def _retain_unsupported_record(
     _append_provider_failure_diagnostic(diagnostics, request, detail, provider_failure)
     records[request.ica_id] = _unsupported_record(
         request,
-        prior_verdict,
         final_verdict,
         attempts,
         corrected_request,
@@ -1738,7 +1737,6 @@ def _append_provider_failure_diagnostic(
 
 def _unsupported_record(
     request: IcaHazardVerificationRequest,
-    prior_verdict: IcaHazardVerificationVerdict | None,
     final_verdict: IcaHazardVerificationVerdict | None,
     attempts: tuple[IcaHazardVerificationAttempt, ...],
     corrected_request: IcaHazardVerificationRequest | None,
@@ -1746,7 +1744,6 @@ def _unsupported_record(
     terminal_disposition: Literal["not_applicable", "unresolved"] | None,
     provider_failure: bool,
 ) -> IcaHazardVerificationRecord:
-    del prior_verdict
     return IcaHazardVerificationRecord(
         ica_id=request.ica_id,
         slot_id=request.slot_id,

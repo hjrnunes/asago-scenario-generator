@@ -230,9 +230,6 @@ class _RevisionAllocation:
     """Request-local identities and closed reference sets for one draft."""
 
     handles: dict[str, str]
-    baseline_resp_ids: tuple[str, ...]
-    baseline_cp_ids: tuple[str, ...]
-    baseline_hazard_ids: tuple[str, ...]
     baseline_constraint_ids: tuple[str, ...]
     all_resp_ids: set[str]
     all_cp_ids: set[str]
@@ -507,9 +504,6 @@ def _allocate_revision_handles(
     )
     return _RevisionAllocation(
         handles=handles,
-        baseline_resp_ids=tuple(resp_ids),
-        baseline_cp_ids=tuple(cp_ids),
-        baseline_hazard_ids=tuple(hazard_ids),
         baseline_constraint_ids=tuple(constraint_ids),
         all_resp_ids=_with_new_handles(resp_ids, handles, "RESP-"),
         all_cp_ids=_with_new_handles(cp_ids, handles, "CP-"),

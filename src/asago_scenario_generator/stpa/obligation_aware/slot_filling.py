@@ -1724,15 +1724,11 @@ def fill_synthesis_slots(
     return SlotFillRunResult(result=final)
 
 
-fill_slots = fill_synthesis_slots
-
-
 __all__ = [
     "SlotFillRunResult",
     "build_synthesis_slot_requests",
     "compile_ica_slot_draft",
     "compile_slot_provider_entry",
-    "fill_slots",
     "fill_synthesis_slots",
     "final_slot_universe",
 ]

@@ -1269,14 +1269,8 @@ def project_revision_context(
     )
 
 
-def _route_payload(
-    route: ObligationRoute,
-    *,
-    briefs: dict[str, NeutralObligationBrief],
-    target_index: ProviderTargetIndex,
-) -> ProviderRoutedRoute:
+def _route_payload(route: ObligationRoute) -> ProviderRoutedRoute:
     """Project one route with opaque handles and explained target references."""
-    del briefs, target_index  # The question/index carry the descriptive context.
     return ProviderRoutedRoute(
         route_handle=route.route_id or "route-without-derived-id",
         obligation_handle=route.obligation_id,
@@ -1323,7 +1317,7 @@ def project_ica_target_context(
         if route.obligation_id in brief_map
     )
     routes = tuple(
-        _route_payload(route, briefs=brief_map, target_index=target_index).model_copy(
+        _route_payload(route).model_copy(
             update={
                 "route_handle": handles[route.obligation_id],
                 "obligation_handle": handles[route.obligation_id],
@@ -1574,8 +1568,6 @@ def build_mechanism_verification_prompts(
 
 def build_ica_hazard_verification_prompts(
     requests: Sequence[Any],
-    *,
-    correction_feedback: Mapping[str, str] | None = None,
 ) -> tuple[str, str]:
     """Render the narrow independent verifier prompt for final ICAs.
 
@@ -1584,7 +1576,6 @@ def build_ica_hazard_verification_prompts(
     Previous verdicts remain call bookkeeping, not evidence for this independent
     reading of the current finding.
     """
-    del correction_feedback
     if not requests:
         raise ValueError("ICA hazard verification requires at least one request")
     payloads: list[dict[str, Any]] = []
