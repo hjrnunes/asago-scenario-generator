@@ -87,7 +87,8 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     unproven_absence_verdict,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
-    PROHIBITED_PROMPT_FIELDS,
+    PROHIBITED_PROMPT_KEYS,
+    PROHIBITED_PROMPT_WORDS,
     audit_prompt_contract,
     build_ica_hazard_correction_prompts,
     build_ica_hazard_verification_prompts,
@@ -286,7 +287,8 @@ def _preflight(
             accounted_handles=handles,
             selectable_references=pairs,
             authoritative_references=pairs,
-            prohibited_fields=PROHIBITED_PROMPT_FIELDS,
+            prohibited_fields=PROHIBITED_PROMPT_WORDS,
+            prohibited_exact_keys=PROHIBITED_PROMPT_KEYS,
             output_schema=output_schema,
             valid_example=valid_example,
             budget=resolve_prompt_budget(

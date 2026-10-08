@@ -1949,8 +1949,8 @@ def test_obligation_prompt_audit_reports_prohibited_typed_fields() -> None:
 
     assert audit.view_type == "Leaky"
     assert audit.issues == (
-        "prohibited prompt field leaked: plan_digest",
-        "prohibited prompt field leaked: scores",
+        "prohibited prompt-view field leaked: plan_digest",
+        "prohibited prompt-view field leaked: nested.scores",
     )
 
 
