@@ -74,6 +74,22 @@ class _Model(ClosedCanonicalModel):
     """Closed immutable provider boundary model."""
 
 
+class _ProviderCallCounts(_Model):
+    """Validator only: each response class declares its own fields.
+
+    Fields stay on the subclasses so each keeps its own field order, defaults,
+    and reference URIs in the generated schema.
+    """
+
+    @model_validator(mode="after")
+    def check_provider_calls(self) -> "_ProviderCallCounts":
+        if self.adapter_kind == "fake" and self.provider_calls:
+            raise ValueError("fake adapter cannot report provider calls")
+        if self.adapter_kind == "provider" and self.provider_calls < 1:
+            raise ValueError("provider adapter must report at least one provider call")
+        return self
+
+
 class _DigestModel(SemanticDigestMixin, _Model):
     """Provider request with a content-addressed semantic digest."""
 
@@ -143,7 +159,7 @@ class StructuralRoutingRequest(_DigestModel):
         return self
 
 
-class StructuralRoutingResponse(_Model):
+class StructuralRoutingResponse(_ProviderCallCounts):
     """Provider-local response envelope containing authoritative routes."""
 
     status: Literal["completed"] = "completed"
@@ -159,10 +175,6 @@ class StructuralRoutingResponse(_Model):
 
     @model_validator(mode="after")
     def canonicalize_and_validate(self) -> "StructuralRoutingResponse":
-        if self.adapter_kind == "fake" and self.provider_calls:
-            raise ValueError("fake adapter cannot report provider calls")
-        if self.adapter_kind == "provider" and self.provider_calls < 1:
-            raise ValueError("provider adapter must report at least one provider call")
         routes = tuple(sorted(self.routes, key=lambda item: item.obligation_id))
         if len({item.obligation_id for item in routes}) != len(routes):
             raise ValueError("routing response must contain unique obligation IDs")
@@ -720,7 +732,7 @@ class StructuralRevisionRequest(_DigestModel):
         return self
 
 
-class StructuralRevisionResponse(_Model):
+class StructuralRevisionResponse(_ProviderCallCounts):
     """Provider-local response for the one permitted revision attempt."""
 
     # ``rejected`` is an explicit, valid domain outcome: the adapter completed
@@ -737,14 +749,6 @@ class StructuralRevisionResponse(_Model):
     # follow-up requests included; a fake adapter sends none.
     provider_calls: int = Field(default=0, ge=0, strict=True)
     response_digest: Digest | None = None
-
-    @model_validator(mode="after")
-    def validate_response(self) -> "StructuralRevisionResponse":
-        if self.adapter_kind == "fake" and self.provider_calls:
-            raise ValueError("fake adapter cannot report provider calls")
-        if self.adapter_kind == "provider" and self.provider_calls < 1:
-            raise ValueError("provider adapter must report at least one provider call")
-        return self
 
 
 class SynthesisSlotRequest(_DigestModel):
@@ -780,7 +784,7 @@ class SynthesisSlotRequest(_DigestModel):
         return self
 
 
-class SynthesisSlotResponse(_Model):
+class SynthesisSlotResponse(_ProviderCallCounts):
     """Provider-local slot response with authoritative pair evidence."""
 
     status: Literal["completed"] = "completed"
@@ -797,10 +801,6 @@ class SynthesisSlotResponse(_Model):
 
     @model_validator(mode="after")
     def validate_response(self) -> "SynthesisSlotResponse":
-        if self.adapter_kind == "fake" and self.provider_calls:
-            raise ValueError("fake adapter cannot report provider calls")
-        if self.adapter_kind == "provider" and self.provider_calls < 1:
-            raise ValueError("provider adapter must report at least one provider call")
         object.__setattr__(
             self,
             "filled_slots",
