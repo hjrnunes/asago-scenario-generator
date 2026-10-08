@@ -35,7 +35,11 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     build_kc_subcodes_display,
 )
-from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
+from asago_scenario_generator.stpa.infra.llm import (
+    DEFAULT_TEMPERATURE,
+    LLMClient,
+    LLMResult,
+)
 from asago_scenario_generator.stpa.infra.call_log import CallLog, call_log_of
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
@@ -49,6 +53,7 @@ from asago_scenario_generator.stpa._model_data import raw_model_data
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
+    ASSEMBLY_DEFERRED,
     ControlAction,
     ControlActionEffectKind,
     ControlActionTemporality,
@@ -59,8 +64,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     FeedbackChannel,
     FeedbackSourceKind,
     NonBlankStr,
+    ProcessModelPart,
     ReferenceType,
     Responsibility,
+    ResponsibilityConstraint,
     check_structural_heuristics,
     normalize_control_action_effect_kind,
 )
@@ -710,68 +717,101 @@ def _validate_stage2_intermediate(model: BaseModel) -> None:
         raise ValueError("responsibilities must contain at least one item")
 
 
-_RESPONSIBILITY_FIELDS = (
-    "resp_id",
-    "description",
-    "responsibility_constraints",
-    "security_constraint_refs",
-    "process_model_parts",
-)
+def _holds_nothing(value: Any) -> bool:
+    return value in (None, "", [], {})
 
 
-def _nonempty_unknown_fields(record: dict[str, Any], allowed: set[str]) -> list[str]:
-    """Return the sorted unknown fields of ``record`` that hold a value."""
-    return sorted(
-        str(name)
-        for name, item in record.items()
-        if name not in allowed and item not in (None, "", [], {})
-    )
+class _Call2aConstraint(ResponsibilityConstraint):
+    """A responsibility constraint whose omitted ID normalization supplies.
 
-
-def _validate_responsibility_payload(value: Any) -> None:
-    """Reject Call 2a fields tolerant decoding would silently discard.
-
-    Call 2a deliberately retains tolerant ID normalization for malformed
-    nested IDs, but its top-level collection and security-trace fields are
-    normative. Validate those raw fields before the tolerant parser can drop
-    unknown responsibility collections or omitted constraint references. Any
-    alternate top-level collection fails, even an empty one, because the
-    prompt forbids splitting the collection. Inside a responsibility, an
-    unknown field whose value is empty carries nothing to lose, so the
-    tolerant parser may drop it.
+    ``id_normalization`` numbers every RC by its position, so an RC whose ID
+    key the model misspelled still has a position and keeps its meaning.
     """
-    if not isinstance(value, dict):
-        return
-    unexpected = set(value) - {"responsibilities"}
-    if unexpected:
-        names = ", ".join(sorted(str(item) for item in unexpected))
-        raise ValueError(f"unexpected responsibility collection(s): {names}")
-    responsibilities = value.get("responsibilities")
-    if not isinstance(responsibilities, list):
-        return
-    for index, responsibility in enumerate(responsibilities):
-        if isinstance(responsibility, dict):
-            _validate_responsibility_entry(responsibility, index)
+
+    rc_id: str = ""
 
 
-def _validate_responsibility_entry(responsibility: dict[str, Any], index: int) -> None:
-    """Reject one raw responsibility with a dropped field or untraced constraints."""
-    unexpected_fields = _nonempty_unknown_fields(
-        responsibility, {"id", *_RESPONSIBILITY_FIELDS}
+class _Call2aResponsibility(BaseModel):
+    """One Call 2a responsibility; a field it does not declare is an error.
+
+    A generic ``id`` stands for ``resp_id``.  An undeclared field that holds
+    nothing carries no meaning to lose, so it is dropped instead of rejected;
+    one that holds content fails with the list of fields to keep.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    resp_id: StrictStr
+    description: NonBlankStr
+    responsibility_constraints: list[_Call2aConstraint] = Field(default_factory=list)
+    security_constraint_refs: list[StrictStr]
+    process_model_parts: list[ProcessModelPart] = Field(default_factory=list)
+
+    @model_validator(mode="before")
+    @classmethod
+    def _read_generic_id_and_drop_empty_fields(cls, value: Any) -> Any:
+        if not isinstance(value, dict):
+            return value
+        record = {
+            name: item
+            for name, item in value.items()
+            if name in cls.model_fields or name == "id" or not _holds_nothing(item)
+        }
+        unexpected = sorted(set(record) - {"id", *cls.model_fields})
+        if unexpected:
+            fields = list(cls.model_fields)
+            raise ValueError(
+                f"unexpected responsibility field(s): {', '.join(unexpected)}. "
+                f"Remove them; each responsibility contains only "
+                f"{', '.join(fields[:-1])}, and {fields[-1]}"
+            )
+        generic_id = record.pop("id", None)
+        if "resp_id" not in record and generic_id is not None:
+            record["resp_id"] = generic_id
+        return record
+
+
+class _Call2aResponse(BaseModel):
+    """The Call 2a response as the model must write it."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    responsibilities: list[_Call2aResponsibility] = Field(min_length=1)
+
+
+def _validate_responsibility_wire(value: Any) -> None:
+    """Check a decoded Call 2a response against its closed wire models."""
+    _Call2aResponse.model_validate(value, context=ASSEMBLY_DEFERRED)
+
+
+def parse_responsibility_set_response(value: Any) -> ResponsibilitySet:
+    """Parse a Call 2a response; IDs stay as written for ``id_normalization``."""
+    wire = _Call2aResponse.model_validate(value, context=ASSEMBLY_DEFERRED)
+    return ResponsibilitySet.model_construct(
+        responsibilities=[
+            Responsibility.model_construct(
+                resp_id=item.resp_id,
+                description=item.description,
+                responsibility_constraints=[
+                    ResponsibilityConstraint.model_construct(
+                        rc_id=constraint.rc_id, description=constraint.description
+                    )
+                    for constraint in item.responsibility_constraints
+                ],
+                security_constraint_refs=item.security_constraint_refs,
+                process_model_parts=item.process_model_parts,
+            )
+            for item in wire.responsibilities
+        ]
     )
-    if unexpected_fields:
-        raise ValueError(
-            f"unexpected responsibility collection field(s) at index {index}: "
-            f"{', '.join(unexpected_fields)}. Remove them; each responsibility "
-            f"contains only {', '.join(_RESPONSIBILITY_FIELDS[:-1])}, and "
-            f"{_RESPONSIBILITY_FIELDS[-1]}"
-        )
-    if "security_constraint_refs" not in responsibility:
-        raise ValueError(
-            f"responsibility is missing security_constraint_refs at index {index}"
-        )
-    if not isinstance(responsibility["security_constraint_refs"], list):
-        raise ValueError(f"security_constraint_refs must be a list at index {index}")
+
+
+def _parse_responsibility_result(
+    result: LLMResult, cleanup_transformations: list[dict[str, Any]]
+) -> ResponsibilitySet:
+    return parse_responsibility_set_response(
+        decode_content(result, cleanup_transformations=cleanup_transformations)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1895,6 +1935,9 @@ def _run_stage2_llm_call(
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[Any], None] | None = None,
     result_parser: Callable[[Any], _Stage2ModelT] | None = None,
+    result_parser_with_cleanup: (
+        Callable[[LLMResult, list[dict[str, Any]]], _Stage2ModelT] | None
+    ) = None,
     user_prompt_suffix: str = "",
 ) -> _Stage2ModelT:
     """Render prompts, call the LLM, validate, and raise StageError on failure.
@@ -1928,6 +1971,7 @@ def _run_stage2_llm_call(
         allow_unvalidated=allow_unvalidated,
         raw_result_validator=raw_result_validator,
         result_parser=result_parser,
+        result_parser_with_cleanup=result_parser_with_cleanup,
         result_validator=result_validator or _validate_stage2_intermediate,
     )
     if outcome.error is not None:
@@ -2015,7 +2059,8 @@ def _call_2a_responsibilities(
         response_format=ResponsibilitySet,
         step="call_2a_responsibilities",
         allow_unvalidated=True,
-        raw_result_validator=_validate_responsibility_payload,
+        raw_result_validator=_validate_responsibility_wire,
+        result_parser_with_cleanup=_parse_responsibility_result,
     )
 
 

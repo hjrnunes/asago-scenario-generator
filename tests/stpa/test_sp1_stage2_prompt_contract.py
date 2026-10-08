@@ -24,7 +24,8 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _call_2b_control_elements,
     _assemble_control_structure,
     _enrich_responsibilities,
-    _validate_responsibility_payload,
+    _validate_responsibility_wire,
+    parse_responsibility_set_response,
     parse_control_element_set_response,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -661,50 +662,121 @@ def _entry(**changes) -> dict:
     return entry
 
 
-@pytest.mark.parametrize(
-    "value",
-    [
-        "not an object",
-        {"responsibilities": "not a list"},
-        {"responsibilities": ["not an object"]},
-        {"responsibilities": [_entry(notes="", extra=None)]},
-        {"responsibilities": [_entry()]},
-    ],
-    ids=["non-object", "non-list", "non-object-entry", "empty-unknown", "valid"],
-)
-def test_responsibility_payload_leaves_tolerable_shapes_to_the_parser(
-    value: object,
-) -> None:
-    _validate_responsibility_payload(value)
+def _parsed_responsibilities(value: object) -> ResponsibilitySet:
+    _validate_responsibility_wire(value)
+    return parse_responsibility_set_response(value)
+
+
+def test_responsibility_parser_keeps_a_valid_response() -> None:
+    entry = _entry(
+        responsibility_constraints=[{"rc_id": "RC-1-1", "description": "Bound"}],
+        process_model_parts=[
+            {"pm_id": "PM-1-1", "description": "Request state", "values": ["a"]}
+        ],
+    )
+
+    parsed = _parsed_responsibilities({"responsibilities": [entry]})
+
+    assert parsed.responsibilities[0].resp_id == "RESP-1"
+    assert parsed.responsibilities[0].responsibility_constraints[0].rc_id == "RC-1-1"
+    assert parsed.responsibilities[0].process_model_parts[0].values == ["a"]
+
+
+def test_responsibility_parser_reads_a_generic_id_as_resp_id() -> None:
+    parsed = _parsed_responsibilities({"responsibilities": [_entry()]})
+
+    assert parsed.responsibilities[0].resp_id == "RESP-1"
+
+
+def test_responsibility_parser_drops_an_unknown_field_that_holds_nothing() -> None:
+    parsed = _parsed_responsibilities(
+        {"responsibilities": [_entry(notes="", extra=None, feedback_source={})]}
+    )
+
+    assert parsed.responsibilities[0].description == "Authorizes requests"
+
+
+def test_responsibility_parser_keeps_ids_for_normalization() -> None:
+    entry = _entry(
+        id="RESP-A",
+        responsibility_constraints=[{"rc_id": "RC-A", "description": "Bound"}],
+        process_model_parts=[{"pm_id": "PM_1", "description": "Request state"}],
+    )
+
+    parsed = _parsed_responsibilities({"responsibilities": [entry]})
+
+    responsibility = parsed.responsibilities[0]
+    assert responsibility.resp_id == "RESP-A"
+    assert responsibility.responsibility_constraints[0].rc_id == "RC-A"
+    assert responsibility.process_model_parts[0].pm_id == "PM_1"
+
+
+def test_responsibility_parser_leaves_an_omitted_constraint_id_to_normalization() -> (
+    None
+):
+    entry = _entry(
+        responsibility_constraints=[{"rc_2-1": "RC-2-1", "description": "Bound"}]
+    )
+
+    parsed = _parsed_responsibilities({"responsibilities": [entry]})
+
+    assert parsed.responsibilities[0].responsibility_constraints[0].rc_id == ""
 
 
 @pytest.mark.parametrize(
-    ("value", "message"),
+    ("value", "location", "fragment"),
     [
-        (
-            {"responsibilities": [], "extra": []},
-            "unexpected responsibility collection(s): extra",
-        ),
+        ({"responsibilities": [], "extra": []}, "extra", "Extra inputs"),
+        ({"responsibilities": []}, "responsibilities", "at least 1 item"),
+        ({"responsibilities": "not a list"}, "responsibilities", "valid list"),
+        ({"responsibilities": ["not an object"]}, "responsibilities.0", ""),
         (
             {"responsibilities": [_entry(), _entry(notes="keep")]},
-            "unexpected responsibility collection field(s) at index 1: notes. "
-            "Remove them; each responsibility contains only resp_id, description, "
+            "responsibilities.1",
+            "unexpected responsibility field(s): notes. Remove them; each "
+            "responsibility contains only resp_id, description, "
             "responsibility_constraints, security_constraint_refs, and "
             "process_model_parts",
         ),
         (
-            {"responsibilities": [{"id": "RESP-1"}]},
-            "responsibility is missing security_constraint_refs at index 0",
+            {"responsibilities": [{"id": "RESP-1", "description": "Authorizes"}]},
+            "responsibilities.0.security_constraint_refs",
+            "Field required",
         ),
         (
             {"responsibilities": [_entry(security_constraint_refs="SC-1")]},
-            "security_constraint_refs must be a list at index 0",
+            "responsibilities.0.security_constraint_refs",
+            "valid list",
+        ),
+        (
+            {"responsibilities": [_entry(description="")]},
+            "responsibilities.0.description",
+            "",
         ),
     ],
+    ids=[
+        "unknown-collection",
+        "empty",
+        "non-list",
+        "non-object-entry",
+        "unknown-field",
+        "missing-refs",
+        "refs-not-list",
+        "blank-description",
+    ],
 )
-def test_responsibility_payload_rejects_fields_the_parser_would_drop(
-    value: dict, message: str
+def test_responsibility_parser_rejects_fields_it_would_drop(
+    value: dict, location: str, fragment: str
 ) -> None:
-    with pytest.raises(ValueError) as exc_info:
-        _validate_responsibility_payload(value)
-    assert str(exc_info.value) == message
+    with pytest.raises(ValidationError) as exc_info:
+        _validate_responsibility_wire(value)
+    assert any(
+        ".".join(str(part) for part in error["loc"]) == location
+        and fragment in error["msg"]
+        for error in exc_info.value.errors()
+    )
+
+
+def test_responsibility_parser_rejects_a_non_object_response() -> None:
+    with pytest.raises(ValidationError):
+        _validate_responsibility_wire("not an object")

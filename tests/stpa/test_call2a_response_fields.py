@@ -66,8 +66,8 @@ def test_extra_responsibility_field_with_content_fails_and_says_what_to_remove(
     assert "coordination" in str(error.value)
     retry = " ".join(client.calls[1].user_prompt.split())
     assert (
-        "unexpected responsibility collection field(s) at index 0: coordination"
-        in retry
+        "- responsibilities.0: Value error, unexpected responsibility field(s): "
+        "coordination." in retry
     )
     assert (
         "Remove them; each responsibility contains only resp_id, description, "
