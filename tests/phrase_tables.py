@@ -118,6 +118,15 @@ EMPTY_STRUCTURE = {
     "next_cp_num": 1,
 }
 
+# The revision request after a critic that reported no gaps.
+NO_FINDINGS = {
+    "use_case_text": "Test use case",
+    "control_structure": EMPTY_STRUCTURE["control_structure"],
+    "critic_findings": SimpleNamespace(
+        gaps=[], checklist_results={}, taxonomy_probe_results={}
+    ),
+}
+
 
 def _archive_item_facts() -> dict[str, object]:
     operation = TargetOperationObservation(
@@ -225,6 +234,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "commit-operation": _stage5(_commit_operation_facts),
     "realistic-request": _stage5(_realistic_request_facts),
     "realistic-no-tool-call": _stage5(lambda: _realistic_request_facts(False)),
+    "no-findings": _system_model(**NO_FINDINGS),
 }
 
 

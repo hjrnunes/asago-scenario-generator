@@ -13,5 +13,8 @@ cases:
       - Not every system needs every capability
       - a CriticFindings with gaps, checklist_results, and taxonomy_probe_results
       - the capability IS present but the control structure fails to govern it
+      - typed `effect_kind`
+      - action-kind consistency gap
+      - Never silently relabel
     forbidden:
       - STPA-Sec

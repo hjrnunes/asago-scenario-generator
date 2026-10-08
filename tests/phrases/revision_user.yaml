@@ -1,0 +1,9 @@
+template: revision_user.j2
+cases:
+  no-findings:
+    required:
+      - add the missing element(s)
+      - dismiss it with a one-sentence justification
+      - dismissed_gaps
+    forbidden:
+      - You MUST add at least one element for EACH finding
