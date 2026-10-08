@@ -57,13 +57,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetSemanticInterpretation,
     mcp_resource_id,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
+from tests.helpers.loss_analysis import single_hazard_loss_analysis
 
 _OPERATION_RESOURCE = mcp_resource_id("target:mini", "process_refund")
 _READ_RESOURCE = mcp_resource_id("target:mini", "lookup_order")
@@ -188,29 +182,6 @@ def _control_structure() -> ControlStructure:
     )
 
 
-def _loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[],
-        use_case_losses=[
-            Loss(
-                loss_id="L-1",
-                description="financial loss",
-                provenance=LossProvenance.use_case,
-            )
-        ],
-        hazards=[
-            Hazard(hazard_id="H-1", description="bad refund", related_losses=["L-1"])
-        ],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1",
-                rule="refunds are authorized",
-                related_hazards=["H-1"],
-            )
-        ],
-    )
-
-
 class _VerifiedInterpreter:
     """Maps the refund action to the observed operation with verification."""
 
@@ -268,7 +239,7 @@ class TestEnrichControlActions:
         before = structure.model_dump(mode="json")
 
         enrichment = enrich_control_actions(
-            loss_analysis=_loss_analysis(),
+            loss_analysis=single_hazard_loss_analysis(),
             control_structure=structure,
             profile=_profile(),
             interpreter_factory=_VerifiedInterpreter,
@@ -293,7 +264,7 @@ class TestEnrichControlActions:
 
     def test_every_matching_row_is_recorded_with_disposition_and_evidence(self):
         enrichment = enrich_control_actions(
-            loss_analysis=_loss_analysis(),
+            loss_analysis=single_hazard_loss_analysis(),
             control_structure=_control_structure(),
             profile=_profile(),
             interpreter_factory=_VerifiedInterpreter,
@@ -325,7 +296,7 @@ class TestEnrichControlActions:
                 return response
 
         enrichment = enrich_control_actions(
-            loss_analysis=_loss_analysis(),
+            loss_analysis=single_hazard_loss_analysis(),
             control_structure=_control_structure(),
             profile=_profile(),
             interpreter_factory=_NoVerifierEvidence,
@@ -340,7 +311,7 @@ class TestEnrichControlActions:
 
     def test_unmapped_match_keeps_the_action_and_is_recorded(self):
         enrichment = enrich_control_actions(
-            loss_analysis=_loss_analysis(),
+            loss_analysis=single_hazard_loss_analysis(),
             control_structure=_control_structure(),
             profile=_profile(),
             interpreter_factory=_UnsupportedInterpreter,
@@ -372,7 +343,7 @@ class TestEnrichControlActions:
 
         with pytest.raises(ValueError, match="observed inventory"):
             enrich_control_actions(
-                loss_analysis=_loss_analysis(),
+                loss_analysis=single_hazard_loss_analysis(),
                 control_structure=_control_structure(),
                 profile=_profile(),
                 interpreter_factory=_InventedInterpreter,
@@ -385,7 +356,7 @@ class TestEnrichControlActions:
 
         with pytest.raises(Exception, match="provider unavailable"):
             enrich_control_actions(
-                loss_analysis=_loss_analysis(),
+                loss_analysis=single_hazard_loss_analysis(),
                 control_structure=_control_structure(),
                 profile=_profile(),
                 interpreter_factory=_BrokenInterpreter,
@@ -412,7 +383,7 @@ class TestEnrichmentAdapterWiring:
         )
         assert (
             _default_enrich_control_actions(
-                loss_analysis=_loss_analysis(),
+                loss_analysis=single_hazard_loss_analysis(),
                 control_structure=_control_structure(),
                 capability_profile=None,
                 execution_target_profile=None,
@@ -425,7 +396,7 @@ class TestEnrichmentAdapterWiring:
         simulation = SimpleNamespace(basis=ProfileBasis.simulation)
         assert (
             _default_enrich_control_actions(
-                loss_analysis=_loss_analysis(),
+                loss_analysis=single_hazard_loss_analysis(),
                 control_structure=_control_structure(),
                 capability_profile=None,
                 execution_target_profile=simulation,
@@ -453,7 +424,7 @@ class TestEnrichmentAdapterWiring:
         client = object()
 
         enrichment = _default_enrich_control_actions(
-            loss_analysis=_loss_analysis(),
+            loss_analysis=single_hazard_loss_analysis(),
             control_structure=_control_structure(),
             capability_profile=None,
             execution_target_profile=_profile(),
