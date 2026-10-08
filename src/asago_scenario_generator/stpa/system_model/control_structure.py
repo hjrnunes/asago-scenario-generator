@@ -803,10 +803,6 @@ _CONTROL_ACTION_FIELDS = {
     "target",
     "effect_kind",
     "temporality",
-    # Accept this descriptive spelling on input while serializing the
-    # canonical ``temporality`` field.  It keeps hand-authored legacy/live
-    # payloads readable without adding a second durable field.
-    "action_temporality",
     "operation",
     "process_model_refs",
 }
@@ -1010,12 +1006,6 @@ def _stage2_control_action(
     target = _stage2_element_ref(
         value["target"], field_name="target", item_label=item_label
     )
-    if "temporality" in value and "action_temporality" in value:
-        if value["temporality"] != value["action_temporality"]:
-            raise ValueError(
-                f"{item_label} must provide one matching temporality field, not "
-                "conflicting temporality and action_temporality values"
-            )
     effect_kind = _stage2_optional_enum(
         value.get("effect_kind"),
         enum_type=ControlActionEffectKind,
@@ -1023,7 +1013,7 @@ def _stage2_control_action(
         item_label=item_label,
     )
     temporality = _stage2_optional_enum(
-        value.get("temporality", value.get("action_temporality")),
+        value.get("temporality"),
         enum_type=ControlActionTemporality,
         field_name="temporality",
         item_label=item_label,
