@@ -667,11 +667,13 @@ in a run where no operation carries attacker-influenced content, or with no
 target profile, costs no request and takes the default at once. The response model,
 `ShapeProposal` in `stpa.scenario_prod.stage5.shape_step`, is closed: `channel`,
 `turn_count`, `turn_plan` entries of `position`, `speaker` and `purpose`, and
-an `indirect` block of `carrier_operation`, `content_kind`, `record_ref` and
-`controller`. Enums, bounded integers and whitespace-free identifiers are its
-only value types, and a test asserts that no string field accepts free text.
-The system prompt explains each field with one example and lists every
-vocabulary. The user prompt supplies the scenario account, the adversary kind,
+an `indirect` block of `carrier_operation`, `content_kind` and `controller`.
+The block also accepts an optional `record_ref` that the prompt does not
+mention and the schema does not require: a reply that still sends one
+validates, and code discards it. Enums, bounded integers and whitespace-free
+identifiers are its only value types, and a test asserts that no string field
+accepts free text. The system prompt explains each required field with one
+example and lists every vocabulary. The user prompt supplies the scenario account, the adversary kind,
 the channels allowed for it, and the target operations with a flag for those
 whose result carries attacker-influenced content. The system prompt opens the
 `indirect` field with its requirement: required when `channel` is `indirect`,
@@ -689,9 +691,9 @@ observed or not influenced earns one correction through the shared
 `CorrectionPolicy`: the prompt again, the prior reply, and one line per broken
 rule (the rule's own error text), then the operations marked
 `outside content: yes` when `indirect` is allowed. The published shape always
-carries a null `record_ref`: the reply copies it from the scenario account,
-which can name a record no seed slot of the target lists, and a null reference
-lets the consumer seed the slot's own record. A failed request, or a reply
+carries a null `record_ref`: the scenario account can name a record no seed
+slot of the target lists, and a null reference lets the consumer seed the
+slot's own record. A failed request, or a reply
 that still fails after the correction, becomes the single-turn direct default
 with a `downgrade_reason`; the table in `overview.md` lists the reasons.
 `tests/stpa/shape_step_prompts/` pins the rendered request for each adversary
