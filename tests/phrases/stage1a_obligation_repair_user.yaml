@@ -1,0 +1,11 @@
+template: stage1a_obligation_repair_user.j2
+cases:
+  test-use-case:
+    required:
+      - contiguous substring of its constraint's `rule`
+      - compared case-insensitively
+      - backticks
+      - no ellipsis, omission, or rewording
+      - rejected, and there is no second repair
+    forbidden:
+      - Quote the rule verbatim

@@ -1,0 +1,63 @@
+template: stage1a_graph_revision_system.j2
+cases:
+  no-stated-rules:
+    required:
+      - "`NEW-1`, `NEW-2`, `NEW-3`"
+      - "Never use `H-7`, `SC-4`, `L-8`, or any `H-*`/`SC-*`/`L-*`"
+      - reserved canonical
+      - the response is rejected
+      - "`H-*`/`SC-*`/`L-*`"
+      - may not continue the canonical numbering
+      - behavior class
+      - one new hazard with a `NEW-*` handle
+      - names that class's behavior
+      - covering that handle in the same response
+      - >-
+        Every `hazard_additions` entry must be covered in the same response
+        by a constraint whose `related_hazards` includes the addition's handle.
+      - >-
+        Use either a `security_constraint_additions` entry or a
+        `security_constraint_edits` entry that adds the handle to an existing
+        constraint's `related_hazards`; follow the existing obligations rules
+        for edits.
+      - >-
+        The full density check runs on the merged graph, so a repair that
+        creates a new uncovered hazard fails.
+      - An edit target must be an ID present in the supplied graph.
+      - >-
+        An invented ID (for example `SC-11` when the graph holds
+        `SC-1`..`SC-10`) is rejected as an unknown target and the whole
+        revision fails.
+      - >-
+        If an addition already fixes a check, do not also return an edit for
+        the same fix
+      - the addition alone is the complete response for that check
+      - An edit that restates an existing record's content unchanged fixes nothing
+      - >-
+        the merged graph is identical, the check re-fails, and the single
+        revision call is spent
+      - >-
+        When a failing check names a record pair, edit one of the named
+        records to repair that edge
+      - never return a byte-identical edit or a disconnected addition
+      - choose the smallest repair that changes the failing edge
+      - edit that constraint's `related_hazards` to the correct supplied hazard ID
+      - Do not add a second constraint while leaving the wrong edge
+      - relies on unsupported wording is not a repair and must not be returned
+      - After mentally merging the delta, re-check every listed failure
+      - leaves any listed bad edge intact
+      - introduces an unresolved reference
+      - unsupported wording
+      # From the shared _obligation_entries.j2 partial.
+      - contiguous substring of its constraint's `rule`
+      - Copy its words in order from `rule`
+    forbidden:
+      - share no subject phrase
+      - wrong subject wording
+    ordered:
+      - ['"security_constraint_additions"', "## Worked examples"]
+      - - "`security_constraint_edits` replaces"
+        - An edit target must be an ID present in the supplied graph.
+        - "`security_constraint_additions` declares"
+      - - "## Worked examples"
+        - An edit that restates an existing record's content unchanged
