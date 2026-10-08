@@ -1,0 +1,45 @@
+template: synthesis_ica_system.j2
+cases:
+  slot-request:
+    required:
+      - Standard STPA calls an unsafe action a UCA
+      - In this project, an ICA is one concrete security finding
+      - real context
+      - controller belief
+      - A routed obligation is advisory
+      - A route never forces an ICA finding
+      - NOT_PROVIDED
+      - INCORRECT
+      - WRONG_TIMING
+      - WRONG_DURATION
+      - is_na=false
+      - at least one structured item in `findings`
+      - is_na=true
+      - non-empty `na_rationale`
+      - matching zero-based positions
+      - do not use `unresolved` merely because
+      - not proof that the current control already recognizes
+      - requires another control path
+      - subject, operation, affected object, and effect
+      - "`value`, `input`, `parameter`, or `threshold` are not mechanism evidence"
+      - taxonomy mechanism is not established evidence
+      - "`deviation` and `hazardous_context` must describe the unsafe control"
+      - "Bad: `when an adversary uses poisoned persistent memory`"
+      - "Good: `the current authorization is not revalidated after stored context"
+      - legacy `responsibility`, `control_action`, `uca_type`, or `icas`
+      - a non-empty `na_rationale` citing a complete structural property
+      - misstates it, contradicts it, or adds details it does not contain
+      - the source supplies no applicable answer
+      - a pallet on quality hold leaves the warehouse
+      - a defective shipment reaches a customer
+      - An authorized omission is not automatically unsafe
+      - susceptibility claim
+      - not a hazardous state
+      - asserted consequence
+    forbidden:
+      - For a NOT_PROVIDED slot marked N/A
+      - absence cannot be hazardous
+      - lacks a requirement
+      - not established before
+      - the supplied hazardous context
+      - the supplied loss consequence occurs

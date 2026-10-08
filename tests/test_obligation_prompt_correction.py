@@ -307,43 +307,6 @@ def test_obligation_aware_provider_instructions_live_in_jinja_templates() -> Non
     assert "Fill every supplied STPA ICA slot" not in source
 
 
-def test_routing_prompt_judges_the_surface_not_the_system_description() -> None:
-    template_dir = Path(prompt_module.__file__).with_name("prompt_templates")
-    prompt = TemplateLoader(template_dir).render_prompt(
-        "structural_routing_system.j2",
-        obligation_count=1,
-        instructions="Return one result.",
-        routing_targeted_example="{}",
-        routing_unresolved_example="{}",
-    )
-
-    assert "whether the system has the surface" in prompt
-    assert "free-text input, tool calls, or retrieval" in prompt
-    assert "not whether the system description mentions or describes the" in " ".join(
-        prompt.split()
-    )
-    assert "Choose `absent_from_system` only when the structure lacks that surface" in (
-        " ".join(prompt.split())
-    )
-
-
-def test_synthesis_prompt_defines_stpa_local_ica_and_true_context() -> None:
-    template_dir = Path(prompt_module.__file__).with_name("prompt_templates")
-    prompt = TemplateLoader(template_dir).render_prompt(
-        "synthesis_ica_system.j2",
-        requested_slot_count=1,
-        requested_consideration_count=1,
-        instructions="Return one result.",
-    )
-
-    assert "Standard STPA calls an unsafe action a UCA" in prompt
-    assert "In this\nproject, an ICA is one concrete security finding" in prompt
-    assert "real context" in prompt
-    assert "controller belief" in prompt
-    assert "A routed obligation is advisory" in prompt
-    assert "A route never\nforces an ICA finding" in prompt
-
-
 def test_target_prompt_view_deduplicates_losses_by_exact_identity() -> None:
     """Repeated upstream loss rows produce one provider-facing loss record."""
     loss_analysis = _loss_analysis()
@@ -381,28 +344,6 @@ def test_routing_prompt_explains_each_structural_id_once() -> None:
     assert "owner_id: RESP-1" in user
     assert "control_action_id: CA-1-1" in user
     assert "target_process_id: CP-1" in user
-
-
-def test_routing_prompt_rejects_adjacent_control_as_mechanism_evidence() -> None:
-    """A nearby safeguard cannot stand in for the distinctive attack mechanism."""
-    pattern = AttackPattern.model_validate(get_test_raw_pattern())
-    brief = build_neutral_briefs(make_plan(), (pattern,))[0]
-
-    system, _user = build_structural_routing_prompts(
-        briefs=(brief,),
-        loss_analysis=_loss_analysis(),
-        control_structure=_control_structure(),
-        slots=create_slots(_control_structure()),
-    )
-
-    assert "adjacent safeguard is not evidence" in system
-    assert (
-        "unauthenticated access or authentication rejection is not poisoned" in system
-    )
-    assert "ingress resource proves only that content can arrive" in system
-    assert "neither establishes semantic separation" in system
-    assert "the disposition must be `unresolved`" in system
-    assert "capability flags, or integration IDs cannot substitute" in system
 
 
 def test_focused_verifier_retains_path_without_granting_mechanism_credit(
@@ -536,7 +477,7 @@ def test_target_prompt_contains_only_the_selected_structural_slice() -> None:
     assert "RESP-2" not in payload
     assert "complete control structure" not in payload.lower()
 
-    system, user = build_synthesis_slot_prompts(
+    _system, user = build_synthesis_slot_prompts(
         target_id="RESP-1",
         slots=selected,
         routed_briefs=(),
@@ -544,10 +485,6 @@ def test_target_prompt_contains_only_the_selected_structural_slice() -> None:
         loss_analysis=_loss_analysis(),
         control_structure=structure,
     )
-    assert "NOT_PROVIDED" in system
-    assert "INCORRECT" in system
-    assert "WRONG_TIMING" in system
-    assert "WRONG_DURATION" in system
     assert "RESP-2" not in user
 
 

@@ -14,10 +14,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
-from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.obligation_aware.prompts import (
-    PROMPT_TEMPLATES_DIR,
-)
 from asago_scenario_generator.stpa.system_model.control_structure import (
     parse_control_element_set_response,
 )
@@ -367,23 +363,3 @@ def test_slots_copy_action_temporality_and_gate_duration_by_type() -> None:
         uca_type=duration.uca_type,
     )
     assert not is_wrong_duration_eligible(instantaneous)
-
-
-def test_ica_template_uses_meaningful_context_and_loss_example() -> None:
-    """The provider example demonstrates a supported STPA loss chain."""
-    text = TemplateLoader(PROMPT_TEMPLATES_DIR).render_prompt(
-        "synthesis_ica_system.j2",
-        requested_slot_count=1,
-        requested_consideration_count=1,
-    )
-
-    # The example states a context row, not a missing procedure step.
-    assert "a pallet on quality hold leaves the warehouse" in text
-    assert "a defective shipment reaches a customer" in text
-    assert "not established before" not in text
-    assert "An authorized omission is not automatically unsafe" in text
-    assert "susceptibility claim" in text
-    assert "not a\nhazardous state" in text
-    assert "asserted consequence" in text
-    assert "the supplied hazardous context" not in text
-    assert "the supplied loss consequence occurs" not in text
