@@ -229,3 +229,22 @@ def test_narrative_approach_drops_structural_source_tags():
     )[0]
     assert "Approach: Use a foreign order.\n" in narrative
     assert "an order content item" in narrative
+
+
+def test_planted_item_without_a_record_reference_names_no_record():
+    payload = INDIRECT.model_dump(mode="json")
+    payload["indirect"]["data_item"]["record_ref"] = None
+    narrative, _tree, gherkin = render_scenario_presentation(
+        _adversarial(AttackShape.model_validate(payload))
+    )
+    planted = (
+        "the attacker has planted an order content item, controlled by "
+        "a third party, in what lookup_order returns"
+    )
+    assert f"And {planted}" in gherkin.given
+    assert "the attacker plants an order content item, controlled by a third party" in (
+        narrative
+    )
+    for text in (narrative, gherkin.to_feature_text()):
+        assert "record" not in text.replace("target record", "")
+        assert "None" not in text
