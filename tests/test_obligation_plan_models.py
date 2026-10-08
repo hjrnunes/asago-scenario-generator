@@ -41,6 +41,23 @@ def test_version_framed_digest_lives_in_a_neutral_shared_leaf() -> None:
     assert not hasattr(output, "compute_framed_digest")
 
 
+def test_input_normalization_keeps_validated_models_and_rejects_collisions() -> None:
+    """Raw planner input is NFC-normalized around models it already holds."""
+    canonical = import_module("asago_scenario_generator.models.canonical")
+    model = RiskReference(risk_id="R-1", risk_name="e\u0301")
+
+    normalized = canonical.normalize_unicode(
+        {"cafe\u0301": [model, ("o\u0301",)]}, keep_models=True
+    )
+
+    assert normalized == {"café": [model, ["ó"]]}
+    assert normalized["café"][0] is model
+    with pytest.raises(ValueError, match="collide after NFC"):
+        canonical.normalize_unicode(
+            {"café": 1, "cafe\u0301": [model]}, keep_models=True
+        )
+
+
 def _raw_plan() -> dict[str, Any]:
     """Return a mutable JSON representation of one valid generated plan."""
     return make_plan().model_dump(mode="json")

@@ -8,7 +8,6 @@ capability objects needed to derive candidate records.
 
 from __future__ import annotations
 
-import unicodedata
 from typing import Any, Literal
 
 from pydantic import (
@@ -36,6 +35,7 @@ from asago_scenario_generator.models.canonical import (
     FrozenList,
     canonical_json_bytes,
     compute_framed_digest,
+    normalize_unicode,
 )
 from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
@@ -46,35 +46,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
 MAPPING_BUNDLE_DIGEST_DOMAIN = "asago-scenario-generator:obligation-mapping-bundle:v1"
 _QUALIFICATION_FACTS_DIGEST_DOMAIN = "asago-scenario-generator:qualification-facts:v1"
 _EXPECTED_MAPPING_PIN_KEYS = frozenset({"sssom", "obligation_edges"})
-
-
-def _nfc(value: Any) -> Any:
-    """Normalize input strings and mapping keys before typed validation."""
-    if isinstance(value, str):
-        return unicodedata.normalize("NFC", value)
-    if isinstance(value, dict):
-        return _normalize_input_mapping(value)
-    if isinstance(value, (list, tuple)):
-        return _normalize_input_sequence(value)
-    return value
-
-
-def _normalize_input_mapping(value: dict[Any, Any]) -> dict[str, Any]:
-    """Normalize one input mapping and reject canonical-key collisions."""
-    normalized: dict[str, Any] = {}
-    for key, item in value.items():
-        if not isinstance(key, str):
-            raise TypeError("input mapping keys must be strings")
-        normalized_key = unicodedata.normalize("NFC", key)
-        if normalized_key in normalized:
-            raise ValueError("input mapping keys collide after NFC normalization")
-        normalized[normalized_key] = _nfc(item)
-    return normalized
-
-
-def _normalize_input_sequence(value: list[Any] | tuple[Any, ...]) -> list[Any]:
-    """Normalize each item in one input collection."""
-    return [_nfc(item) for item in value]
 
 
 def _freeze_model_fields(value: BaseModel) -> BaseModel:
@@ -131,7 +102,7 @@ class _InputModel(BaseModel):
     @classmethod
     def normalize_input_strings(cls, value: Any) -> Any:
         """Apply the same NFC contract as persisted authoritative models."""
-        return _nfc(value)
+        return normalize_unicode(value, keep_models=True)
 
 
 def _canonical_json(value: Any) -> str:
