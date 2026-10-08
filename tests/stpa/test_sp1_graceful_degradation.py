@@ -1,11 +1,8 @@
 """Unit tests for SP1 graceful degradation — recoverable and stage-error scenarios.
 
-Covers SP1-GD-01 through SP1-GD-15 from the Gherkin feature files:
-  - features/sp1_graceful_degradation_recoverable.feature
-  - features/sp1_graceful_degradation_stage_error.feature
-
-Tests use MockLLMClient configured to return invalid responses or raise
-exceptions, then verify graceful degradation behavior.
+Covers SP1-GD-01 through SP1-GD-15. Tests use MockLLMClient configured to
+return invalid responses or raise exceptions, then verify graceful
+degradation behavior.
 """
 
 from __future__ import annotations

@@ -520,7 +520,7 @@ class SynthesisAdapters:
     """Dependency-injection ports for :func:`run_synthesis`.
 
     Every field is optional so the production defaults can be selected lazily,
-    while acceptance can provide a completely deterministic object.  The
+    while tests can provide a completely deterministic object.  The
     ``from_object`` constructor reads each port from the callable attribute
     of the same name.
     """

@@ -157,7 +157,6 @@ def legacy_stage1a_provider_payload(
         translated.pop("risk_dispositions", None)
     elif preserve_gap_extras:
         # Explicit unit-test seam for malformed/out-of-contract gap rows.
-        # Acceptance registrations use the default closed current wire.
         pass
     else:
         # Historical full-graph fixtures carried both stage collections.

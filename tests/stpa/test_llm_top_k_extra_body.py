@@ -1,8 +1,7 @@
 """Unit and property tests for LLM top_k routing through extra_body.
 
-Covers LLM-TOPK-01 through LLM-TOPK-06 from the Gherkin feature file
-``features/sp1_llm_top_k_extra_body.feature``. top_k goes into extra_body,
-never into the top-level kwargs, and the standard parameters stay top-level.
+Covers LLM-TOPK-01 through LLM-TOPK-06. top_k goes into extra_body, never
+into the top-level kwargs, and the standard parameters stay top-level.
 """
 
 from __future__ import annotations

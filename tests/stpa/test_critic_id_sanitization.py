@@ -1,10 +1,6 @@
 """Unit tests for SP1 critic ID sanitization before revision.
 
-Covers SP1-CRITIC-SAN-01 through SP1-CRITIC-SAN-09 from the Gherkin
-feature file:
-  features/sp1_critic_id_sanitization.feature
-
-Tests verify that:
+Covers SP1-CRITIC-SAN-01 through SP1-CRITIC-SAN-09. Tests verify that:
 - The critic system prompt instructs the LLM not to suggest specific IDs.
 - ``sanitize_critic_ids`` strips non-conforming IDs (e.g., PM-0, CA-0,
   FB-0) from ``suggested_remedy`` strings, replacing them with generic

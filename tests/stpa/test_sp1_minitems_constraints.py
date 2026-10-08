@@ -1,8 +1,4 @@
-"""Unit tests for SP1 minItems constraints on critical arrays.
-
-Covers MinItems-01 through MinItems-04 from the Gherkin feature file:
-  features/sp1_minitems_constraints.feature
-"""
+"""Unit tests for SP1 minItems constraints on critical arrays (MinItems-01 to -04)."""
 
 from __future__ import annotations
 

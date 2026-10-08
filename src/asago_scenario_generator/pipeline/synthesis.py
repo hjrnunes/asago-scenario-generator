@@ -9,7 +9,7 @@ sidecars, the manifest, and the report (``synthesis_persist``,
 ``synthesis_manifest``).  It does not duplicate the domain contracts used by
 those stages.
 
-Acceptance supplies deterministic fakes for any port; the production CLI
+Tests supply deterministic fakes for any port; the production CLI
 leaves the ports unset and gets the defaults.
 """
 

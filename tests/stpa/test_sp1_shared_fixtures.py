@@ -1,9 +1,6 @@
-"""Contracts for the SP1 payload files that the unit and acceptance layers share."""
+"""Contracts for the shared SP1 payload files that unit tests load."""
 
 from __future__ import annotations
-
-import sys
-from pathlib import Path
 
 import pytest
 
@@ -16,14 +13,6 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 )
 from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 from tests.fixtures.sp1 import load_sp1_fixture
-from tests.stpa import sp1_helpers
-
-_ROOT = next(
-    p for p in Path(__file__).resolve().parents if (p / "pyproject.toml").is_file()
-)
-sys.path.insert(0, str(_ROOT / "acceptance"))
-
-import runtime_shared  # noqa: E402
 
 _VARIANTS = [
     ("stage1_profile", "default", Stage1Profile),
@@ -43,29 +32,6 @@ _VARIANTS = [
 @pytest.mark.parametrize(("name", "variant", "model"), _VARIANTS)
 def test_every_shared_payload_validates_against_its_model(name, variant, model):
     model.model_validate(load_sp1_fixture(name, variant))
-
-
-def test_the_two_layers_load_the_same_files():
-    assert (
-        runtime_shared._sp1_valid_stage1_profile_dict()
-        == sp1_helpers.valid_stage1_profile_dict()
-    )
-    assert [c.model_dump() for c in runtime_shared._sp1_make_risk_cards()] == [
-        c.model_dump() for c in sp1_helpers.make_risk_cards()
-    ]
-
-
-def test_each_layer_keeps_the_loss_analysis_variant_its_dependents_need():
-    acceptance = runtime_shared._sp1_valid_la_dict()
-    unit = sp1_helpers.valid_loss_analysis_dict()
-
-    assert [
-        loss["loss_id"]
-        for loss in acceptance["risk_card_losses"] + acceptance["use_case_losses"]
-    ] == ["L-1", "L-2", "L-3"]
-    assert [
-        loss["loss_id"] for loss in unit["risk_card_losses"] + unit["use_case_losses"]
-    ] == ["L-1", "L-2"]
 
 
 def test_a_caller_may_edit_its_payload_without_changing_the_next_one():
