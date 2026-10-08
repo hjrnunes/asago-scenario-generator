@@ -87,6 +87,7 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     unproven_absence_verdict,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    PROHIBITED_PROMPT_FIELDS,
     audit_prompt_contract,
     build_ica_hazard_correction_prompts,
     build_ica_hazard_verification_prompts,
@@ -115,16 +116,6 @@ _ICA_VERIFICATION_REPAIRS = 1
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
 _MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS = 1024
 _MECHANISM_VERIFICATION_REPAIRS = 1
-_PROMPT_PROHIBITED_FIELDS = (
-    "digest",
-    "pin",
-    "score",
-    "mitigation",
-    "provider_call",
-    "schema_name",
-    "source_path",
-    "artifact_path",
-)
 
 
 def _reference_pairs(value: Any) -> tuple[tuple[str, str], ...]:
@@ -286,7 +277,7 @@ def _preflight(
             accounted_handles=handles,
             selectable_references=pairs,
             authoritative_references=pairs,
-            prohibited_fields=_PROMPT_PROHIBITED_FIELDS,
+            prohibited_fields=PROHIBITED_PROMPT_FIELDS,
             output_schema=output_schema,
             valid_example=valid_example,
             budget=resolve_prompt_budget(

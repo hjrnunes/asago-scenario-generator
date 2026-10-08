@@ -70,7 +70,11 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlacehol
 PROMPT_TEMPLATES_DIR = Path(__file__).with_name("prompt_templates")
 _TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
 
-_PROHIBITED_PROMPT_KEYS = (
+# One list serves two matchers: the local audit rejects a view key equal to an
+# entry, and the repository preflight rejects a key with an entry as one of its
+# snake_case words (a plural ``s`` included).  Multi-word entries therefore act
+# only as exact keys.
+PROHIBITED_PROMPT_FIELDS = (
     "semantic_digest",
     "plan_digest",
     "catalog_pins",
@@ -82,6 +86,12 @@ _PROHIBITED_PROMPT_KEYS = (
     "source_path",
     "artifact_path",
     "raw_mapping",
+    "digest",
+    "pin",
+    "score",
+    "mitigation",
+    "provider_call",
+    "schema_name",
 )
 _ABSOLUTE_PATH = re.compile(r"(?:^|[\s\"'])/(?:Users|private|tmp|var|home)/")
 _STRUCTURAL_REFERENCE_TOKEN = re.compile(
@@ -136,7 +146,7 @@ def audit_prompt_contract(
         view_type = type(prompt_view).__name__
         payload = prompt_view.model_dump(mode="json")
     field_names = _prompt_field_names(payload)
-    for key in _PROHIBITED_PROMPT_KEYS:
+    for key in PROHIBITED_PROMPT_FIELDS:
         if key in field_names:
             issues.append(f"prohibited prompt field leaked: {key}")
     issues.extend(_rendered_prompt_issues(system_prompt, user_prompt, opaque_handles))
@@ -1696,6 +1706,7 @@ def build_synthesis_slot_prompts(
 
 
 __all__ = [
+    "PROHIBITED_PROMPT_FIELDS",
     "audit_prompt_contract",
     "build_structural_revision_prompts",
     "build_structural_routing_prompts",
