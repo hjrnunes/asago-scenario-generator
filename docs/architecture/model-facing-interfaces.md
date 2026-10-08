@@ -644,7 +644,10 @@ of the reply without repairing it. A reply that breaks the schema, an
 observed or not influenced earns one correction through the shared
 `CorrectionPolicy`: the prompt again, the prior reply, and one line per broken
 rule (the rule's own error text), then the operations marked
-`outside content: yes` when `indirect` is allowed. A failed request, or a reply
+`outside content: yes` when `indirect` is allowed. The published shape always
+carries a null `record_ref`: the reply copies it from the scenario account,
+which can name a record no seed slot of the target lists, and a null reference
+lets the consumer seed the slot's own record. A failed request, or a reply
 that still fails after the correction, becomes the single-turn direct default
 with a `downgrade_reason`; the table in `overview.md` lists the reasons.
 `tests/stpa/shape_step_prompts/` pins the rendered request for each adversary

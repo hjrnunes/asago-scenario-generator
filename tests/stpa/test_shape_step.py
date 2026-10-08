@@ -174,7 +174,7 @@ def test_a_multi_turn_direct_proposal_keeps_its_plan() -> None:
     ]
 
 
-def test_a_valid_indirect_proposal_keeps_its_carrier_and_leaves_the_actor_null() -> (
+def test_a_valid_indirect_proposal_keeps_its_carrier_and_leaves_record_and_actor_null() -> (
     None
 ):
     shape = resolve(indirect_proposal(), THIRD_PARTY)
@@ -184,7 +184,7 @@ def test_a_valid_indirect_proposal_keeps_its_carrier_and_leaves_the_actor_null()
     assert shape.indirect is not None
     assert shape.indirect.carrier_operation == "get_listing"
     assert shape.indirect.data_item.content_kind.value == "listing_content"
-    assert shape.indirect.data_item.record_ref == "LST-104"
+    assert shape.indirect.data_item.record_ref is None
     assert shape.indirect.party_relation.controller.value == "counterparty"
     assert shape.indirect.party_relation.benign_user_actor_ref is None
 

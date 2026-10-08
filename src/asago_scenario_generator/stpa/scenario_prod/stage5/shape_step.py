@@ -209,9 +209,10 @@ def _indirect_shape(
         return None
     return IndirectShape(
         carrier_operation=carrier.carrier_operation,
-        data_item=PlantedItem(
-            content_kind=carrier.content_kind, record_ref=carrier.record_ref
-        ),
+        # The reply copies record_ref from the scenario account, which names
+        # records the target's seed slots need not list; a null ref lets the
+        # consumer seed the slot's own record.
+        data_item=PlantedItem(content_kind=carrier.content_kind, record_ref=None),
         party_relation=PartyRelation(
             controller=carrier.controller, benign_user_actor_ref=None
         ),
