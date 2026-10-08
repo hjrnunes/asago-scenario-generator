@@ -15,7 +15,7 @@ Your task is to address gaps identified by the completeness critic. This is a si
   {% endfor %}
   Process model parts:
   {% for pm in resp.process_model_parts %}
-    - {{ pm.pm_id }}: {{ pm.description }}{% if pm.feedback_source %} (source: {{ pm.feedback_source.type }} {{ pm.feedback_source.id }}){% endif %}{% if pm.values %} (values: {{ pm.values | join("; ") }}){% endif %}{% if pm.evidence_refs %} (evidence: {{ pm.evidence_refs | join(", ") }}){% endif %}
+    - {{ pm.pm_id }}: {{ pm.description }}{% if pm.feedback_source %} (source: {{ pm.feedback_source.type.value }} {{ pm.feedback_source.id }}){% endif %}{% if pm.values %} (values: {{ pm.values | join("; ") }}){% endif %}{% if pm.evidence_refs %} (evidence: {{ pm.evidence_refs | join(", ") }}){% endif %}
   {% endfor %}
   Control actions:
   {% for ca in resp.control_actions %}
