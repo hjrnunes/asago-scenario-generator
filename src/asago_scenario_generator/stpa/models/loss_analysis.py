@@ -323,6 +323,11 @@ class SecurityConstraint(BaseModel):
         return self.direction_authority or "proposed"
 
 
+def span_quotes_rule(rule: str, span: str) -> bool:
+    """Whether ``span`` is a contiguous substring of ``rule``, ignoring case."""
+    return span.casefold() in rule.casefold()
+
+
 def _validate_obligation_spans(constraint: SecurityConstraint) -> None:
     """Require unique obligation IDs whose rule spans quote the rule."""
     ids = [entry.obligation_id for entry in constraint.obligations]
@@ -330,9 +335,8 @@ def _validate_obligation_spans(constraint: SecurityConstraint) -> None:
         raise ValueError(
             f"SecurityConstraint {constraint.constraint_id} has duplicate obligation ids."
         )
-    rule_folded = constraint.rule.casefold()
     for entry in constraint.obligations:
-        if entry.rule_span.casefold() not in rule_folded:
+        if not span_quotes_rule(constraint.rule, entry.rule_span):
             raise ValueError(
                 f"obligation {constraint.constraint_id}/{entry.obligation_id} "
                 "rule_span must be a contiguous substring of the constraint "

@@ -860,7 +860,7 @@ def _addition_only_constraint_edit(
         f"meets the rule_span requirement in the extended rule. "
         f"{rule_span_requirement()}"
         for obligation in constraint.obligations
-        if obligation.rule_span.casefold() not in edit.rule.casefold()
+        if not span_quotes_rule(edit.rule, obligation.rule_span)
     )
     if edit.rule == constraint.rule and obligations == prior_obligations:
         return None

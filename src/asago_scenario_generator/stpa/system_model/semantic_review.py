@@ -34,6 +34,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     Obligation,
     SecurityConstraint,
     compose_constraint_description,
+    span_quotes_rule,
 )
 
 
@@ -421,11 +422,10 @@ def _require_obligation_phrases(
     re-anchor one to new wording, so the model must keep the phrase or
     leave the rule unchanged.
     """
-    folded = revised_rule.casefold()
     dropped = [
         f"{entry.obligation_id} {entry.rule_span!r}"
         for entry in obligations
-        if entry.rule_span.casefold() not in folded
+        if not span_quotes_rule(revised_rule, entry.rule_span)
     ]
     if dropped:
         raise ValueError(
