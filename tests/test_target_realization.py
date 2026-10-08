@@ -802,6 +802,20 @@ def test_bounded_extension_uses_the_interpreter_extend_without_a_factory():
     assert adapter.extension_calls == 1
 
 
+def test_extension_factory_must_return_an_adapter_with_extend():
+    class _PlainCallableExtension:
+        def __call__(self, request):
+            raise AssertionError("a plain callable is not an extension adapter")
+
+    with pytest.raises(TypeError, match="adapter with extend"):
+        _realize(
+            _baseline(),
+            _profile(),
+            lambda: _UnmappedInterpreter(),
+            extension_factory=lambda: _PlainCallableExtension(),
+        )
+
+
 def test_bounded_extension_rejects_invented_operation_identity():
     class _InventedExtension:
         def extend(self, request):

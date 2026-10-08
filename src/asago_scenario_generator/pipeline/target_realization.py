@@ -353,10 +353,13 @@ def realize_target_operations(
     :func:`realize_baseline_rows`).  The seam adopts those rows and makes no
     map or verify call, so a run matches each action to the target once.
 
-    When supplied, ``extension_factory`` is constructed at most once and is
-    called once with all uncovered observed operations.  Its accepted
-    additions are compiled as target-derived records after baseline rows have
-    been finalized.
+    The bounded extension uses one adapter shape: an object whose
+    ``extend(request)`` receives one ``TargetRealizationExtensionRequest``.
+    ``extension_factory``, when supplied, is constructed at most once and must
+    return such an adapter; otherwise the interpreter's own ``extend`` is
+    used, and an interpreter without one leaves uncovered operations
+    diagnosed.  Accepted additions are compiled as target-derived records
+    after the baseline rows.
     """
     _require_baseline(baseline)
     _require_profile(profile)
@@ -1479,35 +1482,20 @@ def _extension_interpreter(
     extension_factory: Callable[..., Any] | None,
     interpreter: Any,
 ) -> Any:
+    """Return the bound ``extend`` of the one extension adapter, if any."""
     if extension_factory is not None:
-        adapter = _construct_extension_adapter(extension_factory)
-        extension = getattr(adapter, "extend", None)
-        if callable(extension):
-            return extension
-        extension = adapter if callable(adapter) else None
-        return extension
-    if interpreter is None:
-        return None
+        return _construct_extension_adapter(extension_factory)
     extension = getattr(interpreter, "extend", None)
     return extension if callable(extension) else None
 
 
-def _construct_extension_adapter(factory: Any) -> Any:
-    """Construct one typed extension adapter without guessing call shapes."""
+def _construct_extension_adapter(factory: Any) -> Callable[..., Any]:
     if not callable(factory):
         raise TypeError("extension factory must be a zero-argument callable")
-    adapter = factory()
-    extend = getattr(adapter, "extend", None)
-    if callable(extend):
-        return adapter
-    # A plain callable is the original public extension adapter shape.  It is
-    # still invoked with exactly one TargetRealizationExtensionRequest; this
-    # branch does not inspect or retry alternate signatures.
-    if callable(adapter):
-        return adapter  # type: ignore[return-value]
+    extend = getattr(factory(), "extend", None)
     if not callable(extend):
         raise TypeError("extension factory did not return an adapter with extend")
-    return adapter  # pragma: no cover - guarded by the callable checks above
+    return extend
 
 
 def _missing_extension_result(
@@ -1529,7 +1517,7 @@ def _attempt_target_extension(
 ) -> _ExtensionResult:
     request = TargetRealizationExtensionRequest(baseline=baseline, operations=eligible)
     try:
-        response = _invoke_extension_interpreter(extension, request)
+        response = extension(request)
     except Exception as exc:  # noqa: BLE001 - retain provider-boundary diagnostics
         return _extension_failure_result(eligible, exc)
     return _compile_extension_response(
@@ -1551,19 +1539,6 @@ def _extension_failure_result(
             + [_extension_missing_diagnostic(item.reference) for item in eligible]
         )
     )
-
-
-def _invoke_extension_interpreter(
-    interpreter: Any,
-    request: TargetRealizationExtensionRequest,
-) -> Any:
-    """Invoke one extension adapter with one exact typed request."""
-    function = getattr(interpreter, "extend", None)
-    if not callable(function):
-        function = interpreter if callable(interpreter) else None
-    if not callable(function):
-        raise TypeError("target extension interpreter is not callable")
-    return function(request)
 
 
 def _compile_extension_response(
