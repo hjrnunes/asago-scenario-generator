@@ -6,9 +6,6 @@ ranges using Hypothesis:
 - **BDI grounding**: ``populate_defender_bdi`` always produces beliefs,
   desires, and intentions whose IDs match the control structure.
   ``validate_bdi_grounding`` always passes for specs derived this way.
-- **Tree branch coverage**: ``count_branch_categories`` always returns
-  0–3; ``get_branch_categories`` is always a subset of
-  ``BRANCH_CATEGORIES``.
 - **Traceability chain completeness**: A scenario with all valid links
   produces zero errors; breaking any single link produces an error for
   that link type only.
@@ -63,9 +60,6 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.validators import (
-    BRANCH_CATEGORIES,
-    count_branch_categories,
-    get_branch_categories,
     validate_traceability,
 )
 from tests.helpers.stpa_builders import make_loss_analysis
@@ -274,53 +268,6 @@ class TestBDIGroundingProperty:
         # Vulnerability fields must be empty before LLM call
         for belief in bdi.beliefs:
             assert belief.vulnerability == ""
-
-
-# Tree branch coverage property tests
-
-
-class TestTreeBranchCoverageProperty:
-    """Branch category counting invariants."""
-
-    @given(
-        categories=st.lists(
-            st.sampled_from(BRANCH_CATEGORIES + ["unknown", ""]),
-            min_size=0,
-            max_size=10,
-        )
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_count_branch_categories_bounded(self, categories):
-        """count_branch_categories always returns 0–3."""
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": cat, "label": "l", "children": []} for cat in categories
-            ],
-            "leaves": [],
-        }
-        count = count_branch_categories(tree)
-        assert 0 <= count <= 3
-
-    @given(
-        categories=st.lists(
-            st.sampled_from(BRANCH_CATEGORIES + ["unknown"]),
-            min_size=0,
-            max_size=10,
-        )
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_get_branch_categories_subset(self, categories):
-        """get_branch_categories is always a subset of BRANCH_CATEGORIES."""
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": cat, "label": "l", "children": []} for cat in categories
-            ],
-            "leaves": [],
-        }
-        cats = get_branch_categories(tree)
-        assert cats.issubset(set(BRANCH_CATEGORIES))
 
 
 # Traceability chain completeness property tests

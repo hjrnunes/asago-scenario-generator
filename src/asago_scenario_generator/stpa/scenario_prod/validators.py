@@ -36,15 +36,8 @@ __all__ = [
     "validate_tree_factor_evidence_coverage",
     "validate_loss_hazard_id_references",
     "validate_traceability",
-    "detect_orphan_elements",
-    "detect_orphan_icas",
     "collect_valid_tree_ids",
-    "count_branch_categories",
-    "get_branch_categories",
-    "BRANCH_CATEGORIES",
 ]
-
-BRANCH_CATEGORIES = ["controller_side", "path_side", "coordination_gap"]
 
 LEGAL_PROVENANCE_ROOTS = {"risk_card", "use_case", "critic_derived"}
 
@@ -127,22 +120,6 @@ def validate_vulnerability_completeness(
                 f"DefenderBelief {belief.pm_id} has an empty vulnerability annotation."
             )
     return ValidationResult(passed=len(errors) == 0, errors=errors)
-
-
-def count_branch_categories(attack_tree: dict) -> int:
-    """Count how many of the 3 branch categories are used in the tree."""
-    return len(get_branch_categories(attack_tree))
-
-
-def get_branch_categories(attack_tree: dict) -> set[str]:
-    """Get the set of branch categories used in the tree."""
-    branches = attack_tree.get("branches", [])
-    categories: set[str] = set()
-    for branch in branches:
-        cat = branch.get("category", "")
-        if cat in BRANCH_CATEGORIES:
-            categories.add(cat)
-    return categories
 
 
 def validate_tree_factor_evidence_coverage(
@@ -560,106 +537,3 @@ def _check_hazard_and_constraint_links(
             )
 
     return errors
-
-
-def detect_orphan_elements(
-    control_structure: ControlStructure,
-    enriched_threat_set: EnrichedThreatSet,
-) -> list[str]:
-    """Detect control structure elements not referenced by any ICA.
-
-    An element is orphaned if no structural threat references it.
-
-    Args:
-        control_structure: The control structure.
-        enriched_threat_set: The enriched threat set.
-
-    Returns:
-        A list of orphan element IDs.
-    """
-    referenced = _collect_referenced_ids(enriched_threat_set.structural_threats)
-    return _find_orphan_elements(control_structure, referenced)
-
-
-def _collect_referenced_ids(
-    threats: list[StructuralThreat],
-) -> tuple[set[str], set[str], set[str]]:
-    """Collect PM, CA, and RESP IDs referenced by any threat.
-
-    Returns:
-        A tuple of (referenced_pms, referenced_cas, referenced_resps).
-    """
-    referenced_pms: set[str] = set()
-    referenced_cas: set[str] = set()
-    referenced_resps: set[str] = set()
-
-    for threat in threats:
-        slot_parts = threat.ica_slot_id.split(":")
-        if len(slot_parts) >= 2:
-            referenced_resps.add(slot_parts[0])
-            referenced_cas.add(slot_parts[1])
-
-        for pm_match in re.finditer(
-            r"PM-\d+-\d+", threat.ica_text + " " + threat.hazardous_context
-        ):
-            referenced_pms.add(pm_match.group())
-
-    return referenced_pms, referenced_cas, referenced_resps
-
-
-def _find_orphan_elements(
-    control_structure: ControlStructure,
-    referenced: tuple[set[str], set[str], set[str]],
-) -> list[str]:
-    """Find control structure elements not in the referenced set."""
-    referenced_pms, referenced_cas, referenced_resps = referenced
-    orphans: list[str] = []
-    for resp in control_structure.responsibilities:
-        orphans.extend(
-            _find_orphans_in_resp(
-                resp, referenced_pms, referenced_cas, referenced_resps
-            )
-        )
-    return orphans
-
-
-def _find_orphans_in_resp(
-    resp: Responsibility,
-    ref_pms: set[str],
-    ref_cas: set[str],
-    ref_resps: set[str],
-) -> list[str]:
-    """Find orphaned elements within a single responsibility."""
-    orphans: list[str] = []
-    if resp.resp_id not in ref_resps:
-        orphans.append(resp.resp_id)
-    orphans.extend(
-        pm.pm_id for pm in resp.process_model_parts if pm.pm_id not in ref_pms
-    )
-    orphans.extend(ca.ca_id for ca in resp.control_actions if ca.ca_id not in ref_cas)
-    return orphans
-
-
-def detect_orphan_icas(
-    enriched_threat_set: EnrichedThreatSet,
-    scenarios: list[ScenarioEnvelope],
-) -> list[str]:
-    """Detect ICAs not concretized into scenarios.
-
-    Args:
-        enriched_threat_set: The enriched threat set.
-        scenarios: The produced scenario envelopes.
-
-    Returns:
-        A list of orphan ICA IDs.
-    """
-    scenario_ica_ids = {
-        s.scenario_spec.threat_source.ica_id
-        for s in scenarios
-        if s.scenario_spec.threat_source.ica_id
-    }
-    orphans: list[str] = []
-    for threat in enriched_threat_set.structural_threats:
-        if threat.ica_id and threat.ica_id not in scenario_ica_ids:
-            orphans.append(threat.ica_id)
-    return orphans
