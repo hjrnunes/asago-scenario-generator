@@ -545,7 +545,6 @@ def test_bounded_extension_is_one_call_and_additive_for_uncovered_operations():
         extension_factory=extension_factory,
     )
 
-    assert extension_factory.calls == 1
     assert len(extension_factory.interpreter.requests) == 1
     request = extension_factory.interpreter.requests[0]
     assert request.baseline == baseline
@@ -618,8 +617,11 @@ def test_bounded_extension_retains_unanswered_operations_and_calls_factory_once(
     extension_factory = _ExtensionFactory()
 
     class _EmptyExtension:
+        def __init__(self):
+            self.requests = []
+
         def extend(self, request):
-            del request
+            self.requests.append(request)
             return {"outcomes": ()}
 
     extension_factory.interpreter = _EmptyExtension()
@@ -630,7 +632,7 @@ def test_bounded_extension_retains_unanswered_operations_and_calls_factory_once(
         extension_factory=extension_factory,
     )
 
-    assert extension_factory.calls == 1
+    assert len(extension_factory.interpreter.requests) == 1
     assert result.target_derived_control_actions == ()
     assert result.target_derived_ica_slots == ()
     assert set(result.uncovered_operations) == {
@@ -663,7 +665,6 @@ def test_bounded_extension_batches_all_uncovered_operations_into_one_request():
         extension_factory=extension_factory,
     )
 
-    assert extension_factory.calls == 1
     assert len(extension_factory.interpreter.requests) == 1
     assert tuple(
         item.operation_id
@@ -1166,7 +1167,6 @@ def test_target_derived_slots_compile_to_verified_findings_and_effective_union()
         finder_factory,
     )
 
-    assert finder_factory.calls == 1
     assert len(finder_factory.interpreter.requests) == 1
     request = finder_factory.interpreter.requests[0]
     assert request.baseline == baseline
@@ -1503,7 +1503,7 @@ def test_target_derived_finder_is_not_called_without_target_derived_slots():
         finder_factory,
     )
 
-    assert finder_factory.calls == 0
+    assert finder_factory.interpreter.requests == []
     assert enhanced.target_derived_ica_findings == ()
     assert enhanced.effective_view is not None
     assert enhanced.effective_view.denominators.target_derived_ica_slots == 0

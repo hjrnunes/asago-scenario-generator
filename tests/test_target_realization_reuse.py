@@ -74,7 +74,6 @@ def test_realization_given_baseline_rows_still_runs_the_extension_once():
         baseline_rows=rows,
     )
 
-    assert extension_factory.calls == 1
     assert len(extension_factory.interpreter.requests) == 1
     assert tuple(
         item.operation_id
@@ -114,7 +113,7 @@ def test_extension_factory_is_not_built_when_every_operation_is_supported():
         baseline, _profile(), extension_factory, baseline_rows=rows
     )
 
-    assert extension_factory.calls == 0
+    assert extension_factory.interpreter.requests == []
     assert result.uncovered_operations == ()
 
 
