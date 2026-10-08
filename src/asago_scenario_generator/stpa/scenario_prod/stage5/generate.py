@@ -1,13 +1,13 @@
 """Stage 5 provider call for both paths: plan, call, and publish.
 
-``generate_bdi_for_context`` builds the execution-design or the normal
-(semantics-only) plan, makes the one provider call with its bounded
-length retry, and lets the plan compile and record the reply.
+``generate_bdi_for_context`` renders the semantics-only request, makes the
+one provider call with its bounded length retry, and compiles and records
+the reply.
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import replace
 import json
 from types import SimpleNamespace
 from pathlib import Path
@@ -89,21 +89,6 @@ _LENGTH_RETRY_EXHAUSTED_PREFIX = (
 )
 
 
-@dataclass(frozen=True)
-class _Stage5Plan:
-    """One Stage 5 path's provider request and how its reply is published."""
-
-    system_prompt: str
-    user_prompt: str
-    response_format: type[BaseModel]
-    validation_retry_feedback: Callable[[Exception], str]
-    result_validator: Callable[[BaseModel], BaseModel]
-    finish: Callable[
-        [BaseModel | None, str | None, object, tuple[ValidationIssue, ...]],
-        tuple[BDIGenerationResult | None, str | None],
-    ]
-
-
 def generate_bdi_for_context(
     llm_client: LLMClient,
     scenario_context: ScenarioGenerationContext,
@@ -141,11 +126,15 @@ def generate_bdi_for_context(
         target_observations,
         observation_contract,
     )
-    plan = _semantics_only_plan(
+    return _generate_semantics(
+        llm_client,
         scenario_context,
         choices,
         run_dir,
         loader=loader,
+        stage=stage,
+        step=step,
+        temperature=temperature,
         target_operation=target_operation,
         execution_target_profile=execution_target_profile,
         target_observations=target_observations,
@@ -153,21 +142,6 @@ def generate_bdi_for_context(
         observation_contract=observation_contract,
         condition_family=condition_family,
     )
-    draft, error, final_llm_result, issues = _call_bdi_with_bounded_length_retry(
-        llm_client,
-        plan.system_prompt,
-        plan.user_prompt,
-        run_dir,
-        response_format=plan.response_format,
-        stage=stage,
-        step=step,
-        slot_id=scenario_context.scenario_identity.ica_slot_id,
-        scenario_id=scenario_context.scenario_identity.scenario_id,
-        temperature=temperature,
-        validation_retry_feedback=plan.validation_retry_feedback,
-        result_validator=plan.result_validator,
-    )
-    return plan.finish(draft, error, final_llm_result, issues)
 
 
 def _require_intact_environment_inputs(
@@ -197,20 +171,24 @@ def _require_intact_environment_inputs(
         observation_contract.verify_digest()
 
 
-def _semantics_only_plan(
+def _generate_semantics(
+    llm_client: LLMClient,
     scenario_context: ScenarioGenerationContext,
     choices: tuple[_CausalSourceChoice, ...],
     run_dir: Path,
     *,
     loader: TemplateLoader,
+    stage: str,
+    step: str,
+    temperature: float,
     target_operation: TargetOperationObservation | None,
     execution_target_profile: ExecutionTargetProfile | None,
     target_observations: TargetObservationSnapshot | None,
     content_surface: ContentSurfaceFacts | None,
     observation_contract: ObservationContract | None,
     condition_family: ConditionFamily | None,
-) -> _Stage5Plan:
-    """Plan the Stage 5 wire: scenario semantics and evidence only.
+) -> tuple[BDIGenerationResult | None, str | None]:
+    """Request, validate, and compile scenario semantics and evidence only.
 
     The supplied target facts (``target_operation`` and
     ``target_observations``) are semantic grounding, not execution design:
@@ -328,18 +306,25 @@ def _semantics_only_plan(
             )
         return result, error
 
-    return _Stage5Plan(
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
+    draft, error, final_llm_result, issues = _call_bdi_with_bounded_length_retry(
+        llm_client,
+        system_prompt,
+        user_prompt,
+        run_dir,
         response_format=response_format,
+        stage=stage,
+        step=step,
+        slot_id=scenario_context.scenario_identity.ica_slot_id,
+        scenario_id=scenario_context.scenario_identity.scenario_id,
+        temperature=temperature,
         validation_retry_feedback=_normal_validation_retry_feedback(
             scenario_context,
             choices,
             target_observations=target_observations,
         ),
         result_validator=validate,
-        finish=finish,
     )
+    return finish(draft, error, final_llm_result, issues)
 
 
 def _finish_normal_context_bdi(
