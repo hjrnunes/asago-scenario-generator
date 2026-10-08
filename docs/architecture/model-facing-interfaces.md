@@ -584,6 +584,15 @@ empty (`null`, `""`, `[]`, or `{}`). An unknown field with content still
 fails, and the retry lists the fields a responsibility may contain. Any
 alternate top-level collection still fails, even when empty.
 
+A Call 2b response that still names an unknown action target, an unknown
+feedback source, or another responsibility's process model part after its
+correction gets one reference correction in the same step. That request names
+every unknown reference, lists the valid targets and sources with their
+descriptions and, for a process-model reference, the parts of the action's own
+responsibility. It continues the step's attempt numbering. When the reference
+correction fails, the stage fails with its error; every other Call 2b failure
+stops as before.
+
 Call 3 lists each constraint's obligation phrases. A `revise` decision must
 keep every phrase verbatim in the new rule; otherwise the retry names the
 dropped phrase and asks the model to keep it or preserve the constraint.

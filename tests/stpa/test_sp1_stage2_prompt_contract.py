@@ -21,6 +21,8 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
     ResponsibilitySet,
+    UnknownReferenceError,
+    _INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
     _call_2b_control_elements,
     _assemble_control_structure,
     _enrich_responsibilities,
@@ -28,8 +30,10 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     parse_responsibility_set_response,
     parse_control_element_set_response,
 )
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
@@ -802,3 +806,113 @@ def test_responsibility_parser_rejects_fields_it_would_drop(
 def test_responsibility_parser_rejects_a_non_object_response() -> None:
     with pytest.raises(ValidationError):
         _validate_responsibility_wire("not an object")
+
+
+def _invented_reference_payload() -> dict:
+    payload = _valid_payload()
+    payload["control_actions"][0]["target"] = {
+        "type": "responsibility",
+        "id": "RESP-T_S",
+    }
+    payload["control_actions"][0]["effect_kind"] = "agent_message"
+    payload["control_actions"][0]["process_model_refs"] = ["PM-1-1"]
+    payload["feedback"][1]["source"] = {"type": "controlled_process", "id": "CP-9"}
+    return payload
+
+
+def _run_call_2b(client: MockLLMClient, tmp_path) -> ControlElementSet:
+    return _call_2b_control_elements(
+        llm_client=client,
+        use_case_text="Test use case",
+        responsibility_set=_responsibilities(),
+        run_dir=tmp_path,
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0.4,
+    )
+
+
+def test_call2b_parser_names_every_unknown_reference() -> None:
+    with pytest.raises(UnknownReferenceError) as exc_info:
+        parse_control_element_set_response(
+            _invented_reference_payload(),
+            responsibilities=_responsibilities().responsibilities,
+        )
+
+    assert [
+        (item.location, item.value, item.owner) for item in exc_info.value.references
+    ] == [
+        ("control_actions[0].target", "RESP-T_S", None),
+        ("feedback[1].source", "CP-9", None),
+        ("control_actions[0].process_model_refs", "PM-1-1", "RESP-2"),
+    ]
+
+
+def test_call2b_sends_one_reference_correction_after_the_generic_retry(
+    tmp_path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_for(
+        ControlElementSet,
+        [
+            _invented_reference_payload(),
+            _invented_reference_payload(),
+            _valid_payload(),
+        ],
+    )
+
+    parsed = _run_call_2b(client, tmp_path)
+
+    assert parsed.control_actions[0].target == ElementRef(
+        type=ReferenceType.controlled_process, id="CP-1"
+    )
+    assert len(client.calls) == 3
+    attempts = [
+        entry
+        for entry in read_calls_jsonl(tmp_path)
+        if entry["step"] == "call_2b_control_elements"
+    ]
+    assert [(entry["attempt_number"], entry["success"]) for entry in attempts] == [
+        (1, False),
+        (2, False),
+        (3, True),
+    ]
+    generic, typed = client.calls[1].user_prompt, client.calls[2].user_prompt
+    assert "Unknown references" not in generic
+    assert "Unknown references in the prior response:" in typed
+    assert "- control_actions[0].target: RESP-T_S" in typed
+    assert "- feedback[1].source: CP-9" in typed
+    assert (
+        "- control_actions[0].process_model_refs: PM-1-1 "
+        "(not a process model part of RESP-2)" in typed
+    )
+    assert "- RESP-1 (responsibility): Authorizes requests" in typed
+    assert "- CP-1 (controlled process): Transaction processor" in typed
+    assert "- RESP-2: PM-2-1: Outcome state" in typed
+    assert "Prior structured response to correct in place" in typed
+    assert _INTERMEDIATE_VALIDATION_RETRY_FEEDBACK not in typed
+
+
+def test_call2b_reference_correction_is_bounded(tmp_path) -> None:
+    client = MockLLMClient()
+    client.set_response_for(
+        ControlElementSet,
+        [_invented_reference_payload()] * 3 + [_valid_payload()],
+    )
+
+    with pytest.raises(StageError) as exc_info:
+        _run_call_2b(client, tmp_path)
+
+    assert len(client.calls) == 3
+    assert "RESP-T_S" in exc_info.value.message
+
+
+def test_call2b_other_failures_get_no_reference_correction(tmp_path) -> None:
+    unserved = _valid_payload()
+    unserved["control_actions"] = unserved["control_actions"][:1]
+    client = MockLLMClient()
+    client.set_response_for(ControlElementSet, [unserved, unserved, _valid_payload()])
+
+    with pytest.raises(StageError):
+        _run_call_2b(client, tmp_path)
+
+    assert len(client.calls) == 2

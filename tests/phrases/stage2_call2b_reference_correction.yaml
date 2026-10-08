@@ -1,0 +1,22 @@
+template: stage2_call2b_reference_correction.j2
+cases:
+  unknown-references:
+    once:
+      - "Unknown references in the prior response:"
+      - "Valid action targets and feedback sources:"
+    required:
+      - The prior response names references that this structure does not hold.
+      - Correct only these references, and keep every other record as written.
+      - "(not a process model part of"
+      - "(responsibility):"
+      - "(controlled process):"
+      - >-
+        A target or source may also name a controlled process that you add to
+        `controlled_processes` in this response.
+      - >-
+        An action's `process_model_refs` name only process model parts of the
+        action's own responsibility.
+    ordered:
+      - - "Unknown references in the prior response:"
+        - "Valid action targets and feedback sources:"
+        - "Valid process model parts:"

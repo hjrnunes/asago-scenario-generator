@@ -42,9 +42,11 @@ from asago_scenario_generator.stpa.infra.llm import (
 )
 from asago_scenario_generator.stpa.infra.call_log import CallLog, call_log_of
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CallOutcome,
     CorrectionPolicy,
     StageError,
     call_with_policy,
+    correction_prompt,
     decode_content,
     log_llm_call_failure,
     strip_json_fence,
@@ -1075,6 +1077,44 @@ def _check_every_responsibility_is_served(
         )
 
 
+@dataclass(frozen=True)
+class UnknownReference:
+    """One Call 2b reference to an element the structure does not hold.
+
+    ``owner`` names the responsibility whose process model parts a
+    ``process_model_refs`` entry should have come from.
+    """
+
+    location: str
+    value: str
+    owner: str | None = None
+
+    @property
+    def message(self) -> str:
+        if self.owner is not None:
+            return (
+                f"{self.location} {self.value!r} is not a process model part of "
+                f"the action's own responsibility {self.owner}"
+            )
+        return (
+            f"{self.location} reference {self.value!r} is not present in the "
+            "supplied structure"
+        )
+
+
+class UnknownReferenceError(ValueError):
+    """A Call 2b response names targets, sources or process model parts it lacks."""
+
+    def __init__(
+        self,
+        references: Sequence[UnknownReference],
+        controlled_processes: Sequence[ControlledProcess] = (),
+    ) -> None:
+        self.references = tuple(references)
+        self.controlled_processes = tuple(controlled_processes)
+        super().__init__("; ".join(item.message for item in self.references))
+
+
 def _check_control_elements_against_responsibilities(
     responsibilities: Sequence[Responsibility],
     *,
@@ -1092,69 +1132,74 @@ def _check_control_elements_against_responsibilities(
     _check_every_responsibility_is_served(
         owner_numbers, known_pm_ids, actions, feedback_channels
     )
-    _check_control_element_refs(
+    unknown = _unknown_element_refs(
         actions,
         feedback_channels,
         responsibility_ids={resp.resp_id for resp in responsibilities},
         controlled_process_ids={process.cp_id for process in controlled_processes},
     )
-    for index, channel in enumerate(feedback_channels):
-        if channel.updates not in known_pm_ids:
-            raise ValueError(
-                f"feedback[{index}] updates unknown process model part "
-                f"{channel.updates!r}"
-            )
-    _check_action_process_model_refs(actions, responsibilities)
+    if not unknown:
+        for index, channel in enumerate(feedback_channels):
+            if channel.updates not in known_pm_ids:
+                raise ValueError(
+                    f"feedback[{index}] updates unknown process model part "
+                    f"{channel.updates!r}"
+                )
+    unknown += _foreign_process_model_refs(actions, responsibilities)
+    if unknown:
+        raise UnknownReferenceError(unknown, controlled_processes)
 
 
-def _check_control_element_refs(
+def _unknown_element_refs(
     actions: Sequence[ControlAction],
     feedback_channels: Sequence[FeedbackChannel],
     *,
     responsibility_ids: set[str],
     controlled_process_ids: set[str],
-) -> None:
-    """Reject an action target or feedback source absent from the structure."""
+) -> list[UnknownReference]:
+    """Return each action target or feedback source absent from the structure."""
+    unknown: list[UnknownReference] = []
     for collection_name, elements, ref_field in (
-        ("control action", actions, "target"),
-        ("feedback channel", feedback_channels, "source"),
+        ("control_actions", actions, "target"),
+        ("feedback", feedback_channels, "source"),
     ):
         for index, element in enumerate(elements):
             ref = getattr(element, ref_field)
-            if ref is None:  # pragma: no cover - required above
-                raise ValueError(f"{collection_name}[{index}] is missing {ref_field}")
-            if ref.type.value == "responsibility":
-                known = ref.id in responsibility_ids
-            else:
-                known = ref.id in controlled_process_ids
-            if not known:
-                raise ValueError(
-                    f"{collection_name}[{index}] {ref_field} reference "
-                    f"{ref.id!r} is not present in the supplied structure"
+            known_ids = (
+                responsibility_ids
+                if ref.type is ReferenceType.responsibility
+                else controlled_process_ids
+            )
+            if ref.id not in known_ids:
+                unknown.append(
+                    UnknownReference(f"{collection_name}[{index}].{ref_field}", ref.id)
                 )
+    return unknown
 
 
-def _check_action_process_model_refs(
+def _foreign_process_model_refs(
     actions: Sequence[ControlAction],
     responsibilities: Sequence[Responsibility],
-) -> None:
-    """Reject an action that cites another responsibility's process model."""
+) -> list[UnknownReference]:
+    """Return each action reference to another responsibility's process model."""
     pm_ids_by_owner = {
         _extract_resp_num(responsibility.resp_id): {
             pm.pm_id for pm in responsibility.process_model_parts
         }
         for responsibility in responsibilities
     }
+    unknown: list[UnknownReference] = []
     for index, action in enumerate(actions):
-        owner_pm_ids = pm_ids_by_owner.get(_owner_number(action.ca_id, prefix="CA"))
-        foreign = [
-            ref for ref in action.process_model_refs if ref not in (owner_pm_ids or ())
-        ]
-        if foreign:
-            raise ValueError(
-                f"control_actions[{index}] process_model_refs {foreign} are not "
-                "process model parts of the action's own responsibility"
+        owner = _owner_number(action.ca_id, prefix="CA")
+        owner_pm_ids = pm_ids_by_owner.get(owner, set())
+        unknown.extend(
+            UnknownReference(
+                f"control_actions[{index}].process_model_refs", ref, f"RESP-{owner}"
             )
+            for ref in action.process_model_refs
+            if ref not in owner_pm_ids
+        )
+    return unknown
 
 
 # ---------------------------------------------------------------------------
@@ -1925,13 +1970,17 @@ def _run_stage2_llm_call(
         Callable[[LLMResult, list[dict[str, Any]]], _Stage2ModelT] | None
     ) = None,
     user_prompt_suffix: str = "",
+    recover: (
+        Callable[[CallOutcome[_Stage2ModelT], str, str], _Stage2ModelT | None] | None
+    ) = None,
 ) -> _Stage2ModelT:
     """Render prompts, call the LLM, validate, and raise StageError on failure.
 
     Shared backbone for the four Stage 2 LLM calls (Call 1, 2a, 2b, 3).
     Each call renders a system + user prompt, invokes the LLM via
     ``call_with_policy``, and raises ``StageError`` if the call or validation
-    fails.
+    fails.  ``recover`` receives a failed outcome with the system and user
+    prompts and may return a model from a follow-up request instead.
     """
     system_prompt = loader.render_prompt(system_template)
     user_prompt = (
@@ -1960,6 +2009,10 @@ def _run_stage2_llm_call(
         result_parser_with_cleanup=result_parser_with_cleanup,
         result_validator=result_validator,
     )
+    if outcome.error is not None and recover is not None:
+        recovered = recover(outcome, system_prompt, user_prompt)
+        if recovered is not None:
+            return recovered
     if outcome.error is not None:
         raise StageError(stage=STAGE, step=step, message=outcome.error)
     return outcome.value  # type: ignore[return-value]
@@ -2070,6 +2123,27 @@ def _call_2b_control_elements(
     Raises:
         StageError: If the LLM call fails or the response fails validation.
     """
+
+    def parse(result: LLMResult) -> ControlElementSet:
+        return parse_control_element_set_response(
+            result.content, responsibilities=responsibility_set.responsibilities
+        )
+
+    def correct_references(
+        outcome: CallOutcome[ControlElementSet], system_prompt: str, user_prompt: str
+    ) -> ControlElementSet | None:
+        return _correct_call_2b_references(
+            outcome,
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            responsibilities=responsibility_set.responsibilities,
+            parse=parse,
+            run_dir=run_dir,
+            loader=loader,
+            temperature=temperature,
+        )
+
     return _run_stage2_llm_call(
         llm_client=llm_client,
         run_dir=run_dir,
@@ -2086,11 +2160,72 @@ def _call_2b_control_elements(
         step="call_2b_control_elements",
         # Call 2b is semantic output.  Its stage-local parser rejects unknown
         # carriers and missing meaning before canonical IDs are repaired.
-        result_parser=lambda result: parse_control_element_set_response(
-            result.content,
-            responsibilities=responsibility_set.responsibilities,
-        ),
+        result_parser=parse,
+        recover=correct_references,
     )
+
+
+def _correct_call_2b_references(
+    outcome: CallOutcome[ControlElementSet],
+    *,
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    responsibilities: Sequence[Responsibility],
+    parse: Callable[[LLMResult], ControlElementSet],
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+) -> ControlElementSet | None:
+    """Send the one reference correction for a Call 2b response, or decline.
+
+    It runs only when the generic correction is spent and the last response
+    still names unknown targets, sources or process model parts.  The request
+    names each unknown reference, offers the valid IDs with their
+    descriptions, and continues the step's attempt numbering.  Every other
+    failure is declined so the caller stops as before.
+    """
+    failure = outcome.failure
+    if not isinstance(failure, UnknownReferenceError) or outcome.result is None:
+        return None
+    owners = {item.owner for item in failure.references if item.owner is not None}
+    feedback = "\n\n" + loader.render_prompt(
+        "stage2_call2b_reference_correction.j2",
+        unknown_references=failure.references,
+        responsibilities=responsibilities,
+        controlled_processes=failure.controlled_processes,
+        process_model_owners=[
+            responsibility
+            for responsibility in responsibilities
+            if responsibility.resp_id in owners
+        ],
+    )
+    corrected = call_with_policy(
+        llm_client=llm_client,
+        system_prompt=system_prompt,
+        user_prompt=correction_prompt(
+            original_prompt=user_prompt,
+            feedback=feedback,
+            error=failure,
+            response_format=_ControlElementProviderSet,
+            include_schema=False,
+            prior_result=outcome.result,
+            include_prior_response=True,
+        ),
+        response_format=_ControlElementProviderSet,
+        run_dir=run_dir,
+        stage=STAGE,
+        step="call_2b_control_elements",
+        policy=CorrectionPolicy(),
+        temperature=temperature,
+        result_parser=parse,
+        first_attempt_number=outcome.attempt_number + 1,
+    )
+    if corrected.error is not None:
+        raise StageError(
+            stage=STAGE, step="call_2b_control_elements", message=corrected.error
+        )
+    return corrected.value
 
 
 # ---------------------------------------------------------------------------

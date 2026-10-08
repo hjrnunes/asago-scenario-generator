@@ -770,7 +770,8 @@ class CallOutcome(Generic[_T]):
     """The published model or the last error, and the requests dispatched.
 
     ``failure`` is the exception behind ``error``, for a caller that reads
-    typed detail from it.
+    typed detail from it.  ``attempt_number`` is the number of the last
+    attempt, so a follow-up request in the same step can continue it.
     """
 
     value: _T | None
@@ -778,6 +779,7 @@ class CallOutcome(Generic[_T]):
     error: str | None
     calls: int
     failure: BaseException | None = None
+    attempt_number: int = 1
 
 
 @dataclass
@@ -1093,6 +1095,7 @@ def call_with_policy(
         Callable[[LLMResult, list[dict[str, Any]]], _T] | None
     ) = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
+    first_attempt_number: int = 1,
 ) -> CallOutcome[_T]:
     """Request a structured response, correcting it as ``policy`` allows.
 
@@ -1131,11 +1134,13 @@ def call_with_policy(
             also receives the mutable cleanup-transformation list used by the
             durable call record. Use this when parsing applies a response
             correction that must remain distinguishable from model output.
+        first_attempt_number: Number of the first attempt in the call log; a
+            follow-up request in the same step continues the numbering.
     """
     json_retries_remaining = policy.json_retries
     validation_retries_remaining = policy.validation_retries
     attempt_user_prompt = user_prompt
-    attempt_number = 1
+    attempt_number = first_attempt_number
     calls = 0
     while True:
         state = _SafeCallState()
@@ -1175,6 +1180,7 @@ def call_with_policy(
                 state.result,
                 None,
                 _dispatched(calls + 1 + state.transport_retries),
+                attempt_number=attempt_number,
             )
         except Exception as exc:
             calls += state.dispatched + state.transport_retries
@@ -1219,7 +1225,14 @@ def call_with_policy(
                     include_prior_response=policy.include_response,
                 )
                 continue
-            return CallOutcome(None, state.result, error_msg, _dispatched(calls), exc)
+            return CallOutcome(
+                None,
+                state.result,
+                error_msg,
+                _dispatched(calls),
+                exc,
+                attempt_number=attempt_number,
+            )
 
 
 def _terminal_error_code(

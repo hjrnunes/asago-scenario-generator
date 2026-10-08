@@ -36,6 +36,7 @@ from asago_scenario_generator.models.target_realization import (
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import (
+    ControlledProcess,
     ProcessModelPart,
     Responsibility,
 )
@@ -51,6 +52,9 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 )
 from asago_scenario_generator.stpa.system_model import (
     PROMPTS_DIR as SYSTEM_MODEL_PROMPTS_DIR,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    UnknownReference,
 )
 from tests.helpers.normal_authoring_wire import (
     _record_observations,
@@ -96,6 +100,18 @@ ONE_RESPONSIBILITY = {
             ],
         )
     ],
+}
+
+UNKNOWN_REFERENCES = {
+    "unknown_references": [
+        UnknownReference("control_actions[0].target", "RESP-9"),
+        UnknownReference("control_actions[0].process_model_refs", "PM-2-1", "RESP-1"),
+    ],
+    "responsibilities": ONE_RESPONSIBILITY["responsibilities"],
+    "controlled_processes": [
+        ControlledProcess(cp_id="CP-1", description="Request processor")
+    ],
+    "process_model_owners": ONE_RESPONSIBILITY["responsibilities"],
 }
 
 EMPTY_STRUCTURE = {
@@ -183,6 +199,7 @@ CASES: dict[str, Callable[[str], str]] = {
     ),
     "no-probes": _system_model(taxonomy_probes=[]),
     "empty-structure": _system_model(**EMPTY_STRUCTURE),
+    "unknown-references": _system_model(**UNKNOWN_REFERENCES),
     "target-blind": _stage5(dict),
     "operation": _stage5(lambda: {"target_operation": _target_operation()}),
     "observations": _stage5(lambda: {"target_observations": _record_observations()}),
