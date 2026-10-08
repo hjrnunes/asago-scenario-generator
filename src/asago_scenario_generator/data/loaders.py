@@ -18,33 +18,6 @@ from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.models import EvidenceSpan, MitigationRef, RiskCard
 
 
-class _UniqueKeyLoader(yaml.SafeLoader):
-    """Safe YAML loader that rejects same-scope duplicate mapping keys."""
-
-
-def _construct_unique_mapping(
-    loader: _UniqueKeyLoader, node: yaml.MappingNode, deep: bool = False
-) -> dict[Any, Any]:
-    loader.flatten_mapping(node)
-    mapping: dict[Any, Any] = {}
-    for key_node, value_node in node.value:
-        key = loader.construct_object(key_node, deep=deep)
-        if key in mapping:
-            raise ValueError(f"duplicate YAML key: {key}")
-        mapping[key] = loader.construct_object(value_node, deep=deep)
-    return mapping
-
-
-_UniqueKeyLoader.add_constructor(
-    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _construct_unique_mapping
-)
-
-
-def load_yaml_strict(content: bytes | str) -> Any:
-    """Safely parse YAML while rejecting duplicate mapping keys."""
-    return yaml.load(content, Loader=_UniqueKeyLoader)
-
-
 def load_agentic_threats(path: str | Path) -> dict[str, Any]:
     """Load OWASP Agentic Threats YAML and return threats keyed by ID.
 
@@ -231,12 +204,3 @@ def build_threat_to_patterns_index(
     for pid, pattern in patterns.items():
         index[pattern["threat_id"]].append(pid)
     return dict(index)
-
-
-# ---------------------------------------------------------------------------
-# Attack Goals Taxonomy
-# ---------------------------------------------------------------------------
-
-# ---------------------------------------------------------------------------
-# Threat-goal affinity map
-# ---------------------------------------------------------------------------

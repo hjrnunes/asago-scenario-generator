@@ -286,9 +286,8 @@ failure alone does not establish attacker-controlled retrieval. Accurate empty
 reads remain background facts. A scenario whose observable outcome the
 observation contract cannot capture is published as analytical-only.
 
-An optional `--execution-target-profile` (also available as `--target-profile`)
-supplies an observed/inferred target or explicit simulation profile. The
-profile's own `basis` field selects its meaning. A simulation
+An optional `--target-profile` supplies an observed/inferred target or explicit
+simulation profile. The profile's own `basis` field selects its meaning. A simulation
 profile must be explicit and complete; missing target information never creates a mock.
 Profiles contain semantic resource facts, not URLs, credentials, or secrets.
 A simulation profile is not treated as target evidence: SP1 ignores its
@@ -322,7 +321,7 @@ uv run asago-target-scan mcp \
 
 uv run asago-scenario-generator generate \
   ... \
-  --execution-target-profile \
+  --target-profile \
   build/target-discovery/my-agent/execution-target-profile.json
 ```
 

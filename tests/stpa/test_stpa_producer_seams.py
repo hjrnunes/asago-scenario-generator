@@ -89,7 +89,7 @@ def _target_realization_fixture(
     return TargetRealizationResult(
         baseline_id="baseline-fixture",
         baseline_digest="b" * 64,
-        profile_id=profile.profile_id,
+        profile_id=profile.target_id,
         profile_digest=profile.semantic_digest,
         summary=TargetRealizationSummary(
             baseline_control_actions=0,
@@ -122,7 +122,7 @@ def _supported_target_realization_fixture(
     return TargetRealizationResult(
         baseline_id="baseline-fixture",
         baseline_digest="b" * 64,
-        profile_id=profile.profile_id,
+        profile_id=profile.target_id,
         profile_digest=profile.semantic_digest,
         rows=(
             TargetRealizationRow(
