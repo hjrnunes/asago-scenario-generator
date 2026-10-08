@@ -40,7 +40,8 @@
       "plan_semantic_digest": "08cbf97181e0b391b9d037cafd9f0b50ccd186ef677674b32c6ca686c8f54431",
       "plan_sha256": "2d3e5eabeaddeb6645f7676bf4c7429f0e890d5a46627ee4e17e42bb0afb22ac",
       "semantic_digest_count": 199,
-      "target": "airbnb"
+      "target": "airbnb",
+      "taxonomy_inputs_digest": "2886b81aa3e17c4ed9fb93b0c3cc70bcd0e5907ff5bfd3536a93151feb006078"
     },
     "airbnb-r2": {
       "candidate_ids": [
@@ -78,7 +79,8 @@
       "plan_semantic_digest": "a91d6c453d90d25d6580f3b85eb18cf816ebfa70cdde42cab25ef8975b7eda54",
       "plan_sha256": "b3c37f440166c6aa13caae6783c4f8edc42a2228b8d4eff126acedf86797e170",
       "semantic_digest_count": 305,
-      "target": "airbnb"
+      "target": "airbnb",
+      "taxonomy_inputs_digest": "ae4d78e07cf94bd727ec3950c287b90594f08abf7043c268aa113cd72be3054b"
     },
     "klarna-r1": {
       "candidate_ids": [
@@ -110,7 +112,8 @@
       "plan_semantic_digest": "e181a3f568f9b2736f843b3299be58d75ba2585277d0708797df81dc23e59701",
       "plan_sha256": "fcb6ae9287c636e50ab77be4da1e446111f61d37004055a0dcd47f11063f88fc",
       "semantic_digest_count": 188,
-      "target": "klarna"
+      "target": "klarna",
+      "taxonomy_inputs_digest": "42a3e689cfe6575324fc7395f90b4089710489794b8daddcc8865fc385b565a8"
     },
     "klarna-r2": {
       "candidate_ids": [
@@ -142,7 +145,8 @@
       "plan_semantic_digest": "d601d65e667ba7a37d21f3f17443ae1331dfd1ebc594a8c897592a7243ff21e1",
       "plan_sha256": "74c316e9ca4edeeb2bf46149d2a1ff6e8dc163fb7c886f53ece3e933c5575a84",
       "semantic_digest_count": 167,
-      "target": "klarna"
+      "target": "klarna",
+      "taxonomy_inputs_digest": "f50c9ff9b215f5aff3cef7826c55a422f867cb80a18490e2d8cf5c5e90fe4a2e"
     },
     "occiai-r1": {
       "candidate_ids": [
@@ -175,7 +179,8 @@
       "plan_semantic_digest": "84d6cddcf42da69ed2e9f11f6187766fca2813519f1c617345bb0bd00003cdf5",
       "plan_sha256": "38e02bb62806d300d75733dd863397a6d80b60a0cf8dc7ac656f1c126073a622",
       "semantic_digest_count": 218,
-      "target": "occiai"
+      "target": "occiai",
+      "taxonomy_inputs_digest": "1f79518dc5e174d01754d595e72703d732b7c5f163d1e469cd916c75fbea65a7"
     },
     "occiai-r2": {
       "candidate_ids": [
@@ -220,7 +225,8 @@
       "plan_semantic_digest": "465629dd86571f5ce2e40a2f4cdd7864d0881f821207a4ec0309b8312c8ff91b",
       "plan_sha256": "5464116268cc2e79c3583aeef338175009b0555352e89267265fa7d24021292b",
       "semantic_digest_count": 122,
-      "target": "occiai"
+      "target": "occiai",
+      "taxonomy_inputs_digest": "a1f55be8de6b0e9c74e2de37dd9a126abce087a8ce984219d0868e33f18a40d0"
     }
   }
 }
