@@ -240,12 +240,7 @@ class McpToolObservation(_Model):
         _validate_json_schema(self.input_schema, "input_schema")
         if self.output_schema is not None and isinstance(self.output_schema, dict):
             _validate_json_schema(self.output_schema, "output_schema")
-        properties = self.input_schema.get("properties", {})
-        if properties is None:
-            properties = {}
-        if not isinstance(properties, Mapping):
-            raise ValueError("input_schema.properties must be a mapping")
-        names = tuple(sorted(str(name) for name in properties))
+        names = _input_schema_argument_names(self.input_schema)
         if any(not name for name in names):
             raise ValueError("input_schema property names must be non-empty")
         object.__setattr__(self, "argument_names", names)
