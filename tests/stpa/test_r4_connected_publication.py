@@ -259,6 +259,23 @@ def test_grounded_secondary_defender_intention_is_accepted_as_tree_evidence():
     assert "CA-1-2" in str(tree)
 
 
+def test_tree_coverage_accepts_the_evidence_phrase_and_reports_gaps_and_bridges():
+    spec = _spec()
+    factor = spec.causal_factors[0]
+    assert factor.source_id not in factor.description
+    by_evidence = {"root": "Outcome", "children": [factor.description]}
+
+    assert validate_tree_factor_evidence_coverage(by_evidence, spec).passed
+
+    unrelated = {"root": "Outcome", "children": ["The caller exploits PM-9-9."]}
+    assert validate_tree_factor_evidence_coverage(unrelated, spec).errors == [
+        f"Attack tree does not cover declared causal factor {factor.source_id} "
+        "with its declared evidence.",
+        "Attack tree references unsupported causal bridge PM-9-9; "
+        "only selected-path and declared-factor evidence is allowed.",
+    ]
+
+
 def test_functional_publication_keeps_structural_causality_without_attacker():
     spec = _spec().model_copy(
         update={
