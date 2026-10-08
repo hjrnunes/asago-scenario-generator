@@ -22,7 +22,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticCondition,
     SemanticValue,
-    contains_binding_placeholder,
     normalize_semantic_proposition,
 )
 from asago_scenario_generator.stpa.observation_contract import (
@@ -88,40 +87,19 @@ class CausalFactorDeclaration(BaseModel):
 
 
 class UnsafeOutcomeDeclaration(BaseModel):
-    """Stage 5's semantic unsafe-outcome condition.
+    """Stage 5's unsafe outcome: one bounded semantic proposition.
 
-    The condition family, subject and operator are provider-authored.  Any
-    value absent from source evidence is represented by a typed placeholder;
-    the binding flag is derived and cannot be used to hide a placeholder.
-
-    The normal product run requests scenario semantics without an executable
-    condition, so ``condition`` is optional: the contextual normal wire
-    materializes the bounded semantic proposition with ``condition=None``
-    while the historical execution wire keeps its strict dynamic condition
-    schema.
+    The scenario handoff derives its hazard and constraint lineage from the
+    immutable context, and the wire requests no executable condition, so the
+    proposition is the only provider-authored field.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    condition: SemanticCondition | None = None
     semantic_proposition: StrictStr | None = None
-    semantic_binding_required: StrictBool | None = None
-    # These fields remain only for non-contextual compatibility callers.  The
-    # corrected contextual wire model never exposes or accepts them.
-    hazard_refs: tuple[str, ...] = ()
-    constraint_refs: tuple[str, ...] = ()
 
     @model_validator(mode="after")
-    def derive_binding_state(self) -> "UnsafeOutcomeDeclaration":
-        expected = contains_binding_placeholder(self.condition)
-        if (
-            self.semantic_binding_required is not None
-            and self.semantic_binding_required is not expected
-        ):
-            raise ValueError(
-                "semantic_binding_required must match typed placeholder presence"
-            )
-        object.__setattr__(self, "semantic_binding_required", expected)
+    def normalize_proposition(self) -> "UnsafeOutcomeDeclaration":
         if self.semantic_proposition is not None:
             object.__setattr__(
                 self,

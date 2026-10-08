@@ -59,7 +59,7 @@ def _comparison_snapshot() -> TargetObservationSnapshot:
     )
 
 
-def test_context_materialization_derives_lineage_and_preserves_proposition(
+def test_context_materialization_preserves_proposition(
     tmp_path,
 ) -> None:
     context = _model_output_context()
@@ -73,12 +73,6 @@ def test_context_materialization_derives_lineage_and_preserves_proposition(
     assert result.unsafe_outcome is not None
     assert result.unsafe_outcome.semantic_proposition == (
         "The response authorizes an unsafe action prohibited by policy."
-    )
-    assert result.unsafe_outcome.hazard_refs == tuple(
-        item.hazard_id for item in context.hazards
-    )
-    assert result.unsafe_outcome.constraint_refs == tuple(
-        item.constraint_id for item in context.constraints
     )
 
 

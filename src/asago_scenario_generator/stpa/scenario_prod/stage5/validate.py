@@ -31,7 +31,6 @@ from asago_scenario_generator.stpa.observation_contract import (
     SafeObservableOutcome,
     assess_observation_criteria,
 )
-from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
@@ -52,7 +51,6 @@ from ..condition_check import (
 from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
 from .wire import (
-    UnsafeOutcomeDeclaration,
     _CausalSourceChoice,
     _ContextAdversarialDraft,
     _ContextAttackerBDIDraft,
@@ -1058,33 +1056,4 @@ def _prune_undeclared_handles(
                 normalized=kept,
                 reason="undeclared_intention_handles_pruned",
             )
-        )
-
-
-def _validate_unsafe_outcome_for_target(
-    unsafe_outcome: UnsafeOutcomeDeclaration,
-    uca_type: UCAType,
-    control_action_id: str,
-) -> None:
-    """Keep provider-authored unsafe semantics inside the requested ICA."""
-    accepted = {
-        UCAType.not_provided: {"action_presence"},
-        UCAType.incorrect: {"action_value", "state_value"},
-        UCAType.wrong_timing: {"ordering", "delay", "window", "absence"},
-        UCAType.wrong_duration: {"duration"},
-    }
-    condition = unsafe_outcome.condition
-    if condition.type not in accepted[uca_type]:
-        raise ValueError(
-            f"unsafe outcome condition '{condition.type}' is incompatible with "
-            f"the selected UCA '{uca_type.value}'"
-        )
-    # A typed action condition is the one place the provider may repeat the
-    # target action identity.  It remains semantic condition data, never a
-    # causal-source selection; deterministic code requires exact equality.
-    condition_action = getattr(condition, "control_action_id", None)
-    if condition_action is not None and condition_action != control_action_id:
-        raise ValueError(
-            "unsafe outcome condition control_action_id must equal the selected "
-            "target action"
         )

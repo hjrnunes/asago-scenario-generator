@@ -6,9 +6,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     validate_factor_sources,
 )
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    SemanticCondition,
-)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
 )
@@ -25,9 +22,6 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 )
 from .wire import (
     BDIGenerationResult,
-)
-from .validate import (
-    _validate_unsafe_outcome_for_target,
 )
 
 
@@ -104,9 +98,6 @@ def assemble_scenario_spec(
     _merge_defender_vulnerabilities(defender_bdi, llm_result)
     causal_factors = _materialize_causal_factors(llm_result)
     _validate_assembled_factors(causal_factors, control_structure, scenario_context)
-    unsafe_condition = _validated_unsafe_condition(
-        llm_result, UCAType(slot_parts["ica_type"]), slot_parts["control_action"]
-    )
     if scenario_context is not None:
         # Context is the only authoritative source for selected consequence
         # lineage.  The contextual provider wire carries descriptions only;
@@ -114,7 +105,8 @@ def assemble_scenario_spec(
         hazard_refs = [item.hazard_id for item in scenario_context.hazards]
         constraint_refs = [item.constraint_id for item in scenario_context.constraints]
     else:
-        hazard_refs, constraint_refs = _unsafe_outcome_refs(llm_result, threat)
+        hazard_refs = list(threat.related_hazards)
+        constraint_refs = list(threat.related_constraints)
 
     return ScenarioSpec(
         scenario_id=generate_scenario_id(scenario_index),
@@ -131,7 +123,6 @@ def assemble_scenario_spec(
         catalog_context=threat.catalog_mappings,
         loss_scenario=threat.loss_scenario,
         causal_factors=causal_factors,
-        unsafe_outcome_condition=unsafe_condition,
         unsafe_outcome_semantic_proposition=(
             llm_result.unsafe_outcome.semantic_proposition
             if llm_result.unsafe_outcome is not None
@@ -245,35 +236,6 @@ def _validate_assembled_factors(
         return
     validate_factor_evidence(context, causal_factors)
     _validate_context_factor_sources(context, causal_factors)
-
-
-def _validated_unsafe_condition(
-    llm_result: BDIGenerationResult,
-    uca_type: UCAType,
-    control_action_id: str,
-) -> SemanticCondition | None:
-    """Validate and return the provider's typed unsafe condition when present.
-
-    The normal product wire materializes no executable condition, so an
-    absent condition is the expected normal shape; a supplied condition keeps
-    its exact UCA-family validation for historical callers.
-    """
-    outcome = llm_result.unsafe_outcome
-    if outcome is None or outcome.condition is None:
-        return None
-    _validate_unsafe_outcome_for_target(outcome, uca_type, control_action_id)
-    return outcome.condition
-
-
-def _unsafe_outcome_refs(
-    llm_result: BDIGenerationResult,
-    threat: StructuralThreat,
-) -> tuple[list[str], list[str]]:
-    """Use validated provider refs or the threat's authoritative fallback refs."""
-    outcome = llm_result.unsafe_outcome
-    if outcome is None:
-        return list(threat.related_hazards), list(threat.related_constraints)
-    return list(outcome.hazard_refs), list(outcome.constraint_refs)
 
 
 def _validate_context_factor_sources(

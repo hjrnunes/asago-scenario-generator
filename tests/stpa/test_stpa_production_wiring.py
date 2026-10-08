@@ -34,7 +34,6 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
-from asago_scenario_generator.stpa.models.semantic_conditions import OrderingCondition
 from tests.stpa.helpers import (
     make_minimal_control_structure,
 )
@@ -84,9 +83,7 @@ def _attacker_bdi() -> AttackerBDI:
 def _unsafe_outcome() -> UnsafeOutcomeDeclaration:
     """Return the typed wrong-timing outcome used by corrected Stage 5 mocks."""
     return UnsafeOutcomeDeclaration(
-        condition=OrderingCondition(reference_step_id="S-1", relation="after"),
         semantic_proposition="The response exhibits the unsafe semantic behavior.",
-        semantic_binding_required=False,
     )
 
 
@@ -381,14 +378,7 @@ class TestRunSp3ProductionWiring:
                             for index, declaration in enumerate(declarations, start=1)
                         ],
                         "unsafe_outcome": {
-                            **_unsafe_outcome().model_dump(
-                                mode="json",
-                                exclude={
-                                    "semantic_binding_required",
-                                    "hazard_refs",
-                                    "constraint_refs",
-                                },
-                            ),
+                            **_unsafe_outcome().model_dump(mode="json"),
                             "condition": {
                                 "type": "ordering",
                                 "reference_handle": "cause_1",

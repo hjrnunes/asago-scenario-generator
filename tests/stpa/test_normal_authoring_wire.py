@@ -504,7 +504,7 @@ def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
     assert "execution_route" not in BDIGenerationResult.model_fields
     assert not hasattr(wire, "AnalyticalOnlyRouteSelection")
     assert result.unsafe_outcome is not None
-    assert result.unsafe_outcome.condition is None
+    assert set(dumped["unsafe_outcome"]) == {"semantic_proposition"}
     assert result.unsafe_outcome.semantic_proposition == PROPOSITION
 
 

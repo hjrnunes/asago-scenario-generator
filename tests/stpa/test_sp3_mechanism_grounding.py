@@ -15,9 +15,6 @@ import yaml
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.models.scenario_spec import AttackerBDI
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionValueCondition,
-)
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioObligationConsideration,
 )
@@ -71,12 +68,6 @@ def _stage5_result(factor: CausalFactorDeclaration) -> BDIGenerationResult:
         ),
         causal_factors=[factor],
         unsafe_outcome=UnsafeOutcomeDeclaration(
-            condition=ActionValueCondition(
-                control_action_id="CA-1-1",
-                property="semantic_proposition",
-                operator="equals",
-                expected=True,
-            ),
             semantic_proposition="The response exhibits the selected unsafe action.",
         ),
     )

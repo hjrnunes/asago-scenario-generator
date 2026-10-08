@@ -35,9 +35,6 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     ScenarioSpec,
 )
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    ActionValueCondition,
-)
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     BDIGenerationResult,
@@ -379,13 +376,7 @@ def test_context_stage5_rejects_typed_compiler_contract(tmp_path) -> None:
                         )
                     ],
                     unsafe_outcome=UnsafeOutcomeDeclaration(
-                        condition=ActionValueCondition(
-                            control_action_id="CA-1-1",
-                            property="authorization_state",
-                            operator="equals",
-                            expected="approved",
-                        ),
-                        semantic_binding_required=False,
+                        semantic_proposition="The response approves the action.",
                     ),
                 )
             ]
@@ -796,12 +787,6 @@ def test_coordination_bdi_and_spec_validate_against_exact_link() -> None:
             )
         ],
         unsafe_outcome=UnsafeOutcomeDeclaration(
-            condition=ActionValueCondition(
-                control_action_id="CM-1",
-                property="semantic_proposition",
-                operator="equals",
-                expected=True,
-            ),
             semantic_proposition=(
                 "The coordination response authorizes an unsafe action."
             ),

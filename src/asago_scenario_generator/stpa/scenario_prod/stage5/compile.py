@@ -155,10 +155,7 @@ def _materialize_normal_context_bdi(
         attacker_bdi=attacker_bdi,
         causal_factors=factors,
         unsafe_outcome=UnsafeOutcomeDeclaration(
-            condition=None,
             semantic_proposition=outcome.semantic_proposition,
-            hazard_refs=tuple(item.hazard_id for item in context.hazards),
-            constraint_refs=tuple(item.constraint_id for item in context.constraints),
         ),
         adversary=adversary,
         observation_criteria=criteria,
