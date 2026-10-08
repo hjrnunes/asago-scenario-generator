@@ -3,11 +3,11 @@
 A model answer that lists the same loss twice in a hazard's
 ``related_losses`` (or the same hazard twice in a security constraint's
 ``related_hazards``) is a validation finding, like an unknown reference ID.
-When repeated IDs are a first Stage 1a draft's only reference problem
-(risk_derivation, gap_analysis), the draft gets exactly one targeted repair
-call that may only remove each repeat or replace it with a valid ID
-(decision 47b, 2026-10-04).  A draft that also names an unknown ID gets the
-same one call (``test_stage1a_unknown_reference_correction.py``).  The bounded
+In a first Stage 1a draft (risk_derivation, gap_analysis) a repeat gets no
+repair call of its own: the reference gate reports it and the unit stops
+(decision 243, 2026-10-08; the one targeted repair replaces unknown IDs only,
+``test_stage1a_unknown_reference_correction.py``).  The repair-limit tests
+below use an unknown ID to open that one call.  The bounded
 hazard_graph_revision call sends the duplicate back to the model in its one
 correction request and accepts a corrected answer.
 
@@ -62,18 +62,6 @@ def _stage1a_steps(run_dir: Path) -> list[str]:
     ]
 
 
-def _derive(tmp_path: Path, drafts: list[dict]) -> MockLLMClient:
-    client = MockLLMClient()
-    client.set_response_for(LossAnalysisDraft, drafts)
-    derive_loss_analysis(
-        llm_client=client,
-        use_case_text="Test use case",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
-    return client
-
-
 def _derive_with_repair(
     tmp_path: Path, drafts: list[dict], repairs: list[dict]
 ) -> tuple[MockLLMClient, LossAnalysis]:
@@ -92,10 +80,6 @@ def _derive_with_repair(
 def _repair_entries(run_dir: Path) -> list[dict]:
     record = yaml.safe_load((run_dir / "loss-analysis-repair.yaml").read_text())
     return [entry for entry in record["records"] if entry["kind"] == "repair"]
-
-
-def _call_entry(run_dir: Path, step: str) -> dict:
-    return next(entry for entry in read_calls_jsonl(run_dir) if entry["step"] == step)
 
 
 def _hazard_repair(hazard_id: str, related_losses: list[str]) -> dict:
@@ -126,145 +110,15 @@ def _gap_with_l3() -> dict:
     return gap
 
 
-class TestStage1aDuplicateRepair:
-    """A duplicates-only first draft gets exactly one targeted repair call."""
-
-    def test_risk_derivation_duplicate_loss_is_repaired_once(self, tmp_path) -> None:
-        risk = valid_risk_draft_dict()
-        risk["hazards"][0]["related_losses"] = ["L-1", "L-1"]
-
-        _, analysis = _derive_with_repair(
-            tmp_path,
-            [risk, valid_gap_draft_dict()],
-            [_hazard_repair("H-1", ["L-1"])],
-        )
-
-        assert _stage1a_steps(tmp_path) == [
-            "risk_derivation",
-            "risk_derivation_repair",
-            "gap_analysis",
-        ]
-        hazards = {hazard.hazard_id: hazard for hazard in analysis.hazards}
-        assert hazards["H-1"].related_losses == ["L-1"]
-        [entry] = _repair_entries(tmp_path)
-        assert entry["stage"] == "risk_derivation"
-        assert entry["identity"] == "H-1.related_losses"
-        assert entry["outcome"] == "repaired"
-        assert entry["proposed"]["references"] == ["L-1"]
-        assert entry["applied"] == entry["proposed"]
-        assert "hazards.related_losses duplicate IDs: H-1 -> L-1" in entry["reason"]
-
-    def test_repeat_replaced_with_a_valid_loss_is_accepted(self, tmp_path) -> None:
-        risk = _risk_with_second_loss()
-        risk["hazards"][0]["related_losses"] = ["L-1", "L-1"]
-
-        _, analysis = _derive_with_repair(
-            tmp_path,
-            [risk, _gap_with_l3()],
-            [_hazard_repair("H-1", ["L-1", "L-2"])],
-        )
-
-        hazards = {hazard.hazard_id: hazard for hazard in analysis.hazards}
-        assert hazards["H-1"].related_losses == ["L-1", "L-2"]
-
-    def test_constraint_duplicate_hazard_is_repaired_once(self, tmp_path) -> None:
-        risk = valid_risk_draft_dict()
-        risk["security_constraints"][0]["related_hazards"] = ["H-1", "H-1"]
-        repair = {
-            "hazards": [],
-            "security_constraints": [
-                {"constraint_id": "SC-1", "related_hazards": ["H-1"]}
-            ],
-        }
-
-        _, analysis = _derive_with_repair(
-            tmp_path, [risk, valid_gap_draft_dict()], [repair]
-        )
-
-        assert _stage1a_steps(tmp_path) == [
-            "risk_derivation",
-            "risk_derivation_repair",
-            "gap_analysis",
-        ]
-        constraints = {c.constraint_id: c for c in analysis.security_constraints}
-        assert constraints["SC-1"].related_hazards == ["H-1"]
-        [entry] = _repair_entries(tmp_path)
-        assert entry["identity"] == "SC-1.related_hazards"
-        assert entry["outcome"] == "repaired"
-
-    def test_gap_analysis_duplicate_existing_loss_is_repaired_once(
-        self, tmp_path
-    ) -> None:
-        gap = valid_gap_draft_dict()
-        gap["hazards"][0]["related_losses"] = ["L-1", "L-2", "L-1"]
-
-        _, analysis = _derive_with_repair(
-            tmp_path,
-            [valid_risk_draft_dict(), gap],
-            [_hazard_repair("H-2", ["L-1", "L-2"])],
-        )
-
-        assert _stage1a_steps(tmp_path) == [
-            "risk_derivation",
-            "gap_analysis",
-            "gap_analysis_repair",
-        ]
-        hazards = {hazard.hazard_id: hazard for hazard in analysis.hazards}
-        assert hazards["H-2"].related_losses == ["L-1", "L-2"]
-
-    def test_rendered_repair_request_names_canonical_ids_and_choices(
-        self, tmp_path
-    ) -> None:
-        risk = _risk_with_second_loss()
-        risk["hazards"][0]["related_losses"] = ["L-1", "L-1"]
-
-        _derive_with_repair(
-            tmp_path,
-            [risk, _gap_with_l3()],
-            [_hazard_repair("H-1", ["L-1"])],
-        )
-
-        entry = _call_entry(tmp_path, "risk_derivation_repair")
-        system_prompt = entry["system_prompt_text"]
-        user_prompt = entry["user_prompt_text"]
-        assert "compiled the prior response's local handles into" in system_prompt
-        assert "canonical IDs before this repair" in system_prompt
-        assert "## Targeted repair contract" in system_prompt
-        assert (
-            "### H-1.related_losses\n"
-            "- **Hazard text:** The agent executes an unintended payment.\n"
-            '- **Original list, verbatim:** ["L-1", "L-1"]\n'
-            "- **Validation error:** hazards.related_losses duplicate IDs: "
-            "H-1 -> L-1\n"
-            "- **Repeated IDs:** L-1\n"
-            "- **IDs to keep once each, in this order:**\n"
-            "  - **L-1**: Unauthorized transaction\n"
-            "- **Replacement IDs** (a repeated entry may become one of these):\n"
-            "  - **L-2**: Disclosure of account data\n"
-            "- **Permitted correction:**"
-        ) in user_prompt
-        assert (
-            "- **Permitted correction:** for each repeated entry, remove the "
-            "repeat or replace it with one listed replacement ID; keep L-1 once "
-            "each in this order; name no ID outside the kept and replacement IDs"
-        ) in user_prompt
-        assert "Test use case" in user_prompt
-        assert "names the same ID more than once.\n" in system_prompt
-        assert "each names an\nID more than once. Everything else" in user_prompt
-        for unknown_wording in ("no declared record has", "unknown"):
-            assert unknown_wording not in system_prompt
-            assert unknown_wording not in user_prompt
-
-
-class TestStage1aDuplicateRepairLimits:
-    """A bad repair fails without a retry."""
+class TestStage1aReferenceRepairLimits:
+    """A bad repair of an unknown ID gets no retry; the unknown ID is dropped."""
 
     @pytest.mark.parametrize(
         ("repair", "expected"),
         [
             pytest.param(
-                _hazard_repair("H-1", ["L-1", "L-1"]),
-                "repair_duplicate_remaining: H-1.related_losses still lists L-1",
+                _hazard_repair("H-1", ["L-1", "L-2", "L-2"]),
+                "repair_duplicate_remaining: H-1.related_losses adds L-2",
                 id="duplicate-left",
             ),
             pytest.param(
@@ -295,28 +149,29 @@ class TestStage1aDuplicateRepairLimits:
             ),
         ],
     )
-    def test_out_of_scope_repair_fails_typed_without_a_second_call(
+    def test_out_of_scope_repair_is_rejected_without_a_second_call(
         self, tmp_path, repair: dict, expected: str
     ) -> None:
         risk = _risk_with_second_loss()
-        risk["hazards"][0]["related_losses"] = ["L-1", "L-1"]
+        risk["hazards"][0]["related_losses"] = ["L-1", "L-9"]
 
-        with pytest.raises(StageError) as exc_info:
-            _derive_with_repair(tmp_path, [risk, _gap_with_l3()], [repair])
+        _, analysis = _derive_with_repair(tmp_path, [risk, _gap_with_l3()], [repair])
 
-        assert expected in str(exc_info.value)
         assert _stage1a_steps(tmp_path) == [
             "risk_derivation",
             "risk_derivation_repair",
+            "gap_analysis",
         ]
         [entry] = _repair_entries(tmp_path)
         assert entry["identity"] == "H-1.related_losses"
         assert entry["outcome"] == "rejected"
+        assert expected in entry["reason"]
         assert entry["applied"] == {}
+        assert analysis.hazards[0].related_losses == ["L-1"]
 
     def test_repair_response_with_extra_fields_fails_typed(self, tmp_path) -> None:
         risk = valid_risk_draft_dict()
-        risk["hazards"][0]["related_losses"] = ["L-1", "L-1"]
+        risk["hazards"][0]["related_losses"] = ["L-1", "L-9"]
         repair = {
             "hazards": [
                 {
@@ -342,7 +197,7 @@ class TestStage1aDuplicateRepairLimits:
 
 def _merge_plan() -> ReferenceRepairPlan:
     draft = LossAnalysisDraft.model_validate(_risk_with_second_loss())
-    draft.hazards[0].related_losses = ["L-1", "L-1"]
+    draft.hazards[0].related_losses = ["L-1", "L-9"]
     return ReferenceRepairPlan(
         prior=draft,
         selected=select_reference_repairs(
@@ -379,9 +234,9 @@ class TestReferenceRepairMerge:
         with pytest.raises(RepairRejected, match="repair_identity_duplicate"):
             merge_reference_repair(_merge_plan(), response)
 
-    def test_more_replacements_than_repeats_are_rejected(self) -> None:
+    def test_more_replacements_than_unknown_entries_are_rejected(self) -> None:
         draft = LossAnalysisDraft.model_validate(_risk_with_second_loss())
-        draft.hazards[0].related_losses = ["L-1", "L-1"]
+        draft.hazards[0].related_losses = ["L-1", "L-9"]
         plan = ReferenceRepairPlan(
             prior=draft,
             selected=select_reference_repairs(
@@ -394,7 +249,7 @@ class TestReferenceRepairMerge:
 
         with pytest.raises(
             RepairRejected,
-            match="adds 2 IDs but only 1 repeated entries may be replaced",
+            match="adds 2 IDs but only 1 unknown entries may be replaced",
         ):
             merge_reference_repair(plan, response)
 
@@ -437,7 +292,7 @@ def test_a_list_the_plan_selects_twice_is_recorded_once(tmp_path, outcome) -> No
     assert entry.proposed == {"entries": ["H-1.related_losses"], "references": ["L-1"]}
     if outcome == "repaired":
         assert entry.applied == entry.proposed
-        assert entry.reason.count("duplicate IDs") == 1
+        assert entry.reason.count("unknown IDs") == 1
     else:
         assert entry.applied == {}
         assert entry.reason.endswith("; graph validator rejects the repair")

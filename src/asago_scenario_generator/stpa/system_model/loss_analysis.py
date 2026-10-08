@@ -1826,9 +1826,9 @@ def _repair_stage1a_failure(
     # authorization 2026-09-11) by one narrowly scoped targeted repair for
     # three approved failure classes: missing or malformed risk-disposition
     # entries, malformed obligation entries within an otherwise preserved
-    # constraint, and duplicate-only reference IDs (decision 47b,
-    # 2026-10-04).  Every other failure class gets an explicit typed outcome
-    # and no additional model call.
+    # constraint, and unknown reference IDs (decision 243, 2026-10-08).
+    # Every other failure class gets an explicit typed outcome and no
+    # additional model call.
     if call.validation_feedback is None:
         raise StageError(stage=STAGE, step=call.step, message=error_msg)
     _reject_unsupported_wire_error(call, error_msg)
@@ -1977,10 +1977,10 @@ def _check_repair_graph(
     """Reject a repair input whose independent graph edges do not resolve.
 
     Returns the reference-list repair plan when the reference gate failed on
-    lists that repeat an ID or name an unknown ID.
+    lists that each name an unknown ID.
     """
     # The bounded repair may only address dispositions, obligation rows, or
-    # repeated or unknown reference IDs.  Validate the independent graph edges
+    # unknown reference IDs.  Validate the independent graph edges
     # before constructing any repair plan so a malformed local reference cannot
     # be smuggled through an otherwise repairable obligation and trigger a
     # second model call.
@@ -2052,10 +2052,10 @@ def _reference_plan(
     """Plan the reference-list repair, or None when it does not apply.
 
     The repair applies when the reference gate failed (a wire failure has
-    its own class) on lists that repeat an ID or name an unknown ID.  Those
-    lists are every edge the reference gate checks, so the selection covers
-    the whole finding; a gap list that is empty from the start is another
-    defect and gets no repair call.
+    its own class) on lists that each name an unknown ID.  A list that only
+    repeats an ID gets no repair call; the stop reports the gate's duplicate
+    finding.  A gap list that is empty from the start is another defect and
+    gets no repair call either.
     """
     if call.failure_class != "draft_references" or not _relationships_present(
         call, graph

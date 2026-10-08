@@ -507,21 +507,23 @@ applies to `risk_derivation` and `gap_analysis`; the graph revision keeps its
 own drop of slipping records.
 
 A `risk_derivation` or `gap_analysis` response that parses but has a hazard
-`related_losses` or constraint `related_hazards` list naming an ID more than
-once, or naming an ID no declared record has, gets exactly one reference
-correction call. The call carries the validator's finding and offers the
-IDs valid for each selected list, with their meanings, as replacements; it
-cannot declare a new record. The request describes repeated IDs only when a
-selected list repeats one. A correction that is rejected or fails
-validation for a list with an unknown ID does not stop the run. Instead,
-code cuts each selected list to its known IDs and drops any hazard or
+`related_losses` or constraint `related_hazards` list naming an ID no
+declared record has gets exactly one reference correction call, provided
+every failing list names such an unknown ID. The call carries the
+validator's finding and offers the IDs valid for each selected list, with
+their meanings, as replacements; it cannot declare a new record. The
+correction may replace or remove only the unknown entries; a repeated ID in
+the same list stays, and the reference gate reports it after the
+correction. A list whose only defect is a repeated ID gets no correction
+call: the run stops on the gate's duplicate finding. A correction that is
+rejected or fails validation does not stop the run. Instead, code cuts each
+selected list to its known IDs and drops any hazard or
 constraint left without a valid ID, along with any constraint whose every
 hazard was dropped. The cut draft is validated again, and only a draft that
 is still invalid stops the run. Each cut list is a `reference_dropped` entry
 (outcome `dropped`; `applied` names `references`, `dropped_entries`, and
 `dropped_records`) in `loss-analysis-repair.yaml` and a normalization
-warning. A list whose only defect is a repeated ID keeps its stop after a
-failed correction. These cases stay outside this scope and stop the run as
+warning. These cases stay outside this scope and stop the run as
 before: a response that does not decode or fails the provider schema, a
 transport error, a correction call that returns no response, and a gap list
 that is empty in the first response.

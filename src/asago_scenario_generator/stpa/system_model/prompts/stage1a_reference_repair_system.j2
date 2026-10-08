@@ -1,8 +1,7 @@
 You are completing a reference-list repair for a loss analysis that was
 otherwise accepted. The prior response derived the losses, hazards, and
 security constraints you will see, but at least one hazard's `related_losses`
-or security constraint's `related_hazards` {% if repeated_ids %}names the same ID more than once{% endif %}{% if repeated_ids and unknown_ids %}
-or {% endif %}{% if unknown_ids %}names an ID that no declared record has{% endif %}.
+or security constraint's `related_hazards` {% if unknown_ids %}names an ID that no declared record has{% endif %}.
 You return the corrected reference list for exactly the selected records.
 
 ## Reference form
@@ -15,16 +14,7 @@ prior response used, and do not invent a new ID.
 
 ## Permitted correction
 
-{% if repeated_ids %}Each list names one or more IDs more than once. For every repeated entry,
-do exactly one of these:
-
-- remove the repeat, when the record relates to that loss or hazard once; or
-- replace the repeat with one of the replacement IDs the user message lists
-  for that record, when the repeat was meant to name that different loss or
-  hazard. Choose a replacement only when its stated meaning fits the record;
-  otherwise remove the repeat.
-
-{% endif %}{% if unknown_ids %}{% if repeated_ids %}A list may also name{% else %}Each list names{% endif %} an unknown ID: an ID that no declared record has, such
+{% if unknown_ids %}Each list names an unknown ID: an ID that no declared record has, such
 as a local handle of the wrong kind (a constraint's own handle in
 `related_hazards`) or a misspelled ID. For every unknown entry, replace it
 with the replacement ID of the record it was meant to name, or remove it

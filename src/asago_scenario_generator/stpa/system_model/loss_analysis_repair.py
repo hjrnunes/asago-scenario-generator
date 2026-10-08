@@ -13,11 +13,12 @@ exactly three approved failure classes:
 
 1. missing or malformed ``risk_dispositions`` entries;
 2. malformed obligation entries within an otherwise preserved constraint; and
-3. duplicate IDs in a hazard's ``related_losses`` or a security constraint's
-   ``related_hazards`` when the draft names no unknown ID (decision 47b,
-   2026-10-04).  Each repeated entry may only be removed or replaced with a
-   valid ID the list does not already name; a draft that also names an
-   unknown ID stops with a typed failure and no repair call.
+3. unknown IDs in a hazard's ``related_losses`` or a security constraint's
+   ``related_hazards``, when every failing list names one (decision 243,
+   2026-10-08).  Each unknown entry may only be removed or replaced with a
+   valid ID the list does not already name; a repeated entry stays for the
+   reference gate's duplicate detection, and a list that only repeats an ID
+   stops the draft with a typed failure and no repair call.
 
 Contract (owner authorization 2026-09-11; narrowed per the approved
 correction specification revision 2, 2026-09-11):
@@ -1360,12 +1361,12 @@ _REFERENCE_LIST_FIELDS = {
 
 @dataclass(frozen=True)
 class SelectedReferenceList:
-    """One reference list that names an ID more than once or an unknown ID.
+    """One reference list that names an unknown ID.
 
     ``unknown`` are the listed IDs that no declared record has.
     ``replacement_ids`` are the IDs valid for this list at this step that the
-    list does not already name; a repeated or unknown entry may become one of
-    them or be removed.
+    list does not already name; an unknown entry may become one of them or be
+    removed.
     """
 
     collection: str
@@ -1383,75 +1384,48 @@ class SelectedReferenceList:
         return f"{self.owner_id}.{self.field_name}"
 
     @property
-    def repeated(self) -> tuple[str, ...]:
-        return tuple(
-            sorted(
-                {
-                    ref
-                    for ref in self.original
-                    if self.original.count(ref) > 1 and ref not in self.unknown
-                }
-            )
-        )
-
-    @property
     def kept(self) -> tuple[str, ...]:
-        """Each known original ID once, in first-occurrence order."""
-        return tuple(dict.fromkeys(r for r in self.original if r not in self.unknown))
+        """Each known original entry, repeats included, in original order."""
+        return tuple(r for r in self.original if r not in self.unknown)
 
     @property
     def replaceable_count(self) -> int:
-        """How many entries (repeats and unknown IDs) a repair may replace."""
+        """How many unknown entries a repair may replace."""
         return len(self.original) - len(self.kept)
 
     @property
-    def entry_kind(self) -> str:
-        """The defective entries this list holds, as the request names them."""
-        if not self.unknown:
-            return "repeated"
-        return "repeated or unknown" if self.repeated else "unknown"
+    def kept_order(self) -> str:
+        """How the kept entries must appear; a repeat stays for the gate."""
+        if len(set(self.kept)) == len(self.kept):
+            return "once each"
+        return "exactly as listed, repeats included,"
 
     @property
     def defect_reason(self) -> str:
-        prefix = f"{self.collection}.{self.field_name}"
-        findings = [
-            (f"{prefix} unknown IDs: ", self.unknown),
-            (f"{prefix} duplicate IDs: ", self.repeated),
-        ]
-        return "; ".join(
-            label + ", ".join(f"{self.owner_id} -> {ref}" for ref in refs)
-            for label, refs in findings
-            if refs
+        return f"{self.collection}.{self.field_name} unknown IDs: " + ", ".join(
+            f"{self.owner_id} -> {ref}" for ref in self.unknown
         )
 
     @property
     def correction_instruction(self) -> str:
-        if not self.unknown:
-            return (
-                "for each repeated entry, remove the repeat or replace it with one "
-                "listed replacement ID; keep "
-                + ", ".join(self.kept)
-                + " once each in this order; name no ID outside the kept and "
-                "replacement IDs"
-            )
         if not self.kept:
             return (
-                f"for each {self.entry_kind} entry, remove it or replace it with "
+                "for each unknown entry, remove it or replace it with "
                 "one listed replacement ID; the list has no other ID to keep; "
                 "name no ID outside the replacement IDs and return at least one ID"
             )
         return (
-            f"for each {self.entry_kind} entry, remove it or replace it with one "
+            "for each unknown entry, remove it or replace it with one "
             "listed replacement ID; keep "
             + ", ".join(self.kept)
-            + " once each in this order; name no ID outside the kept and "
+            + f" {self.kept_order} in this order; name no ID outside the kept and "
             "replacement IDs"
         )
 
 
 @dataclass(frozen=True)
 class ReferenceRepairPlan:
-    """One targeted repair of repeated or unknown hazard or constraint references.
+    """One targeted repair of unknown hazard or constraint references.
 
     ``meanings`` maps every loss and hazard ID the request names to its
     description, including IDs an earlier call established.  ``feedback``
@@ -1475,7 +1449,12 @@ def select_reference_repairs(
     valid_loss_ids: set[str],
     valid_hazard_ids: set[str],
 ) -> tuple[SelectedReferenceList, ...]:
-    """Select each hazard or constraint list with a repeated or unknown ID."""
+    """Select each hazard or constraint list with an unknown ID.
+
+    Selects nothing when a list repeats an ID and names no unknown ID: the
+    reference gate's duplicate detection reports that list, and no repair
+    call is made.
+    """
     rows = (
         ("hazards", hazard.hazard_id, hazard.related_losses, valid_loss_ids)
         for hazard in draft.hazards
@@ -1489,7 +1468,7 @@ def select_reference_repairs(
         )
         for constraint in draft.security_constraints
     )
-    selected = (
+    lists = tuple(
         SelectedReferenceList(
             collection=collection,
             owner_id=owner_id,
@@ -1499,7 +1478,12 @@ def select_reference_repairs(
         )
         for collection, owner_id, references, valid_ids in (*rows, *constraint_rows)
     )
-    return tuple(item for item in selected if item.replaceable_count)
+    if any(
+        not item.unknown and len(set(item.original)) < len(item.original)
+        for item in lists
+    ):
+        return ()
+    return tuple(item for item in lists if item.unknown)
 
 
 def select_disposition_repairs(
@@ -2739,20 +2723,13 @@ def _index_returned_reference_lists(
 
 def _check_reference_list(selected: SelectedReferenceList, returned: list[str]) -> None:
     """Reject any returned list outside the permitted correction."""
-    repeated = sorted({ref for ref in returned if returned.count(ref) > 1})
-    if repeated:
-        raise RepairRejected(
-            f"repair_duplicate_remaining: {selected.identity} still lists "
-            + ", ".join(repeated)
-            + " more than once"
-        )
     keep = set(selected.kept)
     kept = tuple(ref for ref in returned if ref in keep)
     if kept != selected.kept:
         raise RepairRejected(
             f"repair_edit_forbidden: {selected.identity} must keep "
             + ", ".join(selected.kept)
-            + " once each in this order; returned "
+            + f" {selected.kept_order} in this order; returned "
             + ", ".join(returned)
         )
     _check_added_references(selected, returned, keep)
@@ -2762,6 +2739,13 @@ def _check_added_references(
     selected: SelectedReferenceList, returned: list[str], keep: set[str]
 ) -> None:
     added = [ref for ref in returned if ref not in keep]
+    repeated = sorted({ref for ref in added if added.count(ref) > 1})
+    if repeated:
+        raise RepairRejected(
+            f"repair_duplicate_remaining: {selected.identity} adds "
+            + ", ".join(repeated)
+            + " more than once"
+        )
     invalid = [ref for ref in added if ref not in selected.replacement_ids]
     if invalid:
         raise RepairRejected(
@@ -2772,7 +2756,7 @@ def _check_added_references(
     if len(added) > selected.replaceable_count:
         raise RepairRejected(
             f"repair_edit_forbidden: {selected.identity} adds {len(added)} IDs "
-            f"but only {selected.replaceable_count} {selected.entry_kind} "
+            f"but only {selected.replaceable_count} unknown "
             "entries may be replaced"
         )
 
@@ -3302,7 +3286,6 @@ def _reference_request(
         system_prompt=loader.render_prompt(
             REFERENCE_REPAIR_SYSTEM_TEMPLATE,
             unknown_ids=any(selected.unknown for selected in plan.selected),
-            repeated_ids=any(selected.repeated for selected in plan.selected),
         ),
         user_prompt=loader.render_prompt(
             REFERENCE_REPAIR_USER_TEMPLATE,
@@ -3489,14 +3472,10 @@ def _finish_failed_repair(
 
     ``answered`` means the parser reached a typed verdict: a response came
     back and was rejected or failed validation.  A transport or undecodable
-    failure has nothing to resolve, and a duplicate-only plan keeps its stop
-    (decision 47b).
+    failure has nothing to resolve.  Every selected reference list names an
+    unknown ID (decision 243), so any answered reference plan reaches the drop.
     """
-    if (
-        isinstance(plan, ReferenceRepairPlan)
-        and answered
-        and any(selected.unknown for selected in plan.selected)
-    ):
+    if isinstance(plan, ReferenceRepairPlan) and answered:
         return _drop_unresolved(
             plan,
             validation,
@@ -3530,10 +3509,10 @@ def _selected_card_views(
 
 
 def _selected_reference_views(plan: ReferenceRepairPlan) -> list[dict]:
-    """Each selected list with its owner's text, repeats, and replacement IDs.
+    """Each selected list with its owner's text, unknown and replacement IDs.
 
-    Every ID the view names carries its meaning, so the model can tell a
-    repeat meant for a different record from a plain repeat.
+    Every ID the view names carries its meaning, so the model can choose the
+    replacement whose meaning fits the record.
     """
     meanings = dict(plan.meanings)
     owners = {
@@ -3562,9 +3541,7 @@ def _selected_reference_views(plan: ReferenceRepairPlan) -> list[dict]:
             "original": list(selected.original),
             "validation_error": selected.defect_reason,
             "kept": described(selected.kept),
-            "repeated": list(selected.repeated),
             "unknown": list(selected.unknown),
-            "entry_kind": selected.entry_kind,
             "replacements": described(selected.replacement_ids),
             "permitted_change": selected.correction_instruction,
         }

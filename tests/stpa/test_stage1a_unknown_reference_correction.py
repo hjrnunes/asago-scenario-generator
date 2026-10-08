@@ -11,6 +11,7 @@ meanings, as replacements.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -165,57 +166,6 @@ class TestUnknownReferenceCorrection:
             "least one ID"
         ) in user_prompt
 
-    def test_duplicate_and_unknown_ids_in_a_risk_draft_get_one_correction(
-        self, tmp_path
-    ) -> None:
-        risk = valid_risk_draft_dict()
-        risk["risk_card_losses"].append(
-            {
-                "loss_id": "L-2",
-                "description": "Disclosure of account data",
-                "provenance": "risk_card",
-                "source_risk_cards": ["atlas-001"],
-            }
-        )
-        risk["risk_dispositions"][0]["loss_ids"] = ["L-1", "L-2"]
-        risk["hazards"] = [
-            {
-                "hazard_id": "H-1",
-                "description": "The agent executes an unintended payment.",
-                "related_losses": ["L-1", "L-1"],
-            },
-            {
-                "hazard_id": "H-2",
-                "description": "The agent discloses account data.",
-                "related_losses": ["L-2"],
-            },
-        ]
-        risk["security_constraints"][0]["related_hazards"] = ["H-1", "H-2", "H-9"]
-        repair = {
-            "hazards": [{"hazard_id": "H-1", "related_losses": ["L-1"]}],
-            "security_constraints": [
-                {"constraint_id": "SC-1", "related_hazards": ["H-1", "H-2"]}
-            ],
-        }
-        gap = {
-            "risk_card_losses": [],
-            "use_case_losses": [],
-            "hazards": [],
-            "security_constraints": [],
-        }
-
-        analysis = _derive(tmp_path, [risk, gap], [repair])
-
-        assert _stage1a_steps(tmp_path) == [
-            "risk_derivation",
-            "risk_derivation_repair",
-            "gap_analysis",
-        ]
-        constraints = {c.constraint_id: c for c in analysis.security_constraints}
-        assert constraints["SC-1"].related_hazards == ["H-1", "H-2"]
-        identities = [entry["identity"] for entry in _records(tmp_path, "repair")]
-        assert identities == ["H-1.related_losses", "SC-1.related_hazards"]
-
     def test_unknown_only_request_carries_no_repeated_id_wording(
         self, tmp_path
     ) -> None:
@@ -245,40 +195,6 @@ class TestUnknownReferenceCorrection:
         ):
             assert repeated_wording not in system_prompt
             assert repeated_wording not in user_prompt
-
-    def test_a_request_with_repeated_and_unknown_ids_names_both(self, tmp_path) -> None:
-        risk = valid_risk_draft_dict()
-        risk["hazards"][0]["related_losses"] = ["L-1", "L-1"]
-        risk["security_constraints"][0]["related_hazards"] = ["H-1", "H-9"]
-        repair = {
-            "hazards": [{"hazard_id": "H-1", "related_losses": ["L-1"]}],
-            "security_constraints": [
-                {"constraint_id": "SC-1", "related_hazards": ["H-1"]}
-            ],
-        }
-        gap = {
-            "risk_card_losses": [],
-            "use_case_losses": [],
-            "hazards": [],
-            "security_constraints": [],
-        }
-
-        _derive(tmp_path, [risk, gap], [repair])
-
-        entry = _call_entry(tmp_path, "risk_derivation_repair")
-        system_prompt = entry["system_prompt_text"]
-        user_prompt = entry["user_prompt_text"]
-        assert (
-            "names the same ID more than once\nor names an ID that no declared "
-            "record has.\n"
-        ) in system_prompt
-        assert "Each list names one or more IDs more than once." in system_prompt
-        assert "A list may also name an unknown ID" in system_prompt
-        assert (
-            "each names an\nID more than once or an ID that no declared record has."
-        ) in user_prompt
-        assert "only. Remove each repeated\nentry" in user_prompt
-        assert "name. Replace each unknown entry" in user_prompt
 
     def test_an_empty_gap_list_still_stops_without_a_call(self, tmp_path) -> None:
         gap = json.loads(json.dumps(RECORDED_GAP_RESPONSE))
@@ -355,7 +271,7 @@ class TestUnknownReferenceMerge:
 class TestUnresolvedReferenceDrop:
     """A correction that still fails drops what it could not resolve.
 
-    Deterministic code removes each unknown or repeated entry; a record whose
+    Deterministic code removes each unknown entry; a record whose
     list is left without a valid ID is dropped, and so is a constraint whose
     every hazard was dropped.  The draft is validated again, and only a draft
     that is still invalid stops the unit.
@@ -396,7 +312,7 @@ class TestUnresolvedReferenceDrop:
 
     def test_a_list_with_a_known_id_keeps_its_record(self, tmp_path) -> None:
         risk = valid_risk_draft_dict()
-        risk["security_constraints"][0]["related_hazards"] = ["H-1", "H-9", "H-1"]
+        risk["security_constraints"][0]["related_hazards"] = ["H-1", "H-9"]
 
         analysis = _derive(
             tmp_path,
@@ -410,7 +326,7 @@ class TestUnresolvedReferenceDrop:
         assert dropped["identity"] == "SC-1.related_hazards"
         assert dropped["applied"] == {
             "references": ["H-1"],
-            "dropped_entries": ["H-9", "H-1"],
+            "dropped_entries": ["H-9"],
             "dropped_records": [],
         }
 
@@ -531,3 +447,150 @@ def _two_hazard_gap() -> dict:
         }
     )
     return gap
+
+
+def _risk_with_two_hazards(
+    *, related_losses: list[str], related_hazards: list[str]
+) -> dict:
+    """A risk draft with H-1 and H-2; H-1 and SC-1 carry the given lists."""
+    risk = valid_risk_draft_dict()
+    risk["hazards"][0]["related_losses"] = related_losses
+    risk["hazards"].append(
+        {
+            "hazard_id": "H-2",
+            "description": "The agent discloses account data.",
+            "related_losses": ["L-1"],
+        }
+    )
+    risk["security_constraints"][0]["related_hazards"] = related_hazards
+    return risk
+
+
+def _request_digest(entry: dict) -> str:
+    text = entry["system_prompt_text"] + "\0" + entry["user_prompt_text"]
+    return hashlib.sha256(text.encode()).hexdigest()
+
+
+class TestRepairNeedsAnUnknownIdInEveryList:
+    """The repair runs only when every failing list names an unknown ID.
+
+    A list that only repeats an ID is the reference gate's duplicate finding:
+    no repair call is made, and the stop names the repeat.  When the repair
+    runs, it replaces only the unknown entries; a repeat in a selected list
+    stays for the gate's duplicate detection.
+    """
+
+    @pytest.mark.parametrize(
+        ("case", "drafts", "repair", "digest"),
+        [
+            pytest.param(
+                "recorded gap",
+                [valid_risk_draft_dict(), RECORDED_GAP_RESPONSE],
+                _constraint_repair("SC-2", ["H-2"]),
+                "1af517d3e5e720925eecc1d6519f0fab72288ee37e1100c326cb5f667d6b3ea1",
+                id="recorded-gap",
+            ),
+            pytest.param(
+                "kept and unknown",
+                [
+                    _risk_with_two_hazards(
+                        related_losses=["L-1"], related_hazards=["H-1", "H-9"]
+                    ),
+                    _empty_gap(),
+                ],
+                _constraint_repair("SC-1", ["H-1", "H-2"]),
+                "ce1c3f198d2afa382cd61a862a834a0788fe4cdeab1febe64597845c84b31380",
+                id="kept-and-unknown",
+            ),
+        ],
+    )
+    def test_an_unknown_only_request_renders_as_before(
+        self, tmp_path, case: str, drafts: list[dict], repair: dict, digest: str
+    ) -> None:
+        _derive(tmp_path, drafts, [repair])
+
+        [entry] = [
+            item
+            for item in read_calls_jsonl(tmp_path)
+            if item["step"].endswith("_repair")
+        ]
+        assert _request_digest(entry) == digest, case
+
+    def test_a_mixed_list_keeps_its_repeats_and_replaces_its_unknown_id(
+        self,
+    ) -> None:
+        draft = LossAnalysisDraft.model_validate(
+            _risk_with_two_hazards(
+                related_losses=["L-1"], related_hazards=["H-1", "H-1", "H-9"]
+            )
+        )
+        draft.security_constraints[0].related_hazards = ["H-1", "H-1", "H-9"]
+        plan = ReferenceRepairPlan(
+            prior=draft,
+            selected=select_reference_repairs(
+                draft, valid_loss_ids={"L-1"}, valid_hazard_ids={"H-1", "H-2"}
+            ),
+        )
+
+        [selected] = plan.selected
+        assert selected.unknown == ("H-9",)
+        assert selected.kept == ("H-1", "H-1")
+        merged = merge_reference_repair(
+            plan,
+            ReferenceRepairResponse.model_validate(
+                _constraint_repair("SC-1", ["H-1", "H-1", "H-2"])
+            ),
+        )
+        assert merged.security_constraints[0].related_hazards == ["H-1", "H-1", "H-2"]
+        with pytest.raises(
+            RepairRejected, match="repair_edit_forbidden: SC-1.related_hazards"
+        ):
+            merge_reference_repair(
+                plan,
+                ReferenceRepairResponse.model_validate(
+                    _constraint_repair("SC-1", ["H-1", "H-2"])
+                ),
+            )
+
+    def test_a_mixed_list_is_repaired_once_and_its_repeat_still_stops(
+        self, tmp_path
+    ) -> None:
+        risk = _risk_with_two_hazards(
+            related_losses=["L-1"], related_hazards=["H-1", "H-1", "H-9"]
+        )
+
+        with pytest.raises(StageError) as raised:
+            _derive(
+                tmp_path,
+                [risk, _empty_gap()],
+                [_constraint_repair("SC-1", ["H-1", "H-1", "H-2"])],
+            )
+
+        assert _stage1a_steps(tmp_path) == ["risk_derivation", "risk_derivation_repair"]
+        assert "SC-1 -> H-1" in str(raised.value)
+        user_prompt = _call_entry(tmp_path, "risk_derivation_repair")[
+            "user_prompt_text"
+        ]
+        assert "- **Unknown IDs:** H-9\n" in user_prompt
+        assert "Repeated IDs" not in user_prompt
+
+    @pytest.mark.parametrize(
+        ("related_losses", "related_hazards"),
+        [
+            pytest.param(["L-1", "L-1"], ["H-1", "H-9"], id="repeat-beside-unknown"),
+            pytest.param(["L-1", "L-1"], ["H-1"], id="repeat-only"),
+        ],
+    )
+    def test_a_list_that_only_repeats_an_id_stops_without_a_repair_call(
+        self, tmp_path, related_losses: list[str], related_hazards: list[str]
+    ) -> None:
+        risk = _risk_with_two_hazards(
+            related_losses=related_losses, related_hazards=related_hazards
+        )
+
+        with pytest.raises(StageError) as raised:
+            _derive(tmp_path, [risk, _empty_gap()], [])
+
+        assert _stage1a_steps(tmp_path) == ["risk_derivation"]
+        assert "H-1 -> L-1" in str(raised.value)
+        assert "no repair call was made" in str(raised.value)
