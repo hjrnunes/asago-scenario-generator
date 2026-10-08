@@ -901,9 +901,9 @@ def _revision_patch_to_draft(
         constraint_id: constraint.model_copy(deep=True)
         for constraint_id, constraint in prior_constraints.items()
     }
-    failures: list[ValidationError] = []
+    failures: list[tuple[tuple[str, str], ValidationError]] = []
     for edit in patch.security_constraint_edits:
-        with _collecting(failures):
+        with _collecting(failures, ("security_constraint_edits", edit.constraint_id)):
             assembled_constraints[edit.constraint_id] = _edited_constraint(
                 prior_constraints[edit.constraint_id],
                 edit,
@@ -913,7 +913,7 @@ def _revision_patch_to_draft(
                 span_repairs_out=span_repairs_out,
             )
     for addition in patch.security_constraint_additions:
-        with _collecting(failures):
+        with _collecting(failures, ("security_constraint_additions", addition.handle)):
             assembled_constraints[constraint_handle_map[addition.handle]] = (
                 _build_constraint(
                     constraint_id=constraint_handle_map[addition.handle],
@@ -949,36 +949,43 @@ def _revision_patch_to_draft(
 
 
 @contextmanager
-def _collecting(failures: list[ValidationError]) -> Iterator[None]:
-    """Collect a record's validation error so later records still run.
+def _collecting(
+    failures: list[tuple[tuple[str, str], ValidationError]], loc: tuple[str, str]
+) -> Iterator[None]:
+    """Collect a record's validation error, with its *loc*, so later records run.
 
     A reference ``ValueError`` still raises at once.
     """
     try:
         yield
     except ValidationError as exc:
-        failures.append(exc)
+        failures.append((loc, exc))
 
 
-def _raise_collected(failures: list[ValidationError]) -> None:
+def _raise_collected(failures: list[tuple[tuple[str, str], ValidationError]]) -> None:
     """Raise one error naming every collected record failure.
 
-    A single failure raises unchanged, so its feedback keeps its wording.
+    A single failure raises unchanged, so its feedback keeps its wording.  In
+    the combined error, a line without a location gets its record's.
     """
     if not failures:
         return
     if len(failures) == 1:
-        raise failures[0]
+        raise failures[0][1]
     raise ValidationError.from_exception_data(
-        failures[0].title,
-        [_line_error(error) for failure in failures for error in failure.errors()],
+        failures[0][1].title,
+        [
+            _line_error(error, loc)
+            for loc, failure in failures
+            for error in failure.errors()
+        ],
     )
 
 
-def _line_error(error: ErrorDetails) -> InitErrorDetails:
+def _line_error(error: ErrorDetails, loc: tuple[str, str]) -> InitErrorDetails:
     line: InitErrorDetails = {
         "type": error["type"],
-        "loc": error["loc"],
+        "loc": error["loc"] or loc,
         "input": error.get("input"),
     }
     if "ctx" in error:

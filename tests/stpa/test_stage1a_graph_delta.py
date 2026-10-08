@@ -13,6 +13,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     stamp_proposed_direction,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.llm_helpers import compact_validation_error
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRiskRepairDraft,
     _Stage1aGapProviderDraft,
@@ -701,6 +702,20 @@ def test_delta_names_every_failing_edit_and_addition_in_one_error() -> None:
     assert "security constraint addition 'alpha_constraint'" in message
     assert "security constraint addition 'beta_constraint'" in message
     assert "valid_constraint" not in message
+
+
+def test_the_combined_error_locates_each_record_for_the_correction() -> None:
+    error = _patch_error(
+        _constraint_patch(
+            edits=[_slipping_edit("Guard account records")], additions=[_ALPHA]
+        )
+    )
+
+    lines = compact_validation_error(error).splitlines()[1:]
+    assert [line.split(": ", 1)[0] for line in lines] == [
+        "- security_constraint_edits.SC-3",
+        "- security_constraint_additions.alpha_constraint",
+    ]
 
 
 def test_delta_keeps_a_single_failure_unchanged() -> None:
