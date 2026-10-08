@@ -25,9 +25,7 @@ def populate_defender_bdi(
     """Deterministically derive defender BDI from the control structure.
 
     Extracts beliefs from process model parts, desires from the selected
-    security constraints, and intentions from control actions.  The optional
-    constraint projection keeps direct historical callers compatible; when it
-    is absent, local responsibility constraints are used where available.
+    security constraints, and intentions from control actions.
 
     Args:
         control_structure: The control structure.
@@ -59,13 +57,6 @@ def populate_defender_bdi(
     ]
 
     desires = [_defender_desire(resp.resp_id, constraint) for constraint in constraints]
-    if not desires:
-        desires = [
-            DefenderDesire(
-                resp_id=resp.resp_id,
-                content=resp.description,
-            )
-        ]
 
     intentions = [
         DefenderIntention(
@@ -85,21 +76,13 @@ def _populate_coordination_bdi(
 ) -> DefenderBDI:
     """Derive one defender BDI from both exact endpoints of a CL path."""
     responsibilities = _coordination_responsibilities(control_structure, link_id)
-    selected = tuple(constraints)
-    if selected:
-        desires = [
-            _defender_desire(
-                responsibility.resp_id,
-                constraint,
-            )
-            for responsibility in responsibilities
-            for constraint in selected
-        ]
-    else:
-        desires = _coordination_desires(responsibilities)
     return DefenderBDI(
         beliefs=_coordination_beliefs(responsibilities),
-        desires=desires,
+        desires=[
+            _defender_desire(responsibility.resp_id, constraint)
+            for responsibility in responsibilities
+            for constraint in constraints
+        ],
         intentions=_coordination_intentions(responsibilities),
     )
 
@@ -143,18 +126,6 @@ def _coordination_beliefs(
         DefenderBelief(pm_id=part.pm_id, content=part.description, vulnerability="")
         for responsibility in responsibilities
         for part in responsibility.process_model_parts
-    ]
-
-
-def _coordination_desires(
-    responsibilities: tuple[Responsibility, Responsibility],
-) -> list[DefenderDesire]:
-    """Build desire records for both coordination endpoints."""
-    return [
-        DefenderDesire(
-            resp_id=responsibility.resp_id, content=responsibility.description
-        )
-        for responsibility in responsibilities
     ]
 
 

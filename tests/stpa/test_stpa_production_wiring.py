@@ -107,13 +107,11 @@ def _declare(
     kind: CausalFactorKind,
     source_id: str,
     evidence: str | None = None,
-    timing: str | None = None,
 ) -> CausalFactorDeclaration:
     return CausalFactorDeclaration(
         kind=kind,
         source_id=source_id,
         evidence=evidence or f"evidence:{source_id}",
-        timing=timing,
         temporal_condition=None,
     )
 

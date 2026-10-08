@@ -43,6 +43,7 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     StructuralThreat,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+from asago_scenario_generator.stpa.models.scenario_context import ScenarioConstraint
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
@@ -299,7 +300,12 @@ class TestBDIGroundingProperty:
         for i in range(n_resps):
             resp = cs.responsibilities[i]
             ca = resp.control_actions[0]
-            bdi = populate_defender_bdi(cs, resp.resp_id)
+            constraint = ScenarioConstraint(
+                constraint_id=f"SC-{i + 1}",
+                description="Selected constraint",
+                related_hazard_ids=("H-1",),
+            )
+            bdi = populate_defender_bdi(cs, resp.resp_id, (constraint,))
             # Fill in vulnerabilities (as the LLM would)
             for belief in bdi.beliefs:
                 belief.vulnerability = "exploitable"

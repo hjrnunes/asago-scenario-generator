@@ -78,7 +78,7 @@ def assemble_scenario_spec(
     are extracted by matching to the original pm_id values.
 
     Declared causal factors are selected in declared order with their
-    evidence descriptions and optional timing; every factor reference is
+    evidence descriptions and temporal conditions; every factor reference is
     validated against the control structure (a ``ValueError`` names the
     invalid causal-factor reference) so unbacked structural presence
     never invents a factor.
@@ -213,7 +213,6 @@ def _materialize_causal_factors(
             kind=declaration.kind,
             source_id=declaration.source_id,
             description=declaration.evidence,
-            declared_timing=declaration.timing,
             evidence_status=declaration.evidence_status,
             capability_refs=declaration.capability_refs,
             access_refs=declaration.access_refs,

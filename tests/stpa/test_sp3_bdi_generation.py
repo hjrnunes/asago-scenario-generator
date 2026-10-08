@@ -21,6 +21,7 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     StructuralThreat,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+from asago_scenario_generator.stpa.models.scenario_context import ScenarioConstraint
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
 )
@@ -179,13 +180,26 @@ class TestPopulateDefenderBDI:
         assert bdi.beliefs[0].content == "User intent state"
         assert bdi.beliefs[1].content == "Parameter schema status"
 
-    def test_desires_from_responsibility(self):
-        """SP3-BDI-02: desires derived from responsibility."""
-        cs = _make_control_structure(resp1_desc="Authorize payment operations")
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        assert len(bdi.desires) >= 1
-        assert all(d.resp_id == "RESP-1" for d in bdi.desires)
-        assert all(d.content == "Authorize payment operations" for d in bdi.desires)
+    def test_desires_from_selected_constraints(self):
+        """SP3-BDI-02: each selected constraint becomes one desire of the target."""
+        cs = _make_control_structure()
+        constraints = (
+            ScenarioConstraint(
+                constraint_id="SC-1",
+                description="Confirm a refund before processing it",
+                related_hazard_ids=("H-1",),
+            ),
+            ScenarioConstraint(
+                constraint_id="SC-2",
+                description="Pay only the requested amount",
+                related_hazard_ids=("H-2",),
+            ),
+        )
+        bdi = populate_defender_bdi(cs, "RESP-1", constraints)
+        assert [(d.resp_id, d.constraint_id, d.content) for d in bdi.desires] == [
+            ("RESP-1", "SC-1", "Confirm a refund before processing it"),
+            ("RESP-1", "SC-2", "Pay only the requested amount"),
+        ]
 
     def test_intentions_from_control_actions(self):
         """SP3-BDI-03: intentions derived from CAs."""

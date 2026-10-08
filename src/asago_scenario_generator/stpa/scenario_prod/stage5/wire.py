@@ -48,9 +48,8 @@ class CausalFactorDeclaration(BaseModel):
     """One Stage 5 declaration of an evidence-backed causal factor.
 
     ``kind`` and ``source_id`` name the structural finding, ``evidence``
-    carries the declared evidence description, and ``timing`` carries
-    optional declared timing text (parsed into typed temporal
-    constraints only at projection time; never inferred).  The evidence
+    carries the declared evidence description, and ``temporal_condition``
+    carries the typed temporal condition the provider declared.  The evidence
     status distinguishes an existing structural failure from an explicitly
     reachable capability or a bounded assumption.  Capability and access
     references are resolved against the exact scenario context during
@@ -62,11 +61,6 @@ class CausalFactorDeclaration(BaseModel):
     kind: CausalFactorKind
     source_id: str = Field(min_length=1)
     evidence: str = Field(min_length=1)
-    timing: str | None = None
-    # V2 provider contract.  ``timing`` remains a compatibility field for
-    # historical direct callers; corrected context requests require this
-    # field (including explicit ``null``) through their dynamic response
-    # model.
     temporal_condition: SemanticCondition | None = None
     evidence_status: CausalEvidenceStatus = CausalEvidenceStatus.structural_failure
     capability_refs: tuple[str, ...] = ()

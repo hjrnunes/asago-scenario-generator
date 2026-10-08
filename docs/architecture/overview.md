@@ -410,25 +410,6 @@ endpoint responsibility. Stage 2 and scenario-context assembly use the same
 `coordination_process_model_owner` resolver, so a defect can use the existing
 Stage 2 correction instead of failing after scenario generation starts.
 
-`scenario_prod.outcome_grounding` separates literal source presence from
-semantic interpretation. For action/state value comparisons, Stage 5 may cite
-an exact supplied constraint/action text and its verbatim literal quotation.
-If citation evidence is absent, `resolve_outcome_grounding` may instead find
-the exact typed scalar or object key in the supplied `TargetObservationSnapshot`
-JSON observations. It retains all matching references and JSON paths; repeated
-occurrences are still evidence of presence. It does not search schemas,
-defaults, examples, or arbitrary prompt prose. An invalid explicit citation
-remains unresolved and cannot trigger the absent-citation fallback. This
-resolution is shared by materialization and its audit, with no citation-only
-provider retry or additional model call.
-Unmatched evidence retains the subject/property/operator but materializes a
-typed unresolved reference value; it never derives policy from tool schemas.
-The ordinary model-output Boolean proposition is exempt because it is a truth
-predicate, not an argument reference value. Per-context grounding audit records
-preserve the proposed and compiled conditions and cited source, explicitly
-without independent interpretation verification. These are audit sidecars,
-not runtime observations or an additional consumer input. The existing bundle
-contract carries the resulting literal or placeholder unchanged.
 Provider state-condition subjects use the explained local process-model handles,
 just like temporal references. Compilation resolves the handle and checks it
 against the declared causal factors; a provider never needs to reconstruct a
