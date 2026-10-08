@@ -252,6 +252,47 @@ def test_conflicting_readings_serialize_only_when_present() -> None:
     assert QualificationFactEvidence.model_validate(conflict_dump) == conflicting
 
 
+def test_conflicting_readings_are_retained_only_as_a_contradiction() -> None:
+    """Readings need a contradictory status and at least two sources."""
+    fact = {
+        "namespace": "profile",
+        "fact_id": "agent.can_call_payment_tool",
+        "value_type": "boolean",
+        "property_path": ["can_call_payment_tool"],
+    }
+    readings = [
+        {"value": True, "source": "profile-a"},
+        {"value": False, "source": "profile-b"},
+    ]
+    with pytest.raises(ValidationError, match="only beside a contradictory"):
+        QualificationFactEvidence.model_validate(
+            {"fact": fact, "status": "unknown", "readings": readings}
+        )
+    with pytest.raises(ValidationError, match="at least two readings"):
+        QualificationFactEvidence.model_validate(
+            {"fact": fact, "status": "contradictory", "readings": readings[:1]}
+        )
+
+
+def test_planner_inputs_validate_into_the_persisted_models() -> None:
+    """Risk cards and qualification facts need no conversion before persisting."""
+    contracts = import_module("asago_scenario_generator.pipeline.obligation_contracts")
+    fact = {
+        "namespace": "profile",
+        "fact_id": "agent.can_call_payment_tool",
+        "value_type": "boolean",
+        "property_path": ["can_call_payment_tool"],
+    }
+
+    card = contracts.RiskCardInput(risk_id="R-1", evidence=[{"text": "reviewed"}])
+    facts = contracts.QualificationFactsInput.model_validate(
+        [{"fact": fact, "status": "present", "value": True}]
+    )
+
+    assert type(card) is RiskReference
+    assert all(type(item) is QualificationFactEvidence for item in facts.facts.values())
+
+
 def test_plan_requires_nonempty_taxonomy_pins_and_nonnegative_summary() -> None:
     """Persisted plans require both lineage pin maps and valid count bounds."""
     zero_summary = ObligationPlanSummary(

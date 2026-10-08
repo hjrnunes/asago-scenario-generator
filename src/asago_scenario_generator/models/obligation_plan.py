@@ -148,6 +148,13 @@ class QualificationFactEvidence(_ContractModel):
             raise ValueError(
                 "absent, unknown, and contradictory fact evidence require a null value"
             )
+        if self.readings and self.status != "contradictory":
+            raise ValueError(
+                "conflicting readings are retained only beside a "
+                "contradictory qualification fact"
+            )
+        if self.readings and len(self.readings) < 2:
+            raise ValueError("a conflicting fact retains at least two readings")
         return self
 
 

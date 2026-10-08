@@ -1,23 +1,19 @@
 """Typed inputs for the authoritative taxonomy-obligation planner.
 
-The planner consumes this module's immutable input graph.  It is intentionally
-separate from :mod:`models.obligation_plan`: the latter is the persisted output
-contract, while this module is allowed to carry the authoritative pattern and
-capability objects needed to derive candidate records.
+The planner consumes this module's immutable input graph.  Risk cards and
+qualification facts validate directly into their persisted
+:mod:`models.obligation_plan` records; this module adds the authoritative
+pattern and capability objects needed to derive candidate records.
 """
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Any
 
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
-    StrictBool,
-    StrictInt,
-    StrictStr,
-    model_serializer,
     model_validator,
 )
 
@@ -25,10 +21,10 @@ from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.attack_pattern_contracts import (
     AuthoritativeFactReference,
     TaxonomyPin,
-    validate_fact_scalar,
 )
-from asago_scenario_generator.models.risk_card import (
-    RiskCard,
+from asago_scenario_generator.models.obligation_plan import (
+    QualificationFactEvidence,
+    RiskReference,
 )
 from asago_scenario_generator.models.canonical import (
     FrozenDict,
@@ -238,54 +234,9 @@ def _validate_acyclic_mapping_graph(edges: list[tuple[str, str, str]]) -> None:
         _visit_mapping_graph(node, adjacency, visiting, visited)
 
 
-class RiskEvidenceInput(_InputModel):
-    """Immutable evidence span copied from a reviewed risk card."""
-
-    text: str = ""
-    source: str | None = None
-    relevance: float | None = Field(default=None, ge=0.0, le=1.0)
-
-
-class MitigationInput(_InputModel):
-    """Immutable mitigation reference copied from a reviewed risk card."""
-
-    mitigation_id: str | None = None
-    description: str = ""
-    source: str | None = None
-
-
-class RiskCardInput(_InputModel):
-    """Closed immutable copy of the reviewed risk-card fields used in Phase 1."""
-
-    risk_id: str = Field(min_length=1)
-    risk_name: str = ""
-    risk_description: str = ""
-    taxonomy: str = ""
-    confidence: float = Field(default=0.0, ge=0.0, le=1.0)
-    grounding_confidence: Literal["high", "medium", "low"] = "low"
-    evidence: tuple[RiskEvidenceInput, ...] = ()
-    scores: dict[str, float] | None = None
-    mitigations: tuple[MitigationInput, ...] = ()
-    threat: str | None = None
-    threat_source: str | None = None
-    vulnerability: str | None = None
-    consequence: str | None = None
-    impact: str | None = None
-
-    @model_validator(mode="before")
-    @classmethod
-    def accept_reviewed_risk_card(cls, value: Any) -> Any:
-        """Adapt the existing reviewed ``RiskCard`` without importing its mutability."""
-        if isinstance(value, RiskCard):
-            return value.model_dump(mode="python")
-        return value
-
-    @model_validator(mode="after")
-    def freeze_nested_mappings(self) -> RiskCardInput:
-        """Prevent caller mutation of nested score values after validation."""
-        if self.scores is not None:
-            object.__setattr__(self, "scores", FrozenDict(self.scores))
-        return self
+# The persisted provenance model is the planner's risk-card input: it accepts a
+# reviewed ``RiskCard`` (dumped by its NFC validator) and freezes its scores.
+RiskCardInput = RiskReference
 
 
 class CrossTaxonomyMappingInput(_InputModel):
@@ -362,66 +313,13 @@ def compute_mapping_bundle_digest(
     return compute_framed_digest(MAPPING_BUNDLE_DIGEST_DOMAIN, payload)
 
 
-QualificationFactScalar = StrictStr | StrictInt | StrictBool
-QualificationFactStatus = Literal["present", "absent", "unknown", "contradictory"]
-
-
 def _qualification_fact_key(reference: AuthoritativeFactReference) -> str:
     """Return the canonical map key for one authoritative fact reference."""
     return _canonical_json(reference.model_dump(mode="json"))
 
 
-class ConflictingFactReading(_InputModel):
-    """One conflicting supplied reading retained beside a contradictory fact.
-
-    Both values and their sources stay visible in the published evidence;
-    the planner never silently adopts one reading.
-    """
-
-    value: QualificationFactScalar
-    source: str = Field(min_length=1)
-
-
-class QualificationFact(_InputModel):
-    """One closed, typed authoritative qualification reading."""
-
-    fact: AuthoritativeFactReference
-    status: QualificationFactStatus
-    value: QualificationFactScalar | None = None
-    readings: tuple[ConflictingFactReading, ...] = ()
-
-    @model_serializer(mode="wrap")
-    def _serialize(self, handler: Any) -> dict[str, Any]:
-        """Omit empty readings so unambiguous facts keep their digests."""
-        payload = handler(self)
-        if not self.readings:
-            payload.pop("readings", None)
-        return payload
-
-    @model_validator(mode="after")
-    def coherent_value(self) -> QualificationFact:
-        """Require values only for unambiguous present readings."""
-        if self.status == "present":
-            if self.value is None:
-                raise ValueError("present qualification facts require a value")
-            validate_fact_scalar(self.fact, self.value)
-        elif self.value is not None:
-            raise ValueError(
-                "absent, unknown, and contradictory qualification facts "
-                "require a null value"
-            )
-        if self.readings and self.status != "contradictory":
-            raise ValueError(
-                "conflicting readings are retained only beside a "
-                "contradictory qualification fact"
-            )
-        if self.readings and len(self.readings) < 2:
-            raise ValueError("a conflicting fact retains at least two readings")
-        return self
-
-
 def _canonical_qualification_facts(
-    facts: dict[str, QualificationFact],
+    facts: dict[str, QualificationFactEvidence],
 ) -> dict[str, Any]:
     """Serialize the typed fact map for its content-integrity digest."""
     return {key: facts[key].model_dump(mode="json") for key in sorted(facts)}
@@ -430,7 +328,7 @@ def _canonical_qualification_facts(
 class QualificationFactsInput(_InputModel):
     """Immutable qualification facts and their content digest."""
 
-    facts: dict[str, QualificationFact] = Field(default_factory=dict)
+    facts: dict[str, QualificationFactEvidence] = Field(default_factory=dict)
     semantic_digest: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
 
     @model_validator(mode="before")
@@ -567,13 +465,8 @@ class TaxonomyObligationInputs(_InputModel):
 __all__ = [
     "CompatibilityPolicyInput",
     "CrossTaxonomyMappingInput",
-    "QualificationFact",
-    "QualificationFactScalar",
     "QualificationFactsInput",
-    "QualificationFactStatus",
     "RiskCardInput",
-    "RiskEvidenceInput",
-    "MitigationInput",
     "SSSOMMappingInput",
     "TaxonomyObligationInputs",
     "compute_mapping_bundle_digest",

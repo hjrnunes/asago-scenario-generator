@@ -37,7 +37,6 @@ from asago_scenario_generator.pipeline.obligation_contracts import (
     CrossTaxonomyMappingInput,
     QualificationFactsInput,
     RiskCardInput,
-    RiskEvidenceInput,
     SSSOMMappingInput,
     _freeze_nested_collections,
     compute_mapping_bundle_digest,
@@ -64,7 +63,10 @@ from tests.helpers.projection_factory import (
     get_test_resolver,
     get_test_snapshot,
 )
-from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+from asago_scenario_generator.models.obligation_plan import (
+    RiskEvidence,
+    TaxonomyObligationPlan,
+)
 from asago_scenario_generator.pipeline.obligation_persistence import (
     write_taxonomy_obligation_plan,
 )
@@ -195,7 +197,7 @@ def test_deferred_tail_sets_allocator_retention_before_continuing() -> None:
 
 def test_nested_freezing_dispatch_handles_every_supported_shape() -> None:
     """Nested input copies preserve models and freeze every collection kind."""
-    evidence = RiskEvidenceInput(text="reviewed")
+    evidence = RiskEvidence(text="reviewed")
     already_frozen_mapping = FrozenDict({"value": "stable"})
     already_frozen_list = FrozenList(["stable"])
 

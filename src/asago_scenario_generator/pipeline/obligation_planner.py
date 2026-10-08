@@ -8,7 +8,6 @@ from typing import Any, Literal
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_plan import (
     CandidateRecord,
-    ConflictingFactReadingEvidence,
     EvidenceRecord,
     FactEvaluationEvidence,
     QualificationFactEvidence,
@@ -304,11 +303,6 @@ def _path_evidence(
             )
         )
     return tuple(records)
-
-
-def _risk_reference(card: Any) -> RiskReference:
-    """Convert a typed input risk card into immutable persisted provenance."""
-    return RiskReference.model_validate(card.model_dump(mode="json"))
 
 
 def _identity_digest(
@@ -742,7 +736,7 @@ def _qualification_trace_evidence(trace: Any) -> tuple[EvidenceRecord, ...]:
 
 
 def _unready_fact_status(
-    reading: _contracts.QualificationFact | None,
+    reading: QualificationFactEvidence | None,
 ) -> Literal["absent", "unknown", "contradictory"]:
     """Map an unusable typed reading to persisted evidence vocabulary."""
     if reading is None:
@@ -770,12 +764,7 @@ def _missing_qualification_facts(
                     value=None,
                     # Both conflicting supplied readings stay visible with
                     # their sources; the planner never silently adopts one.
-                    readings=tuple(
-                        ConflictingFactReadingEvidence(
-                            value=item.value, source=item.source
-                        )
-                        for item in conflicting
-                    ),
+                    readings=conflicting,
                 )
             )
     return tuple(missing)
@@ -850,13 +839,13 @@ def _obligation_evidence(
 
 
 def _build_governance_obligation(
-    card: Any,
+    card: RiskReference,
     inputs: _contracts.TaxonomyObligationInputs,
 ) -> TaxonomyObligation:
     """Build the visible row for a risk without a resolved pattern."""
     return TaxonomyObligation(
         obligation_id=_identity_digest(card.risk_id, None, inputs),
-        risk_ref=_risk_reference(card),
+        risk_ref=card,
         taxonomy_chain=(),
         scope_disposition="governance_only",
         qualification_disposition="not_attempted",
@@ -872,7 +861,7 @@ def _build_governance_obligation(
 
 
 def _build_pattern_obligation(
-    card: Any,
+    card: RiskReference,
     pattern: AttackPattern,
     paths: tuple[tuple[_MappingEdge, ...], ...],
     inputs: _contracts.TaxonomyObligationInputs,
@@ -895,7 +884,7 @@ def _build_pattern_obligation(
     )
     return TaxonomyObligation(
         obligation_id=_identity_digest(card.risk_id, pattern, inputs),
-        risk_ref=_risk_reference(card),
+        risk_ref=card,
         taxonomy_chain=_chain_entries(pattern),
         attack_pattern_id=pattern.id,
         attack_pattern_semantic_digest=pattern.canonical_chain.semantic_digest,
@@ -916,7 +905,7 @@ def _build_pattern_obligation(
 
 
 def _build_obligation(
-    card: Any,
+    card: RiskReference,
     pattern: AttackPattern | None,
     paths: tuple[tuple[_MappingEdge, ...], ...],
     inputs: _contracts.TaxonomyObligationInputs,
@@ -952,7 +941,7 @@ def _validate_planner_inputs(inputs: Any) -> None:
 
 
 def _rows_for_risk(
-    card: Any,
+    card: RiskReference,
     patterns: dict[str, AttackPattern],
     edges: tuple[_MappingEdge, ...],
     inputs: _contracts.TaxonomyObligationInputs,
