@@ -614,7 +614,6 @@ def _safe_alternative(envelope: ScenarioEnvelope) -> str:
 
 def _documented_operations(
     envelope: ScenarioEnvelope,
-    loss_analysis: LossAnalysis | None,
     enriched_operations: Mapping[str, str] | None = None,
     observed_operations: tuple[str, ...] | None = None,
 ) -> list[HandoffOperation]:
@@ -840,7 +839,6 @@ def _sourced_facts(
 
 def _assumptions_and_unknowns(
     envelope: ScenarioEnvelope,
-    loss_analysis: LossAnalysis | None,
     environment_bound: bool,
 ) -> list[str]:
     unknowns = [
@@ -953,12 +951,10 @@ def build_scenario_handoff(
         governing_rules=_governing_rules(envelope),
         lineage=_lineage(envelope),
         documented_operations=_documented_operations(
-            envelope, loss_analysis, enriched_operations, observed_operations
+            envelope, enriched_operations, observed_operations
         ),
         sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source),
-        assumptions_and_unknowns=_assumptions_and_unknowns(
-            envelope, loss_analysis, environment_bound
-        ),
+        assumptions_and_unknowns=_assumptions_and_unknowns(envelope, environment_bound),
         observation=_observation_metadata(envelope),
         discriminating_condition=envelope.scenario_spec.discriminating_condition,
         condition_check=envelope.scenario_spec.condition_check,
@@ -1000,11 +996,6 @@ def _tool_call_condition(
     return binding.status, binding.condition
 
 
-def render_handoff_feature(handoff: ScenarioHandoffV4) -> str:
-    """Render the declarative Gherkin feature text for a handoff."""
-    return handoff.gherkin.to_feature_text()
-
-
 def write_scenario_handoff(
     handoff: ScenarioHandoffV4,
     scenarios_dir: Path,
@@ -1015,7 +1006,7 @@ def write_scenario_handoff(
     handoff_path = scenarios_dir / f"{handoff.scenario_id}.yaml"
     feature_path = scenarios_dir / f"{handoff.scenario_id}.feature"
     write_yaml(handoff, handoff_path)
-    feature_path.write_text(render_handoff_feature(handoff), encoding="utf-8")
+    feature_path.write_text(handoff.gherkin.to_feature_text(), encoding="utf-8")
     return handoff_path, feature_path
 
 
@@ -1051,7 +1042,6 @@ __all__ = [
     "handoff_ownership_violations",
     "handoff_payload_digest",
     "handoff_schema_violations",
-    "render_handoff_feature",
     "verify_handoff_digest",
     "write_scenario_handoff",
 ]
