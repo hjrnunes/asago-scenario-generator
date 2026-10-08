@@ -248,8 +248,8 @@ Each generated scenario is published as a versioned **scenario handoff**
 under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the
 envelope over narrative, attack tree, Gherkin and necessary metadata defined
 by [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v4`; the `handoff-v1`, `handoff-v2` and `handoff-v3` kits
-stay unchanged for their readers). Version 3 adds `tool_call_condition_status`,
+(schema `scenario-handoff-v4`, the producer's only handoff model; the `handoff-v1`,
+`handoff-v2` and `handoff-v3` kits stay unchanged for their readers). Version 3 adds `tool_call_condition_status`,
 which says whether Stage 5 bound the discriminating condition to target facts,
 and, when it did, the ready-to-evaluate `tool_call_condition`. Version 4 adds the
 required `attack_shape` key (closed enums, turn count 1-4 and identifiers, never
