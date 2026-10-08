@@ -25,8 +25,6 @@ from asago_scenario_generator.models.attack_pattern_contracts import (
     Condition,
     ConditionEvaluationResult,
     EvaluatedFactEvidence,
-    ExecutionRequirement,
-    MappingDecision,
     NotCondition,
     evaluate_condition,
 )
@@ -62,21 +60,6 @@ class ProjectionModel(BaseModel):
 
 def _canonical_json(value: Any) -> str:
     return canonical_json_bytes(value).decode("utf-8")
-
-
-EXECUTION_REQUIREMENTS_DIGEST_DOMAIN = (
-    "asago-scenario-generator:execution-requirements:v1"
-)
-
-
-def compute_execution_requirements_digest(requirements: Any) -> str:
-    """Compute the canonical digest for a sequence of execution requirements."""
-    payloads: list[Any] = []
-    for item in requirements:
-        payloads.append(
-            item.model_dump(mode="json") if hasattr(item, "model_dump") else item
-        )
-    return compute_framed_digest(EXECUTION_REQUIREMENTS_DIGEST_DOMAIN, payloads)
 
 
 def _fact_key(reference: AuthoritativeFactReference) -> str:
@@ -574,79 +557,33 @@ class ProjectionBatch(ProjectionModel):
     limitations: tuple[ProjectionLimitation, ...]
 
 
-class ProjectedMapping(ProjectionModel):
-    scope: Literal["chain", "step"]
-    step_id: str | None = None
-    mapping: MappingDecision
-
-    @model_validator(mode="after")
-    def scope_matches_step(self) -> "ProjectedMapping":
-        if (self.scope == "step") != (self.step_id is not None):
-            raise ValueError("step mappings require step_id; chain mappings forbid it")
-        return self
-
-
-class CandidateComplexityInputs(ProjectionModel):
-    """Policy-free inputs reserved for the future complexity policy."""
-
-    selected_step_count: int = Field(ge=1)
-    attacker_controlled_step_count: int = Field(ge=1)
-    boundary_crossing_step_count: int = Field(ge=0)
-    selected_conditional_step_count: int = Field(ge=0)
-    concrete_binding_count: int = Field(ge=1)
-    execution_requirement_count: int = Field(ge=1)
-
-
 class ProjectedCandidate(ProjectionModel):
     """Sole candidate-v2 contract intended for future generation stages."""
 
     candidate_id: str = Field(pattern=r"^cand:v2:[0-9a-f]{32}$")
     pattern_id: str
     chain_id: str
-    chain_semantic_revision: int = Field(gt=0)
     chain_semantic_digest: Digest
     projection: ProjectionSnapshot
     canonical_ingress: EntryPointResourceReference
-    ingress_controllability: Literal["direct", "indirect"]
-    projected_mappings: tuple[ProjectedMapping, ...]
     precondition_results: tuple[PreconditionEvaluationResult, ...]
-    execution_requirements: tuple[ExecutionRequirement, ...]
-    requirement_derivation_version: Literal["1"]
-    execution_requirements_digest: Digest
-    complexity_inputs: CandidateComplexityInputs
 
     @model_validator(mode="after")
-    def verifiable_identity_and_derivation(self) -> "ProjectedCandidate":
-        _require_unique_requirement_ids(self.execution_requirements)
+    def verifiable_identity(self) -> "ProjectedCandidate":
         _verify_chain_identity(
             self.pattern_id,
             self.chain_id,
-            self.chain_semantic_revision,
             self.chain_semantic_digest,
             self.projection.source_chain,
         )
         _verify_canonical_ingress(
             self.projection, self.projection.source_chain, self.canonical_ingress
         )
-        _verify_execution_requirements_digest(
-            self.execution_requirements, self.execution_requirements_digest
-        )
         _verify_candidate_identity(self.candidate_id, self.pattern_id, self.projection)
         expected_preconditions = _expected_precondition_key_map(
             self.projection.source_chain, self.projection.selected_step_ids
         )
         _verify_precondition_results(expected_preconditions, self.precondition_results)
-        _verify_projected_mappings(
-            self.projected_mappings,
-            self.projection.source_chain,
-            self.projection.selected_step_ids,
-        )
-        _verify_complexity_inputs(
-            self.complexity_inputs,
-            self.projection.source_chain,
-            self.projection,
-            self.execution_requirements,
-        )
         return self
 
 
@@ -673,25 +610,15 @@ class AuthoritativeProjectionObservation(ProjectionModel):
     qualification_traces: tuple[ProjectionQualificationTrace, ...] = ()
 
 
-def _require_unique_requirement_ids(
-    execution_requirements: tuple[ExecutionRequirement, ...],
-) -> None:
-    req_ids = [item.requirement_id for item in execution_requirements]
-    if len(req_ids) != len(set(req_ids)):
-        raise ValueError("execution requirement IDs must be unique")
-
-
 def _verify_chain_identity(
     pattern_id: str,
     chain_id: str,
-    chain_semantic_revision: int,
     chain_semantic_digest: str,
     chain: CanonicalAttackChain,
 ) -> None:
     if (
         pattern_id != chain.pattern_id
         or chain_id != chain.chain_id
-        or chain_semantic_revision != chain.semantic_revision
         or chain_semantic_digest != chain.semantic_digest
     ):
         raise ValueError("candidate chain identity does not match its projection")
@@ -709,16 +636,6 @@ def _verify_canonical_ingress(
     )
     if ingress != canonical_ingress:
         raise ValueError("canonical_ingress does not match the projection binding")
-
-
-def _verify_execution_requirements_digest(
-    execution_requirements: tuple[ExecutionRequirement, ...],
-    execution_requirements_digest: str,
-) -> None:
-    if execution_requirements_digest != compute_execution_requirements_digest(
-        execution_requirements
-    ):
-        raise ValueError("execution_requirements_digest does not match requirements")
 
 
 def _verify_candidate_identity(
@@ -763,56 +680,11 @@ def _verify_precondition_results(
         _verify_precondition_true(condition, supplied_preconditions[key])
 
 
-def _verify_projected_mappings(
-    projected_mappings: tuple[ProjectedMapping, ...],
-    chain: CanonicalAttackChain,
-    selected_step_ids: tuple[str, ...],
-) -> None:
-    if projected_mappings != _projected_mappings(chain, selected_step_ids):
-        raise ValueError("projected mappings are incomplete or non-authoritative")
-
-
 def _selected_steps_for_projection(
     chain: CanonicalAttackChain, selected_step_ids: tuple[str, ...]
 ) -> list[Any]:
     selected = set(selected_step_ids)
     return [step for step in chain.steps if step.step_id in selected]
-
-
-def _expected_complexity_inputs(
-    selected_steps: list[Any],
-    projection: ProjectionSnapshot,
-    execution_requirements: tuple[ExecutionRequirement, ...],
-) -> CandidateComplexityInputs:
-    return CandidateComplexityInputs(
-        selected_step_count=len(selected_steps),
-        attacker_controlled_step_count=sum(
-            step.attacker_controlled for step in selected_steps
-        ),
-        boundary_crossing_step_count=sum(
-            step.boundary_position == "crossing" for step in selected_steps
-        ),
-        selected_conditional_step_count=sum(
-            step.requirement == "conditional" for step in selected_steps
-        ),
-        concrete_binding_count=len(projection.bindings),
-        execution_requirement_count=len(execution_requirements),
-    )
-
-
-def _verify_complexity_inputs(
-    complexity_inputs: CandidateComplexityInputs,
-    chain: CanonicalAttackChain,
-    projection: ProjectionSnapshot,
-    execution_requirements: tuple[ExecutionRequirement, ...],
-) -> None:
-    expected = _expected_complexity_inputs(
-        _selected_steps_for_projection(chain, projection.selected_step_ids),
-        projection,
-        execution_requirements,
-    )
-    if complexity_inputs != expected:
-        raise ValueError("complexity inputs do not match projected candidate")
 
 
 def _entry_point_resource_id(reference: EntryPointResourceReference) -> str:
@@ -951,38 +823,6 @@ def _evaluate_precondition(
         result=evaluate_condition(precondition.condition, evidence),
         evidence=evidence,
     )
-
-
-def _chain_atlas_mappings(
-    chain: CanonicalAttackChain,
-) -> Iterable[ProjectedMapping]:
-    """Project the chain-level ATLAS mappings of the authoritative chain."""
-    return (
-        ProjectedMapping(scope="chain", mapping=mapping)
-        for mapping in chain.mappings
-        if mapping.taxonomy == "ATLAS"
-    )
-
-
-def _step_atlas_mappings(step: Any) -> Iterable[ProjectedMapping]:
-    """Project the ATLAS mappings declared on one selected step."""
-    return (
-        ProjectedMapping(scope="step", step_id=step.step_id, mapping=mapping)
-        for mapping in step.mappings
-        if mapping.taxonomy == "ATLAS"
-    )
-
-
-def _projected_mappings(
-    chain: CanonicalAttackChain, selected_step_ids: tuple[str, ...]
-) -> tuple[ProjectedMapping, ...]:
-    """Project the chain and selected-step ATLAS mappings."""
-    mappings = list(_chain_atlas_mappings(chain))
-    selected = set(selected_step_ids)
-    for step in chain.steps:
-        if step.step_id in selected:
-            mappings.extend(_step_atlas_mappings(step))
-    return tuple(mappings)
 
 
 def _candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:

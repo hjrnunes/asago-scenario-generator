@@ -26,7 +26,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     _resource_id,
     _resource_id_allowed,
     _restriction_blocks,
-    compute_execution_requirements_digest,
 )
 
 _MAX_EXAMPLES = 60
@@ -89,33 +88,6 @@ def test_nfc_key_collision_is_rejected(left: str, right: str) -> None:
         assert "collide after NFC" in str(exc)
         return
     raise AssertionError("NFC-colliding mapping keys must fail closed")
-
-
-@settings(max_examples=_MAX_EXAMPLES, deadline=None)
-@given(
-    payloads=st.lists(
-        st.dictionaries(
-            st.sampled_from(("kind", "requirement_id", "slot_id")),
-            _IDS,
-            min_size=1,
-            max_size=3,
-        ),
-        max_size=5,
-    )
-)
-def test_execution_requirements_digest_is_order_sensitive(
-    payloads: list[dict[str, str]],
-) -> None:
-    """The digest is deterministic and changes when requirement order does."""
-    first = compute_execution_requirements_digest(payloads)
-    assert first == compute_execution_requirements_digest(payloads)
-    assert len(first) == 64
-    if len(set(json.dumps(item, sort_keys=True) for item in payloads)) < 2:
-        return
-    reversed_payloads = list(reversed(payloads))
-    if reversed_payloads == payloads:
-        return
-    assert first != compute_execution_requirements_digest(reversed_payloads)
 
 
 @settings(max_examples=_MAX_EXAMPLES, deadline=None)

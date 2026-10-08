@@ -36,23 +36,15 @@ from asago_scenario_generator.models.capability_profile import (
 from asago_scenario_generator.pipeline.projection_contracts import (
     ProjectionBudget,
     capture_capability_snapshot,
-    CandidateComplexityInputs,
     PreconditionEvaluationResult,
     ProjectionLimitation,
-    ProjectedCandidate,
     _candidate_v2_id,
-    _require_unique_requirement_ids,
     _verify_chain_identity,
     _verify_canonical_ingress,
-    _verify_execution_requirements_digest,
     _verify_candidate_identity,
     _expected_precondition_key_map,
     _verify_precondition_results,
     _verify_precondition_true,
-    _verify_projected_mappings,
-    _expected_complexity_inputs,
-    _selected_steps_for_projection,
-    _verify_complexity_inputs,
     _entry_point_eligible_for_slot,
     CapabilityFactSnapshot,
     _restriction_blocks,
@@ -68,10 +60,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     _condition_fact_items,
     _condition_facts,
     _resource_key,
-    ProjectedMapping,
-    _chain_atlas_mappings,
-    _projected_mappings,
-    _step_atlas_mappings,
 )
 from asago_scenario_generator.models.attack_pattern_projection import (
     EntryPointResourceReference,
@@ -350,6 +338,18 @@ def _project(
     )
 
 
+def _derived_requirements(candidate: Any, snapshot: Any = None) -> tuple[Any, ...]:
+    """Re-run the requirement-derivation gate a projected candidate passed."""
+    derived, issue = _derive_execution_requirements(
+        candidate.pattern_id,
+        candidate.projection.source_chain,
+        candidate.projection,
+        snapshot or capture_capability_snapshot(_profile(), (_evidence(),)),
+    )
+    assert issue is None
+    return derived
+
+
 def test_snapshot_is_content_addressed_order_independent_and_qualifies_resources() -> (
     None
 ):
@@ -424,24 +424,6 @@ def test_projection_contract_boundary_values_are_explicit() -> None:
             emitted_bindings=-1,
         )
 
-    base = {
-        "selected_step_count": 1,
-        "attacker_controlled_step_count": 1,
-        "boundary_crossing_step_count": 0,
-        "selected_conditional_step_count": 0,
-        "concrete_binding_count": 1,
-        "execution_requirement_count": 1,
-    }
-    assert CandidateComplexityInputs(**base)
-    for field in (
-        "selected_step_count",
-        "attacker_controlled_step_count",
-        "concrete_binding_count",
-        "execution_requirement_count",
-    ):
-        with pytest.raises(ValidationError):
-            CandidateComplexityInputs(**{**base, field: 0})
-
 
 def test_content_identity_normalizes_canonically_equivalent_unicode() -> None:
     composed = _pattern()
@@ -507,7 +489,7 @@ def test_selected_step_preconditions_persist_true_false_and_unknown_evidence() -
 
 def test_bindings_exactly_cover_slots_and_indirect_ingress_fails_closed() -> None:
     result = _project()
-    assert {c.ingress_controllability for c in result.candidates} == {"direct"}
+    assert result.candidates
     assert {issue.code for issue in result.infeasibilities} == {
         "unsupported_requirement_derivation"
     }
@@ -519,7 +501,7 @@ def test_bindings_exactly_cover_slots_and_indirect_ingress_fails_closed() -> Non
             "boundary",
         }
         assert {
-            requirement.kind for requirement in candidate.execution_requirements
+            requirement.kind for requirement in _derived_requirements(candidate)
         } == {
             "direct_input_control",
             "observation",
@@ -552,7 +534,6 @@ def test_expansion_is_bounded_coverage_aware_stable_and_deduplicated() -> None:
         limitation.code == "candidate_budget_exhausted"
         for limitation in first.limitations
     )
-    assert {c.ingress_controllability for c in first.candidates} == {"direct"}
     assert (
         len(
             {
@@ -614,19 +595,22 @@ def test_observation_keeps_batch_limitations_before_tail_collection() -> None:
     assert observed.deferred_candidates
 
 
-def test_explicit_execution_requirements_are_versioned_and_digest_verified() -> None:
+def test_candidate_does_not_store_its_derived_requirements() -> None:
     direct = _project().candidates[0]
-    assert {r.kind for r in direct.execution_requirements} == {
+    assert {r.kind for r in _derived_requirements(direct)} == {
         "direct_input_control",
         "observation",
         "security_outcome_assertion",
     }
-    assert direct.requirement_derivation_version == "1"
-    assert len(direct.execution_requirements_digest) == 64
-    forged = direct.model_dump(mode="json")
-    forged["execution_requirements_digest"] = ZERO
-    with pytest.raises(ValidationError, match="requirements_digest"):
-        type(direct).model_validate(forged)
+    assert set(type(direct).model_fields) == {
+        "candidate_id",
+        "pattern_id",
+        "chain_id",
+        "chain_semantic_digest",
+        "projection",
+        "canonical_ingress",
+        "precondition_results",
+    }
 
 
 @pytest.mark.parametrize("action_kind", ["deliver", "transform", "invoke", "persist"])
@@ -646,7 +630,7 @@ def test_unlinked_action_resources_and_observations_are_never_inferred(
     # requirement derivation.
     assert len(result.candidates) == 1
     candidate = result.candidates[0]
-    assert {requirement.kind for requirement in candidate.execution_requirements} == {
+    assert {requirement.kind for requirement in _derived_requirements(candidate)} == {
         "direct_input_control",
         "observation",
         "security_outcome_assertion",
@@ -654,7 +638,7 @@ def test_unlinked_action_resources_and_observations_are_never_inferred(
     # No tool-fixture requirements are inferred from action kind.
     assert not any(
         requirement.kind == "state_changing_tool_fixture"
-        for requirement in candidate.execution_requirements
+        for requirement in _derived_requirements(candidate)
     )
 
 
@@ -685,14 +669,8 @@ def test_candidate_v2_identity_is_stable_and_sensitive_to_every_identity_axis() 
         type(baseline[0]).model_validate(forged)
 
 
-def test_projected_mappings_are_cumulative_not_a_technique_subset_axis() -> None:
+def test_candidates_carry_no_technique_subset_axis() -> None:
     candidates = _project().candidates
-    assert all(candidate.projected_mappings for candidate in candidates)
-    assert all(
-        mapping.mapping.taxonomy == "ATLAS"
-        for candidate in candidates
-        for mapping in candidate.projected_mappings
-    )
     assert all(not hasattr(candidate, "technique_ids") for candidate in candidates)
     assert all(not hasattr(candidate, "prompt_emphasis") for candidate in candidates)
 
@@ -906,7 +884,7 @@ def test_explicit_observable_outcome_link_produces_observation() -> None:
     )
     result = _project(pattern=raw)
     candidate = result.candidates[0]
-    kinds = {requirement.kind for requirement in candidate.execution_requirements}
+    kinds = {requirement.kind for requirement in _derived_requirements(candidate)}
     assert "observation" in kinds
     assert "direct_input_control" in kinds
     assert "security_outcome_assertion" in kinds
@@ -928,7 +906,7 @@ def test_tool_fixture_link_produces_tool_fixture_requirement() -> None:
     )
     result = _project(pattern=raw)
     candidate = result.candidates[0]
-    kinds = {requirement.kind for requirement in candidate.execution_requirements}
+    kinds = {requirement.kind for requirement in _derived_requirements(candidate)}
     assert "state_changing_tool_fixture" in kinds
     assert "direct_input_control" in kinds
     assert "security_outcome_assertion" in kinds
@@ -953,7 +931,7 @@ def test_source_influence_link_produces_upstream_requirement() -> None:
     )
     result = _project(pattern=raw)
     candidate = result.candidates[0]
-    kinds = {requirement.kind for requirement in candidate.execution_requirements}
+    kinds = {requirement.kind for requirement in _derived_requirements(candidate)}
     assert "upstream_source_influence" in kinds
     assert "direct_input_control" not in kinds
     assert "security_outcome_assertion" in kinds
@@ -1020,7 +998,12 @@ def test_source_influence_activates_indirect_ingress() -> None:
     result = _project(profile=profile, pattern=raw)
     assert len(result.candidates) == 1
     candidate = result.candidates[0]
-    kinds = {requirement.kind for requirement in candidate.execution_requirements}
+    kinds = {
+        requirement.kind
+        for requirement in _derived_requirements(
+            candidate, capture_capability_snapshot(profile)
+        )
+    }
     assert "upstream_source_influence" in kinds
     assert "direct_input_control" not in kinds
     assert not any(
@@ -1084,12 +1067,12 @@ def test_security_assertion_only_from_explicit_outcome_link() -> None:
     candidate = result.candidates[0]
     sec_reqs = [
         r
-        for r in candidate.execution_requirements
+        for r in _derived_requirements(candidate)
         if r.kind == "security_outcome_assertion"
     ]
     assert len(sec_reqs) == 1
     # The observation requirement for the same link should also exist.
-    obs_reqs = [r for r in candidate.execution_requirements if r.kind == "observation"]
+    obs_reqs = [r for r in _derived_requirements(candidate) if r.kind == "observation"]
     assert len(obs_reqs) == 1
 
 
@@ -1241,26 +1224,8 @@ def test_dotted_component_partition_collision_fails_closed() -> None:
     # get a candidate.  This proves the encoding prevents the collision.
     assert len(result.candidates) > 0
     candidate = result.candidates[0]
-    req_ids = [r.requirement_id for r in candidate.execution_requirements]
+    req_ids = [r.requirement_id for r in _derived_requirements(candidate)]
     assert len(req_ids) == len(set(req_ids)), "requirement IDs must be unique"
-
-
-def test_projected_candidate_validator_rejects_duplicate_requirement_ids() -> None:
-    """ProjectedCandidate model validator must reject execution_requirements
-    with duplicate requirement_ids."""
-    # Build a minimal candidate with duplicate requirement IDs by
-    # constructing two identical requirements and injecting them.
-    raw = _pattern(conditional=False)
-    result = _project(pattern=raw)
-    assert len(result.candidates) > 0
-    candidate = result.candidates[0]
-    # Duplicate the first requirement to create a collision.
-    reqs = list(candidate.execution_requirements)
-    reqs.append(reqs[0])
-    bad_data = candidate.model_dump(mode="json")
-    bad_data["execution_requirements"] = [r.model_dump(mode="json") for r in reqs]
-    with pytest.raises(ValidationError, match="unique"):
-        ProjectedCandidate.model_validate(bad_data)
 
 
 def test_all_live_projected_candidate_requirement_ids_unique() -> None:
@@ -1330,7 +1295,7 @@ def test_all_live_projected_candidate_requirement_ids_unique() -> None:
         budget=ProjectionBudget(max_candidates=512),
     )
     for candidate in batch.candidates:
-        req_ids = [r.requirement_id for r in candidate.execution_requirements]
+        req_ids = [r.requirement_id for r in _derived_requirements(candidate, snapshot)]
         assert len(req_ids) == len(set(req_ids)), (
             f"{candidate.pattern_id}: duplicate requirement IDs {req_ids}"
         )
@@ -1484,7 +1449,7 @@ def test_ap_t6_07_catalog_projection_derives_source_influence_activation() -> No
         validate_projection_snapshot(swapped["projection"], snapshot)
     requirements = [
         item
-        for item in candidate.execution_requirements
+        for item in _derived_requirements(candidate, snapshot)
         if item.kind == "upstream_source_influence"
     ]
     assert len(requirements) == 1
@@ -1800,26 +1765,10 @@ class TestCandidateIdentityHelpers:
         assert result.candidates
         return result.candidates[0]
 
-    def test_require_unique_requirement_ids_ok_and_duplicate(self):
-        _require_unique_requirement_ids(
-            (
-                SimpleNamespace(requirement_id="r1"),
-                SimpleNamespace(requirement_id="r2"),
-            )
-        )
-        with pytest.raises(ValueError, match="must be unique"):
-            _require_unique_requirement_ids(
-                (
-                    SimpleNamespace(requirement_id="r1"),
-                    SimpleNamespace(requirement_id="r1"),
-                )
-            )
-
     @staticmethod
     def _verifier_pair(name: str, candidate):
         """A call that must pass for the derived value and one that must not."""
         chain = candidate.projection.source_chain
-        selected = candidate.projection.selected_step_ids
         other_ingress = next(
             (
                 binding.resource_ref
@@ -1832,7 +1781,6 @@ class TestCandidateIdentityHelpers:
             "chain_identity": lambda bad: _verify_chain_identity(
                 "other-pattern" if bad else candidate.pattern_id,
                 candidate.chain_id,
-                candidate.chain_semantic_revision,
                 candidate.chain_semantic_digest,
                 chain,
             ),
@@ -1841,19 +1789,10 @@ class TestCandidateIdentityHelpers:
                 chain,
                 other_ingress if bad else candidate.canonical_ingress,
             ),
-            "execution_requirements_digest": (
-                lambda bad: _verify_execution_requirements_digest(
-                    candidate.execution_requirements,
-                    "0" * 64 if bad else candidate.execution_requirements_digest,
-                )
-            ),
             "candidate_identity": lambda bad: _verify_candidate_identity(
                 "cand:v2:" + "0" * 32 if bad else candidate.candidate_id,
                 candidate.pattern_id,
                 candidate.projection,
-            ),
-            "projected_mappings": lambda bad: _verify_projected_mappings(
-                () if bad else candidate.projected_mappings, chain, selected
             ),
         }
         verify = pairs[name]
@@ -1864,9 +1803,7 @@ class TestCandidateIdentityHelpers:
         [
             ("chain_identity", "chain identity"),
             ("canonical_ingress", "canonical_ingress"),
-            ("execution_requirements_digest", "does not match requirements"),
             ("candidate_identity", "candidate_id"),
-            ("projected_mappings", "mappings"),
         ],
         ids=lambda value: value.replace(" ", "_"),
     )
@@ -1943,31 +1880,6 @@ class TestCandidateIdentityHelpers:
         )
         with pytest.raises(ValueError, match="must evaluate true"):
             _verify_precondition_true(condition, supplied)
-
-    def test_expected_complexity_inputs_and_verify(self):
-        candidate = self._candidate()
-        chain = candidate.projection.source_chain
-        selected_steps = _selected_steps_for_projection(
-            chain, candidate.projection.selected_step_ids
-        )
-        expected = _expected_complexity_inputs(
-            selected_steps, candidate.projection, candidate.execution_requirements
-        )
-        assert expected == candidate.complexity_inputs
-        _verify_complexity_inputs(
-            candidate.complexity_inputs,
-            chain,
-            candidate.projection,
-            candidate.execution_requirements,
-        )
-        wrong = expected.model_copy(update={"selected_step_count": 99})
-        with pytest.raises(ValueError, match="complexity inputs"):
-            _verify_complexity_inputs(
-                wrong,
-                chain,
-                candidate.projection,
-                candidate.execution_requirements,
-            )
 
 
 class TestReferenceResolutionHelpers:
@@ -2450,7 +2362,7 @@ class TestRequirementDerivationHelpers:
             "direct",
         )
         assert issue is None
-        assert derived == candidate.execution_requirements
+        assert derived == _derived_requirements(candidate)
         derived, issue = _derive_execution_requirements_core(
             candidate.pattern_id,
             chain,
@@ -2506,7 +2418,11 @@ class TestRequirementDerivationHelpers:
             candidate.pattern_id, chain, candidate.projection, snapshot
         )
         assert issue is None
-        assert derived == candidate.execution_requirements
+        assert {item.kind for item in derived} == {
+            "direct_input_control",
+            "observation",
+            "security_outcome_assertion",
+        }
 
 
 class TestRemainingProjectionHelpers:
@@ -2810,29 +2726,12 @@ class TestRemainingProjectionHelpers:
         }
         assert list(_cartesian_fill(options, seen)) == [(tools[1], ints[1])]
 
-    def test_projected_mappings_helpers(self):
-
-        chain = AttackPattern.model_validate(_pattern()).canonical_chain
-        chain_only = tuple(_chain_atlas_mappings(chain))
-        assert _projected_mappings(chain, ()) == chain_only
-        step = chain.steps[0]
-        assert tuple(_step_atlas_mappings(step)) == tuple(
-            ProjectedMapping(scope="step", step_id=step.step_id, mapping=mapping)
-            for mapping in step.mappings
-            if mapping.taxonomy == "ATLAS"
-        )
-        combined = _projected_mappings(chain, (step.step_id,))
-        assert combined[: len(chain_only)] == chain_only
-        assert any(item.scope == "step" for item in combined)
-
     def test_build_candidate_from_combination_helpers_round_trip(self):
         from asago_scenario_generator.pipeline.projection_candidates import (
             _bindings_for_combination,
             _build_candidate_from_combination,
-            _candidate_complexity_inputs,
             _ingress_for_combination,
             _projection_data_for_combination,
-            _selected_steps_from_chain,
         )
 
         raw = _pattern()
@@ -2853,20 +2752,8 @@ class TestRemainingProjectionHelpers:
         bindings = candidate.projection.bindings
         resources = tuple(item.resource_ref for item in bindings)
         assert _bindings_for_combination(chain, resources) == bindings
-        ingress_ref, controllability = _ingress_for_combination(
-            bindings, chain, snapshot
-        )
-        assert ingress_ref == candidate.canonical_ingress
-        assert controllability == candidate.ingress_controllability
+        assert _ingress_for_combination(bindings, chain) == candidate.canonical_ingress
         selected = candidate.projection.selected_step_ids
-        selected_steps = _selected_steps_from_chain(chain, selected)
-        assert selected_steps == [
-            step for step in chain.steps if step.step_id in set(selected)
-        ]
-        complexity = _candidate_complexity_inputs(
-            selected_steps, bindings, candidate.execution_requirements
-        )
-        assert complexity == candidate.complexity_inputs
         data = _projection_data_for_combination(
             chain,
             selected,
