@@ -14,7 +14,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.issues import IssueCode
 from tests.stpa.sp1_helpers import MockLLMClient
 
 from .condition_prompt_fixture import realistic_observations, realistic_profile
-from .test_normal_authoring_wire import _normal_payload, _wrong_timing_context
+from tests.helpers.normal_authoring_wire import _normal_payload, _wrong_timing_context
 
 _ATTEMPT = {
     "criterion_id": "attempt",

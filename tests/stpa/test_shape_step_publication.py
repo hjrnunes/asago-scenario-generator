@@ -31,12 +31,12 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
 )
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_scenario_handoff_publication import (
+from tests.helpers.scenario_handoff_publication import (
     _functional_payload,
     _normal_semantics_payload,
     _published_handoff,
 )
-from tests.stpa.test_shape_step_call import DIRECT_REPLY
+from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets
 
 SCHEMA = json.loads(

@@ -40,6 +40,10 @@ from tests.helpers.scenario_handoff_publication import (
     _profile_condition,
     _publish,
 )
+from tests.helpers.scenario_handoff_publication import (
+    _functional_payload,
+    _published_handoff,
+)
 
 #: Artifact-design content classes the producer handoff must never carry, at
 #: the structural-field level or hidden in prose.
@@ -105,26 +109,6 @@ def _adversarial_payload() -> dict:
             "reason": "The selected structural factor supports the direct route.",
         },
     }
-
-
-def _functional_payload() -> dict:
-    payload = _normal_semantics_payload()
-    payload["adversary"] = {
-        "kind": "none",
-        "gain": "The requested service completes as designed.",
-    }
-    payload["attacker_bdi"] = {
-        "beliefs": [],
-        "desires": [],
-        "intentions": [],
-    }
-    return payload
-
-
-def _published_handoff(run_dir: Path, scenario_id: str = "SCN-001") -> dict:
-    path = run_dir / "scenarios" / f"{scenario_id}.yaml"
-    assert path.is_file(), f"missing handoff {path}"
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
 def _scan_published_text(run_dir: Path) -> list[str]:

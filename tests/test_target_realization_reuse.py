@@ -210,7 +210,7 @@ def _run_default_synthesis(tmp_path, monkeypatch, *, enrich):
         _default_enrich_control_actions,
         _default_target_realize,
     )
-    from tests.test_synthesis import (
+    from tests.helpers.synthesis import (
         _miniklarna_target_package,
         _runtime,
         _TargetAwareFakeAdapters,
@@ -256,7 +256,7 @@ def test_default_adapter_requires_the_enrichment_rows(tmp_path, monkeypatch):
         final_ica_result,
         synthesis_capability_profile,
     )
-    from tests.test_synthesis import _miniklarna_target_package, _runtime
+    from tests.helpers.synthesis import _miniklarna_target_package, _runtime
 
     log: list[tuple[str, str]] = []
     monkeypatch.setattr(
@@ -298,7 +298,7 @@ def test_default_adapter_hands_the_enrichment_rows_to_realization(
         final_ica_result,
         synthesis_capability_profile,
     )
-    from tests.test_synthesis import _miniklarna_target_package, _runtime
+    from tests.helpers.synthesis import _miniklarna_target_package, _runtime
 
     seen: dict[str, object] = {}
 

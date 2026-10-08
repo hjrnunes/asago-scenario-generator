@@ -16,8 +16,8 @@ from asago_scenario_generator.stpa.scenario_prod.condition_family import (
     family_prompt_view,
 )
 
-from .test_condition_family import EDIT, OPS, _index, _kind, _request, _state
-from .test_discriminating_condition import _check
+from tests.helpers.condition_family import EDIT, OPS, _index, _kind, _request, _state
+from tests.helpers.discriminating_condition import _check
 
 
 def _flat(text: str) -> str:

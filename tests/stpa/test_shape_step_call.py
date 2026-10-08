@@ -31,6 +31,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
 from tests.stpa.helpers import make_scenario_spec
 from tests.stpa.shape_fixtures import profile_with_influence
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.helpers.shape_step_call import DIRECT_REPLY
 
 SNAPSHOTS = Path(__file__).parent / "shape_step_prompts"
 
@@ -41,15 +42,6 @@ REACH = {
     AdversaryKind.none: None,
 }
 
-DIRECT_REPLY = {
-    "channel": "direct",
-    "turn_count": 2,
-    "turn_plan": [
-        {"position": 1, "speaker": "attacker_user", "purpose": "establish_context"},
-        {"position": 2, "speaker": "attacker_user", "purpose": "request_action"},
-    ],
-    "indirect": None,
-}
 
 INDIRECT_REPLY = {
     "channel": "indirect",

@@ -78,94 +78,31 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from tests.stpa.sp1_helpers import MockLLMClient
 
 from .condition_prompt_fixture import realistic_observations, realistic_profile
-from .test_normal_authoring_wire import (
-    PROMPTS_DIR,
-    _control_structure,
+from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
+from tests.helpers.sp3_scenario_continuity import _control_structure, _loss_analysis
+from tests.helpers.normal_authoring_wire import (
     _defender_bdi,
-    _loss_analysis,
-    _normal_payload,
     _wrong_timing_context,
     _wrong_timing_threat,
 )
-from .test_scenario_deduplication import _scenario
-
-#: Stage 5 request budget in estimated tokens (system + user + schema).
-STAGE5_PROMPT_TOKEN_BUDGET = 24576
-
-
-def _operation() -> TargetOperationObservation:
-    return TargetOperationObservation(
-        reference=TargetOperationReference(
-            resource_id="orders",
-            operation_id="refund_payment",
-        ),
-        description="Refund the payment for one order record.",
-        input_schema={
-            "type": "object",
-            "properties": {
-                "order_id": {"type": "string"},
-                "amount": {"type": "number"},
-            },
-        },
-    )
-
-
-def _observations() -> TargetObservationSnapshot:
-    content = {
-        "session": {"customer_id": "cus-1"},
-        "orders": {
-            "ORD-1": {"owner_id": "cus-1", "amount": 40, "refunded": False},
-            "ORD-2": {"owner_id": "cus-9", "amount": 250, "refunded": False},
-        },
-    }
-    return TargetObservationSnapshot.create(
-        target_profile_digest="b" * 64,
-        observations=(
-            TargetObservation(
-                observation_ref="TARGET-STATE",
-                kind="state",
-                content_format="json",
-                content=json.dumps(content),
-            ),
-        ),
-    )
-
-
-def _universe() -> ConditionUniverse:
-    return build_condition_universe(
-        execution_target_profile=None,
-        target_operation=_operation(),
-        target_observations=_observations(),
-    )
-
-
-def _ownership_condition(record: str = "ORD-2") -> dict:
-    """A foreign-owner condition selecting one observed order."""
-    return {
-        "statement": "The refund targets an order the session customer does not own.",
-        "comparisons": [
-            {
-                "kind": "value",
-                "left": {
-                    "source": "fact",
-                    "path": f"TARGET-STATE.orders.{record}.owner_id",
-                },
-                "op": "ne",
-                "right": {"source": "fact", "path": "TARGET-STATE.session.customer_id"},
-            }
-        ],
-        "record_selection": {
-            "status": "observed",
-            "record_path": f"TARGET-STATE.orders.{record}",
-            "argument_values": [
-                {
-                    "operation": "refund_payment",
-                    "argument": "order_id",
-                    "path": f"TARGET-STATE.orders.{record}",
-                }
-            ],
-        },
-    }
+from tests.helpers.scenario_deduplication import _scenario
+from tests.helpers.discriminating_condition import (
+    ANALYTICAL_NOTE,
+    STAGE5_PROMPT_TOKEN_BUDGET,
+    _bad_condition_payload,
+    _check,
+    _generate,
+    _generate_plain,
+    _kind_mismatch_condition,
+    _literal,
+    _observations,
+    _operation,
+    _ownership_condition,
+    _payload_with,
+    _placeholder_payload,
+    _universe,
+    _value,
+)
 
 
 def _amount_condition() -> dict:
@@ -188,12 +125,6 @@ def _amount_condition() -> dict:
             "reason": "The amount is chosen by the request, not by a record.",
         },
     }
-
-
-def _check(payload: dict):
-    return check_discriminating_condition(
-        DiscriminatingCondition.model_validate(payload), _universe()
-    )
 
 
 # --- schema ---------------------------------------------------------------
@@ -511,52 +442,6 @@ def test_booleans_do_not_equal_numbers() -> None:
 
 
 # --- Stage 5 correction ---------------------------------------------------
-
-
-def _payload_with(condition: dict | None) -> dict:
-    payload = _normal_payload()
-    payload["unsafe_outcome"]["observation_criteria"] = [
-        {
-            "criterion_id": "attempt",
-            "outcome": "The refund_payment operation is attempted for the order.",
-            "observable": True,
-            "claim_level": "command_attempt",
-            "evidence": "tool_call",
-            "operation_name": "refund_payment",
-            "reason": "The runtime captures decoded tool calls.",
-        }
-    ]
-    payload["unsafe_outcome"]["safe_observable_outcome"] = {
-        "observable": True,
-        "statement": "The refund_payment operation is refused for the order.",
-        "claim_level": "command_attempt",
-        "evidence": "tool_call",
-        "operation_name": "refund_payment",
-    }
-    payload["unsafe_outcome"]["discriminating_condition"] = condition
-    return payload
-
-
-ANALYTICAL_NOTE = (
-    "the response declares no reply criterion the contract supports, so the "
-    "command_attempt claim cannot run without its condition and the scenario "
-    "is published as analytical_only."
-)
-
-
-def _generate(client: MockLLMClient, tmp_path, *, scenario_id=None, **overrides):
-    context = (
-        _wrong_timing_context()
-        if scenario_id is None
-        else _wrong_timing_context(scenario_id=scenario_id)
-    )
-    arguments = {
-        "target_operation": _operation(),
-        "target_observations": _observations(),
-        "observation_contract": default_observation_contract(),
-    }
-    arguments.update(overrides)
-    return generate_bdi_for_context(client, context, tmp_path, **arguments)
 
 
 def test_stage5_records_the_condition_and_its_code_owned_check(tmp_path) -> None:
@@ -1134,10 +1019,6 @@ def _fact(path: str) -> dict:
     return {"source": "fact", "path": f"TARGET-STATE.{path}"}
 
 
-def _value(left: dict, op: str, right: dict) -> dict:
-    return {"kind": "value", "left": left, "op": op, "right": right}
-
-
 def _booking_selection(key: str) -> dict:
     return {
         "status": "observed",
@@ -1416,26 +1297,6 @@ def test_precondition_mixed_with_an_anchored_comparison_stays_satisfied() -> Non
         "not_checkable",
     ]
     assert outcome.check.status == "satisfied"
-
-
-def _kind_mismatch_condition() -> dict:
-    payload = _ownership_condition("ORD-2")
-    payload["comparisons"] = [
-        _value(
-            {
-                "source": "argument",
-                "operation": "refund_payment",
-                "argument": "order_id",
-            },
-            "ne",
-            {"source": "fact", "path": "TARGET-STATE.session.customer_id"},
-        )
-    ]
-    return payload
-
-
-def _bad_condition_payload() -> dict:
-    return _payload_with(_kind_mismatch_condition())
 
 
 def _unsafe_outcome_not_an_object() -> dict:
@@ -1764,10 +1625,6 @@ def _literal_findings(comparison: dict, universe: ConditionUniverse | None = Non
     return condition_findings(condition, universe or _literal_universe())
 
 
-def _literal(value) -> dict:
-    return {"source": "literal", "value": value}
-
-
 @pytest.mark.parametrize(
     ("comparison", "literals"),
     [
@@ -1898,26 +1755,6 @@ def test_findings_message_lists_literal_and_operand_findings_together() -> None:
     assert {item.code for item in findings} == {OPERAND_MISMATCH, LITERAL_UNSUPPORTED}
     message = condition_findings_message(findings)
     assert all(f"- {item.detail}" in message for item in findings)
-
-
-def _placeholder_payload() -> dict:
-    payload = _bad_condition_payload()
-    payload["unsafe_outcome"]["discriminating_condition"] = {
-        "statement": "The refund targets an order that is not eligible.",
-        "comparisons": [
-            _value(
-                {
-                    "source": "argument",
-                    "operation": "refund_payment",
-                    "argument": "order_id",
-                },
-                "ne",
-                _literal("ELIGIBLE_ORDER"),
-            )
-        ],
-        "record_selection": {"status": "unavailable", "reason": "Not chosen."},
-    }
-    return payload
 
 
 def test_comparisons_without_a_literal_side_have_no_literal_findings() -> None:
@@ -2163,10 +2000,6 @@ def _literal_only_payload() -> dict:
 
 def _generate_with_operand_observations(client, tmp_path):
     return _generate(client, tmp_path, target_observations=_operand_observations())
-
-
-def _generate_plain(client, tmp_path):
-    return _generate(client, tmp_path)
 
 
 def _check_failed_fragments(condition: dict) -> list[str]:
