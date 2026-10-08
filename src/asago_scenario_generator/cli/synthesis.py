@@ -39,7 +39,6 @@ def generate_cmd(
     execution_target_profile: Path | None = typer.Option(
         None,
         "--target-profile",
-        "--execution-target-profile",
         help=(
             "Optional verified execution target/simulation profile JSON or YAML. "
             "The run publishes its canonical copy as enrichment evidence; it "

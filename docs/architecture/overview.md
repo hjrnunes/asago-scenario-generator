@@ -541,7 +541,7 @@ prose: `model_output` is the externally returned model/agent response,
 `agent_message` is an internal coordination message, and tool calls, state
 changes, and external actions are the other typed effects.
 
-`generate` may receive `--execution-target-profile`; the profile's own `basis`
+`generate` may receive `--target-profile`; the profile's own `basis`
 field sets the environment basis. The profile is a content-addressed, closed
 semantic inventory with no secrets or live connection details. Metadata-free
 MCP profiles are produced independently by the optional `asago-target-scan
