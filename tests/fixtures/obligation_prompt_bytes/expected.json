@@ -1,0 +1,125 @@
+{
+ "fill": {
+  "outcome": "ValueError: JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+  "requests": [
+   {
+    "max_completion_tokens": "864a936a35324151e1c79c44a2e903ff2497f52fa892282d340585f493c637f0",
+    "response_schema": "6e13799a12fc7affab1cdc6b6ddeba8e06655a4b2545bb47d4c34fff82651a59",
+    "system_prompt": "30d13a94a2a9b46275ca3439ad5455c3393349556ea92539f9ea2657107fec26",
+    "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
+    "user_prompt": "2397014a2f3ec9a4b69f95138465bd50a5f8e3a448d56693dd18f3f9eb323311"
+   }
+  ],
+  "semantic_digest": "59c67483398cac46cf3373d84b5b4e462b56e58a9de62e51623b8d52a9531c14"
+ },
+ "governance_route": {
+  "outcome": "ValueError: JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+  "requests": [
+   {
+    "max_completion_tokens": "864a936a35324151e1c79c44a2e903ff2497f52fa892282d340585f493c637f0",
+    "response_schema": "7c17b5ff61f9170d7139986837a4b88029f16c635d53ef145cb26829892e63b9",
+    "system_prompt": "285dfb03fe8df9e940f0265928b406ae49b763c3fe23ce107b386fb4b6ba9b7b",
+    "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
+    "user_prompt": "1318c554fc3646f8c9259cd4dca92faa1f001f5298e8c8e8de5a2d26d3505817"
+   }
+  ],
+  "semantic_digest": "081890dc902dda12c7f1af9eae4c443004945b0b9d5e33f74eb39631b721235f"
+ },
+ "ica_correction": {
+  "outcome": "ValueError: JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+  "requests": [
+   {
+    "max_completion_tokens": "e39eef82f61b21e2e7f762fcc4307358f165757f2e77ec855d6992f7e0191932",
+    "response_schema": "d2b6aaa52797cb14b873f7b067a3dd23065fc653f2ad7e49f9a2b97a65995249",
+    "system_prompt": "57af07c1774697e9c316d47f599101895c0f6fe61fe05ecbd58f9ec76b650158",
+    "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
+    "user_prompt": "7eb806d0bc66b044f82580e28255534e4f9fc3eda732adaca0d4c8c52e977189"
+   }
+  ],
+  "semantic_digest": "bf5500cc052a0f20ff404a77b928221c75ebfb313b9cc703a6a91f39adcfbeb7"
+ },
+ "ica_verification": {
+  "outcome": "ValueError: JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+  "requests": [
+   {
+    "max_completion_tokens": "e39eef82f61b21e2e7f762fcc4307358f165757f2e77ec855d6992f7e0191932",
+    "response_schema": "9ef47202687008251cea347b50773085cc0904f92961d6452e2bd1d0690de822",
+    "system_prompt": "15ff1172f8055b13506cc7b2e9581647abfa509e1bb952009ee0bf63050f283c",
+    "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
+    "user_prompt": "5cea786e91ac7de91c8b3306e7e673202d82bd4b2ce645d838060cad29fead47"
+   }
+  ],
+  "semantic_digest": [
+   "bf5500cc052a0f20ff404a77b928221c75ebfb313b9cc703a6a91f39adcfbeb7",
+   "596ced38d2b72e91d370b110cac9163a4a8d73f9b4f2850c76c25df9e0f2811f"
+  ]
+ },
+ "ica_verification_correction": {
+  "outcome": "ValueError: JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+  "requests": [
+   {
+    "max_completion_tokens": "e39eef82f61b21e2e7f762fcc4307358f165757f2e77ec855d6992f7e0191932",
+    "response_schema": "9ef47202687008251cea347b50773085cc0904f92961d6452e2bd1d0690de822",
+    "system_prompt": "15ff1172f8055b13506cc7b2e9581647abfa509e1bb952009ee0bf63050f283c",
+    "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
+    "user_prompt": "5cea786e91ac7de91c8b3306e7e673202d82bd4b2ce645d838060cad29fead47"
+   }
+  ],
+  "semantic_digest": [
+   "bf5500cc052a0f20ff404a77b928221c75ebfb313b9cc703a6a91f39adcfbeb7",
+   "596ced38d2b72e91d370b110cac9163a4a8d73f9b4f2850c76c25df9e0f2811f"
+  ]
+ },
+ "mechanism_verification": {
+  "outcome": "returned",
+  "requests": [
+   {
+    "max_completion_tokens": "e39eef82f61b21e2e7f762fcc4307358f165757f2e77ec855d6992f7e0191932",
+    "response_schema": "c88655e1950f90c55bd375ec8516bf2cffc30100d60b04bb940d11323bd8753c",
+    "system_prompt": "260841e49105b1384eec23c44be30da6c647c8fa5688a3d3b35fa8078586de67",
+    "temperature": "8aed642bf5118b9d3c859bd4be35ecac75b6e873cce34e7b6f554b06f75550d7",
+    "user_prompt": "a80d7da1c291fb9cfb758a31f11c5fdbeca01d3be2bca8c40b1d3d693c8f6a47"
+   }
+  ],
+  "semantic_digest": "52932bb9e24a95ae1de9f499cf364145572a4d6c4dddb2a7d95975876809cfd5"
+ },
+ "revise": {
+  "outcome": "ValueError: JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+  "requests": [
+   {
+    "max_completion_tokens": "864a936a35324151e1c79c44a2e903ff2497f52fa892282d340585f493c637f0",
+    "response_schema": "1f0bcc81f83e1b3f0ac4a3b37d624b909a01b043af802e4fd4e922bedc42f37b",
+    "system_prompt": "a89164f34b1fa4d57578938090d85d3206979e8ae2bf4ed972ee14e8bca03154",
+    "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
+    "user_prompt": "96c21b1583d70eb56fcbcce8edd65950e1bcbbf0c76e82a77689ca60e194bc50"
+   }
+  ],
+  "semantic_digest": "b82324dd8422c90e126aa5b8b7f9f7ff3db475f80ffeaaa09cde21fbd5f647fd"
+ },
+ "route": {
+  "outcome": "ValueError: JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+  "requests": [
+   {
+    "max_completion_tokens": "864a936a35324151e1c79c44a2e903ff2497f52fa892282d340585f493c637f0",
+    "response_schema": "11b53caa7e2a032d8f26e39c42eb407585f76919a66a27f4055ad351258b12c1",
+    "system_prompt": "b1aa360d6a4550581673a5e2808185f09e6d5d43e088be161ae9b5a31f624eb0",
+    "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
+    "user_prompt": "3658535bbdce9284eca71527cc8adf15390a3a15ebd5a17041eaac1bc7358993"
+   }
+  ],
+  "semantic_digest": "52932bb9e24a95ae1de9f499cf364145572a4d6c4dddb2a7d95975876809cfd5"
+ },
+ "route_correction": {
+  "outcome": "ValueError: JSONDecodeError: Expecting value: line 1 column 1 (char 0)",
+  "requests": [
+   {
+    "max_completion_tokens": "864a936a35324151e1c79c44a2e903ff2497f52fa892282d340585f493c637f0",
+    "response_schema": "11b53caa7e2a032d8f26e39c42eb407585f76919a66a27f4055ad351258b12c1",
+    "system_prompt": "b1aa360d6a4550581673a5e2808185f09e6d5d43e088be161ae9b5a31f624eb0",
+    "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
+    "user_prompt": "8086099726ddcaceb5d3ada83cb4a2d582c0abb7f85c206ec5783f27f7279e03"
+   }
+  ],
+  "semantic_digest": "52932bb9e24a95ae1de9f499cf364145572a4d6c4dddb2a7d95975876809cfd5"
+ }
+}
