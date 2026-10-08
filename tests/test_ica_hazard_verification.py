@@ -519,6 +519,34 @@ def test_exhausted_correction_excludes_only_affected_ica() -> None:
     assert filtered.slots[0].unresolved_reason
 
 
+def test_exclusion_keeps_the_reason_of_a_slot_that_slot_filling_left_unresolved() -> (
+    None
+):
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    unresolved = ICASlot(
+        slot_id="RESP-1:CA-1-1:WRONG_TIMING",
+        responsibility="RESP-1",
+        control_action="CA-1-1",
+        uca_type="WRONG_TIMING",
+        is_na=False,
+        icas=[],
+        unresolved_reason="finding cites context row 'CA-1-2:ctx-2'",
+    )
+    enumeration = enumeration.model_copy(
+        update={"slots": [*enumeration.slots, unresolved]}
+    )
+
+    filtered, _batch = verify_final_ica_batch(
+        _ExhaustedFake(),
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    kept = next(slot for slot in filtered.slots if slot.slot_id == unresolved.slot_id)
+    assert kept.unresolved_reason == unresolved.unresolved_reason
+
+
 def test_incomplete_lineage_excludes_only_unprojectable_ica() -> None:
     enumeration, loss_analysis, control_structure = _stpa_inputs()
     incomplete = (
