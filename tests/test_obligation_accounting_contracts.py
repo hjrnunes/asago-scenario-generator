@@ -22,7 +22,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_neutral_briefs,
     build_obligation_accounting,
 )
-from tests.helpers.obligation_factory import make_plan
+from tests.helpers.obligation_factory import make_pin, make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.helpers.governance import _accounting_pins, _plan_with_non_stpa_rows
 
@@ -58,14 +58,6 @@ def _fixture():
         evidence=("call:ica:1",),
     )
     return plan, consideration, pair
-
-
-def _pin(artifact_id: str, schema_version: str = "fixture-v1") -> ArtifactPin:
-    return ArtifactPin(
-        artifact_id=artifact_id,
-        schema_version=schema_version,
-        semantic_digest="1" * 64,
-    )
 
 
 def test_accounting_derives_addressed_row_and_separate_summary() -> None:
@@ -146,7 +138,7 @@ def test_accounting_requires_all_four_authority_pins_exactly_once() -> None:
             plan=plan,
             consideration=consideration,
             ica_considerations=(pair,),
-            source_pins=(*_accounting_pins(plan), _pin("unrelated-authority")),
+            source_pins=(*_accounting_pins(plan), make_pin("unrelated-authority")),
         )
 
 
