@@ -109,6 +109,7 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _validate_finding_semantics,
     compile_slot_provider_entry,
 )
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import build_stpa_index
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 _SYNTHESIS_MAX_COMPLETION_TOKENS = 8192
@@ -679,28 +680,27 @@ def _ica_hazard_provider_payload_type(verdict_count: int) -> type[_Model]:
 
 
 def _structural_descriptions(request: StructuralRoutingRequest) -> dict[str, str]:
-    """Index only exact structural descriptions available to the verifier."""
-    result: dict[str, str] = {}
-    for responsibility in request.control_structure.responsibilities:
-        result[responsibility.resp_id] = responsibility.description
-        for item in responsibility.control_actions:
-            result[item.ca_id] = item.description
-        for item in responsibility.process_model_parts:
-            result[item.pm_id] = item.description
-        for item in responsibility.feedback_channels:
-            result[item.fb_id] = item.description
-    for item in request.control_structure.coordination_links:
-        result[item.link_id] = item.description
-        result[item.coordination_mechanism.cm_id] = (
-            item.coordination_mechanism.description
+    """Index only exact structural descriptions available to the verifier.
+
+    Responsibility constraints and losses stay out: the verifier has no
+    description for them.
+    """
+    index = build_stpa_index(request.control_structure, request.loss_analysis)
+    return {
+        identity: record.description
+        for records in (
+            index.responsibilities,
+            index.control_actions,
+            index.process_model_parts,
+            index.feedback_channels,
+            index.coordination_links,
+            index.coordination_mechanisms,
+            index.controlled_processes,
+            index.hazards,
+            index.security_constraints,
         )
-    for item in request.control_structure.controlled_processes:
-        result[item.cp_id] = item.description
-    for item in request.loss_analysis.hazards:
-        result[item.hazard_id] = item.description
-    for item in request.loss_analysis.security_constraints:
-        result[item.constraint_id] = item.description
-    return result
+        for identity, record in records.items()
+    }
 
 
 def _verification_handles(routes: Sequence[ObligationRoute]) -> dict[str, str]:

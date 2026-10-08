@@ -64,6 +64,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     PromptContractAudit,
 )
 from asago_scenario_generator.stpa.obligation_aware.hazard_offer import slot_offer
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import build_stpa_index
 from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlaceholder
 
 
@@ -522,43 +523,12 @@ def _mapping_relations(detail: str) -> tuple[str, ...]:
         raise ValueError("mapping evidence is not a typed mapping path") from exc
 
 
-def _reference_map(control_structure: ControlStructure) -> dict[str, PromptReference]:
-    """Build explained references for the structural records."""
-    result: dict[str, PromptReference] = {}
-    for responsibility in control_structure.responsibilities:
-        result[responsibility.resp_id] = PromptReference(
-            id=responsibility.resp_id,
-            description=responsibility.description,
-        )
-        for child in responsibility.responsibility_constraints:
-            result[child.rc_id] = PromptReference(
-                id=child.rc_id, description=child.description
-            )
-        for child in responsibility.process_model_parts:
-            result[child.pm_id] = PromptReference(
-                id=child.pm_id, description=child.description
-            )
-        for child in responsibility.control_actions:
-            result[child.ca_id] = PromptReference(
-                id=child.ca_id, description=child.description
-            )
-        for child in responsibility.feedback_channels:
-            result[child.fb_id] = PromptReference(
-                id=child.fb_id, description=child.description
-            )
-    for process in control_structure.controlled_processes:
-        result[process.cp_id] = PromptReference(
-            id=process.cp_id, description=process.description
-        )
-    for link in control_structure.coordination_links:
-        result[link.link_id] = PromptReference(
-            id=link.link_id, description=link.description
-        )
-        result[link.coordination_mechanism.cm_id] = PromptReference(
-            id=link.coordination_mechanism.cm_id,
-            description=link.coordination_mechanism.description,
-        )
-    return result
+def _prompt_references(descriptions: Mapping[str, str]) -> dict[str, PromptReference]:
+    """Explain each described ID as a prompt reference."""
+    return {
+        identity: PromptReference(id=identity, description=description)
+        for identity, description in descriptions.items()
+    }
 
 
 def _element_reference(
@@ -612,45 +582,12 @@ def _context_references(
     loss_analysis: LossAnalysis | None,
 ) -> dict[str, PromptReference]:
     """Build the explanatory reference table used by every context helper."""
-    refs = _reference_map(control_structure)
-    if loss_analysis is None:
-        return refs
-    if not isinstance(loss_analysis, LossAnalysis):
+    if loss_analysis is not None and not isinstance(loss_analysis, LossAnalysis):
         raise TypeError("loss_analysis must be a LossAnalysis")
-    refs.update(_loss_analysis_references(loss_analysis))
-    return refs
-
-
-def _loss_analysis_references(
-    loss_analysis: LossAnalysis,
-) -> dict[str, PromptReference]:
-    """Project explanatory references for loss-analysis records."""
-    return {
-        **{
-            item.constraint_id: PromptReference(
-                id=item.constraint_id,
-                description=item.description,
-            )
-            for item in loss_analysis.security_constraints
-        },
-        **{
-            item.hazard_id: PromptReference(
-                id=item.hazard_id,
-                description=item.description,
-            )
-            for item in loss_analysis.hazards
-        },
-        **{
-            item.loss_id: PromptReference(
-                id=item.loss_id,
-                description=item.description,
-            )
-            for item in (
-                *loss_analysis.risk_card_losses,
-                *loss_analysis.use_case_losses,
-            )
-        },
-    }
+    index = build_stpa_index(control_structure, loss_analysis)
+    return _prompt_references(
+        {**index.structural_descriptions(), **index.loss_descriptions()}
+    )
 
 
 def _description_references(
@@ -1205,7 +1142,9 @@ def _revision_related_context(
     control_structure: ControlStructure,
 ) -> tuple[PromptReference, ...]:
     """Select compact existing context relevant to one typed gap."""
-    refs = _reference_map(control_structure)
+    refs = _prompt_references(
+        build_stpa_index(control_structure).structural_descriptions()
+    )
     values: list[PromptReference] = []
     if gap.concept_type in {"loss", "hazard", "constraint"}:
         for item in (

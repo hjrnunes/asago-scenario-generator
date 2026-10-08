@@ -41,6 +41,10 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     count_requests,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    StpaIndex,
+    build_stpa_index,
+)
 
 
 ICA_HAZARD_VERIFICATION_REQUEST_SCHEMA_VERSION = (
@@ -676,6 +680,7 @@ def build_ica_hazard_verification_request(
     """Project one final ICA into the narrow STPA verification view."""
     if slot.is_na:
         raise ValueError("N/A ICA slots do not produce verification requests")
+    index = build_stpa_index(control_structure, loss_analysis)
     (
         responsibility,
         action_description,
@@ -683,8 +688,10 @@ def build_ica_hazard_verification_request(
         action_recipient,
         action_direction,
         action_effect_kind,
-    ) = _request_control_context(slot, control_structure)
-    hazard_by_id, security_by_id, loss_by_id = _loss_context_indexes(loss_analysis)
+    ) = _request_control_context(slot, index)
+    hazard_by_id = index.hazards
+    security_by_id = index.security_constraints
+    loss_by_id = index.losses
     hazards = _hazard_contexts(ica, hazard_by_id)
     constraints = _constraint_contexts(
         ica,
@@ -719,7 +726,7 @@ def build_ica_hazard_verification_request(
 
 def _request_control_context(
     slot: ICASlot,
-    control_structure: ControlStructure,
+    index: StpaIndex,
 ) -> tuple[
     Any,
     str,
@@ -730,13 +737,13 @@ def _request_control_context(
 ]:
     """Resolve the responsibility and action description for a slot."""
     if slot.responsibility is not None:
-        return _direct_control_context(slot, control_structure)
-    return _coordination_control_context(slot, control_structure)
+        return _direct_control_context(slot, index)
+    return _coordination_control_context(slot, index)
 
 
 def _direct_control_context(
     slot: ICASlot,
-    control_structure: ControlStructure,
+    index: StpaIndex,
 ) -> tuple[
     Any,
     str,
@@ -745,12 +752,10 @@ def _direct_control_context(
     str | None,
     ControlActionEffectKind | None,
 ]:
-    responsibility = _item_with(
-        control_structure.responsibilities, "resp_id", slot.responsibility
-    )
+    responsibility = index.responsibilities.get(str(slot.responsibility))
     if responsibility is None:
         raise ValueError(f"unknown responsibility {slot.responsibility}")
-    action = _item_with(responsibility.control_actions, "ca_id", slot.control_action)
+    action = index.owned_action(responsibility.resp_id, slot.control_action)
     if action is None:
         raise ValueError(f"unknown control action {slot.control_action}")
     effect_kind = action.effect_kind
@@ -758,7 +763,7 @@ def _direct_control_context(
         responsibility,
         action.description,
         action.temporality or slot.action_temporality,
-        _action_recipient(action.target, control_structure),
+        _action_recipient(action.target, index),
         _action_direction(effect_kind),
         effect_kind,
     )
@@ -766,7 +771,7 @@ def _direct_control_context(
 
 def _coordination_control_context(
     slot: ICASlot,
-    control_structure: ControlStructure,
+    index: StpaIndex,
 ) -> tuple[
     Any,
     str,
@@ -775,17 +780,13 @@ def _coordination_control_context(
     str | None,
     ControlActionEffectKind | None,
 ]:
-    link = _item_with(
-        control_structure.coordination_links, "link_id", slot.coordination_link
-    )
+    link = index.coordination_links.get(str(slot.coordination_link))
     if link is None:
         raise ValueError(f"unknown coordination link {slot.coordination_link}")
-    responsibility = _item_with(
-        control_structure.responsibilities, "resp_id", link.source
-    )
+    responsibility = index.responsibilities.get(link.source)
     if responsibility is None:
         raise ValueError(f"unknown coordination source {link.source}")
-    recipient = _item_with(control_structure.responsibilities, "resp_id", link.target)
+    recipient = index.responsibilities.get(link.target)
     return (
         responsibility,
         link.coordination_mechanism.description,
@@ -798,16 +799,16 @@ def _coordination_control_context(
 
 def _action_recipient(
     target: Any | None,
-    control_structure: ControlStructure,
+    index: StpaIndex,
 ) -> str | None:
     """Resolve the action target to its plain source-established description."""
     if target is None:
         return None
     target_type = getattr(target.type, "value", target.type)
     if target_type == "controlled_process":
-        owner = _item_with(control_structure.controlled_processes, "cp_id", target.id)
+        owner = index.controlled_processes.get(target.id)
     elif target_type == "responsibility":
-        owner = _item_with(control_structure.responsibilities, "resp_id", target.id)
+        owner = index.responsibilities.get(target.id)
     else:
         return target.id
     return owner.description if owner is not None else target.id
@@ -824,26 +825,6 @@ def _action_direction(
         ControlActionEffectKind.agent_message: "internal",
         ControlActionEffectKind.environment_action: "external",
     }.get(effect_kind)
-
-
-def _item_with(items: Sequence[Any], id_field: str, value: str | None) -> Any | None:
-    """Return the first item whose ``id_field`` equals ``value``, else None."""
-    return next((item for item in items if getattr(item, id_field) == value), None)
-
-
-def _loss_context_indexes(
-    loss_analysis: LossAnalysis,
-) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
-    """Index authoritative hazards, constraints, and losses once."""
-    hazard_by_id = {item.hazard_id: item for item in loss_analysis.hazards}
-    constraint_by_id = {
-        item.constraint_id: item for item in loss_analysis.security_constraints
-    }
-    loss_by_id = {
-        item.loss_id: item
-        for item in (*loss_analysis.risk_card_losses, *loss_analysis.use_case_losses)
-    }
-    return hazard_by_id, constraint_by_id, loss_by_id
 
 
 def _hazard_contexts(
