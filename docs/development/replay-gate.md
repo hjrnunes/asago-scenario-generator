@@ -19,7 +19,7 @@ and compares every output file with the recording.
    Or for one directory, with options:
 
    ```bash
-   uv run python -m asago_scenario_generator.replay_gate check RECORDED_OUTPUT_DIR \
+   uv run python scripts/replay_gate.py check RECORDED_OUTPUT_DIR \
      [--stage-json FILE] [--work-dir DIR] [--show N] [-- generate ARGS...]
    ```
 
@@ -78,7 +78,7 @@ sequence number, so concurrent runs compare equal.
 | `synthesis-manifest.yaml` | `created_at`, `prompt_call_evidence[].duration_ms`, `semantic_digest` | wall-clock times; the digest covers them, so the gate checks each side's digest against its own payload instead of comparing digests |
 
 The list lives in `ALLOWED_DIFFERENCES` in
-`src/asago_scenario_generator/replay_gate.py`. Add an entry only for a value
+`scripts/replay_gate.py`. Add an entry only for a value
 that legitimately varies between two executions of the same code on the same
 responses; fix nondeterminism in the code instead of normalising it.
 

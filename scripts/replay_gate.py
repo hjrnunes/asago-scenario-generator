@@ -4,7 +4,7 @@ Record once (any live ``generate`` writes ``provider-calls.jsonl``), then after
 every change replay that record through the current code, offline, and compare
 every output file with the recording::
 
-    python -m asago_scenario_generator.replay_gate check RECORDED_OUTPUT_DIR
+    uv run python scripts/replay_gate.py check RECORDED_OUTPUT_DIR
 
 The gate re-runs ``generate`` with the recorded arguments, inputs copied into a
 scratch directory, ``--replay-calls`` pointing at a copy of the record, model
@@ -36,8 +36,10 @@ from typing import Any, Callable, Iterable, Sequence
 
 import yaml
 
+import asago_scenario_generator
 from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 
+_SCRIPT = Path(__file__).resolve()
 STAGE_FILENAME = "stage.json"
 NETWORK_LOG = "network-attempts.log"
 
@@ -326,7 +328,7 @@ def _normalise(value: Any, relative: str, *, jsonl: bool) -> Any:
 
 def checkout_templates() -> frozenset[str]:
     """Return the name of every prompt template in this checkout."""
-    root = Path(__file__).resolve().parent
+    root = Path(asago_scenario_generator.__file__).resolve().parent
     return frozenset(path.name for path in root.rglob(f"*{_TEMPLATE_SUFFIX}"))
 
 
@@ -606,8 +608,7 @@ def run_gate(
     network_log = work / NETWORK_LOG
     command = [
         sys.executable,
-        "-m",
-        "asago_scenario_generator.replay_gate",
+        str(_SCRIPT),
         "_guarded-run",
         str(network_log),
         "--",
@@ -687,7 +688,7 @@ def main(argv: Iterable[str] | None = None) -> int:
         _guarded_run(Path(log_path), arguments)
         return 0
     parser = argparse.ArgumentParser(
-        prog="python -m asago_scenario_generator.replay_gate",
+        prog="python scripts/replay_gate.py",
         description="Replay a recorded run offline and compare every output.",
     )
     sub = parser.add_subparsers(dest="command", required=True)

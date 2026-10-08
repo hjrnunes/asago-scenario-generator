@@ -20,7 +20,7 @@ status=0
 for recorded in "$@"; do
   echo "== $recorded"
   # --no-sync: a plain sync would drop optional extras this checkout relies on.
-  if ! env -u FORCE_COLOR uv run --no-sync python -m asago_scenario_generator.replay_gate \
+  if ! env -u FORCE_COLOR uv run --no-sync python scripts/replay_gate.py \
     check "$recorded"; then
     status=1
   fi
