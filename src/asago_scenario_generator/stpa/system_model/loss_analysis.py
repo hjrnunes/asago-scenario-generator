@@ -1857,16 +1857,8 @@ def _repair_stage1a_failure(
         ),
     )
     if isinstance(outcome, UnsupportedRepair):
-        call.record_unsupported(outcome.scope, outcome.reason)
-        raise StageError(
-            stage=STAGE,
-            step=call.step,
-            message=(
-                f"targeted repair unsupported ({outcome.reason}); no repair "
-                f"call was made; {call.failure_class or 'unknown'} failure class; "
-                f"first attempt failed: {error_msg}. "
-                f"{call.validation_feedback}"
-            ),
+        raise _unsupported_stop(
+            call, outcome.scope, outcome.reason, error_msg, default_class="unknown"
         )
     if isinstance(outcome, DeterministicCleanup):
         return _apply_deterministic_cleanup(
@@ -1929,16 +1921,8 @@ def _reject_unsupported_wire_error(call: _Stage1aCall, error_msg: str) -> None:
         ),
         "response",
     )
-    call.record_unsupported(identity, reason)
-    raise StageError(
-        stage=STAGE,
-        step=call.step,
-        message=(
-            f"targeted repair unsupported ({reason}); "
-            f"{call.failure_class or 'wire_schema'} failure class; "
-            f"no repair call was made; first attempt failed: "
-            f"{error_msg}. {call.validation_feedback}"
-        ),
+    raise _unsupported_stop(
+        call, identity, reason, error_msg, default_class="wire_schema", class_first=True
     )
 
 
@@ -1956,16 +1940,8 @@ def _require_repair_input(
     if repair_input is not None:
         return repair_input
     reason = _missing_repair_input_reason(call.first_wire_error, first_result)
-    call.record_unsupported("response", reason)
-    raise StageError(
-        stage=STAGE,
-        step=call.step,
-        message=(
-            f"targeted repair unsupported ({reason}); "
-            f"{call.failure_class or 'unknown'} failure class; "
-            f"no repair call was made; "
-            f"first attempt failed: {error_msg}. {call.validation_feedback}"
-        ),
+    raise _unsupported_stop(
+        call, "response", reason, error_msg, default_class="unknown", class_first=True
     )
 
 
@@ -2032,16 +2008,36 @@ def _stop_outside_graph_scope(
 ) -> NoReturn:
     """Record and raise the typed stop for an unrepairable graph failure."""
     reason = f"graph validation is outside the approved repair scope: {exc}"
-    call.record_unsupported("response", reason)
-    raise StageError(
+    raise _unsupported_stop(
+        call, "response", reason, error_msg, default_class="draft_references"
+    ) from exc
+
+
+def _unsupported_stop(
+    call: _Stage1aCall,
+    scope: str,
+    reason: str,
+    error_msg: str,
+    *,
+    default_class: str,
+    class_first: bool = False,
+) -> StageError:
+    """Record a first-attempt failure outside the repair scope; return its stop.
+
+    ``class_first`` keeps the clause order each stop has always recorded.
+    """
+    call.record_unsupported(scope, reason)
+    failure_class = f"{call.failure_class or default_class} failure class"
+    no_call = "no repair call was made"
+    clauses = (failure_class, no_call) if class_first else (no_call, failure_class)
+    return StageError(
         stage=STAGE,
         step=call.step,
         message=(
-            f"targeted repair unsupported ({reason}); no repair call was "
-            f"made; {call.failure_class or 'draft_references'} failure class; "
+            f"targeted repair unsupported ({reason}); {clauses[0]}; {clauses[1]}; "
             f"first attempt failed: {error_msg}. {call.validation_feedback}"
         ),
-    ) from exc
+    )
 
 
 def _reference_plan(
@@ -2145,41 +2141,31 @@ def _apply_deterministic_cleanup(
     try:
         revalidate_provider_object(cleaned, repair_response_format, step=call.step)
     except ValueError as exc:
-        _record_failed_cleanup(call, outcome, exc)
-        raise StageError(
-            stage=STAGE,
-            step=call.step,
-            message=(
-                f"targeted repair unsupported (deterministic cleanup "
-                f"failed re-validation of the original provider schema: "
-                f"{exc}); no repair call was made; first attempt failed: "
-                f"{error_msg}"
-            ),
+        raise _cleanup_stop(
+            call,
+            outcome,
+            exc,
+            f"failed re-validation of the original provider schema: {exc}",
+            error_msg,
         ) from exc
     try:
         cleaned = _validate_cleaned_draft(call, cleaned)
     except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
-        _record_failed_cleanup(call, outcome, exc)
-        raise StageError(
-            stage=STAGE,
-            step=call.step,
-            message=(
-                f"targeted repair unsupported (deterministic cleanup left "
-                f"a {call.failure_class or 'draft'} failure: {exc}); no repair "
-                f"call was made; first attempt failed: {error_msg}. "
-                f"{exc.feedback}"
-            ),
+        raise _cleanup_stop(
+            call,
+            outcome,
+            exc,
+            f"left a {call.failure_class or 'draft'} failure: {exc}",
+            error_msg,
+            feedback=exc.feedback,
         ) from exc
     except ValueError as exc:
-        _record_failed_cleanup(call, outcome, exc)
-        raise StageError(
-            stage=STAGE,
-            step=call.step,
-            message=(
-                "targeted repair unsupported (deterministic cleanup "
-                f"produced a conflicting duplicate: {exc}); no repair call "
-                f"was made; first attempt failed: {error_msg}"
-            ),
+        raise _cleanup_stop(
+            call,
+            outcome,
+            exc,
+            f"produced a conflicting duplicate: {exc}",
+            error_msg,
         ) from exc
     call.add_warnings(outcome.warnings)
     record_cleanup_rows(
@@ -2200,6 +2186,26 @@ def _validate_cleaned_draft(
     call.add_warnings(normalize_disposition_citations(cleaned))
     call.run_validators(cleaned)
     return cleaned
+
+
+def _cleanup_stop(
+    call: _Stage1aCall,
+    outcome: DeterministicCleanup,
+    exc: ValueError,
+    detail: str,
+    error_msg: str,
+    *,
+    feedback: str | None = None,
+) -> StageError:
+    """Record a failed deterministic cleanup and return its typed stop."""
+    _record_failed_cleanup(call, outcome, exc)
+    message = (
+        f"targeted repair unsupported (deterministic cleanup {detail}); "
+        f"no repair call was made; first attempt failed: {error_msg}"
+    )
+    if feedback is not None:
+        message += f". {feedback}"
+    return StageError(stage=STAGE, step=call.step, message=message)
 
 
 def _record_failed_cleanup(
