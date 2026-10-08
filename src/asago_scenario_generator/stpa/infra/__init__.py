@@ -16,7 +16,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     parse_llm_result,
 )
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
-from asago_scenario_generator.stpa.infra.model_profiles import load_profile
+from asago_scenario_generator.model_profiles import load_profile
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptAudit,
     PromptBudget,

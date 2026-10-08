@@ -281,13 +281,6 @@ RULES: list[Rule] = [
         forbidden=(f"{SYSTEM_MODEL}.id_normalization",),
     ),
     Rule(
-        "stpa-model-profiles-reexports-shared-leaf",
-        f"{INFRA}.model_profiles",
-        "the historical STPA import path keeps its public name without owning "
-        "the loader",
-        required=(f"{PACKAGE}.model_profiles",),
-    ),
-    Rule(
         "shared-model-profiles-leaf",
         f"{PACKAGE}.model_profiles",
         "the YAML loader is a shared leaf, not a workflow implementation",

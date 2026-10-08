@@ -6,7 +6,7 @@ import logging
 import os
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.model_profiles import load_profile
+from asago_scenario_generator.model_profiles import load_profile
 from asago_scenario_generator.stpa.infra.provider_record import ProviderCallSession
 
 logger = logging.getLogger(__name__)

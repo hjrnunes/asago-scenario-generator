@@ -9,7 +9,7 @@ import pytest
 import yaml
 
 from asago_scenario_generator.stpa.infra.llm import LLMClient
-from asago_scenario_generator.stpa.infra.model_profiles import load_profile
+from asago_scenario_generator.model_profiles import load_profile
 from asago_scenario_generator.stpa.pipeline.llm_config import resolve_llm_client
 
 _KEY = "api_" + "key"  # avoid literal secret-pattern in source

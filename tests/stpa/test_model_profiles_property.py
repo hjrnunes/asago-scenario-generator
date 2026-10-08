@@ -18,7 +18,7 @@ from __future__ import annotations
 import yaml
 from hypothesis import HealthCheck, given, settings, strategies as st, assume
 
-from asago_scenario_generator.stpa.infra.model_profiles import (
+from asago_scenario_generator.model_profiles import (
     OPTIONAL_FIELDS,
     REQUIRED_FIELDS,
     load_profile,
