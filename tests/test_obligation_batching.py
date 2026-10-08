@@ -17,19 +17,25 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_governance_briefs,
 )
 from asago_scenario_generator.stpa.obligation_aware import governance_routing, routing
-from asago_scenario_generator.stpa.obligation_aware.calls import call_with_feedback
+from asago_scenario_generator.stpa.obligation_aware.calls import (
+    call_with_feedback,
+    response_digest,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     StructuralRevisionResponse,
     StructuralRoutingResponse,
     RevisionDraft,
     SynthesisSlotResponse,
 )
+from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    _call_evidence as _ica_call_evidence,
+)
 from asago_scenario_generator.stpa.obligation_aware.revision import (
     _revision_call_evidence,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
+    SLOT_RESPONSE_DIGEST_DOMAIN,
     _record_request_unresolved,
-    _unresolved_response_digest,
 )
 from tests.helpers.obligation_aware import (
     _control_structure,
@@ -341,9 +347,9 @@ def test_slot_evidence_digests_the_response_unless_it_carries_one():
     response = SynthesisSlotResponse(request_digest=REQUEST_DIGEST, adapter_kind="fake")
     carried = response.model_copy(update={"response_digest": "c" * 64})
 
-    assert _unresolved_response_digest(None) is None
-    assert _unresolved_response_digest(response) == SLOT_DIGEST
-    assert _unresolved_response_digest(carried) == "c" * 64
+    assert response_digest(None, SLOT_RESPONSE_DIGEST_DOMAIN) is None
+    assert response_digest(response, SLOT_RESPONSE_DIGEST_DOMAIN) == SLOT_DIGEST
+    assert response_digest(carried, SLOT_RESPONSE_DIGEST_DOMAIN) == "c" * 64
 
     evidence: list = []
     _record_request_unresolved(
@@ -378,3 +384,17 @@ def test_a_stage_call_passes_correction_feedback_only_when_there_is_some():
     assert call_with_feedback(stage, "r1", None) == "answer"
     assert call_with_feedback(stage, "r2", "fix it") == "answer"
     assert seen == [("r1", {}), ("r2", {"correction_feedback": "fix it"})]
+
+
+def test_evidence_of_a_call_without_a_request_keeps_only_its_outcome():
+    evidence = _ica_call_evidence("batch-1", "initial", "technical_failure", 0)
+
+    assert _evidence_fields(evidence) == {
+        "call_id": "batch-1:initial",
+        "request_digest": None,
+        "response_digest": None,
+        "model_profile": None,
+        "model_name": None,
+        "attempt_count": 0,
+        "outcome": "technical_failure",
+    }

@@ -20,7 +20,6 @@ from asago_scenario_generator.models.artifact_pin import Digest
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     SemanticDigestMixin,
-    compute_framed_digest,
 )
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
@@ -38,7 +37,10 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.briefs import split_by_budget
-from asago_scenario_generator.stpa.obligation_aware.calls import call_with_feedback
+from asago_scenario_generator.stpa.obligation_aware.calls import (
+    call_evidence,
+    call_with_feedback,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisControls
 from asago_scenario_generator.stpa.obligation_aware.governance_prompts import (
     build_governance_routing_prompts,
@@ -296,19 +298,14 @@ def _risk_ids(request: GovernanceRoutingRequest) -> list[str]:
 def _evidence(
     request: GovernanceRoutingRequest, outcome: _BatchOutcome
 ) -> ConsiderationCallEvidence:
-    response_digest = None
-    if outcome.response is not None:
-        response_digest = compute_framed_digest(
-            GOVERNANCE_RESPONSE_DIGEST_DOMAIN, outcome.response.model_dump(mode="json")
-        )
-    return ConsiderationCallEvidence(
-        call_id=f"stpa-governance-route:{request.batch_id}",
+    return call_evidence(
+        f"stpa-governance-route:{request.batch_id}",
+        outcome.attempts,
+        "unresolved" if outcome.errors else "accepted",
         request_digest=request.semantic_digest,
-        response_digest=response_digest,
-        model_profile=request.controls.model_profile,
-        model_name=request.controls.model_name,
-        attempt_count=outcome.attempts,
-        outcome="unresolved" if outcome.errors else "accepted",
+        controls=request.controls,
+        response=outcome.response,
+        digest_domain=GOVERNANCE_RESPONSE_DIGEST_DOMAIN,
     )
 
 

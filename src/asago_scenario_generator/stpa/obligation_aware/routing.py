@@ -8,7 +8,6 @@ import functools
 from typing import Any, Literal
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
-from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
@@ -36,7 +35,10 @@ from asago_scenario_generator.stpa.obligation_aware.briefs import (
     create_obligation_batches,
     split_by_budget,
 )
-from asago_scenario_generator.stpa.obligation_aware.calls import call_with_feedback
+from asago_scenario_generator.stpa.obligation_aware.calls import (
+    call_evidence,
+    call_with_feedback,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     AnalysisControls,
     StructuralAnalysisAdapter,
@@ -675,18 +677,14 @@ def _call_evidence(
     outcome: Literal["accepted", "unresolved", "technical_failure"] = "accepted",
 ) -> ConsiderationCallEvidence:
     """Build shared call evidence for one routing batch."""
-    response_digest = response.response_digest or compute_framed_digest(
-        ROUTING_RESPONSE_DIGEST_DOMAIN,
-        response.model_dump(mode="json"),
-    )
-    return ConsiderationCallEvidence(
-        call_id=f"stpa-route:{request.batch_id}",
+    return call_evidence(
+        f"stpa-route:{request.batch_id}",
+        attempts,
+        outcome,
         request_digest=request.semantic_digest,
-        response_digest=response_digest,
-        model_profile=request.controls.model_profile,
-        model_name=request.controls.model_name,
-        attempt_count=attempts,
-        outcome=outcome,
+        controls=request.controls,
+        response=response,
+        digest_domain=ROUTING_RESPONSE_DIGEST_DOMAIN,
     )
 
 
@@ -1023,13 +1021,12 @@ def _exhausted_batch_result(
 ]:
     """Mark every batch obligation unresolved after validation is exhausted."""
     detail = f"{request.batch_id} exhausted validation: {type(error).__name__}: {error}"
-    evidence = ConsiderationCallEvidence(
-        call_id=f"stpa-route:{request.batch_id}",
+    evidence = call_evidence(
+        f"stpa-route:{request.batch_id}",
+        attempts,
+        "unresolved",
         request_digest=request.semantic_digest,
-        model_profile=request.controls.model_profile,
-        model_name=request.controls.model_name,
-        attempt_count=attempts,
-        outcome="unresolved",
+        controls=request.controls,
     )
     return request, _unresolved_routes(request, error), evidence, detail
 

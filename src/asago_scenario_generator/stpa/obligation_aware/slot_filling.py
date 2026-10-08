@@ -7,7 +7,6 @@ from dataclasses import dataclass
 import re
 from typing import Any, Literal, cast
 
-from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
@@ -34,6 +33,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     candidate_id_for,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.obligation_aware.calls import call_evidence
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     DEVIATION_FIELD_BY_UCA_TYPE,
     AnalysisControls,
@@ -934,16 +934,6 @@ def _record_unresolved_slot_fallbacks(
         all_filled[slot_id] = _fallback_slot(slot, detail)
 
 
-def _unresolved_response_digest(response: SynthesisSlotResponse | None) -> str | None:
-    """Return a response digest even when the adapter omitted one."""
-    if response is None:
-        return None
-    return response.response_digest or compute_framed_digest(
-        SLOT_RESPONSE_DIGEST_DOMAIN,
-        response.model_dump(mode="json"),
-    )
-
-
 def _record_unresolved_pairs(
     request: SynthesisSlotRequest,
     expected: Mapping[str, SlotPlaceholder],
@@ -992,14 +982,14 @@ def _record_request_unresolved(
     )
     call_ref = call_ref or f"stpa-slot:{request.target_id}"
     evidence.append(
-        ConsiderationCallEvidence(
-            call_id=call_ref,
+        call_evidence(
+            call_ref,
+            requests_sent,
+            "unresolved",
             request_digest=request.semantic_digest,
-            response_digest=_unresolved_response_digest(response),
-            model_profile=request.controls.model_profile,
-            model_name=request.controls.model_name,
-            attempt_count=requests_sent,
-            outcome="unresolved",
+            controls=request.controls,
+            response=response,
+            digest_domain=SLOT_RESPONSE_DIGEST_DOMAIN,
         )
     )
     _record_unresolved_pairs(
@@ -1608,19 +1598,15 @@ def _record_accepted_request(
         (pair.obligation_id, pair.slot_id): pair
         for pair in (*response.considerations, *structured_pairs)
     }
-    response_digest = response.response_digest or compute_framed_digest(
-        SLOT_RESPONSE_DIGEST_DOMAIN,
-        response.model_dump(mode="json"),
-    )
     state.evidence.append(
-        ConsiderationCallEvidence(
-            call_id=call_ref,
+        call_evidence(
+            call_ref,
+            state.requests_sent,
+            "accepted",
             request_digest=request.semantic_digest,
-            response_digest=response_digest,
-            model_profile=request.controls.model_profile,
-            model_name=request.controls.model_name,
-            attempt_count=state.requests_sent,
-            outcome="accepted",
+            controls=request.controls,
+            response=response,
+            digest_domain=SLOT_RESPONSE_DIGEST_DOMAIN,
         )
     )
     _record_request_pairs(
