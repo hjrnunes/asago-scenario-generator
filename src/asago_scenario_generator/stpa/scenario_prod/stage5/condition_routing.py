@@ -52,7 +52,7 @@ class RoutedDraft:
     normalizations: tuple[Stage5Normalization, ...]
 
 
-def route_reason(route: ConditionRoute, failure_code: str) -> str:
+def _route_reason(route: ConditionRoute, failure_code: str) -> str:
     """Return the normalization reason that names a route and its failure code."""
 
     return f"condition_dropped_{route}:{failure_code}"
@@ -80,7 +80,7 @@ def route_without_condition(
         if _declares_supported_reply(draft.unsafe_outcome, contract)
         else "analytical_only"
     )
-    reason = route_reason(route, failure_code)
+    reason = _route_reason(route, failure_code)
     routed = copy.deepcopy(draft)
     outcome = routed.unsafe_outcome
     normalizations: list[Stage5Normalization] = []

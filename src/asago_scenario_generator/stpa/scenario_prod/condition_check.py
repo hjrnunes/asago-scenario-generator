@@ -291,7 +291,7 @@ def check_discriminating_condition(
     """Resolve every reference, then evaluate each comparison."""
 
     errors: list[str] = []
-    condition = normalize_argument_value_paths(condition, universe)
+    condition = _normalize_argument_value_paths(condition, universe)
     selected = _selected_argument_values(condition, universe, errors)
     for index, comparison in enumerate(condition.comparisons):
         _check_comparison_references(index, comparison, universe, errors)
@@ -558,7 +558,7 @@ def _comparison_check(
     return ComparisonCheck(index=index, result="not_checkable", reason=reason)
 
 
-def normalize_argument_value_paths(
+def _normalize_argument_value_paths(
     condition: DiscriminatingCondition,
     universe: ConditionUniverse,
 ) -> DiscriminatingCondition:
@@ -1108,7 +1108,6 @@ __all__ = [
     "condition_fact_listing",
     "condition_findings",
     "condition_findings_message",
-    "normalize_argument_value_paths",
     "resolve_fact",
     "target_observation_fact_values",
 ]

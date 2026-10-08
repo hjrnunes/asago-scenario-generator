@@ -90,7 +90,7 @@ _PROSE_STRUCTURAL_REFERENCE = re.compile(
 FUNCTIONAL_TEST_GAIN = "Functional test: no adversary gains from this unsafe outcome."
 
 
-def normalize_gain_text(value: str) -> str:
+def _normalize_gain_text(value: str) -> str:
     """Collapse a gain or constraint sentence for substring comparison."""
     collapsed = re.sub(r"\s+", " ", value.strip().casefold())
     return collapsed.strip(" \t.,;:!\"'()")
@@ -106,9 +106,9 @@ def _validate_adversary_gain(
             "adversarial scenarios require a non-empty gain; functional "
             "kind 'none' must omit gain"
         )
-    normalized_gain = normalize_gain_text(adversary.gain)
+    normalized_gain = _normalize_gain_text(adversary.gain)
     for constraint in context.constraints:
-        if normalized_gain in normalize_gain_text(constraint.description):
+        if normalized_gain in _normalize_gain_text(constraint.description):
             raise ValueError(
                 f"adversary gain restates constraint {constraint.constraint_id}: "
                 "say what the adversary gets, not what the constraint forbids"

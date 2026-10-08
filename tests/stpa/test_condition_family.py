@@ -154,6 +154,11 @@ def _families(operation, state=None, operations=OPS):
     )
 
 
+def _candidate_record_paths(family) -> tuple[str, ...]:
+    """Return every candidate record path in candidate order."""
+    return tuple(path for item in family.candidates for path in item.record_paths)
+
+
 def _kind(families, kind):
     return [family for family in families if family.kind == kind]
 
@@ -183,7 +188,7 @@ def test_one_hop_ownership_follows_a_forward_link() -> None:
         "TARGET-STATE.slots.<record_key>.widget_id",
         "TARGET-STATE.widgets.<record_key>.owner_id",
     )
-    assert family.candidate_record_paths == ("TARGET-STATE.slots.SL-2",)
+    assert _candidate_record_paths(family) == ("TARGET-STATE.slots.SL-2",)
 
 
 def test_subject_argument_ownership_offers_other_values() -> None:
@@ -224,7 +229,7 @@ def test_list_valued_mapping_is_a_key_domain_with_subject_ownership() -> None:
     assert family.argument_role == "subject"
     assert family.binding == "field_name"
     assert family.collection == "notes"
-    assert family.candidate_record_paths == (
+    assert _candidate_record_paths(family) == (
         "TARGET-STATE.notes.OW-2",
         "TARGET-STATE.notes.OW-3",
     )
@@ -240,7 +245,7 @@ def test_prefix_binding_to_a_list_valued_key_domain() -> None:
     assert family.kind == "ownership"
     assert family.binding == "inferred_prefix"
     assert family.collection == "files"
-    assert family.candidate_record_paths == (
+    assert _candidate_record_paths(family) == (
         "TARGET-STATE.files.MEM-1",
         "TARGET-STATE.files.MEM-7",
     )
