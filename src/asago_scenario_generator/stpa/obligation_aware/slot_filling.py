@@ -35,6 +35,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
+    DEVIATION_FIELD_BY_UCA_TYPE,
     AnalysisControls,
     IcaFindingDraft,
     ObligationIcaDraft,
@@ -629,12 +630,7 @@ def _validate_finding_type(
     action_description: str,
 ) -> None:
     """Validate the one UCA-specific deviation field and its wording."""
-    expected_field = {
-        UCAType.not_provided: "not_provided_context",
-        UCAType.incorrect: "incorrect_value_or_effect",
-        UCAType.wrong_timing: "timing_deviation",
-        UCAType.wrong_duration: "duration_deviation",
-    }[slot.uca_type]
+    expected_field = DEVIATION_FIELD_BY_UCA_TYPE[slot.uca_type]
     if finding.deviation.field_name != expected_field:
         raise ValueError(
             f"{slot.uca_type.value} requires the {expected_field} deviation field"

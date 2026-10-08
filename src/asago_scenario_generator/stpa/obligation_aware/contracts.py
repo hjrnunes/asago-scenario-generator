@@ -278,6 +278,14 @@ class RevisionGapDecision(_Model):
     rationale: str = Field(min_length=1)
 
 
+DEVIATION_FIELD_BY_UCA_TYPE: dict[UCAType, str] = {
+    UCAType.not_provided: "not_provided_context",
+    UCAType.incorrect: "incorrect_value_or_effect",
+    UCAType.wrong_timing: "timing_deviation",
+    UCAType.wrong_duration: "duration_deviation",
+}
+
+
 class IcaDeviationDraft(_Model):
     """Type-specific unsafe-control deviation supplied by a provider."""
 
@@ -883,6 +891,7 @@ class SlotAnalysisAdapter(Protocol):
 
 
 __all__ = [
+    "DEVIATION_FIELD_BY_UCA_TYPE",
     "AnalysisControls",
     "ArtifactPin",
     "BoundedStructuralRevision",

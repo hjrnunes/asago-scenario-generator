@@ -45,6 +45,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     classify_ica_semantics,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
+    DEVIATION_FIELD_BY_UCA_TYPE,
     AnalysisControls,
     DraftControlAction,
     DraftControlledProcess,
@@ -1312,12 +1313,7 @@ def _materialize_slot_draft(
     expected: SlotPlaceholder,
 ) -> SlotIcaDraft:
     """Bind provider prose to the authoritative UCA type of one exact slot."""
-    field_name = {
-        "NOT_PROVIDED": "not_provided_context",
-        "INCORRECT": "incorrect_value_or_effect",
-        "WRONG_TIMING": "timing_deviation",
-        "WRONG_DURATION": "duration_deviation",
-    }[expected.uca_type.value]
+    field_name = DEVIATION_FIELD_BY_UCA_TYPE[expected.uca_type]
     findings = tuple(
         IcaFindingDraft(
             deviation=IcaDeviationDraft.model_validate({field_name: finding.deviation}),
