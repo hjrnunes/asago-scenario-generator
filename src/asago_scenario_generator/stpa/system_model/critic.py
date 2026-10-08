@@ -618,7 +618,7 @@ def run_revision(
         # schema; the wire models below are the response contract.
         allow_unvalidated=True,
         raw_result_validator=_validate_revision_wire,
-        result_parser_with_cleanup=_parse_revision_result,
+        response_parser=_parse_revision_result,
     )
     revision_delta, error_msg = outcome.value, outcome.error
     if error_msg is not None:

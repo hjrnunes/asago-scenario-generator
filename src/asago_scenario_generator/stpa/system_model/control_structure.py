@@ -2097,7 +2097,7 @@ def _call_2a_responsibilities(
         step="call_2a_responsibilities",
         allow_unvalidated=True,
         raw_result_validator=_validate_responsibility_wire,
-        result_parser_with_cleanup=_parse_responsibility_result,
+        response_parser=_parse_responsibility_result,
     )
 
 
@@ -2122,7 +2122,7 @@ def _call_2b_control_elements(
         StageError: If the LLM call fails or the response fails validation.
     """
 
-    def parse(result: LLMResult) -> ControlElementSet:
+    def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
         return parse_control_element_set_response(
             result.content, responsibilities=responsibility_set.responsibilities
         )
@@ -2170,7 +2170,7 @@ def _correct_call_2b_references(
     system_prompt: str,
     user_prompt: str,
     responsibilities: Sequence[Responsibility],
-    parse: Callable[[LLMResult], ControlElementSet],
+    parse: Callable[[LLMResult, list[dict[str, Any]]], ControlElementSet],
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
@@ -2216,7 +2216,7 @@ def _correct_call_2b_references(
         step="call_2b_control_elements",
         policy=CorrectionPolicy(),
         temperature=temperature,
-        result_parser=parse,
+        response_parser=parse,
         first_attempt_number=outcome.attempt_number + 1,
     )
     if corrected.error is not None:
