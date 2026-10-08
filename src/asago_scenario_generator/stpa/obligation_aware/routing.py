@@ -51,7 +51,10 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_structural_routing_prompts,
     mapping_strength_for_brief,
 )
-from asago_scenario_generator.stpa.obligation_aware.stpa_index import build_stpa_index
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    StpaIndex,
+    build_stpa_index,
+)
 from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     SlotPlaceholder,
     create_slots,
@@ -283,31 +286,25 @@ def _infer_targeted_path(
     if not selected_slots:
         raise ValueError("targeted route requires a non-empty selected slot path")
 
-    responsibilities = {
-        item.resp_id: item for item in control_structure.responsibilities
-    }
-    processes = {item.cp_id: item for item in control_structure.controlled_processes}
-    links = {item.link_id: item for item in control_structure.coordination_links}
+    index = build_stpa_index(control_structure)
     path = _InferredRoutePath()
 
     for slot in selected_slots:
-        _infer_slot_path(slot, responsibilities, processes, links, path)
+        _infer_slot_path(slot, index, path)
 
     return path.as_tuple()
 
 
 def _infer_slot_path(
     slot: SlotPlaceholder,
-    responsibilities: dict[str, Any],
-    processes: dict[str, Any],
-    links: dict[str, Any],
+    index: StpaIndex,
     path: "_InferredRoutePath",
 ) -> None:
     path.actions.add(slot.control_action)
     if slot.responsibility is not None:
-        _infer_owned_slot_path(slot, responsibilities, processes, path)
+        _infer_owned_slot_path(slot, index, path)
     elif slot.coordination_link is not None:
-        _infer_coordination_slot_path(slot, links, path)
+        _infer_coordination_slot_path(slot, index, path)
     else:
         raise ValueError(f"slot {slot.slot_id} has no owner or coordination path")
 
@@ -340,18 +337,18 @@ class _InferredRoutePath:
 
 def _infer_owned_slot_path(
     slot: SlotPlaceholder,
-    responsibilities: dict[str, Any],
-    processes: dict[str, Any],
+    index: StpaIndex,
     path: _InferredRoutePath,
 ) -> None:
     """Add the owner, process, and owner context of a responsibility slot."""
-    responsibility = responsibilities.get(slot.responsibility)
+    resolved = index.slot_path(slot)
+    responsibility = resolved.owner
     if responsibility is None:
         raise ValueError(
             f"slot {slot.slot_id} has unknown owning responsibility "
             f"{slot.responsibility}"
         )
-    process_id = _owned_action_process_id(slot, responsibility, processes)
+    process_id = _owned_action_process_id(slot, resolved.action, index)
     path.controllers.add(slot.responsibility)
     path.responsibilities.add(slot.responsibility)
     path.processes.add(process_id)
@@ -362,17 +359,9 @@ def _infer_owned_slot_path(
 
 
 def _owned_action_process_id(
-    slot: SlotPlaceholder, responsibility: Any, processes: dict[str, Any]
+    slot: SlotPlaceholder, action: Any | None, index: StpaIndex
 ) -> str:
     """Return the controlled process the slot's owned action targets."""
-    action = next(
-        (
-            item
-            for item in responsibility.control_actions
-            if item.ca_id == slot.control_action
-        ),
-        None,
-    )
     if action is None:
         raise ValueError(
             f"slot {slot.slot_id} action {slot.control_action} is not owned "
@@ -383,7 +372,7 @@ def _owned_action_process_id(
             f"action {action.ca_id} has no controlled-process target for "
             "the selected route"
         )
-    if action.target.id not in processes:
+    if action.target.id not in index.controlled_processes:
         raise ValueError(
             f"action {action.ca_id} targets unknown controlled process "
             f"{action.target.id}"
@@ -393,11 +382,11 @@ def _owned_action_process_id(
 
 def _infer_coordination_slot_path(
     slot: SlotPlaceholder,
-    links: dict[str, Any],
+    index: StpaIndex,
     path: _InferredRoutePath,
 ) -> None:
     """Add the issuing source, link, and shared state of a coordination slot."""
-    link = links.get(slot.coordination_link)
+    link = index.slot_path(slot).link
     if link is None:
         raise ValueError(
             f"slot {slot.slot_id} has unknown coordination link "

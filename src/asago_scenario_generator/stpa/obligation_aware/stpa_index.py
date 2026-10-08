@@ -41,6 +41,21 @@ def _first_by_id(records: Iterable[_Record], id_field: str) -> dict[str, _Record
 
 
 @dataclass(frozen=True)
+class SlotPath:
+    """The records one slot names; a missing record is ``None``, never an error.
+
+    ``owner`` is the owning responsibility, or the source of the slot's
+    coordination link.  ``action`` is the control action that responsibility
+    owns, and ``link`` is the coordination link; each is ``None`` for the
+    other kind of slot.
+    """
+
+    owner: Responsibility | None
+    action: ControlAction | None
+    link: CoordinationLink | None
+
+
+@dataclass(frozen=True)
 class StpaIndex:
     """Records of one control structure and loss analysis, by ID."""
 
@@ -63,6 +78,26 @@ class StpaIndex:
     ) -> ControlAction | None:
         """Return the action only when *resp_id* owns it."""
         return self._owned_actions.get((str(resp_id), str(ca_id)))
+
+    def slot_path(self, slot: Any) -> SlotPath:
+        """Resolve a slot's owner, owned action, and coordination link.
+
+        Each caller decides how to fail on a missing record, so this raises
+        nothing.
+        """
+        if slot.responsibility is not None:
+            owner = self.responsibilities.get(slot.responsibility)
+            action = (
+                None
+                if owner is None
+                else self.owned_action(owner.resp_id, slot.control_action)
+            )
+            return SlotPath(owner, action, None)
+        if slot.coordination_link is not None:
+            link = self.coordination_links.get(slot.coordination_link)
+            owner = None if link is None else self.responsibilities.get(link.source)
+            return SlotPath(owner, None, link)
+        return SlotPath(None, None, None)
 
     def structural_descriptions(self) -> dict[str, str]:
         """Describe every structural ID, each responsibility with its children."""
@@ -161,4 +196,4 @@ def _describe_structure(control_structure: ControlStructure) -> dict[str, str]:
     return result
 
 
-__all__ = ["StpaIndex", "build_stpa_index"]
+__all__ = ["SlotPath", "StpaIndex", "build_stpa_index"]

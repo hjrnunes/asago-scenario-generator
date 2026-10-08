@@ -258,7 +258,7 @@ SLOT_FILLING_CASES = [
 def test_slot_filling_reads_the_authority_of_a_slot(fields, expected):
     slot = _slot(**fields)
 
-    got = _outcome(lambda: _slot_authority(slot, _structure()))
+    got = _outcome(lambda: _slot_authority(slot, build_stpa_index(_structure())))
 
     assert got == expected
 
@@ -268,7 +268,9 @@ def test_slot_filling_leaves_a_missing_link_source_to_the_caller() -> None:
     link = structure.coordination_links[0].model_copy(update={"source": "RESP-9"})
     structure = structure.model_copy(update={"coordination_links": [link]})
 
-    got = _outcome(lambda: _slot_authority(_slot(**COORDINATION), structure))
+    got = _outcome(
+        lambda: _slot_authority(_slot(**COORDINATION), build_stpa_index(structure))
+    )
 
     assert got == (StopIteration, "")
 
@@ -327,3 +329,37 @@ def test_ica_verification_leaves_a_missing_link_source_to_the_caller() -> None:
     got = _outcome(lambda: _request_control_context(_slot(**COORDINATION), index))
 
     assert got == (ValueError, "unknown coordination source RESP-9")
+
+
+@pytest.mark.parametrize(
+    ("fields", "owner", "action", "link"),
+    [
+        (OWNED, "RESP-1", "CA-1-1", None),
+        (COORDINATION, "RESP-1", None, "CL-1"),
+        (MISMATCH, "RESP-1", None, "CL-1"),
+        (UNKNOWN_OWNER, None, None, None),
+        (NOT_OWNED, "RESP-1", None, None),
+        (UNKNOWN_LINK, None, None, None),
+        (NO_PATH, None, None, None),
+    ],
+)
+def test_the_resolver_names_the_records_a_slot_reaches_and_never_raises(
+    fields, owner, action, link
+) -> None:
+    path = build_stpa_index(_structure()).slot_path(_slot(**fields))
+
+    assert (
+        None if path.owner is None else path.owner.resp_id,
+        None if path.action is None else path.action.ca_id,
+        None if path.link is None else path.link.link_id,
+    ) == (owner, action, link)
+
+
+def test_a_link_with_no_source_responsibility_has_no_owner() -> None:
+    structure = _structure()
+    link = structure.coordination_links[0].model_copy(update={"source": "RESP-9"})
+    structure = structure.model_copy(update={"coordination_links": [link]})
+
+    path = build_stpa_index(structure).slot_path(_slot(**COORDINATION))
+
+    assert (path.owner, path.link.link_id) == (None, "CL-1")

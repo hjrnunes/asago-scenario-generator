@@ -47,6 +47,11 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotResponse,
     default_synthesis_controls,
 )
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    SlotPath,
+    StpaIndex,
+    build_stpa_index,
+)
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_synthesis_slot_prompts,
 )
@@ -410,31 +415,24 @@ def _require_na_rationale(slot_id: str, rationale: str | None) -> None:
 
 def _slot_authority(
     slot: SlotPlaceholder,
-    control_structure: ControlStructure,
+    index: StpaIndex,
 ) -> tuple[str, str, str | None, set[str], set[str]]:
     """Return authoritative owner/action prose and valid PM/FB references."""
     if slot.responsibility is not None:
-        return _responsibility_authority(slot, control_structure)
+        return _responsibility_authority(slot, index.slot_path(slot))
     if slot.coordination_link is not None:
-        return _coordination_authority(slot, control_structure)
+        return _coordination_authority(slot, index.slot_path(slot))
     raise ValueError(f"slot {slot.slot_id} has no authoritative owner")
-
-
-def _first_match(items: Iterable[Any], attr: str, value: Any) -> Any | None:
-    return next((item for item in items if getattr(item, attr) == value), None)
 
 
 def _responsibility_authority(
     slot: SlotPlaceholder,
-    control_structure: ControlStructure,
+    resolved: SlotPath,
 ) -> tuple[str, str, str | None, set[str], set[str]]:
     """Resolve an ordinary slot through its owning responsibility."""
-    responsibility = _first_match(
-        control_structure.responsibilities, "resp_id", slot.responsibility
-    )
+    responsibility, action = resolved.owner, resolved.action
     if responsibility is None:
         raise ValueError(f"slot {slot.slot_id} has unknown responsibility")
-    action = _first_match(responsibility.control_actions, "ca_id", slot.control_action)
     if action is None:
         raise ValueError(
             f"slot {slot.slot_id} action is not owned by its responsibility"
@@ -450,28 +448,20 @@ def _responsibility_authority(
 
 def _coordination_authority(
     slot: SlotPlaceholder,
-    control_structure: ControlStructure,
+    resolved: SlotPath,
 ) -> tuple[str, str, str | None, set[str], set[str]]:
     """Resolve a coordination slot through its exact link and mechanism."""
-    link = next(
-        (
-            item
-            for item in control_structure.coordination_links
-            if item.link_id == slot.coordination_link
-        ),
-        None,
-    )
+    link, source = resolved.link, resolved.owner
     if link is None:
         raise ValueError(f"slot {slot.slot_id} has unknown coordination link")
     if link.coordination_mechanism.cm_id != slot.control_action:
         raise ValueError(
             f"slot {slot.slot_id} action does not match coordination mechanism"
         )
-    source = next(
-        item
-        for item in control_structure.responsibilities
-        if item.resp_id == link.source
-    )
+    if source is None:
+        # A link whose source is missing was never a valid control structure;
+        # the bare StopIteration is the failure callers have always seen.
+        raise StopIteration
     return (
         f"{source.description} (coordinating with {link.target})",
         link.coordination_mechanism.description,
@@ -723,7 +713,7 @@ def compile_ica_slot_draft(
     if draft.slot_id != slot.slot_id:
         raise ValueError("ICA draft is bound to another slot")
     owner_description, action_description, _target_process, pm_ids, fb_ids = (
-        _slot_authority(slot, control_structure)
+        _slot_authority(slot, build_stpa_index(control_structure))
     )
     if draft.is_na:
         _require_na_rationale(slot.slot_id, draft.na_rationale)
