@@ -394,7 +394,8 @@ def _only_supported_criterion_safe_outcome(
 
     With exactly one supported criterion, that criterion names the only
     boundary the scenario can observe, so a safe outcome written at another
-    claim level or evidence kind is moved onto it.  With several supported
+    claim level or evidence kind is moved onto it, and a command attempt that
+    names no operation takes the criterion's.  With several supported
     criteria the model's choice stays authoritative and a mismatch is left to
     :func:`_require_supported_safe_evidence`.
     """
@@ -406,6 +407,13 @@ def _only_supported_criterion_safe_outcome(
         criterion.claim_level,
         criterion.evidence,
     ):
+        if outcome.operation_name is None and criterion.operation_name is not None:
+            return _replace_safe_outcome(
+                outcome,
+                {"operation_name": criterion.operation_name},
+                reason="safe_outcome_operation_from_only_supported_criterion",
+                normalizations=normalizations,
+            )
         return outcome
     return _replace_safe_outcome(
         outcome,
