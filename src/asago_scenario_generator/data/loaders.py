@@ -15,7 +15,11 @@ from typing import Any, Callable
 import yaml
 
 from asago_scenario_generator.data.paths import DATA_ROOT
-from asago_scenario_generator.models import EvidenceSpan, MitigationRef, RiskCard
+from asago_scenario_generator.models.risk_card import (
+    EvidenceSpan,
+    MitigationRef,
+    RiskCard,
+)
 
 
 def load_agentic_threats(path: str | Path) -> dict[str, Any]:

@@ -15,7 +15,7 @@ from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 from asago_scenario_generator.data.threat_gating import determine_threat_scope
-from asago_scenario_generator.models import CapabilityProfile
+from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.attack_pattern_digests import (
     compute_chain_semantic_digest,
 )

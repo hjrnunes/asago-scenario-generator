@@ -28,7 +28,7 @@ from asago_scenario_generator.data.loaders import (
     load_kc_threat_mapping,
 )
 from asago_scenario_generator.data.paths import DATA_ROOT
-from asago_scenario_generator.models import CapabilityProfile
+from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.threat_scope import (
     OutOfScopeEntry,
     ThreatScope,
