@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 
 import pytest
 from pydantic import ValidationError
@@ -58,6 +59,9 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
 )
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from tests.stpa.sp1_helpers import MockLLMClient
+from asago_scenario_generator.stpa.scenario_prod.stage5.compile import (
+    _materialize_intention,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
     _causal_source_choices,
 )
@@ -632,6 +636,38 @@ def test_context_stage5_intentions_drop_undeclared_handles_beside_declared_ones(
     [intention] = result.attacker_bdi.intentions
     assert intention.endswith(f"[structural sources: {declared_source}]")
     assert undeclared_source not in intention
+
+
+def _coordination_context() -> ScenarioGenerationContext:
+    return build_scenario_generation_context(
+        _coordination_threat(),
+        _coordination_control_structure(),
+        _loss_analysis(),
+        scenario_id="SCN-CL-001",
+    )
+
+
+@pytest.mark.parametrize("make_context", [_context, _coordination_context])
+def test_every_compiled_intention_names_a_selected_path_identity(make_context) -> None:
+    """Any declared handle compiles to an intention citing the selected path."""
+    context = make_context()
+    path = context.target_control_path
+    path_ids = {
+        *(item.element_id for item in path.process_model_parts),
+        *(item.element_id for item in path.feedback),
+        path.control_action.action_id,
+        *(item.action_id for item in path.related_control_actions),
+    }
+    choices = _causal_source_choices(context)
+    by_handle = {choice.handle: choice for choice in choices}
+
+    assert choices
+    for choice in choices:
+        draft = SimpleNamespace(
+            description="Exploit the source.", source_handles=(choice.handle,)
+        )
+        intention = _materialize_intention(draft, by_handle)
+        assert any(source_id in intention for source_id in path_ids), intention
 
 
 def test_context_stage5_derives_public_pm_annotations_from_causal_factors(
