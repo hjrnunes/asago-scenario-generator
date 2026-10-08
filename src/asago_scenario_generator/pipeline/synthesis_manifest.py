@@ -12,7 +12,6 @@ from typing import Any, Iterable, Mapping
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.pipeline.synthesis_types import (
-    REPORT_FILENAME,
     SynthesisInputs,
     SynthesisRunStatus,
 )
@@ -24,9 +23,11 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 
 
-_MANIFEST_SCHEMA = "stpa-synthesis-manifest-v1"
+_MANIFEST_SCHEMA = "stpa-synthesis-manifest-v2"
 
 
+# The domain also frames every artifact digest (``_manifest_artifact_identity``),
+# so it keeps ``v1`` when the manifest schema label moves.
 _MANIFEST_DOMAIN = "asago-scenario-generator:stpa-synthesis-manifest:v1"
 
 
@@ -85,20 +86,6 @@ def _build_manifest(
         "schema_version": _MANIFEST_SCHEMA,
         "run_id": f"synthesis-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}",
         "created_at": datetime.now(UTC).isoformat(),
-        "use_case_digest": source_artifacts["use_case"]["semantic_digest"],
-        "risk_set_digest": source_artifacts["risk_set"]["semantic_digest"],
-        "capability_profile_digest": source_artifacts["capability_profile"][
-            "semantic_digest"
-        ],
-        "capability_snapshot_digest": source_artifacts["capability_snapshot"][
-            "semantic_digest"
-        ],
-        "qualification_facts_digest": source_artifacts["qualification_facts"][
-            "semantic_digest"
-        ],
-        "taxonomy_inputs_digest": source_artifacts["taxonomy_inputs"][
-            "semantic_digest"
-        ],
         # Keep the two Phase 1 pin maps visible at the manifest boundary.  They
         # are taxonomy release/content pins, not generic ArtifactPin values;
         # retaining their native ``release`` and ``digest`` fields prevents a
@@ -111,40 +98,6 @@ def _build_manifest(
         # visible with both values and their sources.
         "evidence_inventory": _manifest_evidence_inventory(inputs),
         "evidence_conflicts": _manifest_evidence_conflicts(inputs.qualification_facts),
-        "plan_digest": source_artifacts["taxonomy_obligation_plan"]["semantic_digest"],
-        "baseline_loss_analysis_digest": source_artifacts["baseline_loss_analysis"][
-            "semantic_digest"
-        ],
-        "baseline_control_structure_digest": source_artifacts[
-            "baseline_control_structure"
-        ]["semantic_digest"],
-        "final_loss_analysis_digest": source_artifacts["final_loss_analysis"][
-            "semantic_digest"
-        ],
-        "final_control_structure_digest": source_artifacts["final_control_structure"][
-            "semantic_digest"
-        ],
-        "consideration_digest": source_artifacts["obligation_consideration"][
-            "semantic_digest"
-        ],
-        "ica_enumeration_digest": source_artifacts["ica_enumeration"][
-            "semantic_digest"
-        ],
-        "accounting_digest": source_artifacts["obligation_accounting"][
-            "semantic_digest"
-        ],
-        "scenario_realization_digest": source_artifacts["scenario_realization"][
-            "semantic_digest"
-        ],
-        "execution_target_profile_digest": (
-            source_artifacts.get("execution_target_profile", {}).get("semantic_digest")
-        ),
-        "target_realization_digest": (
-            source_artifacts.get("target_realization", {}).get("semantic_digest")
-        ),
-        "scenario_collection_digest": source_artifacts["scenario_collection"][
-            "semantic_digest"
-        ],
         "model_controls": {
             "profile": inputs.profile,
             "max_workers": inputs.max_workers,
@@ -172,24 +125,6 @@ def _build_manifest(
         "revision": _manifest_revision(revision),
         "stage_errors": list(stage_errors),
         "stage_warnings": list(stage_warnings),
-        # ``run`` cannot resume; the block keeps the manifest schema stable.
-        "resume": {
-            "requested": False,
-            "state": "not_requested",
-            "reused_stages": [],
-            "checkpoint": None,
-        },
-        # The manifest is written before the HTML adapter so the report cannot
-        # be included in this digest without a circular dependency.  State
-        # that boundary explicitly: the report is optional presentation output,
-        # not a normative source artifact.
-        "report": {
-            "artifact_id": "synthesis-report",
-            "schema_version": "synthesis-report-html-v1",
-            "filename": REPORT_FILENAME,
-            "normative": False,
-            "digest": None,
-        },
     }
     payload.update(_replay_fill_block(replay_fill))
     payload["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, payload)
