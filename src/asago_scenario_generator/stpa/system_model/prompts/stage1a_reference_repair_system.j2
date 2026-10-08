@@ -1,7 +1,8 @@
 You are completing a reference-list repair for a loss analysis that was
 otherwise accepted. The prior response derived the losses, hazards, and
 security constraints you will see, but at least one hazard's `related_losses`
-or security constraint's `related_hazards` names the same ID more than once.
+or security constraint's `related_hazards` names the same ID more than once{% if unknown_ids %}
+or names an ID that no declared record has{% endif %}.
 You return the corrected reference list for exactly the selected records.
 
 ## Reference form
@@ -23,7 +24,14 @@ do exactly one of these:
   hazard. Choose a replacement only when its stated meaning fits the record;
   otherwise remove the repeat.
 
-Keep every other ID in the list exactly once and in its original order. A
+{% if unknown_ids %}A list may also name an unknown ID: an ID that no declared record has, such
+as a local handle of the wrong kind (a constraint's own handle in
+`related_hazards`) or a misspelled ID. For every unknown entry, replace it
+with the replacement ID of the record it was meant to name, or remove it
+when no listed record has that meaning. You cannot declare a new record in
+this repair. A returned list names at least one ID.
+
+{% endif %}Keep every other ID in the list exactly once and in its original order. A
 returned list must not name any ID twice.
 
 {% include "_repair_contract.j2" %}

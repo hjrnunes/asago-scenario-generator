@@ -268,31 +268,49 @@ def _sp1_la_dangling_ref_dict() -> dict:
     return content
 
 
+def _sp1_la_reference_correction(related_losses: list[str]) -> dict:
+    """Return a reference correction that sets H-1's related_losses."""
+    return {
+        "hazards": [{"hazard_id": "H-1", "related_losses": related_losses}],
+        "security_constraints": [],
+    }
+
+
+def _sp1_la_empty_gap_dict() -> dict:
+    return {
+        "risk_card_losses": [],
+        "use_case_losses": [],
+        "hazards": [],
+        "security_constraints": [],
+    }
+
+
 @step(
-    "an LLM that returns a Stage 1a draft with a dangling reference and an unused corrected response queued"
+    "an LLM that returns a Stage 1a draft with a dangling reference and a reference correction queued"
 )
-def _h_sp1_la_unsupported_setup(
+def _h_sp1_la_reference_correction_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Queue an unsupported draft and an unused corrected response.
-
-    The second response is deliberately queued so the acceptance assertion
-    proves that unsupported reference failures do not dispatch a repair call.
-    """
+    """Queue a dangling draft, its one correction, and an empty gap draft."""
     world.sp1_llm_content = [
         _sp1_la_dangling_ref_dict(),
-        _sp1_valid_la_dict(),
+        _sp1_la_reference_correction(["L-1"]),
+        _sp1_la_empty_gap_dict(),
     ]
     return True, ""
 
 
 @step(
-    "an LLM that returns a Stage 1a draft with an unused second dangling response queued"
+    "an LLM that returns a Stage 1a draft with a dangling reference and an unusable correction queued"
 )
-def _h_sp1_la_second_unsupported_setup(
+def _h_sp1_la_unusable_correction_setup(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Queue two dangling drafts; the second must remain unused."""
+    """Queue a dangling draft and, as its correction, a second draft.
+
+    A draft is not a reference correction, so the correction yields no
+    usable response and the unit stops without a drop.
+    """
     world.sp1_llm_content = [
         _sp1_la_dangling_ref_dict(),
         _sp1_la_dangling_ref_dict(),
@@ -341,66 +359,67 @@ def _sp1_stage1a_call_entries(world: World) -> list[dict] | None:
     ]
 
 
-@step("Stage 1a validation fails with typed unsupported repair")
-def _h_sp1_la_unsupported_fails(
+@step("the Stage 1a provider receives exactly one reference correction call")
+def _h_sp1_la_one_correction_call(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Require the typed terminal refusal for an unsupported reference repair."""
+    """Verify the draft, its one correction, and the gap call were logged."""
+    entries = _sp1_stage1a_call_entries(world) or []
+    actual = [(entry.get("step"), entry.get("success")) for entry in entries]
+    expected = [
+        ("risk_derivation", False),
+        ("risk_derivation_repair", True),
+        ("gap_analysis", True),
+    ]
+    if actual != expected:
+        return False, f"Expected {expected}, got {actual}"
+    response = str(entries[0].get("response_content", ""))
+    if "L-99" not in response:
+        return False, f"Dangling first response was not retained: {response}"
+    return True, ""
+
+
+@step("the corrected hazard H-1 relates to loss L-1")
+def _h_sp1_la_corrected_hazard(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    hazards = {hazard.hazard_id: hazard for hazard in world.loss_analysis.hazards}
+    if "H-1" not in hazards or hazards["H-1"].related_losses != ["L-1"]:
+        return False, f"Unexpected corrected hazards: {hazards}"
+    return True, ""
+
+
+@step("Stage 1a validation fails after its one reference correction")
+def _h_sp1_la_correction_fails(
+    world: World, text: str, examples: dict
+) -> tuple[bool, str]:
+    """Require the typed stop that carries the first attempt's finding."""
     error = world.validation_error
     if not isinstance(error, _GDStageError):
         return False, f"Expected typed StageError, got {error!r}"
     message = str(error)
     required = (
-        "targeted repair unsupported",
+        "targeted repair failed",
         "draft_references failure class",
-        "no repair call was made",
+        "L-99",
     )
     missing = [fragment for fragment in required if fragment not in message]
     if missing:
-        return False, f"Typed refusal omitted {missing}: {message}"
+        return False, f"Typed stop omitted {missing}: {message}"
     if world.loss_analysis is not None:
-        return False, "Unsupported reference unexpectedly produced a loss analysis"
+        return False, "A failed correction unexpectedly produced a loss analysis"
     return True, ""
 
 
-@step("the Stage 1a provider receives no repair call")
-def _h_sp1_la_no_repair_call(
+@step("the Stage 1a attempts are logged as a failed draft and a failed correction")
+def _h_sp1_la_failed_correction_log(
     world: World, text: str, examples: dict
 ) -> tuple[bool, str]:
-    """Verify a queued second response was not consumed as a repair."""
-    client = getattr(world, "sp1_mock_client", None)
-    if client is None:
-        return False, "Stage 1a mock client was not retained"
-    if len(client.calls) != 1:
-        return False, f"Expected exactly one provider call, got {len(client.calls)}"
-    entries = _sp1_stage1a_call_entries(world)
-    if entries is None or len(entries) != 1:
-        return False, f"Expected one logged Stage 1a attempt, got {entries!r}"
-    if entries[0].get("step") != "risk_derivation":
-        return False, f"Unexpected Stage 1a step: {entries[0].get('step')!r}"
-    return True, ""
-
-
-@step("the Stage 1a attempts are logged as one unsupported failure")
-def _h_sp1_la_unsupported_log(
-    world: World, text: str, examples: dict
-) -> tuple[bool, str]:
-    """Verify the unsupported failure is logged once with its typed outcome."""
-    entries = _sp1_stage1a_call_entries(world)
-    expected = [("risk_derivation", False)]
-    actual = (
-        [(entry.get("step"), entry.get("success")) for entry in entries]
-        if entries is not None
-        else []
-    )
+    entries = _sp1_stage1a_call_entries(world) or []
+    actual = [(entry.get("step"), entry.get("success")) for entry in entries]
+    expected = [("risk_derivation", False), ("risk_derivation_repair", False)]
     if actual != expected:
-        return False, f"Expected one unsupported Stage 1a failure, got {actual}"
-    entry = entries[0] if entries else {}
-    if entry.get("success") is not False:
-        return False, f"Unsupported attempt was not logged as a failure: {entry}"
-    response = str(entry.get("response_content", ""))
-    if "L-99" not in response:
-        return False, f"Rejected dangling response was not retained: {response}"
+        return False, f"Expected {expected}, got {actual}"
     return True, ""
 
 

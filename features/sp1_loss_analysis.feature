@@ -102,17 +102,16 @@ Feature: SP1 Stage 1a — Loss Analysis derivation
     Then the loss analysis passes foundation validation
 
   # SP1-LA-13
-  Scenario: SP1-LA-13 dangling Stage 1a reference is refused without retry
-    Given an LLM that returns a Stage 1a draft with a dangling reference and an unused corrected response queued
+  Scenario: SP1-LA-13 dangling Stage 1a reference gets one reference correction
+    Given an LLM that returns a Stage 1a draft with a dangling reference and a reference correction queued
     When Stage 1a loss analysis is run
-    Then Stage 1a validation fails with typed unsupported repair
-    And the Stage 1a provider receives no repair call
-    And the Stage 1a attempts are logged as one unsupported failure
+    Then the loss analysis passes foundation validation
+    And the Stage 1a provider receives exactly one reference correction call
+    And the corrected hazard H-1 relates to loss L-1
 
   # SP1-LA-14
-  Scenario: SP1-LA-14 repeated dangling Stage 1a reference is refused without retry
-    Given an LLM that returns a Stage 1a draft with an unused second dangling response queued
+  Scenario: SP1-LA-14 dangling Stage 1a reference with an unusable correction stops typed
+    Given an LLM that returns a Stage 1a draft with a dangling reference and an unusable correction queued
     When Stage 1a loss analysis is run
-    Then Stage 1a validation fails with typed unsupported repair
-    And the Stage 1a provider receives no repair call
-    And the Stage 1a attempts are logged as one unsupported failure
+    Then Stage 1a validation fails after its one reference correction
+    And the Stage 1a attempts are logged as a failed draft and a failed correction

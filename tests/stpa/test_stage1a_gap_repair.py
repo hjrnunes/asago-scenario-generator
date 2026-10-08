@@ -356,7 +356,7 @@ def test_run15_gap_graph_merges_without_id_union_leakage(tmp_path):
 
 
 def test_run15_invalid_gap_references_fail_typed(tmp_path):
-    """The captured run-15 invalid gap response is a typed terminal failure."""
+    """The captured run-15 invalid gap response stops after its one correction."""
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
@@ -372,12 +372,11 @@ def test_run15_invalid_gap_references_fail_typed(tmp_path):
         )
 
     message = str(exc_info.value)
-    assert "targeted repair unsupported" in message
+    assert "targeted repair failed" in message
     assert "draft_references failure class" in message
-    assert "no repair call was made" in message
     entries = read_calls_jsonl(tmp_path)
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-    assert [entry["success"] for entry in stage1a_entries] == [True, False]
+    assert [entry["success"] for entry in stage1a_entries] == [True, False, False]
     # The captured invalid response is retained as call evidence.
     assert '"constraint_16"' in stage1a_entries[1]["response_content"]
 
@@ -561,7 +560,7 @@ def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
         )
 
     message = str(exc_info.value).lower()
-    assert "targeted repair unsupported" in message
+    assert "targeted repair failed" in message
     assert "missing loss declarations: l-7" in message
     assert (
         "for a genuinely new source-grounded use-case loss, declare l-7 in "
@@ -572,8 +571,8 @@ def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
     assert "otherwise correct only a mistaken reference" in message
     entries = read_calls_jsonl(tmp_path)
     stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-    assert [entry["success"] for entry in stage1a_entries] == [True, False]
-    assert len(client.calls) == 2
+    assert [entry["success"] for entry in stage1a_entries] == [True, False, False]
+    assert len(client.calls) == 3
 
 
 def test_a18_gap_valid_disposition_is_not_c1_cleanup(tmp_path):

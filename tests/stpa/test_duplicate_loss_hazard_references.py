@@ -5,9 +5,9 @@ A model answer that lists the same loss twice in a hazard's
 ``related_hazards``) is a validation finding, like an unknown reference ID.
 When repeated IDs are a first Stage 1a draft's only reference problem
 (risk_derivation, gap_analysis), the draft gets exactly one targeted repair
-call that may only remove each repeat or replace it with a valid ID; a draft
-that also names an unknown ID stops with a typed ``draft_references``
-failure and no repair call (decision 47b, 2026-10-04).  The bounded
+call that may only remove each repeat or replace it with a valid ID
+(decision 47b, 2026-10-04).  A draft that also names an unknown ID gets the
+same one call (``test_stage1a_unknown_reference_correction.py``).  The bounded
 hazard_graph_revision call sends the duplicate back to the model in its one
 correction request and accepts a corrected answer.
 
@@ -40,7 +40,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     RepairRejected,
     merge_reference_repair,
     run_targeted_repair,
-    select_duplicate_reference_repairs,
+    select_reference_repairs,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from tests.helpers.calls_log import read_calls_jsonl
@@ -252,39 +252,7 @@ class TestStage1aDuplicateRepair:
 
 
 class TestStage1aDuplicateRepairLimits:
-    """Mixed findings stop without a call; a bad repair fails without a retry."""
-
-    def test_duplicates_with_unknown_ids_stop_without_a_repair_call(
-        self, tmp_path
-    ) -> None:
-        risk = _risk_with_second_loss()
-        risk["hazards"] = [
-            {
-                "hazard_id": "H-1",
-                "description": "The agent executes an unintended payment.",
-                "related_losses": ["L-1", "L-1"],
-            },
-            {
-                "hazard_id": "H-2",
-                "description": "The agent discloses account data.",
-                "related_losses": ["L-2", "L-1", "L-2", "L-1"],
-            },
-        ]
-        risk["security_constraints"][0]["related_hazards"] = ["H-1", "H-2", "H-9"]
-
-        with pytest.raises(StageError) as exc_info:
-            _derive(tmp_path, [risk, valid_gap_draft_dict()])
-
-        message = str(exc_info.value)
-        assert "draft_references failure class" in message
-        assert "no repair call was made" in message
-        assert (
-            "risk_derivation draft has invalid cross-references: "
-            "security_constraints.related_hazards unknown IDs: H-9; "
-            "hazards.related_losses duplicate IDs: H-1 -> L-1, H-2 -> L-1, "
-            "H-2 -> L-2"
-        ) in message
-        assert _stage1a_steps(tmp_path) == ["risk_derivation"]
+    """A bad repair fails without a retry."""
 
     @pytest.mark.parametrize(
         ("repair", "expected"),
@@ -372,7 +340,7 @@ def _merge_plan() -> ReferenceRepairPlan:
     draft.hazards[0].related_losses = ["L-1", "L-1"]
     return ReferenceRepairPlan(
         prior=draft,
-        selected=select_duplicate_reference_repairs(
+        selected=select_reference_repairs(
             draft, valid_loss_ids={"L-1", "L-2"}, valid_hazard_ids={"H-1"}
         ),
     )
@@ -411,8 +379,8 @@ class TestReferenceRepairMerge:
         draft.hazards[0].related_losses = ["L-1", "L-1"]
         plan = ReferenceRepairPlan(
             prior=draft,
-            selected=select_duplicate_reference_repairs(
-                draft, valid_loss_ids={"L-1", "L-2", "L-3"}, valid_hazard_ids=set()
+            selected=select_reference_repairs(
+                draft, valid_loss_ids={"L-1", "L-2", "L-3"}, valid_hazard_ids={"H-1"}
             ),
         )
         response = ReferenceRepairResponse.model_validate(

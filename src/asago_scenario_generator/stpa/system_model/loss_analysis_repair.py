@@ -108,6 +108,9 @@ _REPAIR_STEP_SUFFIX = "_repair"
 # An obligation the repair dropped because its span stays outside the rule.
 RULE_SPAN_DROPPED_KIND = "rule_span_dropped"
 
+# A reference list cut after its one correction failed to resolve it.
+REFERENCE_DROPPED_KIND = "reference_dropped"
+
 # The run-level, cross-stage record of every Stage 1a transformation (R3).
 REPAIR_RECORD_FILENAME = "loss-analysis-repair.yaml"
 REPAIR_RECORD_SCHEMA_VERSION = "loss-analysis-repair-record-v2"
@@ -248,7 +251,7 @@ class RepairConstraintReferences(BaseModel):
 
 
 class ReferenceRepairResponse(BaseModel):
-    """The complete duplicate-reference repair wire.
+    """The complete reference-list repair wire.
 
     Descriptions, rules, conditions, obligations, losses, and dispositions are
     deliberately absent, so a response can change only the selected lists.
@@ -1357,16 +1360,19 @@ _REFERENCE_LIST_FIELDS = {
 
 @dataclass(frozen=True)
 class SelectedReferenceList:
-    """One reference list that names an ID more than once.
+    """One reference list that names an ID more than once or an unknown ID.
 
+    ``unknown`` are the listed IDs that no declared record has.
     ``replacement_ids`` are the IDs valid for this list at this step that the
-    list does not already name; a repeat may become one of them or be removed.
+    list does not already name; a repeated or unknown entry may become one of
+    them or be removed.
     """
 
     collection: str
     owner_id: str
     original: tuple[str, ...]
     replacement_ids: tuple[str, ...]
+    unknown: tuple[str, ...] = ()
 
     @property
     def field_name(self) -> str:
@@ -1379,28 +1385,63 @@ class SelectedReferenceList:
     @property
     def repeated(self) -> tuple[str, ...]:
         return tuple(
-            sorted({ref for ref in self.original if self.original.count(ref) > 1})
+            sorted(
+                {
+                    ref
+                    for ref in self.original
+                    if self.original.count(ref) > 1 and ref not in self.unknown
+                }
+            )
         )
 
     @property
     def kept(self) -> tuple[str, ...]:
-        """Each original ID once, in first-occurrence order."""
-        return tuple(dict.fromkeys(self.original))
+        """Each known original ID once, in first-occurrence order."""
+        return tuple(dict.fromkeys(r for r in self.original if r not in self.unknown))
 
     @property
-    def repeat_count(self) -> int:
+    def replaceable_count(self) -> int:
+        """How many entries (repeats and unknown IDs) a repair may replace."""
         return len(self.original) - len(self.kept)
 
     @property
+    def entry_kind(self) -> str:
+        """The defective entries this list holds, as the request names them."""
+        if not self.unknown:
+            return "repeated"
+        return "repeated or unknown" if self.repeated else "unknown"
+
+    @property
     def defect_reason(self) -> str:
-        return f"{self.collection}.{self.field_name} duplicate IDs: " + ", ".join(
-            f"{self.owner_id} -> {ref}" for ref in self.repeated
+        prefix = f"{self.collection}.{self.field_name}"
+        findings = [
+            (f"{prefix} unknown IDs: ", self.unknown),
+            (f"{prefix} duplicate IDs: ", self.repeated),
+        ]
+        return "; ".join(
+            label + ", ".join(f"{self.owner_id} -> {ref}" for ref in refs)
+            for label, refs in findings
+            if refs
         )
 
     @property
     def correction_instruction(self) -> str:
+        if not self.unknown:
+            return (
+                "for each repeated entry, remove the repeat or replace it with one "
+                "listed replacement ID; keep "
+                + ", ".join(self.kept)
+                + " once each in this order; name no ID outside the kept and "
+                "replacement IDs"
+            )
+        if not self.kept:
+            return (
+                f"for each {self.entry_kind} entry, remove it or replace it with "
+                "one listed replacement ID; the list has no other ID to keep; "
+                "name no ID outside the replacement IDs and return at least one ID"
+            )
         return (
-            "for each repeated entry, remove the repeat or replace it with one "
+            f"for each {self.entry_kind} entry, remove it or replace it with one "
             "listed replacement ID; keep "
             + ", ".join(self.kept)
             + " once each in this order; name no ID outside the kept and "
@@ -1410,29 +1451,31 @@ class SelectedReferenceList:
 
 @dataclass(frozen=True)
 class ReferenceRepairPlan:
-    """One targeted repair of duplicate hazard or constraint references.
+    """One targeted repair of repeated or unknown hazard or constraint references.
 
     ``meanings`` maps every loss and hazard ID the request names to its
-    description, including IDs an earlier call established.
+    description, including IDs an earlier call established.  ``feedback``
+    is the reference validator's finding the request carries.
     """
 
     prior: LossAnalysisDraft
     selected: tuple[SelectedReferenceList, ...]
     meanings: tuple[tuple[str, str], ...] = ()
     salvage_warnings: tuple[str, ...] = ()
+    feedback: str = ""
 
 
 RepairPlan = Union[DispositionRepairPlan, ObligationRepairPlan, ReferenceRepairPlan]
 RepairOutcome = Union[RepairPlan, UnsupportedRepair, DeterministicCleanup]
 
 
-def select_duplicate_reference_repairs(
+def select_reference_repairs(
     draft: LossAnalysisDraft,
     *,
     valid_loss_ids: set[str],
     valid_hazard_ids: set[str],
 ) -> tuple[SelectedReferenceList, ...]:
-    """Select each hazard or constraint whose reference list repeats an ID."""
+    """Select each hazard or constraint list with a repeated or unknown ID."""
     rows = (
         ("hazards", hazard.hazard_id, hazard.related_losses, valid_loss_ids)
         for hazard in draft.hazards
@@ -1446,16 +1489,17 @@ def select_duplicate_reference_repairs(
         )
         for constraint in draft.security_constraints
     )
-    return tuple(
+    selected = (
         SelectedReferenceList(
             collection=collection,
             owner_id=owner_id,
             original=tuple(references),
             replacement_ids=tuple(sorted(valid_ids - set(references))),
+            unknown=tuple(dict.fromkeys(r for r in references if r not in valid_ids)),
         )
         for collection, owner_id, references, valid_ids in (*rows, *constraint_rows)
-        if len(set(references)) != len(references)
     )
+    return tuple(item for item in selected if item.replaceable_count)
 
 
 def select_disposition_repairs(
@@ -2689,8 +2733,8 @@ def _check_reference_list(selected: SelectedReferenceList, returned: list[str]) 
             + ", ".join(repeated)
             + " more than once"
         )
-    original = set(selected.original)
-    kept = tuple(ref for ref in returned if ref in original)
+    keep = set(selected.kept)
+    kept = tuple(ref for ref in returned if ref in keep)
     if kept != selected.kept:
         raise RepairRejected(
             f"repair_edit_forbidden: {selected.identity} must keep "
@@ -2698,13 +2742,13 @@ def _check_reference_list(selected: SelectedReferenceList, returned: list[str]) 
             + " once each in this order; returned "
             + ", ".join(returned)
         )
-    _check_added_references(selected, returned, original)
+    _check_added_references(selected, returned, keep)
 
 
 def _check_added_references(
-    selected: SelectedReferenceList, returned: list[str], original: set[str]
+    selected: SelectedReferenceList, returned: list[str], keep: set[str]
 ) -> None:
-    added = [ref for ref in returned if ref not in original]
+    added = [ref for ref in returned if ref not in keep]
     invalid = [ref for ref in added if ref not in selected.replacement_ids]
     if invalid:
         raise RepairRejected(
@@ -2712,10 +2756,11 @@ def _check_added_references(
             + ", ".join(invalid)
             + ", which is not a replacement ID valid for this list"
         )
-    if len(added) > selected.repeat_count:
+    if len(added) > selected.replaceable_count:
         raise RepairRejected(
             f"repair_edit_forbidden: {selected.identity} adds {len(added)} IDs "
-            f"but only {selected.repeat_count} repeated entries may be replaced"
+            f"but only {selected.replaceable_count} {selected.entry_kind} "
+            "entries may be replaced"
         )
 
 
@@ -2741,6 +2786,184 @@ def merge_reference_repair(
             if references is not None:
                 row[field_name] = references
     return LossAnalysisDraft.model_validate(payload)
+
+
+@dataclass(frozen=True)
+class DroppedReferences:
+    """One reference list deterministic code cut after a failed correction.
+
+    ``kept`` is what the list keeps; an empty ``kept`` drops the record that
+    owns the list.
+    """
+
+    collection: str
+    owner_id: str
+    original: tuple[str, ...]
+    kept: tuple[str, ...]
+    reason: str
+
+    @property
+    def identity(self) -> str:
+        return f"{self.owner_id}.{_REFERENCE_LIST_FIELDS[self.collection][0]}"
+
+    @property
+    def dropped_entries(self) -> tuple[str, ...]:
+        """Each original entry the cut removed, in original order."""
+        remaining = list(self.kept)
+        dropped: list[str] = []
+        for ref in self.original:
+            if remaining and ref == remaining[0]:
+                remaining.pop(0)
+            else:
+                dropped.append(ref)
+        return tuple(dropped)
+
+
+def drop_unresolved_references(
+    plan: ReferenceRepairPlan,
+) -> tuple[LossAnalysisDraft, tuple[DroppedReferences, ...]]:
+    """Cut every selected list to its known IDs and drop emptied records.
+
+    A hazard left without a valid loss is dropped; each constraint then loses
+    its references to dropped hazards, and a constraint left without a hazard
+    is dropped too.  Every other record and field keeps its exact payload.
+    """
+    selected = {(item.collection, item.owner_id): item for item in plan.selected}
+    payload = plan.prior.model_dump(mode="json")
+    drops: list[DroppedReferences] = []
+    dropped_hazards: set[str] = set()
+    # Hazards come first, so constraints see every hazard dropped before them.
+    for collection, (field_name, id_field) in _REFERENCE_LIST_FIELDS.items():
+        rows = []
+        for row in payload[collection]:
+            cut = _cut_reference_list(
+                selected.get((collection, row[id_field])),
+                collection=collection,
+                owner_id=row[id_field],
+                original=tuple(row[field_name]),
+                gone=dropped_hazards if collection == "security_constraints" else set(),
+            )
+            if cut is None:
+                rows.append(row)
+                continue
+            drops.append(cut)
+            if cut.kept:
+                row[field_name] = list(cut.kept)
+                rows.append(row)
+            elif collection == "hazards":
+                dropped_hazards.add(cut.owner_id)
+        payload[collection] = rows
+    return LossAnalysisDraft.model_validate(payload), tuple(drops)
+
+
+def _cut_reference_list(
+    selected: SelectedReferenceList | None,
+    *,
+    collection: str,
+    owner_id: str,
+    original: tuple[str, ...],
+    gone: set[str],
+) -> DroppedReferences | None:
+    base = selected.kept if selected is not None else original
+    kept = tuple(ref for ref in base if ref not in gone)
+    if selected is None and kept == original:
+        return None
+    return DroppedReferences(
+        collection=collection,
+        owner_id=owner_id,
+        original=original,
+        kept=kept,
+        reason=_cut_reason(selected, original, gone),
+    )
+
+
+def _cut_reason(
+    selected: SelectedReferenceList | None,
+    original: tuple[str, ...],
+    gone: set[str],
+) -> str:
+    """The list's own finding, then the dropped hazards it named."""
+    reasons = [selected.defect_reason] if selected is not None else []
+    lost = tuple(dict.fromkeys(ref for ref in original if ref in gone))
+    if lost:
+        reasons.append("dropped hazards: " + ", ".join(lost))
+    return "; ".join(reasons)
+
+
+def _record_dropped_references(
+    drops: Iterable[DroppedReferences],
+    *,
+    step: str,
+    repair_record: RepairRecord | None,
+    normalization_warnings: list[str] | None,
+) -> None:
+    """Record each list the drop cut and each record it dropped."""
+    for item in drops:
+        consequence = (
+            ""
+            if item.kept
+            else f"; {item.owner_id} had no other valid ID and was dropped"
+        )
+        _record_warnings(
+            (
+                f"{step} reference {item.identity} dropped "
+                + ", ".join(item.dropped_entries)
+                + consequence,
+            ),
+            normalization_warnings,
+        )
+        if repair_record is None:
+            continue
+        repair_record.add(
+            stage=step,
+            attempt="repair",
+            kind=REFERENCE_DROPPED_KIND,
+            identity=item.identity,
+            reason=(
+                f"{item.reason}; the one correction did not resolve the list, "
+                f"so deterministic code dropped the entries it could not keep"
+                f"{consequence}."
+            ),
+            proposed={"references": list(item.original)},
+            applied={
+                "references": list(item.kept),
+                "dropped_entries": list(item.dropped_entries),
+                "dropped_records": [] if item.kept else [item.owner_id],
+            },
+            outcome="dropped",
+            # The cut entries come from the first-attempt response.
+            raw_step=step,
+        )
+
+
+def _drop_unresolved(
+    plan: ReferenceRepairPlan,
+    validation: _RepairValidation,
+    *,
+    step: str,
+    error_msg: str | None,
+    repair_record: RepairRecord | None,
+) -> LossAnalysisDraft:
+    """Accept the draft without what the correction left unresolved, or stop."""
+    try:
+        cut, drops = drop_unresolved_references(plan)
+        draft = _finish_merged_draft(cut, validation, step=step)
+    except ValueError as exc:
+        raise StageError(
+            stage="stage_1a",
+            step=step,
+            message=(
+                f"targeted repair failed: {error_msg}; dropping the unresolved "
+                f"references left an invalid draft: {exc}"
+            ),
+        ) from exc
+    _record_dropped_references(
+        drops,
+        step=step,
+        repair_record=repair_record,
+        normalization_warnings=validation.normalization_warnings,
+    )
+    return draft
 
 
 # ---------------------------------------------------------------------------
@@ -3047,11 +3270,15 @@ def _reference_request(
     use_case_text: str,
 ) -> _RepairRequest:
     return _RepairRequest(
-        system_prompt=loader.render_prompt(REFERENCE_REPAIR_SYSTEM_TEMPLATE),
+        system_prompt=loader.render_prompt(
+            REFERENCE_REPAIR_SYSTEM_TEMPLATE,
+            unknown_ids=any(selected.unknown for selected in plan.selected),
+        ),
         user_prompt=loader.render_prompt(
             REFERENCE_REPAIR_USER_TEMPLATE,
             use_case_text=use_case_text,
             selected_lists=_selected_reference_views(plan),
+            feedback=plan.feedback,
         ),
         response_format=ReferenceRepairResponse,
         wire_model=ReferenceRepairResponse,
@@ -3199,13 +3426,51 @@ def run_targeted_repair(
             repair_record=repair_record,
             normalization_warnings=normalization_warnings,
         )
-    if error_msg is not None or draft is None:
-        raise StageError(
-            stage="stage_1a",
+    if error_msg is None and draft is not None:
+        return draft
+    return _finish_failed_repair(
+        plan,
+        validation,
+        step=step,
+        error_msg=error_msg,
+        answered=bool(verdicts),
+        repair_record=repair_record,
+    )
+
+
+def _finish_failed_repair(
+    plan: RepairPlan,
+    validation: _RepairValidation,
+    *,
+    step: str,
+    error_msg: str | None,
+    answered: bool,
+    repair_record: RepairRecord | None,
+) -> LossAnalysisDraft:
+    """Drop what a failed unknown-reference correction left unresolved, or stop.
+
+    ``answered`` means the parser reached a typed verdict: a response came
+    back and was rejected or failed validation.  A transport or undecodable
+    failure has nothing to resolve, and a duplicate-only plan keeps its stop
+    (decision 47b).
+    """
+    if (
+        isinstance(plan, ReferenceRepairPlan)
+        and answered
+        and any(selected.unknown for selected in plan.selected)
+    ):
+        return _drop_unresolved(
+            plan,
+            validation,
             step=step,
-            message=f"targeted repair failed: {error_msg}",
+            error_msg=error_msg,
+            repair_record=repair_record,
         )
-    return draft
+    raise StageError(
+        stage="stage_1a",
+        step=step,
+        message=f"targeted repair failed: {error_msg}",
+    )
 
 
 def _selected_card_views(
@@ -3260,6 +3525,8 @@ def _selected_reference_views(plan: ReferenceRepairPlan) -> list[dict]:
             "validation_error": selected.defect_reason,
             "kept": described(selected.kept),
             "repeated": list(selected.repeated),
+            "unknown": list(selected.unknown),
+            "entry_kind": selected.entry_kind,
             "replacements": described(selected.replacement_ids),
             "permitted_change": selected.correction_instruction,
         }

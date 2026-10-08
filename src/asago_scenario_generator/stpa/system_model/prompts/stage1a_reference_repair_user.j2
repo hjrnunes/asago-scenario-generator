@@ -1,4 +1,4 @@
-## Use-Case Description
+{% set unknown_ids = selected_lists | selectattr("unknown") | list %}## Use-Case Description
 
 {{ use_case_text }}
 
@@ -6,8 +6,10 @@
 
 ## Selected Reference Lists
 
-The prior response failed validation for exactly these lists: each names an
-ID more than once. Everything else about each record (its description or
+{% if feedback %}**Validation feedback:** {{ feedback }}
+
+{% endif %}The prior response failed validation for exactly these lists: each names an
+ID more than once{% if unknown_ids %} or an ID that no declared record has{% endif %}. Everything else about each record (its description or
 rule, its conditions, and its obligations) is retained by deterministic code
 and cannot change.
 
@@ -16,12 +18,14 @@ and cannot change.
 - **{{ selected.owner_kind | capitalize }} text:** {{ selected.owner_text }}
 - **Original list, verbatim:** {{ selected.original | tojson }}
 - **Validation error:** {{ selected.validation_error }}
-- **Repeated IDs:** {{ selected.repeated | join(", ") }}
-- **IDs to keep once each, in this order:**
+{% if selected.repeated %}- **Repeated IDs:** {{ selected.repeated | join(", ") }}
+{% endif %}{% if selected.unknown %}- **Unknown IDs:** {{ selected.unknown | join(", ") }}
+{% endif %}{% if selected.kept %}- **IDs to keep once each, in this order:**
 {% for item in selected.kept %}  - **{{ item.id }}**: {{ item.meaning }}
-{% endfor %}{% if selected.replacements %}- **Replacement IDs** (a repeated entry may become one of these):
+{% endfor %}{% else %}- **IDs to keep:** none
+{% endif %}{% if selected.replacements %}- **Replacement IDs** (a{% if selected.entry_kind == "unknown" %}n{% endif %} {{ selected.entry_kind }} entry may become one of these):
 {% for item in selected.replacements %}  - **{{ item.id }}**: {{ item.meaning }}
-{% endfor %}{% else %}- **Replacement IDs:** none; remove each repeated entry.
+{% endfor %}{% else %}- **Replacement IDs:** none; remove each {{ selected.entry_kind }} entry.
 {% endif %}- **Permitted correction:** {{ selected.permitted_change }}
 {% endfor %}
 
@@ -32,7 +36,9 @@ and cannot change.
 Return the corrected `related_losses` or `related_hazards` list for each
 selected record, using canonical IDs only. Remove each repeated
 entry, or replace it with one listed replacement ID whose meaning the record
-was meant to name. Keep the other IDs once each in their original order. A
+was meant to name. {% if unknown_ids %}Replace each unknown entry with the listed replacement ID
+of the record it was meant to name, or remove it when no listed record has
+that meaning. {% endif %}Keep the other IDs once each in their original order. A
 list that still repeats an ID, drops or reorders a kept ID, or names an ID
 outside the kept and replacement IDs is rejected, and there is no second
 repair.

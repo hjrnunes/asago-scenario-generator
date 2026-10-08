@@ -276,11 +276,11 @@ class TestRunOrchestration:
     """SP1-RUN-01 through SP1-RUN-14."""
 
     def test_run_records_typed_stage1a_reference_failure_and_stops(self, tmp_path):
-        """A Stage 1a reference failure is typed, recorded, and never retried.
+        """A Stage 1a reference failure gets one correction, then stops typed.
 
         The run-3 captured shape (constraints referencing undeclared hazards)
-        is outside the two approved targeted-repair classes, so the run
-        records the typed failure and stops Stage 1a without a second call.
+        gets the one reference correction; a correction that returns nothing
+        usable records the typed failure and stops Stage 1a.
         """
         client = _setup_mock_client()
         client.set_response_for(
@@ -298,9 +298,8 @@ class TestRunOrchestration:
         assert len(result.stage_errors) == 1
         error = result.stage_errors[0]
         assert error.startswith("stage_1a/risk_derivation:")
-        assert "targeted repair unsupported" in error
+        assert "targeted repair failed" in error
         assert "draft_references failure class" in error
-        assert "no repair call was made" in error
         assert result.loss_analysis is None
         assert result.control_structure is None
 
@@ -310,9 +309,11 @@ class TestRunOrchestration:
             for entry in entries
             if entry["stage"] == "stage_1a" and entry["step"] != "risk_actionability"
         ]
-        assert [entry["success"] for entry in stage1a_entries] == [False]
-        # No repair call follows the reference failure.
-        assert not any(entry["step"].endswith("_repair") for entry in stage1a_entries)
+        assert [entry["step"] for entry in stage1a_entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+        ]
+        assert [entry["success"] for entry in stage1a_entries] == [False, False]
 
     def test_run_01_full_run_produces_all_artifacts(self, tmp_path):
         """SP1-RUN-01: full run produces all three output artifacts."""

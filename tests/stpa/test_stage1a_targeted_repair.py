@@ -987,10 +987,10 @@ class TestSavedDispositionFailure:
 class TestUnsupportedFailureClasses:
     """Every failure class outside the approved scopes fails typed."""
 
-    def test_reference_failures_make_no_repair_call(self, tmp_path):
+    def test_reference_failures_get_one_correction_call(self, tmp_path):
         draft = _attempt_two_response()
         # A constraint referencing an undeclared hazard: reference class.
-        # Only duplicate-only reference findings get a repair call.
+        # It gets the one reference correction; an unusable one stops typed.
         draft["security_constraints"][6]["related_hazards"] = ["H-99"]
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [draft])
@@ -1003,14 +1003,16 @@ class TestUnsupportedFailureClasses:
                 run_dir=tmp_path,
             )
         message = str(exc_info.value)
-        assert "targeted repair unsupported" in message
+        assert "targeted repair failed" in message
         assert "draft_references failure class" in message
-        assert "no repair call was made" in message
         # The actionable first-attempt feedback is retained in the record.
         assert "H-99" in message
-        assert len(client.calls) == 1
+        assert len(client.calls) == 2
         entries = _stage1a_entries(tmp_path)
-        assert [entry["step"] for entry in entries] == ["risk_derivation"]
+        assert [entry["step"] for entry in entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+        ]
 
     def test_wire_failures_outside_the_repair_scope_fail_typed(self, tmp_path):
         draft = _attempt_two_response()

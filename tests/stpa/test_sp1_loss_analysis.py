@@ -769,13 +769,11 @@ class TestStage1aLossAnalysis:
             error.startswith("stage_1a/merge:") for error in manifest["stage_errors"]
         )
 
-    def test_la_22_invalid_risk_references_fail_typed_without_repair(self, tmp_path):
-        """Invalid risk references are a typed terminal failure, not a retry.
+    def test_la_22_invalid_risk_references_get_one_correction(self, tmp_path):
+        """Invalid risk references get one reference correction, not a retry.
 
-        Reference validation is outside the two approved targeted-repair
-        classes (owner authorization 2026-09-11), so the constraints are
-        never dropped or rewritten: the run records the exact feedback and
-        stops after the first attempt.
+        A correction that returns nothing usable stops the run with the
+        exact first-attempt feedback.
         """
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [_observed_invalid_risk_draft()])
@@ -789,22 +787,26 @@ class TestStage1aLossAnalysis:
             )
 
         message = str(exc_info.value)
-        assert "targeted repair unsupported" in message
+        assert "targeted repair failed" in message
         assert "draft_references failure class" in message
-        assert "no repair call was made" in message
-        assert len(client.calls) == 1
+        assert len(client.calls) == 2
         entries = read_calls_jsonl(tmp_path)
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-        assert [entry["success"] for entry in stage1a_entries] == [False]
-        assert stage1a_entries[0]["step"] == "risk_derivation"
+        assert [entry["success"] for entry in stage1a_entries] == [False, False]
+        assert [entry["step"] for entry in stage1a_entries] == [
+            "risk_derivation",
+            "risk_derivation_repair",
+        ]
         assert "related_hazards" in stage1a_entries[0]["error"]
         assert "ValueError" in stage1a_entries[0]["error"]
         # The actionable first-attempt feedback is retained in the record.
         assert "Missing hazard declarations: H-2" in message
         assert not (tmp_path / "loss-analysis.yaml").exists()
 
-    def test_la_23_invalid_risk_references_fail_typed_on_first_attempt(self, tmp_path):
-        """A reference failure is a structural StageError with no second call."""
+    def test_la_23_invalid_risk_references_fail_typed_after_the_correction(
+        self, tmp_path
+    ):
+        """A failed reference correction is a structural StageError, not a retry."""
         invalid = _observed_invalid_risk_draft()
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [invalid])
@@ -818,9 +820,9 @@ class TestStage1aLossAnalysis:
             )
 
         assert "related_hazards" in str(exc_info.value)
-        assert "targeted repair unsupported" in str(exc_info.value)
+        assert "targeted repair failed" in str(exc_info.value)
         entries = read_calls_jsonl(tmp_path)
-        assert len(entries) == 1
+        assert len(entries) == 2
         assert all(not entry["success"] for entry in entries)
         assert not (tmp_path / "loss-analysis.yaml").exists()
 
@@ -843,7 +845,7 @@ class TestStage1aLossAnalysis:
         message = str(exc_info.value)
         assert "Missing loss declarations: L-1" in message
         assert "Known loss IDs: none" in message
-        assert len(client.calls) == 1
+        assert len(client.calls) == 2
 
     def test_la_24_invalid_gap_references_fail_typed_with_existing_and_local_ids(
         self, tmp_path
@@ -873,13 +875,14 @@ class TestStage1aLossAnalysis:
         assert "Known loss IDs: L-1, L-2" in message
         entries = read_calls_jsonl(tmp_path)
         stage1a_entries = [entry for entry in entries if entry["stage"] == "stage_1a"]
-        assert [entry["success"] for entry in stage1a_entries] == [True, False]
+        assert [entry["success"] for entry in stage1a_entries] == [True, False, False]
         assert [entry["step"] for entry in stage1a_entries] == [
             "risk_derivation",
             "gap_analysis",
+            "gap_analysis_repair",
         ]
         assert "related_losses" in stage1a_entries[1]["error"]
-        assert len(client.calls) == 2
+        assert len(client.calls) == 3
 
     def test_la_25_gap_empty_references_fail_typed(self, tmp_path):
         """A non-empty gap draft with empty links fails typed without repair."""
