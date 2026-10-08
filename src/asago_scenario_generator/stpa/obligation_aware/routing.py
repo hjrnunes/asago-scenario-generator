@@ -1282,34 +1282,10 @@ def route_obligations(
     )
 
 
-def recheck_obligations(
-    adapter: StructuralAnalysisAdapter,
-    *,
-    briefs: Sequence[NeutralObligationBrief],
-    loss_analysis: LossAnalysis,
-    control_structure: ControlStructure,
-    slots: Sequence[SlotPlaceholder] | None = None,
-    controls: AnalysisControls | None = None,
-    max_batch_size: int | None = None,
-) -> RoutingRunResult:
-    """Run one bounded, complete recheck against the final structure."""
-    return route_obligations(
-        adapter,
-        briefs=briefs,
-        loss_analysis=loss_analysis,
-        control_structure=control_structure,
-        slots=slots,
-        controls=controls,
-        max_batch_size=max_batch_size,
-        purpose="recheck",
-    )
-
-
 __all__ = [
     "RoutingRunResult",
     "build_neutral_brief",
     "build_neutral_briefs",
     "create_obligation_batches",
-    "recheck_obligations",
     "route_obligations",
 ]

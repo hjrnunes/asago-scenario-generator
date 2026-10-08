@@ -309,3 +309,59 @@ def test_a_retained_partial_response_counts_every_attempt_it_took(tmp_path) -> N
 
     assert [item.outcome for item in result.call_evidence] == ["unresolved"]
     assert result.call_evidence[0].attempt_count == 2
+
+
+def test_the_default_recheck_routes_every_brief_again_as_a_recheck(tmp_path) -> None:
+    """The production recheck equals one complete routing pass marked recheck."""
+    from asago_scenario_generator.pipeline.synthesis_defaults import _default_recheck
+    from asago_scenario_generator.pipeline.synthesis_types import SynthesisInputs
+
+    briefs = _briefs()
+
+    class Adapter:
+        controls = _controls()
+
+        def __init__(self) -> None:
+            self.requests = []
+
+        def route(self, request, *, correction_feedback=None):
+            self.requests.append(request)
+            return StructuralRoutingResponse(
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=tuple(
+                    ObligationRoute(
+                        obligation_id=brief.obligation_id,
+                        disposition="unresolved",
+                        rationale="The supplied structure does not settle it.",
+                        evidence=("system-inventory",),
+                    )
+                    for brief in request.briefs
+                ),
+            )
+
+    production = Adapter()
+    result = _default_recheck(
+        briefs=briefs,
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        inputs=SynthesisInputs(use_case="A system", output_dir=tmp_path),
+        obligation_adapter=production,
+        output_dir=tmp_path,
+    )
+    direct = Adapter()
+    expected = route_obligations(
+        direct,
+        briefs=briefs,
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+        purpose="recheck",
+    )
+
+    assert result == expected
+    assert [item.purpose for item in production.requests] == ["recheck"]
+    assert [item.batch_id for item in production.requests] == ["recheck-batch-1"]
+    assert [item.semantic_digest for item in production.requests] == [
+        item.semantic_digest for item in direct.requests
+    ]
