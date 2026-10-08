@@ -2956,14 +2956,11 @@ def _merge_drafts(
 ) -> LossAnalysis:
     """Merge risk derivation and gap analysis drafts into a final LossAnalysis.
 
-    Preserve every canonical identity already assigned by the compiler.  A
-    direct caller may still provide local domain IDs (for example an offline
-    fixture), so those are allocated once, deterministically, before the
-    source-separated loss merge.  Identical repeated records are collapsed;
-    a changed payload under one identity is rejected rather than silently
-    replacing the authoritative risk record.
+    Both drafts carry the canonical identities the compiler assigned, and the
+    merge keeps them.  Identical repeated records are collapsed; a changed
+    payload under one identity is rejected rather than silently replacing the
+    authoritative risk record.
     """
-    risk_draft, gap_draft = _canonicalize_domain_graph(risk_draft, gap_draft)
     all_risk_losses, all_uc_losses = _normalize_losses(risk_draft, gap_draft)
     all_hazards = _merge_identity_records(
         [*risk_draft.hazards, *gap_draft.hazards],
@@ -2987,163 +2984,6 @@ def _merge_drafts(
             disposition.model_copy(deep=True)
             for disposition in risk_draft.risk_dispositions
         ],
-    )
-
-
-def _canonical_id_map(
-    records: Iterable[object],
-    *,
-    id_attr: str,
-    kind: str,
-    reserved_ids: set[str] | None = None,
-) -> dict[str, str]:
-    """Preserve canonical IDs and allocate deterministic IDs for local ones.
-
-    ``reserved_ids`` contains canonical identities already in the complete
-    merge.  Local handles are mapped per provider scope, so the same spelling
-    in the risk and gap responses cannot accidentally merge two records or
-    redirect a risk disposition.
-    """
-    pattern = _CANONICAL_ID_PATTERNS[kind]
-    values = {str(getattr(record, id_attr)) for record in records}
-    used = set(reserved_ids or ())
-    used.update(value for value in values if pattern.fullmatch(value))
-    mapping = {value: value for value in used}
-    mapping.update(
-        allocate_canonical_ids(_CANONICAL_PREFIXES[kind], used, sorted(values - used))
-    )
-    return mapping
-
-
-def _canonicalize_domain_graph(
-    risk_draft: LossAnalysisDraft,
-    gap_draft: LossAnalysisDraft,
-) -> tuple[LossAnalysisDraft, LossAnalysisDraft]:
-    """Normalize optional direct-caller local IDs without rewriting canonicals."""
-    drafts = (risk_draft, gap_draft)
-    all_losses = [
-        loss
-        for draft in drafts
-        for loss in (*draft.risk_card_losses, *draft.use_case_losses)
-    ]
-    all_hazards = [hazard for draft in drafts for hazard in draft.hazards]
-    all_constraints = [
-        constraint for draft in drafts for constraint in draft.security_constraints
-    ]
-    used_loss_ids = _canonical_ids_in(all_losses, id_attr="loss_id", kind="loss")
-    used_hazard_ids = _canonical_ids_in(all_hazards, id_attr="hazard_id", kind="hazard")
-    used_constraint_ids = _canonical_ids_in(
-        all_constraints,
-        id_attr="constraint_id",
-        kind="constraint",
-    )
-
-    normalized: list[LossAnalysisDraft] = []
-    for draft in drafts:
-        loss_map = _canonical_id_map(
-            [
-                *draft.risk_card_losses,
-                *draft.use_case_losses,
-            ],
-            id_attr="loss_id",
-            kind="loss",
-            reserved_ids=used_loss_ids,
-        )
-        used_loss_ids.update(loss_map.values())
-        hazard_map = _canonical_id_map(
-            draft.hazards,
-            id_attr="hazard_id",
-            kind="hazard",
-            reserved_ids=used_hazard_ids,
-        )
-        used_hazard_ids.update(hazard_map.values())
-        constraint_map = _canonical_id_map(
-            draft.security_constraints,
-            id_attr="constraint_id",
-            kind="constraint",
-            reserved_ids=used_constraint_ids,
-        )
-        used_constraint_ids.update(constraint_map.values())
-        normalized.append(
-            _renumbered_draft(draft, loss_map, hazard_map, constraint_map)
-        )
-    return normalized[0], normalized[1]
-
-
-def _canonical_ids_in(
-    records: Iterable[object], *, id_attr: str, kind: str
-) -> set[str]:
-    """Return the record IDs that already have canonical form."""
-    pattern = _CANONICAL_ID_PATTERNS[kind]
-    return {
-        str(getattr(record, id_attr))
-        for record in records
-        if pattern.fullmatch(str(getattr(record, id_attr)))
-    }
-
-
-def _renumbered_draft(
-    draft: LossAnalysisDraft,
-    loss_map: dict[str, str],
-    hazard_map: dict[str, str],
-    constraint_map: dict[str, str],
-) -> LossAnalysisDraft:
-    """Copy *draft* with every identity and reference mapped to its canonical ID."""
-    return LossAnalysisDraft.model_validate(
-        {
-            "risk_card_losses": [
-                loss.model_copy(
-                    update={"loss_id": loss_map[loss.loss_id]},
-                    deep=True,
-                )
-                for loss in draft.risk_card_losses
-            ],
-            "use_case_losses": [
-                loss.model_copy(
-                    update={"loss_id": loss_map[loss.loss_id]},
-                    deep=True,
-                )
-                for loss in draft.use_case_losses
-            ],
-            "hazards": [
-                hazard.model_copy(
-                    update={
-                        "hazard_id": hazard_map[hazard.hazard_id],
-                        "related_losses": [
-                            loss_map.get(reference, reference)
-                            for reference in hazard.related_losses
-                        ],
-                    },
-                    deep=True,
-                )
-                for hazard in draft.hazards
-            ],
-            "security_constraints": [
-                constraint.model_copy(
-                    update={
-                        "constraint_id": constraint_map[constraint.constraint_id],
-                        "related_hazards": [
-                            hazard_map.get(reference, reference)
-                            for reference in constraint.related_hazards
-                        ],
-                    },
-                    deep=True,
-                )
-                for constraint in draft.security_constraints
-            ],
-            "risk_dispositions": [
-                disposition.model_copy(
-                    update={
-                        "loss_ids": [
-                            loss_map.get(reference, reference)
-                            for reference in disposition.loss_ids
-                        ]
-                    },
-                    deep=True,
-                )
-                for disposition in draft.risk_dispositions
-            ],
-        }
     )
 
 

@@ -9,13 +9,7 @@ from hypothesis import example, given, settings, strategies as st
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
     LossAnalysis,
-    LossAnalysisDraft,
-    LossProvenance,
-    RiskDisposition,
-    SecurityConstraint,
     stamp_proposed_direction,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
@@ -494,73 +488,6 @@ def test_merge_preserves_existing_canonical_ids() -> None:
         "SC-3",
         "SC-7",
     ]
-
-
-def test_merge_separates_local_scopes_and_keeps_risk_disposition_binding() -> None:
-    risk = LossAnalysisDraft(
-        risk_card_losses=[
-            Loss(
-                loss_id="shared_loss_handle",
-                description="Risk harm",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=["R1"],
-            )
-        ],
-        hazards=[
-            Hazard(
-                hazard_id="shared_hazard_handle",
-                description="Risk state",
-                related_losses=["shared_loss_handle"],
-            )
-        ],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="shared_constraint_handle",
-                rule="Protect risk state",
-                related_hazards=["shared_hazard_handle"],
-            )
-        ],
-        risk_dispositions=[
-            RiskDisposition(
-                risk_ref="R1",
-                disposition="cited",
-                loss_ids=["shared_loss_handle"],
-            )
-        ],
-    )
-    gap = LossAnalysisDraft(
-        use_case_losses=[
-            Loss(
-                loss_id="shared_loss_handle",
-                description="Use-case harm",
-                provenance=LossProvenance.use_case,
-            )
-        ],
-        hazards=[
-            Hazard(
-                hazard_id="shared_hazard_handle",
-                description="Use-case state",
-                related_losses=["shared_loss_handle"],
-            )
-        ],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="shared_constraint_handle",
-                rule="Protect use-case state",
-                related_hazards=["shared_hazard_handle"],
-            )
-        ],
-    )
-
-    merged = _merge_drafts(risk, gap)
-    assert [loss.loss_id for loss in merged.risk_card_losses] == ["L-1"]
-    assert [loss.loss_id for loss in merged.use_case_losses] == ["L-2"]
-    assert [hazard.hazard_id for hazard in merged.hazards] == ["H-1", "H-2"]
-    assert [constraint.constraint_id for constraint in merged.security_constraints] == [
-        "SC-1",
-        "SC-2",
-    ]
-    assert merged.risk_dispositions[0].loss_ids == ["L-1"]
 
 
 def test_delta_carries_untouched_records_and_restamps_revision() -> None:
