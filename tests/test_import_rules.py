@@ -645,8 +645,6 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "context": 0,
     # Phase 3 content-surface facts: a pure leaf over the IO capability model.
     "content_surface": 0,
-    # The v4 attack shape lives in stpa.models; this module only re-exports it.
-    "attack_shape": 0,
     "assembly": 1,
     "stage5": 1,
     "validators": 1,

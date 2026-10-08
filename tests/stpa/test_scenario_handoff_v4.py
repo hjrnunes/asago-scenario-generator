@@ -17,8 +17,8 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
-from asago_scenario_generator.stpa.scenario_prod import attack_shape as shape_module
-from asago_scenario_generator.stpa.scenario_prod.attack_shape import ShapeSource
+from asago_scenario_generator.stpa.models import attack_shape as shape_module
+from asago_scenario_generator.stpa.models.attack_shape import ShapeSource
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     _FORBIDDEN_KEYS,
     HANDOFF_DIGEST_DOMAIN,
