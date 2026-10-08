@@ -10,7 +10,7 @@ handled by the ``validate_against`` method.
 from __future__ import annotations
 
 from enum import Enum
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from pydantic import (
     BaseModel,
@@ -28,6 +28,9 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+from asago_scenario_generator.stpa.models.omission_evidence import (
+    OmissionEvidenceBasis,
+)
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
@@ -248,11 +251,8 @@ class ScenarioSpec(BaseModel):
     # Structured omission evidence (authoring-side basis) for an accepted
     # tool_absent scenario.  The projection seam assembles the closed
     # ``omission_evidence`` carrier from it and the projection's own source
-    # pins.  Omitted when absent so existing spec digests hold.  The type is
-    # enforced by the validator below through a lazy import: a module-level
-    # import of the omission-evidence module would close a real import cycle
-    # (v3 -> v2 -> asago.models package init -> pipeline -> this module).
-    omission_evidence_basis: Any | None = Field(
+    # pins.  Omitted when absent so existing spec digests hold.
+    omission_evidence_basis: OmissionEvidenceBasis | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )
@@ -277,19 +277,6 @@ class ScenarioSpec(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
-
-    @field_validator("omission_evidence_basis")
-    @classmethod
-    def _validate_omission_evidence_basis(cls, value: Any) -> Any:
-        if value is None:
-            return None
-        from asago_scenario_generator.stpa.models.omission_evidence import (
-            OmissionEvidenceBasis,
-        )
-
-        if isinstance(value, OmissionEvidenceBasis):
-            return value
-        return OmissionEvidenceBasis.model_validate(value)
 
     @property
     def is_functional_test(self) -> bool:
