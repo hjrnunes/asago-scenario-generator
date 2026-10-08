@@ -62,10 +62,13 @@ def _prepare_capability_profile(
     """Resolve the one shared profile through the preparation adapter."""
     if adapters.prepare_capability is None:
         raise ValueError("synthesis requires a capability preparation adapter")
+    # The observed target decides only the KC sub-codes its verified facts
+    # settle; it arrives beside the systemic view, as it does for the baseline.
     profile = adapters.prepare_capability(
         model_runtime=adapters.model_runtime,
         inputs=_systemic_inputs(inputs),
         output_dir=inputs.output_dir,
+        execution_target_profile=inputs.execution_target_profile,
     )
     if profile is None:
         raise ValueError("capability preparation adapter returned no profile")

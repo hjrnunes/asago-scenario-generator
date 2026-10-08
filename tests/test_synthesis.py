@@ -2642,7 +2642,11 @@ def test_default_capability_preparation_uses_the_run_client(
     client = object()
     inputs = _inputs(tmp_path)
 
-    profile = _default_prepare_capability(inputs=inputs, model_runtime=_runtime(client))
+    target = object()
+
+    profile = _default_prepare_capability(
+        inputs=inputs, model_runtime=_runtime(client), execution_target_profile=target
+    )
 
     assert profile == "profile"
     assert [
@@ -2651,9 +2655,32 @@ def test_default_capability_preparation_uses_the_run_client(
             call["use_case_text"],
             call["run_dir"],
             call["temperature"],
+            call["samples"],
+            call["target_profile"],
         )
         for call in calls
-    ] == [(client, inputs.use_case, inputs.output_dir, 0.25)]
+    ] == [(client, inputs.use_case, inputs.output_dir, 0.25, 9, target)]
+
+
+def test_capability_preparation_receives_the_target_beside_the_systemic_view(
+    tmp_path: Path,
+) -> None:
+    """The observed target arrives as its own argument; the inputs stay systemic."""
+    package = _miniklarna_target_package(tmp_path)
+    seen: list[dict] = []
+
+    def prepare(**kwargs):
+        seen.append(kwargs)
+        return synthesis_capability_profile()
+
+    _prepare_capability_profile(
+        package.inputs, SynthesisAdapters(prepare_capability=prepare)
+    )
+
+    (call,) = seen
+    assert call["execution_target_profile"] is package.profile
+    assert call["inputs"].execution_target_profile is None
+    assert call["inputs"].target_observations is None
 
 
 def test_obligation_provider_prefers_the_supplied_adapter(tmp_path: Path) -> None:
