@@ -20,7 +20,6 @@ from tests.helpers.target_realization import (
     _baseline,
     _baseline_with_actions,
     _ExtensionInterpreter,
-    _ExtensionFactory,
     _Interpreter,
     _profile,
 )
@@ -65,21 +64,22 @@ def test_realization_given_baseline_rows_makes_no_map_calls_and_keeps_the_rows()
 def test_realization_given_baseline_rows_still_runs_the_extension_once():
     baseline = _baseline()
     rows = _enrichment_rows(baseline, _Interpreter())
-    extension_factory = _ExtensionFactory()
+    extension = _ExtensionInterpreter()
 
     result = realize_target_operations(
         baseline,
         _profile(),
-        extension_factory,
+        extension,
         baseline_rows=rows,
     )
 
-    assert len(extension_factory.interpreter.requests) == 1
-    assert tuple(
-        item.operation_id
-        for item in extension_factory.interpreter.requests[0].operations
-    ) == ("get_payment",)
+    assert len(extension.requests) == 1
+    assert tuple(item.operation_id for item in extension.requests[0].operations) == (
+        "get_payment",
+    )
     assert result.rows == rows
+    assert len(result.diagnostics) == 1
+    assert result.diagnostics[0].startswith("target extension rejected operation ")
 
 
 class _EveryOperationInterpreter(_Interpreter):
@@ -98,7 +98,7 @@ class _EveryOperationInterpreter(_Interpreter):
         return response
 
 
-def test_extension_factory_is_not_built_when_every_operation_is_supported():
+def test_extension_is_not_asked_when_every_operation_is_supported():
     baseline = _baseline_with_actions(
         [
             ControlAction(ca_id="CA-1-1", description="Controller schedules a payment"),
@@ -107,28 +107,27 @@ def test_extension_factory_is_not_built_when_every_operation_is_supported():
         baseline_id="baseline:two",
     )
     rows = _enrichment_rows(baseline, _EveryOperationInterpreter())
-    extension_factory = _ExtensionFactory()
+    extension = _ExtensionInterpreter()
 
     result = realize_target_operations(
-        baseline, _profile(), extension_factory, baseline_rows=rows
+        baseline, _profile(), extension, baseline_rows=rows
     )
 
-    assert extension_factory.interpreter.requests == []
+    assert extension.requests == []
     assert result.uncovered_operations == ()
 
 
-def test_extension_adapter_needs_only_extend():
+def test_realization_accepts_no_extension_and_diagnoses_each_uncovered_operation():
     baseline = _baseline()
     rows = _enrichment_rows(baseline, _Interpreter())
-    adapter = _ExtensionInterpreter()
 
-    result = realize_target_operations(
-        baseline, _profile(), lambda: adapter, baseline_rows=rows
+    result = realize_target_operations(baseline, _profile(), None, baseline_rows=rows)
+
+    assert result.target_derived_control_actions == ()
+    assert result.diagnostics == (
+        "no extension outcome for observed operation "
+        f"{mcp_resource_id('target:mini', 'get_payment')}/get_payment",
     )
-
-    assert len(adapter.requests) == 1
-    assert len(result.diagnostics) == 1
-    assert result.diagnostics[0].startswith("target extension rejected operation ")
 
 
 def test_realization_requires_baseline_rows():

@@ -2512,9 +2512,9 @@ def test_default_target_realization_runs_both_passes_with_the_run_client(
 
     rows = ("row-1",)
 
-    def realize_operations(baseline, profile, factory, *, baseline_rows):
+    def realize_operations(baseline, profile, extension, *, baseline_rows):
         assert baseline_rows is rows
-        passes.append(("operations", baseline, profile, factory()))
+        passes.append(("operations", baseline, profile, extension))
         return "mapped"
 
     def realize_icas(baseline, mapped, factory):

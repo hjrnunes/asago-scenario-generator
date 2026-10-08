@@ -85,7 +85,6 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 )
 from tests.helpers.target_realization import (
     _realize,
-    _ExtensionFactory,
     _ExtensionInterpreter,
     _Interpreter,
     _UnmappedInterpreter,
@@ -536,17 +535,17 @@ class _DerivedFindingFactory:
 def test_bounded_extension_is_one_call_and_additive_for_uncovered_operations():
     baseline = _baseline()
     before = baseline.model_dump(mode="json")
-    extension_factory = _ExtensionFactory()
+    extension = _ExtensionInterpreter()
 
     result = _realize(
         baseline,
         _profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
 
-    assert len(extension_factory.interpreter.requests) == 1
-    request = extension_factory.interpreter.requests[0]
+    assert len(extension.requests) == 1
+    request = extension.requests[0]
     assert request.baseline == baseline
     assert tuple(item.operation_id for item in request.operations) == (
         "get_payment",
@@ -596,14 +595,13 @@ def test_bounded_extension_enumerates_all_eligible_ordinary_uca_categories():
             response["outcomes"][0]["ica_slots"] = ()
             return response
 
-    extension_factory = _ExtensionFactory()
-    extension_factory.interpreter = _NoSlotProposal()
+    extension = _NoSlotProposal()
 
     result = _realize(
         _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
 
     assert tuple(slot.uca_type for slot in result.target_derived_ica_slots) == (
@@ -613,9 +611,7 @@ def test_bounded_extension_enumerates_all_eligible_ordinary_uca_categories():
     )
 
 
-def test_bounded_extension_retains_unanswered_operations_and_calls_factory_once():
-    extension_factory = _ExtensionFactory()
-
+def test_bounded_extension_retains_unanswered_operations_after_one_request():
     class _EmptyExtension:
         def __init__(self):
             self.requests = []
@@ -624,15 +620,15 @@ def test_bounded_extension_retains_unanswered_operations_and_calls_factory_once(
             self.requests.append(request)
             return {"outcomes": ()}
 
-    extension_factory.interpreter = _EmptyExtension()
+    extension = _EmptyExtension()
     result = _realize(
         _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
 
-    assert len(extension_factory.interpreter.requests) == 1
+    assert len(extension.requests) == 1
     assert result.target_derived_control_actions == ()
     assert result.target_derived_ica_slots == ()
     assert set(result.uncovered_operations) == {
@@ -656,34 +652,34 @@ def test_bounded_extension_batches_all_uncovered_operations_into_one_request():
             interpretation["likely_effect"] = "update"
             interpretation["likely_state_effect"] = "changes"
     profile = ExecutionTargetProfile.model_validate(profile_payload)
-    extension_factory = _ExtensionFactory()
+    extension = _ExtensionInterpreter()
 
     _realize(
         _baseline(),
         profile,
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
 
-    assert len(extension_factory.interpreter.requests) == 1
-    assert tuple(
-        item.operation_id
-        for item in extension_factory.interpreter.requests[0].operations
-    ) == ("get_payment", "schedule_payment")
+    assert len(extension.requests) == 1
+    assert tuple(item.operation_id for item in extension.requests[0].operations) == (
+        "get_payment",
+        "schedule_payment",
+    )
 
 
 def test_bounded_extension_rescues_an_uncovered_read_only_operation():
-    extension_factory = _ExtensionFactory()
-    extension_factory.interpreter.accepted_operation_id = "get_payment"
+    extension = _ExtensionInterpreter()
+    extension.accepted_operation_id = "get_payment"
 
     result = _realize(
         _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
 
-    request = extension_factory.interpreter.requests[0]
+    request = extension.requests[0]
     read_view = next(
         item for item in request.operations if item.operation_id == "get_payment"
     )
@@ -709,14 +705,14 @@ def test_bounded_extension_rescues_an_uncovered_read_only_operation():
 
 
 def test_bounded_extension_keeps_a_rejected_read_only_operation_uncovered():
-    extension_factory = _ExtensionFactory()
-    extension_factory.interpreter.accepted_operation_id = None
+    extension = _ExtensionInterpreter()
+    extension.accepted_operation_id = None
 
     result = _realize(
         _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
 
     read_ref = TargetOperationReference(
@@ -748,26 +744,25 @@ def test_bounded_extension_treats_an_ambiguous_read_only_operation_as_eligible()
             "rationale": "No unique exact relationship was established.",
         }
 
-    extension_factory = _ExtensionFactory()
-    extension_factory.interpreter.accepted_operation_id = None
+    extension = _ExtensionInterpreter()
+    extension.accepted_operation_id = None
 
     result = _realize(
         _baseline(),
         _profile(),
         lambda: interpret,
-        extension_factory=extension_factory,
+        extension=extension,
     )
 
     records = {item.operation_ref.identity: item for item in result.operation_records}
     read_record = records[(read_ref["resource_id"], "get_payment")]
     assert read_record.disposition is TargetRealizationDisposition.ambiguous
     assert "get_payment" in tuple(
-        item.operation_id
-        for item in extension_factory.interpreter.requests[0].operations
+        item.operation_id for item in extension.requests[0].operations
     )
 
 
-def test_bounded_extension_uses_the_interpreter_extend_without_a_factory():
+def test_bounded_extension_uses_the_extend_of_the_baseline_interpreter():
     class _DualAdapter:
         def __init__(self):
             self.extension_calls = 0
@@ -813,7 +808,7 @@ def test_extension_adapter_without_extend_leaves_each_operation_diagnosed():
         _baseline(),
         _profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=lambda: _PlainCallableExtension(),
+        extension=_PlainCallableExtension(),
     )
 
     assert result.target_derived_control_actions == ()
@@ -847,7 +842,7 @@ def test_bounded_extension_rejects_invented_operation_identity():
             _baseline(),
             _profile(),
             lambda: _UnmappedInterpreter(),
-            extension_factory=lambda: _InventedExtension(),
+            extension=_InventedExtension(),
         )
 
 
@@ -884,7 +879,7 @@ def test_bounded_extension_rejects_provider_authored_action_identity():
             _baseline(),
             _profile(),
             lambda: _UnmappedInterpreter(),
-            extension_factory=lambda: _CollidingExtension(),
+            extension=_CollidingExtension(),
         )
 
 
@@ -1012,14 +1007,13 @@ class _Attempt4ShapeExtension(_ExtensionInterpreter):
 def test_bounded_extension_holds_responsibility_target_with_typed_reason():
     baseline = _multi_controller_authorities()[0]
     before = baseline.model_dump(mode="json")
-    extension_factory = _ExtensionFactory()
-    extension_factory.interpreter = _Attempt4ShapeExtension()
+    extension = _Attempt4ShapeExtension()
 
     result = _realize(
         baseline,
         _both_state_changing_profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
 
     held = [
@@ -1052,13 +1046,12 @@ def test_held_responsibility_target_extension_keeps_stpa_projection_valid():
     baseline, loss_analysis, control_structure, ica_enumeration = (
         _multi_controller_authorities()
     )
-    extension_factory = _ExtensionFactory()
-    extension_factory.interpreter = _Attempt4ShapeExtension()
+    extension = _Attempt4ShapeExtension()
     realization = _realize(
         baseline,
         _both_state_changing_profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
     realization = realize_target_derived_icas(
         baseline,
@@ -1111,14 +1104,13 @@ def test_bounded_extension_tool_target_still_compiles_unchanged():
         ),
         baseline_id="baseline:tool-target",
     )
-    extension_factory = _ExtensionFactory()
-    extension_factory.interpreter = _ProcessTargetExtension()
+    extension = _ProcessTargetExtension()
 
     result = _realize(
         baseline,
         _profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
 
     assert result.target_derived_control_actions[0].control_action_id == "CA-1-2"
@@ -1316,7 +1308,7 @@ def test_target_derived_both_operations_reach_stage5_with_exact_constraints():
         baseline,
         profile,
         lambda: _UnmappedInterpreter(),
-        extension_factory=lambda: _BothExtensionInterpreter(),
+        extension=_BothExtensionInterpreter(),
     )
 
     class _BothDerivedFindingInterpreter:
@@ -2215,13 +2207,12 @@ def test_union_projection_and_effective_view_bytes_are_pinned():
     the projection and of the stored effective view.
     """
     baseline, loss_analysis, control_structure, ica_enumeration = _union_authorities()
-    extension_factory = _ExtensionFactory()
-    extension_factory.interpreter = _NewProcessExtension()
+    extension = _NewProcessExtension()
     realization = _realize(
         baseline,
         _profile(),
         lambda: _UnmappedInterpreter(),
-        extension_factory=extension_factory,
+        extension=extension,
     )
     realization = realize_target_derived_icas(
         baseline, realization, _DerivedFindingFactory()

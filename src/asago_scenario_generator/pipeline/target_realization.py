@@ -325,7 +325,7 @@ def _require_rows_cover_baseline(
 def realize_target_operations(
     baseline: SystemicStpaBaseline,
     profile: ExecutionTargetProfile,
-    extension_factory: Callable[[], Any],
+    extension: Any,
     *,
     baseline_rows: Sequence[TargetRealizationRow],
 ) -> TargetRealizationResult:
@@ -343,13 +343,12 @@ def realize_target_operations(
     :func:`realize_baseline_rows`).  The seam adopts those rows and makes no
     map or verify call, so a run matches each action to the target once.
 
-    ``extension_factory`` takes no arguments and returns the bounded
-    extension adapter: an object whose ``extend(request)`` receives one
-    ``TargetRealizationExtensionRequest``.  The factory is called once, and
-    only when an observed operation lacks a supported baseline row.  An
-    adapter without a callable ``extend`` leaves each such operation
-    diagnosed.  Accepted additions are compiled as target-derived records
-    after the baseline rows.
+    ``extension`` is the bounded extension adapter: an object whose
+    ``extend(request)`` receives one ``TargetRealizationExtensionRequest``.
+    The seam calls ``extend`` once, and only when an observed operation lacks
+    a supported baseline row.  ``None`` or an adapter without a callable
+    ``extend`` leaves each such operation diagnosed.  Accepted additions are
+    compiled as target-derived records after the baseline rows.
     """
     _require_baseline(baseline)
     _require_profile(profile)
@@ -364,7 +363,7 @@ def realize_target_operations(
             baseline=baseline,
             observations=observations,
             records=records,
-            extension_factory=extension_factory,
+            extension=extension,
         )
     )
     capabilities = _capability_rows(baseline, observations, rows, profile=profile)
@@ -1335,18 +1334,16 @@ def _run_bounded_target_extension(
     baseline: SystemicStpaBaseline,
     observations: Sequence[TargetOperationObservation],
     records: list[TargetOperationRecord],
-    extension_factory: Callable[[], Any],
+    extension: Any,
 ) -> _ExtensionResult:
     """Apply at most one additive extension attempt to uncovered operations."""
     eligible = _eligible_extension_operations(records)
     if not eligible:
         return _ExtensionResult()
-    extension = getattr(extension_factory(), "extend", None)
-    if not callable(extension):
+    extend = getattr(extension, "extend", None)
+    if not callable(extend):
         return _missing_extension_result(eligible)
-    return _attempt_target_extension(
-        baseline, observations, records, eligible, extension
-    )
+    return _attempt_target_extension(baseline, observations, records, eligible, extend)
 
 
 def _eligible_extension_operations(

@@ -423,7 +423,7 @@ def _default_target_realize(
     mapped = realize_target_operations(
         baseline,
         execution_target_profile,
-        lambda: interpreter,
+        interpreter,
         baseline_rows=operation_enrichment.rows,
     )
     finder = TargetDerivedICALlmFinder(
