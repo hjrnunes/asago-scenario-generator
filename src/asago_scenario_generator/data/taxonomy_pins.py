@@ -32,12 +32,16 @@ from typing import Any, Literal
 
 import yaml
 
-from asago_scenario_generator.data.canonical import _canonical_json, _nfc
 from asago_scenario_generator.data.paths import DATA_ROOT
 
 from asago_scenario_generator.models.attack_pattern_contracts import (
     TaxonomyContext,
     TaxonomyPin,
+)
+from asago_scenario_generator.models.canonical import (
+    canonical_json_bytes,
+    compute_framed_digest,
+    normalize_unicode,
 )
 
 _DEFAULT_ATLAS_PATH = DATA_ROOT / "taxonomies" / "atlas" / "ATLAS-2026.05.yaml"
@@ -324,7 +328,7 @@ def _merge_scalar_metadata(
     path: Path,
 ) -> None:
     for lineno, key, value in scalars:
-        normalized = _nfc(value)
+        normalized = normalize_unicode(value)
         origin = f"{path}:{lineno}"
         existing = scalar_metadata.setdefault(key, (normalized, origin))
         if existing[0] != normalized:
@@ -341,9 +345,11 @@ def _merge_curie_entries(
     path: Path,
 ) -> None:
     for lineno, prefix, uri in curies:
-        normalized_uri = _nfc(uri)
+        normalized_uri = normalize_unicode(uri)
         origin = f"{path}:{lineno}"
-        existing = curie_map.setdefault(_nfc(prefix), (normalized_uri, origin))
+        existing = curie_map.setdefault(
+            normalize_unicode(prefix), (normalized_uri, origin)
+        )
         if existing[0] != normalized_uri:
             raise ValueError(
                 f"conflicting curie_map prefix {prefix!r}: {existing[0]!r} "
@@ -361,12 +367,9 @@ def _merge_mapping_rows(
     total = 0
     for lineno, row in file_rows:
         total += 1
-        canonical = _canonical_json(
-            {
-                field: _nfc(value)
-                for field, value in zip(_MAPPING_ROW_FIELDS, row, strict=True)
-            }
-        )
+        canonical = canonical_json_bytes(
+            dict(zip(_MAPPING_ROW_FIELDS, row, strict=True))
+        ).decode("utf-8")
         if canonical in rows:
             raise ValueError(
                 "duplicate mapping row across the mapping set: "
@@ -384,20 +387,16 @@ def _mapping_set_payload(
     rows: set[str],
 ) -> str:
     metadata = {
-        _canonical_json([key, value]) for key, (value, _) in scalar_metadata.items()
+        canonical_json_bytes([key, value]).decode("utf-8")
+        for key, (value, _) in scalar_metadata.items()
     }
     metadata.update(
-        _canonical_json(["curie_map", prefix, uri])
+        canonical_json_bytes(["curie_map", prefix, uri]).decode("utf-8")
         for prefix, (uri, _) in curie_map.items()
     )
-    payload = (
-        _MAPPING_SET_DOMAIN.encode()
-        + b"\0"
-        + _canonical_json({"metadata": sorted(metadata), "rows": sorted(rows)}).encode(
-            "utf-8"
-        )
+    return compute_framed_digest(
+        _MAPPING_SET_DOMAIN, {"metadata": sorted(metadata), "rows": sorted(rows)}
     )
-    return hashlib.sha256(payload).hexdigest()
 
 
 def compute_mapping_set_digest(paths: Iterable[str | Path] | None = None) -> str:

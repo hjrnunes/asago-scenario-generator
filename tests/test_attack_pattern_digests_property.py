@@ -7,7 +7,6 @@ import unicodedata
 
 from hypothesis import assume, given, settings, strategies as st
 
-from asago_scenario_generator.data.canonical import _nfc
 from asago_scenario_generator.models.attack_pattern_contracts import (
     AllCondition,
     AuthoritativeFactReference,
@@ -16,6 +15,7 @@ from asago_scenario_generator.models.attack_pattern_contracts import (
     NotCondition,
     evaluate_condition,
 )
+from asago_scenario_generator.models.canonical import normalize_unicode
 from asago_scenario_generator.models.attack_pattern_digests import (
     _canonical_json as digest_canonical_json,
     _normalize,
@@ -61,7 +61,7 @@ def test_digest_canonical_json_is_deterministic_and_nfc(value: object) -> None:
 @given(text=st.text(max_size=24))
 def test_lineage_nfc_matches_canonical_helper(text: str) -> None:
     """Snapshot pinning uses the shared NFC helper."""
-    assert _nfc(text) == unicodedata.normalize("NFC", text)
+    assert normalize_unicode(text) == unicodedata.normalize("NFC", text)
 
 
 def _fact(fact_id: str) -> AuthoritativeFactReference:
