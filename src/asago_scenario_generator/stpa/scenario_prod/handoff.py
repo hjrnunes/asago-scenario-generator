@@ -27,6 +27,7 @@ discipline as ``data/contracts/target-profile/``.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Mapping
 from pathlib import Path
@@ -45,6 +46,7 @@ from pydantic import (
     model_validator,
 )
 
+from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.discriminating_condition import (
     ConditionCheck,
@@ -110,72 +112,39 @@ HYPOTHESIS_FRAMING = (
     "an observed execution result. The producer makes no execution claim."
 )
 
-#: Field names that only artifact design may own. A handoff document that
-#: carries any of these keys (at any depth) fails the ownership boundary.
-_FORBIDDEN_KEYS = frozenset(
-    {
-        "prepared_user_text",
-        "stimulus_turns",
-        "turns",
-        "turn",
-        "role",
-        "roles",
-        "delivery",
-        "delivery_class",
-        "delivery_route",
-        "route",
-        "execution_route",
-        "oracle",
-        "oracle_kind",
-        "oracle_observes",
-        "oracle_basis",
-        "detector",
-        "judge",
-        "judge_prompt",
-        "prompt",
-        "prompts",
-        "setup",
-        "execution_setup",
-        "execution_contract",
-        "projection",
-        "bundle",
-        "payload",
-        "messages",
-        "message",
-        "replay",
-        "unsafe_outcome_condition",
-        "operands",
-        "reference_tool",
-        "reference_argument",
-        "applies_when",
-        "trigger_evidence",
-    }
+#: The ownership boundary is scenario-handoff contract data: the consumer
+#: mirrors this file byte for byte and enforces the same list.
+OWNERSHIP_RULES_PATH = (
+    DATA_ROOT / "contracts" / "scenario-handoff" / "ownership-rules.json"
 )
+_REGEX_FLAGS = {"IGNORECASE": re.IGNORECASE}
 
-#: Prose patterns that betray hiding artifact design inside narrative, tree
-#: leaves, Gherkin or intent-like metadata. The first element is the typed
-#: violation code used by the contract kit's expected-violations record.
-_FORBIDDEN_VALUE_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
-    (
-        "role_serialization",
-        re.compile(r"\broles?\s*\"?\s*:\s*\"?(user|assistant|system)\b", re.I),
-    ),
-    ("turn_array", re.compile(r"\bturns?\s*\"?\s*:", re.I)),
-    ("prepared_message_field", re.compile(r"prepared_user_text", re.I)),
-    (
-        "detector_expression",
-        re.compile(r"\bgreater_than\b|\bless_than\b|\bamount\s*[<>=]", re.I),
-    ),
-    (
-        "ready_to_send_instruction",
-        re.compile(
-            r"\bsend this message\b|\bdeliver this message\b|"
-            r"\bexecute the following\b|\bsystem prompt is\b",
-            re.I,
-        ),
-    ),
-    ("judge_prompt", re.compile(r"\bjudge prompt\b", re.I)),
-)
+
+def load_ownership_rules(
+    path: Path,
+) -> tuple[frozenset[str], tuple[tuple[str, re.Pattern[str]], ...]]:
+    """Read forbidden keys and ``(code, pattern)`` prose rules from one rules file.
+
+    Keys are field names only artifact design may own, at any depth. Each
+    pattern's code is the ``prose_hiding:<code>`` violation it reports; the
+    file order is the report order.
+    """
+    rules = json.loads(path.read_text(encoding="utf-8"))
+    patterns = []
+    for entry in rules["forbidden_value_patterns"]:
+        unknown = sorted(set(entry["flags"]) - _REGEX_FLAGS.keys())
+        if unknown:
+            raise ValueError(
+                f"ownership rule {entry['code']} has unknown flags: {unknown}"
+            )
+        flags = 0
+        for name in entry["flags"]:
+            flags |= _REGEX_FLAGS[name]
+        patterns.append((entry["code"], re.compile(entry["pattern"], flags)))
+    return frozenset(rules["forbidden_keys"]), tuple(patterns)
+
+
+_FORBIDDEN_KEYS, _FORBIDDEN_VALUE_PATTERNS = load_ownership_rules(OWNERSHIP_RULES_PATH)
 
 
 class HandoffModel(BaseModel):
@@ -1029,6 +998,7 @@ __all__ = [
     "OPERATION_AUTHORITY_CRITERION",
     "OPERATION_AUTHORITY_ENRICHMENT",
     "OPERATION_AUTHORITY_SAFE_OUTCOME",
+    "OWNERSHIP_RULES_PATH",
     "HandoffFact",
     "HandoffGherkin",
     "HandoffLineage",
@@ -1042,6 +1012,7 @@ __all__ = [
     "handoff_ownership_violations",
     "handoff_payload_digest",
     "handoff_schema_violations",
+    "load_ownership_rules",
     "verify_handoff_digest",
     "write_scenario_handoff",
 ]

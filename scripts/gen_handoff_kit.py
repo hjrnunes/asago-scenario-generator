@@ -1034,6 +1034,7 @@ def write_lock(kits: tuple[Path, ...]) -> None:
     for kit in kits:
         for path in sorted(kit.rglob("*.json")):
             lock["files"][str(path.relative_to(ROOT))] = sha(path)
+    lock["files"]["ownership-rules.json"] = sha(ROOT / "ownership-rules.json")
     lock["handoff_schema_versions"] = list(HANDOFF_SCHEMA_VERSIONS)
     for field in (
         "discriminating_condition",
