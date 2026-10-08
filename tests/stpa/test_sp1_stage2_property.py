@@ -60,9 +60,7 @@ from tests.stpa.helpers import make_minimal_loss_analysis
 DERIVATION_CALLS = 4
 
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 st_text = st.text(
     alphabet=st.characters(
@@ -167,9 +165,7 @@ def _make_coordination_analysis(
     )
 
 
-# ---------------------------------------------------------------------------
 # Assembly conservation property tests
-# ---------------------------------------------------------------------------
 
 
 class TestAssemblyConservation:
@@ -235,9 +231,7 @@ class TestAssemblyConservation:
         assert cs_resp_ids == original_ids
 
 
-# ---------------------------------------------------------------------------
 # Element assignment by ID prefix
-# ---------------------------------------------------------------------------
 
 
 class TestElementAssignmentByIdPrefix:
@@ -286,153 +280,134 @@ class TestElementAssignmentByIdPrefix:
             assert f"FB-{resp_num}-1" in fb_ids
 
 
-# ---------------------------------------------------------------------------
 # Orphan PM repair completeness
-# ---------------------------------------------------------------------------
 
 
-class TestOrphanPmRepairCompleteness:
-    """After repair_orphan_pms, every PM is updated by at least one FB."""
-
-    @given(
-        n_resps=st.integers(min_value=1, max_value=4),
-        n_pms=st.integers(min_value=1, max_value=4),
-        n_fbs=st.integers(min_value=0, max_value=3),
-    )
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_all_pms_covered_after_repair(self, n_resps, n_pms, n_fbs):
-        """Every PM part has at least one FB updating it after repair."""
-        responsibilities = []
-        for num in range(1, n_resps + 1):
-            resp = Responsibility(
-                resp_id=f"RESP-{num}",
-                description=f"Controller {num}",
-                process_model_parts=[
-                    ProcessModelPart(pm_id=f"PM-{num}-{j}", description=f"PM {num}-{j}")
-                    for j in range(1, n_pms + 1)
-                ],
-                control_actions=[
-                    ControlAction(ca_id=f"CA-{num}-1", description=f"CA {num}-1")
-                ],
-                feedback_channels=[
-                    FeedbackChannel(
-                        fb_id=f"FB-{num}-{j}",
-                        description=f"FB {num}-{j}",
-                        updates=f"PM-{num}-1",  # always update PM-{num}-1
-                        source=ElementRef(
-                            type=ReferenceType.responsibility, id=f"RESP-{num}"
-                        ),
-                    )
-                    for j in range(1, n_fbs + 1)
-                ],
-            )
-            responsibilities.append(resp)
-
-        cs = ControlStructure(responsibilities=responsibilities)
-        repaired, warnings = repair_orphan_pms(cs)
-
-        for resp in repaired.responsibilities:
-            updated_pms = {fb.updates for fb in resp.feedback_channels}
-            for pm in resp.process_model_parts:
-                assert pm.pm_id in updated_pms, (
-                    f"PM {pm.pm_id} in {resp.resp_id} not covered after repair. "
-                    f"Updated PMs: {updated_pms}"
+@given(
+    n_resps=st.integers(min_value=1, max_value=4),
+    n_pms=st.integers(min_value=1, max_value=4),
+    n_fbs=st.integers(min_value=0, max_value=3),
+)
+@settings(
+    max_examples=40,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+def test_all_pms_covered_after_repair(n_resps, n_pms, n_fbs):
+    """Every PM part has at least one FB updating it after repair."""
+    responsibilities = []
+    for num in range(1, n_resps + 1):
+        resp = Responsibility(
+            resp_id=f"RESP-{num}",
+            description=f"Controller {num}",
+            process_model_parts=[
+                ProcessModelPart(pm_id=f"PM-{num}-{j}", description=f"PM {num}-{j}")
+                for j in range(1, n_pms + 1)
+            ],
+            control_actions=[
+                ControlAction(ca_id=f"CA-{num}-1", description=f"CA {num}-1")
+            ],
+            feedback_channels=[
+                FeedbackChannel(
+                    fb_id=f"FB-{num}-{j}",
+                    description=f"FB {num}-{j}",
+                    updates=f"PM-{num}-1",  # always update PM-{num}-1
+                    source=ElementRef(
+                        type=ReferenceType.responsibility, id=f"RESP-{num}"
+                    ),
                 )
+                for j in range(1, n_fbs + 1)
+            ],
+        )
+        responsibilities.append(resp)
+
+    cs = ControlStructure(responsibilities=responsibilities)
+    repaired, warnings = repair_orphan_pms(cs)
+
+    for resp in repaired.responsibilities:
+        updated_pms = {fb.updates for fb in resp.feedback_channels}
+        for pm in resp.process_model_parts:
+            assert pm.pm_id in updated_pms, (
+                f"PM {pm.pm_id} in {resp.resp_id} not covered after repair. "
+                f"Updated PMs: {updated_pms}"
+            )
 
 
-# ---------------------------------------------------------------------------
 # RC-vs-PM ID namespace distinction
-# ---------------------------------------------------------------------------
 
 
-class TestRcPmIdNamespaceDistinction:
-    """RC IDs and PM IDs never collide across namespaces in a valid CS."""
-
-    @given(
-        n_resps=st.integers(min_value=1, max_value=5),
-        n_pms=st.integers(min_value=1, max_value=3),
-        n_rcs=st.integers(min_value=1, max_value=3),
+@given(
+    n_resps=st.integers(min_value=1, max_value=5),
+    n_pms=st.integers(min_value=1, max_value=3),
+    n_rcs=st.integers(min_value=1, max_value=3),
+)
+@settings(
+    max_examples=30,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+def test_rc_pm_no_cross_namespace_collision(n_resps, n_pms, n_rcs):
+    """No RC ID value equals any PM ID value in a valid ControlStructure."""
+    resp_nums = list(range(1, n_resps + 1))
+    resp_set = ResponsibilitySet(
+        responsibilities=[
+            _make_responsibility(n, n_pms=n_pms, n_rcs=n_rcs) for n in resp_nums
+        ]
     )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_rc_pm_no_cross_namespace_collision(self, n_resps, n_pms, n_rcs):
-        """No RC ID value equals any PM ID value in a valid ControlStructure."""
-        resp_nums = list(range(1, n_resps + 1))
-        resp_set = ResponsibilitySet(
-            responsibilities=[
-                _make_responsibility(n, n_pms=n_pms, n_rcs=n_rcs) for n in resp_nums
-            ]
-        )
-        elem_set = _make_control_element_set(resp_nums)
-        cs = _assemble_control_structure(resp_set, elem_set)
+    elem_set = _make_control_element_set(resp_nums)
+    cs = _assemble_control_structure(resp_set, elem_set)
 
-        rc_ids: set[str] = set()
-        pm_ids: set[str] = set()
-        for resp in cs.responsibilities:
-            rc_ids.update(rc.rc_id for rc in resp.responsibility_constraints)
-            pm_ids.update(pm.pm_id for pm in resp.process_model_parts)
+    rc_ids: set[str] = set()
+    pm_ids: set[str] = set()
+    for resp in cs.responsibilities:
+        rc_ids.update(rc.rc_id for rc in resp.responsibility_constraints)
+        pm_ids.update(pm.pm_id for pm in resp.process_model_parts)
 
-        # RC-X-Y and PM-X-Y have the same format but different prefixes,
-        # so they should never collide unless the same number is reused
-        # in both namespaces — which the format guarantees won't happen.
-        assert rc_ids.isdisjoint(pm_ids), (
-            f"Cross-namespace collision: {rc_ids & pm_ids}"
-        )
+    # RC-X-Y and PM-X-Y have the same format but different prefixes,
+    # so they should never collide unless the same number is reused
+    # in both namespaces — which the format guarantees won't happen.
+    assert rc_ids.isdisjoint(pm_ids), f"Cross-namespace collision: {rc_ids & pm_ids}"
 
 
-# ---------------------------------------------------------------------------
 # Coordination-link reference validity
-# ---------------------------------------------------------------------------
 
 
-class TestCoordinationLinkReferenceValidity:
-    """CoordinationLink source/target/shared_pm reference valid elements."""
-
-    @given(
-        n_resps=st.integers(min_value=2, max_value=5),
+@given(
+    n_resps=st.integers(min_value=2, max_value=5),
+)
+@settings(
+    max_examples=20,
+    deadline=None,
+    suppress_health_check=[HealthCheck.function_scoped_fixture],
+)
+def test_coordination_links_reference_valid_ids(n_resps):
+    """CL source/target are valid resp_ids; shared_pm is a valid pm_id."""
+    resp_nums = list(range(1, n_resps + 1))
+    resp_set = ResponsibilitySet(
+        responsibilities=[_make_responsibility(n) for n in resp_nums]
     )
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_coordination_links_reference_valid_ids(self, n_resps):
-        """CL source/target are valid resp_ids; shared_pm is a valid pm_id."""
-        resp_nums = list(range(1, n_resps + 1))
-        resp_set = ResponsibilitySet(
-            responsibilities=[_make_responsibility(n) for n in resp_nums]
+    elem_set = _make_control_element_set(resp_nums)
+    cs = _assemble_control_structure(resp_set, elem_set)
+
+    resp_ids = {r.resp_id for r in cs.responsibilities}
+    all_pm_ids: set[str] = set()
+    for resp in cs.responsibilities:
+        all_pm_ids.update(pm.pm_id for pm in resp.process_model_parts)
+
+    coord = _make_coordination_analysis(resp_nums)
+    for cl in coord.coordination_links:
+        assert cl.source in resp_ids, (
+            f"CL {cl.link_id} source {cl.source} not in {resp_ids}"
         )
-        elem_set = _make_control_element_set(resp_nums)
-        cs = _assemble_control_structure(resp_set, elem_set)
-
-        resp_ids = {r.resp_id for r in cs.responsibilities}
-        all_pm_ids: set[str] = set()
-        for resp in cs.responsibilities:
-            all_pm_ids.update(pm.pm_id for pm in resp.process_model_parts)
-
-        coord = _make_coordination_analysis(resp_nums)
-        for cl in coord.coordination_links:
-            assert cl.source in resp_ids, (
-                f"CL {cl.link_id} source {cl.source} not in {resp_ids}"
-            )
-            assert cl.target in resp_ids, (
-                f"CL {cl.link_id} target {cl.target} not in {resp_ids}"
-            )
-            assert cl.shared_pm in all_pm_ids, (
-                f"CL {cl.link_id} shared_pm {cl.shared_pm} not in {all_pm_ids}"
-            )
+        assert cl.target in resp_ids, (
+            f"CL {cl.link_id} target {cl.target} not in {resp_ids}"
+        )
+        assert cl.shared_pm in all_pm_ids, (
+            f"CL {cl.link_id} shared_pm {cl.shared_pm} not in {all_pm_ids}"
+        )
 
 
-# ---------------------------------------------------------------------------
 # Call-log ordering: call_1 → call_2a → call_2b → call_3
-# ---------------------------------------------------------------------------
 
 
 class TestCallLogOrdering:
@@ -590,9 +565,7 @@ class TestCallLogOrdering:
         assert len(client.calls) == DERIVATION_CALLS
 
 
-# ---------------------------------------------------------------------------
 # _extract_resp_num invariant
-# ---------------------------------------------------------------------------
 
 
 class TestExtractRespNum:

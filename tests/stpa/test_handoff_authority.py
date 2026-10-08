@@ -238,9 +238,7 @@ def _real_threat(values: SimpleNamespace):
     )
 
 
-# ---------------------------------------------------------------------------
 # The defect: every constraint published as reviewed
-# ---------------------------------------------------------------------------
 
 
 def test_run_published_constraint_authority_is_not_reviewed_for_proposed_records(
@@ -275,9 +273,7 @@ def test_pinned_reviewed_record_publishes_reviewed(tmp_path: Path) -> None:
     assert fact["authority"] == "supplied_reviewed_constraint"
 
 
-# ---------------------------------------------------------------------------
 # Authority follows the actual source record
-# ---------------------------------------------------------------------------
 
 
 def test_authority_follows_source_record(tmp_path: Path) -> None:
@@ -318,9 +314,7 @@ def test_authority_follows_source_record(tmp_path: Path) -> None:
     )
 
 
-# ---------------------------------------------------------------------------
 # Sealed-run fixtures (read-only)
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.skipif(
@@ -412,9 +406,7 @@ def test_af_run1_pinned_reviewed_fixture_still_publishes_reviewed(
     assert _constraint_fact(handoff)["authority"] == "supplied_reviewed_constraint"
 
 
-# ---------------------------------------------------------------------------
 # The synthesis seam threads the run's actual Stage 1a source
-# ---------------------------------------------------------------------------
 
 
 @pytest.mark.parametrize(

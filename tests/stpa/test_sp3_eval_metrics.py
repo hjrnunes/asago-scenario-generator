@@ -207,30 +207,26 @@ def _make_enriched_threat_set(
     )
 
 
-class TestStructuralConsideration:
+def test_structural_consideration_is_imported_from_sp2():
     """SP3-EVAL-01."""
-
-    def test_imported_from_sp2(self):
-        ets = _make_enriched_threat_set(
-            structural_consideration={"total_slots": 40, "considered": 40, "rate": 1.0}
-        )
-        result = metric_structural_consideration(ets)
-        assert result["total_slots"] == 40
-        assert result["considered"] == 40
-        assert result["rate"] == 1.0
+    ets = _make_enriched_threat_set(
+        structural_consideration={"total_slots": 40, "considered": 40, "rate": 1.0}
+    )
+    result = metric_structural_consideration(ets)
+    assert result["total_slots"] == 40
+    assert result["considered"] == 40
+    assert result["rate"] == 1.0
 
 
-class TestNAQuality:
+def test_na_quality_is_imported_from_sp2():
     """SP3-EVAL-02."""
-
-    def test_imported_from_sp2(self):
-        ets = _make_enriched_threat_set(
-            na_quality={"na_count": 5, "quality_count": 4, "quality_rate": 0.8}
-        )
-        result = metric_na_quality(ets)
-        assert result["na_count"] == 5
-        assert result["quality_count"] == 4
-        assert result["quality_rate"] == 0.8
+    ets = _make_enriched_threat_set(
+        na_quality={"na_count": 5, "quality_count": 4, "quality_rate": 0.8}
+    )
+    result = metric_na_quality(ets)
+    assert result["na_count"] == 5
+    assert result["quality_count"] == 4
+    assert result["quality_rate"] == 0.8
 
 
 class TestBDIGrounding:
@@ -554,37 +550,35 @@ class TestDiversity:
         assert result["unique_attack_mechanisms"] == 4
 
 
-class TestEvalScorecard:
+def test_scorecard_written_to_file():
     """SP3-EVAL-16, SP3-EVAL-17."""
+    cs = _make_cs()
+    la = make_loss_analysis()
+    ets = _make_enriched_threat_set()
+    envelopes = [_make_envelope(spec=_make_scenario_spec())]
 
-    def test_scorecard_written_to_file(self):
-        cs = _make_cs()
-        la = make_loss_analysis()
-        ets = _make_enriched_threat_set()
-        envelopes = [_make_envelope(spec=_make_scenario_spec())]
+    scorecard = compute_eval_scorecard(
+        envelopes,
+        ets,
+        cs,
+        la,
+        stage_local_errors=["err1", "err2"],
+        traceability_errors=["trace_err1"],
+    )
 
-        scorecard = compute_eval_scorecard(
-            envelopes,
-            ets,
-            cs,
-            la,
-            stage_local_errors=["err1", "err2"],
-            traceability_errors=["trace_err1"],
-        )
+    with TemporaryDirectory() as tmpdir:
+        path = write_eval_scorecard(scorecard, Path(tmpdir))
+        assert path.exists()
+        import yaml
 
-        with TemporaryDirectory() as tmpdir:
-            path = write_eval_scorecard(scorecard, Path(tmpdir))
-            assert path.exists()
-            import yaml
-
-            data = yaml.safe_load(path.read_text())
-            assert "metrics" in data
-            assert "structural_consideration" in data["metrics"]
-            assert "na_quality" in data["metrics"]
-            assert "bdi_grounding" in data["metrics"]
-            assert "tree_branch_coverage" in data["metrics"]
-            assert "traceability_depth" in data["metrics"]
-            assert "diversity" in data["metrics"]
-            assert "validation" in data
-            assert len(data["validation"]["stage_local_errors"]) == 2
-            assert len(data["validation"]["traceability_errors"]) == 1
+        data = yaml.safe_load(path.read_text())
+        assert "metrics" in data
+        assert "structural_consideration" in data["metrics"]
+        assert "na_quality" in data["metrics"]
+        assert "bdi_grounding" in data["metrics"]
+        assert "tree_branch_coverage" in data["metrics"]
+        assert "traceability_depth" in data["metrics"]
+        assert "diversity" in data["metrics"]
+        assert "validation" in data
+        assert len(data["validation"]["stage_local_errors"]) == 2
+        assert len(data["validation"]["traceability_errors"]) == 1

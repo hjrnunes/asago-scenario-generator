@@ -747,29 +747,27 @@ class TestProbeGating:
         assert included == expected
 
 
-class TestHasUnjustifiedGapsWithoutTypedGaps:
+@pytest.mark.parametrize(
+    "checklist_results",
+    [
+        pytest.param({}, id="empty"),
+        pytest.param({"a": "present", "b": "present"}, id="all_present"),
+        pytest.param(
+            {"a": "absent_justified", "b": "absent_justified"},
+            id="all_absent_justified",
+        ),
+        pytest.param(
+            {
+                "a": "present",
+                "b": "absent_justified",
+                "c": "absent_unjustified",
+            },
+            id="mixed_with_one_unjustified",
+        ),
+        pytest.param({"a": "absent_unjustified"}, id="only_unjustified"),
+    ],
+)
+def test_no_typed_gap_means_no_revision(checklist_results):
     """Probe statuses alone are diagnostic: without a typed gap nothing triggers."""
-
-    @pytest.mark.parametrize(
-        "checklist_results",
-        [
-            pytest.param({}, id="empty"),
-            pytest.param({"a": "present", "b": "present"}, id="all_present"),
-            pytest.param(
-                {"a": "absent_justified", "b": "absent_justified"},
-                id="all_absent_justified",
-            ),
-            pytest.param(
-                {
-                    "a": "present",
-                    "b": "absent_justified",
-                    "c": "absent_unjustified",
-                },
-                id="mixed_with_one_unjustified",
-            ),
-            pytest.param({"a": "absent_unjustified"}, id="only_unjustified"),
-        ],
-    )
-    def test_no_typed_gap_means_no_revision(self, checklist_results):
-        findings = CriticFindings(gaps=[], checklist_results=checklist_results)
-        assert has_unjustified_gaps(findings) is False
+    findings = CriticFindings(gaps=[], checklist_results=checklist_results)
+    assert has_unjustified_gaps(findings) is False

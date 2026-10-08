@@ -78,9 +78,7 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
 from tests.helpers.stpa_builders import make_loss_analysis
 
 
-# ---------------------------------------------------------------------------
 # Strategies
-# ---------------------------------------------------------------------------
 
 st_text = st.text(
     alphabet=st.characters(
@@ -235,9 +233,7 @@ def _make_scenario_spec(
     )
 
 
-# ---------------------------------------------------------------------------
 # BDI grounding property tests
-# ---------------------------------------------------------------------------
 
 
 class TestBDIGroundingProperty:
@@ -331,9 +327,7 @@ class TestBDIGroundingProperty:
         assert result["intention_grounding_rate"] == 1.0
 
 
-# ---------------------------------------------------------------------------
 # Tree branch coverage property tests
-# ---------------------------------------------------------------------------
 
 
 class TestTreeBranchCoverageProperty:
@@ -427,9 +421,7 @@ class TestTreeBranchCoverageProperty:
         assert result["total_scenarios"] == n_valid + n_invalid
 
 
-# ---------------------------------------------------------------------------
 # Traceability chain completeness property tests
-# ---------------------------------------------------------------------------
 
 
 class TestTraceabilityChainProperty:
@@ -527,9 +519,7 @@ class TestTraceabilityChainProperty:
         assert len(errors) == 0
 
 
-# ---------------------------------------------------------------------------
 # Shannon entropy property tests
-# ---------------------------------------------------------------------------
 
 
 class TestShannonEntropyProperty:
@@ -587,9 +577,7 @@ class TestShannonEntropyProperty:
         assert abs(entropy - expected) < 1e-5
 
 
-# ---------------------------------------------------------------------------
 # Safe rate property tests
-# ---------------------------------------------------------------------------
 
 
 class TestSafeRateProperty:
@@ -616,9 +604,7 @@ class TestSafeRateProperty:
             assert _safe_rate(5, 0) == 0
 
 
-# ---------------------------------------------------------------------------
 # Scenario ID format property tests
-# ---------------------------------------------------------------------------
 
 
 class TestScenarioIdProperty:
@@ -645,9 +631,7 @@ class TestScenarioIdProperty:
             assert generate_scenario_id(a) == generate_scenario_id(b)
 
 
-# ---------------------------------------------------------------------------
 # parse_ica_slot_id round-trip property tests
-# ---------------------------------------------------------------------------
 
 
 class TestParseICASlotIdProperty:
