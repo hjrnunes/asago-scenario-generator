@@ -571,6 +571,14 @@ loses its coverage. A covered rule whose cited constraints still repeat its
 accepted shared terms keeps its first verdict, so re-mapping variance alone
 cannot discard the round. `stated-rule-coverage.yaml` records the outcome.
 
+Call 2a, Call 2b, and the revision request parse their responses with closed
+pydantic wire models. A shape error reaches the correction as the compact
+`ValidationError` field list. The wire models keep IDs as written:
+`id_normalization` numbers responsibilities, their children, and controlled
+processes by position, so a malformed ID, or a constraint with a misspelled
+`rc_id` key, does not fail. Call 2b still requires each `CA-` and `FB-` ID to
+name its owning responsibility.
+
 Call 2a ignores an unknown field inside a responsibility when its value is
 empty (`null`, `""`, `[]`, or `{}`). An unknown field with content still
 fails, and the retry lists the fields a responsibility may contain. Any
