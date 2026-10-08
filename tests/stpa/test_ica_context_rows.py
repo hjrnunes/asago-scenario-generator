@@ -87,15 +87,17 @@ def test_ica_prompt_keeps_findings_outside_the_context_table() -> None:
     assert "Use `context_row: null` only when" not in text
 
 
-def test_context_rows_pass_preflight_and_fill_the_ica_context(tmp_path) -> None:
-    structure = _control_structure()
-    slot = next(
+def _not_provided_slot():
+    return next(
         item
-        for item in create_slots(structure)
+        for item in create_slots(_control_structure())
         if item.uca_type.value == "NOT_PROVIDED"
     )
-    draft = SlotIcaDraft(
-        slot_id=slot.slot_id,
+
+
+def _draft_citing(context_row: str) -> SlotIcaDraft:
+    return SlotIcaDraft(
+        slot_id=_not_provided_slot().slot_id,
         is_na=False,
         findings=(
             IcaFindingDraft(
@@ -106,37 +108,52 @@ def test_context_rows_pass_preflight_and_fill_the_ica_context(tmp_path) -> None:
                 loss_consequence="the protected operation is harmed",
                 related_hazard_ids=("H-1",),
                 related_constraint_ids=("SC-1",),
-                context_row="CA-1-1:ctx-2",
+                context_row=context_row,
             ),
         ),
     )
-    prompts: list[str] = []
 
-    class Client:
-        model = "context-rows"
 
-        def complete(self, **kwargs):
-            prompts.append(kwargs["user_prompt"])
-            return LLMResult(
-                content={"filled_slots": [draft.model_dump(mode="json")]},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+class _ScriptedClient:
+    """Return each scripted draft in turn and keep every user prompt."""
 
-    request = SynthesisSlotRequest(
+    model = "context-rows"
+
+    def __init__(self, *drafts: SlotIcaDraft) -> None:
+        self.drafts = list(drafts)
+        self.prompts: list[str] = []
+
+    def complete(self, **kwargs):
+        self.prompts.append(kwargs["user_prompt"])
+        draft = self.drafts.pop(0)
+        return LLMResult(
+            content={"filled_slots": [draft.model_dump(mode="json")]},
+            prompt_tokens=1,
+            completion_tokens=1,
+            duration_ms=1,
+            system_prompt=kwargs["system_prompt"],
+            user_prompt=kwargs["user_prompt"],
+        )
+
+
+def _slot_request() -> SynthesisSlotRequest:
+    return SynthesisSlotRequest(
         target_id="RESP-1",
         target_kind="responsibility",
-        slots=(slot,),
+        slots=(_not_provided_slot(),),
         loss_analysis=_loss_analysis(),
-        control_structure=structure,
+        control_structure=_control_structure(),
         controls=_controls(),
     )
-    provider = ObligationAwareLLMAdapter(
-        Client(), run_dir=tmp_path, controls=_controls()
-    )
+
+
+def test_context_rows_pass_preflight_and_fill_the_ica_context(tmp_path) -> None:
+    structure = _control_structure()
+    slot = _not_provided_slot()
+    client = _ScriptedClient(_draft_citing("CA-1-1:ctx-2"))
+    prompts = client.prompts
+    request = _slot_request()
+    provider = ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=_controls())
 
     response = provider.fill(request)
 
@@ -155,3 +172,21 @@ def test_context_rows_pass_preflight_and_fill_the_ica_context(tmp_path) -> None:
     ica = compiled[slot.slot_id].icas[0]
     assert ica.context_row == "CA-1-1:ctx-2"
     assert ica.process_model_context == {"PM-1-1": "occupied"}
+
+
+def test_a_finding_citing_another_actions_row_is_sent_back_for_correction(
+    tmp_path,
+) -> None:
+    """A row outside the slot's own action fails provider validation, so the
+    correction policy repairs it instead of the slot ending unresolved."""
+    client = _ScriptedClient(
+        _draft_citing("CA-1-2:ctx-2"), _draft_citing("CA-1-1:ctx-2")
+    )
+    provider = ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=_controls())
+
+    response = provider.fill(_slot_request())
+
+    entries = read_calls_jsonl(tmp_path)
+    assert [entry["success"] for entry in entries] == [False, True]
+    assert "CA-1-2:ctx-2" in client.prompts[1]
+    assert response.filled_slots[0].icas[0].context_row == "CA-1-1:ctx-2"
