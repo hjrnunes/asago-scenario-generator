@@ -74,3 +74,24 @@ def test_an_unverified_state_change_decides_nothing() -> None:
         )
 
         assert (decision.present, decision.absent) == (frozenset(), frozenset())
+
+
+def test_a_complete_inventory_without_state_change_rules_out_full_crud() -> None:
+    decision = target_kc_decision(
+        _profile(_tool("lookup"), _tool("status", effect="observe"))
+    )
+
+    assert decision.present == frozenset()
+    assert decision.absent == {"KC6.3.2"}
+    assert "complete" in decision.reasons["KC6.3.2"]
+
+
+def test_a_possible_or_unverified_change_keeps_full_crud_open() -> None:
+    for tool in (
+        _tool("send", state="may_change"),
+        _tool("send", state="unknown"),
+        _tool("send", disposition="unresolved"),
+    ):
+        decision = target_kc_decision(_profile(_tool("lookup"), tool))
+
+        assert "KC6.3.2" not in decision.absent

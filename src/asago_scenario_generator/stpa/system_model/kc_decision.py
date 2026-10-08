@@ -18,6 +18,7 @@ from dataclasses import dataclass, field
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
     InterpreterVerifierAgreement,
+    InventoryCompleteness,
     TargetInterpretationDisposition,
     TargetSemanticInterpretation,
     TargetStateEffect,
@@ -51,17 +52,45 @@ def _names(items: Iterable[TargetSemanticInterpretation]) -> str:
     return ", ".join(sorted(item.tool_name for item in items))
 
 
+def _without_state_change(
+    profile: ExecutionTargetProfile,
+    verified: tuple[TargetSemanticInterpretation, ...],
+) -> bool:
+    """Every observed tool is verified and none can change target state."""
+    return (
+        profile.inventory_completeness is InventoryCompleteness.observed_complete
+        and len(verified) == len(profile.interpretations)
+        and all(item.likely_state_effect is TargetStateEffect.none for item in verified)
+    )
+
+
 def _database_access(
+    profile: ExecutionTargetProfile,
     verified: tuple[TargetSemanticInterpretation, ...],
 ) -> KcFactDecision:
-    """A verified state change means data access is not read-only (KC6.3.2)."""
+    """A verified state change means data access is not read-only (KC6.3.2).
+
+    A complete inventory whose every tool is verified to leave state
+    unchanged rules full CRUD out; it does not establish a database at all,
+    so KC6.3.1 stays with the model.
+    """
     writers = [
         item
         for item in verified
         if item.likely_state_effect is TargetStateEffect.changes
     ]
     if not writers:
-        return KcFactDecision()
+        if not _without_state_change(profile, verified):
+            return KcFactDecision()
+        return KcFactDecision(
+            absent=frozenset({DATABASE_FULL_CRUD}),
+            reasons={
+                DATABASE_FULL_CRUD: (
+                    "the observed inventory is complete and no verified tool "
+                    "changes target state"
+                )
+            },
+        )
     reason = (
         f"observed tools {_names(writers)} change target state, so the "
         "target's data access is not read-only"
@@ -77,4 +106,4 @@ def target_kc_decision(profile: ExecutionTargetProfile | None) -> KcFactDecision
     """Return the KC sub-codes that *profile*'s verified facts decide."""
     if profile is None:
         return KcFactDecision()
-    return _database_access(_verified(profile))
+    return _database_access(profile, _verified(profile))
