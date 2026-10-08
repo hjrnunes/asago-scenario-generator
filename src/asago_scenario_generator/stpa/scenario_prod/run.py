@@ -76,7 +76,11 @@ from .stage5.wire import BDIGenerationResult
 from .stage5.assemble import assemble_scenario_spec, parse_ica_slot_id
 from .stage5.generate import generate_bdi_for_context, is_bdi_length_retry_exhausted
 from .stage5.defender import populate_defender_bdi
-from .stage5.shape_step import ShapeStepConfig, apply_shape_step
+from .stage5.shape_step import (
+    ShapeStepConfig,
+    apply_shape_step,
+    observed_operation_names,
+)
 from .context import build_scenario_generation_context
 from .coverage import compute_coverage_gaps, write_coverage_gaps
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
@@ -192,15 +196,6 @@ class _Stage5ThreatResult:
 
     scenario_spec: ScenarioSpec | None
     abort_remaining: bool = False
-
-
-def _observed_operation_names(
-    profile: ExecutionTargetProfile | None,
-) -> tuple[str, ...] | None:
-    """Return exact operation identities from the supplied target inventory."""
-    if profile is None or profile.inventory is None:
-        return () if profile is not None else None
-    return tuple(tool.name for tool in profile.inventory.tools)
 
 
 def run_sp3(
@@ -478,7 +473,7 @@ def _run_stages_5_and_6(
     the functional-test specs.
     """
     environment_bound = execution_target_profile is not None
-    observed_operations = _observed_operation_names(execution_target_profile)
+    observed_operations = observed_operation_names(execution_target_profile)
     scenario_specs = _collect_stage5_specs(
         llm_client,
         enriched_threat_set,
