@@ -157,26 +157,14 @@ def derive_capability_profile(
         use_case_text=use_case_text,
     )
 
-    drafts: list[Stage1Profile] = []
-    errors: list[str] = []
-    for index in range(1, samples + 1):
-        outcome = call_with_policy(
-            llm_client=llm_client,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            response_format=stage1_profile_request_model(llm_client),
-            run_dir=run_dir,
-            stage=STAGE,
-            step=STEP if index == 1 else f"{STEP}_vote_{index}",
-            policy=CorrectionPolicy(validation_retries=1, include_response=True),
-            temperature=temperature,
-        )
-        if outcome.error is not None:
-            errors.append(outcome.error)
-        else:
-            drafts.append(outcome.value)
-    if not drafts:
-        raise StageError(stage=STAGE, step=STEP, message=errors[-1])
+    drafts, errors = _sample_drafts(
+        llm_client=llm_client,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
+        run_dir=run_dir,
+        temperature=temperature,
+        samples=samples,
+    )
 
     draws = [draft.kc_subcodes for draft in drafts]
     facts = target_kc_decision(target_profile)
@@ -198,6 +186,39 @@ def derive_capability_profile(
         post_process=inject_kc_subcodes_display,
     )
     return capability_profile
+
+
+def _sample_drafts(
+    *,
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    run_dir: Path,
+    temperature: float,
+    samples: int,
+) -> tuple[list[Stage1Profile], list[str]]:
+    """Send the Stage 1b request *samples* times; return the drafts and errors."""
+    drafts: list[Stage1Profile] = []
+    errors: list[str] = []
+    for index in range(1, samples + 1):
+        outcome = call_with_policy(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=stage1_profile_request_model(llm_client),
+            run_dir=run_dir,
+            stage=STAGE,
+            step=STEP if index == 1 else f"{STEP}_vote_{index}",
+            policy=CorrectionPolicy(validation_retries=1, include_response=True),
+            temperature=temperature,
+        )
+        if outcome.error is not None:
+            errors.append(outcome.error)
+        else:
+            drafts.append(outcome.value)
+    if not drafts:
+        raise StageError(stage=STAGE, step=STEP, message=errors[-1])
+    return drafts, errors
 
 
 def _decided_profile(
