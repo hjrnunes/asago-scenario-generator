@@ -12,8 +12,8 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _ContextScenarioSemanticsPayload,
 )
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
-from tests.helpers.stpa_builders import make_cs
+from tests.helpers.sp3_run import _make_ets
+from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
@@ -32,7 +32,7 @@ def test_exhausted_retry_on_the_only_threat_is_one_stage_error(tmp_path: Path) -
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=tmp_path,
     )
 

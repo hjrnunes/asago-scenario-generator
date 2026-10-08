@@ -31,8 +31,8 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
     run_sp3,
 )
-from tests.helpers.stpa_builders import make_cs
-from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
+from tests.helpers.stpa_builders import make_cs, make_loss_analysis
+from tests.helpers.sp3_run import _make_ets
 from tests.helpers.unified_stage2 import _observations, _profile
 from asago_scenario_generator.stpa.models.scenario_envelope import SystemContext
 from tests.helpers.scenario_handoff_publication import (
@@ -347,7 +347,7 @@ def test_scenario_without_a_preparable_projection_is_still_published(
         llm_client=_client([_adversarial_payload()]),
         enriched_threat_set=_make_ets(num_threats=1),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=bundle_run,
     )
     assert not (bundle_run / "scenarios" / "SCN-001.yaml").exists()

@@ -44,7 +44,7 @@ from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
     metric_tree_branch_coverage,
     write_eval_scorecard,
 )
-from tests.helpers.sp3_coverage import _make_loss_analysis
+from tests.helpers.stpa_builders import make_loss_analysis
 
 
 def _make_cs() -> ControlStructure:
@@ -323,7 +323,7 @@ class TestTraceabilityDepth:
 
     def test_complete_chains(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_enriched_threat_set()
         # 5 scenarios with valid chains
         envelopes = [
@@ -337,7 +337,7 @@ class TestTraceabilityDepth:
 
     def test_zero_scenarios(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_enriched_threat_set()
         result = metric_traceability_depth([], ets, cs, la)
         assert result["total_scenarios"] == 0
@@ -347,7 +347,7 @@ class TestTraceabilityDepth:
     def test_single_scenario_computed(self):
         """A single scenario must be computed, not short-circuited."""
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_enriched_threat_set()
         env = _make_envelope(spec=_make_scenario_spec())
         result = metric_traceability_depth([env], ets, cs, la)
@@ -559,7 +559,7 @@ class TestEvalScorecard:
 
     def test_scorecard_written_to_file(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_enriched_threat_set()
         envelopes = [_make_envelope(spec=_make_scenario_spec())]
 

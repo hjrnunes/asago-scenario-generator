@@ -39,7 +39,7 @@ from asago_scenario_generator.stpa.scenario_prod.coverage import (
     compute_coverage_gaps,
     write_coverage_gaps,
 )
-from tests.helpers.sp3_coverage import _make_loss_analysis
+from tests.helpers.stpa_builders import make_loss_analysis
 
 
 def _make_cs() -> ControlStructure:
@@ -205,7 +205,7 @@ class TestCoverageGaps:
 
     def test_structural_coverage_from_sp2(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(
             structural_coverage={
                 "total_slots": 40,
@@ -222,7 +222,7 @@ class TestCoverageGaps:
 
     def test_by_ica_type(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(by_ica_type={"NOT_PROVIDED": 15, "INCORRECT": 10})
         envs = [_make_envelope()]
         result = compute_coverage_gaps(ets, cs, envs, la)
@@ -231,7 +231,7 @@ class TestCoverageGaps:
 
     def test_by_controller(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(by_controller={"RESP-1": 12, "RESP-2": 8})
         envs = [_make_envelope()]
         result = compute_coverage_gaps(ets, cs, envs, la)
@@ -240,7 +240,7 @@ class TestCoverageGaps:
 
     def test_catalog_correspondence(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(
             catalog_correspondence={
                 "structural_with_match": 10,
@@ -256,7 +256,7 @@ class TestCoverageGaps:
 
     def test_uncovered_owasp_threats(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(uncovered_owasp=["T10"], uncovered_reason="No match")
         envs = [_make_envelope()]
         result = compute_coverage_gaps(ets, cs, envs, la)
@@ -265,7 +265,7 @@ class TestCoverageGaps:
 
     def test_orphan_elements(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         # PM-1-2 is not referenced by any ICA text
         ets = _make_ets()
         envs = [_make_envelope()]
@@ -274,7 +274,7 @@ class TestCoverageGaps:
 
     def test_orphan_icas(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         threats = [
             StructuralThreat(
                 ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
@@ -303,7 +303,7 @@ class TestCoverageGaps:
 
     def test_traceability_errors(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         threats = [
             StructuralThreat(
                 ica_slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
@@ -327,7 +327,7 @@ class TestCoverageGaps:
 
     def test_na_reconciliation_flags(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(na_flags=["flag1", "flag2"])
         envs = [_make_envelope()]
         result = compute_coverage_gaps(ets, cs, envs, la)
@@ -335,7 +335,7 @@ class TestCoverageGaps:
 
     def test_written_to_json(self):
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets()
         envs = [_make_envelope()]
         result = compute_coverage_gaps(ets, cs, envs, la)

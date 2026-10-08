@@ -43,10 +43,10 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_summary,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
-from tests.helpers.stpa_builders import make_cs
+from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
+from tests.helpers.sp3_run import _make_ets
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.pipeline import synthesis
 
@@ -251,7 +251,7 @@ def test_run_published_constraint_authority_is_not_reviewed_for_proposed_records
     The fixture loss analysis carries no reviewed stamps, so the constraint
     fact is proposed regardless of the Stage 1a source the caller reports.
     """
-    _run_publish(tmp_path, _make_loss_analysis())
+    _run_publish(tmp_path, make_loss_analysis())
     authority = _constraint_fact(_published(tmp_path))["authority"]
     assert authority != "supplied_reviewed_constraint"
     assert "reviewed" not in authority
@@ -259,7 +259,7 @@ def test_run_published_constraint_authority_is_not_reviewed_for_proposed_records
 
 def test_derived_run_publishes_derived_proposed_authority(tmp_path: Path) -> None:
     """VAL-A2-001: ``stage_1a.source: derived`` publishes derived authority."""
-    _run_publish(tmp_path, _make_loss_analysis(), stage_1a_source="derived")
+    _run_publish(tmp_path, make_loss_analysis(), stage_1a_source="derived")
     fact = _constraint_fact(_published(tmp_path))
     assert fact["authority"] == "derived_proposed_constraint"
 
@@ -268,7 +268,7 @@ def test_pinned_reviewed_record_publishes_reviewed(tmp_path: Path) -> None:
     """VAL-A2-002: a pinned reviewed record still publishes as reviewed."""
     _run_publish(
         tmp_path,
-        _reviewed(_make_loss_analysis()),
+        _reviewed(make_loss_analysis()),
         stage_1a_source="pinned",
     )
     fact = _constraint_fact(_published(tmp_path))
@@ -282,7 +282,7 @@ def test_pinned_reviewed_record_publishes_reviewed(tmp_path: Path) -> None:
 
 def test_authority_follows_source_record(tmp_path: Path) -> None:
     """VAL-A2-003: differing records yield differing published authorities."""
-    proposed = _make_loss_analysis()
+    proposed = make_loss_analysis()
     reviewed = _reviewed(proposed)
     constraint_id = proposed.security_constraints[0].constraint_id
     hazard_id = proposed.security_constraints[0].related_hazards[0]
@@ -465,7 +465,7 @@ def test_synthesis_threads_stage_1a_source(
     synthesis._default_scenarios(
         ica_enumeration=final_ica_result(),
         control_structure=SimpleNamespace(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         inputs=inputs,
         capability_profile=None,
         output_dir=tmp_path,

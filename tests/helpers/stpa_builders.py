@@ -1,4 +1,4 @@
-"""Control-structure and capability-profile builders that several test modules share."""
+"""Control-structure, capability-profile, and loss-analysis builders that test modules share."""
 
 from __future__ import annotations
 
@@ -7,6 +7,13 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     EntryPoint,
     ToolInventoryEntry,
+)
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
+    Loss,
+    LossAnalysis,
+    LossProvenance,
+    SecurityConstraint,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -109,3 +116,26 @@ def make_risk_cards(ids: tuple[str, ...] = ("atlas-001",)) -> list[RiskCard]:
         )
         for risk_id in ids
     ]
+
+
+def make_loss_analysis() -> LossAnalysis:
+    """Return one risk-card loss, one hazard, and one constraint (L-1, H-1, SC-1)."""
+    return LossAnalysis(
+        risk_card_losses=[
+            Loss(
+                loss_id="L-1",
+                description="Loss",
+                provenance=LossProvenance.risk_card,
+                source_risk_cards=["r1"],
+            ),
+        ],
+        use_case_losses=[],
+        hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
+        security_constraints=[
+            SecurityConstraint(
+                constraint_id="SC-1",
+                rule="Must validate",
+                related_hazards=["H-1"],
+            ),
+        ],
+    )

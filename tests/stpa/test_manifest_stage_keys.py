@@ -29,9 +29,9 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
 )
 
-from tests.helpers.stpa_builders import make_cs
+from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
+from tests.helpers.sp3_run import _make_ets
 
 PINNED_DIGEST = "6e127482ffcfd0d38b474e4518264c6e81c509a2c4d123f6de11d6f6e7069046"
 
@@ -69,7 +69,7 @@ def _final_manifest(
         llm_client=MockLLMClient(),
         enriched_threat_set=_make_ets(num_threats=1),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         scenario_envelopes=[],
         validation_errors=[],
         max_workers=1,

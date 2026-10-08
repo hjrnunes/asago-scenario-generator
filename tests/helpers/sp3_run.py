@@ -7,36 +7,7 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     EnrichedThreatSet,
     StructuralThreat,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
 from tests.stpa.sp1_helpers import MockLLMClient
-
-
-def _make_loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=["r1"],
-            ),
-        ],
-        use_case_losses=[],
-        hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1",
-                rule="Must validate",
-                related_hazards=["H-1"],
-            ),
-        ],
-    )
 
 
 def _make_ets(num_threats: int = 2) -> EnrichedThreatSet:

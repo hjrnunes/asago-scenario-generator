@@ -11,13 +11,6 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     CoverageAnalysis,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
@@ -38,27 +31,7 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     detect_orphan_elements,
     detect_orphan_icas,
 )
-from tests.helpers.stpa_builders import make_cs
-
-
-def _make_loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=["r1"],
-            ),
-        ],
-        use_case_losses=[],
-        hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1", rule="Constraint", related_hazards=["H-1"]
-            ),
-        ],
-    )
+from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 
 
 def _make_scenario_spec(
@@ -220,7 +193,7 @@ class TestTraceability:
 
     def test_passes_on_complete_chain(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_enriched_threat_set()
         env = _make_envelope()
         errors = validate_traceability([env], ets, cs, la)
@@ -228,7 +201,7 @@ class TestTraceability:
 
     def test_fails_on_broken_hazard(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         threat = _make_threat(related_hazards=["H-99"])
         ets = _make_enriched_threat_set(threats=[threat])
         env = _make_envelope()
@@ -237,7 +210,7 @@ class TestTraceability:
 
     def test_fails_on_broken_constraint(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         threat = _make_threat(related_constraints=["SC-99"])
         ets = _make_enriched_threat_set(threats=[threat])
         env = _make_envelope()
@@ -246,7 +219,7 @@ class TestTraceability:
 
     def test_fails_on_broken_responsibility(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_enriched_threat_set()
         spec = _make_scenario_spec(target_controller="RESP-99")
         env = _make_envelope(spec=spec)
@@ -255,7 +228,7 @@ class TestTraceability:
 
     def test_fails_on_broken_ica_link(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_enriched_threat_set()
         spec = _make_scenario_spec(ica_id="RESP-1:CA-1-1:NOT_PROVIDED:99")
         env = _make_envelope(spec=spec)
@@ -264,7 +237,7 @@ class TestTraceability:
 
     def test_accepts_legal_provenance_root(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_enriched_threat_set()
         spec = _make_scenario_spec(provenance="structural")
         env = _make_envelope(spec=spec)
@@ -273,7 +246,7 @@ class TestTraceability:
 
     def test_rejects_illegal_provenance_root(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_enriched_threat_set()
         # Use model_construct to bypass Literal validation on ThreatSource
         threat_source = ThreatSource.model_construct(

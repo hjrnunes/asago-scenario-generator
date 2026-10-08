@@ -5,9 +5,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
-from tests.helpers.stpa_builders import make_cs
+from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.helpers.sp3_run import _make_ets, _make_loss_analysis
+from tests.helpers.sp3_run import _make_ets
 
 
 def _client(payloads: list[dict]) -> MockLLMClient:
@@ -21,7 +21,7 @@ def _publish(payloads: list[dict], run_dir: Path, **kwargs: object):
         llm_client=_client(payloads),
         enriched_threat_set=_make_ets(num_threats=len(payloads)),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=run_dir,
         **kwargs,
     )

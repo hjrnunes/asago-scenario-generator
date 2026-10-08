@@ -13,10 +13,10 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
     run_sp3,
 )
-from tests.helpers.stpa_builders import make_cs
+from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from tests.helpers.sp3_run import _make_ets, _make_loss_analysis, _semantics_wire
+from tests.helpers.sp3_run import _make_ets, _semantics_wire
 
 
 def _functional_adversary() -> dict:
@@ -103,7 +103,7 @@ def test_functional_test_candidate_is_persisted_for_the_owner(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=tmp_path,
     )
 
@@ -134,7 +134,7 @@ def test_functional_test_accepts_empty_attacker_bdi_and_keeps_constraint_groundi
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=tmp_path,
     )
 
@@ -159,7 +159,7 @@ def test_mixed_run_publishes_both_candidates_with_distinct_status(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=2),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=tmp_path,
     )
 

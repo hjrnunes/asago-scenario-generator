@@ -34,7 +34,7 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
     run_sp3,
 )
 
-from tests.helpers.stpa_builders import make_cs
+from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
@@ -43,7 +43,7 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
 )
 from asago_scenario_generator.pipeline.target_realization import TargetRealizationResult
-from tests.helpers.sp3_run import _make_ets, _make_loss_analysis, _setup_mock_client
+from tests.helpers.sp3_run import _make_ets, _setup_mock_client
 
 
 def _target_profile_fixture() -> ExecutionTargetProfile:
@@ -83,7 +83,7 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=tmp_path,
     )
     assert len(result.scenario_envelopes) == 1
@@ -121,7 +121,7 @@ def test_run_sp3_publishes_target_profile_before_stage5_provider_call(tmp_path):
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=run_dir,
         execution_target_profile=_target_profile_fixture(),
     )
@@ -142,7 +142,7 @@ def test_run_sp3_rejects_tampered_target_profile_before_provider_call(tmp_path):
             llm_client=client,
             enriched_threat_set=_make_ets(num_threats=1),
             control_structure=make_cs(),
-            loss_analysis=_make_loss_analysis(),
+            loss_analysis=make_loss_analysis(),
             run_dir=run_dir,
             execution_target_profile=profile,
         )
@@ -170,7 +170,7 @@ def test_run_sp3_skips_provider_work_when_profile_publication_fails(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
         control_structure=make_cs(),
-        loss_analysis=_make_loss_analysis(),
+        loss_analysis=make_loss_analysis(),
         run_dir=run_dir,
         execution_target_profile=_target_profile_fixture(),
     )
@@ -186,7 +186,7 @@ class TestFullRun:
     def test_nested_run_dir_created(self):
         """run_sp3 must create nested run_dir that doesn't exist yet."""
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=1)
         client = _setup_mock_client(1)
 
@@ -216,7 +216,7 @@ class TestFullRun:
             llm_client=client,
             enriched_threat_set=_make_ets(num_threats=1),
             control_structure=make_cs(),
-            loss_analysis=_make_loss_analysis(),
+            loss_analysis=make_loss_analysis(),
             run_dir=run_dir,
         )
 
@@ -239,7 +239,7 @@ class TestFullRun:
                 llm_client=client,
                 enriched_threat_set=_make_ets(num_threats=1),
                 control_structure=make_cs(),
-                loss_analysis=_make_loss_analysis(),
+                loss_analysis=make_loss_analysis(),
                 run_dir=Path(tmpdir),
             )
             manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
@@ -250,7 +250,7 @@ class TestFullRun:
     def test_pre_existing_dirs_handled(self):
         """run_sp3 must not fail when run_dir and scenarios/ already exist."""
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=1)
         client = _setup_mock_client(1)
 
@@ -268,7 +268,7 @@ class TestFullRun:
 
     def test_produces_scenario_envelopes_and_scorecard(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
 
@@ -288,7 +288,7 @@ class TestFullRun:
 
     def test_all_llm_calls_logged(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
 
@@ -308,7 +308,7 @@ class TestFullRun:
 
     def test_stage_7_makes_no_llm_calls(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
 
@@ -326,7 +326,7 @@ class TestFullRun:
 
     def test_run_manifest_written(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
 
@@ -354,7 +354,7 @@ class TestFullRun:
 
     def test_coverage_gaps_written(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
 
@@ -370,7 +370,7 @@ class TestFullRun:
 
     def test_scenario_yaml_loads_as_handoff(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
 
@@ -390,7 +390,7 @@ class TestFullRun:
 
     def test_scenario_count_equals_threats(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=3)
         client = _setup_mock_client(3)
 
@@ -406,7 +406,7 @@ class TestFullRun:
 
     def test_eval_scorecard_contains_coverage_gaps(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
 
@@ -425,7 +425,7 @@ class TestFullRun:
 
     def test_max_workers_flag(self):
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=2)
         client = _setup_mock_client(2)
 
@@ -483,7 +483,7 @@ class TestErrorPaths:
     def test_stage5_invalid_responsibility_skipped(self):
         """A threat with an invalid responsibility ID is skipped with an error."""
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = EnrichedThreatSet(
             structural_threats=[
                 StructuralThreat(
@@ -525,7 +525,7 @@ class TestErrorPaths:
     def test_stage5_llm_failure_skipped(self):
         """A Stage 5 LLM failure is skipped with an error."""
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=1)
         client = MockLLMClient()
         client.set_exception_for(BDIGenerationResult, RuntimeError("LLM down"))
@@ -554,7 +554,7 @@ class TestErrorPaths:
             pass
 
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=3)
         client = MockLLMClient()
         client.set_exception_for(
@@ -596,7 +596,7 @@ class TestErrorPaths:
             llm_client=client,
             enriched_threat_set=_make_ets(num_threats=1),
             control_structure=make_cs(),
-            loss_analysis=_make_loss_analysis(),
+            loss_analysis=make_loss_analysis(),
             run_dir=tmp_path,
         )
 
@@ -611,7 +611,7 @@ class TestErrorPaths:
     def test_stage5_validation_failure_does_not_reach_stage6(self):
         """A structurally invalid Stage 5 result remains an unresolved scenario."""
         cs = make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets(num_threats=1)
         client = MockLLMClient()
         client.set_response_queue(
@@ -690,7 +690,7 @@ class TestTargetInputPins:
                 llm_client=client,
                 enriched_threat_set=_make_ets(num_threats=1),
                 control_structure=make_cs(),
-                loss_analysis=_make_loss_analysis(),
+                loss_analysis=make_loss_analysis(),
                 run_dir=tmp_path / "run",
                 **kwargs,
             )

@@ -75,7 +75,7 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     get_branch_categories,
     validate_traceability,
 )
-from tests.helpers.sp3_coverage import _make_loss_analysis
+from tests.helpers.stpa_builders import make_loss_analysis
 
 
 # ---------------------------------------------------------------------------
@@ -438,7 +438,7 @@ class TestTraceabilityChainProperty:
     def test_valid_chain_produces_no_errors(self):
         """A scenario with all valid links produces zero traceability errors."""
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         ets = _make_ets()
         env = _make_envelope()
         errors = validate_traceability([env], ets, cs, la)
@@ -463,7 +463,7 @@ class TestTraceabilityChainProperty:
         constraint checks only run when the ICA link is intact.
         """
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
 
         hazards = ["H-99"] if break_hazard else ["H-1"]
         constraints = ["SC-99"] if break_constraint else ["SC-1"]
@@ -511,7 +511,7 @@ class TestTraceabilityChainProperty:
     def test_valid_scenarios_produce_zero_errors(self, n_scenarios):
         """Multiple valid scenarios produce zero traceability errors."""
         cs = _make_cs()
-        la = _make_loss_analysis()
+        la = make_loss_analysis()
         threats = [_make_threat(ica_id_suffix=i + 1) for i in range(n_scenarios)]
         ets = _make_ets(threats=threats)
         envelopes = [
