@@ -11,7 +11,6 @@ from __future__ import annotations
 from collections.abc import Iterable
 from typing import Any
 
-from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_accounting import (
     GOVERNANCE_ROUTED_NO_FINDING,
     ObligationAccounting,
@@ -28,6 +27,11 @@ from asago_scenario_generator.models.obligation_consideration import (
 )
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferReport
+from asago_scenario_generator.stpa.obligation_aware.briefs import (
+    build_neutral_briefs,
+    create_obligation_batches as _chunk_briefs,
+    require_batch_size,
+)
 
 
 def _require_plan(value: Any) -> TaxonomyObligationPlan:
@@ -36,22 +40,6 @@ def _require_plan(value: Any) -> TaxonomyObligationPlan:
         raise TypeError("plan must be a TaxonomyObligationPlan")
     value.assert_integrity()
     return value
-
-
-def _typed_patterns(value: Iterable[AttackPattern]) -> tuple[AttackPattern, ...]:
-    """Validate and canonicalize an iterable of authoritative patterns."""
-    if isinstance(value, (str, bytes, dict)):
-        raise TypeError("patterns must be an iterable of AttackPattern values")
-    try:
-        patterns = tuple(value)
-    except TypeError as exc:
-        raise TypeError("patterns must be an iterable of AttackPattern values") from exc
-    if any(not isinstance(item, AttackPattern) for item in patterns):
-        raise TypeError("patterns must contain only AttackPattern values")
-    ids = tuple(item.id for item in patterns)
-    if len(ids) != len(set(ids)):
-        raise ValueError("attack-pattern records must have unique IDs")
-    return tuple(sorted(patterns, key=lambda item: item.id))
 
 
 def _typed_briefs(
@@ -77,79 +65,9 @@ def _typed_briefs(
     return ordered
 
 
-def build_neutral_obligation_briefs(
-    plan: TaxonomyObligationPlan,
-    attack_pattern_catalog: Iterable[AttackPattern],
-) -> tuple[NeutralObligationBrief, ...]:
-    """Build one neutral brief for every applicable Phase 1 obligation.
-
-    Qualification and projection dispositions intentionally do not filter the
-    result.  Capability-excluded and governance-only rows remain in Phase 1
-    accounting but are not attack-pattern questions and therefore produce no
-    brief.
-    """
-    plan = _require_plan(plan)
-    patterns = _typed_patterns(attack_pattern_catalog)
-    by_id = {pattern.id: pattern for pattern in patterns}
-    briefs = [
-        _neutral_brief(plan, row, _brief_pattern(row, by_id))
-        for row in plan.obligations
-        if row.scope_disposition == "applicable"
-    ]
-    return tuple(sorted(briefs, key=lambda item: item.obligation_id))
-
-
-def _brief_pattern(row: Any, by_id: dict[str, AttackPattern]) -> AttackPattern:
-    """Resolve the exact catalog pattern an applicable row names."""
-    if row.attack_pattern_id is None or row.attack_pattern_semantic_digest is None:
-        raise ValueError(
-            f"applicable obligation {row.obligation_id} lacks attack-pattern identity"
-        )
-    pattern = by_id.get(row.attack_pattern_id)
-    if pattern is None:
-        raise ValueError(
-            f"obligation {row.obligation_id} references an unknown attack pattern"
-        )
-    if pattern.canonical_chain.semantic_digest != row.attack_pattern_semantic_digest:
-        raise ValueError(
-            f"obligation {row.obligation_id} substituted its attack-pattern digest"
-        )
-    return pattern
-
-
-def _neutral_brief(
-    plan: TaxonomyObligationPlan, row: Any, pattern: AttackPattern
-) -> NeutralObligationBrief:
-    """Build the neutral brief for one applicable row and its pattern."""
-    resource_bytes = {
-        binding.resource_ref.model_dump_json(): binding.resource_ref
-        for candidate in row.candidate_records
-        for binding in candidate.resource_bindings
-    }
-    return NeutralObligationBrief(
-        obligation_id=row.obligation_id,
-        risk_ref=row.risk_ref,
-        attack_pattern_id=pattern.id,
-        attack_pattern_name=pattern.name,
-        attack_pattern_description=pattern.description,
-        attack_pattern_semantic_digest=pattern.canonical_chain.semantic_digest,
-        taxonomy_chain=row.taxonomy_chain,
-        prerequisite_capabilities=pattern.prerequisite_capabilities,
-        qualification_disposition=row.qualification_disposition,
-        applicability_evidence=row.evidence,
-        resource_references=tuple(resource_bytes.values()),
-        candidate_ids=tuple(
-            candidate.candidate_id for candidate in row.candidate_records
-        ),
-        plan_digest=plan.semantic_digest,
-        catalog_pins=plan.catalog_pins,
-        mapping_pins=plan.mapping_pins,
-    )
-
-
 # The shorter name is useful in the STPA adapter while retaining the full
 # name for callers that want to emphasize the Phase 1 provenance.
-build_neutral_briefs = build_neutral_obligation_briefs
+build_neutral_obligation_briefs = build_neutral_briefs
 
 GOVERNANCE_BRIEF_INSTRUCTION = (
     "Treat this governance risk as a hypothesis for structural STPA analysis. "
@@ -199,15 +117,8 @@ def batch_neutral_obligation_briefs(
     max_batch_size: int,
 ) -> tuple[tuple[NeutralObligationBrief, ...], ...]:
     """Partition briefs by canonical obligation identity and fixed batch size."""
-    if type(max_batch_size) is not int:
-        raise TypeError("max_batch_size must be an integer")
-    if max_batch_size <= 0:
-        raise ValueError("max_batch_size must be positive")
-    ordered = _typed_briefs(briefs)
-    return tuple(
-        ordered[index : index + max_batch_size]
-        for index in range(0, len(ordered), max_batch_size)
-    )
+    require_batch_size(max_batch_size)
+    return _chunk_briefs(_typed_briefs(briefs), max_batch_size)
 
 
 create_obligation_batches = batch_neutral_obligation_briefs
@@ -881,9 +792,6 @@ def build_obligation_accounting(
     )
 
 
-derive_obligation_accounting = build_obligation_accounting
-
-
 __all__ = [
     "batch_neutral_obligation_briefs",
     "build_consideration_artifact",
@@ -892,6 +800,5 @@ __all__ = [
     "build_neutral_obligation_briefs",
     "build_obligation_accounting",
     "create_obligation_batches",
-    "derive_obligation_accounting",
     "validate_obligation_routes",
 ]

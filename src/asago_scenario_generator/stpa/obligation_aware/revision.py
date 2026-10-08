@@ -45,6 +45,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.obligation_aware.calls import call_evidence
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     AnalysisControls,
     DraftCoordinationLink,
@@ -1215,20 +1216,14 @@ def _revision_call_evidence(
     requests_sent: int,
 ) -> ConsiderationCallEvidence:
     """Build one exact call record for the single revision attempt."""
-    response_digest = None
-    if response is not None:
-        response_digest = response.response_digest or compute_framed_digest(
-            REVISION_RESPONSE_DIGEST_DOMAIN,
-            response.model_dump(mode="json"),
-        )
-    return ConsiderationCallEvidence(
-        call_id="stpa-revision:one-round",
+    return call_evidence(
+        "stpa-revision:one-round",
+        requests_sent,
+        outcome,
         request_digest=request.semantic_digest,
-        response_digest=response_digest,
-        model_profile=controls.model_profile,
-        model_name=controls.model_name,
-        attempt_count=requests_sent,
-        outcome=outcome,
+        controls=controls,
+        response=response,
+        digest_domain=REVISION_RESPONSE_DIGEST_DOMAIN,
     )
 
 

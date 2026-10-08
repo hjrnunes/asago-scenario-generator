@@ -41,6 +41,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     count_requests,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.obligation_aware.calls import call_evidence
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
     StpaIndex,
     build_stpa_index,
@@ -752,10 +753,10 @@ def _direct_control_context(
     str | None,
     ControlActionEffectKind | None,
 ]:
-    responsibility = index.responsibilities.get(str(slot.responsibility))
+    resolved = index.slot_path(slot)
+    responsibility, action = resolved.owner, resolved.action
     if responsibility is None:
         raise ValueError(f"unknown responsibility {slot.responsibility}")
-    action = index.owned_action(responsibility.resp_id, slot.control_action)
     if action is None:
         raise ValueError(f"unknown control action {slot.control_action}")
     effect_kind = action.effect_kind
@@ -780,10 +781,10 @@ def _coordination_control_context(
     str | None,
     ControlActionEffectKind | None,
 ]:
-    link = index.coordination_links.get(str(slot.coordination_link))
+    resolved = index.slot_path(slot)
+    link, responsibility = resolved.link, resolved.owner
     if link is None:
         raise ValueError(f"unknown coordination link {slot.coordination_link}")
-    responsibility = index.responsibilities.get(link.source)
     if responsibility is None:
         raise ValueError(f"unknown coordination source {link.source}")
     recipient = index.responsibilities.get(link.target)
@@ -1062,11 +1063,7 @@ def _call_evidence(
     outcome: str,
     requests_sent: int,
 ) -> ConsiderationCallEvidence:
-    return ConsiderationCallEvidence(
-        call_id=f"{batch_id}:{suffix}",
-        attempt_count=requests_sent,
-        outcome=outcome,
-    )
+    return call_evidence(f"{batch_id}:{suffix}", requests_sent, outcome)
 
 
 def _collect_initial_results(
@@ -1845,13 +1842,7 @@ def _failed_batch(
             for request in requests
         ),
         diagnostics=diagnostics,
-        call_evidence=(
-            ConsiderationCallEvidence(
-                call_id=f"{batch_id}:initial",
-                attempt_count=0,
-                outcome="technical_failure",
-            ),
-        ),
+        call_evidence=(_call_evidence(batch_id, "initial", "technical_failure", 0),),
     )
 
 

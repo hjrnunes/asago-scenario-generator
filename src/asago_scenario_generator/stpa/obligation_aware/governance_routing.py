@@ -20,7 +20,6 @@ from asago_scenario_generator.models.artifact_pin import Digest
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     SemanticDigestMixin,
-    compute_framed_digest,
 )
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
@@ -37,6 +36,11 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.obligation_aware.briefs import split_by_budget
+from asago_scenario_generator.stpa.obligation_aware.calls import (
+    call_evidence,
+    call_with_feedback,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisControls
 from asago_scenario_generator.stpa.obligation_aware.governance_prompts import (
     build_governance_routing_prompts,
@@ -171,18 +175,7 @@ def _governance_batches(
         )
         return budget.count(f"{system}\n{user}") <= budget.usable_input_tokens
 
-    batches: list[list[NeutralObligationBrief]] = []
-    for brief in ordered:
-        current = batches[-1] if batches else None
-        if (
-            current is not None
-            and len(current) < max_batch_size
-            and fits([*current, brief])
-        ):
-            current.append(brief)
-        else:
-            batches.append([brief])
-    return tuple(tuple(item) for item in batches)
+    return split_by_budget(ordered, max_batch_size, fits)
 
 
 def _target_slots(slots: Sequence[SlotPlaceholder]) -> dict[str, tuple[str, ...]]:
@@ -244,12 +237,6 @@ def _feedback(errors: Mapping[str, str]) -> str:
     )
 
 
-def _call(adapter, request, feedback):
-    if feedback is None:
-        return adapter.route_governance(request)
-    return adapter.route_governance(request, correction_feedback=feedback)
-
-
 def _attempt(
     adapter,
     request: GovernanceRoutingRequest,
@@ -262,7 +249,7 @@ def _attempt(
 ]:
     """Make one call; a malformed answer fails every risk, a budget error escapes."""
     try:
-        response = _call(adapter, request, feedback)
+        response = call_with_feedback(adapter.route_governance, request, feedback)
         if not isinstance(response, GovernanceRoutingResponse):
             raise TypeError("governance adapter returned an unsupported response")
         accepted, errors = _check_response(response, request, covers)
@@ -311,19 +298,14 @@ def _risk_ids(request: GovernanceRoutingRequest) -> list[str]:
 def _evidence(
     request: GovernanceRoutingRequest, outcome: _BatchOutcome
 ) -> ConsiderationCallEvidence:
-    response_digest = None
-    if outcome.response is not None:
-        response_digest = compute_framed_digest(
-            GOVERNANCE_RESPONSE_DIGEST_DOMAIN, outcome.response.model_dump(mode="json")
-        )
-    return ConsiderationCallEvidence(
-        call_id=f"stpa-governance-route:{request.batch_id}",
+    return call_evidence(
+        f"stpa-governance-route:{request.batch_id}",
+        outcome.attempts,
+        "unresolved" if outcome.errors else "accepted",
         request_digest=request.semantic_digest,
-        response_digest=response_digest,
-        model_profile=request.controls.model_profile,
-        model_name=request.controls.model_name,
-        attempt_count=outcome.attempts,
-        outcome="unresolved" if outcome.errors else "accepted",
+        controls=request.controls,
+        response=outcome.response,
+        digest_domain=GOVERNANCE_RESPONSE_DIGEST_DOMAIN,
     )
 
 
