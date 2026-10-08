@@ -36,7 +36,7 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoff,
+    ScenarioHandoffV4,
     build_scenario_handoff,
 )
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
@@ -129,11 +129,11 @@ def _reviewed(analysis: LossAnalysis) -> LossAnalysis:
     return analysis.model_copy(update={"security_constraints": stamped})
 
 
-def _constraint_fact(handoff: ScenarioHandoff | dict) -> dict:
+def _constraint_fact(handoff: ScenarioHandoffV4 | dict) -> dict:
     """Return the scenario-context constraint fact of one handoff."""
     payload = (
         handoff.model_dump(mode="json")
-        if isinstance(handoff, ScenarioHandoff)
+        if isinstance(handoff, ScenarioHandoffV4)
         else handoff
     )
     facts = [
@@ -172,7 +172,7 @@ def _handoff_for(
     constraint_id: str,
     hazard_id: str,
     tmp_path: Path,
-) -> ScenarioHandoff:
+) -> ScenarioHandoffV4:
     """Build one handoff through the normal authoring path.
 
     The scenario context is built from the supplied loss analysis, so the
@@ -285,7 +285,7 @@ def test_authority_follows_source_record(tmp_path: Path) -> None:
     constraint_id = proposed.security_constraints[0].constraint_id
     hazard_id = proposed.security_constraints[0].related_hazards[0]
 
-    def _build(analysis: LossAnalysis, source: str | None) -> ScenarioHandoff:
+    def _build(analysis: LossAnalysis, source: str | None) -> ScenarioHandoffV4:
         return _handoff_for(
             analysis,
             stage_1a_source=source,

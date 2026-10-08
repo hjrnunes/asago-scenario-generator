@@ -88,7 +88,7 @@ from .realized_operation import realized_operation
 from .target_profile_publication import publish_execution_target_profile
 from .presentation import render_scenario_summary
 from .handoff import (
-    ScenarioHandoff,
+    ScenarioHandoffV4,
     Stage1aSource,
     build_scenario_handoff,
     handoff_ownership_violations,
@@ -790,7 +790,7 @@ def _write_scenario_handoff_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
-) -> ScenarioHandoff:
+) -> ScenarioHandoffV4:
     """Write the versioned scenario handoff for one published scenario.
 
     The normal product run publishes scenario meaning only: narrative, attack

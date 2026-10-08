@@ -244,12 +244,7 @@ def _generator(tmp: Path) -> ModuleType:
     spec.loader.exec_module(module)
     root = tmp / "scenario-handoff"
     shutil.copytree(CONTRACT_ROOT, root)
-    for attribute, kit in (
-        ("KIT_V2", "handoff-v2"),
-        ("KIT_V3", "handoff-v3"),
-        ("KIT_V4", "handoff-v4"),
-    ):
-        setattr(module, attribute, root / kit)
+    module.KIT_V4 = root / "handoff-v4"
     module.ROOT = root
     return module
 
