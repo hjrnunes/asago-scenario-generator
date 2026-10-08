@@ -1,7 +1,7 @@
 """Deterministic summaries publish exactly their source rendering."""
 
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
-    render_scenario_summary,
+    render_scenario_presentation,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import (
     _run_stage6_for_spec,
@@ -24,15 +24,15 @@ def test_deterministic_feedback_summary_needs_no_invented_process_model_id():
         envelope.attack_tree["root"]
         == envelope.scenario_spec.unsafe_outcome_semantic_proposition
     )
-    assert all("PM-" in step for step in envelope.gherkin_spec.given)
+    assert all("PM-" not in step for step in envelope.gherkin_spec.given)
     errors = []
     _validate_envelope_stage7(envelope, make_minimal_loss_analysis(), errors)
     assert errors == []
 
 
-def test_stage6_envelope_carries_the_rendered_summary_unchanged():
+def test_stage6_envelope_carries_the_rendered_presentation_unchanged():
     spec = _spec()
-    narrative, tree, gherkin = render_scenario_summary(spec)
+    narrative, tree, gherkin = render_scenario_presentation(spec)
 
     envelope = _run_stage6_for_spec(spec, _control_structure())
 
