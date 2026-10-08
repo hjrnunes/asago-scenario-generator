@@ -51,10 +51,16 @@ cases:
       # From the shared _obligation_entries.j2 partial.
       - contiguous substring of its constraint's `rule`
       - Copy its words in order from `rule`
+      - >-
+        complete, compatible `obligations` list whose `rule_span` values meet
+        the `rule_span` requirement below.
     forbidden:
       - share no subject phrase
       - wrong subject wording
+      - values quoting the new rule
     ordered:
+      - - "`rule_span` requirement below"
+        - contiguous substring of its constraint's `rule`
       - ['"security_constraint_additions"', "## Worked examples"]
       - - "`security_constraint_edits` replaces"
         - An edit target must be an ID present in the supplied graph.
