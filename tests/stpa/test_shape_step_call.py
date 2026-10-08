@@ -160,7 +160,7 @@ def test_an_uninfluenced_carrier_downgrades_without_a_second_request(
         client,
         [spec_for(AdversaryKind.third_party_via_content)],
         tmp_path,
-        influence={"get_listing": "unknown"},
+        influence={"get_listing": "unknown", "refund": "indirect"},
     )
 
     assert len(client.calls) == 1
@@ -169,6 +169,42 @@ def test_an_uninfluenced_carrier_downgrades_without_a_second_request(
         spec.attack_shape.downgrade_reason
         is ShapeDowngradeReason.NO_ATTACKER_INFLUENCED_OPERATION
     )
+
+
+def test_an_indirect_only_scenario_without_an_influenced_operation_sends_no_request(
+    tmp_path: Path,
+) -> None:
+    client = client_replying(INDIRECT_REPLY)
+
+    (spec,) = run_step(
+        client,
+        [spec_for(AdversaryKind.third_party_via_content)],
+        tmp_path,
+        influence={"get_listing": "unknown"},
+    )
+
+    assert client.calls == []
+    assert spec.attack_shape.source is ShapeSource.CODE_DEFAULT
+    assert (
+        spec.attack_shape.downgrade_reason
+        is ShapeDowngradeReason.NO_ATTACKER_INFLUENCED_OPERATION
+    )
+
+
+def test_a_direct_scenario_without_an_influenced_operation_still_asks(
+    tmp_path: Path,
+) -> None:
+    client = client_replying(DIRECT_REPLY)
+
+    (spec,) = run_step(
+        client,
+        [spec_for(AdversaryKind.malicious_customer)],
+        tmp_path,
+        influence={"get_listing": "unknown"},
+    )
+
+    assert len(client.calls) == 1
+    assert spec.attack_shape.source is ShapeSource.STAGE5_VALIDATED
 
 
 def test_a_scenario_without_a_target_profile_cannot_confirm_its_carrier(
@@ -184,6 +220,7 @@ def test_a_scenario_without_a_target_profile_cannot_confirm_its_carrier(
         config=ShapeStepConfig(),
     )
 
+    assert client.calls == []
     assert (
         spec.attack_shape.downgrade_reason is ShapeDowngradeReason.CARRIER_NOT_OBSERVED
     )

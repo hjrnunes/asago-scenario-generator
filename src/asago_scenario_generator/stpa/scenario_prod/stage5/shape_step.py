@@ -313,12 +313,32 @@ def _render_prompts(spec: ScenarioSpec, adversary_kind: AdversaryKind, run: _Sha
     return system, user
 
 
+def _no_carrier_reason(
+    adversary_kind: AdversaryKind, run: _ShapeRun
+) -> ShapeDowngradeReason | None:
+    """Name why an indirect-only scenario cannot have a carrier, before any request.
+
+    Every reply such a scenario could give would be downgraded for the same
+    reason, so asking would spend a request on a known outcome.
+    """
+    if allowed_channels(adversary_kind, run.config) != {AttackChannel.INDIRECT}:
+        return None
+    if run.observed_operations is None:
+        return ShapeDowngradeReason.CARRIER_NOT_OBSERVED
+    if not run.influenced_operations:
+        return ShapeDowngradeReason.NO_ATTACKER_INFLUENCED_OPERATION
+    return None
+
+
 def _shape_for(spec: ScenarioSpec, run: _ShapeRun) -> AttackShape | None:
     adversary = spec.adversary
     if adversary is None:
         return default_attack_shape(None)
     if adversary.kind is AdversaryKind.none:
         return None
+    unreachable = _no_carrier_reason(adversary.kind, run)
+    if unreachable is not None:
+        return default_attack_shape(unreachable)
     system, user = _render_prompts(spec, adversary.kind, run)
     response_model = response_model_for(run.config)
     outcome = call_with_policy(
@@ -357,7 +377,9 @@ def apply_shape_step(
 ) -> list[ScenarioSpec]:
     """Return ``specs`` with the shape each adversarial scenario's request produced.
 
-    A functional scenario passes through unchanged and costs no request. Each
+    A functional scenario passes through unchanged and costs no request, as
+    does an indirect-only scenario when the run has no attacker-influenced
+    operation; that scenario takes the code default with the reason. Each other
     adversarial scenario costs exactly one request, with no retry.
     """
     run = _ShapeRun(
