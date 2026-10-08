@@ -17,9 +17,9 @@ from pydantic import Field, StrictBool, StrictStr, field_validator, model_valida
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     FrozenDict,
-    FrozenList,
     SemanticDigestMixin,
     canonical_json_bytes,
+    freeze_json,
 )
 
 
@@ -231,7 +231,7 @@ class McpToolObservation(_Model):
     @classmethod
     def freeze_json_fields(cls, value: Any) -> Any:
         """Retain JSON shape while closing nested mutable values."""
-        return _freeze_json(value)
+        return freeze_json(value)
 
     @model_validator(mode="after")
     def validate_observation(self) -> "McpToolObservation":
@@ -318,7 +318,7 @@ class SimulationBehavior(_Model):
     @field_validator("inputs", "outputs", "state_changes", mode="before")
     @classmethod
     def freeze_json_maps(cls, value: Mapping[str, Any]) -> dict[str, Any] | FrozenDict:
-        return _freeze_json(value)
+        return freeze_json(value)
 
     @model_validator(mode="after")
     def validate_behavior(self) -> "SimulationBehavior":
@@ -372,7 +372,7 @@ class TargetProfileResource(_Model):
     @classmethod
     def freeze_interface_json(cls, value: Any) -> Any:
         """Close exact interface JSON while retaining opaque output schemas."""
-        return _freeze_json(value)
+        return freeze_json(value)
 
     @model_validator(mode="after")
     def validate_target_profile_resource(self) -> "TargetProfileResource":
@@ -755,33 +755,6 @@ def _ensure_unique_ids(values: Sequence[Any], attribute: str, label: str) -> Non
     identities = [getattr(value, attribute) for value in values]
     if len(identities) != len(set(identities)):
         raise ValueError(f"{label} must have unique {attribute} values")
-
-
-def _freeze_json(value: Any) -> Any:
-    """Recursively close JSON interface data while retaining JSON shape."""
-    if value is None:
-        return None
-    if isinstance(value, (str, int, float, bool, FrozenDict, FrozenList)):
-        return _freeze_json_scalar(value)
-    if isinstance(value, Mapping):
-        return _freeze_json_mapping(value)
-    if isinstance(value, (list, tuple)):
-        return FrozenList(_freeze_json(item) for item in value)
-    raise TypeError("interface JSON must contain only JSON values")
-
-
-def _freeze_json_scalar(value: Any) -> Any:
-    """Reject non-finite scalar values while retaining the scalar itself."""
-    if isinstance(value, float) and value != value:
-        raise ValueError("interface JSON cannot contain NaN")
-    return value
-
-
-def _freeze_json_mapping(value: Mapping[str, Any]) -> FrozenDict:
-    """Recursively freeze a JSON mapping after checking its key types."""
-    if any(not isinstance(key, str) for key in value):
-        raise TypeError("interface JSON mapping keys must be strings")
-    return FrozenDict({key: _freeze_json(item) for key, item in value.items()})
 
 
 __all__ = [

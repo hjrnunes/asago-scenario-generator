@@ -10,7 +10,6 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ProfileBasis,
     SimulationBehavior,
     TargetProfileResource,
-    _freeze_json,
 )
 from tests.helpers.execution_classification import (
     _simulation_profile,
@@ -83,20 +82,6 @@ def test_target_profile_rejects_simulation_behavior() -> None:
     )
     with pytest.raises(ValueError, match="MCP resources"):
         _profile_update(_target_profile(resources=(resource,)))
-
-
-def test_interface_json_freezing_covers_nested_and_rejected_values() -> None:
-    assert _freeze_json({"nested": [1, {"enabled": True}], "empty": None}) == {
-        "nested": [1, {"enabled": True}],
-        "empty": None,
-    }
-    assert _freeze_json("scalar") == "scalar"
-    with pytest.raises(TypeError, match="mapping keys"):
-        _freeze_json({1: "not-json"})
-    with pytest.raises(TypeError, match="only JSON values"):
-        _freeze_json(object())
-    with pytest.raises(ValueError, match="NaN"):
-        _freeze_json(float("nan"))
 
 
 @pytest.mark.parametrize("properties", (None, [], "query"))

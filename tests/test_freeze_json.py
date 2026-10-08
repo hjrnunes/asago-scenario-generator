@@ -1,19 +1,21 @@
-"""Characterize how observed interface JSON is closed into frozen containers."""
+"""Pin how observed interface JSON is closed into frozen containers."""
 
 from __future__ import annotations
 
 import pytest
 
-from asago_scenario_generator.models.canonical import FrozenDict, FrozenList
-from asago_scenario_generator.models.target_realization import _freeze_interface_json
-from asago_scenario_generator.stpa.models.execution_classification import _freeze_json
+from asago_scenario_generator.models.canonical import (
+    FrozenDict,
+    FrozenList,
+    freeze_json,
+)
+from asago_scenario_generator.stpa.models.execution_classification import (
+    McpToolObservation,
+)
 
-FREEZERS = (_freeze_json, _freeze_interface_json)
 
-
-@pytest.mark.parametrize("freeze", FREEZERS)
-def test_nested_json_closes_into_frozen_containers(freeze) -> None:
-    frozen = freeze({"nested": [1, ("a", {"enabled": True})], "empty": None})
+def test_nested_json_closes_into_frozen_containers() -> None:
+    frozen = freeze_json({"nested": [1, ("a", {"enabled": True})], "empty": None})
     assert frozen == {"nested": [1, ["a", {"enabled": True}]], "empty": None}
     assert type(frozen) is FrozenDict
     assert type(frozen["nested"]) is FrozenList
@@ -23,37 +25,55 @@ def test_nested_json_closes_into_frozen_containers(freeze) -> None:
         frozen["nested"][1][1]["enabled"] = False
 
 
-@pytest.mark.parametrize("freeze", FREEZERS)
 @pytest.mark.parametrize("scalar", (None, "text", 3, 1.5, True))
-def test_scalars_pass_through(freeze, scalar) -> None:
-    assert freeze(scalar) is scalar
+def test_scalars_pass_through(scalar) -> None:
+    assert freeze_json(scalar) is scalar
 
 
-@pytest.mark.parametrize("freeze", FREEZERS)
-def test_frozen_containers_pass_through_unchanged_and_unchecked(freeze) -> None:
+def test_frozen_containers_pass_through_unchanged_and_unchecked() -> None:
     opaque = object()
     frozen_dict = FrozenDict({"bad": opaque})
     frozen_list = FrozenList([opaque, float("nan")])
-    assert freeze(frozen_dict) is frozen_dict
-    assert freeze(frozen_list) is frozen_list
-    assert (
-        freeze({"inner": frozen_dict, "items": [frozen_list]})["inner"] is frozen_dict
-    )
-    assert freeze({"items": [frozen_list]})["items"][0] is frozen_list
+    assert freeze_json(frozen_dict) is frozen_dict
+    assert freeze_json(frozen_list) is frozen_list
+    nested = freeze_json({"inner": frozen_dict, "items": [frozen_list]})
+    assert nested["inner"] is frozen_dict
+    assert nested["items"][0] is frozen_list
 
 
-@pytest.mark.parametrize("freeze", FREEZERS)
-def test_rejected_values_keep_their_exception_types(freeze) -> None:
-    with pytest.raises(TypeError, match="only JSON values"):
-        freeze(object())
-    with pytest.raises(TypeError, match="only JSON values"):
-        freeze({"enum": [{"value"}]})
-    with pytest.raises(ValueError, match="NaN"):
-        freeze({"default": float("nan")})
-    with pytest.raises(TypeError, match="keys must be strings"):
-        freeze({"properties": {1: {"type": "string"}}})
+@pytest.mark.parametrize(
+    ("value", "error", "message"),
+    (
+        (object(), TypeError, "JSON data must contain only JSON values"),
+        ({"enum": [{"value"}]}, TypeError, "JSON data must contain only JSON values"),
+        ({"default": float("nan")}, ValueError, "JSON data cannot contain NaN"),
+        ({"properties": {1: "x"}}, TypeError, "JSON mapping keys must be strings"),
+    ),
+)
+def test_rejected_values_name_the_failure_kind(value, error, message) -> None:
+    with pytest.raises(error) as raised:
+        freeze_json(value)
+    assert str(raised.value) == message
 
 
-@pytest.mark.parametrize("freeze", FREEZERS)
-def test_infinity_is_not_rejected_here(freeze) -> None:
-    assert freeze({"maximum": float("inf")}) == {"maximum": float("inf")}
+def test_infinity_is_not_rejected_here() -> None:
+    assert freeze_json({"maximum": float("inf")}) == {"maximum": float("inf")}
+
+
+@pytest.mark.parametrize(
+    ("schema", "error", "message"),
+    (
+        ({"enum": [{"value"}]}, TypeError, "only JSON values"),
+        ({"default": float("nan")}, ValueError, "NaN"),
+        ({"properties": {1: {}}}, TypeError, "keys must be strings"),
+    ),
+)
+def test_mcp_tool_observation_closes_its_input_schema_through_it(
+    schema, error, message
+) -> None:
+    # TargetOperationObservation's twin cases sit in
+    # tests/test_target_realization.py.
+    with pytest.raises(error, match=message):
+        McpToolObservation(
+            name="lookup", source_observation_sha256="1" * 64, input_schema=schema
+        )

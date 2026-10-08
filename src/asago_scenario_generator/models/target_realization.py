@@ -17,11 +17,10 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_valid
 
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
-    FrozenDict,
-    FrozenList,
     SemanticDigestMixin,
     canonical_yaml,
     compute_framed_digest,
+    freeze_json,
     unique_sorted_strings,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -140,13 +139,11 @@ class TargetOperationObservation(ClosedCanonicalModel):
     @classmethod
     def freeze_input_schema(cls, value: Any) -> Any:
         """Retain exact schema semantics while closing nested JSON values."""
-        return _freeze_interface_json(value)
+        return freeze_json(value)
 
     @model_validator(mode="after")
     def canonicalize(self) -> "TargetOperationObservation":
-        object.__setattr__(
-            self, "input_schema", _freeze_interface_json(self.input_schema)
-        )
+        object.__setattr__(self, "input_schema", freeze_json(self.input_schema))
         properties = self.input_schema.get("properties", {})
         if properties is None:
             properties = {}
@@ -1072,35 +1069,6 @@ class TargetRealizationResult(SemanticDigestMixin, ClosedCanonicalModel):
         result = canonical_target_realization(cls.model_validate(data))
         result.assert_integrity()
         return result
-
-
-def _freeze_interface_json(value: Any) -> Any:
-    """Recursively close one JSON-compatible observed interface value."""
-    if value is None or isinstance(value, (str, int, float, bool)):
-        return _interface_scalar(value)
-    if isinstance(value, FrozenDict | FrozenList):
-        return value
-    if isinstance(value, Mapping):
-        return _freeze_interface_mapping(value)
-    if isinstance(value, (list, tuple)):
-        return FrozenList(_freeze_interface_json(item) for item in value)
-    raise TypeError("target operation input_schema must contain only JSON values")
-
-
-def _interface_scalar(value: Any) -> Any:
-    """Return one JSON scalar, rejecting NaN."""
-    if isinstance(value, float) and value != value:
-        raise ValueError("target operation input_schema cannot contain NaN")
-    return value
-
-
-def _freeze_interface_mapping(value: Mapping[Any, Any]) -> FrozenDict:
-    """Close one JSON object whose keys must all be strings."""
-    if any(not isinstance(key, str) for key in value):
-        raise TypeError("target operation input_schema keys must be strings")
-    return FrozenDict(
-        {key: _freeze_interface_json(item) for key, item in value.items()}
-    )
 
 
 def _validate_slot_relative_ica_identity(slot_id: str, ica_id: str) -> None:
