@@ -50,7 +50,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     Responsibility,
     check_structural_heuristics,
-    _is_valid_element_ref,
     normalize_control_action_effect_kind,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
@@ -1438,269 +1437,185 @@ def _build_control_structure(
 
 
 # ---------------------------------------------------------------------------
-# Fallback helpers — deterministic, no LLM dependency
+# Checked assembly — deterministic, no LLM dependency
 # ---------------------------------------------------------------------------
 
 
-def _iter_resp_ref_fields(
-    resp: Responsibility,
-) -> list[tuple[str, str, Any]]:
-    """Yield (element_label, field_name, item) for each ElementRef-bearing field.
-
-    Each tuple identifies a single ElementRef slot inside the
-    responsibility: the PM feedback_source, CA target, and FB source.
-    The caller can ``getattr``/``setattr`` *field_name* on *item* to
-    read or nullify the ref.
-    """
-    return (
-        [(f"PM {pm.pm_id}", "feedback_source", pm) for pm in resp.process_model_parts]
-        + [(f"CA {ca.ca_id}", "target", ca) for ca in resp.control_actions]
-        + [(f"FB {fb.fb_id}", "source", fb) for fb in resp.feedback_channels]
-    )
+def _dict_items(value: Any) -> list[dict[str, Any]]:
+    """Return the dictionary members of a decoded list, ignoring other shapes."""
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, dict)]
 
 
-def _nullify_invalid_refs_in_resp(
-    resp: Responsibility,
-    resp_ids: set[str],
-    cp_ids: set[str],
+def _unresolved_element_ref(
+    label: str, ref: Any, resp_ids: set[Any], cp_ids: set[Any]
 ) -> list[str]:
-    """Nullify unresolvable ElementRefs in a single responsibility.
+    """Name a typed reference that resolves to no responsibility or process."""
+    if ref is None:
+        return []
+    if not isinstance(ref, dict):
+        return [f"{label} {ref!r}"]
+    ref_type = getattr(ref.get("type"), "value", ref.get("type"))
+    ref_id = ref.get("id")
+    known = {"responsibility": resp_ids, "controlled_process": cp_ids}.get(
+        ref_type, set()
+    )
+    if isinstance(ref_id, str) and ref_id in known:
+        return []
+    return [f"{label} {ref_type} {ref_id!r}"]
 
-    Returns a warning string for each stripped ref.
+
+def _unknown_ids(label: str, refs: list[Any], known_ids: set[Any]) -> list[str]:
+    """Name each ID reference that is not one of the known IDs."""
+    return [
+        f"{label} {ref!r}"
+        for ref in refs
+        if not (isinstance(ref, str) and ref in known_ids)
+    ]
+
+
+def _unresolved_responsibility_refs(
+    resp: dict[str, Any], resp_ids: set[Any], cp_ids: set[Any]
+) -> list[str]:
+    """Name the unresolved references inside one responsibility."""
+    pm_parts = _dict_items(resp.get("process_model_parts"))
+    local_pm_ids = {
+        pm.get("pm_id") for pm in pm_parts if isinstance(pm.get("pm_id"), str)
+    }
+    found: list[str] = []
+    for pm in pm_parts:
+        found += _unresolved_element_ref(
+            f"ProcessModelPart {pm.get('pm_id')} feedback_source",
+            pm.get("feedback_source"),
+            resp_ids,
+            cp_ids,
+        )
+    for ca in _dict_items(resp.get("control_actions")):
+        label = f"ControlAction {ca.get('ca_id')}"
+        found += _unresolved_element_ref(
+            f"{label} target", ca.get("target"), resp_ids, cp_ids
+        )
+        found += _unknown_ids(
+            f"{label} process_model_refs",
+            ca.get("process_model_refs") or [],
+            local_pm_ids,
+        )
+    for fb in _dict_items(resp.get("feedback_channels")):
+        label = f"FeedbackChannel {fb.get('fb_id')}"
+        found += _unresolved_element_ref(
+            f"{label} source", fb.get("source"), resp_ids, cp_ids
+        )
+        found += _unknown_ids(f"{label} updates", [fb.get("updates")], local_pm_ids)
+    return found
+
+
+def _unresolved_references(payload: dict[str, Any]) -> list[str]:
+    """Name every reference in a control-structure payload that resolves nowhere.
+
+    The payload is normalized first, so the names match the identifiers the
+    failed validation saw.  The checks mirror the reference rules of
+    :class:`ControlStructure`; duplicate IDs and other non-reference failures
+    produce no entry.
     """
-    warnings: list[str] = []
-    for element_label, field_name, item in _iter_resp_ref_fields(resp):
-        ref = getattr(item, field_name)
-        if ref is not None and not _is_valid_element_ref(ref, resp_ids, cp_ids):
-            warnings.append(
-                f"Stripped invalid {field_name} from {element_label}: "
-                f"{ref.type.value} '{ref.id}' "
-                f"not found in responsibilities or controlled processes."
-            )
-            setattr(item, field_name, None)
-    return warnings
+    normalized = normalize_control_structure_payload(payload).payload
+    responsibilities = _dict_items(normalized.get("responsibilities"))
+    resp_ids = {resp.get("resp_id") for resp in responsibilities}
+    cp_ids = {
+        cp.get("cp_id") for cp in _dict_items(normalized.get("controlled_processes"))
+    }
+    all_pm_ids = {
+        pm.get("pm_id")
+        for resp in responsibilities
+        for pm in _dict_items(resp.get("process_model_parts"))
+    }
+    found: list[str] = []
+    for resp in responsibilities:
+        found += _unresolved_responsibility_refs(resp, resp_ids, cp_ids)
+    for link in _dict_items(normalized.get("coordination_links")):
+        found += _unresolved_link_refs(link, resp_ids, all_pm_ids)
+    return found
 
 
-def _drop_invalid_feedback_updates(resp: Responsibility) -> list[str]:
-    """Drop feedback channels whose required local PM reference is unresolved."""
-    pm_ids = {pm.pm_id for pm in resp.process_model_parts}
-    valid_channels: list[FeedbackChannel] = []
-    warnings: list[str] = []
-    for channel in resp.feedback_channels:
-        update_id = channel.updates
-        if isinstance(update_id, str) and update_id in pm_ids:
-            valid_channels.append(channel)
-            continue
-        warnings.append(
-            f"Stripped invalid feedback channel {channel.fb_id}: updates "
-            f"'{channel.updates}' does not reference a process model part "
-            f"in responsibility {resp.resp_id}."
+def _unresolved_link_refs(
+    link: dict[str, Any], resp_ids: set[Any], all_pm_ids: set[Any]
+) -> list[str]:
+    """Name the unresolved endpoints and shared state of one coordination link."""
+    label = f"CoordinationLink {link.get('link_id')}"
+    return [
+        *_unknown_ids(f"{label} source responsibility", [link.get("source")], resp_ids),
+        *_unknown_ids(f"{label} target responsibility", [link.get("target")], resp_ids),
+        *_unknown_ids(f"{label} shared_pm", [link.get("shared_pm")], all_pm_ids),
+    ]
+
+
+def _validation_failure(
+    exc: Exception,
+    payload: dict[str, Any] | None,
+    *,
+    step: str,
+    run_dir: Path,
+    model: str,
+    call_log: CallLog | None,
+) -> StageError:
+    """Log a failed deterministic step and describe it as a ``StageError``."""
+    log_llm_call_failure(
+        model,
+        run_dir,
+        STAGE,
+        step,
+        f"{type(exc).__name__}: {exc}",
+        call_log=call_log,
+    )
+    unresolved = _unresolved_references(payload) if payload is not None else []
+    if unresolved:
+        message = (
+            "control structure failed validation; unresolved references: "
+            + "; ".join(unresolved)
         )
-    resp.feedback_channels = valid_channels
-    return warnings
+    else:
+        message = f"control structure failed validation: {type(exc).__name__}: {exc}"
+    return StageError(stage=STAGE, step=step, message=message)
 
 
-def _sanitize_for_fallback(
-    responsibilities: list[Responsibility],
-    controlled_processes: list[ControlledProcess],
-) -> tuple[list[Responsibility], list[ControlledProcess], list[str]]:
-    """Nullify ElementRefs that cannot be resolved against available IDs.
-
-    Iterates deep-copied responsibilities and nullifies any
-    ``feedback_source``, ``control_action.target``, or
-    ``feedback_channel.source`` whose ElementRef id cannot be resolved
-    against the available resp_ids and cp_ids.
-
-    Args:
-        responsibilities: Responsibilities from the ResponsibilitySet.
-        controlled_processes: Controlled processes from the ControlElementSet.
-
-    Returns:
-        A tuple of (sanitized responsibilities, controlled processes,
-        warnings). The warnings list contains one entry per stripped
-        ElementRef.
-    """
-    resp_ids = {r.resp_id for r in responsibilities}
-    cp_ids = {cp.cp_id for cp in controlled_processes}
-    sanitized_resps = copy.deepcopy(responsibilities)
-    sanitized_cps = copy.deepcopy(controlled_processes)
-    warnings: list[str] = []
-
-    for resp in sanitized_resps:
-        warnings.extend(_nullify_invalid_refs_in_resp(resp, resp_ids, cp_ids))
-        warnings.extend(_drop_invalid_feedback_updates(resp))
-
-    return sanitized_resps, sanitized_cps, warnings
-
-
-def _strip_all_refs_in_resp(resp: Responsibility) -> list[str]:
-    """Strip ALL ElementRefs from a single responsibility, returning warnings."""
-    warnings: list[str] = []
-    for element_label, field_name, item in _iter_resp_ref_fields(resp):
-        ref = getattr(item, field_name)
-        if ref is not None:
-            warnings.append(
-                f"Further-degraded: stripped {field_name} from {element_label}."
-            )
-            setattr(item, field_name, None)
-    warnings.extend(_drop_invalid_feedback_updates(resp))
-    return warnings
-
-
-def _strip_all_element_refs(
-    responsibilities: list[Responsibility],
-    controlled_processes: list[ControlledProcess],
-) -> tuple[list[Responsibility], list[ControlledProcess], list[str]]:
-    """Strip ALL ElementRefs from responsibilities (further-degraded fallback).
-
-    Sets all feedback_source to None, removes all control_action targets,
-    and sets all feedback_channel.source to None. Also deduplicates
-    responsibilities by resp_id (keeping the first occurrence) so that
-    the resulting ControlStructure can pass validation even when the
-    original ResponsibilitySet had duplicate IDs.
-
-    Args:
-        responsibilities: Responsibilities to strip.
-        controlled_processes: Controlled processes (deduplicated by cp_id).
-
-    Returns:
-        A tuple of (stripped responsibilities, controlled processes,
-        warnings). The warnings list contains one entry per stripped
-        ElementRef and per duplicate responsibility.
-    """
-    stripped_resps: list[Responsibility] = []
-    seen_resp_ids: set[str] = set()
-    warnings: list[str] = []
-
-    for resp in copy.deepcopy(responsibilities):
-        if resp.resp_id in seen_resp_ids:
-            warnings.append(
-                f"Further-degraded: removed duplicate responsibility {resp.resp_id}."
-            )
-            continue
-        seen_resp_ids.add(resp.resp_id)
-        warnings.extend(_strip_all_refs_in_resp(resp))
-        stripped_resps.append(resp)
-
-    # Deduplicate controlled processes by cp_id
-    stripped_cps: list[ControlledProcess] = []
-    seen_cp_ids: set[str] = set()
-    for cp in copy.deepcopy(controlled_processes):
-        if cp.cp_id not in seen_cp_ids:
-            seen_cp_ids.add(cp.cp_id)
-            stripped_cps.append(cp)
-
-    return stripped_resps, stripped_cps, warnings
-
-
-def _fallback_control_structure(
-    enriched_responsibilities: list[Responsibility],
-    controlled_processes: list[ControlledProcess],
-) -> tuple[ControlStructure, list[str]]:
-    """Build the sanitized fallback, degrading to stripped refs if needed."""
-    warnings: list[str] = []
-    try:
-        sanitized_resps, sanitized_cps, sanitize_warnings = _sanitize_for_fallback(
-            enriched_responsibilities,
-            controlled_processes,
-        )
-        warnings.extend(sanitize_warnings)
-        return (
-            _build_control_structure(sanitized_resps, sanitized_cps),
-            warnings,
-        )
-    except Exception:
-        stripped_resps, stripped_cps, strip_warnings = _strip_all_element_refs(
-            enriched_responsibilities,
-            controlled_processes,
-        )
-        warnings.extend(strip_warnings)
-        return (
-            _build_control_structure(stripped_resps, stripped_cps),
-            warnings,
-        )
-
-
-def _assemble_with_fallback(
+def _assemble_stage2_structure(
     responsibility_set: ResponsibilitySet,
     control_element_set: ControlElementSet,
     run_dir: Path,
     model: str,
     *,
     call_log: CallLog | None = None,
-) -> tuple[ControlStructure, list[str]]:
-    """Assemble ControlStructure from Call 2a + Call 2b, falling back on failure.
+) -> ControlStructure:
+    """Assemble the ControlStructure from Call 2a + Call 2b or stop Stage 2.
 
-    On assembly failure (invalid cross-references in the ControlElementSet),
-    the failure is logged to ``calls.jsonl`` and a fallback ControlStructure
-    is built from the ResponsibilitySet alone (without coordination links).
-    If both fallback tiers fail validation, a ``StageError`` is raised so the
-    SP1 runner can preserve the partial artifacts and record a fatal stage
-    diagnostic instead of leaking a raw Pydantic exception.
-
-    Before falling back, the Call 2b control actions and feedback channels
-    are assigned onto the Call 2a responsibilities via
-    ``_enrich_responsibilities`` so they are preserved on the degraded
-    path. The fallback path then sanitizes invalid ElementRefs via
-    ``_sanitize_for_fallback``. If sanitization still fails (e.g. duplicate
-    IDs), a further-degraded path strips ALL ElementRefs.
-
-    This function is deterministic and has no LLM dependency, so it can
-    be tested independently of the Stage 2 LLM call sequence.
+    On failure the step is logged to ``calls.jsonl`` and a ``StageError``
+    names every unresolved reference, so the SP1 runner records a fatal
+    stage diagnostic and no degraded structure is written.
 
     Args:
         responsibility_set: Responsibilities with RCs and PMs from Call 2a.
         control_element_set: CAs, FBs, and CPs from Call 2b.
         run_dir: Directory for failure logging.
         model: LLM model name (used in the call-log entry).
-
-    Returns:
-        A tuple of (ControlStructure, assembly_warnings). The warning list
-        is empty when the assembly succeeds.
     """
     try:
-        return (
-            _assemble_control_structure(responsibility_set, control_element_set),
-            [],
-        )
+        return _assemble_control_structure(responsibility_set, control_element_set)
     except Exception as exc:
-        error_msg = f"{type(exc).__name__}: {exc}"
-        log_llm_call_failure(
-            model,
-            run_dir,
-            STAGE,
-            "assemble_control_structure",
-            error_msg,
-            call_log=call_log,
-        )
-        warnings = [f"{STAGE}/assemble_control_structure: {error_msg}"]
-
-        # Enrich Call 2a responsibilities with Call 2b control actions and
-        # feedback channels before sanitization/stripping. Without this, the
-        # fallback tiers silently discard all CAs and FBs (the
-        # ``responsibility_set.responsibilities`` passed in only carry RCs
-        # and PM parts). The enriched list is built once and reused for both
-        # tiers; each tier deep-copies it internally, so there is no risk of
-        # cross-tier mutation.
         try:
-            enriched_resps = _enrich_responsibilities(
-                responsibility_set, control_element_set
-            )
-            fallback, fallback_warnings = _fallback_control_structure(
-                enriched_resps,
+            payload = _control_structure_payload(
+                _enrich_responsibilities(responsibility_set, control_element_set),
                 control_element_set.controlled_processes,
             )
-        except Exception as fallback_exc:
-            fallback_error = f"{type(fallback_exc).__name__}: {fallback_exc}"
-            raise StageError(
-                stage=STAGE,
-                step="assemble_control_structure",
-                message=(
-                    f"{error_msg}; fallback construction failed: {fallback_error}"
-                ),
-            ) from fallback_exc
-        warnings.extend(fallback_warnings)
-        return fallback, warnings
+        except Exception:
+            payload = None
+        raise _validation_failure(
+            exc,
+            payload,
+            step="assemble_control_structure",
+            run_dir=run_dir,
+            model=model,
+            call_log=call_log,
+        ) from exc
 
 
 # ---------------------------------------------------------------------------
@@ -1708,54 +1623,50 @@ def _assemble_with_fallback(
 # ---------------------------------------------------------------------------
 
 
-def _add_coordination_links_with_fallback(
+def _add_coordination_links(
     control_structure: ControlStructure,
     coordination_analysis: CoordinationAnalysis,
     run_dir: Path,
     model: str,
     source_id_mappings: dict[str, dict[str, str]] | None = None,
     call_log: CallLog | None = None,
-) -> tuple[ControlStructure, list[str]]:
-    """Add coordination links from Call 3 to the ControlStructure.
+) -> ControlStructure:
+    """Add coordination links from Call 3 to the ControlStructure or stop Stage 2.
 
-    On failure (invalid coordination link references), the failure is
-    logged and the ControlStructure is returned without coordination links.
+    On failure the step is logged to ``calls.jsonl`` and a ``StageError``
+    names every unresolved link reference.
 
     Args:
         control_structure: The assembled ControlStructure (without links).
         coordination_analysis: Coordination links and integrity findings from Call 3.
         run_dir: Directory for failure logging.
         model: LLM model name (used in the call-log entry).
-
-    Returns:
-        A tuple of (ControlStructure, warnings). The warning list is empty
-        when the coordination links are added successfully.
     """
     if not coordination_analysis.coordination_links:
-        return control_structure, []
+        return control_structure
 
+    payload: dict[str, Any] | None = None
     try:
-        payload = control_structure.model_dump(mode="python", exclude_none=False)
         links = [
             link.model_dump(mode="python", exclude_none=False)
             for link in coordination_analysis.coordination_links
         ]
         if source_id_mappings is not None:
             _rewrite_coordination_link_source_ids(links, source_id_mappings)
-        payload["coordination_links"] = links
-        return validate_normalized_control_structure(payload), []
+        payload = {
+            **control_structure.model_dump(mode="python", exclude_none=False),
+            "coordination_links": links,
+        }
+        return validate_normalized_control_structure(payload)
     except Exception as exc:
-        error_msg = f"{type(exc).__name__}: {exc}"
-        log_llm_call_failure(
-            model,
-            run_dir,
-            STAGE,
-            "add_coordination_links",
-            error_msg,
+        raise _validation_failure(
+            exc,
+            payload,
+            step="add_coordination_links",
+            run_dir=run_dir,
+            model=model,
             call_log=call_log,
-        )
-        warnings = [f"{STAGE}/add_coordination_links: {error_msg}"]
-        return control_structure, warnings
+        ) from exc
 
 
 def _rewrite_coordination_link_source_ids(
@@ -2002,11 +1913,11 @@ def derive_control_structure(
         target_evidence=target_evidence,
     )
 
-    # Assembly: merge Call 2a + Call 2b → ControlStructure (with fallback)
+    # Assembly: merge Call 2a + Call 2b → ControlStructure
     assembly_source_id_maps = _assembly_source_id_maps(
         responsibility_set, control_element_set
     )
-    control_structure, assembly_warnings = _assemble_with_fallback(
+    control_structure = _assemble_stage2_structure(
         responsibility_set,
         control_element_set,
         run_dir,
@@ -2134,8 +2045,8 @@ def derive_control_structure(
     finally:
         write_yaml(semantic_result.loss_analysis, run_dir / "loss-analysis.yaml")
 
-    # Add coordination links to the ControlStructure (with fallback)
-    control_structure, coord_warnings = _add_coordination_links_with_fallback(
+    # Add coordination links to the ControlStructure
+    control_structure = _add_coordination_links(
         control_structure,
         coordination_analysis,
         run_dir,
@@ -2149,7 +2060,7 @@ def derive_control_structure(
     return ControlStructureDerivationResult(
         loss_analysis=reviewed_loss_analysis,
         control_structure=control_structure,
-        warnings=assembly_warnings + repair_warnings + coord_warnings,
+        warnings=repair_warnings,
     )
 
 

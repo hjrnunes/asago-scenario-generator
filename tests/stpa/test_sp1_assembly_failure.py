@@ -1,22 +1,21 @@
-"""Unit tests for SP1 assembly fallback — ControlElementSet validation failures.
+"""Stage 2 assembly and coordination-link failures stop the stage.
 
-Covers MergeFallback-01 through MergeFallback-10 from the fallback QA contract.
-
-When _assemble_with_fallback() fails because the Call 2b ControlElementSet
-contains invalid cross-references, the pipeline falls back to building a
-ControlStructure from the ResponsibilitySet alone (without coordination
-links). The fallback preserves Call 2a responsibilities and controlled
-processes, is written to control-structure.yaml, and the pipeline
-completes without crashing. The assembly failure is logged and recorded
-in stage_errors.
+When the assembled control structure or the Call 3 coordination links fail
+validation, Stage 2 logs the failed step to ``calls.jsonl`` and raises a
+``StageError`` that names every unresolved reference.  No degraded control
+structure is written.
 """
 
 from __future__ import annotations
 
+import pytest
 import yaml
 
 from asago_scenario_generator.models.capability_profile import Stage1Profile
-from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+from asago_scenario_generator.stpa.infra.unvalidated_decode import (
+    construct_model_unvalidated,
+)
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysisDraft,
@@ -26,6 +25,8 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,
     RequirementSet,
     ResponsibilitySet,
+    _add_coordination_links,
+    _assemble_stage2_structure,
     derive_control_structure,
 )
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult, run_sp1
@@ -40,7 +41,6 @@ from tests.stpa.sp1_helpers import (
 from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 from tests.helpers.sp1_connection_set_merge import (
     _make_loss_analysis,
-    _valid_control_element_set_dict as _valid_control_element_set_dict_with_cp,
     _valid_requirement_set_dict,
 )
 
@@ -344,253 +344,197 @@ def _reviewed_coordination_fixture(value):
     }
 
 
-# ---------------------------------------------------------------------------
-# MergeFallback-01: Invalid ControlElementSet triggers fallback
-# ---------------------------------------------------------------------------
+ASSEMBLY_ERROR = (
+    "stage_2/assemble_control_structure: control structure failed validation; "
+    "unresolved references: ProcessModelPart PM-1-1 feedback_source "
+    "controlled_process 'CP-99'"
+)
 
 
-class TestMergeFallback01FallbackTriggered:
-    """MergeFallback-01: invalid ControlElementSet triggers assembly fallback."""
+def _assembly_entries(run_dir) -> list[dict]:
+    return [
+        entry
+        for entry in read_calls_jsonl(run_dir)
+        if entry["step"] == "assemble_control_structure"
+    ]
 
-    def test_merge_fallback_01_invalid_control_element_set_triggers_fallback(
-        self, tmp_path
-    ):
-        """Invalid ControlElementSet produces a valid ControlStructure without crashing."""
+
+class TestAssemblyFailureStopsStage2:
+    """A structure that fails validation raises instead of degrading."""
+
+    def test_failing_assembly_raises_a_stage_error_naming_the_reference(self, tmp_path):
         client = _setup_stage2_client()
-        result = derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
+
+        with pytest.raises(StageError) as exc_info:
+            derive_control_structure(
+                llm_client=client,
+                use_case_text="Test",
+                loss_analysis=_make_loss_analysis(),
+                run_dir=tmp_path,
+            )
+
+        assert (exc_info.value.stage, exc_info.value.step) == (
+            "stage_2",
+            "assemble_control_structure",
         )
-        cs, warnings = result.control_structure, result.warnings
-        assert isinstance(cs, ControlStructure)
-        assert len(cs.responsibilities) == 2
-        # The assembly produced warnings
-        assert len(warnings) >= 1
-        assert "assemble_control_structure" in warnings[0]
+        assert str(exc_info.value) == ASSEMBLY_ERROR
 
-
-# ---------------------------------------------------------------------------
-# MergeFallback-02: Fallback ControlStructure has empty coordination_links
-# ---------------------------------------------------------------------------
-
-
-class TestMergeFallback02EmptyCoordinationLinks:
-    """MergeFallback-02: fallback has no coordination links (empty CoordinationAnalysis)."""
-
-    def test_merge_fallback_02_empty_coordination_links(self, tmp_path):
+    def test_failing_assembly_is_logged_once_and_writes_no_structure(self, tmp_path):
         client = _setup_stage2_client()
-        result = derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        cs = result.control_structure
-        assert cs.coordination_links == []
 
+        with pytest.raises(StageError):
+            derive_control_structure(
+                llm_client=client,
+                use_case_text="Test",
+                loss_analysis=_make_loss_analysis(),
+                run_dir=tmp_path,
+            )
 
-# ---------------------------------------------------------------------------
-# MergeFallback-03: Fallback preserves responsibilities from Call 2a
-# ---------------------------------------------------------------------------
+        entries = _assembly_entries(tmp_path)
+        assert len(entries) == 1
+        assert entries[0]["stage"] == "stage_2"
+        assert entries[0]["success"] is False
+        assert "CP-99" in entries[0]["error"]
+        assert not (tmp_path / "control-structure-draft.yaml").exists()
+        assert not (tmp_path / "control-structure.yaml").exists()
+        assert len(client.calls) == 3  # Calls 1, 2a, and 2b; no Call 3
 
-
-class TestMergeFallback03PreservesResponsibilities:
-    """MergeFallback-03: fallback contains RESP-1 and RESP-2 from Call 2a."""
-
-    def test_merge_fallback_03_preserves_responsibilities(self, tmp_path):
-        client = _setup_stage2_client()
-        result = derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        cs = result.control_structure
-        resp_ids = {r.resp_id for r in cs.responsibilities}
-        assert "RESP-1" in resp_ids
-        assert "RESP-2" in resp_ids
-        resp1 = next(r for r in cs.responsibilities if r.resp_id == "RESP-1")
-        assert resp1.description == "Payment authorization controller"
-
-
-# ---------------------------------------------------------------------------
-# MergeFallback-04: Fallback preserves controlled_processes from Call 2b
-# ---------------------------------------------------------------------------
-
-
-class TestMergeFallback04PreservesControlledProcesses:
-    """MergeFallback-04: fallback contains CP-1 from Call 2b."""
-
-    def test_merge_fallback_04_preserves_controlled_processes(self, tmp_path):
-        client = _setup_stage2_client(
-            resp_set_dict=_fallback_responsibility_set_dict(),
-            control_element_set_dict=_valid_control_element_set_dict_with_cp(),
-        )
-        result = derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        cs = result.control_structure
-        cp_ids = {cp.cp_id for cp in cs.controlled_processes}
-        assert "CP-1" in cp_ids
-
-
-# ---------------------------------------------------------------------------
-# MergeFallback-05: Assembly failure is logged to calls.jsonl
-# ---------------------------------------------------------------------------
-
-
-class TestMergeFallback05FailureLogged:
-    """MergeFallback-05: assembly failure logged with success=false."""
-
-    def test_merge_fallback_05_failure_logged_to_calls_jsonl(self, tmp_path):
-        client = _setup_stage2_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        entries = read_calls_jsonl(tmp_path)
-        assemble_entries = [
-            e for e in entries if e["step"] == "assemble_control_structure"
-        ]
-        assert len(assemble_entries) == 1
-        assert assemble_entries[0]["stage"] == "stage_2"
-        assert assemble_entries[0]["success"] is False
-        assert "error" in assemble_entries[0]
-        assert assemble_entries[0]["error"]  # non-empty
-
-
-# ---------------------------------------------------------------------------
-# MergeFallback-06: Assembly repair recorded in run manifest stage_warnings
-# ---------------------------------------------------------------------------
-
-
-class TestMergeFallback06ManifestStageErrors:
-    """MergeFallback-06: repaired assembly appears in manifest warnings."""
-
-    def test_merge_fallback_06_manifest_records_assembly_failure(self, tmp_path):
+    def test_sp1_run_records_the_failure_as_a_stage_error(self, tmp_path):
         client = _setup_full_run_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
-        assert manifest["stage_errors"] == []
-        assert any(
-            "assemble_control_structure" in warning
-            for warning in manifest["stage_warnings"]
-        )
 
-
-# ---------------------------------------------------------------------------
-# MergeFallback-07: Fallback ControlStructure written to control-structure.yaml
-# ---------------------------------------------------------------------------
-
-
-class TestMergeFallback07YamlWritten:
-    """MergeFallback-07: fallback is written to control-structure.yaml."""
-
-    def test_merge_fallback_07_yaml_written_and_valid(self, tmp_path):
-        client = _setup_stage2_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        yaml_file = tmp_path / "control-structure.yaml"
-        assert yaml_file.exists()
-        loaded = read_yaml(yaml_file, ControlStructure)
-        assert isinstance(loaded, ControlStructure)
-        assert len(loaded.responsibilities) == 2
-        assert loaded.coordination_links == []
-
-
-# ---------------------------------------------------------------------------
-# MergeFallback-08: Fallback passes through heuristics
-# ---------------------------------------------------------------------------
-
-
-class TestMergeFallback08HeuristicsPass:
-    """MergeFallback-08: fallback passes through heuristics without crashing."""
-
-    def test_merge_fallback_08_fallback_passes_heuristics(self, tmp_path):
-        client = _setup_full_run_client()
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
             risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
-        assert result.control_structure is not None
-        assert isinstance(result.heuristic_errors, list)
-        assert isinstance(result.heuristic_warnings, list)
 
-
-# ---------------------------------------------------------------------------
-# MergeFallback-09: Pipeline does not crash on assembly failure during full run
-# ---------------------------------------------------------------------------
-
-
-class TestMergeFallback09NoCrashFullRun:
-    """MergeFallback-09: full SP1 run preserves usable fallback warnings."""
-
-    def test_merge_fallback_09_pipeline_completes_with_fallback(self, tmp_path):
-        client = _setup_full_run_client()
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
         assert isinstance(result, SP1RunResult)
-        assert result.control_structure is not None
-        assert result.stage_errors == []
-        assert any(
+        assert result.control_structure is None
+        assert result.stage_errors == [ASSEMBLY_ERROR]
+        assert not any(
             "assemble_control_structure" in warning for warning in result.stage_warnings
         )
-
-    def test_repaired_assembly_is_warning_not_fatal_stage_error(self, tmp_path):
-        """A validated fallback artifact is usable despite repair diagnostics."""
-        client = _setup_full_run_client()
-
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
-        assert result.control_structure is not None
-        assert result.stage_errors == []
-        assert any(
-            "assemble_control_structure" in warning for warning in result.stage_warnings
+        assert manifest["stage_errors"] == [ASSEMBLY_ERROR]
+        assert not (tmp_path / "control-structure.yaml").exists()
+
+    def test_error_names_every_unresolved_reference(self, tmp_path):
+        responsibilities = _fallback_responsibility_set_dict()
+        responsibilities["responsibilities"][1]["process_model_parts"][0][
+            "feedback_source"
+        ] = {"type": "responsibility", "id": "RESP-7"}
+        elements = _valid_control_element_set_dict()
+        elements["control_actions"][0]["target"] = {
+            "type": "responsibility",
+            "id": "RESP-9",
+        }
+        elements["control_actions"][0]["process_model_refs"] = ["PM-2-1"]
+        elements["feedback_channels"][1]["updates"] = "PM-5-1"
+
+        with pytest.raises(StageError) as exc_info:
+            _assemble_stage2_structure(
+                construct_model_unvalidated(responsibilities, ResponsibilitySet),
+                construct_model_unvalidated(elements, ControlElementSet),
+                tmp_path,
+                "test-model",
+            )
+
+        assert exc_info.value.message == (
+            "control structure failed validation; unresolved references: "
+            "ProcessModelPart PM-1-1 feedback_source controlled_process 'CP-99'; "
+            "ControlAction CA-1-1 target responsibility 'RESP-9'; "
+            "ControlAction CA-1-1 process_model_refs 'PM-2-1'; "
+            "ProcessModelPart PM-2-1 feedback_source responsibility 'RESP-7'; "
+            "FeedbackChannel FB-2-1 updates 'PM-5-1'"
         )
-        assert manifest["stage_errors"] == []
-        assert any(
-            "assemble_control_structure" in warning
-            for warning in manifest["stage_warnings"]
+
+    def test_failure_without_a_reference_reports_the_validation_error(self, tmp_path):
+        empty_responsibilities = ResponsibilitySet.model_construct(responsibilities=[])
+
+        with pytest.raises(StageError) as exc_info:
+            _assemble_stage2_structure(
+                empty_responsibilities,
+                ControlElementSet(),
+                tmp_path,
+                "test-model",
+            )
+
+        assert exc_info.value.step == "assemble_control_structure"
+        assert exc_info.value.message.startswith(
+            "control structure failed validation: ValidationError: "
+        )
+        assert len(_assembly_entries(tmp_path)) == 1
+
+
+class TestCoordinationLinkFailureStopsStage2:
+    """Coordination links that fail validation raise instead of being dropped."""
+
+    def _structure(self):
+        return ControlStructure.model_validate(
+            {
+                "responsibilities": [
+                    {
+                        "resp_id": "RESP-1",
+                        "description": "Payment controller",
+                        "process_model_parts": [
+                            {"pm_id": "PM-1-1", "description": "Intent"}
+                        ],
+                    },
+                    {
+                        "resp_id": "RESP-2",
+                        "description": "Output controller",
+                        "process_model_parts": [
+                            {"pm_id": "PM-2-1", "description": "Response"}
+                        ],
+                    },
+                ]
+            }
         )
 
+    def test_failing_links_raise_a_stage_error_naming_each_reference(self, tmp_path):
+        link = _valid_coordination_analysis_dict()["coordination_links"][0]
+        link.update(source="RESP-9", shared_pm="PM-9-9")
+        analysis = CoordinationAnalysis.model_validate({"coordination_links": [link]})
 
-# ---------------------------------------------------------------------------
-# MergeFallback-10: Successful assembly produces full ControlStructure
-# ---------------------------------------------------------------------------
+        with pytest.raises(StageError) as exc_info:
+            _add_coordination_links(self._structure(), analysis, tmp_path, "m")
+
+        assert (exc_info.value.stage, exc_info.value.step) == (
+            "stage_2",
+            "add_coordination_links",
+        )
+        assert exc_info.value.message == (
+            "control structure failed validation; unresolved references: "
+            "CoordinationLink CL-1 source responsibility 'RESP-9'; "
+            "CoordinationLink CL-1 shared_pm 'PM-9-9'"
+        )
+        entries = [
+            entry
+            for entry in read_calls_jsonl(tmp_path)
+            if entry["step"] == "add_coordination_links"
+        ]
+        assert [entry["success"] for entry in entries] == [False]
+
+    def test_valid_links_are_added(self, tmp_path):
+        analysis = CoordinationAnalysis.model_validate(
+            {
+                "coordination_links": _valid_coordination_analysis_dict()[
+                    "coordination_links"
+                ]
+            }
+        )
+
+        structure = _add_coordination_links(self._structure(), analysis, tmp_path, "m")
+
+        assert [link.link_id for link in structure.coordination_links] == ["CL-1"]
+        assert read_calls_jsonl(tmp_path) == []
 
 
-class TestMergeFallback10SuccessfulAssembly:
-    """MergeFallback-10: normal case — full ControlStructure with links."""
+class TestSuccessfulAssembly:
+    """A valid Call 2b response produces the full control structure."""
 
-    def test_merge_fallback_10_successful_assembly_produces_full_cs(self, tmp_path):
+    def test_successful_assembly_produces_full_cs(self, tmp_path):
         client = _setup_stage2_client(
             control_element_set_dict=_valid_control_element_set_dict(),
             coordination_analysis_dict=_valid_coordination_analysis_dict(),
@@ -603,17 +547,12 @@ class TestMergeFallback10SuccessfulAssembly:
         )
         cs, warnings = result.control_structure, result.warnings
         assert isinstance(cs, ControlStructure)
-        # Coordination link CL-1 is present
-        cl_ids = {cl.link_id for cl in cs.coordination_links}
-        assert "CL-1" in cl_ids
         cl = next(cl for cl in cs.coordination_links if cl.link_id == "CL-1")
         assert cl.source == "RESP-1"
         assert cl.target == "RESP-2"
-        # No assembly warnings
         assert warnings == []
-        # No assembly failure logged
-        entries = read_calls_jsonl(tmp_path)
-        assemble_entries = [
-            e for e in entries if e["step"] == "assemble_control_structure"
-        ]
-        assert len(assemble_entries) == 0
+        assert _assembly_entries(tmp_path) == []
+        loaded = ControlStructure.model_validate(
+            yaml.safe_load((tmp_path / "control-structure.yaml").read_text())
+        )
+        assert loaded == cs

@@ -12,12 +12,9 @@ import pytest
 import yaml
 from pydantic import ValidationError
 
-from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.system_model.control_structure import (
-    ControlElementSet,
     RequirementSet,
     ResponsibilitySet,
-    _assemble_with_fallback,
 )
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.helpers.calls_log import read_calls_jsonl
@@ -87,21 +84,3 @@ def test_empty_responsibilities_are_logged_and_do_not_escape_validation_error(
     assert len(failed) == 2
     assert all(entry["success"] is False for entry in failed)
     assert (tmp_path / "run-manifest.yaml").exists()
-
-
-def test_unrecoverable_assembly_fallback_is_contained_as_stage_error(tmp_path):
-    """An exhausted fallback raises StageError instead of raw ValidationError."""
-    empty_responsibilities = ResponsibilitySet.model_construct(responsibilities=[])
-
-    with pytest.raises(StageError, match="assemble_control_structure"):
-        _assemble_with_fallback(
-            empty_responsibilities,
-            ControlElementSet(),
-            tmp_path,
-            "test-model",
-        )
-
-    calls = read_calls_jsonl(tmp_path)
-    failed = [entry for entry in calls if entry["step"] == "assemble_control_structure"]
-    assert len(failed) == 1
-    assert failed[0]["success"] is False

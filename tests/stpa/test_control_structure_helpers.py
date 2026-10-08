@@ -1,12 +1,12 @@
 """Unit contracts for the Stage 2 control-structure helpers.
 
 - ``_assign_elements_to_responsibilities``: an element with no matching
-  responsibility is silently dropped.
+  responsibility is not assigned.
 - ``_next_fb_num``: the next feedback number is the maximum matching number
   plus one.
 - ``_find_orphan_pms``: a process-model part no feedback channel updates.
-- ``_add_coordination_links_with_fallback``: invalid links fall back to the
-  original structure with a warning.
+- ``_add_coordination_links``: an empty link list returns the structure
+  unchanged; valid links are added.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,
-    _add_coordination_links_with_fallback,
+    _add_coordination_links,
     _assign_elements_to_responsibilities,
     _find_orphan_pms,
     _next_fb_num,
@@ -59,7 +59,7 @@ def _resp(resp_id: str = "RESP-1") -> Responsibility:
 
 
 class TestAssignElementsUnmatched:
-    """Element with no matching responsibility is silently dropped."""
+    """Element with no matching responsibility is not assigned."""
 
     def test_unmatched_ca_is_dropped(self):
         """CA whose numeric prefix has no matching RESP is not assigned."""
@@ -165,46 +165,12 @@ def test_find_orphan_pms(pm_ids, updated_pm_ids, orphans):
 
 
 # ---------------------------------------------------------------------------
-# _add_coordination_links_with_fallback — exception handler
+# _add_coordination_links
 # ---------------------------------------------------------------------------
 
 
-class TestAddCoordinationLinksFallback:
-    """Exception handler path when coordination links are invalid."""
-
-    def test_invalid_link_returns_original_cs_with_warning(self, tmp_path):
-        """Invalid coordination link triggers fallback with warning."""
-        resp = _resp("RESP-1")
-        cs = ControlStructure(responsibilities=[resp])
-
-        # Coordination link referencing non-existent responsibility
-        bad_link = CoordinationLink(
-            link_id="CL-1",
-            source="RESP-99",
-            target="RESP-1",
-            shared_pm="PM-1-1",
-            coordination_mechanism=CoordinationMechanism(
-                cm_id="CM-1", description="Coord", payload="data"
-            ),
-            description="Bad link",
-        )
-        analysis = CoordinationAnalysis(
-            coordination_links=[bad_link],
-            integrity_findings=[],
-        )
-
-        result_cs, warnings = _add_coordination_links_with_fallback(
-            cs, analysis, tmp_path, "test-model"
-        )
-
-        # Should return the original CS without coordination links
-        assert len(result_cs.coordination_links) == 0
-        assert len(warnings) >= 1
-        assert any("add_coordination_links" in w for w in warnings)
-
-        # Failure should be logged to calls.jsonl
-        calls_file = tmp_path / "calls.jsonl"
-        assert calls_file.exists()
+class TestAddCoordinationLinks:
+    """Coordination links are added when Call 3 returns valid ones."""
 
     def test_empty_links_returns_original(self, tmp_path):
         """Empty coordination links return original CS with no warnings."""
@@ -215,12 +181,7 @@ class TestAddCoordinationLinksFallback:
             integrity_findings=[],
         )
 
-        result_cs, warnings = _add_coordination_links_with_fallback(
-            cs, analysis, tmp_path, "test-model"
-        )
-
-        assert result_cs is cs
-        assert warnings == []
+        assert _add_coordination_links(cs, analysis, tmp_path, "test-model") is cs
 
     def test_valid_links_added(self, tmp_path):
         """Valid coordination links are added to the CS."""
@@ -243,9 +204,7 @@ class TestAddCoordinationLinksFallback:
             integrity_findings=[],
         )
 
-        result_cs, warnings = _add_coordination_links_with_fallback(
-            cs, analysis, tmp_path, "test-model"
-        )
+        result_cs = _add_coordination_links(cs, analysis, tmp_path, "test-model")
 
         assert len(result_cs.coordination_links) == 1
-        assert warnings == []
+        assert not (tmp_path / "calls.jsonl").exists()
