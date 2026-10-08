@@ -1,4 +1,4 @@
-"""Offline fixture translations shared by acceptance and unit tests.
+"""Offline fixture translations for Stage 1a unit tests.
 
 These adapters never participate in product provider decoding.
 """

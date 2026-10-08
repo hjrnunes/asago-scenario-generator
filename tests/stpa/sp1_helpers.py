@@ -16,7 +16,7 @@ from unittest.mock import MagicMock
 
 from pydantic import BaseModel
 
-from acceptance.fixture_adapters import legacy_stage1a_provider_payload
+from tests.helpers.stage1a_legacy_payload import legacy_stage1a_provider_payload
 from tests.fixtures.sp1 import load_sp1_fixture
 
 from asago_scenario_generator.models.risk_card import RiskCard

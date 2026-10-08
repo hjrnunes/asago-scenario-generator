@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from acceptance.fixture_adapters import legacy_stage1a_provider_payload
+from tests.helpers.stage1a_legacy_payload import legacy_stage1a_provider_payload
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
