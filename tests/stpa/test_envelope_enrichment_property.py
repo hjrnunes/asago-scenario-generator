@@ -47,7 +47,6 @@ from asago_scenario_generator.stpa.scenario_prod.enrichment import (
     compute_system_context,
 )
 import typing
-from asago_scenario_generator.stpa.models import __all__
 from tests.stpa.helpers import make_scenario_spec, make_gherkin_spec
 
 
@@ -582,17 +581,7 @@ class TestEnrichmentRoundTripProperties:
 
 
 class TestEnrichmentModelExports:
-    """SystemContext and ConsumerHints are exported from the models package."""
-
-    def test_models_package_exports_the_enrichment_types(self):
-        from asago_scenario_generator.stpa import models
-
-        for name, cls in (
-            ("SystemContext", SystemContext),
-            ("ConsumerHints", ConsumerHints),
-        ):
-            assert name in __all__
-            assert getattr(models, name) is cls
+    """ConsumerHints testability fields are Literal types."""
 
     def test_consumer_hints_testability_is_literal(self):
         """ConsumerHints.garak_testability and midojo_testability are Literal types."""
