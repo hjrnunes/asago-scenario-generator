@@ -45,12 +45,7 @@ from asago_scenario_generator.pipeline.synthesis_governance import (
     _run_governance_routing,
 )
 
-# replay_gate imports _MANIFEST_DOMAIN and _digest_payload from this module.
-from asago_scenario_generator.pipeline.synthesis_manifest import (
-    _MANIFEST_DOMAIN as _MANIFEST_DOMAIN,
-    _build_manifest,
-    _digest_payload as _digest_payload,
-)
+from asago_scenario_generator.pipeline.synthesis_manifest import _build_manifest
 from asago_scenario_generator.pipeline.synthesis_persist import (
     _artifact_paths,
     _persist_manifest,

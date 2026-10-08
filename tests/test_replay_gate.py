@@ -14,7 +14,7 @@ import pytest
 import yaml
 
 import replay_gate
-from asago_scenario_generator.pipeline.synthesis import (
+from asago_scenario_generator.pipeline.synthesis_manifest import (
     _MANIFEST_DOMAIN,
     _digest_payload,
 )
