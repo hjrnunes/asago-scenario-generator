@@ -131,6 +131,16 @@ def test_effective_model_config_keeps_controls_without_private_endpoint() -> Non
     assert "private.apps.example" not in str(config)
 
 
+def test_effective_model_config_records_the_request_switch_only() -> None:
+    """The constant strict_json_schema option is not a recorded setting."""
+    client = type("Client", (), {"base_url": "", "model": "fixture-model"})()
+
+    config = effective_model_config(client)
+
+    assert "strict_json_schema" not in config
+    assert config["json_schema_strict"] is True
+
+
 def test_explicit_sampling_arguments_override_environment(monkeypatch) -> None:
     monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://env.invalid")
     monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS", "2048")
