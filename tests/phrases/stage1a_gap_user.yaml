@@ -8,6 +8,7 @@ cases:
       - adversarial relevance
       - capability codes
       - new records by their local handles
+      - "## Capability Profile Context"
     forbidden:
       - Focus on adversary-actionable threats
       - Omit operational risks with no adversarial vector

@@ -1,0 +1,7 @@
+template: stage1b_user.j2
+cases:
+  records-service:
+    forbidden:
+      - Security Constraints
+      - Loss Analysis
+      - loss_analysis
