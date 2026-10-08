@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Literal
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
@@ -570,19 +570,29 @@ def _group_candidates_by_pattern(
     return {key: tuple(value) for key, value in grouped.items()}
 
 
-def _build_projection_batch(
+@dataclass(frozen=True)
+class _PlanningContext:
+    """Typed inputs plus everything derived once from them for row building."""
+
+    inputs: _contracts.TaxonomyObligationInputs
+    patterns: dict[str, AttackPattern]
+    edges: tuple[_MappingEdge, ...]
+    batch: Any = None
+    candidates_by_pattern: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+    deferred_ids: frozenset[str] = frozenset()
+    qualification_traces: dict[str, Any] = field(default_factory=dict)
+    rejected_by_pattern: dict[str, tuple[Any, ...]] = field(default_factory=dict)
+
+
+def _planning_context(
     inputs: _contracts.TaxonomyObligationInputs,
-) -> tuple[
-    Any,
-    dict[str, tuple[Any, ...]],
-    frozenset[str],
-    dict[str, Any],
-    dict[str, tuple[Any, ...]],
-]:
+) -> _PlanningContext:
     """Observe one bounded authoritative run and group every derived identity."""
+    patterns = _pattern_lookup(inputs.attack_pattern_catalog)
+    edges = _mapping_edges(inputs)
     records = _catalog_records(inputs)
     if not records:
-        return None, {}, frozenset(), {}, {}
+        return _PlanningContext(inputs, patterns, edges)
     resolver = _CatalogResolver(inputs.attack_pattern_catalog)
     _verify_catalog_pin(records, resolver, inputs.catalog_pins)
     observation = project_authoritative_candidate_observations(
@@ -595,7 +605,10 @@ def _build_projection_batch(
     deferred_ids = frozenset(
         candidate.candidate_id for candidate in observation.deferred_candidates
     )
-    return (
+    return _PlanningContext(
+        inputs,
+        patterns,
+        edges,
         observation.batch,
         _group_candidates_by_pattern(all_candidates),
         deferred_ids,
@@ -864,22 +877,18 @@ def _build_pattern_obligation(
     card: RiskReference,
     pattern: AttackPattern,
     paths: tuple[tuple[_MappingEdge, ...], ...],
-    inputs: _contracts.TaxonomyObligationInputs,
-    batch: Any,
-    candidates_by_pattern: dict[str, tuple[Any, ...]],
-    deferred_ids: frozenset[str],
-    qualification_traces: dict[str, Any],
-    rejected_by_pattern: dict[str, tuple[Any, ...]],
+    context: _PlanningContext,
 ) -> TaxonomyObligation:
     """Build one row for a resolved pattern and its authoritative projection."""
+    inputs = context.inputs
     scope, qualification, candidate_records, qualification_reason = (
         _pattern_disposition(
             pattern,
             inputs,
-            batch,
-            candidates_by_pattern.get(pattern.id, ()),
-            deferred_ids,
-            rejected_by_pattern.get(pattern.id, ()),
+            context.batch,
+            context.candidates_by_pattern.get(pattern.id, ()),
+            context.deferred_ids,
+            context.rejected_by_pattern.get(pattern.id, ()),
         )
     )
     return TaxonomyObligation(
@@ -894,40 +903,13 @@ def _build_pattern_obligation(
         evidence=(
             _obligation_evidence(
                 paths,
-                batch,
+                context.batch,
                 pattern.id,
                 qualification_reason,
-                qualification_traces.get(pattern.id),
+                context.qualification_traces.get(pattern.id),
             )
             + _missing_qualification_evidence(pattern, inputs, qualification)
         ),
-    )
-
-
-def _build_obligation(
-    card: RiskReference,
-    pattern: AttackPattern | None,
-    paths: tuple[tuple[_MappingEdge, ...], ...],
-    inputs: _contracts.TaxonomyObligationInputs,
-    batch: Any,
-    candidates_by_pattern: dict[str, tuple[Any, ...]],
-    deferred_ids: frozenset[str],
-    qualification_traces: dict[str, Any],
-    rejected_by_pattern: dict[str, tuple[Any, ...]],
-) -> TaxonomyObligation:
-    """Build one complete obligation row from typed planner inputs."""
-    if pattern is None:
-        return _build_governance_obligation(card, inputs)
-    return _build_pattern_obligation(
-        card,
-        pattern,
-        paths,
-        inputs,
-        batch,
-        candidates_by_pattern,
-        deferred_ids,
-        qualification_traces,
-        rejected_by_pattern,
     )
 
 
@@ -941,74 +923,27 @@ def _validate_planner_inputs(inputs: Any) -> None:
 
 
 def _rows_for_risk(
-    card: RiskReference,
-    patterns: dict[str, AttackPattern],
-    edges: tuple[_MappingEdge, ...],
-    inputs: _contracts.TaxonomyObligationInputs,
-    batch: Any,
-    candidates_by_pattern: dict[str, tuple[Any, ...]],
-    deferred_ids: frozenset[str],
-    qualification_traces: dict[str, Any],
-    rejected_by_pattern: dict[str, tuple[Any, ...]],
+    card: RiskReference, context: _PlanningContext
 ) -> tuple[TaxonomyObligation, ...]:
     """Build all rows reachable from one reviewed risk card."""
-    paths_by_pattern = _mapping_paths(card.risk_id, set(patterns), edges)
+    paths_by_pattern = _mapping_paths(
+        card.risk_id, set(context.patterns), context.edges
+    )
     if not paths_by_pattern:
-        return (
-            _build_obligation(
-                card,
-                None,
-                (),
-                inputs,
-                batch,
-                candidates_by_pattern,
-                deferred_ids,
-                qualification_traces,
-                rejected_by_pattern,
-            ),
-        )
+        return (_build_governance_obligation(card, context.inputs),)
     return tuple(
-        _build_obligation(
-            card,
-            patterns[pattern_id],
-            paths,
-            inputs,
-            batch,
-            candidates_by_pattern,
-            deferred_ids,
-            qualification_traces,
-            rejected_by_pattern,
-        )
+        _build_pattern_obligation(card, context.patterns[pattern_id], paths, context)
         for pattern_id, paths in paths_by_pattern.items()
     )
 
 
 def _build_obligation_rows(
-    inputs: _contracts.TaxonomyObligationInputs,
-    patterns: dict[str, AttackPattern],
-    edges: tuple[_MappingEdge, ...],
-    batch: Any,
-    candidates_by_pattern: dict[str, tuple[Any, ...]],
-    deferred_ids: frozenset[str],
-    qualification_traces: dict[str, Any],
-    rejected_by_pattern: dict[str, tuple[Any, ...]],
+    context: _PlanningContext,
 ) -> tuple[TaxonomyObligation, ...]:
     """Build and canonically order the complete obligation ledger."""
     obligations: list[TaxonomyObligation] = []
-    for card in sorted(inputs.risk_cards, key=lambda item: item.risk_id):
-        obligations.extend(
-            _rows_for_risk(
-                card,
-                patterns,
-                edges,
-                inputs,
-                batch,
-                candidates_by_pattern,
-                deferred_ids,
-                qualification_traces,
-                rejected_by_pattern,
-            )
-        )
+    for card in sorted(context.inputs.risk_cards, key=lambda item: item.risk_id):
+        obligations.extend(_rows_for_risk(card, context))
     obligations.sort(
         key=lambda row: (
             row.risk_ref.risk_id,
@@ -1047,25 +982,7 @@ def plan_taxonomy_obligations(
 ) -> TaxonomyObligationPlan:
     """Return the complete deterministic obligation ledger for typed inputs."""
     _validate_planner_inputs(inputs)
-    patterns = _pattern_lookup(inputs.attack_pattern_catalog)
-    edges = _mapping_edges(inputs)
-    (
-        batch,
-        candidates_by_pattern,
-        deferred_ids,
-        qualification_traces,
-        rejected_by_pattern,
-    ) = _build_projection_batch(inputs)
-    rows = _build_obligation_rows(
-        inputs,
-        patterns,
-        edges,
-        batch,
-        candidates_by_pattern,
-        deferred_ids,
-        qualification_traces,
-        rejected_by_pattern,
-    )
+    rows = _build_obligation_rows(_planning_context(inputs))
     return _finalize_plan(rows, inputs)
 
 
