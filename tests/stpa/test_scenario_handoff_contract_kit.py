@@ -98,6 +98,17 @@ def test_v4_schema_matches_the_producer_model() -> None:
     assert _schema(KIT_V4_ROOT) == ScenarioHandoffV4.model_json_schema()
 
 
+def test_v4_schema_file_is_the_models_schema_byte_for_byte() -> None:
+    committed = (KIT_V4_ROOT / "schema.json").read_text(encoding="utf-8")
+
+    rendered = json.dumps(ScenarioHandoffV4.model_json_schema(), indent=2) + "\n"
+
+    assert rendered == committed
+    assert list(ScenarioHandoffV4.model_fields) == list(
+        _schema(KIT_V4_ROOT)["properties"]
+    )
+
+
 def test_kit_introduces_no_fourth_scenario_representation() -> None:
     lock = _lock()
     assert lock["representations"] == ["narrative", "attack_tree", "gherkin"]
