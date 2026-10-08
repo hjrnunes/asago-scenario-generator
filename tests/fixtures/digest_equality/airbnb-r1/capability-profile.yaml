@@ -1,0 +1,97 @@
+zones_active:
+- input
+- reasoning
+- tool_execution
+entry_points:
+- name: Conversational Interface
+  entry_point_type: other
+  direction: bidirectional
+  controllability: direct
+  entry_point_id: ep:v1:b42467eb46c282488d2abb90bfae68c4
+- name: Platform Policy Documents
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:62a890e72f9d9b9d9abb04094f756acb
+- name: Reservation and Listing Data (via tool responses)
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:094d8170bba2d620a5a0a68f7a341e05
+- name: Audit and Modification Ledgers
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:dda78e8f7f880fccba59758b4f9036f3
+confidence: high
+kc_subcodes:
+- KC1.1
+- KC2.1
+- KC5.3
+- KC6.1.2
+- KC6.3.2
+- KC6.3.3
+- KCX-AUDIT
+tool_inventory:
+- name: get_reservation
+  description: Read a reservation record.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:fb3f476efcb89877668abc3d16fce08a
+- name: get_listing
+  description: Read a listing record.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:8c0c0900998af5343ab64689456604cf
+- name: check_availability
+  description: Read-only availability check for a listing.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:51e42e630d4989e58fdf4e50050ca672
+- name: lookup_policy
+  description: Retrieve current platform-authored policy documents.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:a677c507b7a645a4c24d79c65819623c
+- name: modify_booking
+  description: Modify booking details such as check-in and check-out dates.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:00597e102f302feaa6131e3218e47e8a
+- name: update_listing
+  description: Update listing details including occupancy and configuration flags.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:40247a01a89c778f73fb55db684ce675
+- name: moderate_message
+  description: Screen conversation messages for safety violations.
+  supported_operations:
+  - retrieve_data
+  - transmit_data
+  tool_id: tool:v1:ab45f6819354d79d8248a16b4de4f6f4
+- name: escalate_trust_safety
+  description: Open a trust-and-safety case for platform review.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:697e905153d58c0ead97c1727f784cbf
+- name: get_airbnb_state_summary
+  description: Read-only ledger view of reservations, listings, modifications, messages,
+    trust cases, and audit logs.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:217d4771b80b3c7a258ca4dbe47d1560
+entry_point_completeness: inferred_partial
+entry_point_evidence: []
+tool_inventory_completeness: inferred_partial
+tool_inventory_evidence: []
+has_persistent_memory: false
+multi_agent: false
+hitl: false
+kc_subcodes_display:
+  KC1.1: Large Language Model (LLM)
+  KC2.1: Predefined workflows
+  KC5.3: Managed API
+  KC6.1.2: Extensive API access
+  KC6.3.2: Database full CRUD
+  KC6.3.3: RAG context data sources
+  KCX-AUDIT: System has exploitable audit or logging architecture
