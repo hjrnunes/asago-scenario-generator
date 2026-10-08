@@ -248,3 +248,49 @@ def test_planted_item_without_a_record_reference_names_no_record():
     for text in (narrative, gherkin.to_feature_text()):
         assert "record" not in text.replace("target record", "")
         assert "None" not in text
+
+
+def test_background_states_each_checked_fact_once_and_skips_unusable_checks():
+    payload = CONDITION.model_dump(mode="json")
+    payload["comparisons"] = [
+        {
+            "kind": "value",
+            "left": {
+                "source": "fact",
+                "path": "TARGET-STATE.orders.ORD-201.customer_id",
+            },
+            "op": "ne",
+            "right": {"source": "literal", "value": "CUST001"},
+        },
+        {
+            "kind": "order",
+            "operation": "refund_order",
+            "requires_prior": "lookup_order",
+        },
+    ]
+    fact = (
+        'fact TARGET-STATE.orders.ORD-201.customer_id = "CUST002" ne literal "CUST001"'
+    )
+    check = ConditionCheck(
+        status="satisfied",
+        comparisons=[
+            ComparisonCheck(index=0, result="satisfied", reason=f"{fact} holds"),
+            ComparisonCheck(index=0, result="satisfied", reason=f"{fact} holds"),
+            ComparisonCheck(
+                index=0,
+                result="not_checkable",
+                reason=fact.replace("CUST002", "CUST009") + " does not hold",
+            ),
+            ComparisonCheck(index=0, result="satisfied", reason="no operator here"),
+            ComparisonCheck(index=1, result="satisfied", reason="order holds"),
+            ComparisonCheck(index=5, result="satisfied", reason="past the comparisons"),
+        ],
+    )
+    condition = DiscriminatingCondition.model_validate(payload)
+    gherkin = render_scenario_presentation(
+        _adversarial(DIRECT_THREE, condition, check)
+    )[2]
+    facts = [step for step in gherkin.given if "the observed " in step]
+    assert facts == [
+        'Given the observed TARGET-STATE.orders.ORD-201.customer_id is "CUST002"'
+    ]
