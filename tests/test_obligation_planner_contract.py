@@ -170,7 +170,7 @@ def test_deferred_tail_does_not_continue_after_work_exhaustion() -> None:
         limitations=(),
     )
 
-    assert _deferred_projection_candidates(allocator, batch, True) == ()
+    assert _deferred_projection_candidates(allocator, batch) == ()
     fill_round_robin.assert_not_called()
 
 
@@ -190,7 +190,7 @@ def test_deferred_tail_sets_allocator_retention_before_continuing() -> None:
         limitations=(),
     )
 
-    assert _deferred_projection_candidates(allocator, batch, True) == ()
+    assert _deferred_projection_candidates(allocator, batch) == ()
     assert allocator.retain_deferred is True
     fill_round_robin.assert_called_once_with()
 
