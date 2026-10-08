@@ -14,6 +14,7 @@ first request.  On a mismatch the test writes the full requests next to
 
 from __future__ import annotations
 
+from collections import Counter
 import hashlib
 import json
 from pathlib import Path
@@ -28,6 +29,12 @@ from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.ica_enumeration import ICA, ICASlot
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.obligation_aware import (
+    governance_prompts,
+    governance_provider,
+    prompts,
+    provider,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     AnalysisControls,
     StructuralRevisionRequest,
@@ -316,6 +323,46 @@ def test_every_obligation_aware_request_keeps_its_recorded_bytes(tmp_path) -> No
     assert sorted(actual) == sorted(expected)
     for name, value in expected.items():
         assert actual[name] == value, name
+
+
+_PROJECTIONS = (
+    (prompts, "project_obligation_routing_context"),
+    (provider, "project_obligation_routing_context"),
+    (prompts, "project_revision_context"),
+    (provider, "project_revision_context"),
+    (prompts, "project_ica_target_context"),
+    (provider, "project_ica_target_context"),
+    (governance_prompts, "project_governance_routing_context"),
+    (governance_provider, "project_governance_routing_context"),
+)
+
+
+def test_each_provider_call_projects_its_prompt_view_once(
+    tmp_path, monkeypatch
+) -> None:
+    calls: Counter[str] = Counter()
+
+    def counting(name: str, function: Any) -> Any:
+        def wrapper(*args: Any, **kwargs: Any) -> Any:
+            calls[name] += 1
+            return function(*args, **kwargs)
+
+        return wrapper
+
+    for module, name in _PROJECTIONS:
+        if hasattr(module, name):
+            monkeypatch.setattr(module, name, counting(name, getattr(module, name)))
+
+    render_all(tmp_path)
+
+    # route and route_correction project the routing view; the other stages
+    # send one request each.
+    assert calls == {
+        "project_obligation_routing_context": 2,
+        "project_governance_routing_context": 1,
+        "project_revision_context": 1,
+        "project_ica_target_context": 1,
+    }
 
 
 def test_a_correction_verification_sends_the_initial_verification_prompt(

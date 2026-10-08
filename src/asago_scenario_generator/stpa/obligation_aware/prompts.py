@@ -1539,6 +1539,13 @@ def build_structural_routing_prompts(
         control_structure=control_structure,
         slots=slots,
     )
+    return render_structural_routing_prompts(context, loss_analysis=loss_analysis)
+
+
+def render_structural_routing_prompts(
+    context: ProviderRoutingContext, *, loss_analysis: LossAnalysis
+) -> tuple[str, str]:
+    """Render system/user prompts from an already projected routing view."""
     routing_targeted_example, routing_unresolved_example = _routing_wire_examples()
     system = _TEMPLATE_LOADER.render_prompt(
         "structural_routing_system.j2",
@@ -1645,6 +1652,13 @@ def build_structural_revision_prompts(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
     )
+    return render_structural_revision_prompts(context)
+
+
+def render_structural_revision_prompts(
+    context: ProviderRevisionContext,
+) -> tuple[str, str]:
+    """Render revision prompts from an already projected revision view."""
     system = _TEMPLATE_LOADER.render_prompt(
         "structural_revision_system.j2",
         instructions=context.instructions,
@@ -1667,7 +1681,7 @@ def build_synthesis_slot_prompts(
     control_structure: ControlStructure,
 ) -> tuple[str, str]:
     """Build an ordinary-Stage-3, target-scoped structured ICA prompt."""
-    target_index, questions, routes = project_ica_target_context(
+    projection = project_ica_target_context(
         target_id=target_id,
         slots=slots,
         routed_briefs=routed_briefs,
@@ -1675,6 +1689,21 @@ def build_synthesis_slot_prompts(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
     )
+    return render_synthesis_slot_prompts(projection, target_id=target_id, slots=slots)
+
+
+def render_synthesis_slot_prompts(
+    projection: tuple[
+        ProviderTargetIndex,
+        tuple[ProviderObligationQuestion | ProviderGovernanceQuestion, ...],
+        tuple[ProviderRoutedRoute, ...],
+    ],
+    *,
+    target_id: str,
+    slots: Sequence[SlotPlaceholder],
+) -> tuple[str, str]:
+    """Render the ICA target prompt from an already projected target view."""
+    target_index, questions, routes = projection
     slot_ids = {slot.slot_id for slot in slots}
     required_pairs = [
         {
@@ -1714,6 +1743,9 @@ __all__ = [
     "build_ica_hazard_verification_prompts",
     "build_ica_hazard_correction_prompts",
     "build_synthesis_slot_prompts",
+    "render_structural_revision_prompts",
+    "render_structural_routing_prompts",
+    "render_synthesis_slot_prompts",
     "authoritative_hazard_constraint_pairs",
     "local_obligation_handles",
     "project_control_structure_context",

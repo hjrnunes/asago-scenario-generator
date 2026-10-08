@@ -92,15 +92,15 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_ica_hazard_correction_prompts,
     build_ica_hazard_verification_prompts,
     build_mechanism_verification_prompts,
-    build_structural_revision_prompts,
-    build_structural_routing_prompts,
-    build_synthesis_slot_prompts,
     local_obligation_handles,
     mapping_strength_for_brief,
     obligation_prompt_template_hashes,
     project_obligation_routing_context,
     project_ica_target_context,
     project_revision_context,
+    render_structural_revision_prompts,
+    render_structural_routing_prompts,
+    render_synthesis_slot_prompts,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _draft_considerations,
@@ -1419,17 +1419,14 @@ class ObligationAwareLLMAdapter:
         correction_feedback: str | None = None,
     ) -> StructuralRoutingResponse:
         """Run the named structural-routing provider stage."""
-        system_prompt, user_prompt = build_structural_routing_prompts(
-            briefs=request.briefs,
-            loss_analysis=request.loss_analysis,
-            control_structure=request.control_structure,
-            slots=request.slots,
-        )
         routing_view = project_obligation_routing_context(
             briefs=request.briefs,
             loss_analysis=request.loss_analysis,
             control_structure=request.control_structure,
             slots=request.slots,
+        )
+        system_prompt, user_prompt = render_structural_routing_prompts(
+            routing_view, loss_analysis=request.loss_analysis
         )
         user_prompt = _with_correction_feedback(user_prompt, correction_feedback)
         _preflight(
@@ -1651,16 +1648,12 @@ class ObligationAwareLLMAdapter:
 
     def revise(self, request: StructuralRevisionRequest) -> StructuralRevisionResponse:
         """Run the single named additive-revision provider stage."""
-        system_prompt, user_prompt = build_structural_revision_prompts(
-            gaps=request.gaps,
-            loss_analysis=request.baseline_loss_analysis,
-            control_structure=request.baseline_control_structure,
-        )
         revision_view = project_revision_context(
             gaps=request.gaps,
             loss_analysis=request.baseline_loss_analysis,
             control_structure=request.baseline_control_structure,
         )
+        system_prompt, user_prompt = render_structural_revision_prompts(revision_view)
         _preflight(
             view=revision_view,
             system_prompt=system_prompt,
@@ -1729,7 +1722,7 @@ class ObligationAwareLLMAdapter:
         """Run the named target-scoped ICA slot provider stage."""
         expected_slot_ids = frozenset(slot.slot_id for slot in request.slots)
         expected_pair_keys = _required_pair_keys(request)
-        system_prompt, user_prompt = build_synthesis_slot_prompts(
+        projection = project_ica_target_context(
             target_id=request.target_id,
             slots=request.slots,
             routed_briefs=request.routed_briefs,
@@ -1737,14 +1730,10 @@ class ObligationAwareLLMAdapter:
             loss_analysis=request.loss_analysis,
             control_structure=request.control_structure,
         )
-        target_view, target_questions, target_routes = project_ica_target_context(
-            target_id=request.target_id,
-            slots=request.slots,
-            routed_briefs=request.routed_briefs,
-            routed_routes=request.routed_routes,
-            loss_analysis=request.loss_analysis,
-            control_structure=request.control_structure,
+        system_prompt, user_prompt = render_synthesis_slot_prompts(
+            projection, target_id=request.target_id, slots=request.slots
         )
+        target_view, target_questions, target_routes = projection
         # The target index is the typed view; obligation and route handles are
         # independently checked in the rendered prompt as copy-only values.
         _preflight(

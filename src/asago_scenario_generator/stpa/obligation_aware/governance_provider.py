@@ -17,8 +17,8 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import _Model
 from asago_scenario_generator.stpa.obligation_aware.governance_prompts import (
-    build_governance_routing_prompts,
     project_governance_routing_context,
+    render_governance_routing_prompts,
 )
 from asago_scenario_generator.stpa.obligation_aware.governance_routing import (
     GovernancePlacement,
@@ -74,18 +74,13 @@ def run_governance_routing(
     correction_feedback: str | None = None,
 ) -> GovernanceRoutingResponse:
     """Run the named governance-routing provider stage for one batch."""
-    system_prompt, user_prompt = build_governance_routing_prompts(
-        briefs=request.briefs,
-        loss_analysis=request.loss_analysis,
-        control_structure=request.control_structure,
-        slots=request.slots,
-    )
     view = project_governance_routing_context(
         briefs=request.briefs,
         loss_analysis=request.loss_analysis,
         control_structure=request.control_structure,
         slots=request.slots,
     )
+    system_prompt, user_prompt = render_governance_routing_prompts(view)
     user_prompt = _with_correction_feedback(user_prompt, correction_feedback)
     stage = f"{adapter.stage_prefix}_governance_routing"
     risk_ids = tuple(item.risk_id for item in view.rows)
