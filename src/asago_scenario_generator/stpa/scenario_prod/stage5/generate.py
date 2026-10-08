@@ -23,6 +23,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
     parse_llm_result,
+    strip_json_fence,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.models.target_realization import (
@@ -445,23 +446,10 @@ def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseM
     elif isinstance(content, Mapping):
         payload = dict(content)
     elif isinstance(content, str):
-        payload = json.loads(_decode_provider_json_text(content))
+        payload = json.loads(strip_json_fence(content))
     else:
         return parse_llm_result(result, response_format)
     return response_format.model_validate(payload)
-
-
-def _decode_provider_json_text(value: str) -> str:
-    """Remove only an exact JSON Markdown fence before provider parsing."""
-    stripped = value.strip()
-    lines = stripped.splitlines()
-    if (
-        len(lines) >= 3
-        and lines[0].strip().lower() in {"```json", "```"}
-        and lines[-1].strip() == "```"
-    ):
-        return "\n".join(lines[1:-1])
-    return stripped
 
 
 def _condition_failure_code(issues: tuple[ValidationIssue, ...]) -> str:
@@ -524,7 +512,7 @@ def _draft_without_condition(
         elif isinstance(content, Mapping):
             payload = json.loads(json.dumps(content))
         elif isinstance(content, str):
-            payload = json.loads(_decode_provider_json_text(content))
+            payload = json.loads(strip_json_fence(content))
         else:
             return None
     except (TypeError, ValueError):
