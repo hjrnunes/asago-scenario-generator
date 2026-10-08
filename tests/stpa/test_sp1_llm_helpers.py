@@ -422,6 +422,37 @@ class TestCallWithPolicy:
         assert "malformed source ID" in client.prompts[1]
         assert "Expected response schema" not in client.prompts[1]
 
+    def test_an_error_note_follows_the_field_lines_of_the_correction(
+        self, tmp_path
+    ) -> None:
+        client = ScriptedClient([{"item_id": "malformed"}, {"item_id": "ok"}])
+        policy = CorrectionPolicy(
+            validation_retries=1,
+            include_schema=False,
+            error_note=lambda error: f"Note for {type(error).__name__}.",
+        )
+
+        _send(client, tmp_path, policy=policy)
+
+        tail = client.prompts[1].split(
+            "Exact validation error from the prior response:\n"
+        )[1]
+        assert tail.index("- item_id:") < tail.index("Note for ValidationError.")
+        assert tail.index("Note for ValidationError.") < tail.index(
+            "Return one JSON object"
+        )
+
+    def test_a_correction_without_an_error_note_adds_nothing(self, tmp_path) -> None:
+        client = ScriptedClient([{"item_id": "malformed"}, {"item_id": "ok"}])
+        policy = CorrectionPolicy(validation_retries=1, include_schema=False)
+
+        _send(client, tmp_path, policy=policy)
+
+        assert client.prompts[1].endswith(
+            "(value_error)\n\nReturn one JSON object matching the response schema "
+            "already supplied."
+        )
+
     def test_undecodable_bodies_repeat_the_prompt_until_exhausted(
         self, tmp_path
     ) -> None:

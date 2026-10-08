@@ -24,6 +24,7 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictStr,
+    ValidationError,
     ValidationInfo,
     create_model,
     field_validator,
@@ -769,6 +770,31 @@ class _Call2aResponse(BaseModel):
 def _validate_responsibility_wire(value: Any) -> None:
     """Check a decoded Call 2a response against its closed wire models."""
     _Call2aResponse.model_validate(value, context=ASSEMBLY_DEFERRED)
+
+
+_TOP_LEVEL_RESPONSIBILITY_NOTE = (
+    "Return one object with a `responsibilities` list; do not return a single "
+    "responsibility as the top-level object."
+)
+
+
+def _top_level_responsibility_note(error: Exception) -> str:
+    """Return the note for a reply that wrote responsibility fields at the top.
+
+    The note applies only when every unexpected top-level key is a field of a
+    responsibility (or its generic ``id``); any other stray key, such as a
+    ``status``, leaves the correction as the field lines alone.
+    """
+    if not isinstance(error, ValidationError):
+        return ""
+    stray = {
+        item["loc"][0]
+        for item in error.errors(include_url=False, include_input=False)
+        if item["type"] == "extra_forbidden" and len(item["loc"]) == 1
+    }
+    if stray and stray <= {"id", *_Call2aResponsibility.model_fields}:
+        return _TOP_LEVEL_RESPONSIBILITY_NOTE
+    return ""
 
 
 def parse_responsibility_set_response(value: Any) -> ResponsibilitySet:
@@ -1972,6 +1998,7 @@ def _run_stage2_llm_call(
     recover: (
         Callable[[CallOutcome[_Stage2ModelT], str, str], _Stage2ModelT | None] | None
     ) = None,
+    error_note: Callable[[Exception], str] | None = None,
 ) -> _Stage2ModelT:
     """Render prompts, call the LLM, validate, and raise StageError on failure.
 
@@ -2000,6 +2027,7 @@ def _run_stage2_llm_call(
             feedback=_INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
             include_schema=False,
             include_response=True,
+            error_note=error_note,
         ),
         temperature=temperature,
         allow_unvalidated=allow_unvalidated,
@@ -2098,6 +2126,7 @@ def _call_2a_responsibilities(
         allow_unvalidated=True,
         raw_result_validator=_validate_responsibility_wire,
         response_parser=_parse_responsibility_result,
+        error_note=_top_level_responsibility_note,
     )
 
 
