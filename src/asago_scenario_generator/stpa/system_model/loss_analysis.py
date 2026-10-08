@@ -59,14 +59,17 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.loss_analysis import (
     BehaviorClass,
+    DispositionFinding,
     Hazard,
     LossAnalysis,
     LossAnalysisDraft,
     Loss,
     LossProvenance,
     Obligation,
+    RiskAccounting,
     RiskDisposition,
     SecurityConstraint,
+    account_for_risk_cards,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     TargetEvidence,
@@ -2497,35 +2500,6 @@ def _remove_authoritative_duplicates(
     return result
 
 
-def _disposition_loss_contradictions(
-    losses: list[Loss],
-    dispositions: list[RiskDisposition],
-) -> list[str]:
-    """Detect citations that contradict a not_applicable disposition.
-
-    Spec rule 1.1(4): every loss is cited by at least one risk card or is
-    marked ``use_case``.  A card marked not_applicable therefore never cites
-    a loss, so no loss may list it in ``source_risk_cards``.  A cited
-    disposition's loss registry is authoritative for which loss accounts for
-    the card; the loss's own source list may name additional cards.
-    """
-    problems: list[str] = []
-    for disposition in dispositions:
-        if disposition.disposition != "not_applicable":
-            continue
-        citing = [
-            loss.loss_id
-            for loss in losses
-            if disposition.risk_ref in loss.source_risk_cards
-        ]
-        if citing:
-            problems.append(
-                f"'{disposition.risk_ref}' is marked not_applicable but is "
-                "cited by loss " + ", ".join(sorted(citing))
-            )
-    return problems
-
-
 def _validate_risk_accounting(
     draft: LossAnalysisDraft,
     *,
@@ -2544,23 +2518,13 @@ def _validate_risk_accounting(
     supplied_ids = [card.risk_id for card in risk_cards]
     if not supplied_ids:
         return
-    declared_loss_ids = {
-        loss.loss_id for loss in draft.risk_card_losses + draft.use_case_losses
-    }
-    seen: dict[str, int] = {}
-    problems = _disposition_entry_problems(
-        draft.risk_dispositions,
-        supplied=set(supplied_ids),
-        declared_loss_ids=declared_loss_ids,
-        seen=seen,
-    )
-    problems.extend(
-        _disposition_loss_contradictions(
+    problems = _risk_accounting_problems(
+        account_for_risk_cards(
             [*draft.risk_card_losses, *draft.use_case_losses],
             draft.risk_dispositions,
+            supplied_ids,
         )
     )
-    problems.extend(_disposition_count_problems(supplied_ids, seen))
     if not problems:
         return
     message = f"{context} risk accounting is incomplete: " + "; ".join(problems)
@@ -2580,54 +2544,30 @@ def _validate_risk_accounting(
     )
 
 
-def _disposition_entry_problems(
-    dispositions: list[RiskDisposition],
-    *,
-    supplied: set[str],
-    declared_loss_ids: set[str],
-    seen: dict[str, int],
-) -> list[str]:
-    """Check each disposition entry and count its risk_ref in *seen*."""
-    problems: list[str] = []
-    for disposition in dispositions:
-        seen[disposition.risk_ref] = seen.get(disposition.risk_ref, 0) + 1
-        if disposition.risk_ref not in supplied:
-            problems.append(f"'{disposition.risk_ref}' is not a supplied risk card ID")
-            continue
-        if disposition.disposition == "cited":
-            missing = [
-                loss_id
-                for loss_id in disposition.loss_ids
-                if loss_id not in declared_loss_ids
-            ]
-            if missing:
-                problems.append(
-                    f"cited '{disposition.risk_ref}' names undeclared losses: "
-                    + ", ".join(missing)
-                )
-        elif not disposition.reason or not disposition.reason.strip():
-            problems.append(
-                f"not_applicable '{disposition.risk_ref}' has an empty reason"
-            )
+def _risk_accounting_problems(accounting: RiskAccounting) -> list[str]:
+    """Word each finding: rows in order, contradictions, missing, then duplicates."""
+    problems = [_finding_problem(finding) for finding in accounting.findings]
+    problems.extend(contradiction.text() for contradiction in accounting.contradictions)
+    if accounting.missing:
+        problems.append(
+            "missing risk_dispositions entries for: " + ", ".join(accounting.missing)
+        )
+    if accounting.duplicates:
+        problems.append(
+            "duplicate risk_dispositions entries for: "
+            + ", ".join(accounting.duplicates)
+        )
     return problems
 
 
-def _disposition_count_problems(
-    supplied_ids: list[str], seen: dict[str, int]
-) -> list[str]:
-    """Name supplied cards without a disposition and cards disposed twice."""
-    problems: list[str] = []
-    missing_cards = [card_id for card_id in supplied_ids if seen.get(card_id, 0) == 0]
-    duplicate_cards = sorted(card_id for card_id, count in seen.items() if count > 1)
-    if missing_cards:
-        problems.append(
-            "missing risk_dispositions entries for: " + ", ".join(missing_cards)
+def _finding_problem(finding: DispositionFinding) -> str:
+    if finding.kind == "unsupplied":
+        return f"'{finding.risk_ref}' is not a supplied risk card ID"
+    if finding.kind == "undeclared_losses":
+        return f"cited '{finding.risk_ref}' names undeclared losses: " + ", ".join(
+            finding.loss_ids
         )
-    if duplicate_cards:
-        problems.append(
-            "duplicate risk_dispositions entries for: " + ", ".join(duplicate_cards)
-        )
-    return problems
+    return f"not_applicable '{finding.risk_ref}' has an empty reason"
 
 
 def _validate_complete_chain(

@@ -50,13 +50,13 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     LossAnalysisDraft,
     SecurityConstraint,
+    account_for_risk_cards,
     stamp_proposed_direction,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     STAGE1A_MAX_COMPLETION_TOKENS,
     STAGE,
     STEP_GAP,
-    _disposition_loss_contradictions,
     _ProviderObligation,
     _RevisionConstraintAddition,
     _RevisionConstraintEdit,
@@ -369,43 +369,32 @@ def check_risk_accounting(
     a cited disposition's loss_ids must match the citing risk-card losses.
     """
     supplied = [card.risk_id for card in risk_cards]
-    disposed = {d.risk_ref for d in analysis.risk_dispositions}
+    accounting = account_for_risk_cards(
+        [*analysis.risk_card_losses, *analysis.use_case_losses],
+        analysis.risk_dispositions,
+        supplied,
+    )
     cited_via_losses = {
         risk_ref
         for loss in analysis.risk_card_losses + analysis.use_case_losses
         for risk_ref in loss.source_risk_cards
     }
-    missing = tuple(card_id for card_id in supplied if card_id not in disposed)
+    missing = accounting.missing
     unaccounted = tuple(
         card_id for card_id in missing if card_id not in cited_via_losses
     )
-    contradictions = _accounting_contradictions(analysis)
     return RiskAccountingReport(
         missing_dispositions=missing,
         unaccounted_risk_refs=unaccounted,
         not_applicable_refs=_refs_with_disposition(analysis, "not_applicable"),
         cited_refs=_refs_with_disposition(analysis, "cited"),
-        contradictions=contradictions,
+        contradictions=tuple(item.text() for item in accounting.contradictions),
     )
 
 
 def _refs_with_disposition(analysis: LossAnalysis, disposition: str) -> tuple[str, ...]:
     return tuple(
         d.risk_ref for d in analysis.risk_dispositions if d.disposition == disposition
-    )
-
-
-def _accounting_contradictions(analysis: LossAnalysis) -> tuple[str, ...]:
-    """Detect citations that contradict a not_applicable disposition.
-
-    Delegates to the shared rule used by the Call 1 provider validator: a
-    not_applicable card is never cited by a loss (spec rule 1.1(4)).
-    """
-    return tuple(
-        _disposition_loss_contradictions(
-            [*analysis.risk_card_losses, *analysis.use_case_losses],
-            analysis.risk_dispositions,
-        )
     )
 
 
