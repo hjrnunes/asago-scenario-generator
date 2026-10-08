@@ -35,7 +35,6 @@ from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     RevisionDelta,
-    count_findings,
     has_unjustified_gaps,
     run_completeness_critic,
     run_revision,
@@ -362,11 +361,9 @@ def test_critic_absent_unjustified_without_gap_does_not_trigger_revision() -> No
     )
 
     assert has_unjustified_gaps(findings) is False
-    assert count_findings(findings) == 0
 
     actionable = findings.model_copy(update={"gaps": [_critic_gap_dict()]})
     assert has_unjustified_gaps(actionable) is True
-    assert count_findings(actionable) == 1
 
 
 def test_revision_noop_retains_baseline_and_reports_unresolved_gap(tmp_path) -> None:

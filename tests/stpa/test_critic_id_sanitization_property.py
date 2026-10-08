@@ -14,6 +14,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticGap,
     _CONFORMING_PATTERNS,
     _ID_LIKE_PATTERN,
+    _replace_non_conforming_ids,
     sanitize_critic_ids,
 )
 
@@ -247,3 +248,35 @@ class TestSanitizeCriticIdsProperties:
             assert orig.gap_type == san.gap_type
             assert orig.description == san.description
             assert orig.related_attack_path == san.related_attack_path
+
+    @given(findings=st_critic_findings())
+    @settings(max_examples=80, deadline=None)
+    def test_dump_matches_a_full_rebuild(self, findings: CriticFindings) -> None:
+        """The sanitized findings dump byte-identically to a field-by-field rebuild.
+
+        Run outputs persist this dump, so a change in field order, field set,
+        or untouched values would alter recorded artifacts.
+        """
+        before = findings.model_dump_json()
+        expected = CriticFindings(
+            gaps=[
+                CriticGap(
+                    gap_type=gap.gap_type,
+                    description=gap.description,
+                    related_attack_path=gap.related_attack_path,
+                    suggested_remedy=_replace_non_conforming_ids(gap.suggested_remedy),
+                )
+                for gap in findings.gaps
+            ],
+            checklist_results=findings.checklist_results,
+            taxonomy_probe_results=findings.taxonomy_probe_results,
+        )
+        sanitized = sanitize_critic_ids(findings)
+        assert sanitized.model_dump_json() == expected.model_dump_json()
+        assert findings.model_dump_json() == before
+
+
+def test_default_findings_dump_unchanged() -> None:
+    """Findings built from defaults keep the same dump after sanitization."""
+    findings = CriticFindings()
+    assert sanitize_critic_ids(findings).model_dump_json() == findings.model_dump_json()

@@ -16,6 +16,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ProcessModelPart,
     ReferenceType,
     Responsibility,
+    check_structural_heuristics,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
@@ -26,7 +27,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model.heuristics import (
     check_solution_neutrality,
-    run_heuristics,
 )
 
 
@@ -125,7 +125,7 @@ class TestStructuralHeuristics:
     def test_heur_01_valid_cs_passes(self):
         """SP1-HEUR-01: valid control structure passes all heuristics."""
         cs = _make_control_structure()
-        result = run_heuristics(cs)
+        result = check_structural_heuristics(cs)
         assert result.passed
         assert len(result.errors) == 0
 
@@ -145,7 +145,7 @@ class TestStructuralHeuristics:
             pm_count=pm_count, ca_count=ca_count, fb_count=fb_count
         )
         cs = _make_control_structure(responsibilities=[resp])
-        result = run_heuristics(cs)
+        result = check_structural_heuristics(cs)
         assert not result.passed
         assert any(error_fragment in e for e in result.errors)
 
@@ -154,7 +154,7 @@ class TestStructuralHeuristics:
         resp = _make_responsibility(pm_count=2, fb_count=1)
         # FB-1-1 updates PM-1-1, so PM-1-2 is orphan
         cs = _make_control_structure(responsibilities=[resp])
-        result = run_heuristics(cs)
+        result = check_structural_heuristics(cs)
         assert any("PM-1-2" in w for w in result.warnings)
 
     def test_heur_04_orphan_controlled_process_fails(self):
@@ -162,7 +162,7 @@ class TestStructuralHeuristics:
         resp = _make_responsibility()
         cp = ControlledProcess(cp_id="CP-1", description="Unreferenced process")
         cs = _make_control_structure(responsibilities=[resp], controlled_processes=[cp])
-        result = run_heuristics(cs)
+        result = check_structural_heuristics(cs)
         assert not result.passed
         assert any("controlled process" in e.lower() for e in result.errors)
 
@@ -172,7 +172,7 @@ class TestStructuralHeuristics:
         # Control structure with no responsibility referencing SC-1
         resp = _make_responsibility()
         cs = _make_control_structure(responsibilities=[resp])
-        result = run_heuristics(cs, la)
+        result = check_structural_heuristics(cs, la)
         assert not result.passed
         assert any("hazard" in e.lower() for e in result.errors)
 
@@ -195,7 +195,7 @@ class TestStructuralHeuristics:
             ],
         )
         cs = _make_control_structure(responsibilities=[resp])
-        result = run_heuristics(cs, la)
+        result = check_structural_heuristics(cs, la)
         assert result.passed
         assert len(result.errors) == 0
 
