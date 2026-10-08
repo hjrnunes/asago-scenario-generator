@@ -506,6 +506,26 @@ def test_the_indirect_field_text_leads_with_the_carrier_requirement(
 
 
 @pytest.mark.parametrize(
+    ("kind", "config"),
+    [
+        (AdversaryKind.external_attacker, ShapeStepConfig()),
+        (AdversaryKind.malicious_customer, ShapeStepConfig()),
+        (AdversaryKind.third_party_via_content, ShapeStepConfig()),
+        (
+            AdversaryKind.third_party_via_content,
+            ShapeStepConfig(allow_forged_transcript=True),
+        ),
+    ],
+)
+def test_the_request_never_asks_for_a_record_reference(
+    kind: AdversaryKind, config: ShapeStepConfig, tmp_path: Path
+) -> None:
+    system, user = rendered_shape_request(kind, tmp_path, config)
+
+    assert "record_ref" not in system + user
+
+
+@pytest.mark.parametrize(
     "kind", [AdversaryKind.external_attacker, AdversaryKind.malicious_customer]
 )
 @pytest.mark.parametrize("forged", [False, True])
