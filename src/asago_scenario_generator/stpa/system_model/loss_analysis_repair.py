@@ -248,7 +248,7 @@ class RepairConstraintReferences(BaseModel):
 
 
 class ReferenceRepairResponse(BaseModel):
-    """The complete duplicate-reference repair wire.
+    """The complete reference-list repair wire.
 
     Descriptions, rules, conditions, obligations, losses, and dispositions are
     deliberately absent, so a response can change only the selected lists.
@@ -1357,16 +1357,19 @@ _REFERENCE_LIST_FIELDS = {
 
 @dataclass(frozen=True)
 class SelectedReferenceList:
-    """One reference list that names an ID more than once.
+    """One reference list that names an ID more than once or an unknown ID.
 
+    ``unknown`` are the listed IDs that no declared record has.
     ``replacement_ids`` are the IDs valid for this list at this step that the
-    list does not already name; a repeat may become one of them or be removed.
+    list does not already name; a repeated or unknown entry may become one of
+    them or be removed.
     """
 
     collection: str
     owner_id: str
     original: tuple[str, ...]
     replacement_ids: tuple[str, ...]
+    unknown: tuple[str, ...] = ()
 
     @property
     def field_name(self) -> str:
@@ -1379,28 +1382,63 @@ class SelectedReferenceList:
     @property
     def repeated(self) -> tuple[str, ...]:
         return tuple(
-            sorted({ref for ref in self.original if self.original.count(ref) > 1})
+            sorted(
+                {
+                    ref
+                    for ref in self.original
+                    if self.original.count(ref) > 1 and ref not in self.unknown
+                }
+            )
         )
 
     @property
     def kept(self) -> tuple[str, ...]:
-        """Each original ID once, in first-occurrence order."""
-        return tuple(dict.fromkeys(self.original))
+        """Each known original ID once, in first-occurrence order."""
+        return tuple(dict.fromkeys(r for r in self.original if r not in self.unknown))
 
     @property
-    def repeat_count(self) -> int:
+    def replaceable_count(self) -> int:
+        """How many entries (repeats and unknown IDs) a repair may replace."""
         return len(self.original) - len(self.kept)
 
     @property
+    def entry_kind(self) -> str:
+        """The defective entries this list holds, as the request names them."""
+        if not self.unknown:
+            return "repeated"
+        return "repeated or unknown" if self.repeated else "unknown"
+
+    @property
     def defect_reason(self) -> str:
-        return f"{self.collection}.{self.field_name} duplicate IDs: " + ", ".join(
-            f"{self.owner_id} -> {ref}" for ref in self.repeated
+        prefix = f"{self.collection}.{self.field_name}"
+        findings = [
+            (f"{prefix} unknown IDs: ", self.unknown),
+            (f"{prefix} duplicate IDs: ", self.repeated),
+        ]
+        return "; ".join(
+            label + ", ".join(f"{self.owner_id} -> {ref}" for ref in refs)
+            for label, refs in findings
+            if refs
         )
 
     @property
     def correction_instruction(self) -> str:
+        if not self.unknown:
+            return (
+                "for each repeated entry, remove the repeat or replace it with one "
+                "listed replacement ID; keep "
+                + ", ".join(self.kept)
+                + " once each in this order; name no ID outside the kept and "
+                "replacement IDs"
+            )
+        if not self.kept:
+            return (
+                f"for each {self.entry_kind} entry, remove it or replace it with "
+                "one listed replacement ID; the list has no other ID to keep; "
+                "name no ID outside the replacement IDs and return at least one ID"
+            )
         return (
-            "for each repeated entry, remove the repeat or replace it with one "
+            f"for each {self.entry_kind} entry, remove it or replace it with one "
             "listed replacement ID; keep "
             + ", ".join(self.kept)
             + " once each in this order; name no ID outside the kept and "
@@ -1410,29 +1448,31 @@ class SelectedReferenceList:
 
 @dataclass(frozen=True)
 class ReferenceRepairPlan:
-    """One targeted repair of duplicate hazard or constraint references.
+    """One targeted repair of repeated or unknown hazard or constraint references.
 
     ``meanings`` maps every loss and hazard ID the request names to its
-    description, including IDs an earlier call established.
+    description, including IDs an earlier call established.  ``feedback``
+    is the reference validator's finding the request carries.
     """
 
     prior: LossAnalysisDraft
     selected: tuple[SelectedReferenceList, ...]
     meanings: tuple[tuple[str, str], ...] = ()
     salvage_warnings: tuple[str, ...] = ()
+    feedback: str = ""
 
 
 RepairPlan = Union[DispositionRepairPlan, ObligationRepairPlan, ReferenceRepairPlan]
 RepairOutcome = Union[RepairPlan, UnsupportedRepair, DeterministicCleanup]
 
 
-def select_duplicate_reference_repairs(
+def select_reference_repairs(
     draft: LossAnalysisDraft,
     *,
     valid_loss_ids: set[str],
     valid_hazard_ids: set[str],
 ) -> tuple[SelectedReferenceList, ...]:
-    """Select each hazard or constraint whose reference list repeats an ID."""
+    """Select each hazard or constraint list with a repeated or unknown ID."""
     rows = (
         ("hazards", hazard.hazard_id, hazard.related_losses, valid_loss_ids)
         for hazard in draft.hazards
@@ -1446,16 +1486,17 @@ def select_duplicate_reference_repairs(
         )
         for constraint in draft.security_constraints
     )
-    return tuple(
+    selected = (
         SelectedReferenceList(
             collection=collection,
             owner_id=owner_id,
             original=tuple(references),
             replacement_ids=tuple(sorted(valid_ids - set(references))),
+            unknown=tuple(dict.fromkeys(r for r in references if r not in valid_ids)),
         )
         for collection, owner_id, references, valid_ids in (*rows, *constraint_rows)
-        if len(set(references)) != len(references)
     )
+    return tuple(item for item in selected if item.replaceable_count)
 
 
 def select_disposition_repairs(
@@ -2689,8 +2730,8 @@ def _check_reference_list(selected: SelectedReferenceList, returned: list[str]) 
             + ", ".join(repeated)
             + " more than once"
         )
-    original = set(selected.original)
-    kept = tuple(ref for ref in returned if ref in original)
+    keep = set(selected.kept)
+    kept = tuple(ref for ref in returned if ref in keep)
     if kept != selected.kept:
         raise RepairRejected(
             f"repair_edit_forbidden: {selected.identity} must keep "
@@ -2698,13 +2739,13 @@ def _check_reference_list(selected: SelectedReferenceList, returned: list[str]) 
             + " once each in this order; returned "
             + ", ".join(returned)
         )
-    _check_added_references(selected, returned, original)
+    _check_added_references(selected, returned, keep)
 
 
 def _check_added_references(
-    selected: SelectedReferenceList, returned: list[str], original: set[str]
+    selected: SelectedReferenceList, returned: list[str], keep: set[str]
 ) -> None:
-    added = [ref for ref in returned if ref not in original]
+    added = [ref for ref in returned if ref not in keep]
     invalid = [ref for ref in added if ref not in selected.replacement_ids]
     if invalid:
         raise RepairRejected(
@@ -2712,10 +2753,11 @@ def _check_added_references(
             + ", ".join(invalid)
             + ", which is not a replacement ID valid for this list"
         )
-    if len(added) > selected.repeat_count:
+    if len(added) > selected.replaceable_count:
         raise RepairRejected(
             f"repair_edit_forbidden: {selected.identity} adds {len(added)} IDs "
-            f"but only {selected.repeat_count} repeated entries may be replaced"
+            f"but only {selected.replaceable_count} {selected.entry_kind} "
+            "entries may be replaced"
         )
 
 
@@ -3047,11 +3089,15 @@ def _reference_request(
     use_case_text: str,
 ) -> _RepairRequest:
     return _RepairRequest(
-        system_prompt=loader.render_prompt(REFERENCE_REPAIR_SYSTEM_TEMPLATE),
+        system_prompt=loader.render_prompt(
+            REFERENCE_REPAIR_SYSTEM_TEMPLATE,
+            unknown_ids=any(selected.unknown for selected in plan.selected),
+        ),
         user_prompt=loader.render_prompt(
             REFERENCE_REPAIR_USER_TEMPLATE,
             use_case_text=use_case_text,
             selected_lists=_selected_reference_views(plan),
+            feedback=plan.feedback,
         ),
         response_format=ReferenceRepairResponse,
         wire_model=ReferenceRepairResponse,
@@ -3260,6 +3306,8 @@ def _selected_reference_views(plan: ReferenceRepairPlan) -> list[dict]:
             "validation_error": selected.defect_reason,
             "kept": described(selected.kept),
             "repeated": list(selected.repeated),
+            "unknown": list(selected.unknown),
+            "entry_kind": selected.entry_kind,
             "replacements": described(selected.replacement_ids),
             "permitted_change": selected.correction_instruction,
         }
