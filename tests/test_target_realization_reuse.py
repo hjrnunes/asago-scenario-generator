@@ -4,6 +4,9 @@ from __future__ import annotations
 
 import pytest
 
+from asago_scenario_generator.stpa.models.execution_classification import (
+    mcp_resource_id,
+)
 from asago_scenario_generator.models.target_realization import (
     TargetRealizationDisposition,
 )
@@ -12,8 +15,11 @@ from asago_scenario_generator.pipeline.target_realization import (
     realize_baseline_rows,
     realize_target_operations,
 )
+from asago_scenario_generator.stpa.models.control_structure import ControlAction
 from tests.helpers.target_realization import (
     _baseline,
+    _baseline_with_actions,
+    _ExtensionInterpreter,
     _ExtensionFactory,
     _Interpreter,
     _profile,
@@ -64,8 +70,7 @@ def test_realization_given_baseline_rows_still_runs_the_extension_once():
     result = realize_target_operations(
         baseline,
         _profile(),
-        _ForbiddenInterpreter,
-        extension_factory=extension_factory,
+        extension_factory,
         baseline_rows=rows,
     )
 
@@ -76,6 +81,55 @@ def test_realization_given_baseline_rows_still_runs_the_extension_once():
         for item in extension_factory.interpreter.requests[0].operations
     ) == ("get_payment",)
     assert result.rows == rows
+
+
+class _EveryOperationInterpreter(_Interpreter):
+    """Maps CA-1-1 to schedule_payment and CA-1-2 to get_payment."""
+
+    def __call__(self, *, action, operations):
+        response = super().__call__(action=action, operations=operations)
+        if action["control_action_id"] == "CA-1-2":
+            operation = {
+                "resource_id": mcp_resource_id("target:mini", "get_payment"),
+                "operation_id": "get_payment",
+            }
+            response["candidate_operations"] = (operation,)
+            response["selected_operation"] = operation
+            response["evidence_refs"] = ("inventory:mcp:payments/get_payment",)
+        return response
+
+
+def test_extension_factory_is_not_built_when_every_operation_is_supported():
+    baseline = _baseline_with_actions(
+        [
+            ControlAction(ca_id="CA-1-1", description="Controller schedules a payment"),
+            ControlAction(ca_id="CA-1-2", description="Controller reads a payment"),
+        ],
+        baseline_id="baseline:two",
+    )
+    rows = _enrichment_rows(baseline, _EveryOperationInterpreter())
+    extension_factory = _ExtensionFactory()
+
+    result = realize_target_operations(
+        baseline, _profile(), extension_factory, baseline_rows=rows
+    )
+
+    assert extension_factory.calls == 0
+    assert result.uncovered_operations == ()
+
+
+def test_extension_adapter_needs_only_extend():
+    baseline = _baseline()
+    rows = _enrichment_rows(baseline, _Interpreter())
+    adapter = _ExtensionInterpreter()
+
+    result = realize_target_operations(
+        baseline, _profile(), lambda: adapter, baseline_rows=rows
+    )
+
+    assert len(adapter.requests) == 1
+    assert len(result.diagnostics) == 1
+    assert result.diagnostics[0].startswith("target extension rejected operation ")
 
 
 def test_realization_requires_baseline_rows():

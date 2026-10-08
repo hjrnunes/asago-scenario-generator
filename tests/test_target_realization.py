@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from asago_scenario_generator.models.target_realization import (
     CapabilityClaim,
     CapabilityExposureDisposition,
+    SystemicControlAction,
     SystemicControlledProcess,
     SystemicElementReference,
     TargetDerivedICARequest,
@@ -802,18 +803,24 @@ def test_bounded_extension_uses_the_interpreter_extend_without_a_factory():
     assert adapter.extension_calls == 1
 
 
-def test_extension_factory_must_return_an_adapter_with_extend():
+def test_extension_adapter_without_extend_leaves_each_operation_diagnosed():
     class _PlainCallableExtension:
         def __call__(self, request):
             raise AssertionError("a plain callable is not an extension adapter")
 
-    with pytest.raises(TypeError, match="adapter with extend"):
-        _realize(
-            _baseline(),
-            _profile(),
-            lambda: _UnmappedInterpreter(),
-            extension_factory=lambda: _PlainCallableExtension(),
-        )
+    result = _realize(
+        _baseline(),
+        _profile(),
+        lambda: _UnmappedInterpreter(),
+        extension_factory=lambda: _PlainCallableExtension(),
+    )
+
+    assert result.target_derived_control_actions == ()
+    assert sorted(result.diagnostics) == [
+        "no extension outcome for observed operation "
+        f"{mcp_resource_id('target:mini', name)}/{name}"
+        for name in ("get_payment", "schedule_payment")
+    ]
 
 
 def test_bounded_extension_rejects_invented_operation_identity():
@@ -2105,3 +2112,202 @@ def test_verified_baseline_operations_win_over_target_derived_ones() -> None:
         ("CA-1", "op"),
         ("TD-1", "op"),
     ]
+
+
+def _union_authorities():
+    loss_analysis = LossAnalysis(
+        risk_card_losses=[],
+        use_case_losses=[
+            Loss(
+                loss_id="L-1",
+                description="payment loss",
+                provenance=LossProvenance.use_case,
+            )
+        ],
+        hazards=[
+            Hazard(hazard_id="H-1", description="bad payment", related_losses=["L-1"])
+        ],
+        security_constraints=[
+            SecurityConstraint(
+                constraint_id="SC-1",
+                rule="payments are authorized",
+                related_hazards=["H-1"],
+            )
+        ],
+    )
+    control_structure = ControlStructure(
+        responsibilities=[
+            Responsibility(
+                resp_id="RESP-1",
+                description="payment controller",
+                security_constraint_refs=["SC-1"],
+                control_actions=[
+                    ControlAction(
+                        ca_id="CA-1-1",
+                        description="Controller schedules a payment",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                        effect_kind=ControlActionEffectKind.state_change,
+                    )
+                ],
+            )
+        ],
+        controlled_processes=[
+            ControlledProcess(cp_id="CP-1", description="payment ledger")
+        ],
+    )
+    ica_enumeration = ICAEnumeration(
+        slots=[
+            ICASlot(
+                slot_id="RESP-1:CA-1-1:NOT_PROVIDED",
+                responsibility="RESP-1",
+                control_action="CA-1-1",
+                uca_type=UCAType.not_provided,
+                is_na=False,
+                icas=[
+                    ICA(
+                        ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
+                        ica_text="Baseline unsafe action.",
+                        hazardous_context="Baseline context.",
+                        loss_scenario="Baseline loss scenario.",
+                        related_hazards=["H-1"],
+                        related_constraints=["SC-1"],
+                    )
+                ],
+            )
+        ]
+    )
+    baseline = SystemicStpaBaseline.from_stpa(
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        ica_enumeration=ica_enumeration,
+        baseline_id="baseline:union",
+    )
+    return baseline, loss_analysis, control_structure, ica_enumeration
+
+
+class _NewProcessExtension(_ExtensionInterpreter):
+    def extend(self, request):
+        response = super().extend(request)
+        response["outcomes"][0]["control_action"] = {
+            "controller_id": "RESP-1",
+            "target_new_controlled_process": True,
+        }
+        response["outcomes"][0]["controlled_process"] = {
+            "description": "payment scheduler queue"
+        }
+        return response
+
+
+def _sha256_text(text: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def test_union_projection_and_effective_view_bytes_are_pinned():
+    """Pin the baseline-plus-target union both builders produce.
+
+    The realization has one derived action targeting one derived process,
+    three derived slots (one with a verified finding, two unresolved), and a
+    baseline slot with an ICA.  The digests cover every serialized byte of
+    the projection and of the stored effective view.
+    """
+    baseline, loss_analysis, control_structure, ica_enumeration = _union_authorities()
+    extension_factory = _ExtensionFactory()
+    extension_factory.interpreter = _NewProcessExtension()
+    realization = _realize(
+        baseline,
+        _profile(),
+        lambda: _UnmappedInterpreter(),
+        extension_factory=extension_factory,
+    )
+    realization = realize_target_derived_icas(
+        baseline, realization, _DerivedFindingFactory()
+    )
+
+    projection = project_target_realization_to_stpa(
+        baseline, loss_analysis, control_structure, ica_enumeration, realization
+    )
+
+    view = realization.effective_view
+    assert view is not None
+    assert [item.cp_id for item in view.target_derived_controlled_processes] == ["CP-2"]
+    assert [
+        item.cp_id for item in projection.control_structure.controlled_processes
+    ] == [
+        "CP-1",
+        "CP-2",
+    ]
+    slots = projection.ica_enumeration.slots
+    assert [slot.slot_id for slot in slots] == [
+        "RESP-1:CA-1-1:NOT_PROVIDED",
+        "RESP-1:CA-1-2:INCORRECT",
+        "RESP-1:CA-1-2:NOT_PROVIDED",
+        "RESP-1:CA-1-2:WRONG_TIMING",
+    ]
+    assert [len(slot.icas) for slot in slots] == [1, 1, 0, 0]
+    assert [slot.unresolved_reason is None for slot in slots] == [
+        True,
+        True,
+        False,
+        False,
+    ]
+    assert {
+        "control_structure": _sha256_text(
+            projection.control_structure.model_dump_json()
+        ),
+        "ica_enumeration": _sha256_text(projection.ica_enumeration.model_dump_json()),
+        "effective_view": _sha256_text(view.model_dump_json()),
+        "realization_yaml": _sha256_text(realization.to_yaml()),
+    } == {
+        "control_structure": (
+            "37bfd97e7e60468d650853acb3b20e35024f289724e05b9acd735bc6da440e63"
+        ),
+        "ica_enumeration": (
+            "fae100e02afd1616c2dbb169b77c1c10c61c578f343e396386c6229d1046cbae"
+        ),
+        "effective_view": (
+            "51861bc59db0754410f6c19ad730517d837bf4fe72694c86357112b33f9dc126"
+        ),
+        "realization_yaml": (
+            "367daeab04983f5fbd921d6b4dad6421ad9afa704215d1022ed9a5e0f37a4217"
+        ),
+    }
+
+
+def test_projection_requires_the_effective_view():
+    baseline, loss_analysis, control_structure, ica_enumeration = _union_authorities()
+    realization = _realize(baseline, _profile(), lambda: _Interpreter())
+    assert realization.effective_view is None
+
+    with pytest.raises(ValueError, match="must pass realize_target_derived_icas"):
+        project_target_realization_to_stpa(
+            baseline, loss_analysis, control_structure, ica_enumeration, realization
+        )
+
+
+def test_view_builder_rejects_a_target_action_under_an_unknown_controller():
+    action = SystemicControlAction(
+        control_action_id="CA-9-1",
+        controller_id="RESP-9",
+        description="Unknown controller action",
+        provenance="target_derived",
+    )
+
+    with pytest.raises(ValueError, match="not in the baseline: RESP-9"):
+        target_realization_module._combine_control_structure(_baseline(), (action,), ())
+
+
+def test_typed_structure_rejects_a_target_process_that_collides_with_the_baseline():
+    with pytest.raises(ValidationError, match="Duplicate"):
+        ControlStructure(
+            responsibilities=[
+                Responsibility(resp_id="RESP-1", description="payment controller")
+            ],
+            controlled_processes=[
+                ControlledProcess(cp_id="CP-1", description="payment ledger"),
+                ControlledProcess(cp_id="CP-1", description="target-derived copy"),
+            ],
+        )
