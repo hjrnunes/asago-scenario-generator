@@ -1,9 +1,9 @@
 """The shape step's response model, validation and code default.
 
-The model proposes structure only. Code validates the proposal (rules R1-R6 and
-R8, the channels the adversary kind allows) and replaces a proposal that fails
-with the single-turn direct default, carrying the reason. Nothing here makes a
-model request.
+The model proposes structure only. Code takes turn_count from the plan,
+validates the proposal (rules R2-R6 and R8, the channels the adversary kind
+allows) and replaces a proposal that fails with the single-turn direct default,
+carrying the reason. Nothing here makes a model request.
 """
 
 from __future__ import annotations
@@ -189,14 +189,26 @@ def test_a_valid_indirect_proposal_keeps_its_carrier_and_leaves_the_actor_null()
     assert shape.indirect.party_relation.benign_user_actor_ref is None
 
 
+@pytest.mark.parametrize("stated", [1, 2, 4])
+def test_the_turn_count_comes_from_the_plan_not_the_reply(stated: int) -> None:
+    shape = resolve(
+        direct_proposal(
+            turn_count=stated,
+            turn_plan=[
+                _turn(1, purpose="establish_context"),
+                _turn(2, purpose="assert_authority"),
+                _turn(3, purpose="request_action"),
+            ],
+        )
+    )
+
+    assert shape.source is ShapeSource.STAGE5_VALIDATED
+    assert shape.turn_count == 3
+
+
 # Each row: the proposal, the facts it is judged under, and the reason it
 # downgrades with.
 REJECTIONS = {
-    "R1 turn_count differs from the plan length": (
-        direct_proposal(turn_count=2),
-        facts(),
-        REASON.SHAPE_VALIDATION_FAILED,
-    ),
     "R2 positions are out of order": (
         direct_proposal(
             turn_count=2, turn_plan=[_turn(2), _turn(1, purpose="apply_pressure")]

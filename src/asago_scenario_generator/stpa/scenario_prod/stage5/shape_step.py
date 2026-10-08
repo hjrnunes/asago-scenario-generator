@@ -220,7 +220,9 @@ def _validated_shape(proposal: ShapeProposal | ForgedShapeProposal) -> AttackSha
     channel = AttackChannel(proposal.channel)
     return AttackShape(
         channel=channel,
-        turn_count=proposal.turn_count,
+        # The plan is the structure; a reply whose count disagrees with it is
+        # not a different shape.
+        turn_count=len(proposal.turn_plan),
         turn_plan=[
             TurnShape(
                 position=turn.position,
