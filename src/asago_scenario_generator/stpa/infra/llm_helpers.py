@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import json
 import re
-from hashlib import sha256
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
@@ -27,6 +26,8 @@ from asago_scenario_generator.stpa.infra.transport_retry import (
 )
 from asago_scenario_generator.stpa.infra.call_log import (
     CallLog,
+    _content_pin,
+    _safe_error,
     append_call_log,
     call_log_of,
     make_call_log_entry,
@@ -35,6 +36,8 @@ from asago_scenario_generator.stpa.infra.llm import (
     DEFAULT_TEMPERATURE,
     LLMClient,
     LLMResult,
+    _plain_value,
+    _response_content,
 )
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptAudit,
@@ -115,31 +118,11 @@ def _prompt_audit_fields(audit: PromptAudit | None) -> dict[str, Any]:
 
 
 _TRAILING_COMMA = re.compile(r",(\s*[}\]])")
-_SENSITIVE_ERROR = re.compile(
-    r"(?i)\b(?:api[-_ ]?key|token|password|authorization)\s*[:=]\s*[^\s,;]+"
-)
 
 
 def _safe_error_detail(error: BaseException) -> str:
     """Keep typed error context while excluding connection material."""
-    detail = str(error)
-    detail = re.sub(r"https?://[^\s\"')]+", "[redacted-url]", detail)
-    detail = _SENSITIVE_ERROR.sub("[redacted-secret]", detail)
-    detail = re.sub(r"(?i)\bbearer\s+\S+", "Bearer [redacted]", detail)
-    detail = re.sub(r"(?i)\bsk-[A-Za-z0-9_-]+\b", "[redacted-key]", detail)
-    return detail[:800]
-
-
-def _evidence_pin(value: Any, frame: str) -> str:
-    """Pin one JSON-shaped evidence value for the call record."""
-    payload = json.dumps(
-        value,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-        default=str,
-    )
-    return sha256(f"{frame}\n{payload}".encode("utf-8")).hexdigest()
+    return _safe_error(str(error))
 
 
 def _transformation(
@@ -152,8 +135,12 @@ def _transformation(
     """Build one ordered, content-pinned cleanup record."""
     item: dict[str, Any] = {
         "name": name,
-        "input_pin": _evidence_pin(input_value, "stpa-cleanup-input-v1"),
-        "output_pin": _evidence_pin(output_value, "stpa-cleanup-output-v1"),
+        "input_pin": _content_pin(
+            input_value, "stpa-cleanup-input-v1", jsonable=False, stringify=True
+        ),
+        "output_pin": _content_pin(
+            output_value, "stpa-cleanup-output-v1", jsonable=False, stringify=True
+        ),
     }
     if detail:
         item["detail"] = detail
@@ -296,19 +283,6 @@ def _attached_provider_response(error: BaseException) -> Any | None:
     return None
 
 
-def _provider_response_content(response: Any) -> Any:
-    """Extract message content from an attached provider completion."""
-    choices = getattr(response, "choices", None)
-    if not choices:
-        return None
-    try:
-        choice = choices[0]
-    except (IndexError, KeyError, TypeError):
-        return None
-    message = getattr(choice, "message", None)
-    return getattr(message, "content", None)
-
-
 def _provider_response_usage(response: Any) -> tuple[int | None, int | None]:
     """Extract usage counters from an attached provider completion."""
     usage = getattr(response, "usage", None)
@@ -330,28 +304,10 @@ def _provider_response_usage(response: Any) -> tuple[int | None, int | None]:
 
 def _provider_response_usage_details(response: Any) -> dict[str, Any]:
     """Preserve nested usage details from an attached provider response."""
-
-    def plain(value: Any) -> Any:
-        if value is None or isinstance(value, (str, int, float, bool)):
-            return value
-        if isinstance(value, BaseModel):
-            return value.model_dump(mode="json")
-        if isinstance(value, Mapping):
-            return {str(key): plain(item) for key, item in value.items()}
-        if isinstance(value, (list, tuple)):
-            return [plain(item) for item in value]
-        if hasattr(value, "__dict__"):
-            return {
-                str(key): plain(item)
-                for key, item in vars(value).items()
-                if not key.startswith("_")
-            }
-        return str(value)
-
     usage = getattr(response, "usage", None)
     if usage is None:
         return {}
-    value = plain(usage)
+    value = _plain_value(usage)
     return value if isinstance(value, dict) else {}
 
 
@@ -544,7 +500,7 @@ def _failure_evidence(
         duration_ms = 0
         usage_details = _provider_response_usage_details(attached)
         response_content = (
-            _stringify_response_content(_provider_response_content(attached))
+            _stringify_response_content(_response_content(attached))
             if attached is not None
             else None
         )

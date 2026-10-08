@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import time
+from collections.abc import Mapping
 from typing import Any
 
 from openai import LengthFinishReasonError, OpenAI, RateLimitError
@@ -297,17 +298,12 @@ def _plain_value(value: Any) -> Any:
     """Convert provider usage objects into JSON-compatible values."""
     if value is None or isinstance(value, (str, int, float, bool)):
         return value
-    if isinstance(value, dict):
+    if isinstance(value, BaseModel):
+        return value.model_dump(mode="json")
+    if isinstance(value, Mapping):
         return {str(key): _plain_value(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
         return [_plain_value(item) for item in value]
-    return _plain_object(value)
-
-
-def _plain_object(value: Any) -> Any:
-    """Convert a model or attribute-bearing usage object; stringify anything else."""
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
     if hasattr(value, "__dict__"):
         return {
             str(key): _plain_value(item)
