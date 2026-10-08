@@ -71,7 +71,7 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservation,
     TargetObservationSnapshot,
 )
-from asago_scenario_generator.stpa.system_model import (
+from asago_scenario_generator.stpa.system_model._constants import (
     PROMPTS_DIR as SYSTEM_MODEL_PROMPTS_DIR,
 )
 from tests.helpers.normal_authoring_wire import (

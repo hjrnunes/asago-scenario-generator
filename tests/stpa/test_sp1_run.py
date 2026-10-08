@@ -61,16 +61,16 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     build_target_evidence,
 )
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model import (
-    PROMPTS_DIR,
     loss_analysis,
     profile,
     control_structure,
     critic,
     heuristics,
     run,
-    run_sp1 as _run,
 )
+from asago_scenario_generator.stpa.system_model.run import run_sp1 as _run
 
 
 def _valid_control_structure_dict() -> dict:
@@ -684,10 +684,12 @@ class TestRunOrchestration:
 
     def test_run_11_internal_models_defined(self):
         """SP1-RUN-11: internal models are defined."""
-        from asago_scenario_generator.stpa.system_model import (
+        from asago_scenario_generator.stpa.system_model.control_structure import (
             RequirementSet,
             Requirement,
             ResponsibilitySet,
+        )
+        from asago_scenario_generator.stpa.system_model.critic import (
             CriticFindings,
             CriticGap,
         )

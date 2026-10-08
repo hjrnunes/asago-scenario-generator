@@ -1,7 +1,7 @@
 """Requirements must not become evidence that a safeguard is installed."""
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 
 
 def test_requirement_prompt_does_not_mandate_a_control_per_constraint() -> None:

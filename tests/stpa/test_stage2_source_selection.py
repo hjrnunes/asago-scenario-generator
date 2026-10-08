@@ -10,7 +10,7 @@ from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-from asago_scenario_generator.stpa.system_model import (
+from asago_scenario_generator.stpa.system_model.semantic_review import (
     apply_control_structure_semantic_review,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (

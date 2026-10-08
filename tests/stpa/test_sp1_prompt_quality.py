@@ -10,7 +10,7 @@ from __future__ import annotations
 from hypothesis import given, settings, strategies as st
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.system_model import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
