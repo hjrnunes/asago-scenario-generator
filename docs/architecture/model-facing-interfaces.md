@@ -614,7 +614,18 @@ coverage claims or manufacture an evidence selection.
 
 Product execution uses deterministic hypothesis summaries: Stage 6 stores the
 narrative, tree, structured Gherkin, and feature text that
-`render_scenario_summary` returns for the scenario, unchanged. Stage 7 checks
+`render_scenario_presentation` returns for the scenario, unchanged. For a
+functional scenario that is the semantic summary of `render_scenario_summary`.
+For an adversarial scenario the tree stays the summary's, and the narrative
+and Gherkin follow the attack shape: a short story without the provenance
+list (actor, goal, approach, channel, the turns in order, failure, safe
+alternative), and Gherkin whose `Background` holds the checked facts, the
+discriminating-condition step word for word, the weak points and, for an
+indirect shape, the planted item, with one step per planned turn naming its
+speaker and purpose. Every feature puts its Given steps under `Background`.
+The shape step still sends the `render_scenario_summary` narrative to the
+model. Hazard, loss, constraint and source IDs stay in the structured handoff
+fields and the tree. Stage 7 checks
 that the tree's factor evidence covers the selected causal factors and that
 the Gherkin cites only known loss and hazard IDs, then checks cross-scenario
 traceability. It does not re-run the Stage 5 spec validators, whose input the

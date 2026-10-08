@@ -86,7 +86,7 @@ from .coverage import compute_coverage_gaps, write_coverage_gaps
 from .eval_metrics import compute_eval_scorecard, write_eval_scorecard
 from .realized_operation import realized_operation
 from .target_profile_publication import publish_execution_target_profile
-from .presentation import render_scenario_summary
+from .presentation import render_scenario_presentation
 from .handoff import (
     ScenarioHandoffV4,
     Stage1aSource,
@@ -885,7 +885,7 @@ def _persist_functional_test_candidates(
     for spec in specs:
         prior_error_count = len(stage_errors)
         try:
-            narrative, tree, gherkin = render_scenario_summary(spec)
+            narrative, tree, gherkin = render_scenario_presentation(spec)
             envelope = assemble_envelope(
                 scenario_id=spec.scenario_id,
                 scenario_spec=spec,
@@ -1399,7 +1399,7 @@ def _run_stage6_for_spec(
     detector is still rendered and published, with the limitation reported
     downstream.
     """
-    narrative, tree, gherkin = render_scenario_summary(spec)
+    narrative, tree, gherkin = render_scenario_presentation(spec)
     return assemble_envelope(
         scenario_id=spec.scenario_id,
         scenario_spec=spec,

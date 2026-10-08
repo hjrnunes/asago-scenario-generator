@@ -213,9 +213,10 @@ def test_r5_handoff_rendering_keeps_unsafe_alternatives_non_executable():
 
     assert gherkin.to_feature_text() == (
         "Feature: Safe orchestration\n"
-        "Scenario: SCN-001\n"
-        "  Given PM-1-1 is a hypothesis\n"
-        "  When the customer requests a refund\n"
-        "  Then the system should reject the request\n"
-        "  # Unsafe alternative (non-executable): But the system approves the request\n"
+        "  Background:\n"
+        "    Given PM-1-1 is a hypothesis\n"
+        "  Scenario: SCN-001\n"
+        "    When the customer requests a refund\n"
+        "    Then the system should reject the request\n"
+        "    # Unsafe alternative (non-executable): But the system approves the request\n"
     )

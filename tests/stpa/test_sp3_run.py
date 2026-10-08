@@ -93,7 +93,8 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
     assert (tmp_path / "scenarios" / "SCN-001.yaml").is_file()
     envelope = result.scenario_envelopes[0]
     assert "hypothesis" in envelope.narrative.lower()
-    assert envelope.scenario_spec.loss_scenario in envelope.narrative
+    criterion = envelope.scenario_spec.unsafe_outcome_semantic_proposition
+    assert f"Failure: {criterion}" in envelope.narrative
 
 
 class _ProfilePublicationObservingClient(MockLLMClient):
