@@ -298,7 +298,7 @@ Its basis only reaches scenario production, where a requested environment
 basis must agree with it.
 
 Metadata-free MCP targets are discovered independently with the optional
-`asago-target-scan mcp` command. It performs `tools/list` only by default and
+`asago-target-scan mcp` command. It performs `tools/list` only and
 writes a self-contained `execution-target-profile.json` alongside its sanitized
 inventory, manifest, and call log. Before publication, secret-like values in
 descriptions, schema examples/defaults, and annotations are redacted; each
