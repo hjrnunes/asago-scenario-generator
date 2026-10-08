@@ -705,7 +705,7 @@ def _extension_action_view(
     proposal = outcome.control_action
     if proposal is None:  # pragma: no cover - caller guards accepted outcomes
         raise ValueError("accepted target extension requires control_action")
-    description = _operation_action_description(operation)
+    description = target_operation_action_description(operation)
     target = _extension_target_prompt_view(baseline, outcome)
     controller = _controller_prompt_view(baseline, proposal.controller_id)
     return {
@@ -803,11 +803,6 @@ def _extension_semantic_context(
         ],
         "proposed_uca_categories": [item.uca_type for item in outcome.ica_slots],
     }
-
-
-def _operation_action_description(operation: Any) -> str:
-    """Render an exact observed operation meaning for verifier context."""
-    return target_operation_action_description(operation)
 
 
 def _require_provider_result(

@@ -1805,7 +1805,7 @@ def _compile_target_extension_action(
         # action's meaning.  Provider prose remains a rationale/evidence
         # input, but cannot collapse a loan-renewal or fee-waiver operation into a generic
         # "authorize backend mutation" placeholder.
-        description=_target_action_description(operation),
+        description=target_operation_action_description(operation),
         target=target,
         # An accepted MCP inventory operation is, by construction, a discrete
         # tool invocation. These execution facts are compiler-owned rather
@@ -1814,11 +1814,6 @@ def _compile_target_extension_action(
         temporality="instantaneous",
         provenance="target_derived",
     )
-
-
-def _target_action_description(operation: TargetOperationObservation) -> str:
-    """Keep additive action meaning anchored to exact observed operation facts."""
-    return target_operation_action_description(operation)
 
 
 def _compile_target_extension_target(
