@@ -634,7 +634,6 @@ def test_normal_draft_publishes_to_handoff_without_execution_content(tmp_path) -
         attack_tree=tree,
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
-        control_structure=_control_structure(),
     )
     handoff = build_scenario_handoff(envelope, loss_analysis=_loss_analysis())
     payload = handoff.model_dump(mode="json")

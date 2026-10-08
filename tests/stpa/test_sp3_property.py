@@ -6,9 +6,6 @@ ranges using Hypothesis:
 - **BDI grounding**: ``populate_defender_bdi`` always produces beliefs,
   desires, and intentions whose IDs match the control structure.
   ``validate_bdi_grounding`` always passes for specs derived this way.
-- **Tree branch coverage**: ``count_branch_categories`` always returns
-  0–3; ``get_branch_categories`` is always a subset of
-  ``BRANCH_CATEGORIES``.
 - **Traceability chain completeness**: A scenario with all valid links
   produces zero errors; breaking any single link produces an error for
   that link type only.
@@ -22,7 +19,6 @@ ranges using Hypothesis:
 
 from __future__ import annotations
 
-import math
 import re
 
 from hypothesis import HealthCheck, given, settings, strategies as st
@@ -43,7 +39,6 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     StructuralThreat,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.models.scenario_context import ScenarioConstraint
 from asago_scenario_generator.stpa.models.scenario_envelope import (
     GherkinSpec,
     ScenarioEnvelope,
@@ -64,16 +59,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
     populate_defender_bdi,
 )
-from asago_scenario_generator.stpa.scenario_prod.eval_metrics import (
-    _safe_rate,
-    _shannon_entropy,
-    metric_bdi_grounding,
-    metric_tree_branch_coverage,
-)
 from asago_scenario_generator.stpa.scenario_prod.validators import (
-    BRANCH_CATEGORIES,
-    count_branch_categories,
-    get_branch_categories,
     validate_traceability,
 )
 from tests.helpers.stpa_builders import make_loss_analysis
@@ -283,149 +269,6 @@ class TestBDIGroundingProperty:
         for belief in bdi.beliefs:
             assert belief.vulnerability == ""
 
-    @given(
-        n_resps=st.integers(min_value=1, max_value=4),
-        n_pms=st.integers(min_value=1, max_value=3),
-        n_cas=st.integers(min_value=1, max_value=3),
-    )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_bdi_grounding_metric_is_one_for_valid_specs(self, n_resps, n_pms, n_cas):
-        """metric_bdi_grounding returns 1.0 for specs from populate_defender_bdi."""
-        cs = _make_cs(n_resps=n_resps, n_pms=n_pms, n_cas=n_cas)
-        envelopes = []
-        for i in range(n_resps):
-            resp = cs.responsibilities[i]
-            ca = resp.control_actions[0]
-            constraint = ScenarioConstraint(
-                constraint_id=f"SC-{i + 1}",
-                description="Selected constraint",
-                related_hazard_ids=("H-1",),
-            )
-            bdi = populate_defender_bdi(cs, resp.resp_id, (constraint,))
-            # Fill in vulnerabilities (as the LLM would)
-            for belief in bdi.beliefs:
-                belief.vulnerability = "exploitable"
-            spec = ScenarioSpec(
-                scenario_id=f"SCN-{i + 1:03d}",
-                threat_source=ThreatSource(
-                    ica_slot_id=f"{resp.resp_id}:{ca.ca_id}:NOT_PROVIDED",
-                    provenance="structural",
-                    ica_id=f"{resp.resp_id}:{ca.ca_id}:NOT_PROVIDED:1",
-                ),
-                target_controller=resp.resp_id,
-                target_control_action=ca.ca_id,
-                ica_type=UCAType.not_provided,
-                defender_bdi=bdi,
-                attacker_bdi=AttackerBDI(
-                    beliefs=["b"], desires=["d"], intentions=["i"]
-                ),
-                loss_scenario="Loss",
-            )
-            envelopes.append(_make_envelope(spec=spec))
-
-        result = metric_bdi_grounding(envelopes, cs)
-        assert result["belief_grounding_rate"] == 1.0
-        assert result["desire_grounding_rate"] == 1.0
-        assert result["intention_grounding_rate"] == 1.0
-
-
-# Tree branch coverage property tests
-
-
-class TestTreeBranchCoverageProperty:
-    """Branch category counting invariants."""
-
-    @given(
-        categories=st.lists(
-            st.sampled_from(BRANCH_CATEGORIES + ["unknown", ""]),
-            min_size=0,
-            max_size=10,
-        )
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_count_branch_categories_bounded(self, categories):
-        """count_branch_categories always returns 0–3."""
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": cat, "label": "l", "children": []} for cat in categories
-            ],
-            "leaves": [],
-        }
-        count = count_branch_categories(tree)
-        assert 0 <= count <= 3
-
-    @given(
-        categories=st.lists(
-            st.sampled_from(BRANCH_CATEGORIES + ["unknown"]),
-            min_size=0,
-            max_size=10,
-        )
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_get_branch_categories_subset(self, categories):
-        """get_branch_categories is always a subset of BRANCH_CATEGORIES."""
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": cat, "label": "l", "children": []} for cat in categories
-            ],
-            "leaves": [],
-        }
-        cats = get_branch_categories(tree)
-        assert cats.issubset(set(BRANCH_CATEGORIES))
-
-    @given(
-        n_valid=st.integers(min_value=0, max_value=5),
-        n_invalid=st.integers(min_value=0, max_value=5),
-    )
-    @settings(max_examples=30, deadline=None)
-    def test_metric_coverage_rate_in_range(self, n_valid, n_invalid):
-        """Coverage rate is always in [0, 1]."""
-        envelopes = []
-        for i in range(n_valid):
-            envelopes.append(
-                _make_envelope(
-                    spec=_make_scenario_spec(scenario_id=f"SCN-{i + 1:03d}"),
-                    attack_tree={
-                        "root": "r",
-                        "branches": [
-                            {
-                                "category": "controller_side",
-                                "label": "l",
-                                "children": [],
-                            },
-                            {"category": "path_side", "label": "l", "children": []},
-                        ],
-                        "leaves": [],
-                    },
-                )
-            )
-        for i in range(n_invalid):
-            envelopes.append(
-                _make_envelope(
-                    spec=_make_scenario_spec(scenario_id=f"SCN-{n_valid + i + 1:03d}"),
-                    attack_tree={
-                        "root": "r",
-                        "branches": [
-                            {
-                                "category": "controller_side",
-                                "label": "l",
-                                "children": [],
-                            },
-                        ],
-                        "leaves": [],
-                    },
-                )
-            )
-        result = metric_tree_branch_coverage(envelopes)
-        assert 0.0 <= result["coverage_rate"] <= 1.0
-        assert result["total_scenarios"] == n_valid + n_invalid
-
 
 # Traceability chain completeness property tests
 
@@ -523,91 +366,6 @@ class TestTraceabilityChainProperty:
         ]
         errors = validate_traceability(envelopes, ets, cs, la)
         assert len(errors) == 0
-
-
-# Shannon entropy property tests
-
-
-class TestShannonEntropyProperty:
-    """Shannon entropy mathematical invariants."""
-
-    @given(
-        counts=st.dictionaries(
-            keys=st.text(min_size=1, max_size=5, alphabet="abcdefghij"),
-            values=st.integers(min_value=0, max_value=100),
-            min_size=0,
-            max_size=10,
-        )
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_non_negative(self, counts):
-        """Shannon entropy is always non-negative."""
-        entropy = _shannon_entropy(counts)
-        assert entropy >= 0.0
-
-    @given(
-        n_categories=st.integers(min_value=1, max_value=10),
-    )
-    @settings(max_examples=20, deadline=None)
-    def test_max_entropy_with_uniform_distribution(self, n_categories):
-        """Uniform distribution gives entropy = log2(n)."""
-        counts = {f"cat_{i}": 10 for i in range(n_categories)}
-        entropy = _shannon_entropy(counts)
-        expected = round(math.log2(n_categories), 6)
-        assert abs(entropy - expected) < 1e-5
-
-    @given(
-        n_categories=st.integers(min_value=1, max_value=10),
-    )
-    @settings(max_examples=20, deadline=None)
-    def test_zero_entropy_with_single_category(self, n_categories):
-        """Single non-zero category gives entropy = 0."""
-        counts = {f"cat_{i}": 0 for i in range(n_categories)}
-        counts["cat_0"] = 42
-        entropy = _shannon_entropy(counts)
-        assert entropy == 0.0
-
-    def test_zero_entropy_with_empty_counts(self):
-        """Empty counts dict gives entropy = 0."""
-        assert _shannon_entropy({}) == 0.0
-
-    def test_zero_entropy_with_all_zeros(self):
-        """All-zero counts gives entropy = 0."""
-        assert _shannon_entropy({"a": 0, "b": 0}) == 0.0
-
-    def test_count_of_one_contributes(self):
-        """A category with count=1 must contribute to entropy."""
-        counts = {"a": 1, "b": 1}
-        entropy = _shannon_entropy(counts)
-        expected = round(1.0, 6)  # log2(2) = 1.0
-        assert abs(entropy - expected) < 1e-5
-
-
-# Safe rate property tests
-
-
-class TestSafeRateProperty:
-    """_safe_rate mathematical invariants."""
-
-    @given(
-        numerator=st.integers(min_value=0, max_value=1000),
-        denominator=st.integers(min_value=1, max_value=1000),
-    )
-    @settings(max_examples=50, deadline=None)
-    def test_rate_in_unit_interval(self, numerator, denominator):
-        """Rate is in [0, 1] when numerator ≤ denominator."""
-        n = min(numerator, denominator)
-        rate = _safe_rate(n, denominator)
-        assert 0.0 <= rate <= 1.0
-
-    @given(
-        denominator=st.integers(min_value=-100, max_value=0),
-    )
-    @settings(max_examples=20, deadline=None)
-    def test_zero_denominator_returns_zero(self, denominator):
-        """Zero or negative denominator returns 0."""
-        if denominator == 0:
-            assert _safe_rate(5, 0) == 0
 
 
 # Scenario ID format property tests

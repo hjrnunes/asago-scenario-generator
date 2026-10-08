@@ -1053,7 +1053,6 @@ def test_omitted_condition_reason_reaches_the_handoff(tmp_path) -> None:
         attack_tree=tree,
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
-        control_structure=_control_structure(),
     )
     handoff = build_scenario_handoff(
         envelope,

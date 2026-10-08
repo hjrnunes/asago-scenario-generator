@@ -9,7 +9,6 @@ from pydantic import (
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactorKind,
-    CausalMechanism,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticCondition,
@@ -302,7 +301,6 @@ def _materialize_causal_factor(
         kind=choice.kind,
         source_id=choice.source_id,
         evidence=draft.evidence,
-        mechanism=getattr(draft, "mechanism", CausalMechanism.none),
         temporal_condition=(
             temporal_condition
             if temporal_condition is not None

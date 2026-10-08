@@ -410,28 +410,8 @@ RULES: list[Rule] = [
     Rule(
         "scenario-prod-stages-below-reporting",
         (f"{SCENARIO_PROD}.assembly", f"{SCENARIO_PROD}.validators"),
-        "stage modules stay below evaluation, coverage, and the orchestrator",
-        forbidden=tuple(
-            f"{SCENARIO_PROD}.{n}" for n in ("eval_metrics", "coverage", "run")
-        ),
-    ),
-    Rule(
-        "scenario-prod-eval-metrics-below-run",
-        f"{SCENARIO_PROD}.eval_metrics",
-        "evaluation metrics do not import the orchestrator",
+        "stage modules stay below the orchestrator",
         forbidden=(f"{SCENARIO_PROD}.run",),
-    ),
-    Rule(
-        "scenario-prod-enrichment-is-a-model-layer-leaf",
-        f"{SCENARIO_PROD}.enrichment",
-        "enrichment computes deterministic blocks from models and the capability "
-        "profile; it imports no scenario_prod module",
-        allowed=(
-            MODELS,
-            f"{PUBLIC_MODELS}.capability_profile",
-            "typing",
-            "pydantic",
-        ),
     ),
     Rule(
         "scenario-prod-stage5-below-run",
@@ -641,7 +621,6 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "condition_family": 0,
     "presentation": 1,
     "_constants": 0,
-    "enrichment": 0,
     "context": 0,
     # Phase 3 content-surface facts: a pure leaf over the IO capability model.
     "content_surface": 0,
@@ -657,8 +636,6 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "deduplication": 1,
     # Target-profile publication is an atomic IO writer over the profile model.
     "target_profile_publication": 2,
-    "eval_metrics": 2,
-    "coverage": 2,
     "run": 3,
 }
 

@@ -40,7 +40,6 @@ class TestInfraManifest:
         assert manifest.post_revision_warnings == []
         assert manifest.stage_errors == []
         assert manifest.stage_warnings == []
-        assert manifest.eval_scorecard_path is None
 
     def test_manifest_02_with_fill_rate_and_counts(self):
         """InfraManifest-02: manifest with fill_rate and counts passes."""
@@ -64,13 +63,6 @@ class TestInfraManifest:
         ]
         manifest = STPARunManifest(**data)
         assert len(manifest.critic_findings) == 2
-
-    def test_manifest_04_with_eval_scorecard_path(self):
-        """InfraManifest-04: manifest with eval scorecard path passes."""
-        data = self._base_manifest_data()
-        data["eval_scorecard_path"] = "output/test/eval-scorecard.yaml"
-        manifest = STPARunManifest(**data)
-        assert manifest.eval_scorecard_path == "output/test/eval-scorecard.yaml"
 
     def test_manifest_records_revision_outcome(self):
         """Revision attempts and warnings are durable operator diagnostics."""

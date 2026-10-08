@@ -6,8 +6,6 @@ plus the ScenarioSpec and faceting metadata.
 
 from __future__ import annotations
 
-from typing import Literal
-
 from pydantic import BaseModel, Field, model_validator
 
 from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
@@ -72,39 +70,6 @@ def render_feature_text(
     return "\n".join(lines) + "\n"
 
 
-class SystemContext(BaseModel):
-    """Inline SP1 system context block for the scenario envelope.
-
-    Populated deterministically during assembly from the capability
-    profile and control structure — no LLM calls.  Lets adapters
-    interpret scenarios without separate SP1 artifacts.
-    """
-
-    target_responsibility_description: str
-    target_control_action_description: str
-    tool_inventory: list[str]  # tool names
-    active_zones: list[str]
-    multi_agent: bool
-    has_persistent_memory: bool
-
-
-class ConsumerHints(BaseModel):
-    """Deterministic consumer hints for adapter filtering.
-
-    Populated in a post-generation enrichment pass from the capability
-    profile, attack tree, and narrative — no LLM calls.  Lets adapters
-    self-select scenarios without LLM inference.
-    """
-
-    primary_attack_zone: str
-    requires_tool_execution: bool
-    requires_multi_turn: bool
-    requires_multi_agent: bool
-    requires_persistent_state: bool
-    garak_testability: Literal["high", "medium", "low"]
-    midojo_testability: Literal["high", "medium", "low"]
-
-
 class ScenarioEnvelope(BaseModel):
     """Scenario envelope wrapping Stage 6 artifacts and faceting metadata."""
 
@@ -119,9 +84,6 @@ class ScenarioEnvelope(BaseModel):
     ica_type: UCAType
     catalog_mappings: list[CatalogMapping] = Field(default_factory=list)
     provenance: str  # "structural" or "catalog_only"
-    # Enrichment blocks (optional, backward compat)
-    system_context: SystemContext | None = None
-    consumer_hints: ConsumerHints | None = None
 
     @model_validator(mode="after")
     def validate_scenario_id_match(self) -> ScenarioEnvelope:

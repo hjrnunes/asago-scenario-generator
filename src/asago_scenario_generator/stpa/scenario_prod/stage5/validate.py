@@ -13,10 +13,6 @@ from pydantic import (
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
 )
-from asago_scenario_generator.stpa.models.causal_factor import (
-    CausalMechanism,
-    validate_mechanism_pairing,
-)
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     normalize_semantic_proposition,
 )
@@ -178,7 +174,6 @@ def _validate_normal_provider_payload(
         value.attacker_bdi, value.causal_factors, normalizations=normalizations
     )
     _validate_intention_choice_handles(value.attacker_bdi, allowed_handles)
-    _validate_factor_mechanisms(value.causal_factors, choices)
     _validate_context_provider_temporal_conditions(
         value.causal_factors, choices, context
     )
@@ -394,7 +389,8 @@ def _only_supported_criterion_safe_outcome(
 
     With exactly one supported criterion, that criterion names the only
     boundary the scenario can observe, so a safe outcome written at another
-    claim level or evidence kind is moved onto it.  With several supported
+    claim level or evidence kind is moved onto it, and a command attempt that
+    names no operation takes the criterion's.  With several supported
     criteria the model's choice stays authoritative and a mismatch is left to
     :func:`_require_supported_safe_evidence`.
     """
@@ -406,6 +402,13 @@ def _only_supported_criterion_safe_outcome(
         criterion.claim_level,
         criterion.evidence,
     ):
+        if outcome.operation_name is None and criterion.operation_name is not None:
+            return _replace_safe_outcome(
+                outcome,
+                {"operation_name": criterion.operation_name},
+                reason="safe_outcome_operation_from_only_supported_criterion",
+                normalizations=normalizations,
+            )
         return outcome
     return _replace_safe_outcome(
         outcome,
@@ -453,13 +456,14 @@ def _validate_safe_outcome_refs(
     normalizations: list[Stage5Normalization] | None,
 ) -> SafeObservableOutcome:
     """Require supplied record and fact references, moving record paths to facts."""
-    allowed_facts = set(target_observation_fact_values(target_observations))
+    fact_values = target_observation_fact_values(target_observations)
+    allowed_facts = set(fact_values)
+    allowed_records = (
+        {item.observation_ref for item in target_observations.observations}
+        if target_observations is not None
+        else set()
+    )
     if outcome.record_refs:
-        allowed_records = (
-            {item.observation_ref for item in target_observations.observations}
-            if target_observations is not None
-            else set()
-        )
         outcome = _move_record_paths_to_fact_refs(
             outcome, allowed_records, allowed_facts, normalizations
         )
@@ -473,11 +477,57 @@ def _validate_safe_outcome_refs(
     if outcome.fact_refs:
         unknown_facts = sorted(set(outcome.fact_refs) - allowed_facts)
         if unknown_facts:
-            raise ValueError(
+            raise ExactIssueError(
+                IssueCode.safe_outcome_fact_ref_not_supplied,
                 "safe observable outcome fact_refs must name supplied facts: "
                 + ", ".join(unknown_facts)
+                + "".join(
+                    "\n- "
+                    + _nearest_supplied_parent(path, fact_values, allowed_records)
+                    for path in unknown_facts
+                ),
             )
     return outcome
+
+
+def _nearest_supplied_parent(
+    path: str, fact_values: Mapping[str, object], records: set[str]
+) -> str:
+    """Name the longest supplied path that *path* extends, with its JSON type."""
+    parts = path.split(".")
+    for end in range(len(parts) - 1, 0, -1):
+        parent = ".".join(parts[:end])
+        if parent in fact_values:
+            kind = _json_type(fact_values[parent])
+        elif parent in records:
+            kind = "record"
+        else:
+            continue
+        return (
+            f"`{path}` is not supplied; the nearest supplied path is "
+            f"`{parent}` ({kind})"
+        )
+    return f"`{path}` is not supplied; no supplied path contains it"
+
+
+# bool before number: a JSON boolean is a Python int.
+_JSON_TYPES: tuple[tuple[type | tuple[type, ...], str], ...] = (
+    (Mapping, "object"),
+    ((list, tuple), "array"),
+    (bool, "boolean"),
+    ((int, float), "number"),
+    (str, "string"),
+    (type(None), "null"),
+)
+
+
+def _json_type(value: object) -> str:
+    """Return the JSON type name of an observed fact value."""
+    return next(
+        (name for kinds, name in _JSON_TYPES if isinstance(value, kinds)),
+        # condition_check marks a path observed twice with different values.
+        "ambiguous",
+    )
 
 
 def _move_record_paths_to_fact_refs(
@@ -735,8 +785,9 @@ def _validate_attacker_bdi_cardinality(
             "adversarial scenarios require a non-empty attacker desires list"
         )
     if not attacker_bdi.intentions:
-        raise ValueError(
-            "adversarial scenarios require a non-empty attacker_bdi.intentions list"
+        raise ValidationIssueError(
+            IssueCode.attacker_intentions_missing,
+            "adversarial scenarios require a non-empty attacker_bdi.intentions list",
         )
 
 
@@ -951,27 +1002,6 @@ def _validate_intention_choice_handles(
             "intention source handles must name supplied context choices: "
             + ", ".join(unknown)
         )
-
-
-def _validate_factor_mechanisms(
-    factor_drafts: Sequence[BaseModel],
-    choices: Sequence[_CausalSourceChoice],
-) -> None:
-    """Require each factor's mechanism to fit its selected source."""
-    by_handle = {choice.handle: choice for choice in choices}
-    for factor in factor_drafts:
-        mechanism = getattr(factor, "mechanism", CausalMechanism.none)
-        choice = by_handle.get(factor.source_handle)
-        if choice is None:
-            continue
-        try:
-            validate_mechanism_pairing(
-                CausalMechanism(mechanism), choice.kind, choice.source_kind
-            )
-        except ValueError as exc:
-            raise ValidationIssueError(
-                IssueCode.mechanism_source_mismatch, f"{factor.source_handle}: {exc}"
-            ) from exc
 
 
 def _validate_intention_factor_handles(

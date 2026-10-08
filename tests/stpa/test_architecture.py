@@ -464,28 +464,6 @@ class TestScenarioProdNoDirectCompleteCalls:
         )
 
 
-class TestEnrichmentModuleBoundary:
-    """Enrichment module must be a pure, leaf-level computation module.
-
-    ``enrichment.py`` computes deterministic enrichment blocks from
-    models and capability-profile data.  It must not depend on the
-    orchestrator (``run.py``) or any other scenario_prod module —
-    only on the model layer and the capability profile.
-    """
-
-    def test_enrichment_exports_compute_functions(self):
-        """enrichment.py must export compute_system_context and compute_consumer_hints."""
-        mod = importlib.import_module(
-            "asago_scenario_generator.stpa.scenario_prod.enrichment"
-        )
-        assert hasattr(mod, "compute_system_context")
-        assert hasattr(mod, "compute_consumer_hints")
-        assert callable(mod.compute_system_context)
-        assert callable(mod.compute_consumer_hints)
-        assert "compute_system_context" in mod.__all__
-        assert "compute_consumer_hints" in mod.__all__
-
-
 class TestPromptIncludeBoundary:
     """SP3 prompt templates include only files from their own package."""
 

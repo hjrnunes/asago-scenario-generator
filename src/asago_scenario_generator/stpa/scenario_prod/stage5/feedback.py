@@ -148,19 +148,30 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             f"observation_ref values ({supplied_records}); put record and field "
             "paths in fact_refs."
         ),
+        IssueCode.safe_outcome_fact_ref_not_supplied: (
+            "safe_observable_outcome.fact_refs lists only supplied fact paths, "
+            "copied exactly; for each path the error lists, cite the supplied "
+            "path that states the fact, or remove the reference."
+        ),
         IssueCode.safe_outcome_observability_mismatch: (
             "set safe_observable_outcome.observable=true with the claim_level "
             "and evidence of a supported observation criterion when the "
             "scenario is executable, and observable=false with no claim or "
             "references when it is analytical_only."
         ),
+        IssueCode.safe_outcome_claim_missing: (
+            "an observable safe_observable_outcome sets claim_level and evidence "
+            "(and operation_name for command_attempt) from a supported "
+            "observation criterion; with no observable criterion, set "
+            "observable=false with no claim or references."
+        ),
         IssueCode.intention_handle_undeclared: (
             "every attacker_bdi intention cites at least one source_handle that "
             "has a declared causal_factors entry; declare the factor or cite a "
             "declared handle."
         ),
-        IssueCode.mechanism_source_mismatch: (
-            "choose a mechanism listed in the selected source's "
-            "compatible_mechanisms, or use none."
+        IssueCode.attacker_intentions_missing: (
+            "an adversarial scenario lists at least one attacker_bdi intention "
+            "that cites a declared causal handle."
         ),
     }

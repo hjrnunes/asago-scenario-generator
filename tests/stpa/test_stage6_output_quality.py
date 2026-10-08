@@ -32,8 +32,6 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_loss_hazard_id_references,
-    get_branch_categories,
-    BRANCH_CATEGORIES,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import (
     _validate_envelope_stage7,
@@ -360,30 +358,3 @@ class TestEnvelopeGherkinTextHelper:
             provenance="structural",
         )
         assert _envelope_gherkin_text(envelope) == ""
-
-
-# ===========================================================================
-# Hardening tests — kill surviving mutants from mutation testing
-# ===========================================================================
-
-
-class TestHardeningTreeBranchCoverage:
-    """Hardening: get_branch_categories.
-
-    Kills mutants:
-      - cat in BRANCH_CATEGORIES -> cat not in BRANCH_CATEGORIES
-    """
-
-    def test_get_branch_categories_returns_valid_only(self):
-        """get_branch_categories only returns categories in BRANCH_CATEGORIES."""
-        tree = {
-            "root": "r",
-            "branches": [
-                {"category": "controller_side", "label": "l1", "children": []},
-                {"category": "invalid_category", "label": "l2", "children": []},
-            ],
-            "leaves": [],
-        }
-        cats = get_branch_categories(tree)
-        assert cats == {"controller_side"}
-        assert cats.issubset(set(BRANCH_CATEGORIES))

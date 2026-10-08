@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from asago_scenario_generator.stpa.models.control_structure import (
-    ProcessModelPart,
-)
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
     EnrichedThreatSet,
     StructuralThreat,
@@ -28,8 +25,6 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_bdi_grounding,
     validate_traceability,
     validate_vulnerability_completeness,
-    detect_orphan_elements,
-    detect_orphan_icas,
 )
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 
@@ -259,46 +254,3 @@ class TestTraceability:
         env = _make_envelope(spec=spec)
         errors = validate_traceability([env], ets, cs, la)
         assert any(e.broken_link == "provenance_root" for e in errors)
-
-
-class TestOrphanDetection:
-    """SP3-VAL-19, SP3-VAL-20."""
-
-    def test_finds_orphan_elements(self):
-        cs = make_cs()
-        cs.responsibilities[0].process_model_parts.append(
-            ProcessModelPart(pm_id="PM-1-2", description="Extra PM")
-        )
-        threat = _make_threat()
-        ets = _make_enriched_threat_set(threats=[threat])
-        orphans = detect_orphan_elements(cs, ets)
-        assert "PM-1-2" in orphans
-
-    def test_no_false_positive_orphans_for_referenced_elements(self):
-        """Referenced resp/ca must not be flagged as orphans."""
-        cs = make_cs()
-        threat = _make_threat()
-        ets = _make_enriched_threat_set(threats=[threat])
-        orphans = detect_orphan_elements(cs, ets)
-        assert "RESP-1" not in orphans
-        assert "CA-1-1" not in orphans
-
-    def test_collects_ids_from_two_part_slot_id(self):
-        """A 2-part slot ID must still yield resp and ca references."""
-        cs = make_cs()
-        threat = _make_threat()
-        threat = threat.model_copy(update={"ica_slot_id": "RESP-1:CA-1-1"})
-        ets = _make_enriched_threat_set(threats=[threat])
-        orphans = detect_orphan_elements(cs, ets)
-        assert "RESP-1" not in orphans
-        assert "CA-1-1" not in orphans
-
-    def test_finds_orphan_icas(self):
-        threats = [
-            _make_threat(ica_id=f"RESP-1:CA-1-1:NOT_PROVIDED:{i}") for i in range(1, 6)
-        ]
-        ets = _make_enriched_threat_set(threats=threats)
-        env = _make_envelope()
-        # Only 3 scenarios produced out of 5 threats
-        orphans = detect_orphan_icas(ets, [env])
-        assert len(orphans) == 4  # 4 threats not concretized (env has ica_id :1)

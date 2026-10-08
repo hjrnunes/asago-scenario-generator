@@ -219,7 +219,6 @@ def _handoff_for(
         attack_tree=tree,
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
-        control_structure=structure,
     )
     return build_scenario_handoff(
         envelope,
@@ -433,8 +432,6 @@ def test_synthesis_threads_stage_1a_source(
             stage_errors=[],
             scenario_specs=[],
             scenario_envelopes=[],
-            eval_scorecard=None,
-            coverage_gaps=None,
             candidate_outcomes=(),
             functional_test_specs=[],
         )

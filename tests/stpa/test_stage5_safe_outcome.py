@@ -223,7 +223,6 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
         attack_tree=tree,
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
-        control_structure=_control_structure(),
     )
     handoff = build_scenario_handoff(
         envelope,
@@ -1054,7 +1053,6 @@ def test_handoff_names_an_operation_once_when_two_authorities_agree(tmp_path) ->
         attack_tree=tree,
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
-        control_structure=_control_structure(),
     )
 
     handoff = build_scenario_handoff(
@@ -1068,3 +1066,67 @@ def test_handoff_names_an_operation_once_when_two_authorities_agree(tmp_path) ->
         ("refund_payment", OPERATION_AUTHORITY_SAFE_OUTCOME)
     ]
     assert "safe observable outcome" in handoff.documented_operations[0].relevance
+
+
+_FILL_REASON = "safe_outcome_operation_from_only_supported_criterion"
+
+
+def test_a_missing_safe_operation_is_taken_from_the_only_supported_criterion(
+    tmp_path,
+) -> None:
+    safe_outcome = {**_declared_attempt_safe_outcome(), "operation_name": None}
+    payload = _outcome_payload([_ATTEMPT_CRITERION], safe_outcome)
+    payload["unsafe_outcome"]["discriminating_condition"] = ARGUMENT_CONDITION
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        target_operation=_target_operation(),
+        observation_contract=default_observation_contract(),
+    )
+
+    assert error is None, error
+    assert client.call_count == 1
+    outcome = result.safe_observable_outcome
+    assert (outcome.claim_level, outcome.operation_name) == (
+        "command_attempt",
+        "refund_payment",
+    )
+    [record] = _normalization_records(tmp_path)
+    assert [
+        (item["field"], item["original"], item["normalized"], item["reason"])
+        for item in record["normalizations"]
+    ] == [
+        (
+            "safe_observable_outcome.operation_name",
+            None,
+            "refund_payment",
+            _FILL_REASON,
+        )
+    ]
+
+
+def test_a_missing_safe_operation_is_not_filled_from_two_supported_criteria(
+    tmp_path,
+) -> None:
+    safe_outcome = {**_declared_attempt_safe_outcome(), "operation_name": None}
+    second = {**_ATTEMPT_CRITERION, "criterion_id": "attempt_two"}
+    payload = _outcome_payload([_ATTEMPT_CRITERION, second], safe_outcome)
+    payload["unsafe_outcome"]["discriminating_condition"] = ARGUMENT_CONDITION
+    client = MockLLMClient()
+    client.set_response_queue([payload, payload])
+
+    result, error = generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        target_operation=_target_operation(),
+        observation_contract=default_observation_contract(),
+    )
+
+    assert result is None
+    assert "observation_command_attempt_operation_missing" in error
+    assert _normalization_records(tmp_path) == []
