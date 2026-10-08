@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from enum import Enum
 from typing import Annotated, Literal, Union
 from pydantic import (
     BaseModel,
@@ -213,31 +212,6 @@ class _ContextAbsenceTemporalWire(_ContextTemporalConditionWire):
     until_step_handle: StrictStr = Field(min_length=1)
 
 
-class StimulusCategory(str, Enum):
-    """Provider-only description of how the adversarial stimulus enters."""
-
-    user_message = "user_message"
-    conversation = "conversation"
-    # ``conversation_context`` is accepted for captured callers that used the
-    # execution-delivery spelling.  It is still mapped to the same supported
-    # conversation primitive and never treated as a distinct route.
-    conversation_context = "conversation_context"
-    retrieved_content = "retrieved_content"
-    tool_content = "tool_content"
-    file_upload = "file_upload"
-    traffic_load = "traffic_load"
-    unknown = "unknown"
-
-
-class _ContextStimulusDraft(BaseModel):
-    """Request-local stimulus description; it is not persisted."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    category: StimulusCategory
-    description: StrictStr = Field(min_length=1, max_length=600)
-
-
 class BDIGenerationResult(BaseModel):
     """LLM response model for the combined BDI generation call."""
 
@@ -322,26 +296,6 @@ class _ContextAdversarialDraft(BaseModel):
         AdversaryKind.third_party_via_content,
     ]
     gain: _ContextNonBlankText
-
-
-class _ContextAdversaryDraft(BaseModel):
-    """Compatibility value object for direct materialization callers.
-
-    Provider schemas use the discriminated adversarial and functional branches
-    below.  Historical unit callers construct this broader value directly to
-    exercise compiler-owned reach derivation, so retain its permissive shape
-    without widening the provider response schema.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    kind: Literal[
-        AdversaryKind.external_attacker,
-        AdversaryKind.malicious_customer,
-        AdversaryKind.third_party_via_content,
-        AdversaryKind.none,
-    ]
-    gain: _ContextNonBlankText | None = None
 
 
 class _ContextFunctionalAdversaryDraft(BaseModel):

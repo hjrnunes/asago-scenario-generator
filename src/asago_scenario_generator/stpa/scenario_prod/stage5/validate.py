@@ -37,7 +37,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 )
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AdversaryKind,
-    AdversaryReach,
 )
 from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
@@ -53,11 +52,9 @@ from ..condition_check import (
 from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
 from .wire import (
-    StimulusCategory,
     UnsafeOutcomeDeclaration,
     _CausalSourceChoice,
     _ContextAdversarialDraft,
-    _ContextAdversaryDraft,
     _ContextAttackerBDIDraft,
     _ContextFunctionalAdversaryDraft,
     _ContextSemanticOutcomeDraft,
@@ -89,15 +86,6 @@ _PROSE_STRUCTURAL_REFERENCE = re.compile(
 )
 
 
-_ADVERSARY_REACH_BY_STIMULUS = {
-    StimulusCategory.user_message: AdversaryReach.user_message,
-    StimulusCategory.conversation: AdversaryReach.conversation,
-    StimulusCategory.conversation_context: AdversaryReach.conversation,
-    StimulusCategory.retrieved_content: AdversaryReach.retrieved_content,
-    StimulusCategory.tool_content: AdversaryReach.retrieved_content,
-}
-
-
 # Phase 3 deviation 8: a ``kind: none`` record is a functional test whose
 # gain is compiler-owned bookkeeping, never provider text.
 FUNCTIONAL_TEST_GAIN = "Functional test: no adversary gains from this unsafe outcome."
@@ -110,7 +98,7 @@ def normalize_gain_text(value: str) -> str:
 
 
 def _validate_adversary_gain(
-    adversary: _ContextAdversaryDraft,
+    adversary: _ContextAdversarialDraft,
     context: ScenarioGenerationContext,
 ) -> None:
     """Reject a gain that restates a governing constraint instead of a benefit."""

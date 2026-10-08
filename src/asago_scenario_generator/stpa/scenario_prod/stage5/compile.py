@@ -45,14 +45,12 @@ from .wire import (
     CausalFactorDeclaration,
     UnsafeOutcomeDeclaration,
     _CausalSourceChoice,
-    _ContextStimulusDraft,
 )
 from .conditions import (
     _resolve_temporal_condition,
 )
 from .validate import (
     FUNCTIONAL_TEST_GAIN,
-    _ADVERSARY_REACH_BY_STIMULUS,
     _normalize_provider_semantic_proposition,
     _validate_intention_factor_handles,
 )
@@ -92,22 +90,15 @@ def _discriminating_condition_result(
     return outcome.condition, outcome.check, None
 
 
-def _materialize_adversary(
-    draft: BaseModel, stimulus: _ContextStimulusDraft | None
-) -> Adversary:
+def _materialize_adversary(draft: BaseModel) -> Adversary:
     """Derive the compiler-owned adversary fields (Phase 3 deviations 7-8).
 
-    ``reaches_target_via`` is a function of the stimulus category; an
-    analytical-only delivery (`file_upload`, `traffic_load`, `unknown`) has
-    none of the three primitives, so the persisted reach is null. A
-    ``kind: none`` record ignores the provider's gain text and carries the
-    fixed functional-test marker. The normal wire carries no stimulus, so
-    the reach stays null unless the adversary kind itself asserts content
-    reach; the producer makes no delivery claim the handoff could publish.
+    A ``kind: none`` record ignores the provider's gain text and carries the
+    fixed functional-test marker. The wire carries no stimulus, so the reach
+    stays null unless the adversary kind itself asserts content reach; the
+    producer makes no delivery claim the handoff could publish.
     """
-    if stimulus is not None:
-        reach = _ADVERSARY_REACH_BY_STIMULUS.get(stimulus.category)
-    elif draft.kind is AdversaryKind.third_party_via_content:
+    if draft.kind is AdversaryKind.third_party_via_content:
         reach = AdversaryReach.retrieved_content
     else:
         reach = None
@@ -141,7 +132,7 @@ def _materialize_normal_context_bdi(
     factors = _materialize_context_factors(draft, choices, choices_by_handle, context)
     outcome = draft.unsafe_outcome
     _normalize_provider_semantic_proposition(outcome, context)
-    adversary = _materialize_adversary(draft.adversary, None)
+    adversary = _materialize_adversary(draft.adversary)
     criteria, contract, assessment = _normal_observation_assessment(
         outcome, observation_contract
     )
