@@ -632,47 +632,20 @@ class LLMClient:
     ) -> tuple[Any, Any]:
         """Request a completion and return its response plus extracted content."""
         if response_format is not None and not allow_unvalidated:
-            if _is_pydantic_model_type(response_format):
-                # ``beta.parse`` can raise a Pydantic error before exposing
-                # the raw provider message.  Request the same strict schema
-                # through the ordinary completion seam, then validate only
-                # after the raw content and usage have been captured.
-                request_kwargs = {
-                    **extra_kwargs,
-                    "response_format": _json_schema_response_format(
-                        response_format,
-                        strict_json_schema=self.strict_json_schema,
-                        json_schema_strict=self.json_schema_strict,
-                    ),
-                }
-                response = self._send(
-                    "chat.completions.create",
-                    model=self.model,
-                    messages=messages,
-                    **request_kwargs,
+            if not _is_pydantic_model_type(response_format):
+                raise TypeError(
+                    "a strict structured completion needs a Pydantic model class "
+                    f"as response_format, got {response_format!r}"
                 )
-                _raise_if_length_without_content(response)
-                return response, _response_content(response)
-            response = self._send(
-                "beta.chat.completions.parse",
-                model=self.model,
-                messages=messages,
-                response_format=response_format,
+            # Validate only after the raw content and usage have been captured.
+            extra_kwargs = {
                 **extra_kwargs,
-            )
-            parsed = getattr(
-                getattr(_response_choice(response), "message", None),
-                "parsed",
-                None,
-            )
-            # Some compatible structured endpoints return valid provider JSON
-            # but leave the SDK's ``parsed`` slot empty.  Returning raw content
-            # lets the shared parser classify it without losing response
-            # evidence.
-            _raise_if_length_without_content(response)
-            return response, parsed if parsed is not None else _response_content(
-                response
-            )
+                "response_format": _json_schema_response_format(
+                    response_format,
+                    strict_json_schema=self.strict_json_schema,
+                    json_schema_strict=self.json_schema_strict,
+                ),
+            }
 
         response = self._send(
             "chat.completions.create",
