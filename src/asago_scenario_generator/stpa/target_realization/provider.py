@@ -707,7 +707,9 @@ def _extension_action_view(
         raise ValueError("accepted target extension requires control_action")
     description = target_operation_action_description(operation)
     target = _extension_target_prompt_view(baseline, outcome)
-    controller = _controller_prompt_view(baseline, proposal.controller_id)
+    controller = baseline.control_structure.controller_prompt_view(
+        proposal.controller_id
+    )
     return {
         "control_action_id": (
             f"TARGET_EXTENSION:{operation.resource_id}:{operation.operation_id}"
@@ -728,16 +730,6 @@ def _extension_action_view(
             "effect": operation.effect,
             "state_effect": operation.state_effect,
         },
-    }
-
-
-def _controller_prompt_view(baseline: Any, controller_id: str) -> dict[str, Any]:
-    """Return controller identity with only baseline authority meaning."""
-    return {
-        "id": controller_id,
-        "description": baseline.control_structure.element_description(
-            "responsibility", controller_id
-        ),
     }
 
 

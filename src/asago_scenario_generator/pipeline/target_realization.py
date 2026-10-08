@@ -2464,30 +2464,17 @@ def _operation_prompt_view(observation: TargetOperationObservation) -> dict[str,
 
 def _action_prompt_view(
     action: SystemicControlAction,
-    control_structure: SystemicControlStructureSnapshot | None = None,
+    control_structure: SystemicControlStructureSnapshot,
 ) -> dict[str, Any]:
     return {
         "control_action_id": action.control_action_id,
         "controller_id": action.controller_id,
-        "controller": _controller_prompt_view(action.controller_id, control_structure),
+        "controller": control_structure.controller_prompt_view(action.controller_id),
         "description": action.description,
         "target": _target_prompt_view(action.target, control_structure),
         "effect_kind": action.effect_kind,
         "temporality": action.temporality,
     }
-
-
-def _controller_prompt_view(
-    controller_id: str,
-    control_structure: SystemicControlStructureSnapshot | None,
-) -> dict[str, Any]:
-    """Return controller identity with only its attested explanation."""
-    description = None
-    if control_structure is not None:
-        description = control_structure.element_description(
-            "responsibility", controller_id
-        )
-    return {"id": controller_id, "description": description}
 
 
 def _target_prompt_view(

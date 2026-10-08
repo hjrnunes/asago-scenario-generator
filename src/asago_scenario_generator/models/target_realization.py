@@ -357,6 +357,13 @@ class SystemicControlStructureSnapshot(ClosedCanonicalModel):
         }
         return descriptions[element_type].get(element_id)
 
+    def controller_prompt_view(self, controller_id: str) -> dict[str, Any]:
+        """Return a controller identity with only its attested description."""
+        return {
+            "id": controller_id,
+            "description": self.element_description("responsibility", controller_id),
+        }
+
 
 class SystemicICA(ClosedCanonicalModel):
     """Closed snapshot of one ordinary ICA."""
