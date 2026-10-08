@@ -221,6 +221,12 @@ class SynthesisAdapters:
     ``synthesis_consideration``, ``synthesis_governance``, and
     ``synthesis_scenarios`` call each port with keyword arguments only and
     name the arguments it receives.
+
+    ``enrich_actions`` may return ``None``, which means the target gave
+    nothing to enrich.  The default ``target_realize`` needs the enrichment
+    rows for an observed profile and raises ``ValueError`` when it receives
+    ``None`` there, so an adapter set that replaces ``enrich_actions`` must
+    return rows whenever it keeps the default ``target_realize``.
     """
 
     prepare_capability: Callable[..., Any] | None = None
