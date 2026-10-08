@@ -1,0 +1,15 @@
+template: stage1b_system.j2
+cases:
+  no-variables:
+    required:
+      - "## Rules"
+      - Do not invent tools based on what a system like this might have
+      - every tool must be explicitly mentioned or directly implied by the use-case description
+      - KC1 — Language Models
+      - KC6 — Operational Environment
+      - KCX — Extended Capabilities
+    forbidden:
+      - Entry point category checklist
+      - STPA
+      - User input surfaces
+      - zones_active
