@@ -407,14 +407,12 @@ def test_call2b_parser_rejects_an_action_without_a_matching_owner() -> None:
     )
 
 
-def test_call2b_parser_rejects_conflicting_temporality_fields() -> None:
+def test_call2b_parser_rejects_the_action_temporality_spelling() -> None:
     action = _valid_payload()["control_actions"][0]
-    action["temporality"] = "discrete"
-    action["action_temporality"] = "continuous"
+    action["action_temporality"] = "discrete"
 
     assert _action_error(action) == (
-        "control_actions[0] must provide one matching temporality field, not "
-        "conflicting temporality and action_temporality values"
+        "control_actions[0] contains unexpected semantic field(s): action_temporality"
     )
 
 
@@ -428,10 +426,10 @@ def test_call2b_parser_rejects_a_malformed_operation(operation: object) -> None:
     )
 
 
-def test_call2b_parser_keeps_matching_temporality_and_operation() -> None:
+def test_call2b_parser_keeps_temporality_and_operation() -> None:
     payload = _valid_payload()
     action = payload["control_actions"][0]
-    action["temporality"] = action["action_temporality"] = "discrete"
+    action["temporality"] = "discrete"
     action["operation"] = "verify_transaction"
 
     parsed = parse_control_element_set_response(

@@ -12,7 +12,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlStructure,
+    check_structural_heuristics,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
@@ -25,7 +28,6 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     run_completeness_critic,
 )
-from asago_scenario_generator.stpa.system_model.heuristics import run_heuristics
 from asago_scenario_generator.models.capability_profile import Stage1Profile
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -124,7 +126,7 @@ class TestSP1FixtureIntegration:
 
         # Verify the control structure passes structural heuristics
         # when checked with the loss analysis
-        result = run_heuristics(control_structure, loss_analysis)
+        result = check_structural_heuristics(control_structure, loss_analysis)
         assert result.errors == [], (
             f"Expected no heuristic errors but got: {result.errors}"
         )

@@ -33,7 +33,10 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlStructure,
+    check_structural_heuristics,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     stamp_proposed_direction,
@@ -53,7 +56,6 @@ from asago_scenario_generator.stpa.system_model.critic import (
 )
 from asago_scenario_generator.stpa.system_model.heuristics import (
     check_solution_neutrality,
-    run_heuristics,
     uncited_security_constraints,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
@@ -882,7 +884,7 @@ def _run_stage_2_steps(
     stage_warnings.extend(binding_warnings)
 
     # Structural heuristics (always run after Call 3)
-    heuristic_result = run_heuristics(control_structure, loss_analysis)
+    heuristic_result = check_structural_heuristics(control_structure, loss_analysis)
     solution_neutrality_warnings = check_solution_neutrality(control_structure)
 
     # Completeness critic (graceful — returns empty findings on failure)

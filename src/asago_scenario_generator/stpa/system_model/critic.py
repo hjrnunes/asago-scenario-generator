@@ -39,13 +39,13 @@ from asago_scenario_generator.stpa.models.control_structure import (
     CoordinationLink,
     FeedbackSourceKind,
     Responsibility,
+    check_structural_heuristics,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     TargetEvidence,
 )
-from asago_scenario_generator.stpa.system_model.heuristics import run_heuristics
 from asago_scenario_generator.stpa.system_model.id_normalization import (
     validate_normalized_control_structure,
 )
@@ -625,16 +625,6 @@ def has_unjustified_gaps(findings: CriticFindings) -> bool:
     return bool(findings.gaps)
 
 
-def count_findings(findings: CriticFindings) -> int:
-    """Count the findings the revision is asked to address.
-
-    Only explicit structural gaps are actionable revision findings. The
-    checklist and taxonomy maps are retained as diagnostic context and are
-    intentionally excluded from this count.
-    """
-    return len(findings.gaps)
-
-
 # ---------------------------------------------------------------------------
 # Critic ID sanitization
 # ---------------------------------------------------------------------------
@@ -713,22 +703,15 @@ def sanitize_critic_ids(findings: CriticFindings) -> CriticFindings:
         ``checklist_results`` and ``taxonomy_probe_results`` are preserved
         unchanged.
     """
-    sanitized_gaps = []
-    for gap in findings.gaps:
-        sanitized_remedy = _replace_non_conforming_ids(gap.suggested_remedy)
-        sanitized_gaps.append(
-            CriticGap(
-                gap_type=gap.gap_type,
-                description=gap.description,
-                related_attack_path=gap.related_attack_path,
-                suggested_remedy=sanitized_remedy,
-            )
+    sanitized_gaps = [
+        gap.model_copy(
+            update={
+                "suggested_remedy": _replace_non_conforming_ids(gap.suggested_remedy)
+            }
         )
-    return CriticFindings(
-        gaps=sanitized_gaps,
-        checklist_results=findings.checklist_results,
-        taxonomy_probe_results=findings.taxonomy_probe_results,
-    )
+        for gap in findings.gaps
+    ]
+    return findings.model_copy(update={"gaps": sanitized_gaps})
 
 
 # ---------------------------------------------------------------------------
@@ -791,7 +774,7 @@ def _finish_revision(
     revision_warnings.extend(strip_warnings)
 
     # Re-run structural heuristics after revision
-    post_revision = run_heuristics(revised_cs, loss_analysis)
+    post_revision = check_structural_heuristics(revised_cs, loss_analysis)
     revision_warnings.extend(post_revision.errors)
     revision_warnings.extend(post_revision.warnings)
 
@@ -906,7 +889,7 @@ def _all_dismissed_no_change_warning(
     adds or modifies nothing — the revision accomplished no structural
     work. Returns an empty list otherwise.
     """
-    finding_count = count_findings(critic_findings)
+    finding_count = len(critic_findings.gaps)
     if finding_count == 0:
         return []
     if len(revision_delta.dismissed_gaps) < finding_count:
