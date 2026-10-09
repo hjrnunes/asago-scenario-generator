@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from asago_scenario_generator.models.obligation_consideration import (
     MissingStructuralConcept,
@@ -92,6 +93,27 @@ def test_decisions_must_name_every_request_handle_and_no_other() -> None:
     assert result.final_control_structure == result.baseline_control_structure
 
 
+@pytest.mark.parametrize(
+    "draft",
+    [
+        RevisionDraft(responsibilities=_reviewer()),
+        RevisionDraft(rationale="No justified additive repair was found."),
+    ],
+    ids=["with-an-addition", "without-an-addition"],
+)
+def test_a_draft_without_decisions_leaves_every_handle_missing(
+    draft: RevisionDraft,
+) -> None:
+    """A draft needs a decision for each handle, even when it adds something."""
+    result = _revise(draft)
+
+    assert result.status == "technical_failure"
+    assert result.diagnostics == (
+        "compile failure: ValueError: revision gap decisions do not close the "
+        "request (missing gap handles: revision-gap-1, revision-gap-2)",
+    )
+
+
 def test_unknown_handle_alone_is_reported() -> None:
     """A complete set plus an extra handle fails on the extra handle only."""
     result = _revise(
@@ -111,25 +133,20 @@ def test_unknown_handle_alone_is_reported() -> None:
     )
 
 
-def test_decisions_reject_final_gap_ids() -> None:
-    """Closed request-local decisions cannot also dismiss final gap IDs."""
+def test_a_draft_cannot_dismiss_final_gap_ids() -> None:
+    """Dismissals name request-local handles in `gap_decisions`, never gap IDs."""
     gap_id = _gaps()[0].gap_id
     assert gap_id is not None
-    result = _revise(
-        RevisionDraft(
-            gap_decisions=(
-                _decision("revision-gap-1"),
-                _decision("revision-gap-2"),
-            ),
-            dismissed_gap_ids=(gap_id,),
+    with pytest.raises(ValidationError, match="dismissed_gap_ids"):
+        RevisionDraft.model_validate(
+            {
+                "gap_decisions": [
+                    _decision("revision-gap-1"),
+                    _decision("revision-gap-2"),
+                ],
+                "dismissed_gap_ids": [gap_id],
+            }
         )
-    )
-
-    assert result.status == "technical_failure"
-    assert result.diagnostics == (
-        "compile failure: ValueError: revision draft must use request-local "
-        "gap handles, not final gap IDs",
-    )
 
 
 def test_proposed_addition_requires_an_addition() -> None:
@@ -283,7 +300,15 @@ def test_the_revision_record_counts_the_requests_the_adapter_sent(
 
 
 def test_a_fake_adapter_revision_records_no_requests_sent() -> None:
-    result = _revise(RevisionDraft(responsibilities=_reviewer()))
+    result = _revise(
+        RevisionDraft(
+            responsibilities=_reviewer(),
+            gap_decisions=(
+                _decision("revision-gap-1", "propose_addition"),
+                _decision("revision-gap-2"),
+            ),
+        )
+    )
 
     assert result.status == "applied"
     assert result.call_evidence is not None

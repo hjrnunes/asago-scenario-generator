@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -61,6 +63,7 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
 )
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
+    _RevisionProviderPayload,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
@@ -667,6 +670,25 @@ def test_revision_prompt_uses_local_handles_and_three_gap_decisions() -> None:
     assert '"gap_id"' not in user
 
 
+def test_revision_prompt_example_is_a_reply_that_closes_a_one_gap_request() -> None:
+    gap = MissingStructuralConcept(
+        concept_type="responsibility",
+        description="A reviewing responsibility is needed.",
+        evidence_refs=("review-gap",),
+    )
+    system, _ = build_structural_revision_prompts(
+        gaps=(gap,),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+    )
+    example = re.search(r"Valid example: (\{.*\})\.", system)
+    assert example is not None
+
+    payload = _RevisionProviderPayload.model_validate(json.loads(example.group(1)))
+
+    assert [item.gap_handle for item in payload.gap_decisions] == ["revision-gap-1"]
+
+
 def test_structured_ica_draft_compiles_authoritative_owner_and_action() -> None:
     structure = _control_structure()
     slot = create_slots(structure)[0]
@@ -1029,10 +1051,29 @@ def test_revision_provider_schema_uses_local_handles_without_final_gap_ids(
     schema = response_formats[0].model_json_schema()
     draft_fields = schema["$defs"]["_RevisionProviderDraft"]["properties"]
     assert "trigger_gap_ids" not in draft_fields
-    assert "dismissed_gap_ids" not in draft_fields
 
 
-def test_revision_provider_reports_its_validation_retry_as_a_call(tmp_path) -> None:
+_RETRY_DECISION = {
+    "gap_handle": "revision-gap-1",
+    "disposition": "dismiss_unsupported",
+    "rationale": "The supplied evidence does not justify it.",
+}
+
+
+@pytest.mark.parametrize(
+    "first_reply",
+    [
+        {
+            "draft": {},
+            "gap_decisions": [{**_RETRY_DECISION, "disposition": "unknown"}],
+        },
+        {"draft": {}},
+    ],
+    ids=["unknown-disposition", "missing-gap-decisions"],
+)
+def test_revision_provider_reports_its_validation_retry_as_a_call(
+    tmp_path, first_reply
+) -> None:
     gap = MissingStructuralConcept(
         concept_type="responsibility",
         description="A reviewing responsibility is needed.",
@@ -1045,15 +1086,7 @@ def test_revision_provider_reports_its_validation_retry_as_a_call(tmp_path) -> N
         baseline_control_structure=_control_structure(),
         controls=controls,
     )
-    decision = {
-        "gap_handle": "revision-gap-1",
-        "disposition": "dismiss_unsupported",
-        "rationale": "The supplied evidence does not justify it.",
-    }
-    responses = [
-        {"draft": {}, "gap_decisions": [{**decision, "disposition": "unknown"}]},
-        {"draft": {}, "gap_decisions": [decision]},
-    ]
+    responses = [first_reply, {"draft": {}, "gap_decisions": [_RETRY_DECISION]}]
     sent: list[object] = []
 
     class Client:
@@ -1076,6 +1109,43 @@ def test_revision_provider_reports_its_validation_retry_as_a_call(tmp_path) -> N
 
     assert len(sent) == 2
     assert response.provider_calls == 2
+
+
+def test_revision_provider_rejects_a_handle_decided_twice(tmp_path) -> None:
+    """Two decisions for one handle still cover the expected set; they stay invalid."""
+    gap = MissingStructuralConcept(
+        concept_type="responsibility",
+        description="A reviewing responsibility is needed.",
+        evidence_refs=("review-gap",),
+    )
+    controls = _controls()
+    request = StructuralRevisionRequest(
+        gaps=(gap,),
+        baseline_loss_analysis=_loss_analysis(),
+        baseline_control_structure=_control_structure(),
+        controls=controls,
+    )
+
+    class Client:
+        model = "revision-duplicate-test"
+
+        def complete(self, **kwargs):
+            return LLMResult(
+                content={
+                    "draft": {},
+                    "gap_decisions": [_RETRY_DECISION, _RETRY_DECISION],
+                },
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+                system_prompt=kwargs["system_prompt"],
+                user_prompt=kwargs["user_prompt"],
+            )
+
+    with pytest.raises(ValueError, match="unique gap handles"):
+        ObligationAwareLLMAdapter(Client(), run_dir=tmp_path, controls=controls).revise(
+            request
+        )
 
 
 def test_provider_accepts_nested_structured_ica_consideration_results(tmp_path) -> None:

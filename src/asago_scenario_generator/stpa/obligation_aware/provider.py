@@ -998,7 +998,7 @@ class _RevisionProviderPayload(_Model):
 
     status: Literal["completed", "rejected"] = "completed"
     draft: "_RevisionProviderDraft"
-    gap_decisions: tuple[RevisionGapDecision, ...] = ()
+    gap_decisions: tuple[RevisionGapDecision, ...]
 
 
 class _RevisionProviderDraft(_Model):
@@ -1013,7 +1013,6 @@ class _RevisionProviderDraft(_Model):
     control_actions: tuple[DraftControlAction, ...] = ()
     feedback_channels: tuple[DraftFeedbackChannel, ...] = ()
     coordination_links: tuple[DraftCoordinationLink, ...] = ()
-    gap_decisions: tuple[RevisionGapDecision, ...] = ()
     rationale: str = ""
 
 
@@ -1665,15 +1664,9 @@ class ObligationAwareLLMAdapter:
             raise ValueError(
                 outcome.error or "structural revision provider returned no payload"
             )
-        draft = RevisionDraft.model_validate(payload.draft.model_dump(mode="python"))
-        if payload.gap_decisions:
-            draft = draft.model_copy(
-                update={
-                    "gap_decisions": tuple(
-                        (*draft.gap_decisions, *payload.gap_decisions)
-                    )
-                }
-            )
+        draft = RevisionDraft.model_validate(
+            payload.draft.model_dump(mode="python")
+        ).model_copy(update={"gap_decisions": payload.gap_decisions})
         response = StructuralRevisionResponse(
             status=payload.status,
             request_digest=request.semantic_digest,

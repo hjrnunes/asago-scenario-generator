@@ -1280,7 +1280,9 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         IcaDeviationDraft,
         IcaFindingDraft,
         ObligationIcaDraft,
+        DraftHazard,
         RevisionDraft,
+        RevisionGapDecision,
         SlotIcaDraft,
         StructuralRevisionResponse,
         StructuralRoutingResponse,
@@ -1448,6 +1450,21 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                         gap.obligation_id
                         for gap in request.gaps
                         if gap.obligation_id is not None
+                    ),
+                    hazards=(
+                        DraftHazard(
+                            handle="hazard-1",
+                            description="The request is accepted unreviewed.",
+                            related_loss_ids=("L-1",),
+                        ),
+                    ),
+                    gap_decisions=tuple(
+                        RevisionGapDecision(
+                            gap_handle=f"revision-gap-{index}",
+                            disposition="propose_addition",
+                            rationale="The use case shows the missing hazard.",
+                        )
+                        for index in range(1, len(request.gaps) + 1)
                     ),
                 ),
             )

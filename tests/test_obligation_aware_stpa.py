@@ -37,6 +37,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     DraftResponsibilityConstraint,
     DraftSecurityConstraint,
     DraftResponsibility,
+    RevisionGapDecision,
     IcaDeviationDraft,
     IcaFindingDraft,
     ObligationIcaDraft,
@@ -1673,7 +1674,14 @@ def test_revision_explicit_rejection_is_distinct_from_technical_failure() -> Non
                 status="rejected",
                 request_digest=request.semantic_digest,
                 draft=RevisionDraft(
-                    rationale="No justified additive repair was found."
+                    rationale="No justified additive repair was found.",
+                    gap_decisions=(
+                        RevisionGapDecision(
+                            gap_handle="revision-gap-1",
+                            disposition="unresolved",
+                            rationale="The evidence is missing.",
+                        ),
+                    ),
                 ),
             )
 
@@ -1688,7 +1696,10 @@ def test_revision_explicit_rejection_is_distinct_from_technical_failure() -> Non
 
     assert result.status == "rejected"
     assert result.final_control_structure == result.baseline_control_structure
-    assert result.diagnostics == ("No justified additive repair was found.",)
+    assert result.diagnostics == (
+        "No justified additive repair was found.",
+        "revision-gap-1: unresolved: The evidence is missing.",
+    )
     assert result.call_evidence is not None
     assert result.call_evidence.outcome == "rejected"
 

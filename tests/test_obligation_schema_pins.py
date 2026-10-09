@@ -99,7 +99,7 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "revision": (
         "_RevisionProviderPayload",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "c255ee3105ee6dae7830e7f2e8bb2b26c7781edb5498232a8f136b536a266b49",
+        "c47db54603645bacb55cb3852ecf1e12a27ae76e15a5c190299c1d965e98f93c",
     ),
     "routing-1": (
         "_RoutingProviderPayload1",
@@ -199,7 +199,7 @@ ENVELOPES = {
 
 EXPECTED_ENVELOPES: dict[str, dict] = {
     "revision": {
-        "digest": "6937d271f8937491a5b64455abb0d35c860e4db8af2193af8c1f546af22c7e19",
+        "digest": "b78a78507a1c7c65b83217f1bffff4cc4b24415fab95e43069be459e8029c7bc",
         "dump_keys": [
             "status",
             "request_digest",
@@ -342,7 +342,30 @@ def test_the_revision_draft_definition_keeps_its_title_description_and_fields():
         "control_actions",
         "feedback_channels",
         "coordination_links",
-        "gap_decisions",
         "rationale",
     ]
     assert "required" not in definition
+
+
+def test_the_revision_payload_requires_the_gap_decisions_beside_the_draft():
+    schema = provider._RevisionProviderPayload.model_json_schema()
+    assert schema["required"] == ["draft", "gap_decisions"]
+
+
+def test_the_revision_payload_rejects_a_reply_without_gap_decisions():
+    with pytest.raises(ValidationError, match="gap_decisions"):
+        provider._RevisionProviderPayload.model_validate({"draft": {}})
+
+
+def test_the_revision_payload_accepts_an_empty_gap_decision_list():
+    payload = provider._RevisionProviderPayload.model_validate(
+        {"draft": {}, "gap_decisions": []}
+    )
+    assert payload.gap_decisions == ()
+
+
+def test_the_revision_draft_carries_no_gap_decisions_of_its_own():
+    with pytest.raises(ValidationError, match="gap_decisions"):
+        provider._RevisionProviderPayload.model_validate(
+            {"draft": {"gap_decisions": []}, "gap_decisions": []}
+        )
