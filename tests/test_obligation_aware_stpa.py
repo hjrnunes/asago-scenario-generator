@@ -107,6 +107,7 @@ from tests.helpers.obligation_aware import (
     _loss_analysis,
     _provider_slot_request,
     _routed_slot_draft,
+    route_assessment,
 )
 
 
@@ -162,6 +163,7 @@ def test_routing_accounts_for_each_applicable_obligation_once() -> None:
                     ObligationRoute(
                         obligation_id=brief.obligation_id,
                         disposition="targeted",
+                        semantic_assessment=route_assessment(brief),
                         slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
                         controller_ids=("RESP-1",),
                         responsibility_ids=("RESP-1",),
@@ -443,6 +445,7 @@ def test_routing_accepts_coordination_path_with_source_controller() -> None:
     route = ObligationRoute(
         obligation_id=brief.obligation_id,
         disposition="targeted",
+        semantic_assessment=route_assessment(brief),
         slot_ids=(coordination.slot_id,),
         # The source responsibility issues the coordination mechanism.  The
         # CL identity belongs in coordination_link_ids, not in the RESP
@@ -513,6 +516,7 @@ def test_routing_rejects_coordination_path_identity_relabelling(
     route_values = {
         "obligation_id": brief.obligation_id,
         "disposition": "targeted",
+        "semantic_assessment": route_assessment(brief),
         "slot_ids": (coordination.slot_id,),
         "controller_ids": ("RESP-1",),
         "responsibility_ids": ("RESP-1", "RESP-2"),
@@ -672,6 +676,7 @@ def test_routing_retry_includes_exact_local_validation_error() -> None:
                 route = ObligationRoute(
                     obligation_id=brief.obligation_id,
                     disposition="targeted",
+                    semantic_assessment=route_assessment(brief),
                     # Deliberately use a hazard in the slot namespace.
                     slot_ids=("H-1",),
                     hazard_ids=("H-1",),
@@ -683,6 +688,7 @@ def test_routing_retry_includes_exact_local_validation_error() -> None:
                 route = ObligationRoute(
                     obligation_id=brief.obligation_id,
                     disposition="targeted",
+                    semantic_assessment=route_assessment(brief),
                     slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
                     hazard_ids=("H-1",),
                     constraint_ids=("SC-1",),
@@ -1756,6 +1762,7 @@ def test_routing_rejects_unknown_responsibility_reference() -> None:
                     ObligationRoute(
                         obligation_id=briefs[0].obligation_id,
                         disposition="targeted",
+                        semantic_assessment=route_assessment(briefs[0]),
                         slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
                         responsibility_ids=("RESP-UNKNOWN",),
                         hazard_ids=("H-1",),

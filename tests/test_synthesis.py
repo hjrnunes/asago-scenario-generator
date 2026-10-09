@@ -115,6 +115,7 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
 from asago_scenario_generator.stpa.scenario_prod.run import SP3RunResult
 from asago_scenario_generator.stpa.system_model.run import SP1RunResult
 
+from tests.helpers.obligation_aware import route_assessment
 from tests.helpers.synthesis_fixture import (
     RevisionOutcome,
     baseline_control_structure,
@@ -1382,6 +1383,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                     ObligationRoute(
                         obligation_id=brief.obligation_id,
                         disposition="upstream_gap",
+                        semantic_assessment=route_assessment(brief),
                         rationale="A structural hazard needs one revision pass.",
                         missing_concepts=(
                             MissingStructuralConcept(
@@ -1400,6 +1402,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                     ObligationRoute(
                         obligation_id=brief.obligation_id,
                         disposition="targeted",
+                        semantic_assessment=route_assessment(brief),
                         slot_ids=(slot_id,),
                         hazard_ids=("H-1",),
                         constraint_ids=("SC-1",),

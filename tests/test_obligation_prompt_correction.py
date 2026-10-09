@@ -71,6 +71,7 @@ from tests.helpers.obligation_aware import (
     _controls,
     _loss_analysis,
     _provider_slot_request,
+    route_assessment,
 )
 
 
@@ -548,6 +549,7 @@ def test_mismatched_hazard_constraint_route_is_unresolved_after_one_correction()
     route = ObligationRoute(
         obligation_id=brief.obligation_id,
         disposition="targeted",
+        semantic_assessment=route_assessment(brief),
         slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
         hazard_ids=("H-2",),
         constraint_ids=("SC-1",),
@@ -610,6 +612,7 @@ def test_captured_nhs_route_error_and_feedback_explain_allowed_pair() -> None:
     route = ObligationRoute(
         obligation_id=brief.obligation_id,
         disposition="targeted",
+        semantic_assessment=route_assessment(brief),
         slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
         hazard_ids=tuple(captured["hazard_ids"]),
         constraint_ids=tuple(captured["constraint_ids"]),
@@ -952,6 +955,7 @@ def test_routing_budget_splits_compact_batches_in_canonical_order() -> None:
                     ObligationRoute(
                         obligation_id=item.obligation_id,
                         disposition="targeted",
+                        semantic_assessment=route_assessment(item),
                         slot_ids=("RESP-1:CA-1-1:NOT_PROVIDED",),
                         hazard_ids=("H-1",),
                         constraint_ids=("SC-1",),

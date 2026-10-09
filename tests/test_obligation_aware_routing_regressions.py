@@ -17,7 +17,12 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.helpers.request_dispatch import dispatch_requests
-from tests.helpers.obligation_aware import _control_structure, _controls, _loss_analysis
+from tests.helpers.obligation_aware import (
+    _control_structure,
+    _controls,
+    _loss_analysis,
+    route_assessment,
+)
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 
 
@@ -139,6 +144,56 @@ def test_invalid_route_is_unresolved_without_discarding_valid_batch_sibling() ->
         "routing_record_validation_failed"
     )
     assert result.call_evidence[0].outcome == "unresolved"
+
+
+def test_a_route_without_a_semantic_assessment_is_unresolved_beside_its_sibling() -> (
+    None
+):
+    """A record that omits the pair judgement fails locally, not the batch."""
+    briefs = _briefs()
+    slot = create_slots(_control_structure())[0]
+    structure = {
+        "disposition": "targeted",
+        "slot_ids": (slot.slot_id,),
+        "controller_ids": ("RESP-1",),
+        "responsibility_ids": ("RESP-1",),
+        "control_action_ids": ("CA-1-1",),
+        "controlled_process_ids": ("CP-1",),
+        "hazard_ids": ("H-1",),
+        "constraint_ids": ("SC-1",),
+        "rationale": "The supplied control path is relevant.",
+        "evidence": ("system-path",),
+    }
+    assessed = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        semantic_assessment=route_assessment(briefs[0]),
+        **structure,
+    )
+    bare = ObligationRoute(obligation_id=briefs[1].obligation_id, **structure)
+
+    class Adapter:
+        def route(self, request, *, correction_feedback=None):
+            return StructuralRoutingResponse(
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=(assessed, bare),
+            )
+
+    result = route_obligations(
+        Adapter(),
+        briefs=briefs,
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls().model_copy(update={"validation_retries": 0}),
+        max_batch_size=2,
+    )
+
+    by_id = {route.obligation_id: route for route in result.routes}
+    assert by_id[assessed.obligation_id].disposition == "targeted"
+    assert by_id[bare.obligation_id].disposition == "unresolved"
+    assert by_id[bare.obligation_id].diagnostics[0].detail == (
+        "ValueError: route requires a semantic assessment"
+    )
 
 
 def test_untyped_adapter_response_is_corrected_once_then_left_unresolved() -> None:
@@ -333,6 +388,7 @@ def test_the_default_recheck_routes_every_brief_again_as_a_recheck(tmp_path) -> 
                     ObligationRoute(
                         obligation_id=brief.obligation_id,
                         disposition="unresolved",
+                        semantic_assessment=route_assessment(brief),
                         rationale="The supplied structure does not settle it.",
                         evidence=("system-inventory",),
                     )
