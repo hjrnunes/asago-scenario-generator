@@ -2429,10 +2429,7 @@ def _run_graph_revision_call(
                 )
                 if attempt.rejection is not None:
                     return _draft_from_analysis(loss_analysis)
-                attempt.warnings.extend(
-                    f"stated-rule revision dropped an edit and kept the rest: {item}"
-                    for item in dropped
-                )
+                attempt.warnings.extend(_dropped_edit_warnings(dropped))
             return _revision_patch_to_draft(
                 loss_analysis,
                 patch,
@@ -2472,7 +2469,10 @@ def _run_graph_revision_call(
     revised = outcome.value
     if revised is None and drop_unquoted_spans:
         revised = _revision_without_unquoted_spans(
-            loss_analysis, attempts_out, outcome.failure
+            loss_analysis,
+            attempts_out,
+            outcome.failure,
+            addition_only=addition_only,
         )
     if revised is None:
         raise StageError(
@@ -2597,10 +2597,35 @@ def _droppable_final_patch(
     return reduced, dropped
 
 
+def _dropped_edit_warnings(notes: Sequence[str]) -> list[str]:
+    return [
+        f"stated-rule revision dropped an edit and kept the rest: {n}" for n in notes
+    ]
+
+
+def _reduced_patch_for_rebuild(
+    prior: LossAnalysis, reduced: _Stage1aRevisionPatch, addition_only: bool
+) -> tuple[_Stage1aRevisionPatch, list[str]] | None:
+    """The reduced patch to rebuild from, with the notes of the edits it loses.
+
+    The stored patch is the raw response, so an addition-only revision runs the
+    filter again on the reduced patch; a rebuild must not keep an edit the
+    first parse would have dropped.  ``None`` when nothing is left to apply.
+    """
+    if not addition_only:
+        return reduced, []
+    filtered, rejection, notes = _addition_only_patch(prior, reduced)
+    if rejection is not None or not _has_records(filtered):
+        return None
+    return filtered, _dropped_edit_warnings(notes)
+
+
 def _revision_without_unquoted_spans(
     prior: LossAnalysis,
     attempts: list[_RevisionAttempt],
     failure: BaseException | None,
+    *,
+    addition_only: bool = False,
 ) -> LossAnalysisDraft | None:
     """Rebuild a failed final attempt without the records whose spans slipped.
 
@@ -2610,12 +2635,17 @@ def _revision_without_unquoted_spans(
     parsed, failed validation, and drops at least one record while leaving at
     least one, and the remainder passes full validation.  The accepted rebuild
     is appended to *attempts* with the dropped records and their errors.
+    With ``addition_only`` the rebuild keeps only what the add-only filter keeps.
     """
     split = _droppable_final_patch(attempts, failure)
     if split is None:
         return None
-    reduced, dropped = split
-    rebuilt = _RevisionAttempt(dropped=dropped, patch=reduced)
+    rebuild = _reduced_patch_for_rebuild(prior, split[0], addition_only)
+    if rebuild is None:
+        return None
+    reduced, notes = rebuild
+    dropped = split[1]
+    rebuilt = _RevisionAttempt(dropped=dropped, patch=reduced, warnings=notes)
     try:
         draft = _revision_patch_to_draft(
             prior, reduced, rebuilt.warnings, span_repairs_out=rebuilt.span_repairs
