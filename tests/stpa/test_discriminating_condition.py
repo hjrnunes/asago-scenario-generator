@@ -511,13 +511,13 @@ def test_condition_soft_fail_keeps_normalization_provenance(tmp_path, form) -> N
     outcome["record_refs"] = ["TARGET-STATE.orders.ORD-2"]
     bad["attacker_bdi"]["intentions"][0]["source_handles"] = ["cause_1", "cause_2"]
     client = _ContentFormClient(form)
-    client.set_response_queue([bad, copy.deepcopy(bad)])
+    client.set_response_queue([bad, copy.deepcopy(bad), copy.deepcopy(bad)])
 
     result, error = _generate(client, tmp_path)
 
     assert error is None, error
     assert result is not None
-    assert client.call_count == 2
+    assert client.call_count == 3
     assert result.discriminating_condition is None
     assert "(discriminating_condition_check_failed)" in (
         result.condition_omitted_reason or ""
@@ -2072,6 +2072,17 @@ _OMIT_AFTER_FAILED_CORRECTION = {
 }
 
 
+# A condition that failed a check earns a last correction; one that was never
+# written or is structurally invalid does not.
+_SECOND_CORRECTION_CODES = {
+    "discriminating_condition_check_failed",
+    OPERAND_MISMATCH,
+    LITERAL_UNSUPPORTED,
+    OPERATION_MISMATCH,
+    ORDER_UNSCOPED,
+}
+
+
 @pytest.mark.parametrize(
     "case",
     [
@@ -2079,24 +2090,26 @@ _OMIT_AFTER_FAILED_CORRECTION = {
         for name, case in _OMIT_AFTER_FAILED_CORRECTION.items()
     ],
 )
-def test_stage5_sends_one_correction_then_publishes_without_the_condition(
+def test_stage5_sends_its_corrections_then_publishes_without_the_condition(
     tmp_path, case
 ) -> None:
+    corrections = 2 if case.code in _SECOND_CORRECTION_CODES else 1
     client = MockLLMClient()
-    client.set_response_queue([case.payload(), case.payload()])
+    client.set_response_queue([case.payload() for _ in range(corrections + 1)])
 
     result, error = case.generate(client, tmp_path)
 
     assert error is None
     assert result is not None
-    assert client.call_count == 2
+    assert client.call_count == corrections + 1
     correction = client.calls[1].user_prompt
     for fragment in case.fragments():
         assert fragment in correction, fragment
     assert result.discriminating_condition is None
     assert result.condition_check is None
+    spent = "two corrections" if corrections == 2 else "one correction"
     assert result.condition_omitted_reason == (
-        "The discriminating condition failed validation after one correction "
+        f"The discriminating condition failed validation after {spent} "
         f"({case.code}); {ANALYTICAL_NOTE}"
     )
     assert result.observation_assessment is not None

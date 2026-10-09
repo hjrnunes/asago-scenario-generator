@@ -57,6 +57,7 @@ from .sources import (
     _action_duration_eligible,
     _causal_source_choices,
 )
+from .condition_retry import earns_second_correction, request_second_correction
 from .condition_routing import route_without_condition
 from .records import (
     _write_stage5_normalization_record,
@@ -337,6 +338,38 @@ def _generate_semantics(
             )
         return result, error
 
+    def second_correction(first: _BdiCall):
+        """Return the attempt to publish after the last correction, if one is sent."""
+        third = request_second_correction(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            run_dir=run_dir,
+            response_format=response_format,
+            stage=stage,
+            step=step,
+            slot_id=scenario_context.scenario_identity.ica_slot_id,
+            scenario_id=scenario_context.scenario_identity.scenario_id,
+            temperature=temperature,
+            feedback=feedback,
+            failure=first.failure,
+            prior_result=first.result,
+            result_validator=validate,
+            response_parser=lambda value, _cleanup: _parse_context_bdi_result(
+                value, response_format
+            ),
+        )
+        issues = issues_of(third.failure)
+        recovered = recover(third.error, third.result, issues)
+        if third.error is None or recovered is not None:
+            return third.value, third.error, recovered, issues
+        return None
+
+    feedback = _normal_validation_retry_feedback(
+        scenario_context,
+        choices,
+        target_observations=target_observations,
+    )
     first = _call_bdi_with_bounded_length_retry(
         llm_client,
         system_prompt,
@@ -348,15 +381,19 @@ def _generate_semantics(
         slot_id=scenario_context.scenario_identity.ica_slot_id,
         scenario_id=scenario_context.scenario_identity.scenario_id,
         temperature=temperature,
-        validation_retry_feedback=_normal_validation_retry_feedback(
-            scenario_context,
-            choices,
-            target_observations=target_observations,
-        ),
+        validation_retry_feedback=feedback,
         result_validator=validate,
     )
     recovered = recover(first.error, first.result, first.issues)
-    return finish(first.draft, first.error, recovered, first.issues, 1)
+    route = recovered[1] if recovered is not None else None
+    if not earns_second_correction(
+        first.failure, first.attempt_number, first.issues, route
+    ):
+        return finish(first.draft, first.error, recovered, first.issues, 1)
+    last = second_correction(first)
+    if last is None:
+        return finish(first.draft, first.error, recovered, first.issues, 2)
+    return finish(*last, 2)
 
 
 def _finish_normal_context_bdi(

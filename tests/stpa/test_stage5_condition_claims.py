@@ -263,11 +263,11 @@ def test_stage5_routes_a_still_inverted_condition_to_analytical_only(
     assert result is not None
     assert result.discriminating_condition is None
     assert result.condition_omitted_reason == (
-        "The discriminating condition failed validation after one correction "
+        "The discriminating condition failed validation after two corrections "
         f"({IssueCode.discriminating_condition_polarity_inverted}); {ANALYTICAL_NOTE}"
     )
     assert result.observation_assessment.disposition == "analytical_only"
-    assert client.call_count == 2
+    assert client.call_count == 3
 
 
 def test_stage5_routes_a_still_state_only_condition_to_analytical_only(
@@ -283,10 +283,10 @@ def test_stage5_routes_a_still_state_only_condition_to_analytical_only(
     assert result is not None
     assert result.discriminating_condition is None
     assert result.condition_omitted_reason == (
-        "The discriminating condition failed validation after one correction "
+        "The discriminating condition failed validation after two corrections "
         f"({IssueCode.discriminating_condition_no_call}); {ANALYTICAL_NOTE}"
     )
     assert (
         f"{IssueCode.discriminating_condition_no_call}:" in client.calls[1].user_prompt
     )
-    assert client.call_count == 2
+    assert client.call_count == 3
