@@ -135,8 +135,11 @@ meaning, and a response that changes one is discarded as a whole.
 
 - Add one constraint with a local handle for each rule. Its `rule` states
   the quoted behavior and its `related_hazards` cite the supplied hazard the
-  rule prevents. Add a hazard only when no supplied hazard fits, and cover it
-  in the same response.
+  rule prevents. Cite only a hazard that already serves the constraint's own
+  `behavior_class`, or a new hazard added in the same response. Add a hazard
+  only when no supplied hazard fits, and cover it in the same response.
+- Copy each obligation's `rule_span` from the constraint's `rule` character
+  for character.
 - Extend an existing constraint instead only when its `rule` already states
   a narrower form of the same behavior. Keep its current `rule` text word for
   word and append the new wording; keep its `constraint_id`, `applies_when`,

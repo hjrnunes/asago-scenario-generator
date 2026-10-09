@@ -58,6 +58,7 @@ cases:
       - share no subject phrase
       - wrong subject wording
       - values quoting the new rule
+      - already serves the constraint's own
     ordered:
       - - "`rule_span` requirement below"
         - contiguous substring of its constraint's `rule`
@@ -71,5 +72,11 @@ cases:
     required:
       - "## Stated rules no constraint carries"
       - This revision may only add.
+      - >-
+        Cite only a hazard that already serves the constraint's own
+        `behavior_class`, or a new hazard added in the same response.
+      - >-
+        Copy each obligation's `rule_span` from the constraint's `rule`
+        character for character.
       - >-
         the obligations rule for edits above: do not return an `obligations`

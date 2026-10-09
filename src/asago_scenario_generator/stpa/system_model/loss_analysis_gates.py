@@ -62,6 +62,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _ProviderObligation,
     _RevisionConstraintAddition,
     _RevisionConstraintEdit,
+    _RevisionHazardAddition,
     _RevisionHazardEdit,
     _Stage1aRevisionPatch,
 )
@@ -2112,9 +2113,7 @@ def _accept_revision_round(
     if accepted_attempt.dropped:
         record["dropped_records"] = accepted_attempt.dropped
         progress.revision_warnings.extend(
-            f"graph revision dropped {item['record']} "
-            f"'{item.get('handle') or item['constraint_id']}': {item['error']}"
-            for item in accepted_attempt.dropped
+            _dropped_record_warnings(accepted_attempt.dropped)
         )
     progress.rounds.append(record)
     progress.failing.extend(
@@ -2122,6 +2121,14 @@ def _accept_revision_round(
         for check in revised_density.failing_checks
     )
     return revised_density
+
+
+def _dropped_record_warnings(dropped: Sequence[dict]) -> list[str]:
+    return [
+        f"graph revision dropped {item['record']} "
+        f"'{item.get('handle') or item['constraint_id']}': {item['error']}"
+        for item in dropped
+    ]
 
 
 def _apply_stated_rule_revision(
@@ -2199,6 +2206,12 @@ def _run_stated_rule_revision(
     breaks a structural check, and a revision ``check`` rejects all keep the
     unrevised graph, so a stated-rule finding never turns a passing gate
     into a stage failure or damages an existing constraint.
+
+    Two repairs keep a revision that would otherwise fail.  Records whose
+    ``rule_span`` is not in their rule are dropped after the correction call.
+    A revision that fails only the class-ownership check loses the added
+    constraints that cite a hazard another behavior class cites alone
+    (see :func:`_trim_failed_class_ownership`).
     """
     attempts: list[_RevisionAttempt] = []
     warnings: list[str] = []
@@ -2231,6 +2244,7 @@ def _run_stated_rule_revision(
                 attempts_out=attempts,
                 stated_rules=findings,
                 addition_only=True,
+                drop_unquoted_spans=True,
             )
     except Exception as exc:  # noqa: BLE001 - this revision is advisory
         _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
@@ -2248,21 +2262,17 @@ def _run_stated_rule_revision(
         )
         record["trigger"] = "stated_rules"
         return rejected(rejection, record, call_count)
-    revised_density = check_hazard_graph_density(revised)
+    revised, revised_density, trimmed = _trim_failed_class_ownership(
+        loss_analysis, revised, check_hazard_graph_density(revised)
+    )
     record = _revision_round_record(
         round_number, before=density, after=revised_density, original=density
     )
     record["trigger"] = "stated_rules"
-    reason: str | None = None
-    if not revised_density.passed:
-        reason = "revision broke structural checks: " + "; ".join(
-            revised_density.failing_checks
-        )
-    elif check is not None:
-        try:
-            reason = check(revised)
-        except Exception as exc:  # noqa: BLE001 - this revision is advisory
-            reason = f"revision check failed: {type(exc).__name__}: {exc}"
+    dropped = [*attempts[-1].dropped, *trimmed]
+    if dropped:
+        record["dropped_records"] = dropped
+    reason = _revision_rejection(revised, revised_density, check)
     _record_revision_span_repairs(
         repair_record, run_dir, attempts, accepted=reason is None
     )
@@ -2276,12 +2286,138 @@ def _run_stated_rule_revision(
         f"{item.repair.original!r} -> {item.repair.repaired!r}"
         for item in accepted_attempt.span_repairs
     )
+    warnings.extend(_dropped_record_warnings(dropped))
     return (
         revised,
         StatedRuleRevision(trigger="stated_rules", applied=True, call_count=call_count),
         record,
         warnings,
     )
+
+
+def _revision_rejection(
+    revised: LossAnalysis,
+    density: HazardGraphDensityReport,
+    check: StatedRuleCheck | None,
+) -> str | None:
+    """Why the stated-rule round's graph is rejected, or ``None`` to keep it."""
+    if not density.passed:
+        return "revision broke structural checks: " + "; ".join(density.failing_checks)
+    if check is None:
+        return None
+    try:
+        return check(revised)
+    except Exception as exc:  # noqa: BLE001 - this revision is advisory
+        return f"revision check failed: {type(exc).__name__}: {exc}"
+
+
+def _fails_only_class_ownership(report: HazardGraphDensityReport) -> bool:
+    return not report.passed and not (
+        report.losses_without_hazard
+        or report.constraints_without_hazard
+        or report.hazards_without_constraint
+    )
+
+
+def _sole_citing_classes(analysis: LossAnalysis) -> dict[str, str]:
+    """Map each hazard that one classified behavior class alone cites to it."""
+    classes: dict[str, set[str]] = {}
+    for constraint in analysis.security_constraints:
+        for hazard_id in constraint.related_hazards:
+            classes.setdefault(hazard_id, set()).add(_declared_class(constraint))
+    return {
+        hazard_id: next(iter(cited))
+        for hazard_id, cited in classes.items()
+        if len(cited) == 1 and UNCLASSIFIED not in cited
+    }
+
+
+def _trimmed_graph(
+    revised: LossAnalysis, kept: list[SecurityConstraint], orphaned: set[str]
+) -> LossAnalysis:
+    return LossAnalysis.model_validate(
+        {
+            "risk_card_losses": revised.risk_card_losses,
+            "use_case_losses": revised.use_case_losses,
+            "hazards": [h for h in revised.hazards if h.hazard_id not in orphaned],
+            "security_constraints": kept,
+            "risk_dispositions": revised.risk_dispositions,
+        }
+    )
+
+
+def _cross_class_hazards(
+    constraint: SecurityConstraint, sole: dict[str, str]
+) -> list[str]:
+    """The hazards *constraint* cites that a different class cites alone."""
+    declared = _declared_class(constraint)
+    return [h for h in constraint.related_hazards if sole.get(h, declared) != declared]
+
+
+def _cross_class_record(
+    constraint_id: str, clashes: list[str], sole: dict[str, str]
+) -> dict:
+    owners = ", ".join(sorted({sole[h] for h in clashes}))
+    return {
+        "record": "security_constraint_addition",
+        "constraint_id": constraint_id,
+        "error": f"it cites hazard {', '.join(clashes)}, which {owners} "
+        "constraints cite alone, so the revised graph leaves that behavior "
+        "class without a hazard of its own",
+    }
+
+
+def _trim_cross_class_additions(
+    prior: LossAnalysis, revised: LossAnalysis
+) -> tuple[LossAnalysis, list[dict]]:
+    """Drop added constraints that cite a hazard another class cites alone.
+
+    Prior constraints stay as they are.  A new hazard only a trimmed
+    constraint cited goes with it.  Returns *revised* and no records when no
+    added constraint cites such a hazard.
+    """
+    sole = _sole_citing_classes(prior)
+    prior_ids = {c.constraint_id for c in prior.security_constraints}
+    kept: list[SecurityConstraint] = []
+    dropped: list[dict] = []
+    cited_by_dropped: set[str] = set()
+    for constraint in revised.security_constraints:
+        clashes = _cross_class_hazards(constraint, sole)
+        if constraint.constraint_id in prior_ids or not clashes:
+            kept.append(constraint)
+            continue
+        cited_by_dropped.update(constraint.related_hazards)
+        dropped.append(_cross_class_record(constraint.constraint_id, clashes, sole))
+    if not dropped:
+        return revised, []
+    still_cited = {h for c in kept for h in c.related_hazards}
+    prior_hazards = {h.hazard_id for h in prior.hazards}
+    orphaned = cited_by_dropped - still_cited - prior_hazards
+    return _trimmed_graph(revised, kept, orphaned), dropped
+
+
+def _trim_failed_class_ownership(
+    prior: LossAnalysis,
+    revised: LossAnalysis,
+    density: HazardGraphDensityReport,
+) -> tuple[LossAnalysis, HazardGraphDensityReport, list[dict]]:
+    """Repair a revision that fails only the class-ownership check.
+
+    The model cites a hazard it declared for another behavior class, so the
+    class that owned that hazard has none of its own.  Trimming the added
+    constraints that do so is the repair; the trimmed graph replaces
+    *revised* only when it still adds something and passes the density
+    checks.  Otherwise the result is *revised* and *density*, unchanged.
+    """
+    if not _fails_only_class_ownership(density):
+        return revised, density, []
+    trimmed, dropped = _trim_cross_class_additions(prior, revised)
+    if not dropped or trimmed == prior:
+        return revised, density, []
+    trimmed_density = check_hazard_graph_density(trimmed)
+    if not trimmed_density.passed:
+        return revised, density, []
+    return trimmed, trimmed_density, dropped
 
 
 def _record_revision_span_repairs(
@@ -2429,10 +2565,7 @@ def _run_graph_revision_call(
                 )
                 if attempt.rejection is not None:
                     return _draft_from_analysis(loss_analysis)
-                attempt.warnings.extend(
-                    f"stated-rule revision dropped an edit and kept the rest: {item}"
-                    for item in dropped
-                )
+                attempt.warnings.extend(_dropped_edit_warnings(dropped))
             return _revision_patch_to_draft(
                 loss_analysis,
                 patch,
@@ -2472,7 +2605,10 @@ def _run_graph_revision_call(
     revised = outcome.value
     if revised is None and drop_unquoted_spans:
         revised = _revision_without_unquoted_spans(
-            loss_analysis, attempts_out, outcome.failure
+            loss_analysis,
+            attempts_out,
+            outcome.failure,
+            addition_only=addition_only,
         )
     if revised is None:
         raise StageError(
@@ -2521,15 +2657,19 @@ def _without_unquoted_records(
 
     Dropping an edit leaves the prior constraint as it was.  An edit that
     omits its obligations keeps the prior ones, which the span test skips.
+    A hazard addition that only dropped records cited goes with them; a new
+    hazard no kept constraint would cite fails validation.
     """
     kept_additions: list[_RevisionConstraintAddition] = []
     kept_edits: list[_RevisionConstraintEdit] = []
     dropped: list[dict] = []
+    cited_by_dropped: set[str] = set()
     for addition in patch.security_constraint_additions:
         error = _unquoted_span_error(addition.rule, addition.obligations)
         if error is None:
             kept_additions.append(addition)
         else:
+            cited_by_dropped.update(addition.related_hazards)
             dropped.append(
                 {
                     "record": "security_constraint_addition",
@@ -2542,6 +2682,7 @@ def _without_unquoted_records(
         if error is None:
             kept_edits.append(edit)
         else:
+            cited_by_dropped.update(edit.related_hazards)
             dropped.append(
                 {
                     "record": "security_constraint_edit",
@@ -2549,13 +2690,22 @@ def _without_unquoted_records(
                     "error": error,
                 }
             )
+    still_cited = {h for r in (*kept_additions, *kept_edits) for h in r.related_hazards}
+    orphaned = cited_by_dropped - still_cited
     reduced = patch.model_copy(
         update={
+            "hazard_additions": _hazards_not_in(patch.hazard_additions, orphaned),
             "security_constraint_additions": kept_additions,
             "security_constraint_edits": kept_edits,
         }
     )
     return reduced, dropped
+
+
+def _hazards_not_in(
+    additions: list[_RevisionHazardAddition], handles: set[str]
+) -> list[_RevisionHazardAddition]:
+    return [hazard for hazard in additions if hazard.handle not in handles]
 
 
 def _has_records(patch: _Stage1aRevisionPatch) -> bool:
@@ -2597,10 +2747,35 @@ def _droppable_final_patch(
     return reduced, dropped
 
 
+def _dropped_edit_warnings(notes: Sequence[str]) -> list[str]:
+    return [
+        f"stated-rule revision dropped an edit and kept the rest: {n}" for n in notes
+    ]
+
+
+def _reduced_patch_for_rebuild(
+    prior: LossAnalysis, reduced: _Stage1aRevisionPatch, addition_only: bool
+) -> tuple[_Stage1aRevisionPatch, list[str]] | None:
+    """The reduced patch to rebuild from, with the notes of the edits it loses.
+
+    The stored patch is the raw response, so an addition-only revision runs the
+    filter again on the reduced patch; a rebuild must not keep an edit the
+    first parse would have dropped.  ``None`` when nothing is left to apply.
+    """
+    if not addition_only:
+        return reduced, []
+    filtered, rejection, notes = _addition_only_patch(prior, reduced)
+    if rejection is not None or not _has_records(filtered):
+        return None
+    return filtered, _dropped_edit_warnings(notes)
+
+
 def _revision_without_unquoted_spans(
     prior: LossAnalysis,
     attempts: list[_RevisionAttempt],
     failure: BaseException | None,
+    *,
+    addition_only: bool = False,
 ) -> LossAnalysisDraft | None:
     """Rebuild a failed final attempt without the records whose spans slipped.
 
@@ -2610,12 +2785,17 @@ def _revision_without_unquoted_spans(
     parsed, failed validation, and drops at least one record while leaving at
     least one, and the remainder passes full validation.  The accepted rebuild
     is appended to *attempts* with the dropped records and their errors.
+    With ``addition_only`` the rebuild keeps only what the add-only filter keeps.
     """
     split = _droppable_final_patch(attempts, failure)
     if split is None:
         return None
-    reduced, dropped = split
-    rebuilt = _RevisionAttempt(dropped=dropped, patch=reduced)
+    rebuild = _reduced_patch_for_rebuild(prior, split[0], addition_only)
+    if rebuild is None:
+        return None
+    reduced, notes = rebuild
+    dropped = split[1]
+    rebuilt = _RevisionAttempt(dropped=dropped, patch=reduced, warnings=notes)
     try:
         draft = _revision_patch_to_draft(
             prior, reduced, rebuilt.warnings, span_repairs_out=rebuilt.span_repairs
