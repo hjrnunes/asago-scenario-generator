@@ -1232,12 +1232,6 @@ def _validate_gap_decisions(
     gaps: Sequence[MissingStructuralConcept],
 ) -> None:
     """Validate request-local disposition coverage before compiling a delta."""
-    if not draft.gap_decisions:
-        # Legacy deterministic adapters returned only the additive collections;
-        # retain that shape as a compatibility adapter.  Provider responses
-        # using the corrected contract must, however, close over every local
-        # handle below.
-        return
     _require_closed_gap_handles(draft, gaps)
     proposals = {
         item.gap_handle
@@ -1374,7 +1368,7 @@ def revise_structure_once(
 
 def _decisions_reject_all(draft: RevisionDraft) -> bool:
     """Return whether explicit gap decisions propose no addition at all."""
-    return bool(draft.gap_decisions) and not any(
+    return not any(
         item.disposition == "propose_addition" for item in draft.gap_decisions
     )
 

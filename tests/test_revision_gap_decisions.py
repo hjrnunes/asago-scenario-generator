@@ -93,6 +93,27 @@ def test_decisions_must_name_every_request_handle_and_no_other() -> None:
     assert result.final_control_structure == result.baseline_control_structure
 
 
+@pytest.mark.parametrize(
+    "draft",
+    [
+        RevisionDraft(responsibilities=_reviewer()),
+        RevisionDraft(rationale="No justified additive repair was found."),
+    ],
+    ids=["with-an-addition", "without-an-addition"],
+)
+def test_a_draft_without_decisions_leaves_every_handle_missing(
+    draft: RevisionDraft,
+) -> None:
+    """A draft needs a decision for each handle, even when it adds something."""
+    result = _revise(draft)
+
+    assert result.status == "technical_failure"
+    assert result.diagnostics == (
+        "compile failure: ValueError: revision gap decisions do not close the "
+        "request (missing gap handles: revision-gap-1, revision-gap-2)",
+    )
+
+
 def test_unknown_handle_alone_is_reported() -> None:
     """A complete set plus an extra handle fails on the extra handle only."""
     result = _revise(
@@ -279,7 +300,15 @@ def test_the_revision_record_counts_the_requests_the_adapter_sent(
 
 
 def test_a_fake_adapter_revision_records_no_requests_sent() -> None:
-    result = _revise(RevisionDraft(responsibilities=_reviewer()))
+    result = _revise(
+        RevisionDraft(
+            responsibilities=_reviewer(),
+            gap_decisions=(
+                _decision("revision-gap-1", "propose_addition"),
+                _decision("revision-gap-2"),
+            ),
+        )
+    )
 
     assert result.status == "applied"
     assert result.call_evidence is not None
