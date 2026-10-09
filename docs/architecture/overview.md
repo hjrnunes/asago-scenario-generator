@@ -264,9 +264,9 @@ structural findings separate from scenario realization and labels provisional
 accounting separately from completed scenario generation. Accounting and
 realization expose one closed terminal stop reason
 per applicable obligation. The manifest/report replace the provisional
-`addressed` marker with the later realized, generation-failed, or not-requested
-outcome where scenario evidence exists, and show both the full applicable
-denominator and survivor denominators. Provider call evidence separately
+`addressed` marker with the later realized, functional-test, generation-failed,
+or not-requested outcome where scenario evidence exists, and show both the full
+applicable denominator and survivor denominators. Provider call evidence separately
 records response receipt, typed parsing, semantic validation, compilation,
 publication, and terminal error codes; compatibility `success` is not the sole
 stage-quality signal. Scenario candidate outcomes are counted once by exact
