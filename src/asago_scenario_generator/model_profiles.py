@@ -35,6 +35,7 @@ OPTIONAL_FIELDS: tuple[str, ...] = (
     "strict_json_schema",
     "json_schema_strict",
 )
+_ALLOWED_FIELDS: frozenset[str] = frozenset((*REQUIRED_FIELDS, *OPTIONAL_FIELDS))
 
 
 def reasoning_completion_cap(
@@ -76,7 +77,9 @@ def load_profile(profiles_path: Path | str, profile_name: str) -> dict[str, Any]
     Raises:
         FileNotFoundError: If the profiles file does not exist.
         KeyError: If *profile_name* is not found in the file.
-        ValueError: If a required field is missing or empty.
+        ValueError: If the profile has a field outside the allow-list (the
+            message names the field, never its value), or if a required field
+            is missing or empty.
     """
     path = Path(profiles_path)
     if not path.exists():
@@ -87,6 +90,11 @@ def load_profile(profiles_path: Path | str, profile_name: str) -> dict[str, Any]
     profile = raw[profile_name]
     if not isinstance(profile, dict):
         raise ValueError(f"Profile '{profile_name}' in {path} is not a mapping")
+    unknown = sorted(str(key) for key in profile if key not in _ALLOWED_FIELDS)
+    if unknown:
+        raise ValueError(
+            f"Profile '{profile_name}' has unknown field(s): {', '.join(unknown)}"
+        )
     for field in REQUIRED_FIELDS:
         if profile.get(field) in (None, ""):
             raise ValueError(

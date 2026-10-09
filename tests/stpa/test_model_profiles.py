@@ -165,6 +165,48 @@ class TestLoadProfile:
         with pytest.raises(KeyError, match="sequence-profile"):
             load_profile(profiles, "sequence-profile")
 
+    def test_unknown_profile_key_raises_valueerror_naming_the_key_only(self, tmp_path):
+        """A key outside the allow-list fails and the message omits every value."""
+        secret_value = "value-that-must-not-leak"
+        profiles = _write_profile(
+            tmp_path / "typo.yaml",
+            "typo",
+            base_url="https://local.example.com/v1",
+            model="some-model",
+            **{_KEY: "dummy", "temprature": secret_value, "top_pp": 0.9},
+        )
+        with pytest.raises(ValueError) as excinfo:
+            load_profile(profiles, "typo")
+        message = str(excinfo.value)
+        assert "temprature" in message
+        assert "top_pp" in message
+        assert "typo" in message
+        assert secret_value not in message
+        assert "0.9" not in message
+        assert "local.example.com" not in message
+
+    def test_unknown_profile_key_with_null_value_still_fails(self, tmp_path):
+        """A null value does not hide an unknown key."""
+        profiles = tmp_path / "null.yaml"
+        profiles.write_text(
+            "p:\n  base_url: https://x.example/v1\n  model: m\n"
+            f"  {_KEY}: k\n  stray:\n",
+            encoding="utf-8",
+        )
+        with pytest.raises(ValueError, match="stray"):
+            load_profile(profiles, "p")
+
+    def test_unknown_key_in_another_profile_does_not_fail_the_named_one(self, tmp_path):
+        """Only the requested profile is checked."""
+        profiles = _write_profiles_dict(
+            tmp_path / "two.yaml",
+            {
+                "good": {"base_url": "u", "model": "m", _KEY: "k"},
+                "bad": {"base_url": "u", "model": "m", _KEY: "k", "stray": 1},
+            },
+        )
+        assert load_profile(profiles, "good")["model"] == "m"
+
 
 class TestLLMClientTopPTopK:
     """MP-13, MP-14 — LLMClient top_p and top_k support."""
