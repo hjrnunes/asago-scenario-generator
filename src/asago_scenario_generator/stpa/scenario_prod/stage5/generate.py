@@ -12,7 +12,7 @@ import json
 from types import SimpleNamespace
 from pathlib import Path
 from collections.abc import Mapping
-from typing import Callable
+from typing import Callable, NamedTuple
 
 from pydantic import (
     BaseModel,
@@ -88,6 +88,17 @@ _LENGTH_RETRY_PROMPT = (
 _LENGTH_RETRY_EXHAUSTED_PREFIX = (
     "BDI generation retry exhausted after LengthFinishReasonError:"
 )
+
+
+class _BdiCall(NamedTuple):
+    """What the Stage 5 call ended with."""
+
+    draft: BaseModel | None
+    error: str | None
+    result: object
+    issues: tuple[ValidationIssue, ...]
+    failure: BaseException | None = None
+    attempt_number: int = 1
 
 
 def generate_bdi_for_context(
@@ -264,35 +275,49 @@ def _generate_semantics(
         )
         return final
 
-    def finish(
-        draft: BaseModel | None,
+    def recover(
         error: str | None,
         final_llm_result: object,
         issues: tuple[ValidationIssue, ...],
+    ) -> tuple[BaseModel, str | None] | None:
+        """Return the draft and route a failed reply publishes without its condition."""
+        if (
+            error is None
+            or observation_contract is None
+            or not condition_universe.grounded
+        ):
+            return None
+        failure_code = _condition_failure_code(issues)
+        recovered = _draft_without_condition(
+            final_llm_result,
+            response_format,
+            lambda value: validate_without_condition(
+                value, observation_contract, failure_code
+            ),
+        )
+        if recovered is None:
+            return None
+        return recovered, next(
+            check.route for check in checks if check.draft is recovered
+        )
+
+    def finish(
+        draft: BaseModel | None,
+        error: str | None,
+        recovered: tuple[BaseModel, str | None] | None,
+        issues: tuple[ValidationIssue, ...],
+        corrections: int,
     ) -> tuple[BDIGenerationResult | None, str | None]:
         condition_omitted_reason: str | None = None
-        if (
-            error is not None
-            and observation_contract is not None
-            and condition_universe.grounded
-        ):
+        if recovered is not None:
             # The condition must never be the reason a scenario is lost: after
-            # the one correction, a draft that passes without its condition is
+            # the corrections, a draft that passes without its condition is
             # published without one.
-            failure_code = _condition_failure_code(issues)
-            recovered = _draft_without_condition(
-                final_llm_result,
-                response_format,
-                lambda value: validate_without_condition(
-                    value, observation_contract, failure_code
-                ),
+            draft, route = recovered
+            error = None
+            condition_omitted_reason = _condition_omitted_reason(
+                issues, route, corrections
             )
-            if recovered is not None:
-                route = next(
-                    check.route for check in checks if check.draft is recovered
-                )
-                condition_omitted_reason = _condition_omitted_reason(issues, route)
-                draft, error = recovered, None
         published = next((check for check in checks if check.draft is draft), None)
         result, error = _finish_normal_context_bdi(
             draft,
@@ -312,7 +337,7 @@ def _generate_semantics(
             )
         return result, error
 
-    draft, error, final_llm_result, issues = _call_bdi_with_bounded_length_retry(
+    first = _call_bdi_with_bounded_length_retry(
         llm_client,
         system_prompt,
         user_prompt,
@@ -330,7 +355,8 @@ def _generate_semantics(
         ),
         result_validator=validate,
     )
-    return finish(draft, error, final_llm_result, issues)
+    recovered = recover(first.error, first.result, first.issues)
+    return finish(first.draft, first.error, recovered, first.issues, 1)
 
 
 def _finish_normal_context_bdi(
@@ -378,12 +404,14 @@ def _call_bdi_with_bounded_length_retry(
     slot_id: str | None = None,
     scenario_id: str | None = None,
     result_validator: Callable[[BaseModel], BaseModel | None] | None = None,
-) -> tuple[BaseModel | None, str | None, object, tuple[ValidationIssue, ...]]:
+) -> _BdiCall:
     """Call the closed Stage 5 contract with its one length-only retry.
 
     Returns the draft, the error, the provider result of the last attempt
     (``None`` when no response arrived), and the issues the last attempt's
-    failure carried.
+    failure carried. A call that ended after its one validation correction
+    also returns that failure and its attempt number; a call that went
+    through the length retry never does.
     """
     policy = CorrectionPolicy(
         validation_retries=1,
@@ -414,13 +442,20 @@ def _call_bdi_with_bounded_length_retry(
 
     first = call(user_prompt, None)
     if not _is_length_finish_reason_error(first.error):
-        return first.value, first.error, first.result, issues_of(first.failure)
+        return _BdiCall(
+            first.value,
+            first.error,
+            first.result,
+            issues_of(first.failure),
+            first.failure,
+            first.attempt_number,
+        )
     retry = call(
         user_prompt + _LENGTH_RETRY_PROMPT, _LENGTH_RETRY_MAX_COMPLETION_TOKENS
     )
     if retry.error is None:
-        return retry.value, None, retry.result, ()
-    return (
+        return _BdiCall(retry.value, None, retry.result, ())
+    return _BdiCall(
         None,
         f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry.error}",
         retry.result,
@@ -473,7 +508,9 @@ _ROUTE_NOTES = {
 
 
 def _condition_omitted_reason(
-    issues: tuple[ValidationIssue, ...], route: str | None = None
+    issues: tuple[ValidationIssue, ...],
+    route: str | None = None,
+    corrections: int = 1,
 ) -> str:
     """Return the code-owned publication note for a condition that failed.
 
@@ -482,8 +519,9 @@ def _condition_omitted_reason(
     carries no raw validator output. A routed scenario names where it went.
     """
 
+    spent = "one correction" if corrections == 1 else "two corrections"
     return (
-        f"The discriminating condition failed validation after one correction "
+        f"The discriminating condition failed validation after {spent} "
         f"({_condition_failure_code(issues)}); {_ROUTE_NOTES[route]}"
     )
 
