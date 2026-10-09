@@ -242,7 +242,11 @@ The output contains atomically published
 `obligation-accounting.yaml`, `scenario-realization.yaml`, and
 `synthesis-manifest.yaml`, plus a report. `scenario-realization.yaml` records
 whether each accepted ICA was actually carried into a generated scenario; it
-does not change the separate obligation/STPA accounting result.
+does not change the separate obligation/STPA accounting result. An ICA whose
+only candidate became a functional test (`adversary.kind: none`) has status
+`functional_test` and stop reason `scenario_functional_test`: the functional
+scenario is persisted, but it is neither a realized attack scenario nor a
+generation failure.
 
 Each generated scenario is published as a versioned **scenario handoff**
 under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the

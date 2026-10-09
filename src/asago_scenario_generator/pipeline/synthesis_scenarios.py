@@ -542,6 +542,9 @@ def _run_realization(
         ica_considerations=pairs,
         ica_enumeration=ordinary_icas,
         scenario_specs=scenario_specs,
+        functional_test_specs=tuple(
+            getattr(scenario_result, "functional_test_specs", ())
+        ),
         scenario_result=scenario_result,
     )
     if result is None:

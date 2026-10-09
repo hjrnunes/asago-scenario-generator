@@ -20,6 +20,7 @@ ObligationStopReason = Literal[
     "provider_contract_failure",
     "prompt_budget_exceeded",
     "scenario_realized",
+    "scenario_functional_test",
     "scenario_generation_failure",
     "scenario_not_requested",
     "governance_routed_no_finding",
