@@ -547,7 +547,6 @@ STPA_MODEL_LAYERS: dict[str, int] = {
     "ica_enumeration": 2,
     "scenario_context": 2,
     "scenario_spec": 3,
-    "omission_evidence": 3,
     "run_identity": 0,
     "scenario_envelope": 4,
     # A pure dataclass leaf over the standard library; only scenario_prod
