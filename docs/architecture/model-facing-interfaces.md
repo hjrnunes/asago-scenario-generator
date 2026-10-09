@@ -451,14 +451,10 @@ Functional tests remain persisted specifications that are never prepared for
 execution.
 Attempt-level checks never establish completed state effects.
 
-The semantic proposition limit remains 600 characters. In the structured
-branch the authored proposition carries the trigger sentence only; exact
-evidence, locators, meanings, attestations, and the unresolved applicability
-stamp stay in the typed `OmissionEvidenceBasis` on the scenario
-specification. Source values and evidence serialization stay code-owned;
-representation retains exact selected evidence and the applicability caveat.
-Evidence that cannot fit the basis bounds remains an explicit uncompiled hold
-with the original evidence retained; nothing is truncated or removed to fit.
+The semantic proposition limit remains 600 characters. For a tool-absent
+scenario the authored proposition carries the trigger sentence only. The
+scenario specification holds no structured omission evidence, so the
+proposition is the only record of the trigger.
 
 ## Corrections and preservation
 
