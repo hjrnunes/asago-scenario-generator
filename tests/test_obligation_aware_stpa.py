@@ -1890,6 +1890,66 @@ def test_slot_adapter_failure_becomes_request_local_unresolved_evidence() -> Non
     )
 
 
+def test_a_slot_the_code_decides_is_never_sent_to_the_adapter() -> None:
+    """A duration slot on an action without duration costs no request."""
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(make_plan(), (pattern,))
+    control_structure = _control_structure()
+    slots = create_slots(control_structure)
+    decided = next(slot for slot in slots if slot.uca_type.value == "WRONG_DURATION")
+    routed = next(slot for slot in slots if slot.uca_type.value != "WRONG_DURATION")
+    route = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="targeted",
+        slot_ids=(routed.slot_id, decided.slot_id),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("route",),
+    )
+    asked: list[str] = []
+
+    class Adapter:
+        def fill(self, request):
+            asked.extend(slot.slot_id for slot in request.slots)
+            return SynthesisSlotResponse(
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                filled_slots=tuple(
+                    _routed_slot_draft(
+                        item,
+                        [
+                            r
+                            for r in request.routed_routes
+                            if item.slot_id in r.slot_ids
+                        ],
+                    )
+                    for item in request.slots
+                ),
+            )
+
+    result = fill_synthesis_slots(
+        Adapter(),
+        briefs=briefs,
+        routes=(route,),
+        loss_analysis=_loss_analysis(),
+        control_structure=control_structure,
+        controls=_controls(),
+    )
+
+    assert decided.slot_id not in asked
+    assert sorted(asked) == sorted(
+        slot.slot_id for slot in slots if slot.slot_id != decided.slot_id
+    )
+    filled = {slot.slot_id: slot for slot in result.ica_enumeration.slots}
+    assert filled[decided.slot_id].is_na
+    assert filled[decided.slot_id].unresolved_reason is None
+    assert {pair.slot_id for pair in result.considerations} == {
+        routed.slot_id,
+        decided.slot_id,
+    }
+    assert len(result.result.call_evidence) == len(asked)
+
+
 def test_revision_context_relates_loss_gaps_to_loss_records_and_resolved_evidence() -> (
     None
 ):

@@ -486,7 +486,7 @@ def test_oversized_target_splits_routes_and_repeats_all_slots_deterministically(
     assert len(observed) > 1
     assert all(len(request.slots) == 1 for request in result.result.requests)
     assert {slot_id for slot_id, _route_ids in observed} == {
-        item.slot_id for item in target_slots
+        item.slot_id for item in target_slots if item.uca_type.value != "WRONG_DURATION"
     }
     observed_pairs = sorted(
         (route_id, slot_id) for slot_id, route_ids in observed for route_id in route_ids
@@ -564,7 +564,9 @@ def test_target_routes_are_sent_whole_when_the_prompt_fits_the_budget():
 
     assert [len(route_ids) for _slot_id, route_ids in observed if route_ids] == [5]
     assert {slot_id for slot_id, _route_ids in observed} == {
-        item.slot_id for item in create_slots(structure)
+        item.slot_id
+        for item in create_slots(structure)
+        if item.uca_type.value != "WRONG_DURATION"
     }
     observed_pairs = sorted(
         (route_id, slot_id) for slot_id, route_ids in observed for route_id in route_ids

@@ -281,6 +281,16 @@ def _requires_provider_slot_analysis(slot: SlotPlaceholder) -> bool:
     )
 
 
+def _has_provider_slot(request: SynthesisSlotRequest) -> bool:
+    """Return whether a request lists a slot only the provider can decide.
+
+    A request without one is already answered by the local N/A fill, so the
+    provider never sees it.  Its call reference stays allocated, which keeps
+    the references of the other parts of the target stable.
+    """
+    return any(_requires_provider_slot_analysis(slot) for slot in request.slots)
+
+
 def _duration_inapplicable_slot(slot: SlotPlaceholder) -> ICASlot:
     """Materialize the canonical structural N/A for an ineligible duration."""
     return ICASlot(
@@ -1669,13 +1679,16 @@ def fill_synthesis_slots(
     target_parts: dict[str, int] = {}
 
     for request in requests:
+        call_ref = _request_call_ref(request, target_totals, target_parts)
+        if not _has_provider_slot(request):
+            continue
         _process_slot_request(
             method,
             request,
             loss_analysis=loss_analysis,
             control_structure=control_structure,
             state=state,
-            call_ref=_request_call_ref(request, target_totals, target_parts),
+            call_ref=call_ref,
         )
 
     ordered_slots = tuple(state.all_filled[key] for key in sorted(state.all_filled))
