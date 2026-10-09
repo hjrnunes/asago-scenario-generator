@@ -58,6 +58,29 @@ def test_a_malformed_catalog_is_rejected(catalog, error, message) -> None:
         shared.build_neutral_briefs(make_plan(), catalog)
 
 
+@pytest.mark.parametrize(
+    ("missing", "message"),
+    [
+        ("attack_pattern_id", "pattern-less obligations must be governance_only"),
+        (
+            "attack_pattern_semantic_digest",
+            "pattern obligations require attack_pattern_semantic_digest",
+        ),
+    ],
+)
+def test_an_applicable_row_cannot_lack_its_pattern_identity(
+    missing: str, message: str
+) -> None:
+    row = next(
+        item
+        for item in make_plan().obligations
+        if item.scope_disposition == "applicable"
+    )
+
+    with pytest.raises(ValueError, match=message):
+        type(row).model_validate({**row.model_dump(), missing: None})
+
+
 def test_the_pipeline_batcher_checks_the_batch_size_before_the_briefs() -> None:
     with pytest.raises(ValueError, match="max_batch_size must be positive"):
         pipeline.batch_neutral_obligation_briefs("not briefs", 0)
