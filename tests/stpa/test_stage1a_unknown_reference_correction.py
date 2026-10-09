@@ -33,7 +33,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     merge_reference_repair,
     select_reference_repairs,
 )
-from tests.helpers.calls_log import read_calls_jsonl
+from tests.helpers.calls_log import read_calls_jsonl, stage1a_steps
 from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import MockLLMClient, valid_risk_draft_dict
 
@@ -86,14 +86,6 @@ def _derive(
     )
 
 
-def _stage1a_steps(run_dir: Path) -> list[str]:
-    return [
-        entry["step"]
-        for entry in read_calls_jsonl(run_dir)
-        if entry["stage"] == "stage_1a"
-    ]
-
-
 def _records(run_dir: Path, kind: str) -> list[dict]:
     record = yaml.safe_load((run_dir / "loss-analysis-repair.yaml").read_text())
     return [entry for entry in record["records"] if entry["kind"] == kind]
@@ -113,7 +105,7 @@ class TestUnknownReferenceCorrection:
             [_constraint_repair("SC-2", ["H-2"])],
         )
 
-        assert _stage1a_steps(tmp_path) == [
+        assert stage1a_steps(tmp_path) == [
             "risk_derivation",
             "gap_analysis",
             "gap_analysis_repair",
@@ -203,7 +195,7 @@ class TestUnknownReferenceCorrection:
         with pytest.raises(StageError):
             _derive(tmp_path, [valid_risk_draft_dict(), gap], [])
 
-        assert _stage1a_steps(tmp_path) == ["risk_derivation", "gap_analysis"]
+        assert stage1a_steps(tmp_path) == ["risk_derivation", "gap_analysis"]
 
 
 def _unknown_plan() -> ReferenceRepairPlan:
@@ -286,7 +278,7 @@ class TestUnresolvedReferenceDrop:
             warnings,
         )
 
-        assert _stage1a_steps(tmp_path) == [
+        assert stage1a_steps(tmp_path) == [
             "risk_derivation",
             "gap_analysis",
             "gap_analysis_repair",
@@ -566,7 +558,7 @@ class TestRepairNeedsAnUnknownIdInEveryList:
                 [_constraint_repair("SC-1", ["H-1", "H-1", "H-2"])],
             )
 
-        assert _stage1a_steps(tmp_path) == ["risk_derivation", "risk_derivation_repair"]
+        assert stage1a_steps(tmp_path) == ["risk_derivation", "risk_derivation_repair"]
         assert "SC-1 -> H-1" in str(raised.value)
         user_prompt = _call_entry(tmp_path, "risk_derivation_repair")[
             "user_prompt_text"
@@ -591,6 +583,6 @@ class TestRepairNeedsAnUnknownIdInEveryList:
         with pytest.raises(StageError) as raised:
             _derive(tmp_path, [risk, _empty_gap()], [])
 
-        assert _stage1a_steps(tmp_path) == ["risk_derivation"]
+        assert stage1a_steps(tmp_path) == ["risk_derivation"]
         assert "H-1 -> L-1" in str(raised.value)
         assert "no repair call was made" in str(raised.value)

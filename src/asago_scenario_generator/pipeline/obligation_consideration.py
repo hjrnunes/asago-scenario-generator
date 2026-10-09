@@ -117,9 +117,6 @@ def batch_neutral_obligation_briefs(
     return _chunk_briefs(_typed_briefs(briefs), max_batch_size)
 
 
-create_obligation_batches = batch_neutral_obligation_briefs
-
-
 def validate_obligation_routes(
     briefs: Iterable[NeutralObligationBrief],
     routes: Iterable[ObligationRoute],
@@ -794,6 +791,5 @@ __all__ = [
     "build_governance_briefs",
     "build_neutral_briefs",
     "build_obligation_accounting",
-    "create_obligation_batches",
     "validate_obligation_routes",
 ]

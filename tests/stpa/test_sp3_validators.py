@@ -5,7 +5,6 @@ from __future__ import annotations
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
     EnrichedThreatSet,
     StructuralThreat,
-    CoverageAnalysis,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_envelope import (
@@ -27,6 +26,7 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_vulnerability_completeness,
 )
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
+from tests.helpers.sp3_run import threat_set_of
 
 
 def _make_scenario_spec(
@@ -108,17 +108,7 @@ def _make_threat(
 def _make_enriched_threat_set(
     threats: list[StructuralThreat] | None = None,
 ) -> EnrichedThreatSet:
-    return EnrichedThreatSet(
-        structural_threats=threats or [_make_threat()],
-        coverage_analysis=CoverageAnalysis(
-            structural_coverage={
-                "total_slots": 1,
-                "non_na": 1,
-                "na": 0,
-                "coverage_rate": 1.0,
-            },
-        ),
-    )
+    return threat_set_of(threats or [_make_threat()])
 
 
 class TestBDIGroundingValidator:

@@ -81,9 +81,8 @@ Your task is to address gaps identified by the completeness critic. This is a si
   display metadata, not part of its editable description. Preserve them as the
   typed `effect_kind` and `temporality` fields; never paste those labels into
   prose or infer a missing temporal value from the action wording.
-{# Keep the reference attributes explicit for source-contract auditing; rendered
-   output below uses their enum .value so it contains canonical values. #}
-{# {{ pm.feedback_source.type }} {{ ca.target.type }} {{ fb.source.type }} #}
+
+
 
 ## Closed typed action fields
 For every new or modified control action, `effect_kind` is a closed enum. Use

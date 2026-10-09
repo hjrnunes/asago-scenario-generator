@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from asago_scenario_generator.models.artifact_pin import ArtifactPin
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.attack_pattern_contracts import TaxonomyPin
 from asago_scenario_generator.models.risk_card import RiskCard
@@ -110,3 +111,12 @@ def make_inputs(
 def make_plan(**kwargs: Any) -> Any:
     """Plan complete typed inputs through the public planner seam."""
     return plan_taxonomy_obligations(make_inputs(**kwargs))
+
+
+def make_pin(artifact_id: str, schema_version: str = "fixture-v1") -> ArtifactPin:
+    """One pin of ``artifact_id`` with a fixed placeholder semantic digest."""
+    return ArtifactPin(
+        artifact_id=artifact_id,
+        schema_version=schema_version,
+        semantic_digest="1" * 64,
+    )

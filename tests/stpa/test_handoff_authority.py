@@ -46,6 +46,7 @@ from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.helpers.scenario_handoff_publication import _normal_semantics_payload
 from tests.helpers.sp3_run import _make_ets
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
 from asago_scenario_generator.pipeline import synthesis
@@ -55,63 +56,6 @@ from asago_scenario_generator.pipeline.synthesis_defaults import _default_scenar
 _REPO_ROOT = Path(__file__).resolve().parents[2]
 _OCCIAI_RUN_DIR = _REPO_ROOT / "build" / "adaptive-runs" / "m3-occiai-attempt1"
 _AF_RUN1_DIR = _REPO_ROOT / "build" / "adaptive-runs" / "af-run1"
-
-
-def _normal_payload() -> dict:
-    """One valid normal-path draft: semantics and causal evidence only."""
-    return {
-        "adversary": {
-            "kind": "malicious_customer",
-            "gain": "Learns another customer's order details.",
-        },
-        "attacker_bdi": {
-            "beliefs": ["attacker belief 1"],
-            "desires": ["Induce the selected unsafe action."],
-            "intentions": [
-                {
-                    "description": "Request an action using the stale state.",
-                    "source_handles": ["cause_1"],
-                }
-            ],
-        },
-        "causal_factors": [
-            {
-                "source_handle": "cause_1",
-                "evidence": "The selected state can be stale.",
-                "temporal_condition": None,
-                "evidence_status": "structural_failure",
-            }
-        ],
-        "unsafe_outcome": {
-            "semantic_proposition": (
-                "The response does not provide the requested action."
-            ),
-            "observation_criteria": [
-                {
-                    "criterion_id": "reply_outcome",
-                    "outcome": "The assistant reply omits the requested action.",
-                    "observable": True,
-                    "claim_level": "reply",
-                    "evidence": "assistant_message",
-                    "reason": (
-                        "The qualification adapter captures assistant messages."
-                    ),
-                }
-            ],
-            "safe_observable_outcome": {
-                "observable": True,
-                "statement": (
-                    "The assistant reply preserves the requested action "
-                    "without producing the unsafe response."
-                ),
-                "claim_level": "reply",
-                "evidence": "assistant_message",
-                "operation_name": None,
-                "record_refs": [],
-                "fact_refs": [],
-            },
-        },
-    }
 
 
 def _reviewed(analysis: LossAnalysis) -> LossAnalysis:
@@ -153,7 +97,7 @@ def _published(run_dir: Path) -> dict:
 
 def _run_publish(tmp_path: Path, loss_analysis: LossAnalysis, **kwargs) -> None:
     client = MockLLMClient()
-    client.set_response_queue([_normal_payload()])
+    client.set_response_queue([_normal_semantics_payload()])
     result = run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
@@ -195,7 +139,7 @@ def _handoff_for(
         scenario_id="SCN-001",
     )
     client = MockLLMClient()
-    client.set_response_queue([_normal_payload()])
+    client.set_response_queue([_normal_semantics_payload()])
     result, error = generate_bdi_for_context(
         client,
         context,

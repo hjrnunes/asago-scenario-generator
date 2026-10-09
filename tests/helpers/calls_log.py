@@ -12,3 +12,12 @@ def read_calls_jsonl(run_dir: Path) -> list[dict]:
     if not calls_file.exists():
         return []
     return [json.loads(line) for line in calls_file.read_text().splitlines() if line]
+
+
+def stage1a_steps(run_dir: Path) -> list[str]:
+    """Return the step names that Stage 1a logged, in call order."""
+    return [
+        entry["step"]
+        for entry in read_calls_jsonl(run_dir)
+        if entry["stage"] == "stage_1a"
+    ]

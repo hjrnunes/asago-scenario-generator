@@ -23,7 +23,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     validate_obligation_routes,
 )
 
-from tests.helpers.obligation_factory import make_plan
+from tests.helpers.obligation_factory import make_pin, make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 
 
@@ -31,14 +31,6 @@ def _briefs():
     plan = make_plan()
     patterns = (AttackPattern.model_validate(get_test_raw_pattern()),)
     return plan, build_neutral_briefs(plan, patterns)
-
-
-def _pin(artifact_id: str, schema_version: str = "fixture-v1") -> ArtifactPin:
-    return ArtifactPin(
-        artifact_id=artifact_id,
-        schema_version=schema_version,
-        semantic_digest="0" * 64,
-    )
 
 
 def _targeted_route(obligation_id: str) -> ObligationRoute:
@@ -193,7 +185,7 @@ def test_bounded_revision_accepts_applied_outcome_with_canonical_triggers() -> N
         trigger_gap_ids=("gap:v1:a",),
         proposed_delta=_delta(),
         accepted_delta=_delta(),
-        revised_pins=(_pin("revised"),),
+        revised_pins=(make_pin("revised"),),
     )
     assert revision.trigger_obligation_ids == ("ob:v1:" + "a" * 64, "ob:v1:" + "b" * 64)
     assert revision.accepted_delta == _delta()
@@ -289,7 +281,7 @@ def test_consideration_rejects_route_sets_that_do_not_match_the_revision() -> No
         )
     with pytest.raises(ValueError, match="exact Phase 1 plan pin"):
         ObligationConsideration(
-            **{**base, "source_pins": (_pin("other"),)}, final_routes=(route,)
+            **{**base, "source_pins": (make_pin("other"),)}, final_routes=(route,)
         )
 
 
@@ -330,7 +322,7 @@ def test_route_validation_rejects_loose_route_values(routes, match) -> None:
         ({"diagnostics": (object(),)}, TypeError, "ConsiderationDiagnostic"),
         ({"source_pins": (object(),)}, TypeError, "only ArtifactPin"),
         (
-            {"source_pins": (_pin("taxonomy-obligation-plan"),)},
+            {"source_pins": (make_pin("taxonomy-obligation-plan"),)},
             ValueError,
             "substituted Phase 1 plan pin",
         ),
