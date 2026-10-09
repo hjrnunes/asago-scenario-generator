@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import inspect
+import json
+import re
 from pathlib import Path
 
 import pytest
@@ -61,6 +63,7 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
 )
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
+    _RevisionProviderPayload,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
@@ -665,6 +668,25 @@ def test_revision_prompt_uses_local_handles_and_three_gap_decisions() -> None:
     assert "unresolved" in combined
     assert "final stpa id" in combined
     assert '"gap_id"' not in user
+
+
+def test_revision_prompt_example_is_a_reply_that_closes_a_one_gap_request() -> None:
+    gap = MissingStructuralConcept(
+        concept_type="responsibility",
+        description="A reviewing responsibility is needed.",
+        evidence_refs=("review-gap",),
+    )
+    system, _ = build_structural_revision_prompts(
+        gaps=(gap,),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+    )
+    example = re.search(r"Valid example: (\{.*\})\.", system)
+    assert example is not None
+
+    payload = _RevisionProviderPayload.model_validate(json.loads(example.group(1)))
+
+    assert [item.gap_handle for item in payload.gap_decisions] == ["revision-gap-1"]
 
 
 def test_structured_ica_draft_compiles_authoritative_owner_and_action() -> None:
