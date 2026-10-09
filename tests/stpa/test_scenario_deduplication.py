@@ -187,6 +187,76 @@ def test_legacy_scenario_without_safe_outcome_uses_unknown_claim_level() -> None
     assert records["SCN-legacy"].key.claim_level == "unknown"
 
 
+def _governed(scenario_id: str, *constraint_ids: str, analytical: bool = False):
+    return _scenario(scenario_id, analytical=analytical).model_copy(
+        update={"unsafe_outcome_constraint_refs": list(constraint_ids)}
+    )
+
+
+def test_scenarios_governed_by_different_constraints_are_not_collapsed() -> None:
+    records = deduplicate_scenario_specs(
+        [_governed("SCN-001", "SC-1"), _governed("SCN-002", "SC-2")]
+    )
+
+    assert _roles(records) == {
+        "SCN-001": ("canonical", None),
+        "SCN-002": ("canonical", None),
+    }
+    assert records["SCN-002"].key.constraint_ids == ("SC-2",)
+
+
+def test_scenarios_governed_by_the_same_constraints_stay_one_group() -> None:
+    records = deduplicate_scenario_specs(
+        [_governed("SCN-002", "SC-2", "SC-1"), _governed("SCN-001", "SC-1", "SC-2")]
+    )
+
+    assert _roles(records) == {
+        "SCN-001": ("canonical", None),
+        "SCN-002": ("duplicate", "SCN-001"),
+    }
+    assert records["SCN-002"].key.constraint_ids == ("SC-1", "SC-2")
+
+
+def test_a_superset_of_constraints_is_a_different_group() -> None:
+    records = deduplicate_scenario_specs(
+        [_governed("SCN-001", "SC-1"), _governed("SCN-002", "SC-1", "SC-2")]
+    )
+
+    assert records["SCN-001"].status == "canonical"
+    assert records["SCN-002"].status == "canonical"
+
+
+def test_analytical_scenarios_stay_ungrouped_with_constraints_in_the_key() -> None:
+    records = deduplicate_scenario_specs(
+        [
+            _governed("SCN-001", "SC-1", analytical=True),
+            _governed("SCN-002", "SC-1", analytical=True),
+        ]
+    )
+
+    assert _roles(records) == {
+        "SCN-001": ("analytical_only", None),
+        "SCN-002": ("analytical_only", None),
+    }
+    assert records["SCN-001"].key.constraint_ids == ("SC-1",)
+
+
+def test_a_key_without_constraints_keeps_its_historical_shape() -> None:
+    records = deduplicate_scenario_specs([_scenario("SCN-001")])
+
+    assert records["SCN-001"].key.constraint_ids == ()
+    assert "constraint_ids" not in records["SCN-001"].key.model_dump(mode="json")
+
+
+def test_a_key_with_constraints_serializes_them_as_a_sorted_list() -> None:
+    records = deduplicate_scenario_specs([_governed("SCN-001", "SC-2", "SC-1")])
+
+    assert records["SCN-001"].key.model_dump(mode="json")["constraint_ids"] == [
+        "SC-1",
+        "SC-2",
+    ]
+
+
 def test_command_attempt_without_operation_is_never_collapsed() -> None:
     records = deduplicate_scenario_specs(
         [

@@ -400,6 +400,8 @@ SCHEMA_CASES: dict[str, list[str]] = {
 # also rejected the attack_shape key, and the producer keeps those codes.
 SCHEMA_CASES_V4 = SCHEMA_CASES | {
     "schema-unknown-version": [SCHEMA + "schema_version", SCHEMA + "attack_shape"],
+    "schema-deduplication-key-constraint-ids-not-list": DEDUPLICATION,
+    "schema-deduplication-key-constraint-id-blank": DEDUPLICATION,
 }
 # Cases the producer model rejects through a validator the JSON schema cannot
 # express; a reader that checks only schema.json accepts them.
