@@ -13,6 +13,7 @@ from __future__ import annotations
 import yaml
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
@@ -232,3 +233,155 @@ class TestRuleRoundDropsUnquotedRecords:
         assert "graph revision call failed" in (
             outcome.stated_rule_revision.error or ""
         )
+
+
+def _classed_analysis() -> LossAnalysis:
+    """SC-1 (disclosure) owns H-1 and SC-2 (unauthorized_write) owns H-2."""
+    payload = _analysis().model_dump()
+    payload["security_constraints"][0]["behavior_class"] = "disclosure"
+    payload["security_constraints"][1]["behavior_class"] = "unauthorized_write"
+    return LossAnalysis.model_validate(payload)
+
+
+def _constraint_rules(analysis: LossAnalysis) -> list[str]:
+    return [c.rule for c in analysis.security_constraints]
+
+
+class TestRuleRoundTrimsCrossClassCitations:
+    """An addition that takes over another class's only hazard is trimmed."""
+
+    def _reply(self) -> dict:
+        # The recorded pattern: the model cites the hazard it finds closest
+        # in meaning, which the disclosure class owns alone.
+        return _patch(
+            hazards=[_hazard("fee_hazard", "The agent quotes an unapproved fee.")],
+            additions=[
+                _addition(
+                    "fee_rule",
+                    FEE_CONSTRAINT,
+                    ["fee_hazard"],
+                    span=FEE_SPAN,
+                    behavior_class="wrong_information",
+                ),
+                _addition(
+                    "cross_class",
+                    "The agent must cite only current policies.",
+                    ["H-1"],
+                    behavior_class="wrong_information",
+                ),
+            ],
+        )
+
+    def test_the_cross_class_addition_is_trimmed_and_the_round_kept(
+        self, tmp_path
+    ) -> None:
+        prior, outcome, client = _gate_round(
+            tmp_path, [self._reply()], _classed_analysis()
+        )
+
+        revision = outcome.stated_rule_revision
+        assert revision.applied is True
+        assert revision.call_count == 1
+        assert len(client.calls) == 1
+        added = outcome.loss_analysis.security_constraints[2:]
+        assert [c.rule for c in added] == [FEE_CONSTRAINT]
+        assert [h.hazard_id for h in outcome.loss_analysis.hazards] == [
+            "H-1",
+            "H-2",
+            "H-3",
+        ]
+        assert _artifact(tmp_path)["passed"] is True
+
+    def test_a_new_hazard_only_the_trimmed_addition_cited_is_pruned(
+        self, tmp_path
+    ) -> None:
+        reply = self._reply()
+        reply["hazard_additions"].append(
+            _hazard("spare", "The agent cites a stale policy.")
+        )
+        reply["security_constraint_additions"][1]["related_hazards"] = ["H-1", "spare"]
+
+        _, outcome, _ = _gate_round(tmp_path, [reply], _classed_analysis())
+
+        assert outcome.stated_rule_revision.applied is True
+        assert [h.hazard_id for h in outcome.loss_analysis.hazards] == [
+            "H-1",
+            "H-2",
+            "H-3",
+        ]
+        descriptions = [h.description for h in outcome.loss_analysis.hazards]
+        assert "The agent cites a stale policy." not in descriptions
+
+    def test_a_trim_that_still_fails_density_keeps_the_unrevised_graph(
+        self, tmp_path
+    ) -> None:
+        # Two classes share the one new hazard, so neither owns a hazard of
+        # its own after the trim.
+        reply = self._reply()
+        reply["security_constraint_additions"].append(
+            _addition(
+                "second_class",
+                "The agent must not reveal fee internals.",
+                ["fee_hazard"],
+                behavior_class="manipulation",
+            )
+        )
+
+        prior, outcome, _ = _gate_round(tmp_path, [reply], _classed_analysis())
+
+        assert outcome.loss_analysis == prior
+        assert outcome.stated_rule_revision.applied is False
+        error = outcome.stated_rule_revision.error or ""
+        assert "revision broke structural checks" in error
+        assert "has no hazard of its own" in error
+
+    def test_a_round_whose_additions_are_all_trimmed_keeps_the_unrevised_graph(
+        self, tmp_path
+    ) -> None:
+        only_cross = _patch(
+            additions=[
+                _addition(
+                    "cross_class",
+                    FEE_CONSTRAINT,
+                    ["H-1"],
+                    behavior_class="wrong_information",
+                )
+            ]
+        )
+
+        prior, outcome, _ = _gate_round(tmp_path, [only_cross], _classed_analysis())
+
+        assert outcome.loss_analysis == prior
+        assert outcome.stated_rule_revision.applied is False
+        assert "revision broke structural checks" in (
+            outcome.stated_rule_revision.error or ""
+        )
+
+    def test_an_addition_in_the_hazards_own_class_is_not_trimmed(
+        self, tmp_path
+    ) -> None:
+        same_class = _patch(
+            additions=[
+                _addition(
+                    "fee_rule", FEE_CONSTRAINT, ["H-1"], behavior_class="disclosure"
+                )
+            ]
+        )
+
+        _, outcome, _ = _gate_round(tmp_path, [same_class], _classed_analysis())
+
+        assert outcome.stated_rule_revision.applied is True
+        assert _constraint_rules(outcome.loss_analysis)[-1] == FEE_CONSTRAINT
+
+    def test_a_failure_other_than_class_ownership_is_not_trimmed(
+        self, tmp_path
+    ) -> None:
+        # A new hazard no constraint cites fails the hazard check; the trim
+        # does not run, so the cross-class addition does not hide it.
+        reply = self._reply()
+        reply["hazard_additions"].append(_hazard("orphan", "The agent leaks a fee."))
+
+        prior, outcome, _ = _gate_round(tmp_path, [reply], _classed_analysis())
+
+        assert outcome.loss_analysis == prior
+        assert "has no constraint" in (outcome.stated_rule_revision.error or "")
