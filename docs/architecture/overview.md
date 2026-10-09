@@ -441,6 +441,16 @@ the members whose shape has `source: stage5_validated`; a group with no such
 member keeps its smallest ID as canonical. The shape does not join the key, and
 `testability.yaml` and every handoff's `deduplication` block read this result.
 
+`testability.yaml` also carries a `constraint_reach` block, computed from the
+final statuses. For each security constraint of the loss analysis it counts the
+scenarios that govern it, the scenarios sent to authoring (neither `duplicate`
+nor `analytical_only`), the sent scenarios with and without a discriminating
+condition, and the duplicate and analytical-only scenarios. A constraint's
+reach is its number of sent scenarios with a condition. The block lists the
+constraints at reach 0 and reach 1, and the constraints lost to
+`analytical_only` (an analytical scenario and no sent scenario). It is a
+record only: no later step reads it and no request changes.
+
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
 Its closed prompt view contains the authoritative action, original deviation,
 and selected hazard, constraint, and reachable-loss meaning. The proposed UCA

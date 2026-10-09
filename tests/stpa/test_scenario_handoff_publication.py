@@ -228,6 +228,23 @@ def test_handoff_publishes_deduplication_and_testability_summary(
     }
 
 
+def test_testability_summary_lists_every_security_constraint_with_its_reach(
+    tmp_path: Path,
+) -> None:
+    _publish([_normal_semantics_payload()], tmp_path)
+
+    summary = yaml.safe_load((tmp_path / "testability.yaml").read_text())
+    reach = summary["constraint_reach"]
+
+    assert list(reach["constraints"]) == ["SC-1"]
+    assert reach["constraints"]["SC-1"]["scenarios"] == 1
+    assert reach["constraints"]["SC-1"]["sent"] == 1
+    # This request supplies no target facts, so the scenario has no condition.
+    assert reach["constraints"]["SC-1"]["sent_without_condition"] == 1
+    assert reach["reach_0"] == ["SC-1"]
+    assert reach["summary"] == {"constraints": 1, "reach_0": 1, "reach_1": 0}
+
+
 def test_published_handoff_carries_no_artifact_design_content(
     tmp_path: Path,
 ) -> None:
