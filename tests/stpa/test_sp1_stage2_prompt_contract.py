@@ -26,6 +26,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
     _call_2a_responsibilities,
     _call_2b_control_elements,
+    _top_level_responsibility_note,
     _assemble_control_structure,
     _enrich_responsibilities,
     _validate_responsibility_wire,
@@ -892,6 +893,10 @@ def test_call2a_correction_hints_only_at_a_responsibility_as_the_top_level_objec
             _BARE_OBJECT_HINT
         )
         assert errors.index(_BARE_OBJECT_HINT) < errors.index("Return one JSON object")
+
+
+def test_call2a_note_is_empty_for_a_failure_that_is_not_a_wire_error() -> None:
+    assert _top_level_responsibility_note(ValueError("boom")) == ""
 
 
 def test_call2a_recorded_status_reply_keeps_its_correction_text(tmp_path) -> None:
