@@ -55,7 +55,6 @@ INDIRECT_REPLY = {
     "indirect": {
         "carrier_operation": "get_listing",
         "content_kind": "listing_content",
-        "record_ref": None,
         "controller": "counterparty",
     },
 }
@@ -503,6 +502,26 @@ def test_the_indirect_field_text_leads_with_the_carrier_requirement(
     (field,) = [line for line in system.splitlines() if line.startswith("`indirect`:")]
     assert field.startswith("`indirect`: required when `channel` is `indirect`")
     assert "`null` otherwise" in field
+
+
+@pytest.mark.parametrize(
+    ("kind", "config"),
+    [
+        (AdversaryKind.external_attacker, ShapeStepConfig()),
+        (AdversaryKind.malicious_customer, ShapeStepConfig()),
+        (AdversaryKind.third_party_via_content, ShapeStepConfig()),
+        (
+            AdversaryKind.third_party_via_content,
+            ShapeStepConfig(allow_forged_transcript=True),
+        ),
+    ],
+)
+def test_the_request_never_asks_for_a_record_reference(
+    kind: AdversaryKind, config: ShapeStepConfig, tmp_path: Path
+) -> None:
+    system, user = rendered_shape_request(kind, tmp_path, config)
+
+    assert "record_ref" not in system + user
 
 
 @pytest.mark.parametrize(

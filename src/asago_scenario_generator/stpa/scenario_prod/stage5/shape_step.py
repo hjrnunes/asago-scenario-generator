@@ -99,7 +99,9 @@ class ProposedCarrier(_WireModel):
 
     carrier_operation: ShapeIdentifier
     content_kind: ContentKind
-    record_ref: ShapeIdentifier | None
+    # The prompt does not ask for it and code never reads it; a reply that
+    # still sends one validates and is dropped in ``_indirect_shape``.
+    record_ref: ShapeIdentifier | None = None
     controller: ItemController
 
 
@@ -209,9 +211,8 @@ def _indirect_shape(
         return None
     return IndirectShape(
         carrier_operation=carrier.carrier_operation,
-        # The reply copies record_ref from the scenario account, which names
-        # records the target's seed slots need not list; a null ref lets the
-        # consumer seed the slot's own record.
+        # The scenario account names records the target's seed slots need not
+        # list; a null ref lets the consumer seed the slot's own record.
         data_item=PlantedItem(content_kind=carrier.content_kind, record_ref=None),
         party_relation=PartyRelation(
             controller=carrier.controller, benign_user_actor_ref=None

@@ -51,8 +51,6 @@ that sets `channel` to `indirect` and `indirect` to `null` is discarded. For an
   `get_listing`.
 - `content_kind`: what kind of data the item is. One of
   policy_document, listing_content, order_content, clinical_note, education_material, message, review, other. Use `other` when none fits.
-- `record_ref`: the identifier of the record that holds the item, copied from
-  the scenario account, or `null` when the account names none. It has no spaces.
 - `controller`: who controls the item. `third_party` is someone outside the
   conversation, `counterparty` is the other side of the user's transaction,
   `operator_insider` is staff or an operator, `unknown` is anyone else or not

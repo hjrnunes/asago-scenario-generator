@@ -189,6 +189,37 @@ def test_a_valid_indirect_proposal_keeps_its_carrier_and_leaves_record_and_actor
     assert shape.indirect.party_relation.benign_user_actor_ref is None
 
 
+@pytest.mark.parametrize("record_ref", [None, "LST-104", "RES-201"])
+def test_a_carrier_reply_may_leave_record_ref_out_or_still_send_it(
+    record_ref: str | None,
+) -> None:
+    carrier = _carrier()
+    del carrier["record_ref"]
+    if record_ref is not None:
+        carrier["record_ref"] = record_ref
+
+    shape = resolve(indirect_proposal(indirect=carrier), THIRD_PARTY)
+
+    assert shape.source is ShapeSource.STAGE5_VALIDATED
+    assert shape.indirect is not None
+    assert shape.indirect.data_item.record_ref is None
+
+
+@pytest.mark.parametrize("config", [ShapeStepConfig(), ShapeStepConfig(True)])
+def test_the_carrier_schema_requires_the_three_fields_the_prompt_explains(
+    config: ShapeStepConfig,
+) -> None:
+    schema = response_model_for(config).model_json_schema()
+
+    carrier = schema["$defs"]["ProposedCarrier"]
+    assert sorted(carrier["required"]) == [
+        "carrier_operation",
+        "content_kind",
+        "controller",
+    ]
+    assert "record_ref" in carrier["properties"]
+
+
 @pytest.mark.parametrize("stated", [1, 2, 4])
 def test_the_turn_count_comes_from_the_plan_not_the_reply(stated: int) -> None:
     shape = resolve(
