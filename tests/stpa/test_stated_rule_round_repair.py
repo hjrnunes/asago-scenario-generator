@@ -427,3 +427,36 @@ class TestRuleRoundRecordsWhatItDropped:
         artifact = _artifact(tmp_path)
         assert "dropped_records" not in artifact["revision_rounds"][-1]
         assert not any("dropped" in w for w in artifact["normalization_warnings"])
+
+
+class TestRuleRoundRequestCarriesTheCitationInstructions:
+    """The rendered stated-rule request tells the model which hazards to cite."""
+
+    CITE = "Cite only a hazard that already serves the constraint's own"
+    COPY = "Copy each obligation's `rule_span` from the constraint's `rule`"
+
+    def test_the_rule_round_system_prompt_names_both_instructions(
+        self, tmp_path
+    ) -> None:
+        clean = _patch(additions=[_addition("fee_rule", FEE_CONSTRAINT, ["H-2"])])
+        _, _, client = _gate_round(tmp_path, [clean])
+
+        [call] = client.calls
+        flat = " ".join(call.system_prompt.split())
+        assert self.CITE in flat
+        assert "`behavior_class`, or a new hazard added in the same response" in flat
+        assert f"{self.COPY} character for character" in flat
+
+    def test_a_density_round_system_prompt_has_neither(self, tmp_path) -> None:
+        from tests.stpa.test_stated_rule_coverage import (
+            _density_failing_analysis,
+            _density_fix,
+        )
+
+        client = MockLLMClient()
+        client.set_response_for(_Stage1aRevisionPatch, _density_fix())
+        _gate(client, tmp_path, _density_failing_analysis(), ())
+
+        [call] = client.calls
+        assert self.CITE not in " ".join(call.system_prompt.split())
+        assert self.COPY not in " ".join(call.system_prompt.split())
