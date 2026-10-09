@@ -46,7 +46,26 @@ def test_frozen_containers_pass_through_unchanged_and_unchecked() -> None:
     (
         (object(), TypeError, "JSON data must contain only JSON values"),
         ({"enum": [{"value"}]}, TypeError, "JSON data must contain only JSON values"),
-        ({"default": float("nan")}, ValueError, "JSON data cannot contain NaN"),
+        (
+            {"default": float("nan")},
+            ValueError,
+            "JSON data cannot contain NaN or infinity",
+        ),
+        (
+            {"maximum": float("inf")},
+            ValueError,
+            "JSON data cannot contain NaN or infinity",
+        ),
+        (
+            {"minimum": float("-inf")},
+            ValueError,
+            "JSON data cannot contain NaN or infinity",
+        ),
+        (
+            {"allOf": [{"items": [float("inf")]}]},
+            ValueError,
+            "JSON data cannot contain NaN or infinity",
+        ),
         ({"properties": {1: "x"}}, TypeError, "JSON mapping keys must be strings"),
     ),
 )
@@ -56,8 +75,10 @@ def test_rejected_values_name_the_failure_kind(value, error, message) -> None:
     assert str(raised.value) == message
 
 
-def test_infinity_is_not_rejected_here() -> None:
-    assert freeze_json({"maximum": float("inf")}) == {"maximum": float("inf")}
+@pytest.mark.parametrize("scalar", (float("inf"), float("-inf"), float("nan")))
+def test_non_finite_scalars_are_rejected(scalar) -> None:
+    with pytest.raises(ValueError, match="NaN or infinity"):
+        freeze_json(scalar)
 
 
 @pytest.mark.parametrize(
@@ -65,6 +86,8 @@ def test_infinity_is_not_rejected_here() -> None:
     (
         ({"enum": [{"value"}]}, TypeError, "only JSON values"),
         ({"default": float("nan")}, ValueError, "NaN"),
+        ({"maximum": float("inf")}, ValueError, "infinity"),
+        ({"minimum": float("-inf")}, ValueError, "infinity"),
         ({"properties": {1: {}}}, TypeError, "keys must be strings"),
     ),
 )

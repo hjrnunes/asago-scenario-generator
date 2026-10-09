@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import unicodedata
 from collections.abc import Mapping
 from typing import Any, ClassVar, Self
@@ -117,9 +118,9 @@ def freeze_json(value: Any) -> Any:
     """Recursively close JSON data into ``FrozenDict`` and ``FrozenList``.
 
     A ``FrozenDict`` or ``FrozenList`` passes through unchanged and unchecked,
-    because an earlier call already closed it. Scalars pass through; a NaN float
-    raises ``ValueError``, and any other non-JSON value or non-string mapping
-    key raises ``TypeError``.
+    because an earlier call already closed it. Scalars pass through; a NaN or
+    infinite float raises ``ValueError``, and any other non-JSON value or
+    non-string mapping key raises ``TypeError``.
     """
     if value is None or isinstance(value, (str, int, float, bool)):
         return _checked_json_scalar(value)
@@ -133,8 +134,8 @@ def freeze_json(value: Any) -> Any:
 
 
 def _checked_json_scalar(value: Any) -> Any:
-    if isinstance(value, float) and value != value:
-        raise ValueError("JSON data cannot contain NaN")
+    if isinstance(value, float) and not math.isfinite(value):
+        raise ValueError("JSON data cannot contain NaN or infinity")
     return value
 
 
