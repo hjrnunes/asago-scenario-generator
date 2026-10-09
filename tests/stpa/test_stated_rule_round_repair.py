@@ -103,6 +103,44 @@ def _edited_hazard() -> dict:
     }
 
 
+class TestDropPrunesHazardsOnlyTheDroppedRecordsCited:
+    """A new hazard left without a constraint by a drop goes with the drop."""
+
+    def _reply(self, *, shared: bool = False) -> dict:
+        good_hazards = ["H-2", "fee_hazard"] if shared else ["H-2"]
+        return _patch(
+            hazards=[_hazard("fee_hazard", "The agent quotes an unapproved fee.")],
+            additions=[
+                _addition("fee_rule", FEE_CONSTRAINT, good_hazards, span=FEE_SPAN),
+                _addition(
+                    "slipping",
+                    "The agent must cite policies.",
+                    ["fee_hazard"],
+                    span=BAD_SPAN,
+                ),
+            ],
+        )
+
+    def test_the_hazard_only_the_dropped_record_cited_is_pruned(self, tmp_path) -> None:
+        prior, revised, attempts, _ = _call(
+            tmp_path, [self._reply(), self._reply()], addition_only=True
+        )
+
+        assert revised.hazards == prior.hazards
+        assert [c.rule for c in revised.security_constraints[2:]] == [FEE_CONSTRAINT]
+        assert [d["handle"] for d in attempts[-1].dropped] == ["slipping"]
+
+    def test_a_hazard_a_kept_record_also_cites_stays(self, tmp_path) -> None:
+        prior, revised, _, _ = _call(
+            tmp_path,
+            [self._reply(shared=True), self._reply(shared=True)],
+            addition_only=True,
+        )
+
+        assert [h.hazard_id for h in revised.hazards] == ["H-1", "H-2", "H-3"]
+        assert revised.security_constraints[2].related_hazards == ["H-2", "H-3"]
+
+
 class TestDropRebuildKeepsTheAddOnlyFilter:
     """The rebuild after a dropped record runs the same filter as the first parse."""
 

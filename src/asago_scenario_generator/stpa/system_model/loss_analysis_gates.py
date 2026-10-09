@@ -2521,15 +2521,19 @@ def _without_unquoted_records(
 
     Dropping an edit leaves the prior constraint as it was.  An edit that
     omits its obligations keeps the prior ones, which the span test skips.
+    A hazard addition that only dropped records cited goes with them; a new
+    hazard no kept constraint would cite fails validation.
     """
     kept_additions: list[_RevisionConstraintAddition] = []
     kept_edits: list[_RevisionConstraintEdit] = []
     dropped: list[dict] = []
+    cited_by_dropped: set[str] = set()
     for addition in patch.security_constraint_additions:
         error = _unquoted_span_error(addition.rule, addition.obligations)
         if error is None:
             kept_additions.append(addition)
         else:
+            cited_by_dropped.update(addition.related_hazards)
             dropped.append(
                 {
                     "record": "security_constraint_addition",
@@ -2542,6 +2546,7 @@ def _without_unquoted_records(
         if error is None:
             kept_edits.append(edit)
         else:
+            cited_by_dropped.update(edit.related_hazards)
             dropped.append(
                 {
                     "record": "security_constraint_edit",
@@ -2549,8 +2554,19 @@ def _without_unquoted_records(
                     "error": error,
                 }
             )
+    still_cited = {
+        hazard
+        for record in (*kept_additions, *kept_edits)
+        for hazard in record.related_hazards
+    }
+    orphaned = cited_by_dropped - still_cited
     reduced = patch.model_copy(
         update={
+            "hazard_additions": [
+                hazard
+                for hazard in patch.hazard_additions
+                if hazard.handle not in orphaned
+            ],
             "security_constraint_additions": kept_additions,
             "security_constraint_edits": kept_edits,
         }
