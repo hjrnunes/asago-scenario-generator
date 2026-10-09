@@ -185,7 +185,11 @@ check runs after every other Stage 5 check. An unresolved reference or a
 violated comparison fails the result validator, so the existing validation
 retry delivers the exact `discriminating_condition_check_failed:` text as the
 one correction; that text asks for condition changes only and keeps the
-observation fields unchanged. If the corrected response still fails only
+observation fields unchanged. Every Stage 5 correction, for a condition or any
+other failure, shows the model its prior structured reply (the "Prior
+structured response to correct in place" block) between the repair guidance
+and the exact error, so an instruction to keep fields unchanged refers to text
+the model can see. If the corrected response still fails only
 because of its condition (missing, unresolved, violated, or structurally
 invalid), code removes the condition and publishes the scenario with
 `discriminating_condition: null`, `condition_check: null`, and a code-owned

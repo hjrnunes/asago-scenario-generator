@@ -389,6 +389,7 @@ def _call_bdi_with_bounded_length_retry(
         validation_retries=1,
         feedback=validation_retry_feedback,
         include_schema=False,
+        include_response=True,
     )
 
     def call(prompt: str, max_completion_tokens: int | None):
