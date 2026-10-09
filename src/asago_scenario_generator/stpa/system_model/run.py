@@ -130,6 +130,8 @@ class SP1RunResult:
     revised: bool = False
     stage_errors: list[str] = field(default_factory=list)
     stage_warnings: list[str] = field(default_factory=list)
+    # None when a pinned graph skipped the classification.
+    risk_actionability: RiskActionabilityRecord | None = None
 
 
 def run_sp1(
@@ -354,6 +356,7 @@ def run_sp1(
         revised=stage2_result.revised,
         stage_errors=stage_errors,
         stage_warnings=stage_warnings,
+        risk_actionability=risk_actionability,
     )
 
 
