@@ -1217,22 +1217,51 @@ def _prepare_one_correction(
             error="no bounded ICA correction capability was supplied"
         )
     try:
-        correction_raw = _invoke_correction_method(correction_method, request, verdict)
-        correction_value = _coerce_correction_value(correction_raw)
-        if correction_value.disposition != "revise":
-            return _CorrectionPreparation(correction=correction_value)
-        corrected_request = apply_ica_hazard_verification_correction(
-            request, correction_value
-        )
-        if corrected_request.semantic_digest == request.semantic_digest:
+        preparation = _attempt_correction(correction_method, request, verdict)
+        if _is_unchanged(request, preparation):
+            # One retry, which tells the author its first answer changed nothing.
+            preparation = _attempt_correction(
+                correction_method, request, verdict, unchanged_retry=True
+            )
+        if _is_unchanged(request, preparation):
             raise ValueError(
                 "bounded correction returned unchanged ICA request content"
             )
-        return _CorrectionPreparation(corrected_request=corrected_request)
+        return preparation
     except Exception as exc:  # noqa: BLE001 - retain typed first verdict
         return _CorrectionPreparation(
             error=f"bounded ICA correction failed: {type(exc).__name__}: {exc}"
         )
+
+
+def _attempt_correction(
+    correction_method: Any,
+    request: IcaHazardVerificationRequest,
+    verdict: IcaHazardVerificationVerdict,
+    *,
+    unchanged_retry: bool = False,
+) -> _CorrectionPreparation:
+    """Ask for one correction and apply it unless it is a terminal disposition."""
+    correction_raw = _invoke_correction_method(
+        correction_method, request, verdict, unchanged_retry=unchanged_retry
+    )
+    correction_value = _coerce_correction_value(correction_raw)
+    if correction_value.disposition != "revise":
+        return _CorrectionPreparation(correction=correction_value)
+    return _CorrectionPreparation(
+        corrected_request=apply_ica_hazard_verification_correction(
+            request, correction_value
+        )
+    )
+
+
+def _is_unchanged(
+    request: IcaHazardVerificationRequest, preparation: _CorrectionPreparation
+) -> bool:
+    corrected = preparation.corrected_request
+    return (
+        corrected is not None and corrected.semantic_digest == request.semantic_digest
+    )
 
 
 def _verify_correction_requests(
@@ -1580,8 +1609,16 @@ def _invoke_correction_method(
     method: Any,
     request: IcaHazardVerificationRequest,
     verdict: IcaHazardVerificationVerdict,
+    *,
+    unchanged_retry: bool = False,
 ) -> Any:
-    """Invoke the request-local bounded correction capability."""
+    """Invoke the request-local bounded correction capability.
+
+    Only the retry passes ``unchanged_retry``, so a capability that predates
+    the retry keeps working for the first call.
+    """
+    if unchanged_retry:
+        return method(request, verdict=verdict, unchanged_retry=True)
     return method(request, verdict=verdict)
 
 

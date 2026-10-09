@@ -1573,10 +1573,19 @@ class ObligationAwareLLMAdapter:
         self,
         request: IcaHazardVerificationRequest,
         verdict: IcaHazardVerificationVerdict,
+        *,
+        unchanged_retry: bool = False,
     ) -> IcaHazardVerificationCorrection:
-        """Perform one bounded request-local ICA correction."""
+        """Perform one bounded request-local ICA correction.
+
+        *unchanged_retry* asks again after a first correction that left the
+        request content unchanged; the retry is logged under its own step.
+        """
         system_prompt, user_prompt = build_ica_hazard_correction_prompts(
-            request, verdict
+            request, verdict, unchanged_retry=unchanged_retry
+        )
+        step = (
+            f"{request.ica_id}:unchanged-retry" if unchanged_retry else request.ica_id
         )
         outcome = call_with_policy(
             llm_client=self.llm_client,
@@ -1585,7 +1594,7 @@ class ObligationAwareLLMAdapter:
             response_format=_IcaHazardCorrectionPayload,
             run_dir=self.run_dir,
             stage=f"{self.stage_prefix}_ica_hazard_correction",
-            step=request.ica_id,
+            step=step,
             policy=CorrectionPolicy(),
             temperature=self.controls.temperature,
             max_completion_tokens=_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS,
@@ -1611,7 +1620,7 @@ class ObligationAwareLLMAdapter:
         mark_call_published(
             self.run_dir,
             f"{self.stage_prefix}_ica_hazard_correction",
-            request.ica_id,
+            step,
             call_log_of(self.llm_client),
         )
         return correction

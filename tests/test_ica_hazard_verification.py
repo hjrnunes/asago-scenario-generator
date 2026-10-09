@@ -685,7 +685,7 @@ def test_failed_or_unchanged_correction_cannot_admit_rejected_finding(
     enumeration, loss_analysis, control_structure = _single_ica_inputs()
 
     class Adapter(_TerminalCorrectionFake):
-        def correct_ica_hazard(self, request, verdict):
+        def correct_ica_hazard(self, request, verdict, unchanged_retry=False):
             if correction_fails:
                 raise RuntimeError("correction unavailable")
             return IcaHazardVerificationCorrection(
@@ -711,6 +711,130 @@ def test_failed_or_unchanged_correction_cannot_admit_rejected_finding(
     assert filtered.slots[0].icas == []
     assert filtered.slots[0].unresolved_reason
     assert not filtered.slots[0].is_na
+
+
+class _ScriptedCorrectionFake:
+    """Answer each correction call with the next scripted kind."""
+
+    def __init__(self, kinds: list[str]) -> None:
+        self.kinds = list(kinds)
+        self.retry_flags: list[bool] = []
+        self.verification_calls = 0
+
+    def verify_ica_hazards(self, requests, *, correction_feedback=None):
+        self.verification_calls += 1
+        return [
+            {
+                "ica_id": request.ica_id,
+                "verdict": "supported" if correction_feedback else "contradictory",
+                "rationale": "The supplied STPA path is judged as scripted.",
+            }
+            for request in requests
+        ]
+
+    def correct_ica_hazard(self, request, verdict, unchanged_retry=False):
+        self.retry_flags.append(unchanged_retry)
+        kind = self.kinds.pop(0)
+        if kind == "raise":
+            raise RuntimeError("correction unavailable")
+        if kind == "changed":
+            return IcaHazardVerificationCorrection(
+                ica_id=request.ica_id,
+                deviation=request.deviation + " with the missing timing fact",
+                rationale="Add the missing typed timing fact.",
+            )
+        if kind == "same":
+            return IcaHazardVerificationCorrection(
+                ica_id=request.ica_id,
+                deviation=request.deviation,
+                rationale="Repeat the supplied deviation.",
+            )
+        return IcaHazardVerificationCorrection(
+            ica_id=request.ica_id,
+            disposition=kind,
+            rationale="The supplied facts support no different finding.",
+        )
+
+
+def _verify_scripted(kinds: list[str]):
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+    adapter = _ScriptedCorrectionFake(kinds)
+    _, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+    return adapter, batch
+
+
+def test_a_changed_first_correction_is_not_retried() -> None:
+    adapter, batch = _verify_scripted(["changed"])
+
+    assert adapter.retry_flags == [False]
+    assert batch.records[0].disposition == "supported"
+
+
+def test_an_unchanged_correction_gets_one_retry_that_is_verified_as_usual() -> None:
+    adapter, batch = _verify_scripted(["same", "changed"])
+
+    record = batch.records[0]
+    assert adapter.retry_flags == [False, True]
+    assert adapter.verification_calls == 2
+    assert record.disposition == "supported"
+    assert record.corrected_request is not None
+    assert batch.provider_failure_count == 0
+
+
+def test_a_second_unchanged_correction_ends_as_the_existing_provider_failure() -> None:
+    adapter, batch = _verify_scripted(["same", "same", "changed"])
+
+    assert adapter.retry_flags == [False, True]
+    assert adapter.verification_calls == 1
+    assert batch.records[0].disposition == "provider_failure"
+    assert batch.provider_failure_count == 1
+    assert any(
+        "bounded ICA correction failed: ValueError: bounded correction returned "
+        "unchanged ICA request content" in item.detail
+        for item in batch.diagnostics
+    )
+
+
+@pytest.mark.parametrize("terminal", ("not_applicable", "unresolved"))
+def test_a_retry_may_end_in_a_terminal_disposition(terminal: str) -> None:
+    adapter, batch = _verify_scripted(["same", terminal])
+
+    assert adapter.retry_flags == [False, True]
+    assert adapter.verification_calls == 1
+    assert batch.records[0].disposition == terminal
+
+
+def test_a_failing_retry_is_a_recorded_failure_that_names_the_error() -> None:
+    adapter, batch = _verify_scripted(["same", "raise"])
+
+    assert adapter.retry_flags == [False, True]
+    assert batch.records[0].disposition == "provider_failure"
+    assert any("RuntimeError" in item.detail for item in batch.diagnostics)
+
+
+def test_the_retry_requests_are_counted_in_the_correction_call_evidence(
+    tmp_path,
+) -> None:
+    class Sending(_ScriptedCorrectionFake):
+        def correct_ica_hazard(self, request, verdict, unchanged_retry=False):
+            dispatch_requests(tmp_path, 1)
+            return super().correct_ica_hazard(request, verdict, unchanged_retry)
+
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+    _, batch = verify_final_ica_batch(
+        Sending(["same", "changed"]),
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    sent = _sent_by_call(batch)
+    assert sent[f"correction:{batch.records[0].ica_id}"] == 2
 
 
 def test_untyped_correction_is_a_failure_not_a_coerced_correction() -> None:

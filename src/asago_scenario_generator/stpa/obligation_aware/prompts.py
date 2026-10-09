@@ -1550,8 +1550,14 @@ def build_ica_hazard_verification_prompts(
 def build_ica_hazard_correction_prompts(
     request: Any,
     verdict: Any,
+    *,
+    unchanged_retry: bool = False,
 ) -> tuple[str, str]:
-    """Render one request-local correction prompt from STPA-only context."""
+    """Render one request-local correction prompt from STPA-only context.
+
+    *unchanged_retry* adds the block that names a first correction which left
+    the request content unchanged.
+    """
     if not hasattr(request, "model_dump") or not hasattr(verdict, "model_dump"):
         raise TypeError("ICA correction requires typed request and verdict values")
     request_payload = request.model_dump(mode="json", exclude={"semantic_digest"})
@@ -1562,6 +1568,7 @@ def build_ica_hazard_correction_prompts(
         "ica_hazard_correction_user.j2",
         request_yaml=_yaml(request_payload),
         verdict_yaml=_yaml(verdict_payload),
+        unchanged_retry=unchanged_retry,
     )
     return system, user
 

@@ -6,3 +6,12 @@ Independent verdict to address:
 
 Return exactly one request-local correction. The correction is not a new
 source of structural evidence; use only the supplied STPA facts.
+{%- if unchanged_retry %}
+
+Your previous correction left the deviation, hazardous context, and loss
+consequence identical to the bounded correction input, so it corrected nothing.
+Return a correction that changes at least one of them, or return
+`"disposition": "not_applicable"` or `"disposition": "unresolved"` with a
+rationale when the supplied facts support no different finding for this fixed
+action and category.
+{%- endif %}
