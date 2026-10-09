@@ -726,7 +726,7 @@ def _changed_hazard_problems(
 
 def _addition_only_patch(
     prior: LossAnalysis, patch: _Stage1aRevisionPatch
-) -> tuple[_Stage1aRevisionPatch, str | None]:
+) -> tuple[_Stage1aRevisionPatch, str | None, tuple[str, ...]]:
     """Restrict a stated-rule revision to additions and rule extensions.
 
     An edit may extend an existing constraint's ``rule`` so it still
@@ -736,26 +736,38 @@ def _addition_only_patch(
     count heading, number, and extra whitespace are removed; its obligations,
     when returned, must repeat every prior obligation unchanged and may only
     add entries with new IDs.
-    An edit of an existing hazard must repeat it unchanged.  Returns the
-    patch with unchanged edits dropped and, on extended rules, the prior
-    conditions and the prior obligations plus any additions, or the reason
-    the whole revision is rejected.
+    An edit of an existing hazard must repeat it unchanged.
+
+    An edit that breaks one of these rules is dropped whole, with one note
+    per broken rule, and the additions and the edits that hold stay.  Returns
+    the patch with unchanged and dropped edits removed and, on extended
+    rules, the prior conditions and the prior obligations plus any additions;
+    the rejection reason when nothing is left to apply; and the notes of the
+    dropped edits.
     """
     hazards = {hazard.hazard_id: hazard for hazard in prior.hazards}
     constraints = {c.constraint_id: c for c in prior.security_constraints}
-    problems = _changed_hazard_problems(hazards, patch.hazard_edits)
-    kept_edits = [
-        kept
-        for edit in patch.security_constraint_edits
-        if (
-            kept := _addition_only_constraint_edit(
-                constraints[edit.constraint_id], edit, problems
-            )
+    dropped = _changed_hazard_problems(hazards, patch.hazard_edits)
+    kept_edits: list[_RevisionConstraintEdit] = []
+    for edit in patch.security_constraint_edits:
+        edit_problems: list[str] = []
+        kept = _addition_only_constraint_edit(
+            constraints[edit.constraint_id], edit, edit_problems
         )
-        is not None
-    ]
-    if problems:
-        return patch, "the stated-rule revision may only add: " + "; ".join(problems)
+        dropped.extend(edit_problems)
+        if kept is not None and not edit_problems:
+            kept_edits.append(kept)
+    if (
+        dropped
+        and not kept_edits
+        and not patch.hazard_additions
+        and not patch.security_constraint_additions
+    ):
+        return (
+            patch,
+            "the stated-rule revision may only add: " + "; ".join(dropped),
+            (),
+        )
     additions = [
         addition.model_copy(
             update={
@@ -775,6 +787,7 @@ def _addition_only_patch(
             }
         ),
         None,
+        tuple(dropped),
     )
 
 
@@ -2411,9 +2424,15 @@ def _run_graph_revision_call(
             patch = parse_llm_result(result, _Stage1aRevisionPatch)
             attempt.patch = patch
             if addition_only:
-                patch, attempt.rejection = _addition_only_patch(loss_analysis, patch)
+                patch, attempt.rejection, dropped = _addition_only_patch(
+                    loss_analysis, patch
+                )
                 if attempt.rejection is not None:
                     return _draft_from_analysis(loss_analysis)
+                attempt.warnings.extend(
+                    f"stated-rule revision dropped an edit and kept the rest: {item}"
+                    for item in dropped
+                )
             return _revision_patch_to_draft(
                 loss_analysis,
                 patch,
