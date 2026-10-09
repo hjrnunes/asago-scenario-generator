@@ -14,6 +14,9 @@ REPORT_FILENAME = "synthesis-report.html"
 _ZERO_HIDDEN_SUMMARY_KEYS = frozenset(
     {"governance_credited", "governance_routed_no_finding"}
 )
+# The realization summary omits a zero functional-test count from its saved
+# form; the table follows so a run without functional-test findings is unchanged.
+_ZERO_HIDDEN_REALIZATION_KEYS = frozenset({"functional_test"})
 
 
 def render_synthesis_report(
@@ -108,7 +111,7 @@ def render_synthesis_report(
             "<h2>Scenario realization</h2>",
             "<p>Scenario realization is reported separately from provisional obligation accounting.</p>",
             "<table><thead><tr><th>Status</th><th>Count</th></tr></thead><tbody>",
-            *(_row(key, value) for key, value in sorted(realization_summary.items())),
+            *_realization_summary_rows(realization_summary),
             "</tbody></table>",
             _realization_html(realization_records),
             _candidate_outcomes_html(_value(manifest, "candidate_outcomes")),
@@ -129,6 +132,15 @@ def render_synthesis_report(
         + "</body></html>\n"
     )
     return atomic_write_text(output_dir / REPORT_FILENAME, content)
+
+
+def _realization_summary_rows(summary: Mapping[str, Any]) -> list[str]:
+    """Render the realization counts, hiding a zero functional-test count."""
+    return [
+        _row(key, value)
+        for key, value in sorted(summary.items())
+        if key not in _ZERO_HIDDEN_REALIZATION_KEYS or value
+    ]
 
 
 def _governance_summary_rows(manifest: Any) -> list[str]:
