@@ -189,7 +189,18 @@ observation fields unchanged. Every Stage 5 correction, for a condition or any
 other failure, shows the model its prior structured reply (the "Prior
 structured response to correct in place" block) between the repair guidance
 and the exact error, so an instruction to keep fields unchanged refers to text
-the model can see. If the corrected response still fails only
+the model can see. A chain whose corrected response fails again earns one more
+correction (attempt 3) when all of these hold: the second failure carries a
+condition-check code other than `discriminating_condition_missing`; the draft
+without its condition would publish as analytical-only (code routes it, as
+below); and the chain did not go through the length retry. That request is the
+one a second validation retry would send: the original prompt, the same
+correction text, the second reply and the exact second failure, with no added
+wording and no length retry of its own. A reply that passes publishes with its
+condition. A reply that fails only because of its condition takes the rule
+below with the third failure's code, and any other third reply publishes the
+second reply's demotion. A chain that sent the third request has the note
+"after two corrections". If the last response still fails only
 because of its condition (missing, unresolved, violated, or structurally
 invalid), code removes the condition and publishes the scenario with
 `discriminating_condition: null`, `condition_check: null`, and a code-owned

@@ -23,9 +23,9 @@ def _flat(text: str) -> str:
 def _correction(tmp_path) -> str:
     """Return the correction request sent after a literal_unsupported failure."""
     client = MockLLMClient()
-    client.set_response_queue([_placeholder_payload(), _placeholder_payload()])
+    client.set_response_queue([_placeholder_payload() for _ in range(3)])
     _generate_plain(client, tmp_path)
-    assert client.call_count == 2
+    assert client.call_count == 3
     return _flat(client.calls[1].user_prompt)
 
 

@@ -45,9 +45,9 @@ def _with_reply_criterion(payload: dict) -> dict:
     return payload
 
 
-def _failed_twice(payload: dict) -> MockLLMClient:
+def _failed_every_attempt(payload: dict) -> MockLLMClient:
     client = MockLLMClient()
-    client.set_response_queue([payload, copy.deepcopy(payload)])
+    client.set_response_queue([copy.deepcopy(payload) for _ in range(3)])
     return client
 
 
@@ -64,13 +64,13 @@ def _claim_changes(tmp_path) -> list[dict]:
 def test_command_attempt_without_a_reply_criterion_is_published_analytical_only(
     tmp_path,
 ) -> None:
-    client = _failed_twice(_payload_with(_ownership_condition("ORD-1")))
+    client = _failed_every_attempt(_payload_with(_ownership_condition("ORD-1")))
 
     result, error = _generate(client, tmp_path)
 
     assert error is None
     assert result is not None
-    assert client.call_count == 2
+    assert client.call_count == 3
     assert result.discriminating_condition is None
     assert result.observation_assessment.disposition == "analytical_only"
     safe = result.safe_observable_outcome
@@ -84,7 +84,7 @@ def test_command_attempt_without_a_reply_criterion_is_published_analytical_only(
     assert [item.observable for item in result.observation_criteria] == [False]
     assert result.tool_call_condition_status.status == "not_executable"
     assert result.condition_omitted_reason == (
-        f"The discriminating condition failed validation after one correction "
+        f"The discriminating condition failed validation after two corrections "
         f"({CHECK_FAILED}); the response declares no reply criterion the "
         "contract supports, so the command_attempt claim cannot run without "
         "its condition and the scenario is published as analytical_only."
@@ -94,7 +94,7 @@ def test_command_attempt_without_a_reply_criterion_is_published_analytical_only(
 def test_a_rerouted_scenario_records_its_levels_and_failure_code(tmp_path) -> None:
     payload = _payload_with(_ownership_condition("ORD-1"))
 
-    result, error = _generate(_failed_twice(payload), tmp_path)
+    result, error = _generate(_failed_every_attempt(payload), tmp_path)
 
     assert error is None
     assert result is not None
@@ -124,7 +124,7 @@ def test_a_demoted_criterion_carries_a_code_owned_note_not_the_stale_reason(
 ) -> None:
     payload = _payload_with(_ownership_condition("ORD-1"))
 
-    result, error = _generate(_failed_twice(payload), tmp_path)
+    result, error = _generate(_failed_every_attempt(payload), tmp_path)
 
     assert error is None
     assert result is not None
@@ -143,7 +143,7 @@ def test_the_normalization_record_keeps_the_models_original_criterion_reason(
 ) -> None:
     payload = _payload_with(_ownership_condition("ORD-1"))
 
-    result, error = _generate(_failed_twice(payload), tmp_path)
+    result, error = _generate(_failed_every_attempt(payload), tmp_path)
 
     assert error is None
     assert result is not None
@@ -157,7 +157,7 @@ def test_the_normalization_record_keeps_the_models_original_criterion_reason(
 
 
 def test_a_missing_condition_note_names_the_missing_code(tmp_path) -> None:
-    result, error = _generate(_failed_twice(_payload_with(None)), tmp_path)
+    result, error = _generate(_failed_every_attempt(_payload_with(None)), tmp_path)
 
     assert error is None
     assert result is not None
@@ -165,7 +165,7 @@ def test_a_missing_condition_note_names_the_missing_code(tmp_path) -> None:
 
 
 def test_a_missing_condition_is_routed_with_its_own_failure_code(tmp_path) -> None:
-    client = _failed_twice(_payload_with(None))
+    client = _failed_every_attempt(_payload_with(None))
 
     result, error = _generate(client, tmp_path)
 
@@ -207,7 +207,7 @@ def test_a_condition_less_reply_scenario_keeps_its_claim_and_its_note(
         "evidence": "assistant_message",
     }
 
-    result, error = _generate(_failed_twice(payload), tmp_path)
+    result, error = _generate(_failed_every_attempt(payload), tmp_path)
 
     assert error is None
     assert result is not None
@@ -233,7 +233,7 @@ def test_a_routed_draft_that_fails_validation_publishes_unrouted(
         return routed
 
     monkeypatch.setattr(generate, "route_without_condition", broken)
-    client = _failed_twice(_payload_with(_ownership_condition("ORD-1")))
+    client = _failed_every_attempt(_payload_with(_ownership_condition("ORD-1")))
 
     result, error = _generate(client, tmp_path)
 
@@ -251,7 +251,7 @@ def test_command_attempt_with_a_supported_reply_criterion_is_published_as_reply(
 ) -> None:
     payload = _with_reply_criterion(_payload_with(_ownership_condition("ORD-1")))
 
-    result, error = _generate(_failed_twice(payload), tmp_path)
+    result, error = _generate(_failed_every_attempt(payload), tmp_path)
 
     assert error is None
     assert result is not None
@@ -288,7 +288,7 @@ def test_the_reply_route_replaces_only_the_reason_of_the_demoted_criterion(
 ) -> None:
     payload = _with_reply_criterion(_payload_with(_ownership_condition("ORD-1")))
 
-    result, error = _generate(_failed_twice(payload), tmp_path)
+    result, error = _generate(_failed_every_attempt(payload), tmp_path)
 
     assert error is None
     assert result is not None
@@ -313,7 +313,9 @@ def test_reply_criterion_the_contract_does_not_support_routes_to_analytical_only
     payload = _with_reply_criterion(_payload_with(_ownership_condition("ORD-1")))
 
     result, error = _generate(
-        _failed_twice(payload), tmp_path, observation_contract=command_only.finalize()
+        _failed_every_attempt(payload),
+        tmp_path,
+        observation_contract=command_only.finalize(),
     )
 
     assert error is None
