@@ -199,7 +199,7 @@ ENVELOPES = {
 
 EXPECTED_ENVELOPES: dict[str, dict] = {
     "revision": {
-        "digest": "6937d271f8937491a5b64455abb0d35c860e4db8af2193af8c1f546af22c7e19",
+        "digest": "b78a78507a1c7c65b83217f1bffff4cc4b24415fab95e43069be459e8029c7bc",
         "dump_keys": [
             "status",
             "request_digest",

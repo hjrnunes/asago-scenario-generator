@@ -1029,7 +1029,6 @@ def test_revision_provider_schema_uses_local_handles_without_final_gap_ids(
     schema = response_formats[0].model_json_schema()
     draft_fields = schema["$defs"]["_RevisionProviderDraft"]["properties"]
     assert "trigger_gap_ids" not in draft_fields
-    assert "dismissed_gap_ids" not in draft_fields
 
 
 _RETRY_DECISION = {

@@ -1239,10 +1239,6 @@ def _validate_gap_decisions(
         # handle below.
         return
     _require_closed_gap_handles(draft, gaps)
-    if draft.dismissed_gap_ids:
-        raise ValueError(
-            "revision draft must use request-local gap handles, not final gap IDs"
-        )
     proposals = {
         item.gap_handle
         for item in draft.gap_decisions

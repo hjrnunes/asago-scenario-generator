@@ -697,7 +697,6 @@ class RevisionDraft(_Model):
     control_actions: tuple[DraftControlAction, ...] = ()
     feedback_channels: tuple[DraftFeedbackChannel, ...] = ()
     coordination_links: tuple[DraftCoordinationLink, ...] = ()
-    dismissed_gap_ids: tuple[str, ...] = ()
     gap_decisions: tuple[RevisionGapDecision, ...] = ()
     rationale: str = ""
 

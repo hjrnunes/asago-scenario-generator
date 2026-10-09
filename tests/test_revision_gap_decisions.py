@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from pydantic import ValidationError
 
 from asago_scenario_generator.models.obligation_consideration import (
     MissingStructuralConcept,
@@ -111,25 +112,20 @@ def test_unknown_handle_alone_is_reported() -> None:
     )
 
 
-def test_decisions_reject_final_gap_ids() -> None:
-    """Closed request-local decisions cannot also dismiss final gap IDs."""
+def test_a_draft_cannot_dismiss_final_gap_ids() -> None:
+    """Dismissals name request-local handles in `gap_decisions`, never gap IDs."""
     gap_id = _gaps()[0].gap_id
     assert gap_id is not None
-    result = _revise(
-        RevisionDraft(
-            gap_decisions=(
-                _decision("revision-gap-1"),
-                _decision("revision-gap-2"),
-            ),
-            dismissed_gap_ids=(gap_id,),
+    with pytest.raises(ValidationError, match="dismissed_gap_ids"):
+        RevisionDraft.model_validate(
+            {
+                "gap_decisions": [
+                    _decision("revision-gap-1"),
+                    _decision("revision-gap-2"),
+                ],
+                "dismissed_gap_ids": [gap_id],
+            }
         )
-    )
-
-    assert result.status == "technical_failure"
-    assert result.diagnostics == (
-        "compile failure: ValueError: revision draft must use request-local "
-        "gap handles, not final gap IDs",
-    )
 
 
 def test_proposed_addition_requires_an_addition() -> None:
