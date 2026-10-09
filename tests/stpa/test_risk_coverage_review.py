@@ -27,7 +27,10 @@ from asago_scenario_generator.stpa.system_model.risk_coverage_review import (
     _provider_review_model,
     RiskCoverageRow,
 )
-from asago_scenario_generator.stpa.system_model.run import run_sp1
+from asago_scenario_generator.stpa.system_model.run import (
+    _try_run_risk_coverage_review,
+    run_sp1,
+)
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
@@ -948,3 +951,124 @@ class TestRowSchema:
                     "bogus": "extra",
                 }
             )
+
+
+class TestNotApplicableReview:
+    """The outcome counts the review verdicts on the cards marked not applicable."""
+
+    def test_confirmed_card_is_counted_and_no_id_is_named(self, tmp_path):
+        outcome = _run_review(tmp_path)
+
+        assert outcome.not_applicable == {
+            "marked": 1,
+            "confirmed": 1,
+            "disputed": 0,
+            "invalid": 0,
+            "missing": 0,
+            "disputed_risk_ids": [],
+        }
+
+    def test_disputed_card_is_counted_and_named(self, tmp_path):
+        rows = _valid_rows()
+        rows["rows"][3]["coverage"] = "not_applicable_disputed"
+        rows["rows"][3]["missing_protection"] = "A physical harm is still possible."
+
+        outcome = _run_review(tmp_path, rows=rows)
+
+        assert outcome.not_applicable["disputed"] == 1
+        assert outcome.not_applicable["confirmed"] == 0
+        assert outcome.not_applicable["disputed_risk_ids"] == ["risk-d"]
+
+    def test_invalid_and_missing_cards_are_counted_apart(self, tmp_path):
+        invalid_rows = _valid_rows()
+        invalid_rows["rows"][3]["evidence"][0]["source_ref"] = "source_999"
+        missing_rows = _valid_rows()
+        missing_rows["rows"] = missing_rows["rows"][:3]
+
+        (tmp_path / "invalid").mkdir()
+        (tmp_path / "missing").mkdir()
+        invalid = _run_review(tmp_path / "invalid", rows=invalid_rows)
+        missing = _run_review(tmp_path / "missing", rows=missing_rows)
+
+        assert invalid.not_applicable["invalid"] == 1
+        assert invalid.not_applicable["missing"] == 0
+        assert missing.not_applicable["missing"] == 1
+        assert missing.not_applicable["invalid"] == 0
+
+    def test_review_without_a_marked_card_counts_none(self, tmp_path):
+        cards = [card for card in _cards() if card.risk_id != "risk-d"]
+        rows = _valid_rows()
+        rows["rows"] = rows["rows"][:3]
+
+        outcome = _run_review(tmp_path, rows=rows, cards=cards)
+
+        assert outcome.not_applicable["marked"] == 0
+
+    def test_run_warns_once_per_disputed_card(self, tmp_path):
+        rows = _valid_rows()
+        rows["rows"][3]["coverage"] = "not_applicable_disputed"
+        rows["rows"][3]["missing_protection"] = "A physical harm is still possible."
+        warnings: list[str] = []
+
+        _try_run_risk_coverage_review(
+            _client_with_rows(rows),
+            _analysis(),
+            _cards(),
+            "Test use case",
+            tmp_path,
+            TemplateLoader(PROMPTS_DIR),
+            0.4,
+            warnings,
+        )
+
+        assert [w for w in warnings if "disputed" in w] == [
+            "stage_1a/risk_coverage_review not_applicable_disputed: risk-d"
+        ]
+
+    def test_run_without_a_dispute_adds_no_dispute_warning(self, tmp_path):
+        warnings: list[str] = []
+
+        _try_run_risk_coverage_review(
+            _client_with_rows(),
+            _analysis(),
+            _cards(),
+            "Test use case",
+            tmp_path,
+            TemplateLoader(PROMPTS_DIR),
+            0.4,
+            warnings,
+        )
+
+        assert warnings == []
+
+    def test_manifest_records_the_not_applicable_counts(self, tmp_path):
+        client = setup_sp1_mock_client()
+        row = {
+            "risk_id": "atlas-001",
+            "protects": "the prompt boundary",
+            "against": None,
+            "covering_constraints": [],
+            "coverage": "none",
+            "missing_protection": "No rule protects the boundary.",
+            "evidence": [{"source_ref": "source_2", "meaning": "The card."}],
+            "rationale": "No supplied rule covers the card.",
+        }
+        client.set_response_for(RiskCoverageReview, {"rows": [row]})
+
+        run_sp1(
+            llm_client=client,
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path,
+        )
+
+        manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
+        review = manifest["stage_summary"]["stage_1a"]["risk_coverage_review"]
+        assert set(review["not_applicable"]) == {
+            "marked",
+            "confirmed",
+            "disputed",
+            "invalid",
+            "missing",
+            "disputed_risk_ids",
+        }

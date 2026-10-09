@@ -303,6 +303,8 @@ class RiskCoverageReviewOutcome:
     reviewed_loss_analysis_digest: str | None = None
     artifact: RiskCoverageArtifact | None = None
     warnings: tuple[str, ...] = field(default=())
+    # Verdict counts on the cards the graph marks not applicable.
+    not_applicable: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -702,6 +704,41 @@ def _not_applicable_cards(
             dispositions.get(card.risk_id) is None
             and card.risk_id not in cited_via_losses
         )
+    }
+
+
+def _not_applicable_verdicts(
+    loss_analysis: LossAnalysis,
+    risk_cards: list[RiskCard],
+    *,
+    valid: Sequence[RiskCoverageRow],
+    invalid: Sequence[RiskCoverageInvalidRow],
+) -> dict[str, Any]:
+    """Count the review's verdict on each card the graph marks not applicable.
+
+    A card with a valid row is confirmed or disputed; a card with only an
+    invalid row is invalid; every other marked card is missing.
+    """
+    marked = _not_applicable_cards(loss_analysis, risk_cards)
+    verdict_of = {row.risk_id: row.coverage for row in valid}
+    invalid_ids = {row.risk_id for row in invalid}
+    disputed = [
+        card.risk_id
+        for card in risk_cards
+        if card.risk_id in marked
+        and verdict_of.get(card.risk_id) == "not_applicable_disputed"
+    ]
+    confirmed = sum(
+        verdict_of.get(risk_id) == "not_applicable_confirmed" for risk_id in marked
+    )
+    unjudged = [risk_id for risk_id in marked if risk_id not in verdict_of]
+    return {
+        "marked": len(marked),
+        "confirmed": confirmed,
+        "disputed": len(disputed),
+        "invalid": sum(risk_id in invalid_ids for risk_id in unjudged),
+        "missing": sum(risk_id not in invalid_ids for risk_id in unjudged),
+        "disputed_risk_ids": disputed,
     }
 
 
@@ -1226,6 +1263,9 @@ def run_risk_coverage_review(
             call_count=0,
             reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
             artifact=artifact,
+            not_applicable=_not_applicable_verdicts(
+                loss_analysis, risk_cards, valid=(), invalid=()
+            ),
         )
 
     system_prompt = template_loader.render_prompt(SYSTEM_TEMPLATE)
@@ -1321,6 +1361,9 @@ def run_risk_coverage_review(
         failure_reason=failure_reason,
         reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
         artifact=artifact,
+        not_applicable=_not_applicable_verdicts(
+            loss_analysis, risk_cards, valid=valid, invalid=invalid
+        ),
     )
 
 

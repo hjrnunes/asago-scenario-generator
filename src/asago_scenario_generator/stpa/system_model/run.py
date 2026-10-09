@@ -681,6 +681,12 @@ def _try_run_risk_coverage_review(
             f"stage_1a/risk_coverage_review {outcome.status}: "
             f"{outcome.failure_reason or 'invalid or missing rows'}"
         )
+    disputed = (outcome.not_applicable or {}).get("disputed_risk_ids", [])
+    if disputed:
+        stage_warnings.append(
+            "stage_1a/risk_coverage_review not_applicable_disputed: "
+            + ", ".join(disputed)
+        )
     return outcome
 
 
@@ -1138,6 +1144,8 @@ def _add_stage_1a_advisory_summaries(
             review_summary["rows_valid"] = artifact.summary.rows_valid
             review_summary["rows_invalid"] = artifact.summary.rows_invalid
             review_summary["rows_missing"] = artifact.summary.rows_missing
+        if risk_coverage_review.not_applicable is not None:
+            review_summary["not_applicable"] = dict(risk_coverage_review.not_applicable)
         stage_1a_summary["risk_coverage_review"] = review_summary
         stage_1a_summary["call_count"] = (
             int(stage_1a_summary["call_count"]) + risk_coverage_review.call_count
