@@ -385,3 +385,45 @@ class TestRuleRoundTrimsCrossClassCitations:
 
         assert outcome.loss_analysis == prior
         assert "has no constraint" in (outcome.stated_rule_revision.error or "")
+
+
+class TestRuleRoundRecordsWhatItDropped:
+    """Every dropped constraint is visible in the round record and the warnings."""
+
+    def test_a_trimmed_constraint_is_recorded_with_its_reason(self, tmp_path) -> None:
+        reply = TestRuleRoundTrimsCrossClassCitations()._reply()
+        _gate_round(tmp_path, [reply], _classed_analysis())
+
+        artifact = _artifact(tmp_path)
+        dropped = artifact["revision_rounds"][-1]["dropped_records"]
+        assert [(d["record"], d["constraint_id"]) for d in dropped] == [
+            ("security_constraint_addition", "SC-3")
+        ]
+        assert "H-1" in dropped[0]["error"]
+        assert "disclosure" in dropped[0]["error"]
+        assert any(
+            "dropped" in w and "SC-3" in w and "H-1" in w
+            for w in artifact["normalization_warnings"]
+        )
+
+    def test_a_span_dropped_addition_is_recorded_by_handle(self, tmp_path) -> None:
+        reply = TestRuleRoundDropsUnquotedRecords()._slipping()
+        _gate_round(tmp_path, [reply, reply])
+
+        artifact = _artifact(tmp_path)
+        dropped = artifact["revision_rounds"][-1]["dropped_records"]
+        assert [d["handle"] for d in dropped] == ["slipping"]
+        assert BAD_SPAN in dropped[0]["error"]
+        assert any(
+            "dropped" in w and "slipping" in w
+            for w in artifact["normalization_warnings"]
+        )
+
+    def test_a_round_that_drops_nothing_records_nothing_dropped(self, tmp_path) -> None:
+        clean = _patch(additions=[_addition("fee_rule", FEE_CONSTRAINT, ["H-2"])])
+        _, outcome, _ = _gate_round(tmp_path, [clean])
+
+        assert outcome.stated_rule_revision.applied is True
+        artifact = _artifact(tmp_path)
+        assert "dropped_records" not in artifact["revision_rounds"][-1]
+        assert not any("dropped" in w for w in artifact["normalization_warnings"])

@@ -2112,9 +2112,7 @@ def _accept_revision_round(
     if accepted_attempt.dropped:
         record["dropped_records"] = accepted_attempt.dropped
         progress.revision_warnings.extend(
-            f"graph revision dropped {item['record']} "
-            f"'{item.get('handle') or item['constraint_id']}': {item['error']}"
-            for item in accepted_attempt.dropped
+            _dropped_record_warnings(accepted_attempt.dropped)
         )
     progress.rounds.append(record)
     progress.failing.extend(
@@ -2122,6 +2120,14 @@ def _accept_revision_round(
         for check in revised_density.failing_checks
     )
     return revised_density
+
+
+def _dropped_record_warnings(dropped: Sequence[dict]) -> list[str]:
+    return [
+        f"graph revision dropped {item['record']} "
+        f"'{item.get('handle') or item['constraint_id']}': {item['error']}"
+        for item in dropped
+    ]
 
 
 def _apply_stated_rule_revision(
@@ -2255,13 +2261,16 @@ def _run_stated_rule_revision(
         )
         record["trigger"] = "stated_rules"
         return rejected(rejection, record, call_count)
-    revised, revised_density, _trimmed = _trim_failed_class_ownership(
+    revised, revised_density, trimmed = _trim_failed_class_ownership(
         loss_analysis, revised, check_hazard_graph_density(revised)
     )
     record = _revision_round_record(
         round_number, before=density, after=revised_density, original=density
     )
     record["trigger"] = "stated_rules"
+    dropped = [*attempts[-1].dropped, *trimmed]
+    if dropped:
+        record["dropped_records"] = dropped
     reason: str | None = None
     if not revised_density.passed:
         reason = "revision broke structural checks: " + "; ".join(
@@ -2285,6 +2294,7 @@ def _run_stated_rule_revision(
         f"{item.repair.original!r} -> {item.repair.repaired!r}"
         for item in accepted_attempt.span_repairs
     )
+    warnings.extend(_dropped_record_warnings(dropped))
     return (
         revised,
         StatedRuleRevision(trigger="stated_rules", applied=True, call_count=call_count),
