@@ -483,6 +483,9 @@ def _manifest_provider_evidence(
             "records": records,
             "controls": controls,
         }
+        lost_slots = getattr(stages[stage_name], "lost_slots", ())
+        if lost_slots:
+            result[stage_name]["lost_slots"] = [_dump(item) for item in lost_slots]
         verification = getattr(stages[stage_name], "ica_hazard_verification", None)
         if verification is not None:
             result[stage_name]["ica_hazard_verification"] = _dump(verification)

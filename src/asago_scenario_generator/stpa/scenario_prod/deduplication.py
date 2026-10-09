@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 from collections.abc import Sequence
-from typing import Literal
+from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
 
@@ -42,7 +42,18 @@ class ScenarioDeduplicationKey(BaseModel):
         exclude_if=lambda value: value is None,
     )
 
-    def as_tuple(self) -> tuple[str, str, str | None, str, str | None]:
+    # The sorted safety-constraint ids the scenario answers to, so two
+    # scenarios that differ only in the constraint they test keep separate
+    # canonicals.  Omitted when empty so keys without constraints keep their
+    # historical shape.
+    constraint_ids: tuple[Annotated[StrictStr, Field(min_length=1)], ...] = Field(
+        default=(),
+        exclude_if=lambda value: not value,
+    )
+
+    def as_tuple(
+        self,
+    ) -> tuple[str, str, str | None, str, str | None, tuple[str, ...]]:
         """Return the hashable identity used for deterministic grouping."""
 
         return (
@@ -51,6 +62,7 @@ class ScenarioDeduplicationKey(BaseModel):
             self.operation_name,
             self.claim_level,
             self.condition,
+            self.constraint_ids,
         )
 
 
@@ -92,6 +104,7 @@ def scenario_deduplication_key(spec: ScenarioSpec) -> ScenarioDeduplicationKey:
             if spec.discriminating_condition is not None
             else None
         ),
+        constraint_ids=tuple(sorted(set(spec.unsafe_outcome_constraint_refs))),
     )
 
 
@@ -108,9 +121,9 @@ def deduplicate_scenario_specs(
 
     keys = {spec.scenario_id: scenario_deduplication_key(spec) for spec in specs}
     validated = {spec.scenario_id for spec in specs if _has_validated_shape(spec)}
-    groups: dict[tuple[str, str, str | None, str, str | None], list[str]] = defaultdict(
-        list
-    )
+    groups: dict[
+        tuple[str, str, str | None, str, str | None, tuple[str, ...]], list[str]
+    ] = defaultdict(list)
     records: dict[str, ScenarioDeduplication] = {}
     for spec in specs:
         key = keys[spec.scenario_id]

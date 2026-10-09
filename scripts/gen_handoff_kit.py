@@ -608,6 +608,16 @@ def renumber(payload: dict, scenario_id: str) -> dict:
     return payload
 
 
+def key_by_constraints(payload: dict) -> dict:
+    """Add the lineage constraints to a grouped scenario's deduplication key."""
+
+    dedup = payload.get("deduplication")
+    constraints = sorted(set(payload["lineage"]["constraint_ids"]))
+    if dedup is not None and dedup["status"] != "analytical_only" and constraints:
+        dedup["key"]["constraint_ids"] = constraints
+    return payload
+
+
 def v4_payloads(builders: dict) -> dict[str, dict]:
     """Rebuild the v3 payloads as v4 and add one fixture per shape.
 
@@ -624,11 +634,11 @@ def v4_payloads(builders: dict) -> dict[str, dict]:
             if payload["kind"] == "adversarial"
             else None
         )
-        payloads[relative] = payload
+        payloads[relative] = key_by_constraints(payload)
     for relative, (build, scenario_id, shape) in V4_SHAPED.items():
         payload = renumber(with_binding(build(version)), scenario_id)
         payload["attack_shape"] = copy.deepcopy(shape)
-        payloads[relative] = payload
+        payloads[relative] = key_by_constraints(payload)
     return {
         relative: finalize(payload) for relative, payload in sorted(payloads.items())
     }
@@ -756,6 +766,12 @@ SCHEMA_CASES = {
     ),
     "schema-deduplication-key-claim-not-enumerated": put(
         "deduplication.key.claim_level", "belief"
+    ),
+    "schema-deduplication-key-constraint-ids-not-list": put(
+        "deduplication.key.constraint_ids", "SC-1"
+    ),
+    "schema-deduplication-key-constraint-id-blank": put(
+        "deduplication.key.constraint_ids", [""]
     ),
     "schema-safe-outcome-not-object": put("safe_observable_outcome", "x"),
     "schema-safe-outcome-unknown-field": put("safe_observable_outcome", {"x": 1}),

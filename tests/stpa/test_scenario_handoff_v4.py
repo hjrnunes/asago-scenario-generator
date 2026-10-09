@@ -271,7 +271,16 @@ def test_the_v4_schema_differs_from_v3_only_where_the_design_says() -> None:
         for name, definition in v3["$defs"].items()
         if v4["$defs"].get(name) != definition
     }
-    assert unchanged == {}
+    assert set(unchanged) == {"ScenarioDeduplicationKey"}
+    v3_key = v3["$defs"]["ScenarioDeduplicationKey"]
+    v4_key = v4["$defs"]["ScenarioDeduplicationKey"]
+    assert set(v4_key["properties"]) - set(v3_key["properties"]) == {"constraint_ids"}
+    assert v4_key["required"] == v3_key["required"]
+    assert {
+        name: value
+        for name, value in v4_key["properties"].items()
+        if name != "constraint_ids"
+    } == v3_key["properties"]
     other = {
         key: value
         for key, value in v4["properties"].items()

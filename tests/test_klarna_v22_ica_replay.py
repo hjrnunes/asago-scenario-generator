@@ -20,6 +20,9 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     fill_synthesis_slots,
     final_slot_universe,
 )
+from asago_scenario_generator.stpa.threat_enum.slot_creation import (
+    is_wrong_duration_eligible,
+)
 
 
 _REPLAY_FIXTURE = Path(__file__).parent / "fixtures" / "klarna-v22-ca3-1-replay.yaml"
@@ -159,10 +162,17 @@ def test_captured_klarna_ca3_1_deviations_survive_public_fill(tmp_path) -> None:
         controls=controls,
     )
 
-    # The public seam split the 60 authoritative slots into one-slot requests;
-    # the three exact captured responses went through ObligationAwareLLMAdapter.fill.
-    assert len(client.called_slot_ids) == len(all_slots) == 60
-    assert tuple(sorted(client.called_slot_ids)) == tuple(sorted(all_slot_ids))
+    # The public seam split the 60 authoritative slots into one-slot requests and
+    # sent every slot the code does not decide; the three exact captured
+    # responses went through ObligationAwareLLMAdapter.fill.
+    assert len(all_slots) == 60
+    provider_slot_ids = tuple(
+        slot.slot_id
+        for slot in all_slots
+        if slot.uca_type.value != "WRONG_DURATION" or is_wrong_duration_eligible(slot)
+    )
+    assert len(provider_slot_ids) < len(all_slots)
+    assert tuple(sorted(client.called_slot_ids)) == tuple(sorted(provider_slot_ids))
     assert sum(slot_id in captured_payloads for slot_id in client.called_slot_ids) == 3
     assert result.diagnostics == ()
 

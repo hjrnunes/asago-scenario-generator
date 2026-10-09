@@ -823,6 +823,20 @@ class SynthesisSlotResponse(_ProviderCallCounts):
         return self
 
 
+class SlotLoss(_Model):
+    """A provider-owned slot that ended unresolved, named by class not by text.
+
+    ``error_class`` is the exception class name (or a fixed label), never the
+    model's or the validator's free text, so the record stays stable and safe
+    to publish.
+    """
+
+    slot_id: str = Field(min_length=1)
+    target_id: str = Field(min_length=1)
+    error_class: str = Field(min_length=1)
+    call_id: str = Field(min_length=1)
+
+
 class SynthesisSlotFillResult(_Model):
     """Final deterministic slot universe and separate obligation evidence."""
 
@@ -832,6 +846,9 @@ class SynthesisSlotFillResult(_Model):
     call_evidence: tuple[ConsiderationCallEvidence, ...] = ()
     diagnostics: tuple[ConsiderationDiagnostic, ...] = ()
     ica_hazard_verification: IcaHazardVerificationBatch | None = None
+    lost_slots: tuple[SlotLoss, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def canonicalize(self) -> "SynthesisSlotFillResult":
@@ -864,6 +881,11 @@ class SynthesisSlotFillResult(_Model):
             self,
             "diagnostics",
             tuple(sorted(self.diagnostics, key=lambda item: (item.code, item.detail))),
+        )
+        object.__setattr__(
+            self,
+            "lost_slots",
+            tuple(sorted(self.lost_slots, key=lambda item: item.slot_id)),
         )
         return self
 
@@ -962,6 +984,7 @@ __all__ = [
     "StructuralRevisionResponse",
     "StructuralRoutingRequest",
     "StructuralRoutingResponse",
+    "SlotLoss",
     "SynthesisSlotFillResult",
     "SynthesisSlotRequest",
     "SynthesisSlotResponse",

@@ -195,6 +195,10 @@ def test_the_rebuilt_v3_payloads_keep_their_content_beside_the_shape() -> None:
         )
         v4 = _load(f"valid/{name}.json")
         shape = v4.pop("attack_shape")
+        key = (v4.get("deduplication") or {}).get("key", {})
+        constraint_ids = key.pop("constraint_ids", None)
+        if constraint_ids is not None:
+            assert constraint_ids == sorted(set(v4["lineage"]["constraint_ids"]))
         for volatile in ("schema_version", "content_digest"):
             del v3[volatile], v4[volatile]
         # The contract fact names the handoff version it was built for.
