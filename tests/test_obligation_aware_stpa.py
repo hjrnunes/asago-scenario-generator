@@ -1890,6 +1890,70 @@ def test_slot_adapter_failure_becomes_request_local_unresolved_evidence() -> Non
     )
 
 
+def test_a_lost_provider_slot_is_recorded_with_its_error_class_only() -> None:
+    """Each slot a failed request leaves unresolved appears once, without free text."""
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(make_plan(), (pattern,))
+    slots = create_slots(_control_structure())
+    target_slot = slots[0]
+    route = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="targeted",
+        slot_ids=(target_slot.slot_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("route",),
+    )
+
+    class TimeoutAdapter:
+        def fill(self, request):
+            raise TimeoutError("slot deadline expired")
+
+    result = fill_synthesis_slots(
+        TimeoutAdapter(),
+        briefs=briefs,
+        routes=(route,),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+    )
+
+    lost = result.lost_slots
+    provider_ids = sorted(
+        slot.slot_id for slot in slots if slot.uca_type.value != "WRONG_DURATION"
+    )
+    assert sorted(item.slot_id for item in lost) == provider_ids
+    assert {item.error_class for item in lost} == {"TimeoutError"}
+    assert all(item.call_id.startswith("stpa-slot:") for item in lost)
+    assert "deadline" not in repr(lost)
+
+
+def test_a_filled_run_records_no_lost_slot() -> None:
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(make_plan(), (pattern,))
+
+    class Adapter:
+        def fill(self, request):
+            return SynthesisSlotResponse(
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                filled_slots=tuple(
+                    _routed_slot_draft(item, []) for item in request.slots
+                ),
+            )
+
+    result = fill_synthesis_slots(
+        Adapter(),
+        briefs=briefs,
+        routes=(),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+    )
+
+    assert result.lost_slots == ()
+
+
 def test_a_slot_the_code_decides_is_never_sent_to_the_adapter() -> None:
     """A duration slot on an action without duration costs no request."""
     pattern = AttackPattern.model_validate(get_test_raw_pattern())

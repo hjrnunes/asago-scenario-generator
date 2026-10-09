@@ -103,6 +103,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
+    SlotLoss,
     SynthesisSlotFillResult,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
@@ -765,6 +766,37 @@ def test_manifest_call_count_sums_requests_sent_including_zero() -> None:
         3,
         0,
     ]
+
+
+def test_manifest_lists_lost_slots_only_when_a_stage_lost_one() -> None:
+    lost = (
+        SlotLoss(
+            slot_id="S-1",
+            target_id="RESP-1",
+            error_class="TimeoutError",
+            call_id="stpa-slot:RESP-1",
+        ),
+    )
+
+    result = _manifest_provider_evidence(
+        {
+            "ica": SimpleNamespace(call_evidence=(), lost_slots=lost),
+            "revision": SimpleNamespace(call_evidence=()),
+            "consideration_initial": SimpleNamespace(call_evidence=(), lost_slots=()),
+        },
+        SimpleNamespace(profile="synthesis"),
+    )
+
+    assert result["ica"]["lost_slots"] == [
+        {
+            "slot_id": "S-1",
+            "target_id": "RESP-1",
+            "error_class": "TimeoutError",
+            "call_id": "stpa-slot:RESP-1",
+        }
+    ]
+    assert "lost_slots" not in result["revision"]
+    assert "lost_slots" not in result["consideration_initial"]
 
 
 def test_call_evidence_attempt_count_is_a_non_negative_request_count() -> None:

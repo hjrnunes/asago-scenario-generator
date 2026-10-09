@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import re
 from typing import Any, Literal, cast
 
@@ -42,6 +42,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SlotIcaDraft,
     SlotProviderEntry,
     SlotAnalysisAdapter,
+    SlotLoss,
     SynthesisSlotFillResult,
     SynthesisSlotRequest,
     SynthesisSlotResponse,
@@ -923,6 +924,9 @@ def _record_unresolved_slot_fallbacks(
     *,
     all_filled: dict[str, ICASlot],
     successful_slots: set[str] | None,
+    lost: dict[str, SlotLoss] | None = None,
+    error_class: str = "unknown",
+    call_ref: str = "",
 ) -> None:
     """Materialize unresolved provider slots as typed unresolved values."""
     for slot in request.slots:
@@ -932,6 +936,13 @@ def _record_unresolved_slot_fallbacks(
         if successful_slots is not None and slot_id in successful_slots:
             continue
         all_filled[slot_id] = _fallback_slot(slot, detail)
+        if lost is not None:
+            lost[slot_id] = SlotLoss(
+                slot_id=slot_id,
+                target_id=request.target_id,
+                error_class=error_class,
+                call_id=call_ref,
+            )
 
 
 def _record_unresolved_pairs(
@@ -965,6 +976,7 @@ def _record_request_unresolved(
     successful_slots: set[str] | None = None,
     error: BaseException | None = None,
     requests_sent: int,
+    lost: dict[str, SlotLoss] | None = None,
 ) -> None:
     """Retain one failed target request as unresolved local evidence."""
     diagnostics.append(
@@ -974,13 +986,16 @@ def _record_request_unresolved(
             refs=(request.target_id,),
         )
     )
+    call_ref = call_ref or f"stpa-slot:{request.target_id}"
     _record_unresolved_slot_fallbacks(
         request,
         detail,
         all_filled=all_filled,
         successful_slots=successful_slots,
+        lost=lost,
+        error_class="unknown" if error is None else type(error).__name__,
+        call_ref=call_ref,
     )
-    call_ref = call_ref or f"stpa-slot:{request.target_id}"
     evidence.append(
         call_evidence(
             call_ref,
@@ -1087,6 +1102,11 @@ class SlotFillRunResult:
         return self.result.ica_hazard_verification
 
     @property
+    def lost_slots(self) -> tuple[SlotLoss, ...]:
+        """Expose the provider-owned slots that ended unresolved."""
+        return self.result.lost_slots
+
+    @property
     def call_evidence(self) -> tuple[Any, ...]:
         """Expose slot and independent-verifier call evidence together."""
         values = list(self.result.call_evidence)
@@ -1113,6 +1133,7 @@ class _SlotFillState:
     evidence: list[ConsiderationCallEvidence]
     diagnostics: list[ConsiderationDiagnostic]
     requests_sent: int = 0  # for the target request being processed
+    lost: dict[str, SlotLoss] = field(default_factory=dict)
 
 
 def _initial_slot_fill_state(
@@ -1354,6 +1375,7 @@ def _fill_missing_request_slots(
     request: SynthesisSlotRequest,
     by_id: Mapping[str, ICASlot],
     state: _SlotFillState,
+    call_ref: str,
 ) -> None:
     """Fill provider-owned slots omitted by a successful response."""
     for slot in request.slots:
@@ -1361,12 +1383,18 @@ def _fill_missing_request_slots(
             continue
         if not _requires_provider_slot_analysis(slot):
             continue
-        state.all_filled[slot.slot_id] = by_id.get(
-            slot.slot_id,
-            _fallback_slot(
+        returned = by_id.get(slot.slot_id)
+        if returned is None:
+            state.lost[slot.slot_id] = SlotLoss(
+                slot_id=slot.slot_id,
+                target_id=request.target_id,
+                error_class="slot_omitted_from_response",
+                call_id=call_ref,
+            )
+            returned = _fallback_slot(
                 slot, "No valid slot result was returned by the bounded adapter."
-            ),
-        )
+            )
+        state.all_filled[slot.slot_id] = returned
 
 
 def _validate_request_slots(
@@ -1425,6 +1453,7 @@ def _record_request_failure(
         successful_slots=state.successful_slots,
         error=error,
         requests_sent=state.requests_sent,
+        lost=state.lost,
     )
 
 
@@ -1546,7 +1575,7 @@ def _process_valid_response(
         )
         return
     part_fills = _later_part_fills(by_id, state)
-    _fill_missing_request_slots(request, by_id, state)
+    _fill_missing_request_slots(request, by_id, state, call_ref)
     validation_error = _validate_request_slots(
         request,
         state,
@@ -1700,6 +1729,7 @@ def fill_synthesis_slots(
         requests=requests,
         call_evidence=tuple(state.evidence),
         diagnostics=tuple(state.diagnostics),
+        lost_slots=tuple(state.lost.values()),
     )
     return SlotFillRunResult(result=final)
 
