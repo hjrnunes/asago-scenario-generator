@@ -247,6 +247,38 @@ def test_reference_type_and_effect_values_stay_as_written_for_assembly() -> None
     assert responsibility.feedback_channels[0].source.type == "user_message"
 
 
+def test_a_text_where_an_object_belongs_is_corrected_without_a_class_name(
+    tmp_path: Path,
+) -> None:
+    provider = _ScriptedProvider(
+        [
+            {
+                **_EMPTY_DELTA,
+                "new_responsibilities": ["RESP-5"],
+                "modified_responsibilities": ["RESP-1"],
+            },
+            _EMPTY_DELTA,
+        ]
+    )
+
+    run_revision(
+        llm_client=provider,
+        control_structure=_make_control_structure(),
+        critic_findings=CriticFindings(),
+        use_case_text="An offline controlled process",
+        run_dir=tmp_path,
+    )
+
+    correction = provider.requests[1]["user_prompt"]
+    assert (
+        "- new_responsibilities.0: Input should be an object (model_type)" in correction
+    )
+    assert "- modified_responsibilities.0: Input should be an object (model_type)" in (
+        correction
+    )
+    assert "_Revision" not in correction
+
+
 @pytest.mark.parametrize(
     "payloads, failed",
     [

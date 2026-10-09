@@ -734,8 +734,9 @@ class CorrectionPolicy:
     ``validation_retries`` correction requests: the original prompt plus
     ``feedback``, the prior response when ``include_response``, the exact
     error, and the response schema when ``include_schema``.  ``feedback`` is
-    text, or a function from the failure to the text.  Every other failure
-    ends the call.
+    text, or a function from the failure to the text.  ``error_note`` is a
+    function from the failure to a note placed right after the exact error;
+    an empty note adds nothing.  Every other failure ends the call.
     """
 
     json_retries: int = 0
@@ -743,6 +744,7 @@ class CorrectionPolicy:
     feedback: str | Callable[[Exception], str] | None = None
     include_schema: bool = True
     include_response: bool = False
+    error_note: Callable[[Exception], str] | None = None
 
     def __post_init__(self) -> None:
         if self.json_retries < 0 or self.validation_retries < 0:
@@ -821,6 +823,7 @@ def correction_prompt(
     include_schema: bool,
     prior_result: LLMResult | None = None,
     include_prior_response: bool = False,
+    error_note: str = "",
 ) -> str:
     """Build a bounded correction prompt with field-specific validation errors."""
     suffix = feedback or ""
@@ -834,6 +837,8 @@ def correction_prompt(
         "\n\nExact validation error from the prior response:\n"
         f"{compact_validation_error(error)}"
     )
+    if error_note:
+        suffix += f"\n\n{error_note}"
     if include_schema:
         schema = json.dumps(
             response_format.model_json_schema(),
@@ -872,9 +877,20 @@ def _validation_error_lines(error: ValidationError) -> list[str]:
     items = error.errors(include_url=False, include_context=False, include_input=False)
     return [
         f"- {'.'.join(str(part) for part in item['loc']) or 'response'}: "
-        f"{item['msg']} ({item['type']})"
+        f"{_model_facing_message(item)} ({item['type']})"
         for item in items[:8]
     ]
+
+
+def _model_facing_message(item: Mapping[str, Any]) -> str:
+    """Return the error message with no private wire class name in it.
+
+    Pydantic words a ``model_type`` failure as "... or instance of <Class>",
+    and the class is an internal wire model the response never mentions.
+    """
+    if item["type"] == "model_type":
+        return "Input should be an object"
+    return str(item["msg"])
 
 
 def _truncated(message: str, limit: int) -> str:
@@ -1197,6 +1213,7 @@ def call_with_policy(
                     include_schema=policy.include_schema,
                     prior_result=state.result,
                     include_prior_response=policy.include_response,
+                    error_note=policy.error_note(exc) if policy.error_note else "",
                 )
                 continue
             return CallOutcome(

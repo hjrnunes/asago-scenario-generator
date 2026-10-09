@@ -323,6 +323,18 @@ def _validation_error() -> ValidationError:
     raise AssertionError("expected a validation error")
 
 
+class _ParentModel(BaseModel):
+    child: _SampleModel
+
+
+def _model_type_error() -> ValidationError:
+    try:
+        _ParentModel.model_validate({"child": "not an object"})
+    except ValidationError as exc:
+        return exc
+    raise AssertionError("expected a validation error")
+
+
 @pytest.mark.parametrize(
     ("error", "expected"),
     [
@@ -331,6 +343,10 @@ def _validation_error() -> ValidationError:
             "ValidationError:\n- name: Field required (missing)\n"
             "- value: Input should be a valid integer, unable to parse string as an"
             " integer (int_parsing)",
+        ),
+        (
+            _model_type_error(),
+            "ValidationError:\n- child: Input should be an object (model_type)",
         ),
         (
             json.JSONDecodeError("Expecting value", "{x", 1),
@@ -344,7 +360,15 @@ def _validation_error() -> ValidationError:
         (RuntimeError("z" * 801), "RuntimeError: " + "z" * 797 + "..."),
         (RuntimeError("a\n  b"), "RuntimeError: a b"),
     ],
-    ids=["validation", "json", "exact-long", "exact", "generic-long", "generic"],
+    ids=[
+        "validation",
+        "model-type",
+        "json",
+        "exact-long",
+        "exact",
+        "generic-long",
+        "generic",
+    ],
 )
 def test_compact_validation_error_describes_each_error_kind(
     error: Exception, expected: str
@@ -397,6 +421,37 @@ class TestCallWithPolicy:
         assert client.prompts[1].startswith("Return JSON. Fix it.")
         assert "malformed source ID" in client.prompts[1]
         assert "Expected response schema" not in client.prompts[1]
+
+    def test_an_error_note_follows_the_field_lines_of_the_correction(
+        self, tmp_path
+    ) -> None:
+        client = ScriptedClient([{"item_id": "malformed"}, {"item_id": "ok"}])
+        policy = CorrectionPolicy(
+            validation_retries=1,
+            include_schema=False,
+            error_note=lambda error: f"Note for {type(error).__name__}.",
+        )
+
+        _send(client, tmp_path, policy=policy)
+
+        tail = client.prompts[1].split(
+            "Exact validation error from the prior response:\n"
+        )[1]
+        assert tail.index("- item_id:") < tail.index("Note for ValidationError.")
+        assert tail.index("Note for ValidationError.") < tail.index(
+            "Return one JSON object"
+        )
+
+    def test_a_correction_without_an_error_note_adds_nothing(self, tmp_path) -> None:
+        client = ScriptedClient([{"item_id": "malformed"}, {"item_id": "ok"}])
+        policy = CorrectionPolicy(validation_retries=1, include_schema=False)
+
+        _send(client, tmp_path, policy=policy)
+
+        assert client.prompts[1].endswith(
+            "(value_error)\n\nReturn one JSON object matching the response schema "
+            "already supplied."
+        )
 
     def test_undecodable_bodies_repeat_the_prompt_until_exhausted(
         self, tmp_path

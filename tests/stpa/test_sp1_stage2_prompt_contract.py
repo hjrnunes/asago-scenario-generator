@@ -20,10 +20,13 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
+    RequirementSet,
     ResponsibilitySet,
     UnknownReferenceError,
     _INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
+    _call_2a_responsibilities,
     _call_2b_control_elements,
+    _top_level_responsibility_note,
     _assemble_control_structure,
     _enrich_responsibilities,
     _validate_responsibility_wire,
@@ -34,7 +37,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.stpa.sp1_helpers import MockLLMClient
+from tests.stpa.sp1_helpers import MockLLMClient, valid_responsibility_set_dict
 
 
 def _responsibilities() -> ResponsibilitySet:
@@ -806,6 +809,111 @@ def test_responsibility_parser_rejects_fields_it_would_drop(
 def test_responsibility_parser_rejects_a_non_object_response() -> None:
     with pytest.raises(ValidationError):
         _validate_responsibility_wire("not an object")
+
+
+_BARE_OBJECT_HINT = (
+    "Return one object with a `responsibilities` list; do not return a single "
+    "responsibility as the top-level object."
+)
+
+
+def _run_call_2a(client: MockLLMClient, tmp_path) -> ResponsibilitySet:
+    return _call_2a_responsibilities(
+        llm_client=client,
+        use_case_text="Test use case",
+        requirement_set=RequirementSet(
+            requirements=[
+                {
+                    "req_id": "REQ-1",
+                    "description": "Check the actor",
+                    "classification": "control",
+                    "source_constraint": "SC-1",
+                }
+            ]
+        ),
+        run_dir=tmp_path,
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0.4,
+    )
+
+
+def _wrapped_with(**extra) -> dict:
+    return {"responsibilities": [_entry()], **extra}
+
+
+def _flat_responsibility() -> dict:
+    """One responsibility's fields, as a reply writes them at the top level."""
+    fields = _entry()
+    fields["resp_id"] = fields.pop("id")
+    return fields
+
+
+@pytest.mark.parametrize(
+    ("reply", "hinted"),
+    [
+        (_entry(), True),
+        (_flat_responsibility(), True),
+        (_wrapped_with(**_flat_responsibility()), True),
+        (_wrapped_with(status="success"), False),
+        (_wrapped_with(**_flat_responsibility(), status="success"), False),
+        ({"status": "success"}, False),
+        ({}, False),
+        ({"responsibilities": []}, False),
+        ({"responsibilities": [_entry(notes="keep")]}, False),
+    ],
+    ids=[
+        "bare-with-generic-id",
+        "bare-with-resp-id",
+        "responsibility-fields-beside-the-list",
+        "stray-status",
+        "responsibility-field-and-stray-status",
+        "only-stray-status",
+        "empty-object",
+        "empty-list",
+        "unknown-field-inside-an-entry",
+    ],
+)
+def test_call2a_correction_hints_only_at_a_responsibility_as_the_top_level_object(
+    tmp_path, reply: dict, hinted: bool
+) -> None:
+    client = MockLLMClient()
+    client.set_response_for(ResponsibilitySet, [reply, valid_responsibility_set_dict()])
+
+    _run_call_2a(client, tmp_path)
+
+    first, correction = client.calls[0], client.calls[1].user_prompt
+    assert (_BARE_OBJECT_HINT in correction) is hinted
+    assert _BARE_OBJECT_HINT not in first.user_prompt
+    assert _BARE_OBJECT_HINT not in first.system_prompt
+    if hinted:
+        errors = correction.split("Exact validation error from the prior response:\n")[
+            1
+        ]
+        assert errors.index("Extra inputs are not permitted") < errors.index(
+            _BARE_OBJECT_HINT
+        )
+        assert errors.index(_BARE_OBJECT_HINT) < errors.index("Return one JSON object")
+
+
+def test_call2a_note_is_empty_for_a_failure_that_is_not_a_wire_error() -> None:
+    assert _top_level_responsibility_note(ValueError("boom")) == ""
+
+
+def test_call2a_recorded_status_reply_keeps_its_correction_text(tmp_path) -> None:
+    client = MockLLMClient()
+    client.set_response_for(
+        ResponsibilitySet,
+        [_wrapped_with(status="success"), valid_responsibility_set_dict()],
+    )
+
+    _run_call_2a(client, tmp_path)
+
+    assert client.calls[1].user_prompt.endswith(
+        "Exact validation error from the prior response:\n"
+        "ValidationError:\n"
+        "- status: Extra inputs are not permitted (extra_forbidden)\n\n"
+        "Return one JSON object matching the response schema already supplied."
+    )
 
 
 def _invented_reference_payload() -> dict:
