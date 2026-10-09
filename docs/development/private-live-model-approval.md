@@ -102,6 +102,35 @@ and model for scenario generation and artifact authoring, with a 65,536-token
 context and a 16,384-token completion cap. Discovery, the target agents, and the
 semantic judge keep the unchanged `gemma4-oc` profile.
 
+## EnMaaS GLM 5.3 for all roles
+
+Approval recorded: 2026-10-09 (Europe/Zurich).
+
+The project owner approved sending the project data listed in this document to
+the internal EnMaaS model gateway selected by the `glm53-enmaas` model profile
+(GLM 5.3, model `rits/zai-org/glm-5-3`). The approval covers every role:
+discovery, scenario generation, artifact authoring, the target agents and the
+target gateway during execution against the local safe targets, and the
+semantic judge. The owner asked that its first use wait until the running
+comparison batch (B2) and the Stage 5 demotion change have been read.
+
+The gateway serves OpenAI-compatible chat completions with a Bearer key. The
+model has a 262,144-token context and a 65,536-token output limit, and it
+accepts text only. The profile sets a 16,384-token completion cap, temperature
+1.0, top_p 0.95, and `reasoning_effort: medium`, the effort the gateway's
+instructions require. Leave the frequency and presence penalties at 0: the
+gateway's instructions report that penalties make GLM drift into Chinese. The
+gateway's model list omits GLM, so do not use the list to check that the model
+exists. Keep the endpoint and the key in the local model profile; do not print
+or commit them. This approval does not cover real customer data, publication,
+or the other models the gateway serves.
+
+GLM reasons by default; the Gemma and Qwen profiles run with thinking off (see
+the next section). On 2026-10-09
+a schema-bound request with the strict JSON response schema decoded at effort
+medium, and effort `low` returned no reasoning tokens. No pipeline batch has
+measured GLM yet.
+
 ## Thinking-mode limits
 
 Run Gemma and Qwen pipeline roles with thinking off. Qwen fails with thinking
