@@ -58,6 +58,19 @@ def reasoning_completion_cap(
     return max(requested, profile_cap)
 
 
+def _check_profile_fields(profile: dict[str, Any], profile_name: str) -> None:
+    unknown = sorted(str(key) for key in profile if key not in _ALLOWED_FIELDS)
+    if unknown:
+        raise ValueError(
+            f"Profile '{profile_name}' has unknown field(s): {', '.join(unknown)}"
+        )
+    for field in REQUIRED_FIELDS:
+        if profile.get(field) in (None, ""):
+            raise ValueError(
+                f"Profile '{profile_name}' is missing required field '{field}'"
+            )
+
+
 def load_profile(profiles_path: Path | str, profile_name: str) -> dict[str, Any]:
     """Load a named profile from a YAML profiles file.
 
@@ -90,16 +103,7 @@ def load_profile(profiles_path: Path | str, profile_name: str) -> dict[str, Any]
     profile = raw[profile_name]
     if not isinstance(profile, dict):
         raise ValueError(f"Profile '{profile_name}' in {path} is not a mapping")
-    unknown = sorted(str(key) for key in profile if key not in _ALLOWED_FIELDS)
-    if unknown:
-        raise ValueError(
-            f"Profile '{profile_name}' has unknown field(s): {', '.join(unknown)}"
-        )
-    for field in REQUIRED_FIELDS:
-        if profile.get(field) in (None, ""):
-            raise ValueError(
-                f"Profile '{profile_name}' is missing required field '{field}'"
-            )
+    _check_profile_fields(profile, profile_name)
     return {
         field: profile[field]
         for field in (*REQUIRED_FIELDS, *OPTIONAL_FIELDS)
