@@ -10,6 +10,7 @@ beside a slip, and a cross-class citation.
 
 from __future__ import annotations
 
+import yaml
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
@@ -25,6 +26,7 @@ from tests.stpa.test_stated_rule_coverage import (
     FEE_FINDING,
     USE_CASE,
     _analysis,
+    _gate,
 )
 
 BAD_SPAN = "this text is not in the rule"
@@ -173,3 +175,60 @@ class TestDropRebuildKeepsTheAddOnlyFilter:
 
         assert revised.hazards != prior.hazards
         assert revised.hazards[1].description == _edited_hazard()["description"]
+
+
+def _gate_round(tmp_path, replies, analysis=None, check=None):
+    client = MockLLMClient()
+    client.set_response_for(_Stage1aRevisionPatch, replies)
+    prior = analysis or _analysis()
+    outcome = _gate(client, tmp_path, prior, (FEE_FINDING,), check=check)
+    return prior, outcome, client
+
+
+def _artifact(tmp_path) -> dict:
+    return yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+
+
+class TestRuleRoundDropsUnquotedRecords:
+    """A rule_span slip that survives the correction no longer voids the round."""
+
+    def _slipping(self) -> dict:
+        return _patch(
+            hazards=[_hazard("fee_hazard", "The agent quotes an unapproved fee.")],
+            additions=[
+                _addition("fee_rule", FEE_CONSTRAINT, ["H-2"], span=FEE_SPAN),
+                _addition(
+                    "slipping",
+                    "The agent must cite policies.",
+                    ["fee_hazard"],
+                    span=BAD_SPAN,
+                ),
+            ],
+        )
+
+    def test_the_valid_addition_is_kept_after_the_correction(self, tmp_path) -> None:
+        prior, outcome, client = _gate_round(
+            tmp_path, [self._slipping(), self._slipping()]
+        )
+
+        revision = outcome.stated_rule_revision
+        assert revision.applied is True
+        assert revision.call_count == 2
+        assert len(client.calls) == 2
+        assert outcome.loss_analysis.hazards == prior.hazards
+        added = outcome.loss_analysis.security_constraints[2:]
+        assert [c.rule for c in added] == [FEE_CONSTRAINT]
+
+    def test_a_round_with_nothing_valid_left_keeps_the_unrevised_graph(
+        self, tmp_path
+    ) -> None:
+        only_slip = _patch(
+            additions=[_addition("slipping", FEE_CONSTRAINT, ["H-2"], span=BAD_SPAN)]
+        )
+        prior, outcome, _ = _gate_round(tmp_path, [only_slip, only_slip])
+
+        assert outcome.loss_analysis == prior
+        assert outcome.stated_rule_revision.applied is False
+        assert "graph revision call failed" in (
+            outcome.stated_rule_revision.error or ""
+        )

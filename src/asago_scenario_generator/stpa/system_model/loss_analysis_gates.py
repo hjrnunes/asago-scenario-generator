@@ -2231,6 +2231,7 @@ def _run_stated_rule_revision(
                 attempts_out=attempts,
                 stated_rules=findings,
                 addition_only=True,
+                drop_unquoted_spans=True,
             )
     except Exception as exc:  # noqa: BLE001 - this revision is advisory
         _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
