@@ -27,6 +27,7 @@ from tests.stpa.test_stated_rule_coverage import (
     FEE_FINDING,
     USE_CASE,
     _analysis,
+    _edit,
     _gate,
 )
 
@@ -231,6 +232,60 @@ class TestRuleRoundDropsUnquotedRecords:
         assert outcome.loss_analysis == prior
         assert outcome.stated_rule_revision.applied is False
         assert "graph revision call failed" in (
+            outcome.stated_rule_revision.error or ""
+        )
+
+
+class TestRuleRoundKeepsWhatIsValidBesideASlip:
+    """The drop leaves valid edits and additions alone and rejects an empty remainder."""
+
+    def test_a_valid_extension_beside_a_slipping_addition_is_kept(
+        self, tmp_path
+    ) -> None:
+        rule = (
+            "The agent must preserve user trust and must not quote fees "
+            "outside the approved fee table."
+        )
+        reply = _edit(rule=rule)
+        reply["security_constraint_additions"] = [
+            _addition(
+                "slipping", "The agent must cite policies.", ["H-2"], span=BAD_SPAN
+            )
+        ]
+
+        prior, outcome, _ = _gate_round(tmp_path, [reply, reply])
+
+        assert outcome.stated_rule_revision.applied is True
+        assert outcome.loss_analysis.security_constraints[1].rule == rule
+        assert len(outcome.loss_analysis.security_constraints) == len(
+            prior.security_constraints
+        )
+
+    def test_a_remainder_the_add_only_filter_empties_keeps_the_unrevised_graph(
+        self, tmp_path
+    ) -> None:
+        reply = _patch(
+            hazard_edits=[_edited_hazard()],
+            additions=[_addition("slipping", FEE_CONSTRAINT, ["H-2"], span=BAD_SPAN)],
+        )
+
+        prior, outcome, _ = _gate_round(tmp_path, [reply, reply])
+
+        assert outcome.loss_analysis == prior
+        assert outcome.stated_rule_revision.applied is False
+        assert "graph revision call failed" in (
+            outcome.stated_rule_revision.error or ""
+        )
+
+    def test_a_check_that_raises_rejects_the_round(self, tmp_path) -> None:
+        def broken(_revised):
+            raise ZeroDivisionError("remap")
+
+        clean = _patch(additions=[_addition("fee_rule", FEE_CONSTRAINT, ["H-2"])])
+        prior, outcome, _ = _gate_round(tmp_path, [clean], check=broken)
+
+        assert outcome.loss_analysis == prior
+        assert "revision check failed: ZeroDivisionError" in (
             outcome.stated_rule_revision.error or ""
         )
 
@@ -460,3 +515,32 @@ class TestRuleRoundRequestCarriesTheCitationInstructions:
         [call] = client.calls
         assert self.CITE not in " ".join(call.system_prompt.split())
         assert self.COPY not in " ".join(call.system_prompt.split())
+
+
+class TestRuleRoundLeavesOtherOwnershipFailuresAlone:
+    def test_classes_that_share_a_new_hazard_are_not_trimmed(self, tmp_path) -> None:
+        # Neither addition cites a hazard another class owns, so nothing is
+        # trimmed and the ownership failure stands.
+        reply = _patch(
+            hazards=[_hazard("fee_hazard", "The agent quotes an unapproved fee.")],
+            additions=[
+                _addition(
+                    "first",
+                    FEE_CONSTRAINT,
+                    ["fee_hazard"],
+                    behavior_class="wrong_information",
+                ),
+                _addition(
+                    "second",
+                    "The agent must not reveal fee internals.",
+                    ["fee_hazard"],
+                    behavior_class="manipulation",
+                ),
+            ],
+        )
+
+        prior, outcome, _ = _gate_round(tmp_path, [reply], _classed_analysis())
+
+        assert outcome.loss_analysis == prior
+        assert "has no hazard of its own" in (outcome.stated_rule_revision.error or "")
+        assert "dropped_records" not in _artifact(tmp_path)["revision_rounds"][-1]

@@ -62,6 +62,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _ProviderObligation,
     _RevisionConstraintAddition,
     _RevisionConstraintEdit,
+    _RevisionHazardAddition,
     _RevisionHazardEdit,
     _Stage1aRevisionPatch,
 )
@@ -2271,16 +2272,7 @@ def _run_stated_rule_revision(
     dropped = [*attempts[-1].dropped, *trimmed]
     if dropped:
         record["dropped_records"] = dropped
-    reason: str | None = None
-    if not revised_density.passed:
-        reason = "revision broke structural checks: " + "; ".join(
-            revised_density.failing_checks
-        )
-    elif check is not None:
-        try:
-            reason = check(revised)
-        except Exception as exc:  # noqa: BLE001 - this revision is advisory
-            reason = f"revision check failed: {type(exc).__name__}: {exc}"
+    reason = _revision_rejection(revised, revised_density, check)
     _record_revision_span_repairs(
         repair_record, run_dir, attempts, accepted=reason is None
     )
@@ -2301,6 +2293,22 @@ def _run_stated_rule_revision(
         record,
         warnings,
     )
+
+
+def _revision_rejection(
+    revised: LossAnalysis,
+    density: HazardGraphDensityReport,
+    check: StatedRuleCheck | None,
+) -> str | None:
+    """Why the stated-rule round's graph is rejected, or ``None`` to keep it."""
+    if not density.passed:
+        return "revision broke structural checks: " + "; ".join(density.failing_checks)
+    if check is None:
+        return None
+    try:
+        return check(revised)
+    except Exception as exc:  # noqa: BLE001 - this revision is advisory
+        return f"revision check failed: {type(exc).__name__}: {exc}"
 
 
 def _fails_only_class_ownership(report: HazardGraphDensityReport) -> bool:
@@ -2338,6 +2346,27 @@ def _trimmed_graph(
     )
 
 
+def _cross_class_hazards(
+    constraint: SecurityConstraint, sole: dict[str, str]
+) -> list[str]:
+    """The hazards *constraint* cites that a different class cites alone."""
+    declared = _declared_class(constraint)
+    return [h for h in constraint.related_hazards if sole.get(h, declared) != declared]
+
+
+def _cross_class_record(
+    constraint_id: str, clashes: list[str], sole: dict[str, str]
+) -> dict:
+    owners = ", ".join(sorted({sole[h] for h in clashes}))
+    return {
+        "record": "security_constraint_addition",
+        "constraint_id": constraint_id,
+        "error": f"it cites hazard {', '.join(clashes)}, which {owners} "
+        "constraints cite alone, so the revised graph leaves that behavior "
+        "class without a hazard of its own",
+    }
+
+
 def _trim_cross_class_additions(
     prior: LossAnalysis, revised: LossAnalysis
 ) -> tuple[LossAnalysis, list[dict]]:
@@ -2353,26 +2382,12 @@ def _trim_cross_class_additions(
     dropped: list[dict] = []
     cited_by_dropped: set[str] = set()
     for constraint in revised.security_constraints:
-        declared = _declared_class(constraint)
-        clashes = [
-            hazard_id
-            for hazard_id in constraint.related_hazards
-            if sole.get(hazard_id, declared) != declared
-        ]
+        clashes = _cross_class_hazards(constraint, sole)
         if constraint.constraint_id in prior_ids or not clashes:
             kept.append(constraint)
             continue
         cited_by_dropped.update(constraint.related_hazards)
-        dropped.append(
-            {
-                "record": "security_constraint_addition",
-                "constraint_id": constraint.constraint_id,
-                "error": f"it cites hazard {', '.join(clashes)}, which "
-                f"{', '.join(sorted({sole[h] for h in clashes}))} constraints "
-                "cite alone, so the revised graph leaves that behavior class "
-                "without a hazard of its own",
-            }
-        )
+        dropped.append(_cross_class_record(constraint.constraint_id, clashes, sole))
     if not dropped:
         return revised, []
     still_cited = {h for c in kept for h in c.related_hazards}
@@ -2675,24 +2690,22 @@ def _without_unquoted_records(
                     "error": error,
                 }
             )
-    still_cited = {
-        hazard
-        for record in (*kept_additions, *kept_edits)
-        for hazard in record.related_hazards
-    }
+    still_cited = {h for r in (*kept_additions, *kept_edits) for h in r.related_hazards}
     orphaned = cited_by_dropped - still_cited
     reduced = patch.model_copy(
         update={
-            "hazard_additions": [
-                hazard
-                for hazard in patch.hazard_additions
-                if hazard.handle not in orphaned
-            ],
+            "hazard_additions": _hazards_not_in(patch.hazard_additions, orphaned),
             "security_constraint_additions": kept_additions,
             "security_constraint_edits": kept_edits,
         }
     )
     return reduced, dropped
+
+
+def _hazards_not_in(
+    additions: list[_RevisionHazardAddition], handles: set[str]
+) -> list[_RevisionHazardAddition]:
+    return [hazard for hazard in additions if hazard.handle not in handles]
 
 
 def _has_records(patch: _Stage1aRevisionPatch) -> bool:
