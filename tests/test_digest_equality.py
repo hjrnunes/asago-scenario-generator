@@ -6,7 +6,16 @@ capability profile, its target's qualification facts and reviewed risk
 records (only the fields ``load_reviewed_risk_extraction`` reads), the shared
 SSSOM file, and every ``scenario_context.semantic_digest`` payload a strict
 replay of the unit computed. ``expected.json`` holds the recorded plan's
-sha256, semantic digest and candidate IDs, and the bundled taxonomy pins.
+sha256, semantic digest and candidate IDs, the synthesis manifest's
+``taxonomy_inputs_digest``, and the bundled taxonomy pins.
+
+The ``taxonomy_inputs_digest`` values come from the ``synthesis-manifest.yaml``
+of the six ``pp-s3`` strict replays (recorded at ``w4/int-b`` ``9a642ef2``,
+which includes P5-11 ``352cfefa``). The same fixture inputs rebuild them, so
+no extra fixture data exists. The ``pp-int38m`` recordings at ``8e108133``
+predate P5-11 and hold different values for the same inputs, because the
+planner input model dropped its ``compatibility_policy`` field; their plan
+digests are unchanged.
 
 A change to canonical JSON, NFC normalization or digest framing that alters
 any recorded byte fails here. Update the expected values only for an
@@ -37,6 +46,7 @@ from asago_scenario_generator.data.taxonomy_pins import (
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.pipeline.obligation_contracts import (
     QualificationFactsInput,
+    TaxonomyObligationInputs,
 )
 from asago_scenario_generator.pipeline.obligation_planner import (
     plan_taxonomy_obligations,
@@ -45,6 +55,9 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     capture_capability_snapshot,
 )
 from asago_scenario_generator.pipeline.synthesis_baseline import _evaluated_facts
+from asago_scenario_generator.pipeline.synthesis_manifest import (
+    _manifest_artifact_identity,
+)
 from asago_scenario_generator.stpa.models.scenario_context import semantic_digest
 
 FIXTURES = Path(__file__).parent / "fixtures" / "digest_equality"
@@ -66,7 +79,7 @@ def planner_inputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return root
 
 
-def _plan_yaml(unit: str, inputs_root: Path) -> str:
+def _taxonomy_inputs(unit: str, inputs_root: Path) -> TaxonomyObligationInputs:
     target = EXPECTED["units"][unit]["target"]
     profile = CapabilityProfile.model_validate(
         yaml.safe_load((FIXTURES / unit / "capability-profile.yaml").read_text())
@@ -77,7 +90,7 @@ def _plan_yaml(unit: str, inputs_root: Path) -> str:
     risks = tuple(
         load_reviewed_risk_extraction(inputs_root / target / "risk-records.json")
     )
-    inputs = build_taxonomy_inputs(
+    return build_taxonomy_inputs(
         capability_profile=profile,
         capability_snapshot=capture_capability_snapshot(
             profile, _evaluated_facts(facts)
@@ -87,7 +100,10 @@ def _plan_yaml(unit: str, inputs_root: Path) -> str:
         sssom_path=inputs_root / "risk-to-llm.sssom.tsv",
         llm_pattern_path=_DEFAULT_LLM_PATTERN_TABLE,
     )
-    return plan_taxonomy_obligations(inputs).to_yaml()
+
+
+def _plan_yaml(unit: str, inputs_root: Path) -> str:
+    return plan_taxonomy_obligations(_taxonomy_inputs(unit, inputs_root)).to_yaml()
 
 
 def _digest_records(unit: str) -> list[dict[str, Any]]:
@@ -107,6 +123,21 @@ def test_the_rebuilt_plan_keeps_the_recorded_bytes(
     assert (
         sorted(set(re.findall(r"cand:v2:[0-9a-f]{32}", text)))
         == expected["candidate_ids"]
+    )
+
+
+@pytest.mark.parametrize("unit", UNITS)
+def test_the_rebuilt_taxonomy_inputs_keep_the_recorded_manifest_digest(
+    unit: str, planner_inputs: Path
+) -> None:
+    identity = _manifest_artifact_identity(
+        "taxonomy-obligation-inputs",
+        "taxonomy-obligation-inputs-v1",
+        _taxonomy_inputs(unit, planner_inputs),
+    )
+
+    assert (
+        identity["semantic_digest"] == EXPECTED["units"][unit]["taxonomy_inputs_digest"]
     )
 
 
