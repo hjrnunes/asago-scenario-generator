@@ -1111,6 +1111,43 @@ def test_revision_provider_reports_its_validation_retry_as_a_call(
     assert response.provider_calls == 2
 
 
+def test_revision_provider_rejects_a_handle_decided_twice(tmp_path) -> None:
+    """Two decisions for one handle still cover the expected set; they stay invalid."""
+    gap = MissingStructuralConcept(
+        concept_type="responsibility",
+        description="A reviewing responsibility is needed.",
+        evidence_refs=("review-gap",),
+    )
+    controls = _controls()
+    request = StructuralRevisionRequest(
+        gaps=(gap,),
+        baseline_loss_analysis=_loss_analysis(),
+        baseline_control_structure=_control_structure(),
+        controls=controls,
+    )
+
+    class Client:
+        model = "revision-duplicate-test"
+
+        def complete(self, **kwargs):
+            return LLMResult(
+                content={
+                    "draft": {},
+                    "gap_decisions": [_RETRY_DECISION, _RETRY_DECISION],
+                },
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+                system_prompt=kwargs["system_prompt"],
+                user_prompt=kwargs["user_prompt"],
+            )
+
+    with pytest.raises(ValueError, match="unique gap handles"):
+        ObligationAwareLLMAdapter(Client(), run_dir=tmp_path, controls=controls).revise(
+            request
+        )
+
+
 def test_provider_accepts_nested_structured_ica_consideration_results(tmp_path) -> None:
     slot = create_slots(_control_structure())[0]
     obligation_id = "ob:v1:" + "d" * 64
