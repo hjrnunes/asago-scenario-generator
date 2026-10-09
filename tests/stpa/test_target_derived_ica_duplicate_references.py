@@ -147,9 +147,7 @@ class TestProviderCorrection:
 def _realize(tmp_path: Path, client: MockLLMClient, responses: list) -> object:
     client.set_response_queue(responses)
     finder = TargetDerivedICALlmFinder(client, tmp_path, temperature=0.4)
-    return realize_target_derived_icas(
-        _baseline(), _target_extended_result(), lambda: finder
-    )
+    return realize_target_derived_icas(_baseline(), _target_extended_result(), finder)
 
 
 def _decision() -> dict:

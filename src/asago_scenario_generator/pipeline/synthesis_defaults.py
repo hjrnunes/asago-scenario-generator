@@ -423,7 +423,7 @@ def _default_target_realize(
     mapped = realize_target_operations(
         baseline,
         execution_target_profile,
-        lambda: interpreter,
+        interpreter,
         baseline_rows=operation_enrichment.rows,
     )
     finder = TargetDerivedICALlmFinder(
@@ -434,7 +434,7 @@ def _default_target_realize(
     return realize_target_derived_icas(
         baseline,
         mapped,
-        lambda: finder,
+        finder,
     )
 
 
@@ -480,7 +480,7 @@ def _default_enrich_control_actions(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         profile=execution_target_profile,
-        interpreter_factory=lambda: interpreter,
+        interpreter=interpreter,
     )
 
 
