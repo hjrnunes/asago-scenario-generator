@@ -590,7 +590,9 @@ recorded retry after a transport error: an HTTP 5xx status, or a connection
 error that is not a timeout. Timeouts, 4xx statuses, and invalid answers are
 never retried at the transport level. The retry waits one second, appears in
 `provider-calls.jsonl` as its own record marked `retry_of`, and counts as a
-request.
+request. The Stage 1a risk-coverage review adds one step-level exception: it
+repeats a batch once when the reply decodes but carries no row, and counts the
+repeat in its `call_count`.
 
 A producer call count is the number of requests actually sent to the model.
 Retries and correction requests count; a request the prompt preflight blocks

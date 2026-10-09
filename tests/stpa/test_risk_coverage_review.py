@@ -1072,3 +1072,86 @@ class TestNotApplicableReview:
             "missing",
             "disputed_risk_ids",
         }
+
+
+class TestEmptyReplyRetry:
+    """A reply that carries no row for a non-empty batch earns one more request."""
+
+    def test_empty_reply_is_repeated_once_and_the_second_reply_is_used(self, tmp_path):
+        client = MockLLMClient()
+        client.set_response_for(RiskCoverageReview, [{"rows": []}, _valid_rows()])
+
+        outcome = _run_review(tmp_path, client=client)
+
+        assert client.call_count == 2
+        assert outcome.call_count == 2
+        assert outcome.status == "completed"
+        assert client.calls[0].user_prompt == client.calls[1].user_prompt
+        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+        assert artifact["call_count"] == 2
+        assert artifact["rows_missing"] == []
+        attempts = [
+            entry["attempt_number"]
+            for entry in read_calls_jsonl(tmp_path)
+            if entry["step"] == "risk_coverage_review"
+        ]
+        assert attempts == [1, 2]
+
+    def test_second_empty_reply_leaves_the_cards_missing(self, tmp_path):
+        client = MockLLMClient()
+        client.set_response_for(
+            RiskCoverageReview, [{"rows": []}, {"rows": []}, _valid_rows()]
+        )
+
+        outcome = _run_review(tmp_path, client=client)
+
+        assert client.call_count == 2
+        assert outcome.call_count == 2
+        assert outcome.status == "unavailable"
+        assert outcome.failure_reason == (
+            "batch_omitted_cards: risk-a, risk-b, risk-c, risk-d"
+        )
+
+    def test_reply_with_some_rows_is_not_repeated(self, tmp_path):
+        rows = _valid_rows()
+        rows["rows"] = rows["rows"][:3]
+
+        outcome = _run_review(tmp_path, rows=rows)
+
+        assert outcome.call_count == 1
+
+    def test_reply_with_only_an_invalid_row_is_not_repeated(self, tmp_path):
+        rows = _valid_rows()
+        rows["rows"] = [rows["rows"][0]]
+        rows["rows"][0]["evidence"][0]["source_ref"] = "source_999"
+
+        outcome = _run_review(tmp_path, rows=rows)
+
+        assert outcome.call_count == 1
+
+    def test_failed_request_is_not_repeated(self, tmp_path):
+        client = MockLLMClient()
+        client.set_exception_for(RiskCoverageReview, RuntimeError("boom"))
+
+        outcome = _run_review(tmp_path, client=client)
+
+        assert client.call_count == 1
+        assert outcome.call_count == 1
+
+    def test_each_batch_repeats_its_own_empty_reply(self, tmp_path):
+        full = _valid_rows()
+        client = MockLLMClient()
+        client.set_response_for(
+            RiskCoverageReview,
+            [
+                {"rows": full["rows"][:2]},
+                {"rows": []},
+                {"rows": full["rows"][2:]},
+            ],
+        )
+
+        outcome = _run_review(tmp_path, client=client, max_completion_tokens=500)
+
+        assert client.call_count == 3
+        assert outcome.call_count == 3
+        assert outcome.status == "completed"
