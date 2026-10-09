@@ -33,7 +33,7 @@ Set
 `sampling_controls: false` to omit temperature, top-p, top-k, seed, and
 chat-template thinking controls. The client accepts `strict_json_schema` only
 as `false` (or absent); `true` fails at client construction, and run records
-keep `strict_json_schema: false`. Set `json_schema_strict: false` to send the
+do not carry the key. Set `json_schema_strict: false` to send the
 Pydantic schema with `"strict": false`; local Pydantic validation remains
 authoritative. OpenRouter JSON-object and vLLM guided decoding compatibility
 paths are unchanged.

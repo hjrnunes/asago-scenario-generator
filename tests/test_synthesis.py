@@ -739,8 +739,6 @@ def test_synthesis_manifest_retains_taxonomy_pins_and_stage_call_evidence(
         }
     ]
     assert len(manifest["prompt_call_evidence"][0]["response_digest"]) == 64
-    assert manifest["report"]["normative"] is False
-    assert manifest["report"]["digest"] is None
 
 
 def test_manifest_call_count_sums_requests_sent_including_zero() -> None:
@@ -1140,18 +1138,41 @@ def test_synthesis_manifest_keeps_revision_as_compact_evidence_mapping(
     }
 
 
-def test_synthesis_manifest_records_that_no_run_resumes(tmp_path: Path) -> None:
-    """The manifest keeps its resume keys at fixed values."""
+_RETIRED_MANIFEST_KEYS = (
+    "use_case_digest",
+    "risk_set_digest",
+    "capability_profile_digest",
+    "capability_snapshot_digest",
+    "qualification_facts_digest",
+    "taxonomy_inputs_digest",
+    "plan_digest",
+    "baseline_loss_analysis_digest",
+    "baseline_control_structure_digest",
+    "final_loss_analysis_digest",
+    "final_control_structure_digest",
+    "consideration_digest",
+    "ica_enumeration_digest",
+    "accounting_digest",
+    "scenario_realization_digest",
+    "execution_target_profile_digest",
+    "target_realization_digest",
+    "scenario_collection_digest",
+    "resume",
+    "report",
+)
+
+
+def test_synthesis_manifest_names_each_artifact_digest_once(tmp_path: Path) -> None:
+    """The source_artifacts table is the only home of the artifact digests."""
     fake = _FakeAdapters(calls=[])
 
     result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
 
-    assert result.manifest["resume"] == {
-        "requested": False,
-        "state": "not_requested",
-        "reused_stages": [],
-        "checkpoint": None,
-    }
+    manifest = result.manifest
+    assert manifest["schema_version"] == "stpa-synthesis-manifest-v2"
+    assert not set(_RETIRED_MANIFEST_KEYS) & set(manifest)
+    for artifact in ("use_case", "scenario_collection", "taxonomy_obligation_plan"):
+        assert manifest["source_artifacts"][artifact]["semantic_digest"]
 
 
 def test_synthesis_manifest_records_only_the_supplied_model_controls(

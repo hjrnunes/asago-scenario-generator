@@ -224,7 +224,7 @@ def test_strict_json_schema_true_fails_at_client_construction() -> None:
 
 
 @pytest.mark.parametrize("value", [None, False])
-def test_strict_json_schema_false_is_accepted_and_recorded_as_false(value) -> None:
+def test_strict_json_schema_false_is_accepted_and_not_recorded(value) -> None:
     client = _infra_client(strict_json_schema=value)
     client._client.chat.completions.create.return_value = _response(
         '{"required":"ok","nested":{"name":"n"}}'
@@ -235,7 +235,8 @@ def test_strict_json_schema_false_is_accepted_and_recorded_as_false(value) -> No
     sent = client._client.chat.completions.create.call_args.kwargs
     assert sent["response_format"]["json_schema"]["strict"] is True
     assert "default" in str(sent["response_format"]["json_schema"]["schema"])
-    assert result.request_controls["strict_json_schema"] is False
+    assert "strict_json_schema" not in result.request_controls
+    assert result.request_controls["json_schema_strict"] is True
 
 
 def test_non_strict_schema_uses_original_schema_and_local_validation() -> None:

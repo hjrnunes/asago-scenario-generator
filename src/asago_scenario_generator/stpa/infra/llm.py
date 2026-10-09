@@ -533,7 +533,6 @@ class LLMClient:
                 "strict_json_schema: true is not supported; set "
                 "strict_json_schema: false or remove the key from the profile"
             )
-        self.strict_json_schema = False
         self.json_schema_strict = (
             True if json_schema_strict is None else json_schema_strict
         )
@@ -801,7 +800,6 @@ class LLMClient:
             ),
             "service_tier_fallback": self.service_tier_fallback,
             "sampling_controls": self.sampling_controls,
-            "strict_json_schema": self.strict_json_schema,
             "json_schema_strict": self.json_schema_strict,
             "response_schema": (
                 response_format.__name__ if response_format is not None else None
@@ -831,7 +829,6 @@ def effective_model_config(
         "service_tier": getattr(client, "service_tier", None),
         "service_tier_fallback": getattr(client, "service_tier_fallback", None),
         "sampling_controls": getattr(client, "sampling_controls", True),
-        "strict_json_schema": getattr(client, "strict_json_schema", False),
         "json_schema_strict": getattr(client, "json_schema_strict", True),
         "timeout": getattr(client, "timeout", DEFAULT_REQUEST_TIMEOUT_SECONDS),
     }
