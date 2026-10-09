@@ -325,25 +325,20 @@ def _risk_provider_draft_type(
 
 
 class _Stage1aGapRepairDraft(LossAnalysisDraft):
-    """Canonical domain-shaped view used only by the repair adapter."""
+    """Canonical domain-shaped view used only by the repair adapter.
+
+    Every shape rule a repaired draft can break belongs to the domain models;
+    the repair views add only the closed key set and, on the risk wire, the
+    required disposition collection.
+    """
 
     model_config = ConfigDict(extra="forbid")
-
-    @model_validator(mode="after")
-    def validate_current_provider_boundary(self) -> _Stage1aGapRepairDraft:
-        _validate_repair_draft_provider_boundary(self, risk_required=False)
-        return self
 
 
 class _Stage1aRiskRepairDraft(_Stage1aGapRepairDraft):
     """Repair view retaining the risk wire's required disposition collection."""
 
     risk_dispositions: list[RiskDisposition]
-
-    @model_validator(mode="after")
-    def validate_risk_provider_boundary(self) -> _Stage1aRiskRepairDraft:
-        _validate_repair_draft_provider_boundary(self, risk_required=True)
-        return self
 
 
 class _RevisionHazardEdit(BaseModel):
@@ -446,101 +441,6 @@ class _Stage1aRevisionPatch(BaseModel):
     )
 
     model_config = ConfigDict(extra="forbid")
-
-
-def _validate_repair_draft_provider_boundary(
-    draft: LossAnalysisDraft,
-    *,
-    risk_required: bool,
-) -> None:
-    """Validate a repaired canonical draft against the current local wire.
-
-    The targeted-repair module operates on canonical domain rows.  This
-    boundary rebuilds a throwaway local-handle response so the original
-    provider's closed shape and obligation validators still run after the
-    repair, without making canonical IDs acceptable on the live wire.
-    """
-    loss_handles = _local_handles(
-        [*draft.risk_card_losses, *draft.use_case_losses], "loss_id", "loss"
-    )
-    hazard_handles = _local_handles(draft.hazards, "hazard_id", "hazard")
-    constraint_handles = _local_handles(
-        draft.security_constraints, "constraint_id", "constraint"
-    )
-    payload: dict[str, object] = {
-        "risk_card_losses": _local_wire_losses(draft.risk_card_losses, loss_handles),
-        "use_case_losses": _local_wire_losses(draft.use_case_losses, loss_handles),
-        "hazards": [
-            {
-                "handle": hazard_handles[hazard.hazard_id],
-                "description": hazard.description,
-                "related_losses": _mapped_references(
-                    hazard.related_losses, loss_handles
-                ),
-            }
-            for hazard in draft.hazards
-        ],
-        "security_constraints": [
-            {
-                "handle": constraint_handles[constraint.constraint_id],
-                "rule": constraint.rule,
-                "applies_when": constraint.applies_when,
-                "behavior_class": constraint.behavior_class,
-                "obligations": [
-                    obligation.model_dump(mode="json", exclude_none=True)
-                    for obligation in constraint.obligations
-                ],
-                "related_hazards": _mapped_references(
-                    constraint.related_hazards, hazard_handles
-                ),
-            }
-            for constraint in draft.security_constraints
-        ],
-    }
-    if risk_required:
-        payload["risk_dispositions"] = [
-            {
-                "risk_ref": disposition.risk_ref,
-                "disposition": disposition.disposition,
-                "loss_ids": _mapped_references(disposition.loss_ids, loss_handles),
-                **(
-                    {"reason": disposition.reason}
-                    if disposition.reason is not None
-                    else {}
-                ),
-            }
-            for disposition in draft.risk_dispositions
-        ]
-        _Stage1aRiskProviderDraft.model_validate(payload)
-    else:
-        _Stage1aGapProviderDraft.model_validate(payload)
-
-
-def _local_handles(rows: Iterable[Any], id_attr: str, prefix: str) -> dict[str, str]:
-    """Map each canonical ID to a sequential local handle in sorted-ID order."""
-    ordered = sorted(rows, key=lambda item: getattr(item, id_attr))
-    return {
-        getattr(row, id_attr): f"{prefix}_{index}"
-        for index, row in enumerate(ordered, 1)
-    }
-
-
-def _mapped_references(references: Iterable[str], handles: dict[str, str]) -> list[str]:
-    return [handles.get(reference, reference) for reference in references]
-
-
-def _local_wire_losses(
-    losses: Iterable[Any], loss_handles: dict[str, str]
-) -> list[dict[str, object]]:
-    return [
-        {
-            "handle": loss_handles[loss.loss_id],
-            "description": loss.description,
-            "provenance": loss.provenance,
-            "source_risk_cards": loss.source_risk_cards,
-        }
-        for loss in losses
-    ]
 
 
 def _compact_risk_card_evidence(risk_cards: Iterable[RiskCard]) -> list[str]:

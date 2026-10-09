@@ -18,7 +18,6 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.loss_analysis import (
     BEHAVIOR_CLASSES,
     LossAnalysis,
-    LossAnalysisDraft,
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model import loss_analysis_gates as gates
@@ -28,8 +27,6 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _RevisionConstraintAddition,
     _RevisionConstraintEdit,
     _Stage1aRevisionPatch,
-    _Stage1aGapProviderDraft,
-    _validate_repair_draft_provider_boundary,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     UNCLASSIFIED,
@@ -268,29 +265,6 @@ class TestGateUsesTheDeclaredClass:
             assert not hasattr(gates, name)
         root = Path(__file__).resolve().parents[2]
         assert not (root / "data" / "loss-analysis" / "behavior-classes.yaml").exists()
-
-
-class TestRepairBoundary:
-    def test_the_declared_class_reaches_the_rebuilt_wire_payload(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
-        seen: list[dict] = []
-        validate = _Stage1aGapProviderDraft.model_validate
-
-        def spy(payload, *args, **kwargs):
-            seen.append(payload)
-            return validate(payload, *args, **kwargs)
-
-        monkeypatch.setattr(_Stage1aGapProviderDraft, "model_validate", spy)
-        analysis = _analysis(
-            [_constraint("SC-1", ["H-1"], behavior_class="manipulation")],
-            hazard_count=1,
-        )
-        draft = LossAnalysisDraft.model_validate(analysis.model_dump(mode="json"))
-
-        _validate_repair_draft_provider_boundary(draft, risk_required=False)
-
-        assert seen[0]["security_constraints"][0]["behavior_class"] == "manipulation"
 
 
 class TestPrompts:
