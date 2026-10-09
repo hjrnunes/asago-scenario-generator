@@ -29,6 +29,12 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SlotIcaDraft,
     SynthesisSlotRequest,
 )
+from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    mapping_strength_for_brief,
+)
+from asago_scenario_generator.models.obligation_consideration import (
+    ObligationSemanticAssessment,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
@@ -107,6 +113,34 @@ def _controls() -> AnalysisControls:
         model_name="fake-stpa-analyst",
         deadline_seconds=30.0,
         temperature=0.0,
+    )
+
+
+def provider_slot_payload(draft: SlotIcaDraft) -> dict:
+    """Dump a typed slot draft as the provider wire carries it.
+
+    The wire schema gives each finding's ``deviation`` as one string; the typed
+    draft nests it in a type-specific object.
+    """
+    payload = draft.model_dump(mode="json")
+    for wire, typed in zip(payload["findings"], draft.findings, strict=True):
+        wire["deviation"] = typed.deviation.text
+    return payload
+
+
+def route_assessment(
+    brief,
+    *,
+    mechanism: str = "plausible_in_system",
+    risk: str = "supported",
+) -> ObligationSemanticAssessment:
+    """Build the pair judgement a routed brief carries, with its exact strength."""
+    return ObligationSemanticAssessment(
+        mechanism_assessment=mechanism,
+        risk_alignment=risk,
+        mapping_strength=mapping_strength_for_brief(brief),
+        mechanism_rationale="The supplied control path permits the mechanism.",
+        risk_alignment_rationale="The mechanism can realize the reviewed risk.",
     )
 
 

@@ -42,6 +42,7 @@ _DEFAULT_PROHIBITED_FIELD_MARKERS = (
     "provider_call",
     "schema_name",
 )
+_PROHIBITED_FIELD_MESSAGE = "prohibited prompt-view field leaked: {}"
 _LOCAL_PATH_RE = re.compile(
     r"(?:^|[\s\"'=(:])(?:/Users/|/home/|/private/|/var/|/tmp/|"
     r"[A-Za-z]:[\\/]|\\\\)[^\s\"'<>]+"
@@ -371,6 +372,7 @@ def _view_contract_errors(
     prompt_view: Any,
     combined_prompt: str,
     prohibited_fields: Iterable[str] | None,
+    prohibited_exact_keys: Iterable[str],
 ) -> list[str]:
     """Detect metadata, raw mapping, and path leakage in a typed prompt view."""
     marker_source = (
@@ -379,9 +381,12 @@ def _view_contract_errors(
         else prohibited_fields
     )
     markers = tuple(marker.lower() for marker in marker_source)
+    exact_keys = frozenset(prohibited_exact_keys)
     errors: list[str] = []
     for field_path, value in _view_items(prompt_view):
-        errors.extend(_view_item_errors(field_path, value, markers, combined_prompt))
+        errors.extend(
+            _view_item_errors(field_path, value, markers, exact_keys, combined_prompt)
+        )
     errors.extend(
         message
         for pattern, message in _PROMPT_PATH_CHECKS
@@ -396,14 +401,50 @@ _PROMPT_PATH_CHECKS = (
 )
 
 
+def prohibited_view_field_errors(
+    prompt_view: Any,
+    *,
+    prohibited_fields: Iterable[str],
+    prohibited_exact_keys: Iterable[str] = (),
+) -> list[str]:
+    """Report every prompt-view field whose name is prohibited.
+
+    ``prohibited_fields`` match by snake-case word and ``prohibited_exact_keys``
+    by whole field name, anywhere in the view.  The key scan is shared with
+    ``audit_prompt_contract`` so that one implementation decides which names
+    leak.
+    """
+    markers = tuple(marker.lower() for marker in prohibited_fields)
+    exact_keys = frozenset(prohibited_exact_keys)
+    return [
+        _PROHIBITED_FIELD_MESSAGE.format(field_path)
+        for field_path, _value in _view_items(prompt_view)
+        if _is_prohibited_field_path(field_path, markers, exact_keys)
+    ]
+
+
+def _is_prohibited_field_path(
+    field_path: str, markers: tuple[str, ...], exact_keys: frozenset[str]
+) -> bool:
+    """Whether one view path names a prohibited word marker or exact key."""
+    lower_path = field_path.lower()
+    if any(_field_path_has_marker(lower_path, marker) for marker in markers):
+        return True
+    return any(segment in exact_keys for segment in _path_segments(field_path))
+
+
 def _view_item_errors(
-    field_path: str, value: Any, markers: tuple[str, ...], combined_prompt: str
+    field_path: str,
+    value: Any,
+    markers: tuple[str, ...],
+    exact_keys: frozenset[str],
+    combined_prompt: str,
 ) -> list[str]:
     """Detect a prohibited field or raw mapping JSON at one prompt-view path."""
     lower_path = field_path.lower()
     errors: list[str] = []
-    if any(_field_path_has_marker(lower_path, marker) for marker in markers):
-        errors.append(f"prohibited prompt-view field leaked: {field_path}")
+    if _is_prohibited_field_path(field_path, markers, exact_keys):
+        errors.append(_PROHIBITED_FIELD_MESSAGE.format(field_path))
         if isinstance(value, str) and value and value in combined_prompt:
             errors.append(f"prohibited prompt-view value leaked: {field_path}")
     if _is_raw_mapping_text(lower_path, value):
@@ -422,8 +463,14 @@ def _is_raw_mapping_text(lower_path: str, value: Any) -> bool:
 
 def _field_path_has_marker(field_path: str, marker: str) -> bool:
     """Match field-name markers without treating words such as mapping as pins."""
-    segments = tuple(item for item in re.split(r"[.\[\]]+", field_path) if item)
-    return any(_segment_has_marker(segment, marker) for segment in segments)
+    return any(
+        _segment_has_marker(segment, marker) for segment in _path_segments(field_path)
+    )
+
+
+def _path_segments(field_path: str) -> tuple[str, ...]:
+    """Split a view path into its field-name and index segments."""
+    return tuple(item for item in re.split(r"[.\[\]]+", field_path) if item)
 
 
 def _segment_has_marker(segment: str, marker: str) -> bool:
@@ -526,6 +573,7 @@ def _contract_errors(
     selectable_references: Any,
     authoritative_references: Any,
     prohibited_fields: Iterable[str] | None,
+    prohibited_exact_keys: Iterable[str],
     output_schema: Any,
     valid_example: Any,
 ) -> list[str]:
@@ -541,7 +589,9 @@ def _contract_errors(
     errors.extend(handle_errors)
     errors.extend(_selectable_contract_errors(selectable_references))
     errors.extend(
-        _view_contract_errors(prompt_view, combined_prompt, prohibited_fields)
+        _view_contract_errors(
+            prompt_view, combined_prompt, prohibited_fields, prohibited_exact_keys
+        )
     )
     if authoritative_references is not None:
         reference_errors, _authoritative_ids = _reference_contract_errors(
@@ -679,6 +729,7 @@ def audit_prompt_contract(
     selectable_references: Any = None,
     authoritative_references: Any = None,
     prohibited_fields: Iterable[str] | None = None,
+    prohibited_exact_keys: Iterable[str] = (),
     output_schema: Any = None,
     valid_example: Any = None,
     budget: PromptBudget | None = None,
@@ -718,6 +769,7 @@ def audit_prompt_contract(
         selectable_references=selectable_references,
         authoritative_references=authoritative_references,
         prohibited_fields=prohibited_fields,
+        prohibited_exact_keys=prohibited_exact_keys,
         output_schema=output_schema,
         valid_example=valid_example,
     )
@@ -786,6 +838,7 @@ __all__ = [
     "audit_prompt_contract",
     "enforce_prompt_audit",
     "estimate_prompt_tokens",
+    "prohibited_view_field_errors",
     "resolve_adapter_prompt_budget",
     "resolve_prompt_budget",
 ]

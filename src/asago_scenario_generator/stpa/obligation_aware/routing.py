@@ -216,20 +216,10 @@ def _validate_semantic_assessment(
     """Bind provider pair judgements to exact mapping evidence and route meaning."""
     assessment = route.semantic_assessment
     if assessment is None:
-        # Compatibility adapters may still provide the pre-assessment route
-        # contract. The named provider schema requires this field.
-        return
+        raise ValueError("route requires a semantic assessment")
     expected_strength = mapping_strength_for_brief(brief)
     if assessment.mapping_strength != expected_strength:
         raise ValueError("route mapping_strength does not match the obligation path")
-    _validate_mechanism_route_meaning(route)
-
-
-def _validate_mechanism_route_meaning(route: ObligationRoute) -> None:
-    """Require pair judgements that agree with the selected route outcome."""
-    assessment = route.semantic_assessment
-    if assessment is None:
-        return
     _validate_disposition_mechanism(route.disposition, assessment)
 
 

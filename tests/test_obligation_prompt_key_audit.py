@@ -1,4 +1,4 @@
-"""One prohibited-key list feeds both prompt checks at the provider boundary."""
+"""One prohibited-key scan feeds both prompt checks at the provider boundary."""
 
 from __future__ import annotations
 
@@ -10,7 +10,8 @@ from pydantic import BaseModel, create_model
 from asago_scenario_generator.stpa.obligation_aware import provider
 from asago_scenario_generator.stpa.obligation_aware.contracts import AnalysisControls
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
-    PROHIBITED_PROMPT_FIELDS,
+    PROHIBITED_PROMPT_KEYS,
+    PROHIBITED_PROMPT_WORDS,
     audit_prompt_contract,
 )
 
@@ -26,38 +27,33 @@ _EXACT_KEYS = (
     "source_path",
     "artifact_path",
     "raw_mapping",
-)
-_FIELD_MARKERS = (
-    "digest",
-    "pin",
-    "score",
-    "mitigation",
     "provider_call",
     "schema_name",
-    "source_path",
-    "artifact_path",
 )
+_FIELD_WORDS = ("digest", "pin", "score", "mitigation")
 
 
-def test_the_key_list_is_the_union_of_the_exact_keys_and_the_field_markers() -> None:
-    assert set(PROHIBITED_PROMPT_FIELDS) == {*_EXACT_KEYS, *_FIELD_MARKERS}
-    assert len(PROHIBITED_PROMPT_FIELDS) == len(set(PROHIBITED_PROMPT_FIELDS))
+def test_the_lists_are_the_exact_keys_and_the_single_words() -> None:
+    assert PROHIBITED_PROMPT_KEYS == _EXACT_KEYS
+    assert PROHIBITED_PROMPT_WORDS == _FIELD_WORDS
+    assert not set(PROHIBITED_PROMPT_KEYS) & set(PROHIBITED_PROMPT_WORDS)
+    assert all("_" not in word for word in PROHIBITED_PROMPT_WORDS)
 
 
-@pytest.mark.parametrize("key", _EXACT_KEYS)
-def test_the_local_audit_still_rejects_each_exact_key(key: str) -> None:
+@pytest.mark.parametrize("key", (*_EXACT_KEYS, *_FIELD_WORDS))
+def test_the_local_audit_still_rejects_each_listed_name(key: str) -> None:
     view = create_model("View", **{key: (str, ...)})(**{key: "x"})
 
     audit = audit_prompt_contract(view, system_prompt="Return JSON.")
 
-    assert audit.issues == (f"prohibited prompt field leaked: {key}",)
+    assert audit.issues == (f"prohibited prompt-view field leaked: {key}",)
 
 
 class _View(BaseModel):
     description: str
 
 
-def test_the_repository_preflight_receives_the_same_key_list(
+def test_the_repository_preflight_receives_the_same_lists(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     received: dict[str, Any] = {}
@@ -90,4 +86,5 @@ def test_the_repository_preflight_receives_the_same_key_list(
             step="key-audit",
         )
 
-    assert received["prohibited_fields"] is PROHIBITED_PROMPT_FIELDS
+    assert received["prohibited_fields"] is PROHIBITED_PROMPT_WORDS
+    assert received["prohibited_exact_keys"] is PROHIBITED_PROMPT_KEYS

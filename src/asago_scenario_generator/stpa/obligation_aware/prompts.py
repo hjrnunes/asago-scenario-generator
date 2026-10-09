@@ -30,6 +30,9 @@ from asago_scenario_generator.stpa.models.control_structure import (
     control_action_context_rows,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.infra.prompt_preflight import (
+    prohibited_view_field_errors,
+)
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.pipeline.risk_pattern_crosswalk import (
@@ -74,11 +77,12 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlacehol
 PROMPT_TEMPLATES_DIR = Path(__file__).with_name("prompt_templates")
 _TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
 
-# One list serves two matchers: the local audit rejects a view key equal to an
-# entry, and the repository preflight rejects a key with an entry as one of its
-# snake_case words (a plural ``s`` included).  Multi-word entries therefore act
-# only as exact keys.
-PROHIBITED_PROMPT_FIELDS = (
+# The repository preflight rejects a view field with an entry of the first list
+# as one of its snake_case words (a plural ``s`` included) and a field equal to
+# an entry of the second list.  A multi-word name cannot be a word, so it
+# belongs to the second list.
+PROHIBITED_PROMPT_WORDS = ("digest", "pin", "score", "mitigation")
+PROHIBITED_PROMPT_KEYS = (
     "semantic_digest",
     "plan_digest",
     "catalog_pins",
@@ -90,10 +94,6 @@ PROHIBITED_PROMPT_FIELDS = (
     "source_path",
     "artifact_path",
     "raw_mapping",
-    "digest",
-    "pin",
-    "score",
-    "mitigation",
     "provider_call",
     "schema_name",
 )
@@ -149,10 +149,13 @@ def audit_prompt_contract(
     else:
         view_type = type(prompt_view).__name__
         payload = prompt_view.model_dump(mode="json")
-    field_names = _prompt_field_names(payload)
-    for key in PROHIBITED_PROMPT_FIELDS:
-        if key in field_names:
-            issues.append(f"prohibited prompt field leaked: {key}")
+    issues.extend(
+        prohibited_view_field_errors(
+            payload,
+            prohibited_fields=PROHIBITED_PROMPT_WORDS,
+            prohibited_exact_keys=PROHIBITED_PROMPT_KEYS,
+        )
+    )
     issues.extend(_rendered_prompt_issues(system_prompt, user_prompt, opaque_handles))
     digest = compute_framed_digest(
         "asago-scenario-generator:prompt-contract-audit:v1",
@@ -183,19 +186,6 @@ def _rendered_prompt_issues(
     if system_prompt and "json" not in system_prompt.lower():
         issues.append("requested JSON output schema is absent from system prompt")
     return issues
-
-
-def _prompt_field_names(value: Any) -> set[str]:
-    """Collect exact serialized field names without inspecting prose values."""
-    names: set[str] = set()
-    if isinstance(value, dict):
-        for key, child in value.items():
-            names.add(str(key))
-            names.update(_prompt_field_names(child))
-    elif isinstance(value, (list, tuple)):
-        for child in value:
-            names.update(_prompt_field_names(child))
-    return names
 
 
 def _yaml(value: Any) -> str:
@@ -1671,7 +1661,8 @@ def render_synthesis_slot_prompts(
 
 
 __all__ = [
-    "PROHIBITED_PROMPT_FIELDS",
+    "PROHIBITED_PROMPT_KEYS",
+    "PROHIBITED_PROMPT_WORDS",
     "audit_prompt_contract",
     "build_structural_revision_prompts",
     "build_structural_routing_prompts",

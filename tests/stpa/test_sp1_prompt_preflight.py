@@ -19,6 +19,7 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudgetExceeded,
     PromptContractError,
     audit_prompt_contract,
+    prohibited_view_field_errors,
     resolve_adapter_prompt_budget,
 )
 from tests.helpers.calls_log import read_calls_jsonl
@@ -352,6 +353,67 @@ class TestPromptViewContractErrors:
         assert _errors(
             prompt_view={"secret_note": "zzz"}, prohibited_fields=("secret",)
         ) == ("prohibited prompt-view field leaked: secret_note",)
+
+    def test_exact_keys_match_a_whole_segment_at_the_root_and_when_nested(self) -> None:
+        keys = ("provider_call_id",)
+
+        assert _errors(
+            prompt_view={"provider_call_id": "zq9"}, prohibited_exact_keys=keys
+        ) == ("prohibited prompt-view field leaked: provider_call_id",)
+        assert _errors(
+            prompt_view={"outer": [{"provider_call_id": "zq9"}]},
+            prohibited_exact_keys=keys,
+        ) == ("prohibited prompt-view field leaked: outer[0].provider_call_id",)
+
+    def test_an_exact_key_does_not_match_a_longer_or_partial_name(self) -> None:
+        keys = ("provider_call_id",)
+
+        assert (
+            _errors(
+                prompt_view={"provider_call_id_note": "zq9", "call_id": "y"},
+                prohibited_exact_keys=keys,
+            )
+            == ()
+        )
+
+    def test_an_exact_key_is_case_sensitive(self) -> None:
+        assert (
+            _errors(
+                prompt_view={"Provider_Call_Id": "zq9"},
+                prohibited_exact_keys=("provider_call_id",),
+            )
+            == ()
+        )
+
+    def test_a_multi_word_marker_is_not_an_exact_key(self) -> None:
+        assert (
+            _errors(
+                prompt_view={"provider_call_id": "zq9"},
+                prohibited_fields=("provider_call_id",),
+            )
+            == ()
+        )
+
+    def test_a_field_matching_both_a_marker_and_an_exact_key_is_reported_once(
+        self,
+    ) -> None:
+        errors = _errors(
+            prompt_view={"plan_digest": "zq9"},
+            prohibited_fields=("digest",),
+            prohibited_exact_keys=("plan_digest",),
+        )
+
+        assert errors == ("prohibited prompt-view field leaked: plan_digest",)
+
+    def test_the_key_scan_is_available_without_a_rendered_prompt(self) -> None:
+        assert prohibited_view_field_errors(
+            {"nested": {"score": 1, "raw_mapping": 2, "fine": 3}},
+            prohibited_fields=("score",),
+            prohibited_exact_keys=("raw_mapping",),
+        ) == [
+            "prohibited prompt-view field leaked: nested.score",
+            "prohibited prompt-view field leaked: nested.raw_mapping",
+        ]
 
     def test_raw_mapping_json_in_a_mapping_field_is_reported(self) -> None:
         errors = _errors(prompt_view={"raw_json": '{"a": 1}'})

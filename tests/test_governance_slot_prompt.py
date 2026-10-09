@@ -32,7 +32,11 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.helpers.governance import _controls, _setup
-from tests.helpers.obligation_aware import _control_structure, _loss_analysis
+from tests.helpers.obligation_aware import (
+    _control_structure,
+    _loss_analysis,
+    provider_slot_payload,
+)
 
 # Captured from 04a926bd, before any governance prompt text existed. The user
 # digest was recaptured when slot prompts began naming each routed obligation
@@ -215,7 +219,7 @@ def test_the_provider_fills_a_slot_for_a_governance_route(tmp_path) -> None:
         def complete(self, **kwargs):
             prompts.append(kwargs["user_prompt"])
             return LLMResult(
-                content={"filled_slots": [draft.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(draft)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
