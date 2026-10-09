@@ -16,6 +16,34 @@ import yaml
 from pydantic import BaseModel
 
 
+def yaml_text(
+    model: BaseModel,
+    *,
+    exclude_none: bool = True,
+    post_process: Callable[[dict], dict] | None = None,
+) -> str:
+    """Return the YAML text that :func:`write_yaml` persists for *model*.
+
+    Args:
+        model: A Pydantic model instance.
+        exclude_none: Drop ``None`` fields. Pass ``False`` for an artifact
+            contract that requires explicit ``null`` values.
+        post_process: Optional callable that receives the dumped dict
+            and returns a (possibly modified) dict before YAML
+            serialization.  Used by callers to inject companion display
+            fields (e.g. ``kc_subcodes_display`` on CapabilityProfile).
+    """
+    data = model.model_dump(mode="json", exclude_none=exclude_none)
+    if post_process is not None:
+        data = post_process(data)
+    return yaml.dump(
+        data,
+        default_flow_style=False,
+        sort_keys=False,
+        allow_unicode=True,
+    )
+
+
 def write_yaml(
     model: BaseModel,
     path: Path,
@@ -26,28 +54,14 @@ def write_yaml(
     Args:
         model: A Pydantic model instance.
         path: Destination file path.
-        post_process: Optional callable that receives the dumped dict
-            and returns a (possibly modified) dict before YAML
-            serialization.  Used by callers to inject companion display
-            fields (e.g. ``kc_subcodes_display`` on CapabilityProfile).
+        post_process: Optional callable; see :func:`yaml_text`.
 
     Returns:
         The path that was written.
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = model.model_dump(mode="json", exclude_none=True)
-    if post_process is not None:
-        data = post_process(data)
-    path.write_text(
-        yaml.dump(
-            data,
-            default_flow_style=False,
-            sort_keys=False,
-            allow_unicode=True,
-        ),
-        encoding="utf-8",
-    )
+    path.write_text(yaml_text(model, post_process=post_process), encoding="utf-8")
     return path
 
 

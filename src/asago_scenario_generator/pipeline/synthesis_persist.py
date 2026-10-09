@@ -9,7 +9,7 @@ from typing import Any
 
 import yaml
 
-from asago_scenario_generator.manifest import atomic_write_text
+from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.models.slot_hazard_offer import (
@@ -46,7 +46,7 @@ def _persist_prepared_profile(output_dir: Path, profile: CapabilityProfile) -> P
     """
     payload = profile.model_dump(mode="json", exclude_none=True)
     path = output_dir / "capability-profile.yaml"
-    atomic_write_text(
+    write_text_atomically(
         path, yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
     )
     return path
@@ -70,7 +70,7 @@ def _persist_sidecar(output_dir: Path, filename: str, artifact: Any) -> Path:
     """Write one closed artifact atomically, then perform a best-effort reload."""
     path = output_dir / filename
     content = _artifact_yaml(artifact)
-    atomic_write_text(path, content)
+    write_text_atomically(path, content)
     _verify_yaml_round_trip(artifact, path)
     return path
 
@@ -104,7 +104,7 @@ def _persist_target_realization(
 def _persist_manifest(output_dir: Path, manifest: Any) -> Path:
     """Atomically publish and verify the top-level synthesis manifest."""
     path = output_dir / MANIFEST_FILENAME
-    atomic_write_text(path, _artifact_yaml(manifest))
+    write_text_atomically(path, _artifact_yaml(manifest))
     loaded = yaml.safe_load(path.read_text(encoding="utf-8"))
     if not isinstance(loaded, dict):
         raise ValueError("synthesis manifest did not round-trip as a mapping")
