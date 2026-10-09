@@ -1095,7 +1095,11 @@ def _run_one_review_call(
         """Parse rows independently after the strict provider contract."""
 
         payload = decode_content(result)
-        if not isinstance(payload, dict) or not isinstance(payload.get("rows"), list):
+        # A validated provider model decodes its rows as a tuple; a raw JSON
+        # reply decodes them as a list.
+        if not isinstance(payload, dict) or not isinstance(
+            payload.get("rows"), (list, tuple)
+        ):
             # Container defects are terminal for this batch: there is no
             # reliable row boundary to preserve.
             raise ValueError("risk coverage response rows must be a list")

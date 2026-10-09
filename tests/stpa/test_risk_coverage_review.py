@@ -258,12 +258,28 @@ def _client_with_rows(rows: dict | None = None) -> MockLLMClient:
     return client
 
 
+class _ValidatedModelClient(MockLLMClient):
+    """Return the validated response model, as the live client does."""
+
+    def complete(self, *args, **kwargs):
+        result = super().complete(*args, **kwargs)
+        response_format = kwargs.get("response_format")
+        if response_format is None and len(args) > 2:
+            response_format = args[2]
+        if isinstance(result.content, dict) and response_format is not None:
+            return result.model_copy(
+                update={"content": response_format.model_validate(result.content)}
+            )
+        return result
+
+
 def _run_review(
     tmp_path: Path,
     *,
     rows: dict | None = None,
     cards: list[RiskCard] | None = None,
     max_completion_tokens: int | None = None,
+    client: MockLLMClient | None = None,
 ):
     analysis = _analysis()
     graph_path = tmp_path / "loss-analysis.yaml"
@@ -271,7 +287,7 @@ def _run_review(
     write_yaml(analysis, graph_path)
     digest = hashlib.sha256(graph_path.read_bytes()).hexdigest()
     return run_risk_coverage_review(
-        llm_client=_client_with_rows(rows),
+        llm_client=client if client is not None else _client_with_rows(rows),
         loss_analysis=analysis,
         risk_cards=_cards() if cards is None else cards,
         use_case_text="Test use case",
@@ -353,6 +369,39 @@ class TestValidReview:
         assert reading[0]["missing_protection"]
         assert reading[0]["covering_constraints"] == []
         assert reading[1]["risk_name"] == "Output bias"
+
+    def test_validated_model_response_is_reviewed_like_a_dict(self, tmp_path):
+        client = _ValidatedModelClient()
+        client.set_response_for(RiskCoverageReview, _valid_rows())
+
+        outcome = _run_review(tmp_path, client=client)
+
+        assert outcome.status == "completed"
+        assert outcome.failure_reason is None
+        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+        assert [row["risk_id"] for row in artifact["rows"]] == [
+            "risk-a",
+            "risk-b",
+            "risk-c",
+            "risk-d",
+        ]
+        assert artifact["rows_invalid"] == []
+
+    def test_validated_model_response_with_no_rows_names_the_omitted_cards(
+        self, tmp_path
+    ):
+        client = _ValidatedModelClient()
+        client.set_response_for(RiskCoverageReview, {"rows": []})
+
+        outcome = _run_review(tmp_path, client=client)
+
+        artifact = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+        assert artifact["rows"] == []
+        assert len(artifact["rows_missing"]) == 4
+        assert outcome.status == "unavailable"
+        assert outcome.failure_reason == (
+            "batch_omitted_cards: risk-a, risk-b, risk-c, risk-d"
+        )
 
     def test_digests_pin_the_graph_and_risk_set(self, tmp_path):
         outcome = _run_review(tmp_path)
