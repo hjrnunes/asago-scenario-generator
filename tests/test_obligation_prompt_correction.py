@@ -1032,7 +1032,27 @@ def test_revision_provider_schema_uses_local_handles_without_final_gap_ids(
     assert "dismissed_gap_ids" not in draft_fields
 
 
-def test_revision_provider_reports_its_validation_retry_as_a_call(tmp_path) -> None:
+_RETRY_DECISION = {
+    "gap_handle": "revision-gap-1",
+    "disposition": "dismiss_unsupported",
+    "rationale": "The supplied evidence does not justify it.",
+}
+
+
+@pytest.mark.parametrize(
+    "first_reply",
+    [
+        {
+            "draft": {},
+            "gap_decisions": [{**_RETRY_DECISION, "disposition": "unknown"}],
+        },
+        {"draft": {}},
+    ],
+    ids=["unknown-disposition", "missing-gap-decisions"],
+)
+def test_revision_provider_reports_its_validation_retry_as_a_call(
+    tmp_path, first_reply
+) -> None:
     gap = MissingStructuralConcept(
         concept_type="responsibility",
         description="A reviewing responsibility is needed.",
@@ -1045,15 +1065,7 @@ def test_revision_provider_reports_its_validation_retry_as_a_call(tmp_path) -> N
         baseline_control_structure=_control_structure(),
         controls=controls,
     )
-    decision = {
-        "gap_handle": "revision-gap-1",
-        "disposition": "dismiss_unsupported",
-        "rationale": "The supplied evidence does not justify it.",
-    }
-    responses = [
-        {"draft": {}, "gap_decisions": [{**decision, "disposition": "unknown"}]},
-        {"draft": {}, "gap_decisions": [decision]},
-    ]
+    responses = [first_reply, {"draft": {}, "gap_decisions": [_RETRY_DECISION]}]
     sent: list[object] = []
 
     class Client:
