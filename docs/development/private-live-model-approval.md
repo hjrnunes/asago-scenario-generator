@@ -130,7 +130,9 @@ status, or a connection error that is not a timeout (owner decision 174). It
 never retries a timeout, a 4xx status, or an answer that fails parsing or
 validation. The retry is recorded in `provider-calls.jsonl` and counts as a
 request, so a task's request limit covers both attempts. The retry adds no
-allowance beyond the task's limit; no other retry exists.
+allowance beyond the task's limit. One step-level exception exists: the Stage 1a
+risk-coverage review repeats a batch once when its reply decodes but carries no
+row (`{"rows": []}`). That repeat is recorded and counts against the limit too.
 
 ## Replay fill sends live requests
 

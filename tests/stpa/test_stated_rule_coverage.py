@@ -1103,8 +1103,9 @@ class TestRuleRoundAddsOnly:
         assert outcome.loss_analysis == analysis
         assert "rule_span" in (outcome.stated_rule_revision.error or "")
 
-    def test_hazard_edit_is_rejected(self, tmp_path) -> None:
-        patch = _fee_addition()
+    def test_hazard_edit_alone_is_rejected(self, tmp_path) -> None:
+        patch = _edit()
+        patch["security_constraint_edits"] = []
         patch["hazard_edits"] = [
             {
                 "hazard_id": "H-2",
@@ -1132,6 +1133,126 @@ class TestRuleRoundAddsOnly:
         assert outcome.loss_analysis == analysis
         assert outcome.stated_rule_revision.applied is False
         assert "R-2" in (outcome.stated_rule_revision.error or "")
+
+
+class TestRuleRoundKeepsAdditions:
+    """An edit that breaks the add-only rule is dropped, not the whole round."""
+
+    def _kept(self, tmp_path, patch):
+        client = MockLLMClient()
+        client.set_response_for(_Stage1aRevisionPatch, patch)
+        analysis = _analysis()
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+
+        assert len(client.calls) == 1
+        return analysis, outcome
+
+    def test_addition_survives_a_hazard_edit(self, tmp_path) -> None:
+        patch = _fee_addition()
+        patch["hazard_edits"] = [
+            {
+                "hazard_id": "H-2",
+                "description": "The agent quotes unapproved fees.",
+                "related_losses": ["L-2"],
+            }
+        ]
+
+        analysis, outcome = self._kept(tmp_path, patch)
+
+        assert outcome.stated_rule_revision.applied is True
+        assert outcome.stated_rule_revision.error is None
+        assert outcome.loss_analysis.hazards[:2] == analysis.hazards
+        added = outcome.loss_analysis.security_constraints[2]
+        assert added.rule == FEE_CONSTRAINT
+        artifact = yaml.safe_load((tmp_path / "loss-analysis-gates.yaml").read_text())
+        assert any(
+            "dropped an edit" in item and "H-2" in item
+            for item in artifact["normalization_warnings"]
+        )
+
+    def test_addition_survives_a_rewritten_rule_and_the_rule_is_unchanged(
+        self, tmp_path
+    ) -> None:
+        patch = _fee_addition()
+        patch["security_constraint_edits"] = _edit(rule="A different rule.")[
+            "security_constraint_edits"
+        ]
+
+        analysis, outcome = self._kept(tmp_path, patch)
+
+        assert outcome.stated_rule_revision.applied is True
+        constraints = outcome.loss_analysis.security_constraints
+        assert constraints[1].rule == analysis.security_constraints[1].rule
+        assert constraints[2].rule == FEE_CONSTRAINT
+
+    def test_addition_survives_a_changed_related_hazard(self, tmp_path) -> None:
+        patch = _fee_addition()
+        patch["security_constraint_edits"] = _edit(related_hazards=["H-1"])[
+            "security_constraint_edits"
+        ]
+
+        analysis, outcome = self._kept(tmp_path, patch)
+
+        assert outcome.stated_rule_revision.applied is True
+        constraints = outcome.loss_analysis.security_constraints
+        assert constraints[1] == analysis.security_constraints[1]
+        assert len(constraints) == 3
+
+    def test_valid_extension_beside_a_dropped_edit_is_kept(self, tmp_path) -> None:
+        patch = _edit(rule="The agent must preserve user trust and cite approved fees.")
+        bad = _edit("SC-1", related_hazards=["H-2"])["security_constraint_edits"][0]
+        patch["security_constraint_edits"].append(bad)
+
+        analysis, outcome = self._kept(tmp_path, patch)
+
+        assert outcome.stated_rule_revision.applied is True
+        constraints = outcome.loss_analysis.security_constraints
+        assert "approved fees" in constraints[1].rule
+        assert constraints[0] == analysis.security_constraints[0]
+
+    def test_round_with_nothing_left_after_the_drop_is_rejected(self, tmp_path) -> None:
+        client = MockLLMClient()
+        client.set_response_for(_Stage1aRevisionPatch, _edit(rule="Another rule."))
+        analysis = _analysis()
+
+        outcome = _gate(client, tmp_path, analysis, (FEE_FINDING,))
+
+        assert outcome.loss_analysis == analysis
+        assert outcome.stated_rule_revision.applied is False
+        assert "SC-2" in (outcome.stated_rule_revision.error or "")
+
+    def test_remainder_that_breaks_a_structural_check_is_rejected(
+        self, tmp_path
+    ) -> None:
+        patch = _density_breaking_edit()
+        patch["security_constraint_edits"] = _edit(related_hazards=["H-1"])[
+            "security_constraint_edits"
+        ]
+
+        analysis, outcome = self._kept(tmp_path, patch)
+
+        assert outcome.loss_analysis == analysis
+        assert outcome.stated_rule_revision.applied is False
+        assert "revision broke structural checks" in (
+            outcome.stated_rule_revision.error or ""
+        )
+
+    def test_unknown_edit_target_still_rejects_the_additions(self, tmp_path) -> None:
+        patch = _fee_addition()
+        patch["security_constraint_edits"] = _edit(
+            "SC-7",
+            rule="x",
+            obligations=[],
+            applies_when=[],
+            related_hazards=["H-2"],
+        )["security_constraint_edits"]
+
+        analysis, outcome = self._kept(tmp_path, patch)
+
+        assert outcome.loss_analysis == analysis
+        assert outcome.stated_rule_revision.applied is False
+        assert "SC-7" in (outcome.stated_rule_revision.error or "")
 
 
 class TestCheckRevision:

@@ -72,7 +72,10 @@ SwarmForge pipeline starts at the coder.
   actual controls and spend. Stop at the specified boundary without hidden
   retries. The one retry the client makes after a transport error (HTTP 5xx or
   a connection error that is not a timeout) is not hidden: it is recorded in
-  `provider-calls.jsonl` and counts as a request. Nothing else retries.
+  `provider-calls.jsonl` and counts as a request. Nothing else retries, with
+  one stated exception: the Stage 1a risk-coverage review repeats a batch once
+  when its reply decodes but carries no row (`{"rows": []}`); the repeat is a
+  recorded request and counts too.
 - For execution, use `asago-orch/docs/qualification.md` and the existing orch
   stage runner.
   Consumer authoring does not start services or perform setup.

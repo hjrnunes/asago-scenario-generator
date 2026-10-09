@@ -187,7 +187,10 @@ visible in pipeline evidence. The client itself retries a request once, after
 a fixed one-second pause, when the provider answers HTTP 5xx or the connection
 fails for a reason other than a timeout. It never retries a timeout, a 4xx
 status (429 included), or an answer that fails parsing or validation. Both
-attempts appear in `provider-calls.jsonl`, and both count as requests.
+attempts appear in `provider-calls.jsonl`, and both count as requests. One
+step-level exception exists: the Stage 1a risk-coverage review repeats a batch
+once when its reply decodes but carries no row; the repeat is recorded and
+counts as a request.
 
 Every profile used for STPA synthesis must also declare `context_window` and
 `max_completion_tokens`; `safety_margin` is optional and defaults to the

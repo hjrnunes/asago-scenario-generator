@@ -69,6 +69,7 @@ from .condition_family import (
 from .content_surface import ContentSurfaceFacts, content_surface_facts
 from .deduplication import (
     ScenarioDeduplication,
+    build_constraint_reach,
     build_testability_summary,
     deduplicate_scenario_specs,
 )
@@ -503,12 +504,23 @@ def _run_stages_5_and_6(
     # Deduplication follows the shape step: a duplicate group keeps the
     # scenario whose shape the model proposed.
     shaped_by_id = {spec.scenario_id: spec for spec in shaped_specs}
-    deduplication_by_scenario = deduplicate_scenario_specs(
-        [shaped_by_id.get(spec.scenario_id, spec) for spec in scenario_specs]
-    )
+    deduplicated_specs = [
+        shaped_by_id.get(spec.scenario_id, spec) for spec in scenario_specs
+    ]
+    deduplication_by_scenario = deduplicate_scenario_specs(deduplicated_specs)
     (run_dir / TESTABILITY_FILENAME).write_text(
         yaml.safe_dump(
-            build_testability_summary(deduplication_by_scenario),
+            build_testability_summary(
+                deduplication_by_scenario,
+                constraint_reach=build_constraint_reach(
+                    [
+                        constraint.constraint_id
+                        for constraint in inputs.loss_analysis.security_constraints
+                    ],
+                    deduplicated_specs,
+                    deduplication_by_scenario,
+                ),
+            ),
             sort_keys=False,
             allow_unicode=True,
         ),

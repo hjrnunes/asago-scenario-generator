@@ -1254,6 +1254,40 @@ class TestRunSp1Artifacts:
         assert stage_1a["risk_actionability"]["call_count"] == 1
         assert stage_1a["risk_coverage_review"]["call_count"] == 1
 
+    def test_result_carries_the_boundary_decision_of_every_risk_card(self, tmp_path):
+        """The run result hands the saved boundary decision to later stages."""
+        cards = make_risk_cards()
+        result = run_sp1(
+            llm_client=_make_queued_mock_client(),
+            use_case_text="Test use case",
+            risk_cards=cards,
+            run_dir=tmp_path,
+        )
+        record = result.risk_actionability
+        assert record is not None
+        assert [entry.risk_id for entry in record.entries] == [
+            card.risk_id for card in cards
+        ]
+
+    def test_pinned_run_has_no_boundary_decision(self, tmp_path):
+        """A pinned graph skips the classification, so the result has no record."""
+        derived_dir = tmp_path / "derived"
+        derived = run_sp1(
+            llm_client=_make_queued_mock_client(),
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=derived_dir,
+        )
+        assert derived.loss_analysis is not None
+        result = run_sp1(
+            llm_client=_make_queued_mock_client(),
+            use_case_text="Test use case",
+            risk_cards=make_risk_cards(),
+            run_dir=tmp_path / "pinned",
+            loss_analysis_path=derived_dir / "loss-analysis.yaml",
+        )
+        assert result.risk_actionability is None
+
     def test_manifest_stage_1a_counts_only_the_requests_a_failed_derivation_sent(
         self, tmp_path
     ):

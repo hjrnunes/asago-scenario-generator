@@ -438,6 +438,15 @@ structural field still fails parsing of the response as a whole; this change
 does not claim row isolation before that boundary. Coverage review performs
 its own row-level parsing and retains valid sibling rows.
 
+Coverage review is the one step that repeats a request for a reason other than
+a transport error or a failed correction. When a batch's reply decodes but
+carries no row, the review sends the identical request once more as attempt 2.
+A second reply with no row leaves the batch's cards in `rows_missing`, as
+before. A failed request, an undecodable reply, and a reply with at least one
+row, valid or not, are never repeated. The repeat appears in
+`provider-calls.jsonl`, counts as a request, and adds to the review's
+`call_count`.
+
 ## Authority and observation limits
 
 Reviewed obligation/action connections control admission. A selected admissible
@@ -571,9 +580,12 @@ rules never join the density revision, whose prompt and fail-closed rounds
 are unchanged. Once the graph passes density, they get one non-fatal
 revision round of their own, in a separately labelled section with the
 exact quote. That round may only add hazards and constraints or extend an
-existing `rule` word for word. Code discards the whole response, without a
-correction call, when it changes any other part of an existing record or
-edits an ID the graph does not have. Echoes are not changes: a condition
+existing `rule` word for word. Code drops each edit that changes any other
+part of an existing record, keeps the additions and the edits that hold, and
+records one warning per dropped edit; it validates the remainder as it would
+the whole response. Code discards the whole response, without a correction
+call, when it edits an ID the graph does not have or when no addition or
+valid edit remains after the drops. Echoes are not changes: a condition
 that differs from the original only by an echoed count heading
 (`>= 1 condition:`), list number, or whitespace keeps the original, and an
 `obligations` list that repeats every original entry unchanged may add

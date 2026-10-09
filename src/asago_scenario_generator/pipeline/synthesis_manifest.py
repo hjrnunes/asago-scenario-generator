@@ -7,6 +7,7 @@ holds; ``calls.jsonl`` is the same records written to the output directory.
 from __future__ import annotations
 
 import json
+from collections import Counter
 from datetime import UTC, datetime
 from typing import Any, Iterable, Mapping
 
@@ -116,6 +117,12 @@ def _build_manifest(
             accounting=accounting,
             realization=realization,
             scenario_count=len(scenarios),
+        ),
+        "obligation_scope_summary": _obligation_scope_summary(
+            plan=plan,
+            accounting=accounting,
+            realization=realization,
+            risk_actionability=getattr(baseline, "risk_actionability", None),
         ),
         "run_status": run_status.value,
         "run_status_reason": run_status_reason,
@@ -711,6 +718,61 @@ def _obligation_resolution_funnel(
     if routed:
         funnel["governance_routed_no_finding"] = routed
     return funnel
+
+
+_OUT_OF_SCOPE_DECISIONS = ("outside_boundary", "not_applicable")
+
+
+def _obligation_scope_summary(
+    *, plan: Any, accounting: Any, realization: Any, risk_actionability: Any
+) -> dict[str, Any]:
+    """Split the applicable obligations by the Stage 1a boundary decision.
+
+    The planner and the routing steps never read the decision, so this
+    summary only reports it. An obligation whose risk has no entry, or a run
+    without a decision, counts as in scope, the rule Stage 1a applies to an
+    unclassified card.
+    """
+    decisions = _boundary_decisions(risk_actionability)
+    risk_of = {
+        str(item.obligation_id): str(item.risk_ref.risk_id) for item in plan.obligations
+    }
+    realization_reasons = _realization_reasons_by_obligation(realization)
+    rows_by_scope: dict[str, list[Any]] = {"in_scope": [], "out_of_scope": []}
+    out_of_scope_decisions = {name: 0 for name in _OUT_OF_SCOPE_DECISIONS}
+    for row in _considered_rows(accounting.rows):
+        decision = decisions.get(risk_of.get(str(row.obligation_id), ""))
+        if decision in out_of_scope_decisions:
+            out_of_scope_decisions[decision] += 1
+            rows_by_scope["out_of_scope"].append(row)
+        else:
+            rows_by_scope["in_scope"].append(row)
+    summary: dict[str, Any] = {
+        "decision_source": (
+            "absent" if risk_actionability is None else risk_actionability.status
+        ),
+    }
+    for scope, rows in rows_by_scope.items():
+        reasons = [
+            _accounting_terminal_reason(row, realization_reasons) for row in rows
+        ]
+        summary[scope] = {
+            "applicable": len(rows),
+            "addressed": sum(row.disposition == "addressed" for row in rows),
+            "stop_reasons": dict(sorted(Counter(reasons).items())),
+        }
+    summary["out_of_scope"].update(out_of_scope_decisions)
+    return summary
+
+
+def _boundary_decisions(risk_actionability: Any) -> dict[str, str]:
+    """Index the saved decision value of every classified risk."""
+    if risk_actionability is None:
+        return {}
+    return {
+        str(entry.risk_id): getattr(entry.decision, "value", str(entry.decision))
+        for entry in risk_actionability.entries
+    }
 
 
 def _governance_credited(row: Any) -> bool:

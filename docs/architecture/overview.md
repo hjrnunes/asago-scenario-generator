@@ -441,6 +441,16 @@ the members whose shape has `source: stage5_validated`; a group with no such
 member keeps its smallest ID as canonical. The shape does not join the key, and
 `testability.yaml` and every handoff's `deduplication` block read this result.
 
+`testability.yaml` also carries a `constraint_reach` block, computed from the
+final statuses. For each security constraint of the loss analysis it counts the
+scenarios that govern it, the scenarios sent to authoring (neither `duplicate`
+nor `analytical_only`), the sent scenarios with and without a discriminating
+condition, and the duplicate and analytical-only scenarios. A constraint's
+reach is its number of sent scenarios with a condition. The block lists the
+constraints at reach 0 and reach 1, and the constraints lost to
+`analytical_only` (an analytical scenario and no sent scenario). It is a
+record only: no later step reads it and no request changes.
+
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
 Its closed prompt view contains the authoritative action, original deviation,
 and selected hazard, constraint, and reachable-loss meaning. The proposed UCA
@@ -590,7 +600,9 @@ recorded retry after a transport error: an HTTP 5xx status, or a connection
 error that is not a timeout. Timeouts, 4xx statuses, and invalid answers are
 never retried at the transport level. The retry waits one second, appears in
 `provider-calls.jsonl` as its own record marked `retry_of`, and counts as a
-request.
+request. The Stage 1a risk-coverage review adds one step-level exception: it
+repeats a batch once when the reply decodes but carries no row, and counts the
+repeat in its `call_count`.
 
 A producer call count is the number of requests actually sent to the model.
 Retries and correction requests count; a request the prompt preflight blocks

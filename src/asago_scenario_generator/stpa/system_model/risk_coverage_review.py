@@ -42,7 +42,7 @@ and the full graph, and the merged rows keep the supplied card order.
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
@@ -303,6 +303,8 @@ class RiskCoverageReviewOutcome:
     reviewed_loss_analysis_digest: str | None = None
     artifact: RiskCoverageArtifact | None = None
     warnings: tuple[str, ...] = field(default=())
+    # Verdict counts on the cards the graph marks not applicable.
+    not_applicable: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True)
@@ -312,6 +314,12 @@ class _CoverageCallResult:
     rows: tuple[RiskCoverageWireRow, ...] = ()
     invalid_rows: tuple[RiskCoverageInvalidRow, ...] = ()
     failure_reason: str | None = None
+    requests: int = 1
+
+    @property
+    def is_empty_reply(self) -> bool:
+        """Tell whether the reply decoded cleanly and carried no row at all."""
+        return not (self.rows or self.invalid_rows or self.failure_reason)
 
 
 # ---------------------------------------------------------------------------
@@ -702,6 +710,41 @@ def _not_applicable_cards(
             dispositions.get(card.risk_id) is None
             and card.risk_id not in cited_via_losses
         )
+    }
+
+
+def _not_applicable_verdicts(
+    loss_analysis: LossAnalysis,
+    risk_cards: list[RiskCard],
+    *,
+    valid: Sequence[RiskCoverageRow],
+    invalid: Sequence[RiskCoverageInvalidRow],
+) -> dict[str, Any]:
+    """Count the review's verdict on each card the graph marks not applicable.
+
+    A card with a valid row is confirmed or disputed; a card with only an
+    invalid row is invalid; every other marked card is missing.
+    """
+    marked = _not_applicable_cards(loss_analysis, risk_cards)
+    verdict_of = {row.risk_id: row.coverage for row in valid}
+    invalid_ids = {row.risk_id for row in invalid}
+    disputed = [
+        card.risk_id
+        for card in risk_cards
+        if card.risk_id in marked
+        and verdict_of.get(card.risk_id) == "not_applicable_disputed"
+    ]
+    confirmed = sum(
+        verdict_of.get(risk_id) == "not_applicable_confirmed" for risk_id in marked
+    )
+    unjudged = [risk_id for risk_id in marked if risk_id not in verdict_of]
+    return {
+        "marked": len(marked),
+        "confirmed": confirmed,
+        "disputed": len(disputed),
+        "invalid": sum(risk_id in invalid_ids for risk_id in unjudged),
+        "missing": sum(risk_id not in invalid_ids for risk_id in unjudged),
+        "disputed_risk_ids": disputed,
     }
 
 
@@ -1154,29 +1197,39 @@ def _run_one_review_call(
         # return the row-isolated base model for deterministic semantic checks.
         return RiskCoverageReview(rows=tuple(parsed))
 
-    outcome = call_with_policy(
-        llm_client=llm_client,
-        system_prompt=system_prompt,
-        user_prompt=user_prompt,
-        response_format=response_model,
-        run_dir=run_dir,
-        stage=STAGE,
-        step=STEP_RISK_COVERAGE_REVIEW,
-        policy=CorrectionPolicy(),
-        temperature=temperature,
-        max_completion_tokens=max_completion_tokens,
-        response_parser=parse_review,
-        prompt_template_hashes=_review_prompt_hashes(loader),
-    )
-    review, error_msg = outcome.value, outcome.error
-    if error_msg is not None or review is None:
-        return _CoverageCallResult(
-            invalid_rows=tuple(wire_invalid),
-            failure_reason=error_msg or "risk coverage review returned no result",
+    def request(attempt_number: int) -> _CoverageCallResult:
+        outcome = call_with_policy(
+            llm_client=llm_client,
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=response_model,
+            run_dir=run_dir,
+            stage=STAGE,
+            step=STEP_RISK_COVERAGE_REVIEW,
+            policy=CorrectionPolicy(),
+            temperature=temperature,
+            max_completion_tokens=max_completion_tokens,
+            response_parser=parse_review,
+            prompt_template_hashes=_review_prompt_hashes(loader),
+            first_attempt_number=attempt_number,
         )
-    return _CoverageCallResult(
-        rows=tuple(review.rows), invalid_rows=tuple(wire_invalid)
-    )
+        review, error_msg = outcome.value, outcome.error
+        if error_msg is not None or review is None:
+            return _CoverageCallResult(
+                invalid_rows=tuple(wire_invalid),
+                failure_reason=error_msg or "risk coverage review returned no result",
+            )
+        return _CoverageCallResult(
+            rows=tuple(review.rows), invalid_rows=tuple(wire_invalid)
+        )
+
+    # The one exception to the rule that a failed review batch is not
+    # retried: a reply with no row for a non-empty batch repeats the same
+    # request once, and the repeat is a recorded request.
+    first = request(1)
+    if not first.is_empty_reply:
+        return first
+    return replace(request(2), requests=2)
 
 
 def run_risk_coverage_review(
@@ -1194,8 +1247,10 @@ def run_risk_coverage_review(
     """Run the advisory review and always persist its artifact.
 
     The review plans its batches up front from the per-row completion
-    estimate (at most four calls; see :data:`MAX_REVIEW_BATCHES`) and never
-    retries a failed batch.  Every planned batch is issued regardless of
+    estimate (at most four batches; see :data:`MAX_REVIEW_BATCHES`) and never
+    retries a failed batch.  The one exception is a reply that decodes but
+    carries no row: that batch repeats its request once, and ``call_count``
+    counts the repeat.  Every planned batch is issued regardless of
     earlier batches.  Validation is per row: an invalid row is recorded
     under ``rows_invalid`` with its typed reason and the valid rows of the
     same batch are kept.  The status is ``completed`` when every card has a
@@ -1226,6 +1281,9 @@ def run_risk_coverage_review(
             call_count=0,
             reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
             artifact=artifact,
+            not_applicable=_not_applicable_verdicts(
+                loss_analysis, risk_cards, valid=(), invalid=()
+            ),
         )
 
     system_prompt = template_loader.render_prompt(SYSTEM_TEMPLATE)
@@ -1257,7 +1315,6 @@ def run_risk_coverage_review(
     failures: list[str] = []
     call_count = 0
     for group in groups:
-        call_count += 1
         call_result = _run_one_review_call(
             llm_client=llm_client,
             loss_analysis=loss_analysis,
@@ -1269,6 +1326,7 @@ def run_risk_coverage_review(
             max_completion_tokens=budget,
             source_excerpts=_batch_source_excerpts(all_source_excerpts, group),
         )
+        call_count += call_result.requests
         _collect_batch_result(
             call_result,
             group,
@@ -1321,6 +1379,9 @@ def run_risk_coverage_review(
         failure_reason=failure_reason,
         reviewed_loss_analysis_digest=reviewed_loss_analysis_digest,
         artifact=artifact,
+        not_applicable=_not_applicable_verdicts(
+            loss_analysis, risk_cards, valid=valid, invalid=invalid
+        ),
     )
 
 
