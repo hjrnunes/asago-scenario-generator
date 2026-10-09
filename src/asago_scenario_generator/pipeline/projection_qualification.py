@@ -14,12 +14,14 @@ from asago_scenario_generator.models.attack_pattern_projection import StepOmissi
 from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
-from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.models.canonical import (
+    canonical_json,
+    compute_framed_digest,
+)
 from asago_scenario_generator.pipeline.projection_contracts import (
     CapabilityFactSnapshot,
     Digest,
     ProjectionIssue,
-    _canonical_json,
     _evaluate_preconditions,
     _evaluate_projection_conditions,
     _normalize_semantic_order,
@@ -352,7 +354,7 @@ def _dedupe_projection_issues(
 ) -> Any:
     """Deduplicate issues by canonical JSON content, preserving last."""
     return {
-        _canonical_json(issue.model_dump(mode="json")): issue for issue in issues
+        canonical_json(issue.model_dump(mode="json")): issue for issue in issues
     }.values()
 
 

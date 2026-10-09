@@ -178,6 +178,11 @@ def canonical_json_bytes(value: Any) -> bytes:
     ).encode("utf-8")
 
 
+def canonical_json(value: Any) -> str:
+    """Encode one value under the neutral canonical JSON contract, as text."""
+    return canonical_json_bytes(value).decode("utf-8")
+
+
 def compute_framed_digest(domain: str, value: Any) -> str:
     """Hash one payload with an explicit versioned NUL-separated domain frame."""
     return hashlib.sha256(
@@ -250,6 +255,7 @@ __all__ = [
     "FrozenDict",
     "FrozenList",
     "SemanticDigestMixin",
+    "canonical_json",
     "canonical_json_bytes",
     "canonical_yaml",
     "compute_framed_digest",

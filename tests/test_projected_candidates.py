@@ -36,7 +36,10 @@ from asago_scenario_generator.models.attack_pattern_projection import (
 from asago_scenario_generator.models.attack_pattern_validation import (
     validate_projection_snapshot,
 )
-from asago_scenario_generator.models.canonical import normalize_unicode
+from asago_scenario_generator.models.canonical import (
+    canonical_json,
+    normalize_unicode,
+)
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     ConfidenceLevel,
@@ -61,7 +64,6 @@ from asago_scenario_generator.pipeline.projection_contracts import (
     _resource_id,
     _resource_contained,
     _assert_snapshot_facts_uniquely_sorted,
-    _canonical_json,
     _snapshot_resource_payload,
     _sorted_by,
     _sorted_canonical,
@@ -2665,7 +2667,7 @@ class TestRemainingProjectionHelpers:
         )
         assert _sorted_canonical(profile.tool_types) == sorted(
             (item.model_dump(mode="json") for item in profile.tool_types),
-            key=lambda item: _canonical_json(item),
+            key=canonical_json,
         )
 
     def test_condition_facts_collects_deduplicates_and_sorts(self):

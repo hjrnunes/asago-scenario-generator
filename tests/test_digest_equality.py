@@ -27,12 +27,16 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import math
 import re
+import unicodedata
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+from pydantic import BaseModel
 
 from asago_scenario_generator.cli.synthesis import (
     _DEFAULT_LLM_PATTERN_TABLE,
@@ -43,7 +47,15 @@ from asago_scenario_generator.data.taxonomy_pins import (
     compute_mapping_set_digest,
     load_atlas_pin,
 )
+from asago_scenario_generator.models.attack_pattern_digests import (
+    _canonical_json as attack_pattern_canonical_json,
+)
+from asago_scenario_generator.models.canonical import (
+    canonical_json,
+    canonical_json_bytes,
+)
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.pipeline import obligation_contracts, projection_contracts
 from asago_scenario_generator.pipeline.obligation_contracts import (
     QualificationFactsInput,
     TaxonomyObligationInputs,
@@ -56,9 +68,15 @@ from asago_scenario_generator.pipeline.projection_contracts import (
 )
 from asago_scenario_generator.pipeline.synthesis_baseline import _evaluated_facts
 from asago_scenario_generator.pipeline.synthesis_manifest import (
+    _canonical_json as manifest_canonical_json,
+)
+from asago_scenario_generator.pipeline.synthesis_manifest import (
     _manifest_artifact_identity,
 )
 from asago_scenario_generator.stpa.models.scenario_context import semantic_digest
+from asago_scenario_generator.target_discovery.prompts import (
+    _canonical_json as prompt_canonical_json,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures" / "digest_equality"
 EXPECTED: dict[str, Any] = json.loads((FIXTURES / "expected.json").read_text())
@@ -171,3 +189,115 @@ def test_bundled_taxonomy_pins_keep_their_values() -> None:
 
     assert load_atlas_pin().model_dump(mode="json") == pins["atlas_pin"]
     assert compute_mapping_set_digest() == pins["mapping_set_digest"]
+
+
+class _Entry(BaseModel):
+    second: int = 1
+    first: tuple[str, ...] = ("z", "a")
+
+
+_NFD = unicodedata.normalize("NFD", "café")
+_CANONICAL_INPUTS: dict[str, Any] = {
+    "ascii": {"b": 1, "a": [1, 2], "Cc": {"y": None, "X": True}},
+    "non_ascii": {"naïve": "日本語 \U0001f600", "é": "ü"},
+    "nfd_value": {"k": _NFD},
+    "nfd_key": {_NFD: 1},
+    "nfc_collision": {"café": 1, _NFD: 2},
+    "floats": [1.0, 0.1, 1e22, 1e-7, -0.0, 3.14159, 10**20],
+    "nan": [math.nan],
+    "infinity": [math.inf],
+    "nested_keys": {"z": {"b": 1, "a": {"d": 1, "c": 2}}, "a": []},
+    "set": {"s": {3, 1, 2}},
+    "tuple": {"t": (1, 2)},
+    "int_key": {1: "a"},
+    "bool_key": {True: "a"},
+    "model": _Entry(),
+    "unordered_field": {"allowed_resource_ids": ["b", "a"], "other": ["b", "a"]},
+    "scalar": "x",
+    "none": None,
+    "object": object,
+}
+
+
+def _outcome(encode: Callable[[Any], str], value: Any) -> tuple[str, str]:
+    try:
+        return "ok", encode(value)
+    except Exception as error:  # the differential compares failures too
+        return "error", type(error).__name__
+
+
+def _shared_text(value: Any) -> str:
+    return canonical_json_bytes(value).decode("utf-8")
+
+
+# Private encoders that stay because their bytes differ from the shared one.
+# Each row lists the inputs on which they differ; every other input matches.
+_KEPT_ENCODERS: dict[str, tuple[Callable[[Any], str], frozenset[str]]] = {
+    "attack_pattern_digests": (
+        attack_pattern_canonical_json,
+        frozenset({"nfc_collision", "int_key", "bool_key", "unordered_field"}),
+    ),
+    "synthesis_manifest": (
+        manifest_canonical_json,
+        frozenset(
+            {
+                "nfd_value",
+                "nfd_key",
+                "nfc_collision",
+                "nan",
+                "infinity",
+                "set",
+                "int_key",
+                "bool_key",
+                "object",
+            }
+        ),
+    ),
+    "target_discovery.prompts": (
+        prompt_canonical_json,
+        frozenset(
+            {
+                "nfd_value",
+                "nfd_key",
+                "nfc_collision",
+                "nan",
+                "infinity",
+                "int_key",
+                "bool_key",
+                "model",
+            }
+        ),
+    ),
+}
+
+
+@pytest.mark.parametrize("helper", sorted(_KEPT_ENCODERS))
+def test_kept_private_encoders_differ_from_the_shared_one_on_exactly_these_inputs(
+    helper: str,
+) -> None:
+    encode, expected = _KEPT_ENCODERS[helper]
+
+    differing = {
+        name
+        for name, value in _CANONICAL_INPUTS.items()
+        if _outcome(encode, value) != _outcome(_shared_text, value)
+    }
+
+    assert differing == expected
+
+
+@pytest.mark.parametrize("name", sorted(_CANONICAL_INPUTS))
+def test_canonical_json_is_the_shared_bytes_as_text(name: str) -> None:
+    value = _CANONICAL_INPUTS[name]
+
+    assert _outcome(canonical_json, value) == _outcome(_shared_text, value)
+
+
+@pytest.mark.parametrize(
+    "module",
+    [obligation_contracts, projection_contracts],
+    ids=["obligation_contracts", "projection_contracts"],
+)
+def test_contract_modules_use_the_shared_canonical_json(module: Any) -> None:
+    assert not hasattr(module, "_canonical_json")
+    assert module.canonical_json is canonical_json
