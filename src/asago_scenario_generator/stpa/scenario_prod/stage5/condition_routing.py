@@ -4,7 +4,8 @@ A ``command_attempt`` claim is scored by a tool-call condition over the
 captured arguments. A scenario whose condition failed after the one
 correction has none, so publishing the claim leaves the consumer nothing to
 execute. The routing below is deterministic code over the response the model
-already wrote: no model request and no text the model did not author.
+already wrote: no model request. Code writes no reply wording; the only text
+it adds is the note on a criterion it withdrew.
 """
 
 from __future__ import annotations
@@ -27,7 +28,24 @@ from .validate import _replace_safe_outcome
 ConditionRoute = Literal["reply", "analytical_only"]
 
 _COMMAND_ATTEMPT = "command_attempt"
-_CRITERION_FIELDS = ("observable", "claim_level", "evidence", "operation_name")
+_CRITERION_FIELDS = (
+    "observable",
+    "claim_level",
+    "evidence",
+    "operation_name",
+    "reason",
+)
+_DEMOTION_NOTES: dict[ConditionRoute, str] = {
+    "analytical_only": (
+        "Not observable: the discriminating condition failed validation "
+        "({code}), so the scenario is published as analytical_only and no "
+        "criterion is observed."
+    ),
+    "reply": (
+        "Not observable: the claim is command_attempt and the discriminating "
+        "condition failed validation ({code}), so it has no condition to run on."
+    ),
+}
 _ANALYTICAL_SAFE_OUTCOME = {
     "observable": False,
     "claim_level": None,
@@ -81,6 +99,7 @@ def route_without_condition(
         else "analytical_only"
     )
     reason = _route_reason(route, failure_code)
+    note = _DEMOTION_NOTES[route].format(code=failure_code)
     routed = copy.deepcopy(draft)
     outcome = routed.unsafe_outcome
     normalizations: list[Stage5Normalization] = []
@@ -91,7 +110,7 @@ def route_without_condition(
         normalizations=normalizations,
     )
     outcome.observation_criteria = [
-        _demoted(criterion, index, route, reason, normalizations)
+        _demoted(criterion, index, route, reason, note, normalizations)
         for index, criterion in enumerate(outcome.observation_criteria)
     ]
     return RoutedDraft(routed, route, tuple(normalizations))
@@ -132,12 +151,15 @@ def _demoted(
     index: int,
     route: ConditionRoute,
     reason: str,
+    note: str,
     normalizations: list[Stage5Normalization],
 ) -> BaseModel:
     """Return the criterion as an analytical one when the route stops observing it.
 
     The analytical route observes no criterion; the reply route observes every
-    criterion except a command attempt, which has no condition to run on.
+    criterion except a command attempt, which has no condition to run on. The
+    model's ``reason`` justified the observable claim code just withdrew, so
+    the criterion carries ``note`` instead and the record keeps the original.
     """
 
     if not _stops_observing(criterion, route):
@@ -148,6 +170,7 @@ def _demoted(
             "claim_level": None,
             "evidence": None,
             "operation_name": None,
+            "reason": note,
         }
     )
     normalizations.extend(

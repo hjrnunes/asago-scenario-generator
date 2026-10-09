@@ -108,6 +108,62 @@ def test_a_rerouted_scenario_records_its_levels_and_failure_code(tmp_path) -> No
     ]
 
 
+def _reason_changes(tmp_path) -> list[dict]:
+    [path] = (tmp_path / "stage5-normalizations").glob("*.yaml")
+    record = yaml.safe_load(path.read_text(encoding="utf-8"))
+    return [
+        item
+        for item in record["normalizations"]
+        if item["field"].endswith(".reason")
+        and item["field"].startswith("observation_criteria[")
+    ]
+
+
+def test_a_demoted_criterion_carries_a_code_owned_note_not_the_stale_reason(
+    tmp_path,
+) -> None:
+    payload = _payload_with(_ownership_condition("ORD-1"))
+
+    result, error = _generate(_failed_twice(payload), tmp_path)
+
+    assert error is None
+    assert result is not None
+    [criterion] = result.observation_criteria
+    assert criterion.observable is False
+    assert criterion.reason == (
+        f"Not observable: the discriminating condition failed validation "
+        f"({CHECK_FAILED}), so the scenario is published as analytical_only "
+        "and no criterion is observed."
+    )
+    assert len(criterion.reason) <= 600
+
+
+def test_the_normalization_record_keeps_the_models_original_criterion_reason(
+    tmp_path,
+) -> None:
+    payload = _payload_with(_ownership_condition("ORD-1"))
+
+    result, error = _generate(_failed_twice(payload), tmp_path)
+
+    assert error is None
+    assert result is not None
+    [change] = _reason_changes(tmp_path)
+    assert change == {
+        "field": "observation_criteria[0].reason",
+        "original": "The runtime captures decoded tool calls.",
+        "normalized": result.observation_criteria[0].reason,
+        "reason": f"condition_dropped_analytical_only:{CHECK_FAILED}",
+    }
+
+
+def test_a_missing_condition_note_names_the_missing_code(tmp_path) -> None:
+    result, error = _generate(_failed_twice(_payload_with(None)), tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert "(discriminating_condition_missing)" in result.observation_criteria[0].reason
+
+
 def test_a_missing_condition_is_routed_with_its_own_failure_code(tmp_path) -> None:
     client = _failed_twice(_payload_with(None))
 
@@ -225,6 +281,27 @@ def test_command_attempt_with_a_supported_reply_criterion_is_published_as_reply(
         "normalized": "reply",
         "reason": f"condition_dropped_reply:{CHECK_FAILED}",
     }
+
+
+def test_the_reply_route_replaces_only_the_reason_of_the_demoted_criterion(
+    tmp_path,
+) -> None:
+    payload = _with_reply_criterion(_payload_with(_ownership_condition("ORD-1")))
+
+    result, error = _generate(_failed_twice(payload), tmp_path)
+
+    assert error is None
+    assert result is not None
+    attempt, said = result.observation_criteria
+    assert attempt.reason == (
+        f"Not observable: the claim is command_attempt and the discriminating "
+        f"condition failed validation ({CHECK_FAILED}), so it has no condition "
+        "to run on."
+    )
+    assert said.reason == REPLY_CRITERION["reason"]
+    assert [item["field"] for item in _reason_changes(tmp_path)] == [
+        "observation_criteria[0].reason"
+    ]
 
 
 def test_reply_criterion_the_contract_does_not_support_routes_to_analytical_only(
