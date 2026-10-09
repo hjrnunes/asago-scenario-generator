@@ -322,33 +322,16 @@ value is still rejected. The constraint's failure direction is computed from its
 revision-merged graph `proposed` and clears wire-carried reviewer marks, so
 only a pinned graph carries `reviewed` with its reviewer stamp.
 
-Omission trigger evidence is source-addressed: a particular prepared user turn,
-a used state-fact path, or a uniquely named observation content record. Exact
-quotation validation replaces the former reference-name substring check.
-The trigger sentence remains an author interpretation of the cited obligation;
-source validation does not authorize that interpretation. The scenario
-specification keeps the validated `OmissionEvidenceBasis` beside a short
-semantic proposition that holds the trigger sentence only; exact quotations,
-locators, meanings, source attestations, the trigger digest, and the
-unresolved applicability stamp stay in the typed basis, never mixed back into
-the proposition. Conversation evidence binds each quotation to its authored
-turn. State-fact and observation entries pin the target-observation snapshot
-digest. Absence alone remains inconclusive without
-independently established applicability, and citations establish source
-presence only. Historical drafts without evidence stay readable but cannot
-pass the current omission validator through the old substring fallback.
-Evidence that exceeds the closed carrier limits (quotation, trigger, entry
-count, or total size) holds as `trigger_evidence_unrepresentable` with the
-trigger and exact citations retained in the authored record; a quotation the
-delivery cannot attest holds as `delivery_evidence_mismatch`, and a missing
-prepared text, unreferenced turn, or unavailable snapshot holds as
-`delivery_evidence_unresolved`. No quotation is truncated, no weaker proxy is
-substituted, and the six projection cross-checks (`omission_evidence_missing`,
-`omission_evidence_unexpected`, `stimulus_delivery_mismatch`,
-`prepared_text_mismatch`, `snapshot_digest_mismatch`,
-`omission_evidence_invalid`) fail closed before publication. A `kind: none`
-functional specification may retain a validated carrier for review, but it
-never produces an executable v3 projection.
+A tool-absent scenario carries the author's trigger sentence as the unsafe
+outcome's semantic proposition (`unsafe_outcome_semantic_proposition`). The
+omission itself is a `not_called` comparison in the discriminating condition,
+and the condition check reports that comparison as `not_checkable` because the
+omission is observable only at execution time. The trigger sentence remains an
+author interpretation of the cited obligation, and no source validation
+authorizes that interpretation. The scenario specification stores no
+quotations, locators, source attestations, or snapshot digests for the
+trigger. Absence of a call alone remains inconclusive without independently
+established applicability.
 
 The short omission proposition must exactly equal the deterministic rendering
 of the carrier trigger, the outcome's owned target-action operation, the absence

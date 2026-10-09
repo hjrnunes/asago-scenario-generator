@@ -28,9 +28,6 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import CatalogMapping
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.models.omission_evidence import (
-    OmissionEvidenceBasis,
-)
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
@@ -245,14 +242,6 @@ class ScenarioSpec(BaseModel):
         exclude_if=lambda value: value is None,
     )
     oracle_basis: StrictStr | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-    )
-    # Structured omission evidence (authoring-side basis) for an accepted
-    # tool_absent scenario.  The projection seam assembles the closed
-    # ``omission_evidence`` carrier from it and the projection's own source
-    # pins.  Omitted when absent so existing spec digests hold.
-    omission_evidence_basis: OmissionEvidenceBasis | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
     )
