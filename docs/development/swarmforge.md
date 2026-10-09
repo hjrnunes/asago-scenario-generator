@@ -93,11 +93,11 @@ paths. It does not install anything. A developer or CI job explicitly checks
 out or installs those revisions after granting the required network and
 installation permissions.
 
-The Acceptance Pipeline Specification (APS) checkout is optional. The
-native-feature parse check in `tests/stpa/test_r5_declarative_gherkin.py`
-finds it through `ASAGO_SCENARIO_GENERATOR_APS_ROOT` or the ignored local path
-`.cache/acceptance-pipeline-specification/`, and skips when it is absent. The
-project never downloads a replacement.
+The Acceptance Pipeline Specification (APS) checkout is optional, and no test
+needs it. `tests/stpa/test_r5_declarative_gherkin.py` checks the structure of
+the rendered native feature (one Feature, one Scenario, only
+Given/When/Then/And steps, the trigger as a When step) without the APS parser.
+The project never downloads a checkout.
 
 Update a pin in a dedicated pull request that records upstream changes and runs
 the affected quality gate. Harness-specific role prompts, handoff files,

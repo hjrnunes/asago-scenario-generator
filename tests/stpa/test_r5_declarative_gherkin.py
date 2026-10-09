@@ -2,13 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import os
-from pathlib import Path
-import shutil
-import subprocess
-from tempfile import TemporaryDirectory
-
 import pytest
 
 from asago_scenario_generator.stpa.models.scenario_context import DescribedElement
@@ -74,36 +67,98 @@ def test_r5_gherkin_trigger_does_not_depend_on_criterion_vocabulary(criterion: s
     ]
 
 
-def test_r5_native_feature_parses_with_pinned_gherkin_parser():
+_STEP_KEYWORDS = ("Given", "When", "Then", "And")
+
+
+def _feature_problems(feature_text: str, trigger: str) -> list[str]:
+    """Return the structural defects of a rendered feature file.
+
+    This mirrors what the downstream Gherkin parser requires of the published
+    text: one Feature, one Scenario, only Given/When/Then/And steps (no But),
+    and the trigger as a When step.
+    """
+    lines = [line.strip() for line in feature_text.splitlines() if line.strip()]
+    problems: list[str] = []
+    if not lines or not lines[0].startswith("Feature:"):
+        problems.append("the first line is not a Feature line")
+    scenarios = [i for i, line in enumerate(lines) if line.startswith("Scenario:")]
+    if len(scenarios) != 1:
+        problems.append(f"expected one Scenario line, found {len(scenarios)}")
+    steps: list[tuple[str, str]] = []
+    for line in lines[1:]:
+        if line.startswith(("Scenario:", "Background:", "#")):
+            continue
+        keyword, _, text = line.partition(" ")
+        if keyword not in _STEP_KEYWORDS or not text:
+            problems.append(f"not a step line: {line!r}")
+        else:
+            steps.append((keyword, text))
+    if ("When", trigger) not in steps:
+        problems.append(f"no When step carries the trigger {trigger!r}")
+    return problems
+
+
+def test_r5_native_feature_is_structurally_well_formed():
     _narrative, _tree, gherkin = render_scenario_summary(_refund_spec())
-    aps_root = Path(
-        os.environ.get(
-            "ASAGO_SCENARIO_GENERATOR_APS_ROOT",
-            "/Users/hjrnunes/workspace/redhat/hjrnunes/asago-scenario-generator/"
-            ".cache/acceptance-pipeline-specification",
-        )
-    )
-    if not aps_root.is_dir() or not shutil.which("bb"):
-        pytest.skip("pinned APS parser is unavailable")
-
-    with TemporaryDirectory() as tmpdir:
-        tmp = Path(tmpdir)
-        feature_path = tmp / "scenario.feature"
-        ir_path = tmp / "scenario.json"
-        feature_path.write_text(gherkin.to_feature_text(), encoding="utf-8")
-        subprocess.run(
-            ["bb", "gherkin-parser", str(feature_path), str(ir_path)],
-            cwd=aps_root,
-            check=True,
-            capture_output=True,
-            text=True,
-        )
-        parsed = json.loads(ir_path.read_text(encoding="utf-8"))
-
-    steps = parsed["scenarios"][0]["steps"]
     trigger = gherkin.when[0].removeprefix("When ")
-    assert any(step["text"] == trigger for step in steps)
-    assert all(step["keyword"].lower() != "but" for step in steps)
+
+    assert _feature_problems(gherkin.to_feature_text(), trigger) == []
+
+
+_WELL_FORMED = """Feature: Refunds
+  Background:
+    Given an order exists
+  Scenario: Refund request
+    When the actor requests a refund
+    Then the order stays unchanged
+    # Unsafe alternative (non-executable): But the refund is issued
+"""
+
+
+@pytest.mark.parametrize(
+    ("feature_text", "expected_problem"),
+    (
+        pytest.param(
+            _WELL_FORMED.replace("Feature: Refunds", "Refunds"),
+            "the first line is not a Feature line",
+            id="no-feature-line",
+        ),
+        pytest.param(
+            _WELL_FORMED.replace("  Scenario: Refund request\n", ""),
+            "expected one Scenario line, found 0",
+            id="no-scenario-line",
+        ),
+        pytest.param(
+            _WELL_FORMED.replace("Then the order", "But the order"),
+            "not a step line: 'But the order stays unchanged'",
+            id="but-step",
+        ),
+        pytest.param(
+            _WELL_FORMED.replace(
+                "When the actor requests a refund", "the actor requests a refund"
+            ),
+            "not a step line: 'the actor requests a refund'",
+            id="step-without-keyword",
+        ),
+        pytest.param(
+            _WELL_FORMED.replace("requests a refund", "requests a cancellation"),
+            "no When step carries the trigger 'the actor requests a refund'",
+            id="trigger-missing",
+        ),
+        pytest.param(
+            _WELL_FORMED.replace("When the", "Then the", 1),
+            "no When step carries the trigger 'the actor requests a refund'",
+            id="trigger-not-a-when-step",
+        ),
+    ),
+)
+def test_r5_feature_check_rejects_broken_features(
+    feature_text: str, expected_problem: str
+):
+    trigger = "the actor requests a refund"
+
+    assert _feature_problems(_WELL_FORMED, trigger) == []
+    assert expected_problem in _feature_problems(feature_text, trigger)
 
 
 def test_r5_multiple_preconditions_are_separate_and_hypothesized():
