@@ -66,7 +66,9 @@ def test_profile_option_constructs_interpreter_and_passes_it_to_discovery(
         )
 
     assert completed.exit_code == 0, completed.output
-    from_profile.assert_called_once_with(tmp_path / "profiles.yaml", "fixture-profile")
+    from_profile.assert_called_once_with(
+        tmp_path / "profiles.yaml", "fixture-profile", run_dir=tmp_path
+    )
     assert discover.call_args.kwargs["interpreter_factory"] is interpreter
     assert discover.call_args.args[0].model_profile == "fixture-profile"
     assert discover.call_args.args[0].model_name == "fixture-model"

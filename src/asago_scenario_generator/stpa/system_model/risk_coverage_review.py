@@ -46,7 +46,6 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Literal, Sequence
 
-import yaml
 from pydantic import (
     ValidationError,
     BaseModel,
@@ -57,7 +56,7 @@ from pydantic import (
     field_validator,
 )
 
-from asago_scenario_generator.manifest import atomic_write_text
+from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
@@ -66,6 +65,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     call_with_policy,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.infra.yaml_io import yaml_text
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     STAGE,
@@ -945,22 +945,6 @@ def _summarize(
     )
 
 
-def _atomic_write_yaml(model: BaseModel, path: Path) -> Path:
-    """Write *model* as YAML atomically, keeping explicit nulls.
-
-    The shared ``write_yaml`` drops ``None`` fields; the artifact contract
-    requires explicit ``null`` for ``failure_reason``, ``against``, and
-    ``missing_protection``, so this writer dumps the full JSON-mode mapping.
-    """
-    payload = yaml.dump(
-        model.model_dump(mode="json"),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
-    return atomic_write_text(path, payload)
-
-
 def _write_artifact(
     run_dir: Path,
     *,
@@ -994,7 +978,11 @@ def _write_artifact(
         rows_missing=rows_missing,
         summary=summary or RiskCoverageSummary(),
     )
-    _atomic_write_yaml(artifact, run_dir / ARTIFACT_FILENAME)
+    # The artifact contract requires explicit ``null`` for ``failure_reason``,
+    # ``against``, and ``missing_protection``.
+    write_text_atomically(
+        run_dir / ARTIFACT_FILENAME, yaml_text(artifact, exclude_none=False)
+    )
     return artifact
 
 
@@ -1024,13 +1012,7 @@ def graph_digest(loss_analysis: LossAnalysis) -> str:
     intermediate file: Stage 2 Call 3 may reword the graph, and the manifest
     records the difference.
     """
-    payload = yaml.dump(
-        loss_analysis.model_dump(mode="json", exclude_none=True),
-        default_flow_style=False,
-        sort_keys=False,
-        allow_unicode=True,
-    )
-    return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+    return hashlib.sha256(yaml_text(loss_analysis).encode("utf-8")).hexdigest()
 
 
 def _review_prompt_hashes(loader: TemplateLoader) -> dict[str, str]:

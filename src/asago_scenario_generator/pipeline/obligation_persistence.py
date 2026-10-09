@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from asago_scenario_generator.manifest import atomic_write_text
+from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 
 
@@ -18,7 +18,7 @@ def write_taxonomy_obligation_plan(
     """Validate, atomically write, reload, and equality-check one plan."""
     plan.assert_integrity()
     target = Path(output_dir) / PLAN_FILENAME
-    atomic_write_text(target, plan.to_yaml())
+    write_text_atomically(target, plan.to_yaml())
     loaded = TaxonomyObligationPlan.from_yaml(target.read_text(encoding="utf-8"))
     if loaded != plan:
         raise ValueError(

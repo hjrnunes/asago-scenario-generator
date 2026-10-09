@@ -40,7 +40,7 @@ from asago_scenario_generator.models.attack_pattern_projection import (
     TrustBoundaryResourceReference,
 )
 from asago_scenario_generator.models.canonical import (
-    canonical_json_bytes,
+    canonical_json,
     compute_framed_digest,
     normalize_unicode,
 )
@@ -58,16 +58,12 @@ class ProjectionModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-def _canonical_json(value: Any) -> str:
-    return canonical_json_bytes(value).decode("utf-8")
-
-
 def _fact_key(reference: AuthoritativeFactReference) -> str:
-    return _canonical_json(reference.model_dump(mode="json"))
+    return canonical_json(reference.model_dump(mode="json"))
 
 
 def _resource_key(reference: CanonicalResourceReference) -> str:
-    return _canonical_json(reference.model_dump(mode="json"))
+    return canonical_json(reference.model_dump(mode="json"))
 
 
 def _resource_checker_for(
@@ -343,7 +339,7 @@ def _sorted_by(items: Iterable[Any], key_field: str) -> list[dict[str, Any]]:
 def _sorted_canonical(items: Iterable[Any]) -> list[dict[str, Any]]:
     return sorted(
         (item.model_dump(mode="json") for item in items),
-        key=lambda item: _canonical_json(item),
+        key=lambda item: canonical_json(item),
     )
 
 
@@ -469,7 +465,7 @@ def _normalize_semantic_order(value: Any, field_name: str | None = None) -> Any:
     if isinstance(value, list):
         items = [_normalize_semantic_order(item) for item in value]
         if field_name in _SEMANTICALLY_UNORDERED_FIELDS:
-            items.sort(key=_canonical_json)
+            items.sort(key=canonical_json)
         return items
     return value
 
@@ -830,7 +826,7 @@ def _candidate_v2_id(pattern_id: str, projection: ProjectionSnapshot) -> str:
     chain = projection.source_chain
     bindings = sorted(
         (item.model_dump(mode="json") for item in projection.bindings),
-        key=lambda item: (item["slot_id"], _canonical_json(item["resource_ref"])),
+        key=lambda item: (item["slot_id"], canonical_json(item["resource_ref"])),
     )
     ingress = next(
         item["resource_ref"]
@@ -858,7 +854,7 @@ def _rejected_candidate_v2_id(
     """Compute a stable identity for one rejected projection combination."""
     bindings = sorted(
         (item.model_dump(mode="json") for item in resource_bindings),
-        key=lambda item: (item["slot_id"], _canonical_json(item["resource_ref"])),
+        key=lambda item: (item["slot_id"], canonical_json(item["resource_ref"])),
     )
     return (
         "cand:v2:"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from asago_scenario_generator.manifest import atomic_write_bytes
+from asago_scenario_generator.manifest import write_bytes_atomically
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
@@ -32,7 +32,7 @@ def publish_execution_target_profile(
         raise TargetProfilePublicationError("profile must be an ExecutionTargetProfile")
     profile.assert_integrity()
     profile_path = destination.resolve() / EXECUTION_TARGET_PROFILE_NAME
-    atomic_write_bytes(profile_path, profile.canonical_json_bytes())
+    write_bytes_atomically(profile_path, profile.canonical_json_bytes())
     return profile_path
 
 

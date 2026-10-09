@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any
 
 
-from asago_scenario_generator.manifest import atomic_write_text
+from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.canonical import canonical_json_bytes
 
 from .contracts import TargetDiscoveryResult
@@ -41,14 +41,14 @@ def write_target_discovery(
     if result.inventory is not None:
         result.inventory.assert_integrity()
         inventory_path = output_dir / INVENTORY_FILENAME
-        atomic_write_text(
+        write_text_atomically(
             inventory_path, _json_text(result.inventory.model_dump(mode="json"))
         )
         written[INVENTORY_FILENAME] = inventory_path
     if result.profile is not None:
         result.profile.assert_integrity()
         profile_path = output_dir / PROFILE_FILENAME
-        atomic_write_text(
+        write_text_atomically(
             profile_path, _json_text(result.profile.model_dump(mode="json"))
         )
         written[PROFILE_FILENAME] = profile_path
@@ -59,12 +59,12 @@ def write_target_discovery(
         + "\n"
         for call in result.calls
     )
-    atomic_write_text(calls_path, calls_text)
+    write_text_atomically(calls_path, calls_text)
     written[CALLS_FILENAME] = calls_path
 
     manifest = _manifest_payload(result, written)
     manifest_path = output_dir / MANIFEST_FILENAME
-    atomic_write_text(manifest_path, _json_text(manifest))
+    write_text_atomically(manifest_path, _json_text(manifest))
     written[MANIFEST_FILENAME] = manifest_path
     return written
 

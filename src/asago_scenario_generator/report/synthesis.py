@@ -6,7 +6,7 @@ from html import escape
 from pathlib import Path
 from typing import Any, Mapping
 
-from asago_scenario_generator.manifest import atomic_write_text
+from asago_scenario_generator.manifest import write_text_atomically
 
 REPORT_FILENAME = "synthesis-report.html"
 # Counts that exist only for governance rows; the accounting table omits them
@@ -131,7 +131,7 @@ def render_synthesis_report(
         + body
         + "</body></html>\n"
     )
-    return atomic_write_text(output_dir / REPORT_FILENAME, content)
+    return write_text_atomically(output_dir / REPORT_FILENAME, content)
 
 
 def _realization_summary_rows(summary: Mapping[str, Any]) -> list[str]:

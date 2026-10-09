@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from asago_scenario_generator.manifest import atomic_write_text
+from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
 )
@@ -23,7 +23,7 @@ def write_target_realization(
     artifact.assert_integrity()
     output_dir = Path(output_dir)
     path = output_dir / TARGET_REALIZATION_FILENAME
-    atomic_write_text(path, artifact.to_yaml())
+    write_text_atomically(path, artifact.to_yaml())
     reloaded = TargetRealizationResult.from_yaml(path.read_text(encoding="utf-8"))
     if reloaded != artifact:
         raise ValueError("persisted target realization failed round-trip equality")

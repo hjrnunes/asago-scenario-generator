@@ -5,7 +5,11 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
+from asago_scenario_generator.stpa.infra.yaml_io import (
+    read_yaml,
+    write_yaml,
+    yaml_text,
+)
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
@@ -83,3 +87,21 @@ security_constraints: []
         # With exclude_none=True, None fields should not appear in the YAML
         assert "coordination_link" not in text
         assert "na_justification" not in text
+
+    def test_yaml_07_yaml_text_keeps_explicit_nulls_on_request(self):
+        """InfraYAML-07: yaml_text(exclude_none=False) keeps None fields as null."""
+        model = ICAEnumeration(slots=[make_ica_slot()])
+
+        kept = yaml_text(model, exclude_none=False)
+
+        assert "coordination_link: null" in kept
+        assert "na_justification: null" in kept
+
+    def test_yaml_08_yaml_text_is_what_write_yaml_persists(self, tmp_path):
+        """InfraYAML-08: write_yaml writes exactly the yaml_text of the model."""
+        model = ICAEnumeration(slots=[make_ica_slot()])
+        path = tmp_path / "ica.yaml"
+
+        write_yaml(model, path)
+
+        assert path.read_text(encoding="utf-8") == yaml_text(model)

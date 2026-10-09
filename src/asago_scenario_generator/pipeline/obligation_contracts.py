@@ -29,6 +29,7 @@ from asago_scenario_generator.models.obligation_plan import (
 from asago_scenario_generator.models.canonical import (
     FrozenDict,
     FrozenList,
+    canonical_json,
     canonical_json_bytes,
     compute_framed_digest,
     normalize_unicode,
@@ -101,18 +102,13 @@ class _InputModel(BaseModel):
         return normalize_unicode(value, keep_models=True)
 
 
-def _canonical_json(value: Any) -> str:
-    """Use the neutral canonical encoder for typed fact normalization."""
-    return canonical_json_bytes(value).decode("utf-8")
-
-
 def _fact_item(value: Any, index: int) -> tuple[str, Any]:
     """Return the canonical key and payload for one qualification fact."""
     raw = value.model_dump(mode="json") if isinstance(value, BaseModel) else value
     if not isinstance(raw, dict):
         return str(index), raw
     reference = raw.get("fact")
-    key = _canonical_json(reference) if reference is not None else str(index)
+    key = canonical_json(reference) if reference is not None else str(index)
     return key, raw
 
 
@@ -315,7 +311,7 @@ def compute_mapping_bundle_digest(
 
 def _qualification_fact_key(reference: AuthoritativeFactReference) -> str:
     """Return the canonical map key for one authoritative fact reference."""
-    return _canonical_json(reference.model_dump(mode="json"))
+    return canonical_json(reference.model_dump(mode="json"))
 
 
 def _canonical_qualification_facts(

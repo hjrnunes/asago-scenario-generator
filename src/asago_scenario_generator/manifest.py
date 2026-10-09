@@ -7,7 +7,7 @@ import tempfile
 from pathlib import Path
 
 
-def atomic_write_bytes(path: Path, content: bytes) -> Path:
+def write_bytes_atomically(path: Path, content: bytes) -> Path:
     """Write bytes to *path* atomically using temp file + os.replace."""
     path.parent.mkdir(parents=True, exist_ok=True)
     tmp_fd, tmp_path = tempfile.mkstemp(
@@ -36,6 +36,6 @@ def atomic_write_bytes(path: Path, content: bytes) -> Path:
     return path
 
 
-def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> Path:
+def write_text_atomically(path: Path, content: str, encoding: str = "utf-8") -> Path:
     """Write text to *path* atomically using temp file + os.replace."""
-    return atomic_write_bytes(path, content.encode(encoding))
+    return write_bytes_atomically(path, content.encode(encoding))

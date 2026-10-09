@@ -46,7 +46,8 @@ repository no longer contains:
   checkpoint, quarantine bundle, and catalog-qualification contracts.
 
 No code reads or validates a manifest-v3 run directory. `manifest.py` keeps
-only `atomic_write_text`, which the product writers use.
+only `write_text_atomically` and `write_bytes_atomically`, which the product
+writers use.
 
 ## Product inputs that remain
 

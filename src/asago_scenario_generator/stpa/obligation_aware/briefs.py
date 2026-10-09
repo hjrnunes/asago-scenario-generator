@@ -94,11 +94,11 @@ def build_neutral_brief(
 def _row_pattern(
     row: TaxonomyObligation, catalog: Mapping[str, AttackPattern]
 ) -> AttackPattern:
-    """Resolve the exact catalog pattern an applicable row names."""
-    if row.attack_pattern_id is None or row.attack_pattern_semantic_digest is None:
-        raise ValueError(
-            f"applicable obligation {row.obligation_id} lacks attack-pattern identity"
-        )
+    """Resolve the exact catalog pattern an applicable row names.
+
+    ``TaxonomyObligation`` validation guarantees that an applicable row carries
+    its pattern id and semantic digest.
+    """
     pattern = catalog.get(row.attack_pattern_id)
     if pattern is None:
         raise ValueError(
