@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from typing import Any
 
 from asago_scenario_generator.models.artifact_pin import (
     ArtifactPin,
@@ -39,18 +40,32 @@ def build_scenario_realization_assessment(
     ica_considerations: Iterable[ObligationIcaConsideration],
     ica_enumeration: ICAEnumeration,
     scenario_specs: Iterable[ScenarioSpec],
+    functional_test_specs: Iterable[ScenarioSpec] = (),
     requested_ica_ids: Iterable[str] | None = None,
 ) -> ScenarioRealizationAssessment:
-    """Derive one realization record for every exact obligation/ICA finding."""
+    """Derive one realization record for every exact obligation/ICA finding.
+
+    ``functional_test_specs`` are the persisted scenarios that no adversary
+    gains from.  They never enter the scenario collection pin; a finding they
+    carry is recorded as a functional test instead of a generation failure.
+    """
     accounting = _validated_accounting(accounting)
     enumeration = _validated_enumeration(ica_enumeration)
     pairs = _validated_pairs(tuple(ica_considerations))
     scenarios = _validated_scenarios(tuple(scenario_specs))
+    functional = _validated_scenarios(
+        tuple(functional_test_specs), label="functional_test_specs"
+    )
+    _reject_shared_scenario_ids(scenarios, functional)
     findings = _finding_inventory(enumeration)
     eligible_pairs = _validated_addressed_pairs(accounting, pairs, findings)
     requested = _requested_finding_ids(eligible_pairs, requested_ica_ids)
+    outcomes = (
+        ("realized", "scenario_realized", scenarios),
+        ("functional_test", "scenario_functional_test", functional),
+    )
     records = tuple(
-        _realization_record(pair, ica_id, scenarios, requested)
+        _realization_record(pair, ica_id, outcomes, requested)
         for pair in eligible_pairs
         for ica_id in pair.ica_ids
     )
@@ -95,16 +110,30 @@ def _validated_pairs(
     )
 
 
-def _validated_scenarios(values: tuple[ScenarioSpec, ...]) -> tuple[ScenarioSpec, ...]:
+def _validated_scenarios(
+    values: tuple[ScenarioSpec, ...], *, label: str = "scenario_specs"
+) -> tuple[ScenarioSpec, ...]:
     if any(not isinstance(item, ScenarioSpec) for item in values):
-        raise TypeError("scenario_specs must contain ScenarioSpec values")
+        raise TypeError(f"{label} must contain ScenarioSpec values")
     copied = tuple(
         ScenarioSpec.model_validate(item.model_dump(mode="json")) for item in values
     )
     ids = tuple(item.scenario_id for item in copied)
     if len(ids) != len(set(ids)):
-        raise ValueError("scenario_specs contain duplicate scenario IDs")
+        raise ValueError(f"{label} contain duplicate scenario IDs")
     return tuple(sorted(copied, key=lambda item: item.scenario_id))
+
+
+def _reject_shared_scenario_ids(
+    scenarios: tuple[ScenarioSpec, ...], functional: tuple[ScenarioSpec, ...]
+) -> None:
+    shared = {item.scenario_id for item in scenarios} & {
+        item.scenario_id for item in functional
+    }
+    if shared:
+        raise ValueError(
+            "scenario_specs and functional_test_specs contain duplicate scenario IDs"
+        )
 
 
 def _finding_inventory(enumeration: ICAEnumeration) -> dict[str, tuple[str, ICA]]:
@@ -224,50 +253,63 @@ def _requested_finding_ids(
 def _realization_record(
     pair: ObligationIcaConsideration,
     ica_id: str,
-    scenarios: tuple[ScenarioSpec, ...],
+    outcomes: tuple[tuple[str, str, tuple[ScenarioSpec, ...]], ...],
     requested: frozenset[str],
 ) -> ScenarioRealizationRecord:
+    """Record the first outcome whose scenarios carry the finding, in order.
+
+    ``outcomes`` lists ``(status, stop_reason, scenarios)`` best first, so an
+    adversarial scenario for the finding outranks a functional test of it.
+    """
     if ica_id not in requested:
-        return ScenarioRealizationRecord(
-            obligation_id=pair.obligation_id,
-            consideration_pair_id=pair.pair_id,
-            route_id=pair.route_id,
-            slot_id=pair.slot_id,
-            ica_id=ica_id,
+        return _record_for(
+            pair,
+            ica_id,
             status="not_requested",
             stop_reason="scenario_not_requested",
             evidence=("scenario-production:not-requested",),
         )
-    matches = tuple(
-        item
-        for item in scenarios
-        if _scenario_realizes(item, pair.obligation_id, ica_id)
-    )
-    if not matches:
-        return ScenarioRealizationRecord(
-            obligation_id=pair.obligation_id,
-            consideration_pair_id=pair.pair_id,
-            route_id=pair.route_id,
-            slot_id=pair.slot_id,
-            ica_id=ica_id,
-            status="unresolved",
-            stop_reason="scenario_generation_failure",
-            evidence=("scenario-production:no-exact-contextual-realization",),
+    for status, stop_reason, scenarios in outcomes:
+        matches = tuple(
+            item
+            for item in scenarios
+            if _scenario_realizes(item, pair.obligation_id, ica_id)
         )
+        if matches:
+            return _record_for(
+                pair,
+                ica_id,
+                status=status,
+                stop_reason=stop_reason,
+                scenario_ids=tuple(item.scenario_id for item in matches),
+                context_digests=tuple(
+                    item.scenario_context.context_digest for item in matches
+                ),
+                evidence=tuple(
+                    f"scenario:{item.scenario_id}:context:"
+                    f"{item.scenario_context.context_digest}"
+                    for item in matches
+                ),
+            )
+    return _record_for(
+        pair,
+        ica_id,
+        status="unresolved",
+        stop_reason="scenario_generation_failure",
+        evidence=("scenario-production:no-exact-contextual-realization",),
+    )
+
+
+def _record_for(
+    pair: ObligationIcaConsideration, ica_id: str, **fields: Any
+) -> ScenarioRealizationRecord:
     return ScenarioRealizationRecord(
         obligation_id=pair.obligation_id,
         consideration_pair_id=pair.pair_id,
         route_id=pair.route_id,
         slot_id=pair.slot_id,
         ica_id=ica_id,
-        status="realized",
-        stop_reason="scenario_realized",
-        scenario_ids=tuple(item.scenario_id for item in matches),
-        context_digests=tuple(item.scenario_context.context_digest for item in matches),
-        evidence=tuple(
-            f"scenario:{item.scenario_id}:context:{item.scenario_context.context_digest}"
-            for item in matches
-        ),
+        **fields,
     )
 
 

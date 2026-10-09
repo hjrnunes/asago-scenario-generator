@@ -598,6 +598,7 @@ def _default_realize(
     ica_considerations: tuple[Any, ...],
     ica_enumeration: Any,
     scenario_specs: tuple[Any, ...],
+    functional_test_specs: tuple[Any, ...] = (),
     **_: Any,
 ) -> Any:
     """Derive exact scenario realization without changing ICA accounting."""
@@ -610,4 +611,5 @@ def _default_realize(
         ica_considerations=ica_considerations,
         ica_enumeration=ica_enumeration,
         scenario_specs=scenario_specs,
+        functional_test_specs=functional_test_specs,
     )

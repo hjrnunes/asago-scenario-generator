@@ -665,6 +665,7 @@ def _accounting_terminal_reason(
     reasons = realization_reasons.get(obligation_id, set())
     for reason in (
         "scenario_realized",
+        "scenario_functional_test",
         "scenario_generation_failure",
         "scenario_not_requested",
     ):

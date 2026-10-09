@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -18,9 +19,19 @@ from asago_scenario_generator.models.obligation_consideration import (
 from asago_scenario_generator.models.scenario_realization import (
     ScenarioRealizationAssessment,
     ScenarioRealizationRecord,
+    derive_scenario_realization_summary,
 )
 from asago_scenario_generator.pipeline.scenario_realization import (
     build_scenario_realization_assessment,
+)
+from asago_scenario_generator.pipeline.synthesis_manifest import (
+    _obligation_stop_reason_counts,
+)
+from asago_scenario_generator.pipeline.synthesis_scenarios import _run_realization
+from asago_scenario_generator.stpa.models.scenario_spec import (
+    Adversary,
+    AdversaryKind,
+    ScenarioSpec,
 )
 from tests.helpers.governance import (
     _ICA_ID,
@@ -330,6 +341,236 @@ def test_a_finding_citing_icas_with_different_hazards_is_realized() -> None:
     )
 
     assert result.summary.total == 2
+
+
+def _functional(**overrides: Any) -> ScenarioSpec:
+    """A scenario Stage 5 compiled as a functional test (no adversary gains)."""
+    return _scenario(**overrides).model_copy(
+        update={
+            "adversary": Adversary(
+                kind=AdversaryKind.none, gain="Nobody gains.", reaches_target_via=None
+            )
+        }
+    )
+
+
+def test_functional_test_candidate_is_not_a_generation_failure() -> None:
+    functional = _functional(scenario_id="SCN-043")
+
+    result = build_scenario_realization_assessment(
+        accounting=_accounting(),
+        ica_considerations=(_pair(),),
+        ica_enumeration=_enumeration(),
+        scenario_specs=(),
+        functional_test_specs=(functional,),
+        requested_ica_ids=(_ICA_ID,),
+    )
+
+    record = result.records[0]
+    assert (record.status, record.stop_reason) == (
+        "functional_test",
+        "scenario_functional_test",
+    )
+    assert record.scenario_ids == ("SCN-043",)
+    assert record.context_digests == (functional.scenario_context.context_digest,)
+    assert result.summary.model_dump() == {
+        "total": 1,
+        "realized": 0,
+        "unresolved": 0,
+        "not_requested": 0,
+        "functional_test": 1,
+    }
+
+
+def test_a_real_generation_failure_beside_a_functional_test_still_fails() -> None:
+    accounting, pair, enumeration = _two_ica_inputs(("H-1", "H-2"))
+
+    result = build_scenario_realization_assessment(
+        accounting=accounting,
+        ica_considerations=(pair,),
+        ica_enumeration=enumeration,
+        scenario_specs=(),
+        functional_test_specs=(_functional(),),
+    )
+
+    outcomes = {item.ica_id: item.stop_reason for item in result.records}
+    assert outcomes == {
+        _ICA_ID: "scenario_functional_test",
+        f"{_SLOT_ID}:2": "scenario_generation_failure",
+    }
+    assert (result.summary.functional_test, result.summary.unresolved) == (1, 1)
+
+
+def test_an_adversarial_sibling_keeps_the_ica_realized() -> None:
+    result = build_scenario_realization_assessment(
+        accounting=_accounting(),
+        ica_considerations=(_pair(),),
+        ica_enumeration=_enumeration(),
+        scenario_specs=(_scenario(),),
+        functional_test_specs=(_functional(scenario_id="SCN-002"),),
+        requested_ica_ids=(_ICA_ID,),
+    )
+
+    assert result.records[0].status == "realized"
+    assert result.records[0].scenario_ids == ("SCN-001",)
+    assert result.summary.functional_test == 0
+
+
+def test_functional_test_without_the_obligation_context_is_still_a_failure() -> None:
+    result = build_scenario_realization_assessment(
+        accounting=_accounting(),
+        ica_considerations=(_pair(),),
+        ica_enumeration=_enumeration(),
+        scenario_specs=(),
+        functional_test_specs=(_functional(include_obligation=False),),
+        requested_ica_ids=(_ICA_ID,),
+    )
+
+    assert result.records[0].stop_reason == "scenario_generation_failure"
+
+
+def test_unselected_ica_is_not_requested_even_with_a_functional_test() -> None:
+    result = build_scenario_realization_assessment(
+        accounting=_accounting(),
+        ica_considerations=(_pair(),),
+        ica_enumeration=_enumeration(),
+        scenario_specs=(),
+        functional_test_specs=(_functional(),),
+        requested_ica_ids=(),
+    )
+
+    assert result.records[0].status == "not_requested"
+
+
+def test_scenario_ids_stay_unique_across_adversarial_and_functional_specs() -> None:
+    with pytest.raises(ValueError, match="duplicate scenario IDs"):
+        build_scenario_realization_assessment(
+            accounting=_accounting(),
+            ica_considerations=(_pair(),),
+            ica_enumeration=_enumeration(),
+            scenario_specs=(_scenario(),),
+            functional_test_specs=(_functional(),),
+        )
+
+
+def test_functional_test_realization_round_trips_through_yaml() -> None:
+    result = build_scenario_realization_assessment(
+        accounting=_accounting(),
+        ica_considerations=(_pair(),),
+        ica_enumeration=_enumeration(),
+        scenario_specs=(),
+        functional_test_specs=(_functional(),),
+    )
+
+    assert ScenarioRealizationAssessment.from_yaml(result.to_yaml()) == result
+
+
+def test_summary_without_functional_tests_serializes_as_before() -> None:
+    summary = derive_scenario_realization_summary((_record(),))
+
+    assert summary.functional_test == 0
+    assert "functional_test" not in summary.model_dump()
+
+
+class TestFunctionalTestRecordValidation:
+    """A functional-test record carries its scenarios and its own stop reason."""
+
+    def test_valid_record_sorts_pairs_like_a_realized_record(self) -> None:
+        record = _realized(
+            status="functional_test", stop_reason="scenario_functional_test"
+        )
+
+        assert record.scenario_ids == ("SCN-1", "SCN-2")
+
+    def test_record_requires_references(self) -> None:
+        with pytest.raises(ValidationError, match="require scenario IDs"):
+            _record(status="functional_test", stop_reason="scenario_functional_test")
+
+    def test_record_requires_its_stop_reason(self) -> None:
+        with pytest.raises(ValidationError, match="require scenario_functional_test"):
+            _realized(status="functional_test")
+
+    def test_realized_status_rejects_the_functional_stop_reason(self) -> None:
+        with pytest.raises(ValidationError, match="require scenario_realized"):
+            _realized(stop_reason="scenario_functional_test")
+
+
+def _run_realization_stage(scenario_result: Any) -> dict[str, Any]:
+    """Run the realization stage and return what the adapter received."""
+    received: dict[str, Any] = {}
+
+    def realize(**kwargs: Any) -> Any:
+        received.update(kwargs)
+        return SimpleNamespace()
+
+    _run_realization(
+        accounting=_accounting(),
+        ica_enumeration=SimpleNamespace(
+            ica_enumeration=_enumeration(),
+            considerations=(),
+            ica_hazard_verification=None,
+        ),
+        scenario_result=scenario_result,
+        adapters=SimpleNamespace(realize=realize),
+    )
+    return received
+
+
+def test_realization_stage_hands_the_functional_specs_to_the_adapter() -> None:
+    functional = _functional()
+    adversarial = _scenario(scenario_id="SCN-002")
+
+    received = _run_realization_stage(
+        SimpleNamespace(
+            scenario_specs=[adversarial], functional_test_specs=[functional]
+        )
+    )
+
+    assert received["scenario_specs"] == (adversarial,)
+    assert received["functional_test_specs"] == (functional,)
+
+
+def test_realization_stage_without_functional_specs_passes_an_empty_tuple() -> None:
+    received = _run_realization_stage(SimpleNamespace(scenario_specs=[]))
+
+    assert received["functional_test_specs"] == ()
+
+
+def _terminal_reasons(realization: Any) -> dict[str, int]:
+    """Count terminal reasons for one addressed obligation."""
+    row = _accounting().rows[0].model_copy(update={"stop_reason": "addressed"})
+    return _obligation_stop_reason_counts(SimpleNamespace(rows=(row,)), realization)
+
+
+def _manifest_realization(*statuses: str) -> Any:
+    """Realization records for one obligation, one per requested status."""
+    by_status = {
+        "realized": _realized(),
+        "functional_test": _realized(
+            status="functional_test", stop_reason="scenario_functional_test"
+        ),
+        "unresolved": _record(),
+    }
+    records = tuple(
+        by_status[status].model_copy(update={"ica_id": f"ica-{index}"})
+        for index, status in enumerate(statuses)
+    )
+    return SimpleNamespace(records=records)
+
+
+@pytest.mark.parametrize(
+    ("statuses", "expected"),
+    [
+        (("functional_test",), "scenario_functional_test"),
+        (("functional_test", "unresolved"), "scenario_functional_test"),
+        (("functional_test", "realized"), "scenario_realized"),
+        (("unresolved",), "scenario_generation_failure"),
+    ],
+)
+def test_manifest_counts_one_terminal_reason_per_obligation(
+    statuses: tuple[str, ...], expected: str
+) -> None:
+    assert _terminal_reasons(_manifest_realization(*statuses)) == {expected: 1}
 
 
 @pytest.mark.parametrize("pair_hazards", [("H-1",), ("H-1", "H-2", "H-3")])

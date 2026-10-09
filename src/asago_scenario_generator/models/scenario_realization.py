@@ -35,7 +35,9 @@ SCENARIO_REALIZATION_SOURCE_PIN_SPECS: tuple[tuple[str, str], ...] = (
     ("stpa-scenario-collection", "stpa-scenario-collection-v1"),
 )
 
-ScenarioRealizationStatus = Literal["realized", "unresolved", "not_requested"]
+ScenarioRealizationStatus = Literal[
+    "realized", "functional_test", "unresolved", "not_requested"
+]
 
 
 class _RealizationModel(ClosedCanonicalModel):
@@ -83,6 +85,10 @@ class ScenarioRealizationRecord(_RealizationModel):
 
 _REQUIRED_STOP_REASONS = {
     "realized": ("scenario_realized", "realized records require scenario_realized"),
+    "functional_test": (
+        "scenario_functional_test",
+        "functional-test records require scenario_functional_test",
+    ),
     "unresolved": (
         "scenario_generation_failure",
         "unresolved records require scenario_generation_failure",
@@ -92,6 +98,9 @@ _REQUIRED_STOP_REASONS = {
         "not-requested records require scenario_not_requested",
     ),
 }
+
+
+_SCENARIO_STATUSES = frozenset({"realized", "functional_test"})
 
 
 def _canonical_scenario_pairs(
@@ -111,10 +120,14 @@ def _canonical_scenario_pairs(
 def _validate_realization_status(
     status: str, stop_reason: str, has_scenarios: bool
 ) -> None:
-    """Allow scenarios only on realized records and require the status stop reason."""
-    if status == "realized" and not has_scenarios:
-        raise ValueError("realized records require scenario IDs and context digests")
-    if status != "realized" and has_scenarios:
+    """Allow scenarios only on persisted-scenario records and require the stop reason."""
+    carries_scenarios = status in _SCENARIO_STATUSES
+    if carries_scenarios and not has_scenarios:
+        raise ValueError(
+            "realized and functional-test records require scenario IDs "
+            "and context digests"
+        )
+    if not carries_scenarios and has_scenarios:
         raise ValueError(
             "unresolved and not-requested records cannot claim realized scenarios"
         )
@@ -130,6 +143,11 @@ class ScenarioRealizationSummary(_RealizationModel):
     realized: int = Field(ge=0, strict=True)
     unresolved: int = Field(ge=0, strict=True)
     not_requested: int = Field(ge=0, strict=True)
+    # Omitted at zero so artifacts written before this status existed keep
+    # their serialized form and digest.
+    functional_test: int = Field(
+        default=0, ge=0, strict=True, exclude_if=lambda value: value == 0
+    )
 
 
 def derive_scenario_realization_summary(
@@ -143,6 +161,7 @@ def derive_scenario_realization_summary(
         realized=counts["realized"],
         unresolved=counts["unresolved"],
         not_requested=counts["not_requested"],
+        functional_test=counts["functional_test"],
     )
 
 
