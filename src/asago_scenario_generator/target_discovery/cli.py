@@ -88,7 +88,7 @@ def scan_mcp(
     )
     interpreter_factory = None
     if profile is not None:
-        interpreter_factory = _load_interpreter(profiles_file, profile)
+        interpreter_factory = _load_interpreter(profiles_file, profile, output_dir)
         model_name = getattr(interpreter_factory, "model_name", None)
         if model_name is not None:
             inputs = inputs.model_copy(update={"model_name": model_name})
@@ -109,10 +109,12 @@ def scan_mcp(
 
 
 def _load_interpreter(
-    profiles_file: Path, profile: str
+    profiles_file: Path, profile: str, output_dir: Path
 ) -> TargetDiscoveryLlmInterpreter:
     try:
-        return TargetDiscoveryLlmInterpreter.from_profile(profiles_file, profile)
+        return TargetDiscoveryLlmInterpreter.from_profile(
+            profiles_file, profile, run_dir=output_dir
+        )
     except (OSError, ValueError, KeyError) as exc:
         raise typer.BadParameter(
             f"could not load named model profile ({type(exc).__name__})",

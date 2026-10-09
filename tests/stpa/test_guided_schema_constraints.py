@@ -54,6 +54,7 @@ from asago_scenario_generator.target_discovery import (
 from asago_scenario_generator.target_discovery.llm_interpreter import (
     SEMANTIC_ROLE_VOCABULARY,
 )
+from tests.discovery_call_log import logged
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
@@ -337,7 +338,7 @@ def _discovery_request(count: int = 2) -> TargetInterpretationRequest:
     )
 
 
-def _discovery_formats(*, guided: bool, count: int = 2) -> tuple[type, type]:
+def _discovery_formats(run_dir, *, guided: bool, count: int = 2) -> tuple[type, type]:
     """Capture the interpretation and verification response formats."""
     request = _discovery_request(count)
     seen: list[type] = []
@@ -380,22 +381,22 @@ def _discovery_formats(*, guided: bool, count: int = 2) -> tuple[type, type]:
     client = SimpleNamespace(model="fixture-model", use_guided_decoding=guided)
     with patch(
         "asago_scenario_generator.target_discovery.llm_interpreter.call_with_policy",
-        side_effect=fake_call_with_policy,
+        side_effect=logged(fake_call_with_policy),
     ):
-        adapter = TargetDiscoveryLlmInterpreter(client)
+        adapter = TargetDiscoveryLlmInterpreter(client, run_dir=run_dir)
         adapter.verify(request, adapter.interpret(request))
     return seen[0], seen[1]
 
 
-def test_discovery_unguided_request_schemas_are_mains():
-    interpretation, verification = _discovery_formats(guided=False, count=7)
+def test_discovery_unguided_request_schemas_are_mains(tmp_path):
+    interpretation, verification = _discovery_formats(tmp_path, guided=False, count=7)
 
     _assert_main_payload("discovery_interpretation_7", interpretation)
     _assert_main_payload("discovery_verification_7", verification)
 
 
-def test_discovery_guided_interpretation_schema_closes_roles_and_handles():
-    interpretation, _ = _discovery_formats(guided=True)
+def test_discovery_guided_interpretation_schema_closes_roles_and_handles(tmp_path):
+    interpretation, _ = _discovery_formats(tmp_path, guided=True)
     schema = interpretation.model_json_schema()
     rows = schema["properties"]["interpretations"]
     assert rows["minItems"] == rows["maxItems"] == 2
@@ -414,8 +415,8 @@ def test_discovery_guided_interpretation_schema_closes_roles_and_handles():
     assert "enum" not in row["evidence_refs"]["items"]
 
 
-def test_discovery_guided_interpretation_local_validation_is_unchanged():
-    interpretation, _ = _discovery_formats(guided=True)
+def test_discovery_guided_interpretation_local_validation_is_unchanged(tmp_path):
+    interpretation, _ = _discovery_formats(tmp_path, guided=True)
     parsed = interpretation.model_validate(
         {
             "interpretations": [
@@ -436,8 +437,8 @@ def test_discovery_guided_interpretation_local_validation_is_unchanged():
     assert parsed.interpretations[0].semantic_roles == ("reader",)
 
 
-def test_discovery_guided_verification_schema_closes_handles():
-    _, verification = _discovery_formats(guided=True)
+def test_discovery_guided_verification_schema_closes_handles(tmp_path):
+    _, verification = _discovery_formats(tmp_path, guided=True)
     schema = verification.model_json_schema()
     row = _resolve(schema, schema["properties"]["verdicts"]["items"])["properties"]
     assert row["tool_handle"]["enum"] == ["TOOL-1", "TOOL-2"]

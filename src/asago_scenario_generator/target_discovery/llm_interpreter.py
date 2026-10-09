@@ -3,26 +3,22 @@
 This module is the only provider-aware part of the standalone scanner.  It
 resolves a named model profile, delegates both structured calls to the shared
 ``call_with_policy`` boundary, and exposes deterministic call evidence back to
-the pure discovery composition seam.  The temporary safe-call log is
-discarded after each request; the scanner persists the sanitized, replayable
-records returned by :meth:`drain_call_records`.
+the pure discovery composition seam.  The shared call log in the
+discovery output directory records each request; :meth:`drain_call_records`
+returns those entries, with provider error text withheld, for the scanner to
+publish.
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
-from tempfile import TemporaryDirectory
 from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, StrictStr, create_model
 
-from asago_scenario_generator.models.canonical import (
-    ClosedCanonicalModel,
-    canonical_json_bytes,
-)
+from asago_scenario_generator.models.canonical import ClosedCanonicalModel
 from asago_scenario_generator.request_schema import (
     string_enum,
     string_items_enum,
@@ -31,7 +27,6 @@ from asago_scenario_generator.request_schema import (
 from asago_scenario_generator.stpa.infra.llm import (
     DEFAULT_TEMPERATURE,
     LLMClient,
-    LLMResult,
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
@@ -53,6 +48,7 @@ from .contracts import (
     TargetInterpretationVerification,
     TargetToolPromptView,
 )
+from .persistence import CALLS_FILENAME
 from .prompts import (
     build_interpretation_prompt,
     build_verifier_prompt,
@@ -198,11 +194,13 @@ class TargetDiscoveryLlmInterpreter:
         self,
         llm_client: LLMClient,
         *,
+        run_dir: Path,
         model_profile: str | None = None,
         temperature: float | None = None,
         max_completion_tokens: int | None = None,
     ) -> None:
         self._llm_client = llm_client
+        self._run_dir = Path(run_dir)
         self.model_profile = model_profile
         self.model_name = str(getattr(llm_client, "model", "unknown-model"))
         self._temperature = (
@@ -222,6 +220,8 @@ class TargetDiscoveryLlmInterpreter:
         cls,
         profiles_file: str | Path,
         profile_name: str,
+        *,
+        run_dir: Path,
         **kwargs: Any,
     ) -> "TargetDiscoveryLlmInterpreter":
         """Resolve one existing named model profile into an interpreter."""
@@ -230,6 +230,7 @@ class TargetDiscoveryLlmInterpreter:
         )
         return cls(
             llm_client,
+            run_dir=run_dir,
             model_profile=resolved_profile,
             **kwargs,
         )
@@ -248,8 +249,6 @@ class TargetDiscoveryLlmInterpreter:
                 len(request.tools), tools=self._guided_tools(request)
             ),
         )
-        if parsed is None:
-            raise TypeError("safe interpreter response was not typed")
         try:
             interpretations = tuple(
                 TargetInterpretationDraft.model_validate(item.model_dump(mode="json"))
@@ -281,10 +280,7 @@ class TargetDiscoveryLlmInterpreter:
             response_format=_provider_verification_model(
                 len(request.tools), tools=self._guided_tools(request)
             ),
-            response_for_record=response,
         )
-        if parsed is None:
-            raise TypeError("safe verifier response was not typed")
         try:
             verification = TargetInterpretationVerification.model_validate(
                 parsed.model_dump(mode="json")
@@ -322,166 +318,67 @@ class TargetDiscoveryLlmInterpreter:
         system_prompt: str,
         user_prompt: str,
         response_format: type[BaseModel],
-        response_for_record: BaseModel | None = None,
-    ) -> BaseModel | None:
-        """Run one safe structured call and retain replayable call evidence."""
-        result: LLMResult | None = None
+    ) -> BaseModel:
+        """Run one safe structured call and collect what the shared log recorded."""
+        calls_path = self._run_dir / CALLS_FILENAME
+        offset = calls_path.stat().st_size if calls_path.exists() else 0
         parsed: BaseModel | None = None
         error: BaseException | None = None
         try:
-            # ``call_with_policy`` writes its standard lifecycle log to this
-            # disposable directory.  The scanner-owned record below is the
-            # durable accounting surface, so no provider log path leaks into
-            # the profile or manifest.
-            with TemporaryDirectory(prefix="asago-target-discovery-") as directory:
-                outcome = call_with_policy(
-                    llm_client=self._llm_client,
-                    system_prompt=system_prompt,
-                    user_prompt=user_prompt,
-                    response_format=response_format,
-                    run_dir=Path(directory),
-                    stage="target_discovery",
-                    step=kind,
-                    policy=CorrectionPolicy(),
-                    temperature=self._temperature,
-                    max_completion_tokens=self._max_completion_tokens,
-                    allow_unvalidated=False,
-                    prompt_template_hashes={
-                        "target_discovery_prompt": prompt_hash(
-                            system_prompt, user_prompt
-                        )
-                    },
-                )
-            parsed, result = outcome.value, outcome.result
+            outcome = call_with_policy(
+                llm_client=self._llm_client,
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                response_format=response_format,
+                run_dir=self._run_dir,
+                stage="target_discovery",
+                step=kind,
+                policy=CorrectionPolicy(),
+                temperature=self._temperature,
+                max_completion_tokens=self._max_completion_tokens,
+                allow_unvalidated=False,
+                prompt_template_hashes={
+                    "target_discovery_prompt": prompt_hash(system_prompt, user_prompt)
+                },
+            )
+            parsed = outcome.value
             if outcome.error is not None:
                 error = outcome.failure or RuntimeError("safe_llm_call failed")
         except BaseException as exc:  # noqa: BLE001 - provider boundary
             error = exc
-        self._call_records.append(
-            self._call_record(
-                kind=kind,
-                request=request,
-                system_prompt=system_prompt,
-                user_prompt=user_prompt,
-                parsed=parsed,
-                result=result,
-                error=error,
-                response_for_record=response_for_record,
-            )
-        )
+        failure = None
         if error is not None or parsed is None:
-            raise TargetDiscoveryLlmError(kind, error or RuntimeError("empty response"))
+            failure = TargetDiscoveryLlmError(kind, error or RuntimeError("empty"))
+        self._call_records.extend(
+            _entries_logged_since(calls_path, offset, request.batch_id, failure)
+        )
+        if failure is not None:
+            raise failure
         return parsed
 
-    def _call_record(
-        self,
-        *,
-        kind: str,
-        request: TargetInterpretationRequest,
-        system_prompt: str,
-        user_prompt: str,
-        parsed: BaseModel | None,
-        result: LLMResult | None,
-        error: BaseException | None,
-        response_for_record: BaseModel | None,
-    ) -> dict[str, Any]:
-        """Build one deterministic record without runtime configuration."""
-        actual_system, actual_user = _record_prompts(result, system_prompt, user_prompt)
-        response_content = _record_response_content(parsed, result)
-        record = _base_call_record(
-            kind=kind,
-            batch_id=request.batch_id,
-            model=self.model_name,
-            model_profile=self.model_profile,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            actual_system=actual_system,
-            actual_user=actual_user,
-            parsed=parsed,
-            response_content=response_content,
-            result=result,
-            error=error,
-        )
-        _record_error(record, error)
-        _record_verification_digest(record, response_for_record)
-        return record
 
-
-def _record_prompts(
-    result: LLMResult | None,
-    system_prompt: str,
-    user_prompt: str,
-) -> tuple[str, str]:
-    """Use provider-rendered prompts when available, otherwise requested text."""
-    return (
-        _result_prompt(result, "system_prompt") or system_prompt,
-        _result_prompt(result, "user_prompt") or user_prompt,
-    )
-
-
-def _record_response_content(
-    parsed: BaseModel | None,
-    result: LLMResult | None,
-) -> Any:
-    """Choose validated structured content before raw provider content."""
-    return _json_value(
-        parsed if parsed is not None else getattr(result, "content", None)
-    )
-
-
-def _base_call_record(
-    *,
-    kind: str,
+def _entries_logged_since(
+    calls_path: Path,
+    offset: int,
     batch_id: str,
-    model: str,
-    model_profile: str | None,
-    system_prompt: str,
-    user_prompt: str,
-    actual_system: str,
-    actual_user: str,
-    parsed: BaseModel | None,
-    response_content: Any,
-    result: LLMResult | None,
-    error: BaseException | None,
-) -> dict[str, Any]:
-    """Construct the common secret-free call evidence fields."""
-    return {
-        "kind": kind,
-        "stage": "target_discovery",
-        "step": kind,
-        "batch_id": batch_id,
-        "model": model,
-        "model_profile": model_profile,
-        "prompt_hash": prompt_hash(system_prompt, user_prompt),
-        "rendered_prompt_hash": prompt_hash(actual_system, actual_user),
-        "system_prompt_text": actual_system,
-        "user_prompt_text": actual_user,
-        "validated_response": _json_value(parsed),
-        "response_content": (
-            _canonical_text(response_content) if response_content is not None else None
-        ),
-        "prompt_tokens": int(getattr(result, "prompt_tokens", 0) or 0),
-        "completion_tokens": int(getattr(result, "completion_tokens", 0) or 0),
-        "usage_details": dict(getattr(result, "usage_details", {}) or {}),
-        "request_controls": dict(getattr(result, "request_controls", {}) or {}),
-        # A failed helper call may have dispatched a request without returning
-        # an ``LLMResult``.  ``None`` means unmeasured; zero is reserved for a
-        # result that explicitly reports a zero duration.
-        "duration_ms": _result_duration(result),
-        "success": error is None and parsed is not None,
-        "provider_response_received": result is not None,
-        "semantic_validation_passed": parsed is not None and error is None,
-    }
+    failure: TargetDiscoveryLlmError | None,
+) -> list[dict[str, Any]]:
+    """Read the entries one call appended to the shared call log.
 
-
-def _record_error(record: dict[str, Any], error: BaseException | None) -> None:
-    """Attach the failure's class and HTTP status, never its message."""
-    if error is None:
-        return
-    record["error_type"] = type(error).__name__
-    http_status = _failure_http_status(error)
-    if http_status is not None:
-        record["http_status"] = http_status
+    The shared log keeps the provider's error text, which can carry a response
+    body, so a failed call's entries keep only the failure class and status.
+    """
+    if not calls_path.exists():
+        return []
+    with calls_path.open("rb") as handle:
+        handle.seek(offset)
+        lines = handle.read().decode("utf-8").splitlines()
+    entries = [json.loads(line) for line in lines if line.strip()]
+    for entry in entries:
+        entry["batch_id"] = batch_id
+        if failure is not None and "error" in entry:
+            entry["error"] = str(failure)
+    return entries
 
 
 def _coerce_http_status(value: Any) -> int | None:
@@ -498,62 +395,6 @@ def _failure_http_status(error: BaseException) -> int | None:
         return status
     response = getattr(error, "response", None)
     return _coerce_http_status(getattr(response, "status_code", None))
-
-
-def _result_duration(result: LLMResult | None) -> int | None:
-    """Return measured duration, leaving absent provider results unknown."""
-    if result is None:
-        return None
-    value = getattr(result, "duration_ms", None)
-    return int(value) if value is not None else None
-
-
-def _record_verification_digest(
-    record: dict[str, Any], response: BaseModel | None
-) -> None:
-    """Pin the interpretation supplied to the independent verifier."""
-    if response is not None:
-        record["verified_interpretation_digest"] = _digest_model(response)
-
-
-def _result_prompt(result: LLMResult | None, field: str) -> str:
-    """Read one prompt field from a result while accepting test doubles."""
-    value = getattr(result, field, "") if result is not None else ""
-    return value if isinstance(value, str) else ""
-
-
-def _json_value(value: Any) -> Any:
-    """Convert model/provider values into JSON-safe values without repr text."""
-    if value is None:
-        return None
-    if isinstance(value, BaseModel):
-        return value.model_dump(mode="json")
-    if isinstance(value, Mapping):
-        return {str(key): _json_value(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [_json_value(item) for item in value]
-    if isinstance(value, (str, int, float, bool)):
-        return value
-    return str(value)
-
-
-def _canonical_text(value: Any) -> str:
-    """Render one response value deterministically for JSONL accounting."""
-    if isinstance(value, str):
-        return value
-    return json.dumps(
-        _json_value(value),
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
-
-def _digest_model(value: BaseModel) -> str:
-    """Digest a typed model for verifier-side audit context."""
-    return hashlib.sha256(
-        canonical_json_bytes(value.model_dump(mode="json"))
-    ).hexdigest()
 
 
 __all__ = ["TargetDiscoveryLlmError", "TargetDiscoveryLlmInterpreter"]
