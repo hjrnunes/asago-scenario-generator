@@ -185,7 +185,11 @@ check runs after every other Stage 5 check. An unresolved reference or a
 violated comparison fails the result validator, so the existing validation
 retry delivers the exact `discriminating_condition_check_failed:` text as the
 one correction; that text asks for condition changes only and keeps the
-observation fields unchanged. If the corrected response still fails only
+observation fields unchanged. Every Stage 5 correction, for a condition or any
+other failure, shows the model its prior structured reply (the "Prior
+structured response to correct in place" block) between the repair guidance
+and the exact error, so an instruction to keep fields unchanged refers to text
+the model can see. If the corrected response still fails only
 because of its condition (missing, unresolved, violated, or structurally
 invalid), code removes the condition and publishes the scenario with
 `discriminating_condition: null`, `condition_check: null`, and a code-owned
@@ -197,7 +201,11 @@ new model request, to the `reply` claim if the response declares a reply
 criterion the observation contract supports, and to analytical-only
 otherwise (code never writes reply wording). The note says which; every
 changed field, with the failure code in the reason
-`condition_dropped_<route>:<code>`, goes to the Stage 5 normalization record. A
+`condition_dropped_<route>:<code>`, goes to the Stage 5 normalization record.
+A criterion that code stops observing also loses the model's `reason`, which
+justified the withdrawn claim: it carries a code-owned note naming the failure
+code, and the record keeps the model's original under
+`observation_criteria[<i>].reason`. A
 condition returned for an analytical-only scenario is
 discarded with its own `condition_omitted_reason`. The condition never
 causes a scenario to be dropped. The accepted condition and its
