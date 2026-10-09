@@ -12,7 +12,7 @@ from functools import lru_cache, partial
 from pathlib import Path
 from typing import Annotated, Any, Literal, Mapping, Sequence, Union
 
-from pydantic import Field, create_model, field_validator, model_validator
+from pydantic import Field, create_model, model_validator
 
 from asago_scenario_generator.models.artifact_pin import ObligationId
 from asago_scenario_generator.models.obligation_consideration import (
@@ -1044,16 +1044,6 @@ class _SlotProviderFindingDraft(_Model):
     process_model_refs: tuple[str, ...] = ()
     feedback_refs: tuple[str, ...] = ()
     context_row: str | None = None
-
-    @field_validator("deviation", mode="before")
-    @classmethod
-    def accept_historical_typed_deviation(cls, value: Any) -> Any:
-        """Keep deterministic typed fixtures compatible outside the schema."""
-        if isinstance(value, IcaDeviationDraft):
-            return value.text
-        if isinstance(value, dict):
-            return IcaDeviationDraft.model_validate(value).text
-        return value
 
 
 class _SlotProviderDraft(_Model):

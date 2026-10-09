@@ -71,6 +71,7 @@ from tests.helpers.obligation_aware import (
     _controls,
     _loss_analysis,
     _provider_slot_request,
+    provider_slot_payload,
     route_assessment,
 )
 
@@ -1117,7 +1118,7 @@ def test_provider_accepts_nested_structured_ica_consideration_results(tmp_path) 
 
         def complete(self, **kwargs):
             return LLMResult(
-                content={"filled_slots": [draft.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(draft)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,

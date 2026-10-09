@@ -45,6 +45,7 @@ from tests.stpa.helpers import (
     make_minimal_loss_analysis,
 )
 from tests.helpers.governance import _accounting_pins, _controls, _governance_scenario
+from tests.helpers.obligation_aware import provider_slot_payload
 
 _SLOT_ID = "RESP-1:CA-1-1:INCORRECT"
 
@@ -70,7 +71,7 @@ class _Client:
         prompt = kwargs["user_prompt"]
         self.prompts.append(prompt)
         drafts = [
-            self._draft_for(slot_id).model_dump(mode="json")
+            provider_slot_payload(self._draft_for(slot_id))
             for slot_id in self.slot_ids
             if slot_id in prompt
         ]

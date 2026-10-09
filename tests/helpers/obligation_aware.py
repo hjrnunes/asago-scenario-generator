@@ -116,6 +116,18 @@ def _controls() -> AnalysisControls:
     )
 
 
+def provider_slot_payload(draft: SlotIcaDraft) -> dict:
+    """Dump a typed slot draft as the provider wire carries it.
+
+    The wire schema gives each finding's ``deviation`` as one string; the typed
+    draft nests it in a type-specific object.
+    """
+    payload = draft.model_dump(mode="json")
+    for wire, typed in zip(payload["findings"], draft.findings, strict=True):
+        wire["deviation"] = typed.deviation.text
+    return payload
+
+
 def route_assessment(
     brief,
     *,

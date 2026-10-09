@@ -107,6 +107,7 @@ from tests.helpers.obligation_aware import (
     _loss_analysis,
     _provider_slot_request,
     _routed_slot_draft,
+    provider_slot_payload,
     route_assessment,
 )
 
@@ -832,7 +833,7 @@ def test_provider_slot_payload_materializes_canonical_exec_identity(tmp_path) ->
         def complete(self, **kwargs):
             response_formats.append(kwargs["response_format"])
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1034,7 +1035,7 @@ def test_provider_arbitrary_ica_id_survives_fill_and_accounting(tmp_path) -> Non
                     na_rationale="No routed concern applies.",
                 )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,

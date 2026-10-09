@@ -34,6 +34,7 @@ from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.helpers.obligation_aware import (
+    provider_slot_payload,
     _control_structure,
     _controls,
     _loss_analysis,
@@ -97,7 +98,7 @@ def test_captured_resp6_uses_nested_consideration_results(tmp_path) -> None:
         def complete(self, **kwargs):
             nonlocal calls
             calls += 1
-            content = {"filled_slots": [draft.model_dump(mode="json")]}
+            content = {"filled_slots": [provider_slot_payload(draft)]}
             return LLMResult(
                 content=content,
                 prompt_tokens=1,
@@ -175,7 +176,7 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
             calls += 1
             draft = invalid if calls == 1 else corrected
             return LLMResult(
-                content={"filled_slots": [draft.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(draft)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,

@@ -30,7 +30,11 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.helpers.obligation_aware import _controls, _loss_analysis
+from tests.helpers.obligation_aware import (
+    _controls,
+    _loss_analysis,
+    provider_slot_payload,
+)
 from asago_scenario_generator.stpa.obligation_aware.prompts import PROMPT_TEMPLATES_DIR
 
 _PROCESS = ElementRef(type=ReferenceType.controlled_process, id="CP-1")
@@ -127,7 +131,7 @@ class _ScriptedClient:
         self.prompts.append(kwargs["user_prompt"])
         draft = self.drafts.pop(0)
         return LLMResult(
-            content={"filled_slots": [draft.model_dump(mode="json")]},
+            content={"filled_slots": [provider_slot_payload(draft)]},
             prompt_tokens=1,
             completion_tokens=1,
             duration_ms=1,
