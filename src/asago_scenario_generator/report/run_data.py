@@ -113,6 +113,7 @@ class Manifest(_Read):
     total_prompt_tokens: int | None = None
     obligation_resolution_funnel: dict[str, Any] | None = None
     obligation_scope_summary: dict[str, Any] | None = None
+    obligation_stop_reason_counts: dict[str, int] = Field(default_factory=dict)
     revision: dict[str, Any] | None = None
     source_artifacts: dict[str, dict[str, Any]] = Field(default_factory=dict)
     provider_evidence: _ProviderEvidence = Field(default_factory=_ProviderEvidence)
