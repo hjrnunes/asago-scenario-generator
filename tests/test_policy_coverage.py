@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -15,6 +16,7 @@ from asago_scenario_generator.report.policy_coverage import (
     build_policy_coverage,
     display_name,
     harm_title,
+    publish_policy_coverage,
 )
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
@@ -396,3 +398,71 @@ def test_a_risk_without_scenarios_must_carry_a_reason() -> None:
     by_id(document)["r-c"]["reason"] = None
 
     assert list(validator().iter_errors(document)) != []
+
+
+def _write_run(tmp_path: Path) -> dict[str, Any]:
+    """A run directory with two scenarios and a risk extraction beside it."""
+    out = tmp_path / "out"
+    (out / "scenarios").mkdir(parents=True)
+    for scn, losses in (("SCN-001", ["L-1"]), ("SCN-002", ["L-1", "L-2"])):
+        (out / "scenarios" / f"{scn}.yaml").write_text(
+            f"scenario_id: {scn}\nlineage:\n  loss_ids: {json.dumps(losses)}\n"
+        )
+    extraction = tmp_path / "inputs" / "risks.json"
+    extraction.parent.mkdir()
+    extraction.write_text(
+        json.dumps(
+            {
+                "version": "1",
+                "source_documents": ["/private/home/policy-a.pdf", "policy-b.pdf"],
+                "risks": [
+                    {
+                        "risk_id": "r-a",
+                        "risk_name": "Alpha risk",
+                        "risk_description": "About alpha.",
+                        "taxonomy": "ibm-risk-atlas",
+                        "mitigations": [{"action_id": "A-1", "description": "Do it"}],
+                    },
+                    {
+                        "risk_id": "r-b",
+                        "risk_name": "Beta risk",
+                        "risk_description": "About beta.",
+                        "taxonomy": "nist-ai-rmf",
+                    },
+                ],
+            }
+        )
+    )
+    return {"output_dir": out, "risk_extraction": extraction}
+
+
+def test_publishing_reads_scenarios_from_disk_and_names_inputs_by_basename(
+    tmp_path: Path,
+) -> None:
+    run = _write_run(tmp_path)
+
+    path = publish_policy_coverage(
+        **run,
+        sssom=None,
+        loss_analysis=analysis(
+            [
+                risk_loss("L-1", "Money lost due to errors", ["r-a"]),
+                risk_loss("L-2", "Data leaks", ["r-b"]),
+            ],
+            [],
+        ),
+        actionability=None,
+    )
+
+    assert path == run["output_dir"] / "policy-coverage.json"
+    document = json.loads(path.read_text())
+    assert not [e.json_path for e in validator().iter_errors(document)]
+    assert document["policy"]["risk_extraction"] == "risks.json"
+    assert document["policy"]["documents"] == ["policy-a.pdf", "policy-b.pdf"]
+    assert (
+        document["policy"]["digest"]
+        == hashlib.sha256(run["risk_extraction"].read_bytes()).hexdigest()
+    )
+    harms = {h["loss_id"]: h["scenario_ids"] for h in document["harms"]}
+    assert harms == {"L-1": ["SCN-001", "SCN-002"], "L-2": ["SCN-002"]}
+    assert str(tmp_path) not in path.read_text()

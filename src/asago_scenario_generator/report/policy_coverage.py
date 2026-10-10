@@ -9,12 +9,19 @@ reaches scenarios only through its harms.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
-from asago_scenario_generator.data.sssom import SSSOMMapping
+import yaml
+
+from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
+from asago_scenario_generator.data.sssom import SSSOMMapping, load_sssom
+from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Loss,
@@ -297,3 +304,48 @@ def build_policy_coverage(
         "harms": [_harm_json(loss, alias, scenario_ids_by_loss) for loss in losses],
         "risks": [_risk_json(risk) for risk in risks],
     }
+
+
+def _written_scenarios(output_dir: Path) -> dict[str, list[str]]:
+    """Map each loss to the handoff scenarios that cite it in their lineage."""
+    by_loss: dict[str, list[str]] = {}
+    for path in sorted((output_dir / "scenarios").glob("SCN-*.yaml")):
+        handoff = yaml.safe_load(path.read_text(encoding="utf-8"))
+        for loss_id in handoff["lineage"]["loss_ids"]:
+            by_loss.setdefault(loss_id, []).append(handoff["scenario_id"])
+    return by_loss
+
+
+def _policy_source(risk_extraction: Path) -> dict[str, Any]:
+    """Name the policy input by base name and content digest, never by path."""
+    raw = risk_extraction.read_bytes()
+    data = json.loads(raw)
+    documents = data.get("source_documents", []) if isinstance(data, dict) else []
+    return {
+        "risk_extraction": risk_extraction.name,
+        "digest": hashlib.sha256(raw).hexdigest(),
+        "documents": [Path(item).name for item in documents],
+    }
+
+
+def publish_policy_coverage(
+    *,
+    output_dir: Path,
+    risk_extraction: Path,
+    sssom: Path | None,
+    loss_analysis: LossAnalysis,
+    actionability: RiskActionabilityRecord | None,
+) -> Path:
+    """Write ``policy-coverage.json`` beside the scenarios it describes."""
+    document = build_policy_coverage(
+        cards=load_reviewed_risk_extraction(risk_extraction),
+        sssom=load_sssom(sssom) if sssom is not None else [],
+        actionability=actionability,
+        loss_analysis=loss_analysis,
+        scenario_ids_by_loss=_written_scenarios(output_dir),
+        source=_policy_source(risk_extraction),
+    )
+    return write_text_atomically(
+        output_dir / FILENAME,
+        json.dumps(document, indent=2, ensure_ascii=False, sort_keys=True) + "\n",
+    )
