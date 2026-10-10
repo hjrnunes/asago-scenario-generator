@@ -80,8 +80,9 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
     ),
     AllowedDifference(
         "calls.jsonl",
-        ("timestamp", "duration_ms"),
-        "wall-clock time of each call",
+        ("timestamp", "duration_ms", "retry_of"),
+        "wall-clock time of each call; a recording made before calls.jsonl named "
+        "the attempt a retry repeats lacks retry_of",
     ),
     AllowedDifference(
         "run-manifest.yaml",
@@ -93,6 +94,40 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
         ("created_at", "prompt_call_evidence.[].duration_ms", "semantic_digest"),
         "wall-clock time of the run and of each call; the digest covers them, "
         "so the gate recomputes it on both sides instead of comparing it",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class AllowedFileChange:
+    """A file one side may lack because recordings predate the report rewrite.
+
+    *side* names the side that holds the file: ``"recording"`` for a file the
+    replay no longer writes, ``"replay"`` for one a recording lacks.
+    """
+
+    file: str
+    side: str
+    reason: str
+
+
+# Recordings made before the generate report moved to the shared report kit
+# hold synthesis-report.html and neither report/ nor policy-coverage.json.
+# Re-record the corpus to retire these entries.
+ALLOWED_FILE_CHANGES: tuple[AllowedFileChange, ...] = (
+    AllowedFileChange(
+        "synthesis-report.html",
+        "recording",
+        "the generate report now lives at report/index.html",
+    ),
+    AllowedFileChange(
+        "report/index.html", "replay", "the generate report on the report kit"
+    ),
+    AllowedFileChange(
+        "report/stage-summary.json", "replay", "the stage summary of that report"
+    ),
+    AllowedFileChange(
+        "policy-coverage.json", "replay", "the policy funnel the report reads"
     ),
 )
 
@@ -551,6 +586,12 @@ def _run_id_aliases(recorded: Path, replayed: Path) -> dict[str, str]:
     return aliases
 
 
+def _file_change_allowed(name: str, side: str) -> bool:
+    return any(
+        change.side == side and change.file == name for change in ALLOWED_FILE_CHANGES
+    )
+
+
 def compare_trees(
     recorded: Path,
     replayed: Path,
@@ -568,8 +609,14 @@ def compare_trees(
     aliases = {**path_map, **_run_id_aliases(recorded, replayed)}
     left, right = _files(recorded), _files(replayed)
     differences = [
-        Difference(name, "only in recording") for name in sorted(left - right)
-    ] + [Difference(name, "only in replay") for name in sorted(right - left)]
+        Difference(name, "only in recording")
+        for name in sorted(left - right)
+        if not _file_change_allowed(name, "recording")
+    ] + [
+        Difference(name, "only in replay")
+        for name in sorted(right - left)
+        if not _file_change_allowed(name, "replay")
+    ]
     shared = sorted(left & right)
     for relative in shared:
         detail = compare_file(

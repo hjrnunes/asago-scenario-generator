@@ -20,6 +20,7 @@ from asago_scenario_generator.pipeline.synthesis_manifest import (
 )
 from replay_gate import (
     ALLOWED_DIFFERENCES,
+    ALLOWED_FILE_CHANGES,
     Difference,
     GateResult,
     _drop_field,
@@ -162,6 +163,47 @@ def test_missing_extra_and_text_files_are_reported(trees) -> None:
     ]
 
 
+def test_a_recording_made_before_the_generate_report_moved_still_matches(
+    trees,
+) -> None:
+    recorded, replayed, path_map = trees
+    (replayed / "synthesis-report.html").unlink()
+    (replayed / "report").mkdir()
+    (replayed / "report" / "index.html").write_text("<html></html>\n")
+    (replayed / "report" / "stage-summary.json").write_text("{}\n")
+    (replayed / "policy-coverage.json").write_text("{}\n")
+    _jsonl(
+        replayed / "calls.jsonl",
+        [
+            {
+                "step": "a",
+                "timestamp": "x",
+                "duration_ms": 1,
+                "ok": True,
+                "retry_of": 3,
+            }
+        ],
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_only_the_named_report_files_may_appear_or_vanish(trees) -> None:
+    recorded, replayed, path_map = trees
+    (replayed / "report").mkdir()
+    (replayed / "report" / "notes.html").write_text("<html></html>\n")
+    (recorded / "policy-coverage.json").write_text("{}\n")
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [str(d) for d in differences] == [
+        "policy-coverage.json: only in recording",
+        "report/notes.html: only in replay",
+    ]
+
+
 def test_a_self_digest_that_does_not_match_its_payload_fails(trees) -> None:
     recorded, replayed, path_map = trees
     manifest = yaml.safe_load((replayed / "synthesis-manifest.yaml").read_text())
@@ -247,6 +289,9 @@ def test_the_report_names_the_removed_templates(trees, tmp_path: Path) -> None:
 def test_every_allowed_difference_states_a_reason() -> None:
     for allowed in ALLOWED_DIFFERENCES:
         assert allowed.file and allowed.fields and allowed.reason
+    for change in ALLOWED_FILE_CHANGES:
+        assert change.file and change.side in {"recording", "replay"}
+        assert change.reason
 
 
 def test_prepare_run_copies_inputs_and_redirects_the_output(tmp_path: Path) -> None:
