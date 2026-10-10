@@ -561,6 +561,19 @@ class TestCallWithPolicy:
         assert outcome.error == "RuntimeError: offline"
         assert outcome.calls == 1
 
+    def test_an_opted_in_policy_needs_a_reply_to_correct(self, tmp_path) -> None:
+        # A decode error raised before any reply arrived has no response to show.
+        client = ScriptedClient(
+            [json.JSONDecodeError("Expecting value", "", 0), {"item_id": "ok"}]
+        )
+        policy = CorrectionPolicy(validation_retries=1, correct_undecodable=True)
+
+        outcome = _send(client, tmp_path, policy=policy)
+
+        assert outcome.value is None
+        assert outcome.calls == 1
+        assert len(client.prompts) == 1
+
     def test_a_prior_reply_that_fails_validation_keeps_its_trailing_whitespace(
         self, tmp_path
     ) -> None:
