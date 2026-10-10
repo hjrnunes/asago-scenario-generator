@@ -69,3 +69,8 @@ def missing(name: str) -> Markup:
 def status_badge(ok: bool, good: str, bad: str) -> Markup:
     """Render a pass or warn badge from a flag."""
     return badge("pass", good) if ok else badge("warn", bad)
+
+
+def counted(key: str, count: int) -> Markup:
+    """Render a count under ``data-metric`` *key*, so tests read what the page shows."""
+    return Markup(f'<b data-metric="{key}" data-value="{count}">{count:,}</b>')
