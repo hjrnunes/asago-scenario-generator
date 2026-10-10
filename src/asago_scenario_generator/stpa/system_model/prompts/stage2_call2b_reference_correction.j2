@@ -1,5 +1,19 @@
 The prior response names references that this structure does not hold.
 Correct only these references, and keep every other record as written.
+{%- if undeclared_controlled_processes %}
+
+The prior response left out `controlled_processes` (or sent it empty), so it
+declares no controlled process. Declare each controlled process listed below in
+`controlled_processes` with its `cp_id` and `description`, or retarget the
+references that name it to a responsibility listed under "Valid action targets
+and feedback sources". Adding these controlled processes is allowed even though
+every other record stays as written.
+
+Controlled processes referenced but not declared:
+{%- for cp_id in undeclared_controlled_processes %}
+- {{ cp_id }}
+{%- endfor %}
+{%- endif %}
 
 Unknown references in the prior response:
 {%- for ref in unknown_references %}
