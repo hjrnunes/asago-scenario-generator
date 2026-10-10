@@ -16,6 +16,7 @@ from asago_scenario_generator.report.run_data import RunData
 from asago_scenario_generator.report_kit import (
     Column,
     Drop,
+    FootingError,
     FunnelStep,
     Markup,
     Row,
@@ -61,6 +62,11 @@ def risk_scenarios(policy: dict[str, Any], risk: dict[str, Any]) -> list[str]:
     return sorted(found)
 
 
+def _present(run: RunData, risk: dict[str, Any]) -> list[str]:
+    """List the scenarios of *risk* that have a file in this run."""
+    return [s for s in risk_scenarios(run.policy, risk) if s in run.scenarios]
+
+
 def _drop_label(step: str, coverage: str) -> str:
     label = DROP_LABEL[coverage][0]
     return f"{STEP_NAME[step]} {label}" if coverage == "not_applicable" else label
@@ -83,12 +89,18 @@ def _step_drops(risks: list[dict[str, Any]], step: str) -> list[Drop]:
 def _policy_steps(policy: dict[str, Any]) -> list[FunnelStep]:
     risks = [r for r in policy["risks"] if r["coverage"] != "scenarios"]
     remaining = len(policy["risks"])
+    reached = sum(r["coverage"] == "scenarios" for r in policy["risks"])
     steps = []
     for key, step, label in STEPS:
         drops = _step_drops(risks, step)
         left = remaining - sum(d.count for d in drops)
         steps.append(FunnelStep(key, label, remaining, left, drops))
         remaining = left
+    if remaining != reached:
+        raise FootingError(
+            f"the policy funnel ends with {remaining} risks, but {reached} reached "
+            "a scenario: a risk was dropped at a step the funnel does not know"
+        )
     return steps
 
 
@@ -166,7 +178,7 @@ def _cited_rows(run: RunData) -> list[Row]:
     for risk in sorted(run.policy["risks"], key=lambda r: _name(r).lower()):
         if risk["coverage"] != "scenarios":
             continue
-        found = risk_scenarios(run.policy, risk)
+        found = _present(run, risk)
         attack = [s for s in found if run.scenarios[s].kind == ATTACK]
         sent = [s for s in found if sendable(run, s)]
         rows.append(
@@ -183,6 +195,19 @@ def _cited_rows(run: RunData) -> list[Row]:
     return rows
 
 
+def _overlap(run: RunData) -> Markup:
+    cited = [r for r in run.policy["risks"] if r["coverage"] == "scenarios"]
+    per_risk = [_present(run, r) for r in cited]
+    total = sum(len(found) for found in per_risk)
+    distinct = len({s for found in per_risk for s in found})
+    if total <= distinct:
+        return Markup("")
+    return Markup(
+        "<p>One scenario can serve several risks, and the Scenarios column counts it "
+        f"once for each: {total} in all, for {distinct} distinct scenarios.</p>"
+    )
+
+
 def _cited_table(run: RunData) -> Markup:
     columns = [
         Column("Risk"),
@@ -191,7 +216,7 @@ def _cited_table(run: RunData) -> Markup:
         Column("Attack", numeric=True),
         Column("Sent to authoring", numeric=True),
     ]
-    return table(columns, _cited_rows(run), "risks-cited-table")
+    return join([_overlap(run), table(columns, _cited_rows(run), "risks-cited-table")])
 
 
 def _dropped_table(policy: dict[str, Any], coverage: str, ident: str) -> Markup:

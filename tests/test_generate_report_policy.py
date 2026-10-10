@@ -5,9 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from asago_scenario_generator.report.policy_section import policy_section
 from asago_scenario_generator.report.run_data import load_run
-from asago_scenario_generator.report_kit import read_metrics
+from asago_scenario_generator.report_kit import FootingError, read_metrics
 from tests.helpers.generate_report_fixture import copy_run, edit_yaml
 
 
@@ -103,3 +105,22 @@ def test_a_run_without_policy_coverage_says_so(tmp_path: Path) -> None:
 
     assert "policy-coverage.json: not in this run" in html
     assert n == {}
+
+
+def test_the_page_states_the_overlap_when_risks_share_scenarios(tmp_path: Path) -> None:
+    html, _ = shown(copy_run(tmp_path))
+
+    assert "38 in all, for 7 distinct scenarios" in html
+
+
+def test_a_risk_dropped_at_no_known_step_fails_the_footing(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+
+    def lose_track(policy: dict) -> None:
+        risk = next(r for r in policy["risks"] if r["coverage"] == "not_applicable")
+        risk["reason"]["step"] = "somewhere_else"
+
+    edit_policy(output, lose_track)
+
+    with pytest.raises(FootingError, match="14"):
+        shown(output)

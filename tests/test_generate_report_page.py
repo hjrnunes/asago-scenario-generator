@@ -364,3 +364,34 @@ def test_a_null_manifest_count_is_left_out_of_the_handoff(tmp_path: Path) -> Non
 
     handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
     assert "requested" not in handoff
+
+
+def test_every_number_tile_states_what_it_counts(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    tiles = re.findall(
+        r'<div class="metric[^"]*" data-metric="[^"]+".*?</div></div>', html
+    )
+    assert len(tiles) == 4
+    assert all('<span class="u">' in tile for tile in tiles)
+
+
+def test_a_tile_without_a_unit_is_refused() -> None:
+    from asago_scenario_generator.report_kit import KitError, metric
+
+    with pytest.raises(KitError, match="unit"):
+        metric("scenarios.written", "scenarios written", 8, unit=" ")
+
+
+def test_every_scenario_of_the_run_has_a_row_in_the_page_and_the_summary(
+    tmp_path: Path,
+) -> None:
+    output = copy_run(tmp_path)
+    for suffix in ("yaml", "feature"):
+        (output / "scenarios" / f"SCN-012.{suffix}").unlink()
+
+    html, summary = built(output)
+
+    assert metric(html, "scenarios.written") == (7, None)
+    assert 'id="row-SCN-012"' not in html
+    assert len(re.findall(r'<tr id="row-SCN-\d+"', html)) == 7
