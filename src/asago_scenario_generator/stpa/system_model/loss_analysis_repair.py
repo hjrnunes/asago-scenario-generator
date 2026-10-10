@@ -1574,6 +1574,47 @@ class ObligationRepairPlan:
     salvage_warnings: tuple[str, ...] = ()
 
 
+LOSS_PRESENCE_REPAIR_IDENTITY = "risk_card_losses"
+
+
+@dataclass(frozen=True)
+class LossPresenceRepairPlan:
+    """One correction of a risk-derivation reply that declared no grounded loss.
+
+    The request repeats the original prompts with the validator's exact
+    ``feedback`` and the prior reply (owner choice 5, decision 327).  It is
+    the call's one targeted repair.
+    """
+
+    feedback: str
+
+
+def record_loss_presence_repair(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    finding: str,
+    outcome: str,
+    reason: str = "",
+) -> None:
+    """Record the loss-presence correction with its one terminal outcome."""
+    if repair_record is None:
+        return
+    proposed = {"entries": [LOSS_PRESENCE_REPAIR_IDENTITY]}
+    repaired = outcome == "repaired"
+    repair_record.add(
+        stage=step,
+        attempt="repair",
+        kind="repair",
+        identity=LOSS_PRESENCE_REPAIR_IDENTITY,
+        reason=finding if repaired else f"{finding}; {reason}",
+        proposed=proposed,
+        applied=dict(proposed) if repaired else {},
+        outcome=outcome,
+        raw_step=step + _REPAIR_STEP_SUFFIX,
+    )
+
+
 @dataclass(frozen=True)
 class DroppedObligation:
     """An obligation the repair dropped because its span stays outside the rule."""
@@ -1686,7 +1727,9 @@ class ReferenceRepairPlan:
 
 
 RepairPlan = Union[DispositionRepairPlan, ObligationRepairPlan, ReferenceRepairPlan]
-RepairOutcome = Union[RepairPlan, UnsupportedRepair, DeterministicCleanup]
+RepairOutcome = Union[
+    RepairPlan, LossPresenceRepairPlan, UnsupportedRepair, DeterministicCleanup
+]
 
 
 def select_reference_repairs(
@@ -1880,15 +1923,17 @@ def build_repair_plan(
     first_wire_error: ValidationError | None = None,
     repair_record: RepairRecord | None = None,
     gap_wire: bool = False,
+    validation_feedback: str | None = None,
 ) -> RepairOutcome:
     """Classify one failed Stage 1a attempt and select its repair plan.
 
     ``failure_class`` is the caller's typed label for the first failure:
     ``wire_schema`` (the response never parsed), ``risk_accounting`` (the
-    deterministic accounting validator), ``draft_references``, or
-    ``draft_semantics``.  Only the first two can produce a repair, and the
-    wire path is further scoped by the initial error classification and
-    row-level salvage.
+    deterministic accounting validator), ``loss_presence`` (no grounded
+    loss declared), ``draft_references``, or ``draft_semantics``.  Only the
+    first three can produce a repair, and the wire path is further scoped
+    by the initial error classification and row-level salvage.  The
+    loss-presence correction carries ``validation_feedback``.
     """
     if first_result is None:
         return UnsupportedRepair("no provider response is available to repair")
@@ -1905,6 +1950,8 @@ def build_repair_plan(
             repair_record=repair_record,
             gap_wire=gap_wire,
         )
+    if failure_class == "loss_presence":
+        return LossPresenceRepairPlan(feedback=validation_feedback or "")
     if failure_class == "risk_accounting":
         return _accounting_repair_plan(
             first_result,

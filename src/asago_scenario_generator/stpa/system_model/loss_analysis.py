@@ -49,6 +49,7 @@ from asago_scenario_generator.stpa.infra.llm import (
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
+    correction_prompt,
     decode_content,
     _transformation,
     parse_llm_result,
@@ -82,6 +83,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DeterministicCleanup,
     DispositionRepairPlan,
     HazardlessConstraintDrop,
+    LossPresenceRepairPlan,
     ObligationRepairPlan,
     ReferenceRepairPlan,
     RepairPlan,
@@ -94,6 +96,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     drop_hazardless_constraints,
     record_cleanup_rows,
     record_hazardless_constraint_drop,
+    record_loss_presence_repair,
     record_truncation_recovery,
     recover_truncated_risk_dispositions,
     recover_truncated_risk_losses,
@@ -917,6 +920,10 @@ class _DraftSemanticValidationError(ValueError):
         self.feedback = feedback
 
 
+class _LossPresenceError(_DraftSemanticValidationError):
+    """The loss-producing call declared no grounded loss."""
+
+
 @dataclass(frozen=True)
 class LossAnalysisDiagnostic:
     """A deterministic, human-readable loss-analysis semantic diagnostic."""
@@ -1387,11 +1394,15 @@ class _Stage1aCall:
     normalization_warnings: list[str] | None
     repair_record: RepairRecord | None
     template_vars: dict[str, object]
+    system_prompt: str = ""
+    user_prompt: str = ""
     validation_feedback: str | None = None
+    validation_finding: str = ""
     first_parse_failed: bool = False
     first_wire_error: ValidationError | None = None
     # Typed label of the first failure, used to route the targeted repair:
-    # wire_schema, risk_accounting, draft_references, or draft_semantics.
+    # wire_schema, risk_accounting, loss_presence, draft_references, or
+    # draft_semantics.
     failure_class: str | None = None
     span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
     # The first response with its span repairs applied.  The repair path adapts
@@ -1585,6 +1596,9 @@ class _Stage1aCall:
         except _DraftReferenceValidationError:
             self.failure_class = self.failure_class or "draft_references"
             raise
+        except _LossPresenceError:
+            self.failure_class = "loss_presence"
+            raise
         except _DraftSemanticValidationError:
             self.failure_class = "draft_semantics"
             raise
@@ -1630,6 +1644,7 @@ class _Stage1aCall:
             self.run_validators(draft)
         except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
             self.validation_feedback = exc.feedback
+            self.validation_finding = str(exc)
             raise
 
     def record_first_attempt(self, first_result: LLMResult | None) -> LLMResult | None:
@@ -1771,6 +1786,8 @@ def _run_stage1a_call(
         normalization_warnings=normalization_warnings,
         repair_record=repair_record,
         template_vars=template_vars,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
     )
     first = call_with_policy(
         llm_client=llm_client,
@@ -1806,6 +1823,8 @@ def _repair_stage1a_failure(
     # three approved failure classes: missing or malformed risk-disposition
     # entries, malformed obligation entries within an otherwise preserved
     # constraint, and unknown reference IDs (decision 243, 2026-10-08).
+    # A risk-derivation reply that declares no grounded loss gets one
+    # correction carrying the validator's feedback (decision 327).
     # Every other failure class gets an explicit typed outcome and no
     # additional model call.
     if call.validation_feedback is None:
@@ -1836,7 +1855,10 @@ def _repair_stage1a_failure(
             issubclass(call.response_format, _Stage1aGapProviderDraft)
             and not issubclass(call.response_format, _Stage1aRiskProviderDraft)
         ),
+        validation_feedback=call.validation_feedback,
     )
+    if isinstance(outcome, LossPresenceRepairPlan):
+        return _repair_loss_presence(call, outcome, first_result, error_msg)
     if isinstance(outcome, UnsupportedRepair):
         raise _unsupported_stop(
             call, outcome.scope, outcome.reason, error_msg, default_class="unknown"
@@ -1846,6 +1868,75 @@ def _repair_stage1a_failure(
             call, outcome, repair_response_format, error_msg
         )
     return _run_stage1a_repairs(call, outcome, repair_response_format)
+
+
+def _repair_loss_presence(
+    call: _Stage1aCall,
+    plan: LossPresenceRepairPlan,
+    first_result: LLMResult | None,
+    error_msg: str,
+) -> LossAnalysisDraft:
+    """Send the one correction of a reply that declared no grounded loss."""
+    # Validating the corrected reply reclassifies the call's failure.
+    failure_class = call.failure_class
+    outcome = call_with_policy(
+        llm_client=call.llm_client,
+        system_prompt=call.system_prompt,
+        user_prompt=correction_prompt(
+            original_prompt=call.user_prompt,
+            feedback=plan.feedback,
+            error=ValueError(call.validation_finding),
+            response_format=call.response_format,
+            include_schema=False,
+            prior_result=first_result,
+            include_prior_response=True,
+        ),
+        response_format=call.response_format,
+        run_dir=call.run_dir,
+        stage=STAGE,
+        step=call.step + "_repair",
+        policy=CorrectionPolicy(),
+        temperature=call.temperature,
+        max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
+        response_parser=lambda result, _cleanup: _parse_loss_presence_reply(
+            call, result
+        ),
+    )
+    repaired = outcome.error is None and outcome.value is not None
+    record_loss_presence_repair(
+        call.repair_record,
+        step=call.step,
+        finding=call.validation_finding,
+        outcome="repaired" if repaired else "failed",
+        reason=outcome.error or "",
+    )
+    if repaired:
+        return outcome.value
+    raise StageError(
+        stage=STAGE,
+        step=call.step,
+        message=(
+            f"targeted repair failed: {outcome.error}; {failure_class} "
+            f"failure class; first attempt failed: {error_msg}. "
+            f"{call.validation_feedback}"
+        ),
+    )
+
+
+def _parse_loss_presence_reply(
+    call: _Stage1aCall, result: LLMResult
+) -> LossAnalysisDraft:
+    """Parse and fully validate the loss-presence correction's reply."""
+    draft = _materialize_provider_draft(
+        parse_llm_result(result, call.response_format),
+        prior=call.authoritative_draft,
+    )
+    merged = (
+        call.merge_authority(draft) if call.authoritative_draft is not None else draft
+    )
+    call.add_warnings(normalize_disposition_citations(merged))
+    call.run_validators(merged)
+    return merged
 
 
 def _correct_references(
@@ -2619,7 +2710,7 @@ def _validate_loss_presence(
         f"{context} must return a complete loss -> hazard -> security constraint "
         "chain anchor: no grounded losses were declared"
     )
-    raise _DraftSemanticValidationError(
+    raise _LossPresenceError(
         message,
         feedback=(
             f"Validation feedback: {message}. Declare at least one grounded "
