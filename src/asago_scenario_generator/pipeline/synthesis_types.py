@@ -42,7 +42,7 @@ SCENARIO_REALIZATION_FILENAME = "scenario-realization.yaml"
 MANIFEST_FILENAME = "synthesis-manifest.yaml"
 
 
-REPORT_FILENAME = "synthesis-report.html"
+REPORT_FILENAME = "report/index.html"
 
 
 class SynthesisRunStatus(str, Enum):
@@ -84,6 +84,7 @@ class SynthesisInputs:
 
     # CLI/source metadata.  These are not read by pure planning seams.
     risk_extraction_path: Path | None = None
+    sssom_path: Path | None = None
     qualification_facts_path: Path | None = None
     loss_analysis_path: Path | None = None
     profiles_file: Path | str = "config/model-profiles.yaml"

@@ -158,33 +158,6 @@ def test_funnel_counts_a_routed_governance_row_apart_from_stop_reasons() -> None
     assert "governance_credited" not in funnel
 
 
-def test_report_row_names_the_route_of_a_governance_row_without_a_finding() -> None:
-    from asago_scenario_generator.report.synthesis import _obligation_row
-
-    plan_row = {
-        "obligation_id": _OBLIGATION_ID,
-        "scope_disposition": "governance_only",
-        "qualification_disposition": "not_attempted",
-    }
-
-    routed = _obligation_row(plan_row, None, _routed_row())
-
-    assert "routed to slots, no STPA finding" in routed
-    assert "governance route: route-1" in routed
-    assert "credited" not in routed
-
-
-def test_report_summary_row_counts_routed_governance_rows() -> None:
-    from asago_scenario_generator.report.synthesis import _governance_summary_rows
-
-    rows = _governance_summary_rows(
-        {"obligation_resolution_funnel": {"governance_routed_no_finding": 3}}
-    )
-
-    assert any("routed" in row and "3" in row for row in rows)
-    assert not any("credited" in row for row in rows)
-
-
 def test_funnel_without_a_credit_keeps_its_exact_shape() -> None:
     accounting = _governance_accounting(credited=False)
     realization = _realize(accounting, _governance_scenario(), requested=False)
@@ -201,40 +174,6 @@ def test_funnel_without_a_credit_keeps_its_exact_shape() -> None:
         "realized_obligation_denominator": 0,
         "admitted_scenario_denominator": 1,
     }
-
-
-def test_report_row_names_the_governance_credit_and_its_route() -> None:
-    from asago_scenario_generator.report.synthesis import _obligation_row
-
-    plan_row = {
-        "obligation_id": _OBLIGATION_ID,
-        "scope_disposition": "governance_only",
-        "qualification_disposition": "not_attempted",
-    }
-    credited = _obligation_row(plan_row, None, _row(credited=True))
-    bare = _obligation_row(plan_row, None, _row(credited=False))
-
-    assert "credited with an STPA finding" in credited
-    assert "governance route: route-1" in credited
-    assert _ICA_ID in credited
-    assert "credited" not in bare
-    assert "not applicable to this row" in bare
-
-
-def test_report_summary_rows_appear_only_with_a_credit() -> None:
-    from asago_scenario_generator.report.synthesis import _governance_summary_rows
-
-    assert _governance_summary_rows({"obligation_resolution_funnel": {}}) == []
-    rows = _governance_summary_rows(
-        {
-            "obligation_resolution_funnel": {
-                "governance_credited": 2,
-                "governance_realized": 1,
-            }
-        }
-    )
-    assert any("credited" in row and "2" in row for row in rows)
-    assert any("realized" in row and "1" in row for row in rows)
 
 
 def test_funnel_accepts_rows_that_carry_no_finding_fields() -> None:

@@ -1,0 +1,60 @@
+records:
+- consideration_pair_id: pair:v1:5bf66fc39e1cfe1dbd066b69a6cf2685254fcd5a2b72970fa0c9ea01a90f4e5a
+  context_digests:
+  - c1e41889dc1e3dcebb24f7a54f31877aa9b2540d2cd2dc53c0cb879bef5376c9
+  evidence:
+  - scenario:SCN-011:context:c1e41889dc1e3dcebb24f7a54f31877aa9b2540d2cd2dc53c0cb879bef5376c9
+  ica_id: RESP-1:CA-1-1:INCORRECT:1
+  obligation_id: ob:v1:74d37fbf145d41cab5088a659c0091049326873d175c55657daafd4525aabe85
+  record_id: realization:v1:1a93611c8d12dabb3564b5cbf4ceba8e5efe99ce033ce7487da4bde350e121c9
+  route_id: route:v1:fe10895bf9cdab2b7bdeaf71283c922465d0724f1ff664985dceaeb321193f50
+  scenario_ids:
+  - SCN-011
+  slot_id: RESP-1:CA-1-1:INCORRECT
+  status: realized
+  stop_reason: scenario_realized
+- consideration_pair_id: pair:v1:5bf66fc39e1cfe1dbd066b69a6cf2685254fcd5a2b72970fa0c9ea01a90f4e5a
+  context_digests:
+  - 90003cd09034e9c1cacd1f3ba96a460cd9a0c243b5e7eb3399bbfc21ed60dbac
+  evidence:
+  - scenario:SCN-012:context:90003cd09034e9c1cacd1f3ba96a460cd9a0c243b5e7eb3399bbfc21ed60dbac
+  ica_id: RESP-1:CA-1-1:INCORRECT:2
+  obligation_id: ob:v1:74d37fbf145d41cab5088a659c0091049326873d175c55657daafd4525aabe85
+  record_id: realization:v1:687ede7b9a923fe85591845aa8e4c81fb2da06b70f3016978f49ba2d33af4f3c
+  route_id: route:v1:fe10895bf9cdab2b7bdeaf71283c922465d0724f1ff664985dceaeb321193f50
+  scenario_ids:
+  - SCN-012
+  slot_id: RESP-1:CA-1-1:INCORRECT
+  status: realized
+  stop_reason: scenario_realized
+- consideration_pair_id: pair:v1:c116afec067993694227e7c5b5a3f9be13f0e3a5942b928fbea19ad10f4b69ae
+  context_digests:
+  - 6933be9f4b07c0d92cc143da12d1884ee342fb2c0b2eefc152ba6d784493f39c
+  evidence:
+  - scenario:SCN-015:context:6933be9f4b07c0d92cc143da12d1884ee342fb2c0b2eefc152ba6d784493f39c
+  ica_id: RESP-1:CA-1-1:INCORRECT:5
+  obligation_id: ob:v1:94edcaa94cd807ec5052fd8ac65f3064599974b1dc7356701f0d8afd96ab7f4d
+  record_id: realization:v1:de49b73df56e2fdf9d8f70f19597f81e465a18b0caf8f4770a67d39878abf973
+  route_id: route:v1:19253a543673c2dea38372f41dfc21557b2d7861fabaf12909ffcb56534ef552
+  scenario_ids:
+  - SCN-015
+  slot_id: RESP-1:CA-1-1:INCORRECT
+  status: realized
+  stop_reason: scenario_realized
+schema_version: stpa-scenario-realization-v1
+semantic_digest: b5e705be97c8f82d2d4438bce1eb75bceb1ed5234331321c476aa8fb6a4f4210
+source_pins:
+- artifact_id: ica-enumeration
+  schema_version: ica-enumeration-v1
+  semantic_digest: 7ea377cf2c84eaebb7b7fc23b8786cd8cd5ee4ed569e367a91e5be579a8e9f4b
+- artifact_id: obligation-accounting
+  schema_version: stpa-obligation-accounting-v1
+  semantic_digest: 2f2f7de7f698911c89052076f7c0b7ce8c1ef820f6e84173a1fe9e16efe4b9e5
+- artifact_id: stpa-scenario-collection
+  schema_version: stpa-scenario-collection-v1
+  semantic_digest: c5d84a9fd89be58e12d5ff22c2a6653b517631789b757aa807a51f22e7f1829b
+summary:
+  not_requested: 0
+  realized: 3
+  total: 3
+  unresolved: 0

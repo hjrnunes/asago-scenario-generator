@@ -1,0 +1,432 @@
+"""The assembled generate report and its stage summary."""
+
+from __future__ import annotations
+
+import json
+from html.parser import HTMLParser
+import re
+from pathlib import Path
+
+import pytest
+from jsonschema import Draft202012Validator
+
+from asago_scenario_generator.report import generate_report
+from asago_scenario_generator.report.generate_report import (
+    build_report,
+    write_report,
+)
+from asago_scenario_generator.report.run_data import load_run
+from asago_scenario_generator.report_kit import (
+    check_headline,
+    check_offline,
+    read_metrics,
+)
+from tests.helpers.generate_report_fixture import copy_run, edit_calls, edit_yaml
+
+SCHEMA = (
+    Path(generate_report.__file__).parent.parent
+    / "report_kit"
+    / "stage-summary-v1.schema.json"
+)
+SECTIONS = (
+    "answer how risks slots testability obligations failed warnings scenarios "
+    "target handoff effort"
+).split()
+
+
+def built(output: Path) -> tuple[str, dict]:
+    html, summary = build_report(load_run(output))
+    return str(html), summary
+
+
+def metric(html: str, key: str) -> tuple[int, int | None]:
+    found = read_metrics(html)[key]
+    return int(found["value"]), None if found["of"] is None else int(found["of"])
+
+
+def test_the_page_has_every_section_in_order(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    ids = re.findall(r'<section id="([^"]+)"', html)
+    assert ids == SECTIONS
+
+
+def test_the_headline_tiles_state_what_each_number_counts(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    assert metric(html, "scenarios.written") == (8, None)
+    assert metric(html, "scenarios.sent") == (6, 8)
+    assert metric(html, "policy.reached") == (14, 47)
+    assert metric(html, "requests.failed") == (10, 161)
+    for key in (
+        "scenarios.written",
+        "scenarios.sent",
+        "policy.reached",
+        "requests.failed",
+    ):
+        assert re.search(rf'data-metric="{key}".*?<span class="u"> \w+', html, re.S)
+
+
+def test_the_first_sentence_gives_the_outcome(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    assert (
+        "8 scenarios written from 47 policy risks: 5 attack scenarios and 3 everyday "
+        "checks. 6 go to authoring." in html
+    )
+    assert "1 failure cost output" in html
+
+
+def test_a_tile_note_agrees_in_number_with_its_count(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    assert "1 duplicate, 1 analytical only" in html
+    assert "1 duplicates" not in html
+
+
+def test_every_metric_key_appears_once(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    assert len(read_metrics(html)) > 40
+
+
+def test_the_stage_summary_validates_against_the_kit_schema(tmp_path: Path) -> None:
+    html, summary = built(copy_run(tmp_path))
+
+    Draft202012Validator(json.loads(SCHEMA.read_text())).validate(summary)
+    check_headline(summary, html)
+
+
+def test_the_stage_summary_headline_equals_the_page_tiles(tmp_path: Path) -> None:
+    html, summary = built(copy_run(tmp_path))
+
+    keys = [h["key"] for h in summary["headline"]]
+    assert keys == ["scenarios.written", "scenarios.sent", "policy.reached"]
+    for entry in summary["headline"]:
+        assert metric(html, entry["key"]) == (entry["value"], entry.get("of"))
+
+
+def test_the_stage_summary_lists_one_item_per_scenario_with_its_fate(
+    tmp_path: Path,
+) -> None:
+    _, summary = built(copy_run(tmp_path))
+
+    items = {i["scenario_id"]: i for i in summary["items"]}
+    assert len(items) == 8
+    assert items["SCN-001"]["label"] == "Sent to authoring"
+    assert items["SCN-012"]["label"] == "Duplicate of SCN-011"
+    assert items["SCN-002"]["label"] == "Analytical only"
+    assert items["SCN-001"]["href"] == "index.html#SCN-001"
+    assert all(not i["href"].startswith("/") for i in items.values())
+
+
+def test_a_lost_request_and_a_degraded_scenario_are_alerts(tmp_path: Path) -> None:
+    _, summary = built(copy_run(tmp_path))
+
+    by_status = {a["status"]: a for a in summary["alerts"]}
+    assert by_status["fail"]["href"] == "index.html#failed"
+    assert "Request #34" in by_status["fail"]["text"]
+    assert "SCN-023" in by_status["warn"]["text"]
+    assert summary["status"] == "warn"
+
+
+def test_a_clean_run_has_status_pass_and_no_alerts(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+    edit_calls(
+        output,
+        lambda calls: calls.__setitem__(
+            slice(None), [c for c in calls if c["success"]]
+        ),
+    )
+
+    _, summary = built(output)
+
+    assert summary["alerts"] == []
+    assert summary["status"] == "pass"
+
+
+def test_the_summary_usage_counts_requests_and_tokens(tmp_path: Path) -> None:
+    _, summary = built(copy_run(tmp_path))
+
+    assert summary["usage"]["model_requests"] == 161
+    assert summary["usage"]["failed_requests"] == 10
+    assert summary["usage"]["tokens"] > 0
+
+
+def test_a_policy_risks_missing_run_drops_that_tile_and_headline(
+    tmp_path: Path,
+) -> None:
+    output = copy_run(tmp_path)
+    (output / "policy-coverage.json").unlink()
+
+    html, summary = built(output)
+
+    assert "policy.reached" not in read_metrics(html)
+    assert [h["key"] for h in summary["headline"]] == [
+        "scenarios.written",
+        "scenarios.sent",
+    ]
+
+
+def test_how_generation_works_defines_slot_and_finding(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    for word in ("slot", "finding"):
+        assert f'href="#term-{word}"' in html
+        assert f'id="term-{word}"' in html
+
+
+def test_the_handoff_lists_files_with_schema_versions(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
+    for text in (
+        "scenario-handoff-v4",
+        "scenario-testability-v1",
+        "execution-target-profile-v1",
+        "testability.yaml",
+        "8 files",
+    ):
+        assert text in handoff
+
+
+def test_the_handoff_omits_counts_that_are_zero(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
+    assert "functional test" in handoff
+    assert "skipped" not in handoff
+    assert "diagnostic" not in handoff
+
+
+def test_a_manifest_that_counts_other_scenarios_than_the_files_is_flagged(
+    tmp_path: Path,
+) -> None:
+    output = copy_run(tmp_path)
+    edit_yaml(
+        output / "synthesis-manifest.yaml",
+        lambda m: m["scenario_counts"].update(generated=28),
+    )
+
+    html, _ = built(output)
+
+    assert "The manifest counts 28 generated scenarios" in html
+    assert "8 scenario files" in html
+
+
+def test_the_page_loads_nothing_from_outside(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    check_offline(html)
+    assert not re.search(r'(?:src|href)="https?:', html)
+
+
+def test_two_builds_of_one_run_are_identical(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+
+    assert built(output) == built(output)
+
+
+def test_the_page_stays_inside_the_size_budget(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    per_hundred = len(html.encode()) / 8 * 100
+    assert per_hundred <= 5_000_000
+
+
+def test_write_report_puts_both_files_beside_the_report(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+
+    written = write_report(output)
+
+    assert written.index == output / "report" / "index.html"
+    assert (
+        json.loads((output / "report" / "stage-summary.json").read_text())["report"]
+        == "index.html"
+    )
+    assert 'href="../scenarios/SCN-001.yaml"' in written.index.read_text()
+
+
+def test_a_summary_that_disagrees_with_the_page_is_not_written(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = copy_run(tmp_path)
+    real = generate_report.build_report
+
+    def wrong(run):
+        html, summary = real(run)
+        summary["headline"][0]["value"] += 1
+        return html, summary
+
+    monkeypatch.setattr(generate_report, "build_report", wrong)
+
+    with pytest.raises(Exception, match="scenarios.written"):
+        write_report(output)
+
+    assert not (output / "report" / "stage-summary.json").exists()
+
+
+def test_a_run_that_did_not_complete_says_so_in_the_answer(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+
+    def fail(manifest: dict) -> None:
+        manifest["run_status"] = "failed"
+        manifest["run_status_reason"] = "zero_yield_after_attempts"
+
+    edit_yaml(output / "synthesis-manifest.yaml", fail)
+
+    html, summary = built(output)
+
+    answer = html.split('<section id="answer">')[1].split("</section>")[0]
+    assert "Scenario generation ended failed: zero_yield_after_attempts." in answer
+    assert summary["status"] == "fail"
+
+
+def test_a_completed_run_does_not_repeat_its_status_in_the_answer(
+    tmp_path: Path,
+) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    answer = html.split('<section id="answer">')[1].split("</section>")[0]
+    assert "Scenario generation ended" not in answer
+
+
+def test_candidates_that_published_nothing_are_listed_with_their_diagnostics(
+    tmp_path: Path,
+) -> None:
+    output = copy_run(tmp_path)
+
+    def add(manifest: dict) -> None:
+        manifest["candidate_outcomes"] += [
+            {
+                "scenario_id": "SCN-090",
+                "ica_slot_id": "RESP-9:CA-9-1:INCORRECT",
+                "ica_id": None,
+                "status": "rendering_failed",
+                "diagnostics": ["bad <diagnostic>"],
+            },
+            {
+                "scenario_id": "SCN-091",
+                "ica_slot_id": "RESP-9:CA-9-1:WRONG_TIMING",
+                "ica_id": None,
+                "status": "skipped",
+                "diagnostics": [],
+            },
+        ]
+
+    edit_yaml(output / "synthesis-manifest.yaml", add)
+
+    html, _ = built(output)
+
+    handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
+    assert "2 candidates did not publish a scenario" in handoff
+    assert "bad &lt;diagnostic&gt;" in handoff
+    assert 'id="unpublished-SCN-091"' in handoff
+
+
+def test_a_run_whose_candidates_all_published_lists_none(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
+    assert "did not publish" not in handoff
+
+
+def test_a_sidecar_that_cannot_be_read_does_not_stop_the_rest(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+    (output / "obligation-accounting.yaml").write_text("rows: []\n")
+
+    html, _ = built(output)
+
+    obligations = html.split('<section id="obligations">')[1].split("</section>")[0]
+    assert "obligation-accounting.yaml: could not be read" in obligations
+    assert "not in this run" not in obligations
+    assert metric(html, "scenarios.written") == (8, None)
+
+
+def test_the_answer_lists_every_file_it_could_not_read(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+    (output / "obligation-accounting.yaml").write_text("rows: []\n")
+
+    html, _ = built(output)
+
+    answer = html.split('<section id="answer">')[1].split("</section>")[0]
+    assert "obligation-accounting.yaml" in answer
+    assert "could not be read" in answer
+
+
+def test_a_null_manifest_count_is_left_out_of_the_handoff(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+    edit_yaml(
+        output / "synthesis-manifest.yaml",
+        lambda m: m["scenario_counts"].update(requested=None),
+    )
+
+    html, _ = built(output)
+
+    handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
+    assert "requested" not in handoff
+
+
+def test_every_number_tile_states_what_it_counts(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    tiles = re.findall(
+        r'<div class="metric[^"]*" data-metric="[^"]+".*?</div></div>', html
+    )
+    assert len(tiles) == 4
+    assert all('<span class="u">' in tile for tile in tiles)
+
+
+def test_a_tile_without_a_unit_is_refused() -> None:
+    from asago_scenario_generator.report_kit import KitError, metric
+
+    with pytest.raises(KitError, match="unit"):
+        metric("scenarios.written", "scenarios written", 8, unit=" ")
+
+
+def test_every_scenario_of_the_run_has_a_row_in_the_page_and_the_summary(
+    tmp_path: Path,
+) -> None:
+    output = copy_run(tmp_path)
+    for suffix in ("yaml", "feature"):
+        (output / "scenarios" / f"SCN-012.{suffix}").unlink()
+
+    html, summary = built(output)
+
+    assert metric(html, "scenarios.written") == (7, None)
+    assert 'id="row-SCN-012"' not in html
+    assert len(re.findall(r'<tr id="row-SCN-\d+"', html)) == 7
+
+
+class _Shown(HTMLParser):
+    """Collect, for each keyed number, the first text the page shows after its tag."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.pending: str | None = None
+        self.found: dict[str, tuple[str, str]] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        if "data-metric" in values:
+            self.pending = values["data-metric"]
+            self.value = values.get("data-value") or ""
+
+    def handle_data(self, data: str) -> None:
+        if self.pending is not None and data.strip():
+            self.found[self.pending] = (self.value, data.strip())
+            self.pending = None
+
+
+def test_every_keyed_number_shows_the_value_it_is_keyed_to(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+    scan = _Shown()
+    scan.feed(html)
+
+    assert len(scan.found) == len(read_metrics(html))
+    wrong = {
+        key: (value, text)
+        for key, (value, text) in scan.found.items()
+        if value.isdigit() and text != f"{int(value):,}"
+    }
+    assert wrong == {}

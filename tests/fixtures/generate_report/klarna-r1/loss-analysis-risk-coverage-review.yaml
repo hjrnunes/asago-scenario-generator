@@ -1,0 +1,316 @@
+schema_version: loss-analysis-risk-coverage-review-v3
+reviewed_loss_analysis_digest: 3d2ba465412d4071679b54ce7056383dfced6d58737e0990a9896ee9c50b8a6b
+risk_set_digest: 837decdf2cfbe0833ec48f933b3aeb9034a813de5ed2ce599aafc416bbe2d1e5
+status: partial
+call_count: 1
+failure_reason: null
+prompt_template_hashes:
+  stage1a_coverage_review_system.j2: e722249e83f09941e65c309b6790b83188fb34e00cd171ba65ff2efec943a32e
+  stage1a_coverage_review_user.j2: c2c32119175a1611a5fa9fcac5c485f442057dc6cbcebbd69d6f4538728b7683
+batching:
+  max_batches: 4
+  max_completion_tokens: 8192
+  chars_per_token_estimate: 3
+  estimated_tokens_per_row: 250
+  estimated_tokens_all_cards: 20524
+  row_capacity: 32
+  planned_batch_sizes:
+  - 22
+  planned_batch_row_estimates:
+  - 5500
+  planned_batch_conservative_estimates:
+  - 20524
+  beyond_ceiling_cards: []
+  sizing_rule: cards per batch = max_completion_tokens // estimated_tokens_per_row
+    (the current per-row completion estimate); balanced contiguous batches in supplied
+    card order; at most max_batches calls; the conservative prompt-plus-row estimate
+    is recorded for transparency and is not the sizing basis
+rows:
+- risk_id: credo-risk-026
+  protects: the system's integrity against fraudulent manipulation
+  against: fraudulent, destructive, or inappropriate system usage
+  covering_constraints: []
+  coverage: none
+  missing_protection: No constraints address the prevention of social engineering
+    or the generation of deepfakes to facilitate fraud.
+  evidence:
+  - source_ref: credo-risk-026
+    quote: Fraud, scams, and targeted manipulation
+    meaning: Exact supplied risk-card name for credo-risk-026.
+  rationale: While the hazard H-3 touches on deceptive content, no specific constraint
+    prevents the use of the AI to facilitate external scams or social engineering
+    attacks as described in the risk card.
+- risk_id: atlas-hallucination
+  protects: the accuracy of information provided to customers
+  against: hallucinations and lack of groundedness
+  covering_constraints: []
+  coverage: partial
+  missing_protection: Constraints address policy and financial terms but do not broadly
+    prevent all forms of factual fabrication in general conversation.
+  evidence:
+  - source_ref: atlas-hallucination
+    quote: Hallucination
+    meaning: Exact supplied risk-card name for atlas-hallucination.
+  rationale: The risk of hallucination is addressed by constraints ensuring information
+    is grounded in policy or merchant context, but not all hallucinations are covered
+    by these specific rules.
+- risk_id: credo-risk-021
+  protects: the truthfulness of information provided to customers
+  against: unintentional generation of false or misleading information
+  covering_constraints: []
+  coverage: partial
+  missing_protection: Constraints address policy and financial terms specifically,
+    rather than all general misinformation.
+  evidence:
+  - source_ref: credo-risk-021
+    quote: False or misleading information
+    meaning: Exact supplied risk-card name for credo-risk-021.
+  rationale: SC-2 and SC-9 provide targeted protection against incorrect policy/financial
+    info, which covers the core of this risk in a fintech context.
+- risk_id: credo-risk-016
+  protects: the integrity of decision-making processes
+  against: inappropriate reliance or failure to trust the system
+  covering_constraints: []
+  coverage: not_applicable_confirmed
+  missing_protection: null
+  evidence:
+  - source_ref: credo-risk-016
+    quote: Over or under-reliance and unsafe use (Slattery et al., 2024; IBM, 2024;
+      AI, 2023)
+    meaning: Exact supplied risk-card name for credo-risk-016.
+  rationale: As stated in the disposition, this describes user behavior patterns rather
+    than a direct system-level loss within the analyzed boundary.
+- risk_id: mit-ai-risk-subdomain-5.1
+  protects: customer decision-making and material interests
+  against: overreliance and emotional/material dependence
+  covering_constraints: []
+  coverage: none
+  missing_protection: No constraints manage the user's level of trust or psychological
+    dependence on the AI.
+  evidence:
+  - source_ref: mit-ai-risk-subdomain-5.1
+    quote: Overreliance and unsafe use
+    meaning: Exact supplied risk-card name for mit-ai-risk-subdomain-5.1.
+  rationale: While the consequences of overreliance (like erroneous information) are
+    covered, the specific risk of human overreliance/dependence is not.
+- risk_id: atlas-copyright-infringement
+  protects: intellectual property rights
+  against: unauthorized reproduction of protected works
+  covering_constraints: []
+  coverage: not_applicable_confirmed
+  missing_protection: null
+  evidence:
+  - source_ref: atlas-copyright-infringement
+    quote: Copyright infringement
+    meaning: Exact supplied risk-card name for atlas-copyright-infringement.
+  rationale: The system's scope is customer service support, and copyright infringement
+    is not a primary risk for this interaction model.
+- risk_id: credo-risk-024
+  protects: the organization from legal consequences
+  against: civil lawsuits (defamation, negligence, privacy)
+  covering_constraints: []
+  coverage: partial
+  missing_protection: Constraints do not cover legal liability resulting from defamation
+    or negligence outside of financial/PII rules.
+  evidence:
+  - source_ref: credo-risk-024
+    quote: Civil liability
+    meaning: Exact supplied risk-card name for credo-risk-024.
+  rationale: Constraints address financial and PII compliance, which are drivers of
+    liability, but don't address the broad category of civil liability.
+- risk_id: mit-ai-risk-subdomain-3.1
+  protects: the organization from regulatory and legal fallout
+  against: implementation of fraudulent or unethical business decisions based on misinformation
+  covering_constraints: []
+  coverage: partial
+  missing_protection: Constraints target accuracy of policy and financial info, but
+    don't cover all forms of misleading information.
+  evidence:
+  - source_ref: mit-ai-risk-subdomain-3.1
+    quote: False or misleading information
+    meaning: Exact supplied risk-card name for mit-ai-risk-subdomain-3.1.
+  rationale: SC-2 and SC-9 prevent many instances of incorrect financial/policy information
+    that lead to this risk.
+- risk_id: mit-ai-risk-subdomain-4.3
+  protects: financial assets and company policy integrity
+  against: fraud, scams, and manipulation for personal advantage
+  covering_constraints: []
+  coverage: partial
+  missing_protection: Constraints prevent incorrect financial execution but do not
+    prevent the use of AI for scams or manipulation.
+  evidence:
+  - source_ref: mit-ai-risk-subdomain-4.3
+    quote: Fraud, scams, and targeted manipulation
+    meaning: Exact supplied risk-card name for mit-ai-risk-subdomain-4.3.
+  rationale: SC-3 and SC-8 prevent incorrect financial transactions, which mitigates
+    some fraudulent outcomes.
+- risk_id: credo-risk-023
+  protects: the organization's regulatory standing
+  against: failure to comply with financial regulations and standards
+  covering_constraints: []
+  coverage: partial
+  missing_protection: Constraints protect against specific financial and policy errors,
+    but do not cover all aspects of regulatory compliance.
+  evidence:
+  - source_ref: credo-risk-023
+    quote: Regulatory compliance
+    meaning: Exact supplied risk-card name for credo-risk-023.
+  rationale: The constraints on financial amounts and policy grounding directly support
+    compliance with financial regulations.
+- risk_id: atlas-non-disclosure
+  protects: transparency of AI usage
+  against: failure to disclose AI-generated content
+  covering_constraints: []
+  coverage: not_applicable_confirmed
+  missing_protection: null
+  evidence:
+  - source_ref: atlas-non-disclosure
+    quote: Non-disclosure
+    meaning: Exact supplied risk-card name for atlas-non-disclosure.
+  rationale: The risk of failing to disclose AI generation is not explicitly linked
+    to a customer loss in this context.
+- risk_id: atlas-dangerous-use
+  protects: financial transactions and customer accounts
+  against: fraudulent or destructive manipulation of transactions
+  covering_constraints: []
+  coverage: partial
+  missing_protection: Constraints prevent incorrect transaction parameters but do
+    not prevent malicious intent in system usage.
+  evidence:
+  - source_ref: atlas-dangerous-use
+    quote: Dangerous use
+    meaning: Exact supplied risk-card name for atlas-dangerous-use.
+  rationale: SC-3 and SC-8 mitigate the risk of incorrect financial processing which
+    is a component of dangerous use.
+- risk_id: mit-ai-risk-subdomain-7.3
+  protects: the reliability of service and regulatory standing
+  against: failure to perform reliably or effectively in critical areas
+  covering_constraints: []
+  coverage: partial
+  missing_protection: Constraints protect against specific inaccuracies (policy/finance)
+    but not all forms of reliability failure.
+  evidence:
+  - source_ref: mit-ai-risk-subdomain-7.3
+    quote: Lack of capability or robustness
+    meaning: Exact supplied risk-card name for mit-ai-risk-subdomain-7.3.
+  rationale: SC-2, SC-5, and SC-9 protect against the specific types of erroneous
+    outputs (policy/financial) mentioned in the risk card.
+- risk_id: atlas-over-or-under-reliance
+  protects: the integrity of user decisions
+  against: inaccurate decision-making due to misplaced trust
+  covering_constraints: []
+  coverage: partial
+  missing_protection: Constraints address the quality of the information but not the
+    human's psychological reliance on it.
+  evidence:
+  - source_ref: atlas-over-or-under-reliance
+    quote: Over- or under-reliance
+    meaning: Exact supplied risk-card name for atlas-over-or-under-reliance.
+  rationale: By ensuring information accuracy (SC-2, SC-9), the system mitigates the
+    impact of a user making a decision based on incorrect information.
+rows_invalid:
+- risk_id: credo-risk-010
+  reason: full_without_covering_constraint
+- risk_id: ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+  reason: full_without_covering_constraint
+- risk_id: ai-risk-taxonomy-unauthorized-processing---financial-records
+  reason: full_without_covering_constraint
+- risk_id: ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+  reason: full_without_covering_constraint
+- risk_id: atlas-revealing-confidential-information
+  reason: full_without_covering_constraint
+- risk_id: atlas-output-bias
+  reason: full_without_covering_constraint
+- risk_id: mit-ai-risk-subdomain-1.1
+  reason: full_without_covering_constraint
+- risk_id: atlas-confidential-data-in-prompt
+  reason: full_without_covering_constraint
+rows_missing: []
+summary:
+  full: 0
+  partial: 9
+  none: 2
+  not_applicable_confirmed: 3
+  not_applicable_disputed: 0
+  rows_valid: 14
+  rows_invalid: 8
+  rows_missing: 0
+  reading_list:
+  - risk_id: credo-risk-026
+    risk_name: Fraud, scams, and targeted manipulation
+    protects: the system's integrity against fraudulent manipulation
+    against: fraudulent, destructive, or inappropriate system usage
+    covering_constraints: []
+    missing_protection: No constraints address the prevention of social engineering
+      or the generation of deepfakes to facilitate fraud.
+  - risk_id: atlas-hallucination
+    risk_name: Hallucination
+    protects: the accuracy of information provided to customers
+    against: hallucinations and lack of groundedness
+    covering_constraints: []
+    missing_protection: Constraints address policy and financial terms but do not
+      broadly prevent all forms of factual fabrication in general conversation.
+  - risk_id: credo-risk-021
+    risk_name: False or misleading information
+    protects: the truthfulness of information provided to customers
+    against: unintentional generation of false or misleading information
+    covering_constraints: []
+    missing_protection: Constraints address policy and financial terms specifically,
+      rather than all general misinformation.
+  - risk_id: mit-ai-risk-subdomain-5.1
+    risk_name: Overreliance and unsafe use
+    protects: customer decision-making and material interests
+    against: overreliance and emotional/material dependence
+    covering_constraints: []
+    missing_protection: No constraints manage the user's level of trust or psychological
+      dependence on the AI.
+  - risk_id: credo-risk-024
+    risk_name: Civil liability
+    protects: the organization from legal consequences
+    against: civil lawsuits (defamation, negligence, privacy)
+    covering_constraints: []
+    missing_protection: Constraints do not cover legal liability resulting from defamation
+      or negligence outside of financial/PII rules.
+  - risk_id: mit-ai-risk-subdomain-3.1
+    risk_name: False or misleading information
+    protects: the organization from regulatory and legal fallout
+    against: implementation of fraudulent or unethical business decisions based on
+      misinformation
+    covering_constraints: []
+    missing_protection: Constraints target accuracy of policy and financial info,
+      but don't cover all forms of misleading information.
+  - risk_id: mit-ai-risk-subdomain-4.3
+    risk_name: Fraud, scams, and targeted manipulation
+    protects: financial assets and company policy integrity
+    against: fraud, scams, and manipulation for personal advantage
+    covering_constraints: []
+    missing_protection: Constraints prevent incorrect financial execution but do not
+      prevent the use of AI for scams or manipulation.
+  - risk_id: credo-risk-023
+    risk_name: Regulatory compliance
+    protects: the organization's regulatory standing
+    against: failure to comply with financial regulations and standards
+    covering_constraints: []
+    missing_protection: Constraints protect against specific financial and policy
+      errors, but do not cover all aspects of regulatory compliance.
+  - risk_id: atlas-dangerous-use
+    risk_name: Dangerous use
+    protects: financial transactions and customer accounts
+    against: fraudulent or destructive manipulation of transactions
+    covering_constraints: []
+    missing_protection: Constraints prevent incorrect transaction parameters but do
+      not prevent malicious intent in system usage.
+  - risk_id: mit-ai-risk-subdomain-7.3
+    risk_name: Lack of capability or robustness
+    protects: the reliability of service and regulatory standing
+    against: failure to perform reliably or effectively in critical areas
+    covering_constraints: []
+    missing_protection: Constraints protect against specific inaccuracies (policy/finance)
+      but not all forms of reliability failure.
+  - risk_id: atlas-over-or-under-reliance
+    risk_name: Over- or under-reliance
+    protects: the integrity of user decisions
+    against: inaccurate decision-making due to misplaced trust
+    covering_constraints: []
+    missing_protection: Constraints address the quality of the information but not
+      the human's psychological reliance on it.

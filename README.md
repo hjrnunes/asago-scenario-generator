@@ -465,7 +465,15 @@ scenario. Accounting and scenario realization record a closed stop reason for
 every applicable obligation. The synthesis manifest and report reconcile those
 reasons against the full applicable-obligation denominator, while
 `calls.jsonl` distinguishes a returned provider response from parsing,
-semantic validation, compilation, and publication.
+semantic validation, compilation, and publication. When an attempt repeats an
+earlier failed one, its `calls.jsonl` line names that attempt in `retry_of`.
+
+`generate` writes its report to `report/index.html`, built on the shared
+report kit, with `report/stage-summary.json` beside it. `policy-coverage.json`
+(`data/contracts/policy-coverage/`) records where each policy risk stopped on
+its way to a scenario, and the report reads it. The report, the stage summary,
+and the coverage file are for people and for orch's run reports; the consumer
+reads none of them. A run no longer writes `synthesis-report.html`.
 
 `generate` also writes `provider-calls.jsonl` to the output directory: one line per
 provider request, with the request exactly as sent (messages, response format,

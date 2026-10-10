@@ -1,0 +1,94 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "policy-coverage-v1/schema.json",
+  "title": "Asago policy coverage v1",
+  "description": "What the producer writes to generate/output/policy-coverage.json: which policy risks reached scenarios, through which harms, and where the others dropped. A risk reaches scenarios only through its harms.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "policy", "rule", "harms", "risks"],
+  "properties": {
+    "schema_version": {"const": "policy-coverage-v1"},
+    "policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["risk_extraction", "digest", "documents", "entry_count", "risk_count"],
+      "properties": {
+        "risk_extraction": {"type": ["string", "null"], "description": "File name of the risk extraction, without its directory."},
+        "digest": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$", "description": "SHA-256 of the risk extraction file."},
+        "documents": {"type": "array", "items": {"type": "string", "minLength": 1}, "description": "File names of the policy documents."},
+        "entry_count": {"type": "integer", "minimum": 0, "description": "Risk entries in the extraction."},
+        "risk_count": {"type": "integer", "minimum": 0, "description": "Distinct risks after entries of one normalized name merge."}
+      }
+    },
+    "rule": {"enum": ["loss-source-risk-cards"], "description": "How a risk maps to scenarios. Version 1 has one rule: a loss lists the risks it came from, and a scenario cites losses."},
+    "harms": {"type": "array", "items": {"$ref": "#/$defs/harm"}},
+    "risks": {"type": "array", "items": {"$ref": "#/$defs/risk"}}
+  },
+  "$defs": {
+    "text": {"type": "string", "minLength": 1},
+    "harm": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["loss_id", "title", "text", "provenance", "risk_ids", "scenario_ids"],
+      "properties": {
+        "loss_id": {"$ref": "#/$defs/text"},
+        "title": {"$ref": "#/$defs/text"},
+        "text": {"$ref": "#/$defs/text"},
+        "provenance": {"enum": ["risk_card", "use_case", "critic_derived"]},
+        "risk_ids": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "The risk_id of each merged risk the loss cites; empty for a use-case harm."},
+        "scenario_ids": {"type": "array", "items": {"$ref": "#/$defs/text"}, "description": "Every scenario written for the loss, sorted."}
+      }
+    },
+    "tag": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["scheme", "id", "label"],
+      "properties": {
+        "scheme": {"enum": ["nist-ai-rmf", "owasp-llm-2.0"]},
+        "id": {"$ref": "#/$defs/text"},
+        "label": {"$ref": "#/$defs/text"}
+      }
+    },
+    "mitigation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "source", "text"],
+      "properties": {
+        "id": {"type": ["string", "null"]},
+        "source": {"type": ["string", "null"]},
+        "text": {"type": "string"}
+      }
+    },
+    "reason": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "text", "step"],
+      "properties": {
+        "code": {"$ref": "#/$defs/text"},
+        "text": {"type": "string", "description": "The producer's plain-language sentence for the end user."},
+        "step": {"enum": ["boundary_decision", "loss_analysis", "scenario_writing"], "description": "Where the risk dropped."}
+      }
+    },
+    "risk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["risk_id", "merged_ids", "sources", "name", "display_name", "description", "tags", "coverage", "reason", "loss_ids", "mitigations"],
+      "properties": {
+        "risk_id": {"$ref": "#/$defs/text"},
+        "merged_ids": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+        "sources": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/text"}},
+        "name": {"$ref": "#/$defs/text"},
+        "display_name": {"$ref": "#/$defs/text"},
+        "description": {"type": "string"},
+        "tags": {"type": "array", "items": {"$ref": "#/$defs/tag"}},
+        "coverage": {"enum": ["scenarios", "outside_boundary", "not_applicable", "not_reached"]},
+        "reason": {"oneOf": [{"type": "null"}, {"$ref": "#/$defs/reason"}]},
+        "loss_ids": {"type": "array", "items": {"$ref": "#/$defs/text"}},
+        "mitigations": {"type": "array", "items": {"$ref": "#/$defs/mitigation"}}
+      },
+      "if": {"properties": {"coverage": {"const": "scenarios"}}},
+      "then": {"properties": {"reason": {"type": "null"}}},
+      "else": {"properties": {"reason": {"$ref": "#/$defs/reason"}}}
+    }
+  }
+}

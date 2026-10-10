@@ -698,3 +698,33 @@ def test_strip_json_fence_returns_the_fenced_body_or_the_stripped_text(
     from asago_scenario_generator.stpa.infra.llm_helpers import strip_json_fence
 
     assert strip_json_fence(text) == expected
+
+
+class TestRetryOf:
+    """A request that retries a failed one names it in calls.jsonl."""
+
+    def test_a_correction_names_the_attempt_it_corrects(self, tmp_path):
+        client = ScriptedClient([{"item_id": "malformed"}, {"item_id": "valid"}])
+
+        _send(client, tmp_path, policy=CorrectionPolicy(validation_retries=1))
+
+        first, second = read_calls_jsonl(tmp_path)
+        assert "retry_of" not in first
+        assert second["retry_of"] == first["attempt_id"]
+        assert second["attempt_number"] == 2
+
+    def test_a_failed_correction_still_names_the_failure_before_it(self, tmp_path):
+        client = ScriptedClient(
+            [{"item_id": "malformed"}, {"item_id": "malformed"}, {"item_id": "ok"}]
+        )
+
+        _send(client, tmp_path, policy=CorrectionPolicy(validation_retries=2))
+
+        first, second, third = read_calls_jsonl(tmp_path)
+        assert second["retry_of"] == first["attempt_id"]
+        assert third["retry_of"] == second["attempt_id"]
+
+    def test_a_first_request_carries_no_retry_of(self, tmp_path):
+        _send(ScriptedClient([{"item_id": "valid"}]), tmp_path)
+
+        assert "retry_of" not in read_calls_jsonl(tmp_path)[0]

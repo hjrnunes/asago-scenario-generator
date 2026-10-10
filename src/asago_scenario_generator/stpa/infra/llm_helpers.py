@@ -411,6 +411,8 @@ class _SafeCallState:
     attempt_number: int = 1
     dispatched: bool = False
     transport_retries: int = 0
+    retry_of: str | None = None
+    logged_attempt_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -632,6 +634,7 @@ def _perform_safe_call(
         cleaned_response=model,
         request_controls=_request_controls(state.result, state),
         call_log=call_log_of(llm_client),
+        retry_of=state.retry_of,
     )
     return model
 
@@ -654,7 +657,7 @@ def _log_structured_failure(
     """Log one structured failure and return its stable display message."""
     error_msg = f"{type(error).__name__}: {_safe_error_detail(error)}"
     evidence = _failure_evidence(state.result, error)
-    log_llm_call_failure(
+    state.logged_attempt_id = log_llm_call_failure(
         llm_client.model,
         run_dir,
         stage,
@@ -692,6 +695,7 @@ def _log_structured_failure(
             ),
         ),
         prompt_template_hashes=prompt_template_hashes,
+        retry_of=state.retry_of,
     )
     return error_msg
 
@@ -935,8 +939,9 @@ def log_llm_call(
     cleaned_response: Any | None = None,
     request_controls: Mapping[str, Any] | None = None,
     call_log: CallLog | None = None,
-) -> None:
-    """Append a call-log entry for a single LLM call.
+    retry_of: str | None = None,
+) -> str:
+    """Append a call-log entry for a single LLM call and return its attempt id.
 
     Args:
         result: The LLM result wrapper (provides prompts and token counts).
@@ -985,9 +990,11 @@ def log_llm_call(
         compiled=False,
         published=False,
         prompt_template_hashes=prompt_template_hashes,
+        retry_of=retry_of,
     )
     entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir, call_log)
+    return str(entry["attempt_id"])
 
 
 def log_llm_call_failure(
@@ -1020,8 +1027,9 @@ def log_llm_call_failure(
     request_controls: Mapping[str, Any] | None = None,
     failure_class: str | None = None,
     call_log: CallLog | None = None,
-) -> None:
-    """Append a call-log entry for a failed LLM call.
+    retry_of: str | None = None,
+) -> str:
+    """Append a call-log entry for a failed LLM call and return its attempt id.
 
     Args:
         model: The model name used for the call.
@@ -1063,9 +1071,11 @@ def log_llm_call_failure(
         compiled=compiled,
         terminal_error_codes=terminal_error_codes,
         prompt_template_hashes=prompt_template_hashes,
+        retry_of=retry_of,
     )
     entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir, call_log)
+    return str(entry["attempt_id"])
 
 
 def call_with_policy(
@@ -1133,8 +1143,9 @@ def call_with_policy(
     attempt_user_prompt = user_prompt
     attempt_number = first_attempt_number
     calls = 0
+    retry_of: str | None = None
     while True:
-        state = _SafeCallState()
+        state = _SafeCallState(retry_of=retry_of)
         try:
             with call_identity(
                 CallIdentity(
@@ -1197,10 +1208,12 @@ def call_with_policy(
             if retry_kind == "json":
                 json_retries_remaining -= 1
                 attempt_number += 1
+                retry_of = state.logged_attempt_id
                 continue
             if retry_kind == "validation":
                 validation_retries_remaining -= 1
                 attempt_number += 1
+                retry_of = state.logged_attempt_id
                 attempt_user_prompt = correction_prompt(
                     original_prompt=user_prompt,
                     feedback=(

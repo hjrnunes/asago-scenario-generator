@@ -56,6 +56,7 @@ from asago_scenario_generator.pipeline.synthesis_persist import (
     _persist_target_realization,
     _reload_persisted_plan,
     _render_report,
+    _write_policy_coverage,
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _accounting_source_pins,
@@ -397,16 +398,14 @@ def _run_synthesis(
     )
     manifest_path = _persist_manifest(output_dir, manifest)
 
-    report_path = _render_report(
+    policy_coverage_path = _write_policy_coverage(
         output_dir,
-        manifest,
-        plan,
-        consideration,
-        accounting,
-        realization,
-        target_realization,
-        scenario_result,
+        inputs,
+        final_loss,
+        getattr(baseline, "risk_actionability", None),
     )
+
+    report_path = _render_report(output_dir)
 
     artifact_paths = _artifact_paths(
         output_dir,
@@ -422,6 +421,7 @@ def _run_synthesis(
         operation_enrichment=operation_enrichment,
         report_path=report_path,
         hazard_offers_path=hazard_offers_path,
+        policy_coverage_path=policy_coverage_path,
     )
 
     return SynthesisResult(

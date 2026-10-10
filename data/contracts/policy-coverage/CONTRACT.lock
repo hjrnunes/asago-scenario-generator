@@ -1,0 +1,10 @@
+{
+  "authority": "asago-scenario-generator",
+  "contract": "policy-coverage",
+  "files": {
+    "policy-coverage-v1/README.md": "9c9ec9e207f9f9db3f011f11388fa3b69c1d541d048e46b0cabe32e7d3f8bcca",
+    "policy-coverage-v1/schema.json": "a4f7f87f764103955196ea3b280e124dd34407f3867522c07a55bfe2125c0b6b",
+    "policy-coverage-v1/valid/minimal.json": "0228bdae3989d07ef657676ac52381e1dd8fe0abf6fd4a15f5b10d83d9dfd8a4"
+  },
+  "schema_version": "policy-coverage-v1"
+}

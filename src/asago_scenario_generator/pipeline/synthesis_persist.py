@@ -111,32 +111,40 @@ def _persist_manifest(output_dir: Path, manifest: Any) -> Path:
     return path
 
 
-def _render_report(
-    output_dir: Path,
-    manifest: Any,
-    plan: Any,
-    consideration: Any,
-    accounting: Any,
-    realization: Any,
-    target_realization: Any,
-    scenario_result: Any,
-) -> Path | None:
-    """Render the read-only synthesis report after all normative sidecars."""
+def _render_report(output_dir: Path) -> Path | None:
+    """Render the generate report from the published sidecars; a failure never fails the run."""
     try:
-        from asago_scenario_generator.report.synthesis import render_synthesis_report
+        from asago_scenario_generator.report.generate_report import write_report
 
-        return render_synthesis_report(
-            output_dir,
-            manifest=manifest,
-            plan=plan,
-            consideration=consideration,
-            accounting=accounting,
-            realization=realization,
-            target_realization=target_realization,
-            scenario_result=scenario_result,
-        )
+        return write_report(output_dir).index
     except Exception as exc:  # noqa: BLE001 - report is read-only and non-fatal
-        logger.warning("synthesis report generation failed: %s", exc)
+        logger.warning("generate report failed: %s", exc)
+        return None
+
+
+def _write_policy_coverage(
+    output_dir: Path,
+    inputs: SynthesisInputs,
+    loss_analysis: Any,
+    risk_actionability: Any,
+) -> Path | None:
+    """Publish which policy risks reached scenarios; a failure never fails the run."""
+    if inputs.risk_extraction_path is None:
+        return None
+    try:
+        from asago_scenario_generator.report.policy_coverage import (
+            publish_policy_coverage,
+        )
+
+        return publish_policy_coverage(
+            output_dir=output_dir,
+            risk_extraction=inputs.risk_extraction_path,
+            sssom=inputs.sssom_path,
+            loss_analysis=loss_analysis,
+            actionability=risk_actionability,
+        )
+    except Exception as exc:  # noqa: BLE001 - derived file, non-fatal
+        logger.warning("policy coverage generation failed: %s", exc)
         return None
 
 
@@ -149,10 +157,13 @@ def _artifact_paths(
     operation_enrichment: Any | None,
     report_path: Path | None,
     hazard_offers_path: Path | None = None,
+    policy_coverage_path: Path | None = None,
 ) -> dict[str, Path]:
     """Add each optional published artifact to the always-written ones."""
     if hazard_offers_path is not None:
         artifact_paths[hazard_offers_path.name] = hazard_offers_path
+    if policy_coverage_path is not None:
+        artifact_paths[policy_coverage_path.name] = policy_coverage_path
     if target_realization_path is not None:
         artifact_paths[TARGET_REALIZATION_FILENAME] = target_realization_path
     if operation_enrichment is not None:
