@@ -555,6 +555,16 @@ before: a response that does not decode or fails the provider schema, a
 transport error, a correction call that returns no response, and a gap list
 that is empty in the first response.
 
+A risk-derivation response that declares no grounded loss while risks are
+supplied gets one correction as the call's targeted repair. The correction
+repeats the original system and user prompts and appends the validator's
+feedback, the prior response, and the exact finding. Code validates the
+corrected response with every stage validator and applies no further
+deterministic repair to it; a second failure stops the run. The correction
+is a `repair` entry with identity `risk_card_losses` in
+`loss-analysis-repair.yaml`. Other semantic failures still stop the run
+without a repair call.
+
 The risk-derivation request asks for `risk_dispositions` rows in the
 supplied risk order. When a response reaches its completion-token cap inside
 that array and does not decode, code keeps the decoded graph and every
