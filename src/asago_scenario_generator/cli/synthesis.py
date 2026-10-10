@@ -146,6 +146,7 @@ def generate_cmd(
         inputs = _synthesis_inputs(
             use_case=use_case,
             risk_extraction=risk_extraction,
+            sssom=sssom,
             qualification_facts=qualification_facts,
             output_dir=output_dir,
             execution_target_profile=execution_target_profile,
@@ -239,6 +240,7 @@ def _synthesis_inputs(
     *,
     use_case: str,
     risk_extraction: Path,
+    sssom: Path,
     qualification_facts: Path,
     output_dir: Path,
     execution_target_profile: Path | None,
@@ -294,6 +296,7 @@ def _synthesis_inputs(
         target_observations=target_observations_value,
         observation_contract=observation_contract_value,
         risk_extraction_path=risk_extraction,
+        sssom_path=sssom,
         qualification_facts_path=qualification_facts,
         loss_analysis_path=loss_analysis,
         profiles_file=profiles_file,

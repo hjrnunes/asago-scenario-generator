@@ -140,6 +140,32 @@ def _render_report(
         return None
 
 
+def _write_policy_coverage(
+    output_dir: Path,
+    inputs: SynthesisInputs,
+    loss_analysis: Any,
+    risk_actionability: Any,
+) -> Path | None:
+    """Publish which policy risks reached scenarios; a failure never fails the run."""
+    if inputs.risk_extraction_path is None:
+        return None
+    try:
+        from asago_scenario_generator.report.policy_coverage import (
+            publish_policy_coverage,
+        )
+
+        return publish_policy_coverage(
+            output_dir=output_dir,
+            risk_extraction=inputs.risk_extraction_path,
+            sssom=inputs.sssom_path,
+            loss_analysis=loss_analysis,
+            actionability=risk_actionability,
+        )
+    except Exception as exc:  # noqa: BLE001 - derived file, non-fatal
+        logger.warning("policy coverage generation failed: %s", exc)
+        return None
+
+
 def _artifact_paths(
     output_dir: Path,
     inputs: SynthesisInputs,
@@ -149,10 +175,13 @@ def _artifact_paths(
     operation_enrichment: Any | None,
     report_path: Path | None,
     hazard_offers_path: Path | None = None,
+    policy_coverage_path: Path | None = None,
 ) -> dict[str, Path]:
     """Add each optional published artifact to the always-written ones."""
     if hazard_offers_path is not None:
         artifact_paths[hazard_offers_path.name] = hazard_offers_path
+    if policy_coverage_path is not None:
+        artifact_paths[policy_coverage_path.name] = policy_coverage_path
     if target_realization_path is not None:
         artifact_paths[TARGET_REALIZATION_FILENAME] = target_realization_path
     if operation_enrichment is not None:

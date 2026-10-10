@@ -358,6 +358,45 @@ def test_synthesis_retains_baseline_diagnostics_without_changing_yield(tmp_path)
     assert "An <input> repair" not in report
 
 
+def test_a_run_with_a_risk_extraction_publishes_policy_coverage(tmp_path):
+    """The producer, not each report, derives which policy risks reached scenarios."""
+    extraction = tmp_path / "risks.json"
+    extraction.write_text(
+        json.dumps(
+            {
+                "risks": [
+                    {
+                        "risk_id": "r-1",
+                        "risk_name": "Disclosure",
+                        "risk_description": "Data leaves.",
+                        "taxonomy": "ibm-risk-atlas",
+                    }
+                ]
+            }
+        )
+    )
+    out = tmp_path / "out"
+    inputs = replace(_inputs(out), risk_extraction_path=extraction)
+
+    result = run_synthesis(
+        inputs, SynthesisAdapters.from_object(_FakeAdapters(calls=[]))
+    )
+
+    path = result.artifact_paths["policy-coverage.json"]
+    document = json.loads(path.read_text())
+    assert document["schema_version"] == "policy-coverage-v1"
+    assert document["policy"]["risk_extraction"] == "risks.json"
+
+
+def test_a_run_without_a_risk_extraction_publishes_no_policy_coverage(tmp_path):
+    result = run_synthesis(
+        _inputs(tmp_path), SynthesisAdapters.from_object(_FakeAdapters(calls=[]))
+    )
+
+    assert "policy-coverage.json" not in result.artifact_paths
+    assert not (tmp_path / "policy-coverage.json").exists()
+
+
 def test_target_profile_is_absent_from_systemic_baseline_inputs(
     tmp_path: Path,
 ) -> None:
