@@ -170,8 +170,8 @@ class TestBlankEntryOnly:
         assert _NEW_2_RULE in [item.rule for item in revised.security_constraints]
 
 
-class TestNothingLeft:
-    """Dropping every record still stops the round."""
+class TestStopsThatRemain:
+    """The drop rescues nothing it cannot validate."""
 
     def test_a_patch_left_empty_still_stops(self, tmp_path) -> None:
         reply = {
@@ -180,6 +180,16 @@ class TestNothingLeft:
             "security_constraint_edits": _attempt(1)["security_constraint_edits"],
             "security_constraint_additions": [],
         }
+
+        with pytest.raises(StageError, match="graph revision call failed"):
+            _call(tmp_path, [reply, reply])
+
+    def test_a_remainder_with_another_defect_still_stops(self, tmp_path) -> None:
+        reply = _attempt(1)
+        reply["security_constraint_additions"][2]["applies_when"] = [
+            "when a reply names an order",
+            "When a reply names an order",
+        ]
 
         with pytest.raises(StageError, match="graph revision call failed"):
             _call(tmp_path, [reply, reply])
