@@ -1,0 +1,49 @@
+{
+  "schema_version": "policy-coverage-v1",
+  "policy": {
+    "risk_extraction": "risk-extraction.json",
+    "digest": "0000000000000000000000000000000000000000000000000000000000000000",
+    "documents": ["policy.pdf"],
+    "entry_count": 2,
+    "risk_count": 2
+  },
+  "rule": "loss-source-risk-cards",
+  "harms": [
+    {
+      "loss_id": "L-1",
+      "title": "Customers lose money",
+      "text": "Customers lose money due to wrong answers.",
+      "provenance": "risk_card",
+      "risk_ids": ["atlas-hallucination"],
+      "scenario_ids": ["SCN-001"]
+    }
+  ],
+  "risks": [
+    {
+      "risk_id": "atlas-hallucination",
+      "merged_ids": ["atlas-hallucination"],
+      "sources": ["ibm-risk-atlas"],
+      "name": "Hallucination",
+      "display_name": "Hallucination",
+      "description": "The assistant states false information.",
+      "tags": [{"scheme": "owasp-llm-2.0", "id": "llm092025-misinformation", "label": "OWASP LLM09 Misinformation"}],
+      "coverage": "scenarios",
+      "reason": null,
+      "loss_ids": ["L-1"],
+      "mitigations": [{"id": "aiuc1-req-a002", "source": "aiuc1", "text": "Establish output policies."}]
+    },
+    {
+      "risk_id": "atlas-ownership",
+      "merged_ids": ["atlas-ownership"],
+      "sources": ["ibm-risk-atlas"],
+      "name": "Generated content ownership",
+      "display_name": "Generated content ownership",
+      "description": "Ownership of generated content is unclear.",
+      "tags": [],
+      "coverage": "outside_boundary",
+      "reason": {"code": "boundary_decision:outside_boundary", "text": "People decide this, not the assistant.", "step": "boundary_decision"},
+      "loss_ids": [],
+      "mitigations": []
+    }
+  ]
+}

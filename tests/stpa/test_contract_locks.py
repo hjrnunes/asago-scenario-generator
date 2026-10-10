@@ -52,6 +52,7 @@ LOCKS = {
         "digest_domain": "execution-target-profile-v1",
     },
     "tool-call-condition": {"version": "tool-call-condition-v1"},
+    "policy-coverage": {"schema_version": "policy-coverage-v1"},
 }
 
 
