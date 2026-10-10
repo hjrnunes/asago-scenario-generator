@@ -421,6 +421,22 @@ Three rejections that once failed as plain errors carry codes:
 - `safe_outcome_claim_missing`: an observable safe outcome has no claim level
   or evidence.
 
+## Target-realization mapping
+
+The `map_control_action` step names one selected operation and any candidate
+operations for a control action, copied from the operations the request
+offered. When a reply names a `(resource_id, operation_id)` pair that the
+request did not offer, the provider sends one correction request. It
+repeats the original prompts and appends, in order, the reusable instruction
+(`realize_inventory_correction.j2`, which names no target or operation), the
+prior reply, and the exact error: one line per offending identity, with the
+reply location and both values JSON-quoted. The correction is attempt 2 of
+the same step. A corrected reply that still names an unoffered pair, or fails
+in any other way, ends the unit with an error that says it failed after one
+correction. A schema or parser failure of the first reply sends no
+correction, and code never edits an identifier. The pipeline keeps its own
+check against the observed inventory as a backstop.
+
 ## Target-realization extension
 
 The bounded `extend_uncovered_operations` step returns exactly one outcome for
@@ -591,7 +607,12 @@ gap call with its losses and dispositions, and no request is sent for the
 drop. Each drop is a `hazardless_constraint_drop` entry in
 `loss-analysis-repair.yaml` (`applied.dropped_constraints` names the
 dropped handles, `proposed.undeclared_hazards` the references) and a
-cleanup transformation of the call record.
+cleanup transformation of the call record. The reply of the loss-presence
+correction (above) gets the same drop before its provider schema check, with
+no extra request; its entry has `attempt: repair` and a `raw_step` that names
+the repair step, and the correction's call record carries the cleanup
+transformation. Every other defect in the corrected reply still stops the
+unit.
 
 The Stage 1a density revision prompt follows each `hazard H-n has no
 constraint` check with its repair: a constraint whose `related_hazards`

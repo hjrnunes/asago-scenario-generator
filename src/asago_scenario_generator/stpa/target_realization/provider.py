@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+import json
+from collections.abc import Callable, Mapping, Sequence
+from functools import partial
 from pathlib import Path
 from typing import Any, Literal
 
@@ -30,6 +32,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     decode_content,
     _transformation,
     correction_prompt,
+    CallOutcome,
     CorrectionPolicy,
     call_with_policy,
 )
@@ -41,6 +44,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
 
 PROMPTS_DIR = Path(__file__).with_name("prompts")
 TARGET_REALIZATION_MAX_COMPLETION_TOKENS = 4096
+INVENTORY_CORRECTION_TEMPLATE = "realize_inventory_correction.j2"
 TARGET_EXTENSION_RETRY_FEEDBACK = """\
 Your previous target-extension response failed validation. Return exactly one
 outcome for every listed operation: either an accepted outcome with the
@@ -206,17 +210,47 @@ class TargetRealizationLlmInterpreter:
         operations: Sequence[Mapping[str, Any]],
     ) -> TargetRealizationDraft:
         system_prompt, user_prompt = self._mapping_prompts(action, operations)
-        result, error = self._call(
+        check = partial(
+            _require_offered_operations, offered=_offered_identities(operations)
+        )
+        slot_id = str(action["control_action_id"])
+        outcome = self._call_outcome(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             response_format=TargetRealizationDraft,
             step="map_control_action",
-            slot_id=str(action["control_action_id"]),
+            slot_id=slot_id,
+            result_validator=check,
         )
-        return _require_provider_result(
-            result,
-            error,
-            "target realization provider failed",
+        message = "target realization provider failed"
+        if isinstance(outcome.failure, UnofferedOperationError):
+            # Only this failure earns a correction.  A validator on the first
+            # call, with no validation retry in its policy, singles it out
+            # while schema and parser failures end the call as before.
+            outcome = self._call_outcome(
+                system_prompt=system_prompt,
+                user_prompt=self._inventory_correction_prompt(user_prompt, outcome),
+                response_format=TargetRealizationDraft,
+                step="map_control_action",
+                slot_id=slot_id,
+                result_validator=check,
+                first_attempt_number=outcome.attempt_number + 1,
+            )
+            message += " after one correction"
+        return _require_provider_result(outcome.value, outcome.error, message)
+
+    def _inventory_correction_prompt(
+        self, user_prompt: str, outcome: CallOutcome[Any]
+    ) -> str:
+        """Append the reusable instruction, prior reply and exact identities."""
+        return correction_prompt(
+            original_prompt=user_prompt,
+            feedback="\n\n" + self._loader.render_prompt(INVENTORY_CORRECTION_TEMPLATE),
+            error=outcome.failure,
+            response_format=TargetRealizationDraft,
+            include_schema=False,
+            prior_result=outcome.result,
+            include_prior_response=True,
         )
 
     def _mapping_prompts(
@@ -278,7 +312,27 @@ class TargetRealizationLlmInterpreter:
         step: str,
         slot_id: str,
     ) -> tuple[Any, Any]:
-        outcome = call_with_policy(
+        outcome = self._call_outcome(
+            system_prompt=system_prompt,
+            user_prompt=user_prompt,
+            response_format=response_format,
+            step=step,
+            slot_id=slot_id,
+        )
+        return outcome.value, outcome.error
+
+    def _call_outcome(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        response_format: type[ClosedCanonicalModel],
+        step: str,
+        slot_id: str,
+        result_validator: Callable[[Any], None] | None = None,
+        first_attempt_number: int = 1,
+    ) -> CallOutcome[Any]:
+        return call_with_policy(
             llm_client=self._client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
@@ -290,8 +344,9 @@ class TargetRealizationLlmInterpreter:
             slot_id=slot_id,
             temperature=self._temperature,
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
+            result_validator=result_validator,
+            first_attempt_number=first_attempt_number,
         )
-        return outcome.value, outcome.error
 
     def extend(
         self,
@@ -800,6 +855,44 @@ def _extension_semantic_context(
         ],
         "proposed_uca_categories": [item.uca_type for item in outcome.ica_slots],
     }
+
+
+class UnofferedOperationError(ExactFeedbackError):
+    """A map reply names an operation that its request did not offer."""
+
+
+def _offered_identities(
+    operations: Sequence[Mapping[str, Any]],
+) -> frozenset[tuple[Any, Any]]:
+    """Return the exact ``(resource_id, operation_id)`` pairs a request offered."""
+    return frozenset(
+        (operation.get("resource_id"), operation.get("operation_id"))
+        for operation in operations
+    )
+
+
+def _require_offered_operations(
+    draft: TargetRealizationDraft,
+    offered: frozenset[tuple[Any, Any]],
+) -> None:
+    """Raise when the reply selects or lists an operation that was not offered."""
+    named = [
+        (f"candidate_operations[{index}]", reference)
+        for index, reference in enumerate(draft.candidate_operations)
+    ]
+    if draft.selected_operation is not None:
+        named.insert(0, ("selected_operation", draft.selected_operation))
+    unoffered = [item for item in named if item[1].identity not in offered]
+    if unoffered:
+        lines = [
+            f"- {where}: resource_id {json.dumps(reference.resource_id, ensure_ascii=False)}"
+            f", operation_id {json.dumps(reference.operation_id, ensure_ascii=False)}"
+            for where, reference in unoffered
+        ]
+        raise UnofferedOperationError(
+            "The prior response names operations that are absent from the "
+            "offered list:\n" + "\n".join(lines)
+        )
 
 
 def _require_provider_result(

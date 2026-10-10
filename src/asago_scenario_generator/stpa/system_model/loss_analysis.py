@@ -1502,35 +1502,11 @@ class _Stage1aCall:
         self, result: LLMResult, cleanup: list[dict[str, Any]]
     ) -> LLMResult:
         """Drop the constraints of a body that declares no hazard to cite."""
-        evidence: list[dict[str, Any]] = []
-        try:
-            body = decode_content(result, cleanup_transformations=evidence)
-        except (TypeError, ValueError):
-            return result
-        dropped = drop_hazardless_constraints(
-            body, allowed_hazard_ids=self.allowed_hazard_ids
-        )
+        dropped = _drop_hazardless_body(result, self.allowed_hazard_ids, cleanup)
         if dropped is None:
             return result
-        dropped_body, drop = dropped
-        dropped_result = result.model_copy(
-            update={"content": json.dumps(dropped_body, ensure_ascii=False)}
-        )
-        self.hazardless_drop = (dropped_result, drop)
-        cleanup.extend(evidence)
-        cleanup.append(
-            _transformation(
-                HAZARDLESS_CONSTRAINT_DROP_KIND,
-                result.content,
-                dropped_result.content,
-                detail=(
-                    "dropped constraints "
-                    f"{', '.join(drop.dropped_constraints)} citing undeclared "
-                    f"hazards {', '.join(drop.undeclared_hazards)}"
-                ),
-            )
-        )
-        return dropped_result
+        self.hazardless_drop = dropped
+        return dropped[0]
 
     def _parse_provider_draft(self, result: LLMResult) -> LossAnalysisDraft:
         """Parse the provider wire and record the failure class it raises."""
@@ -1697,6 +1673,45 @@ class _Stage1aCall:
                 outcome="unsupported",
                 raw_step=self.step,
             )
+
+
+def _drop_hazardless_body(
+    result: LLMResult,
+    allowed_hazard_ids: set[str],
+    cleanup: list[dict[str, Any]],
+) -> tuple[LLMResult, HazardlessConstraintDrop] | None:
+    """Drop the constraints of a decoded body that declares no hazard to cite.
+
+    Returns the result without those constraints and the drop, or ``None`` when
+    the body does not decode or the drop does not apply.  An applied drop adds
+    its decode evidence and one transformation to *cleanup*.
+    """
+    evidence: list[dict[str, Any]] = []
+    try:
+        body = decode_content(result, cleanup_transformations=evidence)
+    except (TypeError, ValueError):
+        return None
+    dropped = drop_hazardless_constraints(body, allowed_hazard_ids=allowed_hazard_ids)
+    if dropped is None:
+        return None
+    dropped_body, drop = dropped
+    dropped_result = result.model_copy(
+        update={"content": json.dumps(dropped_body, ensure_ascii=False)}
+    )
+    cleanup.extend(evidence)
+    cleanup.append(
+        _transformation(
+            HAZARDLESS_CONSTRAINT_DROP_KIND,
+            result.content,
+            dropped_result.content,
+            detail=(
+                "dropped constraints "
+                f"{', '.join(drop.dropped_constraints)} citing undeclared "
+                f"hazards {', '.join(drop.undeclared_hazards)}"
+            ),
+        )
+    )
+    return dropped_result, drop
 
 
 def _truncation_detail(
@@ -1898,8 +1913,8 @@ def _repair_loss_presence(
         policy=CorrectionPolicy(),
         temperature=call.temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-        response_parser=lambda result, _cleanup: _parse_loss_presence_reply(
-            call, result
+        response_parser=lambda result, cleanup: _parse_loss_presence_reply(
+            call, result, cleanup
         ),
     )
     repaired = outcome.error is None and outcome.value is not None
@@ -1924,9 +1939,20 @@ def _repair_loss_presence(
 
 
 def _parse_loss_presence_reply(
-    call: _Stage1aCall, result: LLMResult
+    call: _Stage1aCall, result: LLMResult, cleanup: list[dict[str, Any]]
 ) -> LossAnalysisDraft:
-    """Parse and fully validate the loss-presence correction's reply."""
+    """Parse and fully validate the loss-presence correction's reply.
+
+    The reply loses the constraints it writes beside no declared hazard, as the
+    first reply does, before the provider schema check; every other defect
+    stops the unit.
+    """
+    dropped = _drop_hazardless_body(result, call.allowed_hazard_ids, cleanup)
+    if dropped is not None:
+        result, drop = dropped
+        record_hazardless_constraint_drop(
+            call.repair_record, step=call.step, drop=drop, attempt="repair"
+        )
     draft = _materialize_provider_draft(
         parse_llm_result(result, call.response_format),
         prior=call.authoritative_draft,

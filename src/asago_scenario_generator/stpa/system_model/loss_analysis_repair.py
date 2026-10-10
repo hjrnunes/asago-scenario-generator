@@ -654,13 +654,18 @@ def record_hazardless_constraint_drop(
     *,
     step: str,
     drop: HazardlessConstraintDrop,
+    attempt: str = "first",
 ) -> None:
-    """Record one hazard-less constraint drop in the cross-stage repair artifact."""
+    """Record one hazard-less constraint drop in the cross-stage repair artifact.
+
+    ``attempt`` is ``first`` for the first reply and ``repair`` for the reply
+    of a correction, whose ``raw_step`` names the repair step.
+    """
     if repair_record is None:
         return
     repair_record.add(
         stage=step,
-        attempt="first",
+        attempt=attempt,
         kind=HAZARDLESS_CONSTRAINT_DROP_KIND,
         identity="security_constraints",
         reason=(
@@ -672,7 +677,7 @@ def record_hazardless_constraint_drop(
         proposed={"undeclared_hazards": list(drop.undeclared_hazards)},
         applied={"dropped_constraints": list(drop.dropped_constraints)},
         outcome="applied",
-        raw_step=step,
+        raw_step=step if attempt == "first" else step + _REPAIR_STEP_SUFFIX,
     )
 
 

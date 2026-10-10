@@ -78,6 +78,9 @@ from asago_scenario_generator.stpa.system_model._constants import (
 from asago_scenario_generator.stpa.system_model.control_structure import (
     UnknownReference,
 )
+from asago_scenario_generator.stpa.target_realization.provider import (
+    PROMPTS_DIR as TARGET_REALIZATION_PROMPTS_DIR,
+)
 from tests.helpers.normal_authoring_wire import (
     _record_observations,
     _target_operation,
@@ -105,6 +108,7 @@ PROMPT_DIRS = (
     SYSTEM_MODEL_PROMPTS_DIR,
     STAGE5_PROMPTS_DIR,
     OBLIGATION_AWARE_PROMPTS_DIR,
+    TARGET_REALIZATION_PROMPTS_DIR,
 )
 
 _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
@@ -343,6 +347,14 @@ def _system_model(**variables: object) -> Callable[[str], str]:
     return render
 
 
+def _target_realization(**variables: object) -> Callable[[str], str]:
+    def render(template: str) -> str:
+        loader = TemplateLoader(TARGET_REALIZATION_PROMPTS_DIR)
+        return loader.render_prompt(template, **variables)
+
+    return render
+
+
 def _stage5(facts: Callable[[], dict[str, object]]) -> Callable[[str], str]:
     def render(template: str) -> str:
         system, user = build_context_bdi_prompts(
@@ -356,6 +368,7 @@ def _stage5(facts: Callable[[], dict[str, object]]) -> Callable[[str], str]:
 # A case renders one template; the table that names it supplies the template.
 CASES: dict[str, Callable[[str], str]] = {
     "no-variables": _system_model(),
+    "no-target-variables": _target_realization(),
     "no-stated-rules": _system_model(stated_rules=False),
     "records-service": _system_model(**RECORDS_SERVICE),
     "neutral-status": _system_model(**NEUTRAL_STATUS),
