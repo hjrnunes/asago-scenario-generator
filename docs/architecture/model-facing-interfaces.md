@@ -607,7 +607,12 @@ gap call with its losses and dispositions, and no request is sent for the
 drop. Each drop is a `hazardless_constraint_drop` entry in
 `loss-analysis-repair.yaml` (`applied.dropped_constraints` names the
 dropped handles, `proposed.undeclared_hazards` the references) and a
-cleanup transformation of the call record.
+cleanup transformation of the call record. The reply of the loss-presence
+correction (above) gets the same drop before its provider schema check, with
+no extra request; its entry has `attempt: repair` and a `raw_step` that names
+the repair step, and the correction's call record carries the cleanup
+transformation. Every other defect in the corrected reply still stops the
+unit.
 
 The Stage 1a density revision prompt follows each `hazard H-n has no
 constraint` check with its repair: a constraint whose `related_hazards`
