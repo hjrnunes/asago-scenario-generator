@@ -78,6 +78,7 @@ from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     HAZARDLESS_CONSTRAINT_DROP_KIND,
     TRUNCATED_DISPOSITION_RECOVERY_KIND,
+    TRUNCATED_LOSS_RECOVERY_KIND,
     DeterministicCleanup,
     DispositionRepairPlan,
     HazardlessConstraintDrop,
@@ -86,14 +87,16 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     RepairPlan,
     RepairRecord,
     TruncatedDispositionRecovery,
+    TruncatedLossRecovery,
     UnsupportedRepair,
     build_repair_plan,
     classify_wire_validation_errors,
     drop_hazardless_constraints,
     record_cleanup_rows,
     record_hazardless_constraint_drop,
-    record_truncated_disposition_recovery,
+    record_truncation_recovery,
     recover_truncated_risk_dispositions,
+    recover_truncated_risk_losses,
     revalidate_provider_object,
     run_targeted_repair,
     select_disposition_repairs,
@@ -1395,7 +1398,9 @@ class _Stage1aCall:
     # this body, not the logged provider response, so a repaired span is the
     # span every later validator reads.
     span_repaired_result: LLMResult | None = None
-    truncation_recovery: tuple[LLMResult, TruncatedDispositionRecovery] | None = None
+    truncation_recovery: (
+        tuple[LLMResult, TruncatedDispositionRecovery | TruncatedLossRecovery] | None
+    ) = None
     hazardless_drop: tuple[LLMResult, HazardlessConstraintDrop] | None = None
 
     def add_warnings(self, warnings: Iterable[str]) -> None:
@@ -1457,21 +1462,27 @@ class _Stage1aCall:
     def _recover_truncation(
         self, result: LLMResult, cleanup: list[dict[str, Any]]
     ) -> LLMResult:
-        """Recover the complete rows of a body cut off inside dispositions."""
-        self.truncation_recovery = recover_truncated_risk_dispositions(result)
+        """Recover the complete records of a body cut off at the completion cap.
+
+        A cut inside a loss list keeps the complete losses; a cut inside
+        dispositions keeps the complete graph and rows.
+        """
+        self.truncation_recovery = recover_truncated_risk_losses(
+            result
+        ) or recover_truncated_risk_dispositions(result)
         if self.truncation_recovery is None:
             return result
         recovered_result, recovery = self.truncation_recovery
         cleanup.append(
             _transformation(
-                TRUNCATED_DISPOSITION_RECOVERY_KIND,
+                (
+                    TRUNCATED_LOSS_RECOVERY_KIND
+                    if isinstance(recovery, TruncatedLossRecovery)
+                    else TRUNCATED_DISPOSITION_RECOVERY_KIND
+                ),
                 result.content,
                 recovered_result.content,
-                detail=(
-                    f"kept {recovery.kept_rows} of "
-                    f"{recovery.complete_rows} complete disposition "
-                    "rows from a response cut off at the completion cap"
-                ),
+                detail=_truncation_detail(recovery),
             )
         )
         return recovered_result
@@ -1631,7 +1642,7 @@ class _Stage1aCall:
         """
         if self.truncation_recovery is not None:
             first_result, recovery = self.truncation_recovery
-            record_truncated_disposition_recovery(
+            record_truncation_recovery(
                 self.repair_record, step=self.step, recovery=recovery
             )
         if self.hazardless_drop is not None:
@@ -1671,6 +1682,22 @@ class _Stage1aCall:
                 outcome="unsupported",
                 raw_step=self.step,
             )
+
+
+def _truncation_detail(
+    recovery: TruncatedDispositionRecovery | TruncatedLossRecovery,
+) -> str:
+    """Describe a cut-off recovery for the call record's cleanup entry."""
+    if isinstance(recovery, TruncatedLossRecovery):
+        return (
+            f"kept {recovery.kept_losses} complete {recovery.collection} "
+            f"records and dropped the cut record {recovery.dropped_record} "
+            "from a response cut off at the completion cap"
+        )
+    return (
+        f"kept {recovery.kept_rows} of {recovery.complete_rows} complete "
+        "disposition rows from a response cut off at the completion cap"
+    )
 
 
 def _provider_reference_feedback(step: str, exc: ValueError) -> str:

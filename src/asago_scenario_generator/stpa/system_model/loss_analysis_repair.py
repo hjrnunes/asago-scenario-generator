@@ -362,19 +362,166 @@ def recover_truncated_risk_dispositions(
 
 def _complete_array_rows(text: str, start: int) -> list[Any]:
     """Decode array elements from ``start`` until the array ends or is cut."""
+    return _array_rows(text, start)[0]
+
+
+def _array_rows(text: str, start: int) -> tuple[list[Any], int | None]:
+    """Decode array elements from ``start``; return them and where a cut starts.
+
+    The cut position is ``None`` when the array closes.
+    """
     decoder = json.JSONDecoder()
     rows: list[Any] = []
     index = start
     while True:
         while index < len(text) and text[index] in " \t\r\n,":
             index += 1
-        if index >= len(text) or text[index] == "]":
-            return rows
+        if index < len(text) and text[index] == "]":
+            return rows, None
+        if index >= len(text):
+            return rows, index
         try:
             row, index = decoder.raw_decode(text, index)
         except json.JSONDecodeError:
-            return rows
+            return rows, index
         rows.append(row)
+
+
+TRUNCATED_LOSS_RECOVERY_KIND = "truncated_loss_recovery"
+
+_LOSS_ARRAYS = re.compile(r'"(risk_card_losses|use_case_losses)"\s*:\s*\[')
+_HANDLE_FIELD = re.compile(r'"handle"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_RISK_WIRE_COLLECTIONS = (
+    "risk_card_losses",
+    "use_case_losses",
+    "hazards",
+    "security_constraints",
+)
+
+
+@dataclass(frozen=True)
+class TruncatedLossRecovery:
+    """What recovery kept from a response cut off inside a loss list."""
+
+    completion_tokens: int
+    collection: str
+    kept_losses: int
+    dropped_record: str
+    emptied: tuple[str, ...]
+
+
+def _cut_loss_list(content: str) -> tuple[dict, str, list[Any], int] | None:
+    """Find the loss list the cut lies in, with the graph decoded before it."""
+    for match in _LOSS_ARRAYS.finditer(content):
+        collection = match.group(1)
+        head = content[: match.start()].rstrip().removesuffix(",")
+        try:
+            graph = json.loads(head + "}")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(graph, dict) or collection in graph:
+            continue
+        rows, cut_at = _array_rows(content, match.end())
+        if cut_at is not None:
+            return graph, collection, rows, cut_at
+    return None
+
+
+def _cut_record_label(content: str, cut_at: int, index: int) -> str:
+    """Name the cut record by the handle it wrote, else by its position."""
+    handle = _HANDLE_FIELD.search(content, cut_at)
+    return handle.group(1) if handle is not None else f"row {index}"
+
+
+def recover_truncated_risk_losses(
+    result: LLMResult,
+) -> tuple[LLMResult, TruncatedLossRecovery] | None:
+    """Recover a risk-derivation response cut off inside a loss list.
+
+    Models can run away inside one loss record's ``source_risk_cards`` until
+    the completion cap stops them.  Recovery applies only when the response
+    reached its cap, does not decode, the cut lies inside the
+    ``risk_card_losses`` or ``use_case_losses`` list, and at least one
+    complete loss record remains.  It keeps every collection that decoded
+    completely before that list and the list's complete records, drops the
+    cut record, sets each collection the response never reached to ``[]``,
+    and empties ``risk_dispositions`` so the approved disposition repair
+    accounts for every supplied card.  The logged provider response is
+    never mutated.
+    """
+    used = _truncated_completion_tokens(result)
+    if used is None:
+        return None
+    found = _cut_loss_list(result.content)
+    if found is None:
+        return None
+    graph, collection, rows, cut_at = found
+    recovered = {**graph, collection: rows}
+    emptied = tuple(name for name in _RISK_WIRE_COLLECTIONS if name not in recovered)
+    recovered.update(dict.fromkeys(emptied, []))
+    if not any(recovered[name] for name in ("risk_card_losses", "use_case_losses")):
+        return None
+    if recovered.get("risk_dispositions") != []:
+        emptied += ("risk_dispositions",)
+    recovered["risk_dispositions"] = []
+    return (
+        result.model_copy(
+            update={"content": json.dumps(recovered, ensure_ascii=False)}
+        ),
+        TruncatedLossRecovery(
+            completion_tokens=used,
+            collection=collection,
+            kept_losses=len(rows),
+            dropped_record=_cut_record_label(result.content, cut_at, len(rows)),
+            emptied=emptied,
+        ),
+    )
+
+
+def record_truncated_loss_recovery(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    recovery: TruncatedLossRecovery,
+) -> None:
+    """Record one cut-off loss-list recovery in the cross-stage repair artifact."""
+    if repair_record is None:
+        return
+    repair_record.add(
+        stage=step,
+        attempt="first",
+        kind=TRUNCATED_LOSS_RECOVERY_KIND,
+        identity=recovery.collection,
+        reason=(
+            f"the response reached its {recovery.completion_tokens}-token "
+            f"completion cap inside {recovery.collection}; the complete loss "
+            "records were kept, the cut record was dropped, and every "
+            "supplied card was left to the disposition repair"
+        ),
+        proposed={"complete_losses": recovery.kept_losses},
+        applied={
+            "kept_losses": recovery.kept_losses,
+            "dropped_record": recovery.dropped_record,
+            "emptied": list(recovery.emptied),
+        },
+        outcome="applied",
+        raw_step=step,
+    )
+
+
+def record_truncation_recovery(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    recovery: TruncatedDispositionRecovery | TruncatedLossRecovery,
+) -> None:
+    """Record either cut-off recovery under its own kind."""
+    if isinstance(recovery, TruncatedLossRecovery):
+        record_truncated_loss_recovery(repair_record, step=step, recovery=recovery)
+    else:
+        record_truncated_disposition_recovery(
+            repair_record, step=step, recovery=recovery
+        )
 
 
 def _disposition_signature(row: dict) -> tuple[Any, tuple[str, ...]]:
