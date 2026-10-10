@@ -562,6 +562,14 @@ complete row, collapses duplicate rows that agree, and sends the risks still
 missing to the existing incomplete-disposition repair. The recovery applies
 only when the text before the array decodes; each use is a
 `truncated_disposition_recovery` entry in `loss-analysis-repair.yaml`.
+When the cut lies inside `risk_card_losses` or `use_case_losses` instead,
+code keeps the collections that decoded before that list and its complete
+loss records, drops the cut record, sets every collection the response
+never reached and `risk_dispositions` to `[]`, and sends every supplied
+risk to the same disposition repair. The recovery needs at least one
+complete loss record; each use is a `truncated_loss_recovery` entry in
+`loss-analysis-repair.yaml` (`applied` names `kept_losses`,
+`dropped_record`, and `emptied`).
 
 The risk-derivation call need not derive the dependent graph; the gap call
 derives hazards and constraints for the declared losses. When a decoded
