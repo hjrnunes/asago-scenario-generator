@@ -40,6 +40,7 @@ def test_findings_are_tallied_by_the_verifiers_disposition(tmp_path: Path) -> No
     assert n["findings.total"] == 64
     assert (n["findings.supported"], n["findings.excluded"]) == (57, 7)
     assert n["findings.failed"] == 0
+    assert n["findings.scenarios"] == 8
 
 
 def test_the_matrix_has_one_row_per_action_and_four_ways_to_go_wrong(

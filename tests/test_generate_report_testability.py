@@ -27,6 +27,14 @@ def test_the_bar_counts_sent_duplicate_and_analytical_scenarios(tmp_path: Path) 
     assert n["testability.total"] == 8
 
 
+def test_the_lead_sentence_repeats_the_bar_counts(tmp_path: Path) -> None:
+    _, n = shown(copy_run(tmp_path))
+
+    assert n["testability.sent"] == n["testability.bar.sent"] == 6
+    assert n["testability.duplicate"] == n["testability.bar.duplicate"] == 1
+    assert n["testability.analytical"] == n["testability.bar.analytical"] == 1
+
+
 def test_removing_a_scenario_lowers_the_total_by_one(tmp_path: Path) -> None:
     output = copy_run(tmp_path)
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
@@ -26,6 +27,22 @@ def edit_policy(output: Path, change) -> None:
     path.write_text(json.dumps(value, sort_keys=True))
 
 
+def body_rows(html: str, table_id: str) -> int:
+    table = re.search(rf'<table[^>]*id="{table_id}".*?</table>', html, re.S).group(0)
+    return len(re.findall(r"<tr[^>]*>\s*<td", table))
+
+
+def test_the_cited_and_outside_boundary_tables_list_every_such_risk(
+    tmp_path: Path,
+) -> None:
+    html, n = shown(copy_run(tmp_path))
+
+    assert body_rows(html, "risks-cited-table") == n["policy.scenarios.out"]
+    assert (
+        body_rows(html, "risks-outside-table") == n["policy.boundary.outside-boundary"]
+    )
+
+
 def test_each_step_takes_in_what_the_one_before_passed_on(tmp_path: Path) -> None:
     _, n = shown(copy_run(tmp_path))
 
@@ -35,6 +52,7 @@ def test_each_step_takes_in_what_the_one_before_passed_on(tmp_path: Path) -> Non
     assert n["policy.boundary.not-applicable"] == 4
     assert n["policy.loss.in"] == 20
     assert n["policy.loss.not-applicable"] == 3
+    assert n["policy.loss.out"] == 17
     assert n["policy.scenarios.in"] == 17
     assert n["policy.scenarios.not-reached"] == 3
     assert n["policy.scenarios.out"] == 14

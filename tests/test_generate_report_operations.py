@@ -36,6 +36,27 @@ def test_failed_requests_are_counted_against_all_requests(tmp_path: Path) -> Non
     )
 
 
+def test_a_failure_fixed_by_a_repair_request_is_counted_as_repaired(
+    tmp_path: Path,
+) -> None:
+    output = copy_run(tmp_path)
+    edit_calls(
+        output,
+        lambda calls: calls.append(
+            {
+                "stage": "stage_2",
+                "step": "revision_repair",
+                "attempt_number": 1,
+                "success": True,
+            }
+        ),
+    )
+
+    n = numbers(str(failure_section(load_run(output))))
+
+    assert (n["failures.repaired"], n["failures.lost"]) == (1, 0)
+
+
 def test_a_chain_row_lists_its_requests_error_code_and_effect(tmp_path: Path) -> None:
     html = str(failure_section(load_run(copy_run(tmp_path))))
 
@@ -111,6 +132,20 @@ def test_effort_groups_requests_by_step_and_foots_to_the_total(tmp_path: Path) -
         )
     ]
     assert sum(groups) == len(run.calls)
+
+
+def test_effort_counts_failed_requests_and_adds_up_the_seconds(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+    edit_calls(
+        output,
+        lambda calls: [c.update(duration_ms=2000) for c in calls],
+    )
+    run = load_run(output)
+
+    n = numbers(str(effort_section(run)))
+
+    assert n["effort.failed"] == 10
+    assert n["effort.seconds"] == 2 * len(run.calls)
 
 
 def test_effort_lists_steps_in_pipeline_order(tmp_path: Path) -> None:

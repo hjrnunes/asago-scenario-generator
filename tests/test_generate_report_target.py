@@ -26,6 +26,18 @@ def test_actions_operations_and_capabilities_are_three_separate_counts(
     assert n["target.capabilities"] == 8
 
 
+def body_rows(html: str, table_id: str) -> int:
+    table = re.search(rf'<table[^>]*id="{table_id}".*?</table>', html, re.S).group(0)
+    return len(re.findall(r"<tr[^>]*>\s*<td", table))
+
+
+def test_the_action_and_operation_tables_list_one_row_for_each(tmp_path: Path) -> None:
+    html, n = shown(copy_run(tmp_path))
+
+    assert body_rows(html, "target-actions") == n["target.actions"]
+    assert body_rows(html, "target-operations") == n["target.operations"]
+
+
 def test_each_count_breaks_down_by_its_own_dispositions(tmp_path: Path) -> None:
     _, n = shown(copy_run(tmp_path))
 
