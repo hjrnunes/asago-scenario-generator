@@ -549,6 +549,20 @@ normalization warning; the dropped obligation has no `repair` entry. The drop
 applies to `risk_derivation` and `gap_analysis`; the graph revision keeps its
 own drop of slipping records.
 
+A `hazard_graph_revision` reply that does not decode as JSON gets the step's one
+correction, like a reply that fails validation. A model can end a reply in a
+whitespace runaway: the reply starts as JSON, then emits only blank lines and
+spaces until the completion cap. The correction
+(`stage1a_graph_revision_undecodable_correction.j2`) tells the model that the
+prior reply did not decode, possibly because it hit the token limit, and asks
+for the complete patch with no padding after the closing brace. It then lists
+the exact decode error and shows the prior reply with its trailing whitespace
+removed. The step still sends at most two requests. When the corrected reply
+fails too, the stage error says that the correction was tried. The setting is
+`CorrectionPolicy.correct_undecodable`; this step is the only one that sets it,
+so `risk_derivation`, `gap_analysis`, and every other step end on an undecodable
+reply as before.
+
 A `risk_derivation` or `gap_analysis` response that parses but has a hazard
 `related_losses` or constraint `related_hazards` list naming an ID no
 declared record has gets exactly one reference correction call, provided

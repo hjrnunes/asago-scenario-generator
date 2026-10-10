@@ -1,0 +1,19 @@
+template: stage1a_graph_revision_undecodable_correction.j2
+cases:
+  no-variables:
+    once:
+      - "Correction request: the prior graph revision response did not decode as JSON"
+    required:
+      - possibly because it ran to the token limit before the object was complete
+      - >-
+        Reply again with the complete revision patch as one JSON object, and
+        end the reply at its closing brace
+      - add no blank lines or spaces after it
+    forbidden:
+      - failed validation
+      - keep every other edit and addition unchanged
+    ordered:
+      - - "Correction request: the prior graph revision response did not decode as JSON"
+        - possibly because it ran to the token limit
+        - Reply again with the complete revision patch as one JSON object
+        - add no blank lines or spaces after it
