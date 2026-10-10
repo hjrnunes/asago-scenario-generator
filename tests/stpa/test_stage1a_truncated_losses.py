@@ -365,3 +365,37 @@ def test_cut_record_without_a_written_handle_is_named_by_position():
 
     assert recovered is not None
     assert recovered[1].dropped_record == "row 1"
+
+
+def test_a_list_name_inside_a_string_is_not_taken_for_the_list():
+    mention = dict(
+        _loss(*_COMPLETE_LOSSES[0]),
+        description='Neutralized text naming "risk_card_losses": [ inside it.',
+    )
+    text = '{"risk_card_losses": [' + json.dumps(mention) + ', {"handle": "cut_loss"'
+
+    recovered = recover_truncated_risk_losses(_result(text))
+
+    assert recovered is not None
+    assert recovered[1].kept_losses == 1
+    assert recovered[1].dropped_record == "cut_loss"
+
+
+def test_a_nested_list_key_is_not_recovered():
+    text = (
+        '{"other": {"risk_card_losses": ['
+        + json.dumps(_loss(*_COMPLETE_LOSSES[0]))
+        + ', {"ha'
+    )
+
+    assert recover_truncated_risk_losses(_result(text)) is None
+
+
+def test_a_repeated_list_key_is_not_recovered():
+    text = (
+        '{"risk_card_losses": [], "risk_card_losses": ['
+        + json.dumps(_loss(*_COMPLETE_LOSSES[0]))
+        + ', {"ha'
+    )
+
+    assert recover_truncated_risk_losses(_result(text)) is None
