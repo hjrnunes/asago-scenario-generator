@@ -214,7 +214,7 @@ def target_section(run: RunData) -> Markup:
     """Render the target-mapping counts and the context-table coverage."""
     result = run.realization
     if result is None:
-        body = missing("target-realization.yaml")
+        body = missing(run, "target-realization.yaml")
     else:
         body = join(
             [

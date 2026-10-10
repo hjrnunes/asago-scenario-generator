@@ -14,6 +14,7 @@ from asago_scenario_generator.report.run_data import RunData
 from asago_scenario_generator.report.slot_view import slot_views
 from asago_scenario_generator.report_kit import (
     Markup,
+    callout,
     chain,
     esc,
     glossary,
@@ -111,6 +112,23 @@ def _ended(run: RunData) -> str:
     return f"Scenario generation ended {manifest.run_status}{why}. "
 
 
+def _unreadable(run: RunData) -> Markup:
+    if not run.unreadable:
+        return Markup("")
+    items = join(
+        Markup(f"<li><code>{esc(name)}</code>: {esc(why)}</li>")
+        for name, why in sorted(run.unreadable.items())
+    )
+    return callout(
+        "warning",
+        "Files that could not be read",
+        Markup(
+            f"<p>The sections that read these files say so; the rest of the report "
+            f"stands.</p><ul>{items}</ul>"
+        ),
+    )
+
+
 def _risk_sentence(n: Counts) -> str:
     if n.risks is None:
         return ""
@@ -174,7 +192,11 @@ def answer_section(run: RunData) -> Markup:
     )
     detail = f"{_ended(run)}{_risk_sentence(n)}{_cost(n)}"
     body = join(
-        [Markup(f"<p><b>{esc(sentence)}</b></p><p>{esc(detail)}</p>"), _tiles(n)]
+        [
+            Markup(f"<p><b>{esc(sentence)}</b></p><p>{esc(detail)}</p>"),
+            _tiles(n),
+            _unreadable(run),
+        ]
     )
     return section("answer", "What did generation produce?", QUESTION, body)
 

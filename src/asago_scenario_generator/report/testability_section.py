@@ -283,5 +283,5 @@ def _body(run: RunData) -> Markup:
 
 def testability_section(run: RunData) -> Markup:
     """Render the section on duplicates, analytical-only scenarios, and conditions."""
-    body = missing("testability.yaml") if run.testability is None else _body(run)
+    body = missing(run, "testability.yaml") if run.testability is None else _body(run)
     return section("testability", "Which scenarios go to authoring?", QUESTION, body)

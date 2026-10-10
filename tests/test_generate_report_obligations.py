@@ -8,7 +8,9 @@ from typing import get_args
 
 from asago_scenario_generator.models.obligation_funnel import ObligationStopReason
 from asago_scenario_generator.report.obligation_section import (
+    REALIZED,
     STOP_MEANING,
+    stop_key,
     obligation_section,
 )
 from asago_scenario_generator.report.run_data import load_run
@@ -101,3 +103,10 @@ def test_the_stop_reasons_of_a_run_are_all_known(tmp_path: Path) -> None:
     codes = Counter(r.stop_reason or r.disposition for r in run.accounting.rows)
 
     assert set(codes) - set(STOP_MEANING) == set()
+
+
+def test_a_functional_test_obligation_is_counted_apart_from_a_realized_one() -> None:
+    assert stop_key("scenario_functional_test") == "scenario_functional_test"
+    assert stop_key("addressed") == stop_key("scenario_realized")
+    assert "scenario_functional_test" not in REALIZED
+    assert STOP_MEANING["scenario_functional_test"][0] == "Became an everyday check"

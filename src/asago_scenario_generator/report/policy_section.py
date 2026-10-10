@@ -227,5 +227,5 @@ def _body(run: RunData) -> Markup:
 
 def policy_section(run: RunData) -> Markup:
     """Render the section that follows each policy risk to where it stopped."""
-    body = missing("policy-coverage.json") if run.policy is None else _body(run)
+    body = missing(run, "policy-coverage.json") if run.policy is None else _body(run)
     return section("risks", "Where did the policy risks go?", QUESTION, body)

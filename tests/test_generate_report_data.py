@@ -5,7 +5,6 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import ValidationError
 
 from asago_scenario_generator.report.run_data import load_run
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
@@ -61,11 +60,38 @@ def test_a_run_without_a_manifest_cannot_be_reported(tmp_path: Path) -> None:
         load_run(output)
 
 
-def test_an_invalid_sidecar_fails_instead_of_rendering_a_guess(
-    tmp_path: Path,
-) -> None:
+def test_an_invalid_sidecar_is_named_and_not_guessed_at(tmp_path: Path) -> None:
     output = copy_run(tmp_path)
     (output / "loss-analysis.yaml").write_text("risk_card_losses: not-a-list\n")
 
-    with pytest.raises(ValidationError):
-        load_run(output)
+    run = load_run(output)
+
+    assert run.loss is None
+    assert "loss-analysis.yaml" in run.unreadable
+    assert run.unreadable["loss-analysis.yaml"]
+
+
+def test_a_sidecar_that_is_not_yaml_is_named_too(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+    (output / "testability.yaml").write_text("a: [unclosed\n")
+
+    run = load_run(output)
+
+    assert run.testability is None
+    assert "testability.yaml" in run.unreadable
+
+
+def test_a_readable_run_has_nothing_unreadable(tmp_path: Path) -> None:
+    assert load_run(copy_run(tmp_path)).unreadable == {}
+
+
+def test_a_null_count_in_the_manifest_loads(tmp_path: Path) -> None:
+    from tests.helpers.generate_report_fixture import edit_yaml
+
+    output = copy_run(tmp_path)
+    edit_yaml(
+        output / "synthesis-manifest.yaml",
+        lambda m: m["scenario_counts"].update(requested=None),
+    )
+
+    assert load_run(output).manifest.scenario_counts["requested"] is None

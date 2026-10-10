@@ -311,7 +311,7 @@ def _body(run: RunData) -> Markup:
 def obligation_section(run: RunData) -> Markup:
     """Render the section that groups attack-pattern obligations by stop reason."""
     if run.accounting is None or run.plan is None:
-        body = missing("obligation-accounting.yaml")
+        body = missing(run, "obligation-accounting.yaml")
     else:
         body = _body(run)
     return section(

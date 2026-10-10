@@ -321,3 +321,39 @@ def test_a_run_whose_candidates_all_published_lists_none(tmp_path: Path) -> None
 
     handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
     assert "did not publish" not in handoff
+
+
+def test_a_sidecar_that_cannot_be_read_does_not_stop_the_rest(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+    (output / "obligation-accounting.yaml").write_text("rows: []\n")
+
+    html, _ = built(output)
+
+    obligations = html.split('<section id="obligations">')[1].split("</section>")[0]
+    assert "obligation-accounting.yaml: could not be read" in obligations
+    assert "not in this run" not in obligations
+    assert metric(html, "scenarios.written") == (8, None)
+
+
+def test_the_answer_lists_every_file_it_could_not_read(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+    (output / "obligation-accounting.yaml").write_text("rows: []\n")
+
+    html, _ = built(output)
+
+    answer = html.split('<section id="answer">')[1].split("</section>")[0]
+    assert "obligation-accounting.yaml" in answer
+    assert "could not be read" in answer
+
+
+def test_a_null_manifest_count_is_left_out_of_the_handoff(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+    edit_yaml(
+        output / "synthesis-manifest.yaml",
+        lambda m: m["scenario_counts"].update(requested=None),
+    )
+
+    html, _ = built(output)
+
+    handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
+    assert "requested" not in handoff

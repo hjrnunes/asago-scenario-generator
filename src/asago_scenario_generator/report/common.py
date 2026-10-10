@@ -55,13 +55,23 @@ def plural(count: int, singular: str, many: str | None = None) -> str:
     return f"{count} {singular if count == 1 else many or singular + 's'}"
 
 
-def missing(name: str) -> Markup:
-    """Say that a file the section reads is absent from the run."""
+def missing(run: RunData, name: str) -> Markup:
+    """Say that a file the section reads is absent from the run, or could not be read."""
+    reason = run.unreadable.get(name)
+    if reason is None:
+        return callout(
+            "limit",
+            "Not in this run",
+            Markup(
+                f'<p><span class="artifact missing">{esc(name)}: not in this run</span></p>'
+            ),
+        )
     return callout(
         "limit",
-        "Not in this run",
+        "Could not be read",
         Markup(
-            f'<p><span class="artifact missing">{esc(name)}: not in this run</span></p>'
+            f'<p><span class="artifact missing">{esc(name)}: could not be read</span></p>'
+            f'<p class="nm">{esc(reason)}</p>'
         ),
     )
 

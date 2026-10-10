@@ -173,7 +173,7 @@ def _intro(run: RunData) -> Markup:
 def scenario_section(run: RunData) -> Markup:
     """Render the scenario list and one expandable detail per scenario."""
     if not run.scenarios:
-        body = missing("scenarios/")
+        body = missing(run, "scenarios/")
     else:
         details = join(_detail(run, s) for s in sorted(run.scenarios))
         body = join(

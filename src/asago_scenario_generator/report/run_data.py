@@ -11,12 +11,12 @@ invalid one raises, so the report never renders a guess.
 from __future__ import annotations
 
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, TypeVar
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from asago_scenario_generator.models.obligation_accounting import ObligationAccounting
 from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferReport
@@ -104,7 +104,7 @@ class Manifest(_Read):
     created_at: str
     run_status: str
     run_status_reason: str | None = None
-    scenario_counts: dict[str, int] = Field(default_factory=dict)
+    scenario_counts: dict[str, int | None] = Field(default_factory=dict)
     candidate_outcomes: list[CandidateOutcome] = Field(default_factory=list)
     stage_warnings: list[str] = Field(default_factory=list)
     stage_errors: list[Any] = Field(default_factory=list)
@@ -186,17 +186,40 @@ class RunData:
     scenarios: dict[str, ScenarioHandoffV4]
     features: dict[str, str]
     policy: dict[str, Any] | None
+    unreadable: dict[str, str] = field(default_factory=dict)
 
     def has(self, name: str) -> bool:
         """Tell whether *name* is a file of the output directory."""
         return (self.output_dir / name).exists()
 
 
-def _read_yaml(output: Path, name: str, model: type[_M]) -> _M | None:
+def _reason(error: Exception) -> str:
+    return " ".join(str(error).split())[:300]
+
+
+def _read_yaml(
+    output: Path, name: str, model: type[_M], unreadable: dict[str, str]
+) -> _M | None:
+    """Load a sidecar through its model; one that does not load is named, not guessed at."""
     path = output / name
     if not path.exists():
         return None
-    return model.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+    try:
+        return model.model_validate(yaml.safe_load(path.read_text(encoding="utf-8")))
+    except (ValidationError, yaml.YAMLError) as error:
+        unreadable[name] = _reason(error)
+        return None
+
+
+def _read_policy(output: Path, unreadable: dict[str, str]) -> dict[str, Any] | None:
+    path = output / POLICY
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as error:
+        unreadable[POLICY] = _reason(error)
+        return None
 
 
 def _read_calls(output: Path) -> tuple[CallRecord, ...]:
@@ -230,28 +253,34 @@ def _read_features(output: Path) -> dict[str, str]:
 def load_run(output_dir: Path | str) -> RunData:
     """Load the sidecars of one generate run from *output_dir*."""
     output = Path(output_dir)
-    manifest = _read_yaml(output, MANIFEST, Manifest)
+    unreadable: dict[str, str] = {}
+    manifest = _read_yaml(output, MANIFEST, Manifest, unreadable)
     if manifest is None:
+        if MANIFEST in unreadable:
+            raise ValueError(f"{MANIFEST}: {unreadable[MANIFEST]}")
         raise FileNotFoundError(output / MANIFEST)
-    plan = _read_yaml(output, "taxonomy-obligation-plan.yaml", _Plan)
-    testability = _read_yaml(output, "testability.yaml", _Testability)
-    policy = output / POLICY
+    plan = _read_yaml(output, "taxonomy-obligation-plan.yaml", _Plan, unreadable)
+    testability = _read_yaml(output, "testability.yaml", _Testability, unreadable)
     return RunData(
         output_dir=output,
         manifest=manifest,
         calls=_read_calls(output),
-        loss=_read_yaml(output, "loss-analysis.yaml", LossAnalysis),
+        loss=_read_yaml(output, "loss-analysis.yaml", LossAnalysis, unreadable),
         actionability=_read_yaml(
-            output, "risk-actionability.yaml", RiskActionabilityRecord
+            output, "risk-actionability.yaml", RiskActionabilityRecord, unreadable
         ),
-        structure=_read_yaml(output, "control-structure.yaml", ControlStructure),
-        offers=_read_yaml(output, "slot-hazard-offers.yaml", SlotHazardOfferReport),
+        structure=_read_yaml(
+            output, "control-structure.yaml", ControlStructure, unreadable
+        ),
+        offers=_read_yaml(
+            output, "slot-hazard-offers.yaml", SlotHazardOfferReport, unreadable
+        ),
         accounting=_read_yaml(
-            output, "obligation-accounting.yaml", ObligationAccounting
+            output, "obligation-accounting.yaml", ObligationAccounting, unreadable
         ),
         plan=None if plan is None else tuple(plan.obligations),
         realization=_read_yaml(
-            output, "target-realization.yaml", TargetRealizationResult
+            output, "target-realization.yaml", TargetRealizationResult, unreadable
         ),
         testability=(
             None
@@ -259,11 +288,13 @@ def load_run(output_dir: Path | str) -> RunData:
             else {row.scenario_id: row for row in testability.scenarios}
         ),
         coverage_review=_read_yaml(
-            output, "loss-analysis-risk-coverage-review.yaml", CoverageReview
+            output,
+            "loss-analysis-risk-coverage-review.yaml",
+            CoverageReview,
+            unreadable,
         ),
         scenarios=_read_scenarios(output),
         features=_read_features(output),
-        policy=json.loads(policy.read_text(encoding="utf-8"))
-        if policy.exists()
-        else None,
+        policy=_read_policy(output, unreadable),
+        unreadable=unreadable,
     )
