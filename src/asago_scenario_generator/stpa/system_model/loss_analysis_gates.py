@@ -24,6 +24,7 @@ service or infer a taxonomy mechanism.
 
 from __future__ import annotations
 
+import json
 import re
 from collections.abc import Callable, Collection, Iterator, Sequence
 from contextlib import contextmanager
@@ -110,6 +111,7 @@ REVISION_CORRECTION_FEEDBACK = (
     "error reported below and keep every other edit and addition unchanged. "
     + rule_span_requirement()
 )
+REVISION_UNDECODABLE_TEMPLATE = "stage1a_graph_revision_undecodable_correction.j2"
 
 
 @dataclass
@@ -119,6 +121,8 @@ class _RevisionAttempt:
     warnings: list[str] = field(default_factory=list)
     span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
     failed: bool = False
+    # The response never decoded as JSON, so no patch was read from it.
+    undecodable: bool = False
     # Why an addition-only revision rejected this response outright.  A
     # rejection is final: it gets no correction call.
     rejection: str | None = None
@@ -2530,9 +2534,13 @@ def _run_graph_revision_call(
     records by echoing or omitting them.
 
     A response that fails parsing or validation receives one correction call
-    carrying the exact validation error and the prior response.  Each parsed
-    attempt is appended to ``attempts_out`` with its own warnings and
-    ``rule_span`` repairs, so only the accepted attempt's evidence is applied.
+    carrying the exact validation error and the prior response.  A response
+    that never decodes as JSON gets the same one call, with instruction text
+    for the decode error and the prior response without its trailing
+    whitespace; a call that still fails then says it tried the correction.
+    Each parsed attempt is appended to ``attempts_out`` with its own warnings
+    and ``rule_span`` repairs, so only the accepted attempt's evidence is
+    applied.
     """
     system_prompt = template_loader.render_prompt(
         "stage1a_graph_revision_system.j2", stated_rules=bool(stated_rules)
@@ -2574,8 +2582,9 @@ def _run_graph_revision_call(
                 attempt.warnings,
                 span_repairs_out=attempt.span_repairs,
             )
-        except Exception:
+        except Exception as exc:
             attempt.failed = True
+            attempt.undecodable = isinstance(exc, json.JSONDecodeError)
             raise
 
     def validate_revision(draft: LossAnalysisDraft) -> None:
@@ -2585,6 +2594,7 @@ def _run_graph_revision_call(
             attempts_out[-1].failed = True
             raise
 
+    first_attempt = len(attempts_out)
     outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=system_prompt,
@@ -2593,12 +2603,7 @@ def _run_graph_revision_call(
         run_dir=run_dir,
         stage=STAGE,
         step=STEP_GRAPH_REVISION,
-        policy=CorrectionPolicy(
-            validation_retries=REVISION_VALIDATION_RETRIES,
-            feedback=REVISION_CORRECTION_FEEDBACK,
-            include_schema=False,
-            include_response=True,
-        ),
+        policy=_revision_policy(template_loader),
         temperature=temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
         response_parser=parse_revision,
@@ -2616,9 +2621,44 @@ def _run_graph_revision_call(
         raise StageError(
             stage=STAGE,
             step=STEP_GRAPH_REVISION,
-            message=f"graph revision call failed: {outcome.error}",
+            message=_revision_failure_message(
+                outcome.error, attempts_out[first_attempt:]
+            ),
         )
     return _revised_analysis(loss_analysis, revised)
+
+
+def _revision_policy(template_loader: TemplateLoader) -> CorrectionPolicy:
+    """The graph-revision correction: one request, also for an undecodable reply."""
+
+    def feedback(error: Exception) -> str:
+        if isinstance(error, json.JSONDecodeError):
+            return "\n\n" + template_loader.render_prompt(REVISION_UNDECODABLE_TEMPLATE)
+        return REVISION_CORRECTION_FEEDBACK
+
+    return CorrectionPolicy(
+        validation_retries=REVISION_VALIDATION_RETRIES,
+        feedback=feedback,
+        include_schema=False,
+        include_response=True,
+        correct_undecodable=True,
+    )
+
+
+def _revision_failure_message(
+    error: str | None, attempts: list[_RevisionAttempt]
+) -> str:
+    """Word the failed call, naming the correction an undecodable reply earned.
+
+    *attempts* are the replies this call parsed, in order; a second one means
+    the correction was sent and answered.
+    """
+    if len(attempts) > 1 and attempts[0].undecodable:
+        return (
+            "graph revision call failed after one correction request for an "
+            f"undecodable reply: {error}"
+        )
+    return f"graph revision call failed: {error}"
 
 
 def _check_revision(prior: LossAnalysis, draft: LossAnalysisDraft) -> None:
