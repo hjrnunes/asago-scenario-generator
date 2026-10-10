@@ -1,0 +1,43 @@
+{
+  "source": "b8-glm batch L1 occiai-r1, target_realization control_action_enrichment:map_control_action CA-3-3, request 79",
+  "control_action_id": "CA-3-3",
+  "offered_operations": [
+    {
+      "resource_id": "mcp:miniocciai:ask_clinical_question",
+      "operation_id": "ask_clinical_question"
+    },
+    {
+      "resource_id": "mcp:miniocciai:commit_to_ehr",
+      "operation_id": "commit_to_ehr"
+    },
+    {
+      "resource_id": "mcp:miniocciai:escalate_to_clinician",
+      "operation_id": "escalate_to_clinician"
+    },
+    {
+      "resource_id": "mcp:miniocciai:generate_education_video",
+      "operation_id": "generate_education_video"
+    },
+    {
+      "resource_id": "mcp:miniocciai:get_education",
+      "operation_id": "get_education"
+    },
+    {
+      "resource_id": "mcp:miniocciai:get_occiai_state_summary",
+      "operation_id": "get_occiai_state_summary"
+    },
+    {
+      "resource_id": "mcp:miniocciai:get_referral",
+      "operation_id": "get_referral"
+    },
+    {
+      "resource_id": "mcp:miniocciai:submit_questionnaire",
+      "operation_id": "submit_questionnaire"
+    },
+    {
+      "resource_id": "mcp:miniocciai:summarize_for_ehr",
+      "operation_id": "summarize_for_ehr"
+    }
+  ],
+  "reply_content": "{\"control_action_id\":\"CA-3-3\",\"disposition\":\"supported\",\"selected_operation\":{\"operation_id\":\"ask_clinical_question\",\"resource_id\":\"mcp:miniocciai:ask_clinical_question},\"} }"
+}

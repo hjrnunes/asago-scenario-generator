@@ -1,0 +1,8 @@
+The prior response names operations that are not in the observed operations
+list. Every `resource_id` and `operation_id` in `selected_operation` and
+`candidate_operations` must be copied exactly from one listed operation, and
+both values of a pair must come from the same listed operation. Replace each
+operation named in the validation error with the exact pair it was meant to
+name. If no listed operation fits, drop it from the response and set
+`disposition` to `ambiguous` or `unmapped`, as the remaining evidence supports.
+Keep every other field as written.
