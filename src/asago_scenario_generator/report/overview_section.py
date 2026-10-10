@@ -76,7 +76,7 @@ def counts(run: RunData) -> Counts:
     """Count scenarios, policy risks, and requests once, for every place they appear."""
     chains = failure_chains(run, slot_views(run))
     status = [t.status for t in (run.testability or {}).values()]
-    risks = None if run.policy is None else run.policy["risks"]
+    total, reached, outside = _policy_counts(run)
     return Counts(
         written=len(run.scenarios),
         attack=sum(s.kind == ATTACK for s in run.scenarios.values()),
@@ -87,13 +87,20 @@ def counts(run: RunData) -> Counts:
         failed=sum(not c.success for c in run.calls),
         lost=tuple(f for f in chains if f.outcome == "lost"),
         degraded=tuple(f for f in chains if f.outcome == "degraded"),
-        risks=None if risks is None else len(risks),
-        reached=None
-        if risks is None
-        else sum(r["coverage"] == "scenarios" for r in risks),
-        outside=None
-        if risks is None
-        else sum(r["coverage"] == "outside_boundary" for r in risks),
+        risks=total,
+        reached=reached,
+        outside=outside,
+    )
+
+
+def _policy_counts(run: RunData) -> tuple[int | None, int | None, int | None]:
+    if run.policy is None:
+        return None, None, None
+    coverage = [r["coverage"] for r in run.policy["risks"]]
+    return (
+        len(coverage),
+        coverage.count("scenarios"),
+        coverage.count("outside_boundary"),
     )
 
 

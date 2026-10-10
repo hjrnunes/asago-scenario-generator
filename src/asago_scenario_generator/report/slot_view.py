@@ -71,26 +71,35 @@ def _enumerated(run: RunData) -> dict[str, tuple[bool, str, str | None]]:
     }
 
 
-def _findings(run: RunData) -> dict[str, list[Finding]]:
+def _scenarios_by_ica(run: RunData) -> dict[str, list[str]]:
     scenarios: dict[str, list[str]] = {}
     for outcome in run.manifest.candidate_outcomes:
         if outcome.ica_id and outcome.scenario_id in run.scenarios:
             scenarios.setdefault(outcome.ica_id, []).append(outcome.scenario_id)
+    return scenarios
+
+
+def _finding(record, scenarios: list[str]) -> Finding:
+    verdict = record.final_verdict or {}
+    request = record.corrected_request or record.request or {}
+    return Finding(
+        ica_id=record.ica_id,
+        text=request.get("deviation") or "",
+        disposition=record.disposition,
+        verdict=verdict.get("verdict"),
+        rationale=verdict.get("rationale") or "",
+        corrected=bool(record.correction),
+        scenarios=sorted(scenarios),
+        context=request.get("hazardous_context") or "",
+    )
+
+
+def _findings(run: RunData) -> dict[str, list[Finding]]:
+    scenarios = _scenarios_by_ica(run)
     found: dict[str, list[Finding]] = {}
     for record in run.manifest.verifications:
-        verdict = record.final_verdict or {}
-        request = record.corrected_request or record.request or {}
         found.setdefault(record.slot_id, []).append(
-            Finding(
-                ica_id=record.ica_id,
-                text=request.get("deviation") or "",
-                disposition=record.disposition,
-                verdict=verdict.get("verdict"),
-                rationale=verdict.get("rationale") or "",
-                corrected=bool(record.correction),
-                scenarios=sorted(scenarios.get(record.ica_id, [])),
-                context=request.get("hazardous_context") or "",
-            )
+            _finding(record, scenarios.get(record.ica_id, []))
         )
     for items in found.values():
         items.sort(key=lambda f: int(f.ica_id.rsplit(":", 1)[1]))

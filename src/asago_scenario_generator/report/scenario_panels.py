@@ -97,17 +97,20 @@ def parse_narrative(text: str) -> tuple[str, list[Entry]]:
 
 def meta_html(meta: str | None) -> Markup:
     """Render a claim's ``(source: ...; authority: ...)`` note; the default authority stays unmarked."""
-    parts = []
-    for part in (meta or "").split("; "):
-        key, sep, value = part.partition(": ")
-        if not sep:
-            parts.append(esc(part))
-        elif key == "source":
-            parts.append(join((code_id(s) for s in value.split(", ")), " "))
-        elif not (key == "authority" and value == DEFAULT_AUTHORITY):
-            parts.append(esc(f"{key} {value}"))
+    parts = [_meta_part(part) for part in (meta or "").split("; ")]
     shown = join([p for p in parts if p], " · ")
     return Markup(f'<span class="nm">{shown}</span>') if shown else Markup("")
+
+
+def _meta_part(part: str) -> str:
+    key, sep, value = part.partition(": ")
+    if not sep:
+        return esc(part)
+    if key == "source":
+        return join((code_id(s) for s in value.split(", ")), " ")
+    if key == "authority" and value == DEFAULT_AUTHORITY:
+        return ""
+    return esc(f"{key} {value}")
 
 
 def _vulnerability(text: str) -> tuple[str, Markup]:
