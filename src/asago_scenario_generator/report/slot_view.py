@@ -26,6 +26,7 @@ class Finding:
     rationale: str
     corrected: bool
     scenarios: list[str] = field(default_factory=list)
+    context: str = ""
 
 
 @dataclass(frozen=True)
@@ -88,6 +89,7 @@ def _findings(run: RunData) -> dict[str, list[Finding]]:
                 rationale=verdict.get("rationale") or "",
                 corrected=bool(record.correction),
                 scenarios=sorted(scenarios.get(record.ica_id, [])),
+                context=request.get("hazardous_context") or "",
             )
         )
     for items in found.values():

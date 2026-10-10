@@ -40,12 +40,12 @@ def _value(item: object) -> str:
     return str(getattr(item, "value", item))
 
 
-def _check(run: RunData, scenario_id: str) -> str:
+def check_of(run: RunData, scenario_id: str) -> str:
     check = run.scenarios[scenario_id].condition_check
     return "none" if check is None else _value(check.status)
 
 
-def _tool(run: RunData, scenario_id: str) -> tuple[str, str]:
+def tool_of(run: RunData, scenario_id: str) -> tuple[str, str]:
     status = run.scenarios[scenario_id].tool_call_condition_status
     return _value(status.status), status.detail or status.reason or ""
 
@@ -57,10 +57,10 @@ def _rules(run: RunData, scenario_id: str) -> list[str]:
     return sorted({r.constraint_id for r in scenario.governing_rules})
 
 
-def _omitted(run: RunData, scenario_id: str) -> str:
+def omitted_reason(run: RunData, scenario_id: str) -> str:
     return (
         run.scenarios[scenario_id].condition_omitted_reason
-        or _tool(run, scenario_id)[1]
+        or tool_of(run, scenario_id)[1]
     )
 
 
@@ -137,7 +137,7 @@ def _duplicate_table(run: RunData) -> Markup:
 def _analytical_table(run: RunData) -> Markup:
     rows = [
         Row(
-            [scenario_link(run, r.scenario_id), _omitted(run, r.scenario_id)],
+            [scenario_link(run, r.scenario_id), omitted_reason(run, r.scenario_id)],
             id=f"analytical-{r.scenario_id}",
         )
         for r in _with_status(run, "analytical_only")
@@ -196,7 +196,7 @@ def _rules_table(run: RunData) -> Markup:
 
 def _grid(run: RunData) -> Markup:
     cells = Counter(
-        (_check(run, s), _tool(run, s)[0])
+        (check_of(run, s), tool_of(run, s)[0])
         for s in run.testability
         if s in run.scenarios
     )
@@ -223,9 +223,9 @@ def _grid(run: RunData) -> Markup:
 
 
 def _weak(run: RunData, scenario_id: str) -> tuple[str, str] | None:
-    if _check(run, scenario_id) == "none":
-        return "No discriminating condition", _omitted(run, scenario_id)
-    status, detail = _tool(run, scenario_id)
+    if check_of(run, scenario_id) == "none":
+        return "No discriminating condition", omitted_reason(run, scenario_id)
+    status, detail = tool_of(run, scenario_id)
     if status != "bound":
         return f"Tool-call condition is {status}", detail
     return None
