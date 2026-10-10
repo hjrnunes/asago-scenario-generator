@@ -841,12 +841,27 @@ class TargetDerivedICAProviderResponse(ClosedCanonicalModel):
     """The one exact response accepted for target-derived ICA findings."""
 
     findings: tuple[TargetDerivedICAFinding, ...] = ()
+    _provider_diagnostics: tuple[str, ...] = PrivateAttr(default=())
 
     @model_validator(mode="after")
     def canonicalize(self) -> "TargetDerivedICAProviderResponse":
         findings = _sorted_target_derived_findings(self.findings)
         object.__setattr__(self, "findings", findings)
         return self
+
+    @property
+    def provider_diagnostics(self) -> tuple[str, ...]:
+        """Return response-boundary diagnostics without changing the wire."""
+        return self._provider_diagnostics
+
+    def with_provider_diagnostics(
+        self,
+        diagnostics: Sequence[str],
+    ) -> "TargetDerivedICAProviderResponse":
+        """Return a response carrying non-wire provider diagnostics."""
+        response = self.model_copy()
+        object.__setattr__(response, "_provider_diagnostics", tuple(diagnostics))
+        return response
 
 
 class TargetOperationRecord(ClosedCanonicalModel):

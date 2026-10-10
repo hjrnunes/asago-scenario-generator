@@ -1969,8 +1969,9 @@ def _run_density_revision(
     structural failures; a revision call that fails validation after its
     correction still stops the gate immediately, unless the only defect is
     constraint records whose obligation ``rule_span`` is not part of their
-    rule: those records are dropped, the rest of the revision is kept, and
-    the round records each dropped record (``dropped_records``).
+    rule or that carry a blank ``applies_when`` entry: those records are
+    dropped, the rest of the revision is kept, and the round records each
+    dropped record (``dropped_records``).
     """
     progress.revision_attempted = True
     current = progress.loss_analysis
@@ -2000,7 +2001,7 @@ def _run_density_revision(
                     template_loader=inputs.template_loader,
                     temperature=inputs.temperature,
                     attempts_out=attempts,
-                    drop_unquoted_spans=True,
+                    drop_defective_records=True,
                 )
         except StageError as exc:
             # The revision itself failed (provider error or a response that
@@ -2244,7 +2245,7 @@ def _run_stated_rule_revision(
                 attempts_out=attempts,
                 stated_rules=findings,
                 addition_only=True,
-                drop_unquoted_spans=True,
+                drop_defective_records=True,
             )
     except Exception as exc:  # noqa: BLE001 - this revision is advisory
         _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
@@ -2503,17 +2504,18 @@ def _run_graph_revision_call(
     attempts_out: list[_RevisionAttempt],
     stated_rules: Sequence[StatedRuleFinding] = (),
     addition_only: bool = False,
-    drop_unquoted_spans: bool = False,
+    drop_defective_records: bool = False,
 ) -> LossAnalysis:
     """Make the bounded graph-revision call and validate its result.
 
     A caller counts the requests it sent, a correction included and a request
     the prompt preflight blocked excluded, with :func:`count_requests`.
 
-    With ``drop_unquoted_spans``, a final response that fails validation
+    With ``drop_defective_records``, a final response that fails validation
     because some record's obligation ``rule_span`` is not part of that
-    record's rule yields the response without those records (see
-    :func:`_revision_without_unquoted_spans`); the dropped records and their
+    record's rule, or because a record has a blank ``applies_when`` entry,
+    yields the response without those records (see
+    :func:`_revision_without_defective_records`); the dropped records and their
     errors stay on the last entry of ``attempts_out``.
 
     With ``addition_only``, a response that edits an existing record beyond
@@ -2603,8 +2605,8 @@ def _run_graph_revision_call(
         result_validator=validate_revision,
     )
     revised = outcome.value
-    if revised is None and drop_unquoted_spans:
-        revised = _revision_without_unquoted_spans(
+    if revised is None and drop_defective_records:
+        revised = _revision_without_defective_records(
             loss_analysis,
             attempts_out,
             outcome.failure,
@@ -2650,11 +2652,42 @@ def _unquoted_span_error(
     return " ".join(errors) or None
 
 
-def _without_unquoted_records(
+def _blank_applies_when_error(applies_when: Sequence[str]) -> str | None:
+    """Describe every blank ``applies_when`` entry (1-based)."""
+    errors = [
+        "applies_when entries must be non-empty condition sentences: "
+        f"entry {index} is {entry!r}."
+        for index, entry in enumerate(applies_when, start=1)
+        if not entry.strip()
+    ]
+    return " ".join(errors) or None
+
+
+def _record_defect_error(
+    rule: str,
+    applies_when: Sequence[str],
+    obligations: Sequence[_ProviderObligation],
+) -> str | None:
+    """Describe a constraint record's droppable defects, or ``None``."""
+    errors = [
+        error
+        for error in (
+            _unquoted_span_error(rule, obligations),
+            _blank_applies_when_error(applies_when),
+        )
+        if error is not None
+    ]
+    return " ".join(errors) or None
+
+
+def _without_defective_records(
     patch: _Stage1aRevisionPatch,
 ) -> tuple[_Stage1aRevisionPatch, list[dict]]:
     """Split constraint additions and edits into the kept patch and the dropped.
 
+    A record is dropped when an obligation span no repair maps onto its rule,
+    or when an ``applies_when`` entry is blank.  A blank entry is not read as
+    "no condition": on an edit that would delete the prior conditions.
     Dropping an edit leaves the prior constraint as it was.  An edit that
     omits its obligations keeps the prior ones, which the span test skips.
     A hazard addition that only dropped records cited goes with them; a new
@@ -2665,7 +2698,9 @@ def _without_unquoted_records(
     dropped: list[dict] = []
     cited_by_dropped: set[str] = set()
     for addition in patch.security_constraint_additions:
-        error = _unquoted_span_error(addition.rule, addition.obligations)
+        error = _record_defect_error(
+            addition.rule, addition.applies_when, addition.obligations
+        )
         if error is None:
             kept_additions.append(addition)
         else:
@@ -2678,7 +2713,9 @@ def _without_unquoted_records(
                 }
             )
     for edit in patch.security_constraint_edits:
-        error = _unquoted_span_error(edit.rule, edit.obligations or ())
+        error = _record_defect_error(
+            edit.rule, edit.applies_when, edit.obligations or ()
+        )
         if error is None:
             kept_edits.append(edit)
         else:
@@ -2741,7 +2778,7 @@ def _droppable_final_patch(
     patch = _final_patch_after_validation_failure(attempts, failure)
     if patch is None:
         return None
-    reduced, dropped = _without_unquoted_records(patch)
+    reduced, dropped = _without_defective_records(patch)
     if not dropped or not _has_records(reduced):
         return None
     return reduced, dropped
@@ -2770,17 +2807,18 @@ def _reduced_patch_for_rebuild(
     return filtered, _dropped_edit_warnings(notes)
 
 
-def _revision_without_unquoted_spans(
+def _revision_without_defective_records(
     prior: LossAnalysis,
     attempts: list[_RevisionAttempt],
     failure: BaseException | None,
     *,
     addition_only: bool = False,
 ) -> LossAnalysisDraft | None:
-    """Rebuild a failed final attempt without the records whose spans slipped.
+    """Rebuild a failed final attempt without its defective constraint records.
 
-    A span that no repair maps onto its rule stays wrong after the correction
-    call, and one bad record must not discard the valid rest of the revision.
+    A span that no repair maps onto its rule, or a blank ``applies_when``
+    entry, stays wrong after the correction call, and one bad record must not
+    discard the valid rest of the revision.
     Returns ``None`` (the call then fails as before) unless the final response
     parsed, failed validation, and drops at least one record while leaving at
     least one, and the remainder passes full validation.  The accepted rebuild
