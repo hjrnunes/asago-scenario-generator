@@ -259,6 +259,7 @@ def make_call_log_entry(
     published: bool = False,
     terminal_error_codes: tuple[str, ...] = (),
     prompt_template_hashes: Mapping[str, str] | None = None,
+    retry_of: str | None = None,
 ) -> dict[str, Any]:
     """Build a call-log entry dict following the STPA format (Section 6).
 
@@ -277,6 +278,8 @@ def make_call_log_entry(
         slot_id: Stage 3 slot ID (e.g. ``RESP-1:CA-1-1:TYPE-1``), or None.
         scenario_id: Stage 5/6 scenario ID (e.g. ``SCN-001``), or None.
         timestamp: ISO 8601 timestamp; defaults to current UTC time.
+        retry_of: ``attempt_id`` of the failed attempt this request retries;
+            the key is absent from a first request.
         response_content: Optional full response content (string representation).
 
     Returns:
@@ -353,6 +356,8 @@ def make_call_log_entry(
             error=error,
         )
     )
+    if retry_of is not None:
+        entry["retry_of"] = retry_of
     return entry
 
 
