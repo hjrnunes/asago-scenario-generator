@@ -563,6 +563,18 @@ missing to the existing incomplete-disposition repair. The recovery applies
 only when the text before the array decodes; each use is a
 `truncated_disposition_recovery` entry in `loss-analysis-repair.yaml`.
 
+The risk-derivation call need not derive the dependent graph; the gap call
+derives hazards and constraints for the declared losses. When a decoded
+risk-derivation body declares no hazard (`"hazards": []`) but writes
+constraints, and no constraint reference names an existing hazard, code
+drops every constraint before the provider schema check, so an error inside
+a dropped constraint sets no failure class. The draft then goes on to the
+gap call with its losses and dispositions, and no request is sent for the
+drop. Each drop is a `hazardless_constraint_drop` entry in
+`loss-analysis-repair.yaml` (`applied.dropped_constraints` names the
+dropped handles, `proposed.undeclared_hazards` the references) and a
+cleanup transformation of the call record.
+
 The Stage 1a density revision prompt follows each `hazard H-n has no
 constraint` check with its repair: a constraint whose `related_hazards`
 includes that hazard. Code resolves a hazard addition that restates an
