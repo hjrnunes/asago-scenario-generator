@@ -1,0 +1,2221 @@
+rows:
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - RESP-1 provides natural language responses via CA-1-1
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:028c34eca55ec0488be66b63d112f38367b07ed6cbde4617307835abc284913f
+  route_refs:
+  - route:v1:8ac993d45140e8fd232ab1f5914164d598908e7a152f08b8984580535bda0179
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - External service access is a valid threat vector for all user-facing AI services
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:05ed7cad99237029f10414d7aba15aa9d36062c6588383e6a6e5c640a1bd9be2
+  route_refs:
+  - route:v1:f034be588bbce9bc2e2da31d1a2ad52d762b2d9dd51b89982161ee3ec6526864
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - Priming can influence the model's response generation via CA-1-1
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:0a181c27ad198d966159a9a2781c75a5211024226e5ff68e52d84f2cd5fe3d4e
+  route_refs:
+  - route:v1:d7d8ea3c56af8a8f05feb735adf1c495835ba1cf493323307cd44719863b8ce4
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - RESP-6 manages tool execution via CA-6-1
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:0a89604e6c684bd06e64b62c119a6ccc0f42ee5c0a8ec5aefd8d3b8d6f6e4ddb
+  route_refs:
+  - route:v1:c0adcaae62e010e8935ef1d8b458271cd58f50f4e62e0bbae0421ea58825a5f1
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The conversational interface (CP-1) is the medium for the delivery of deceptive
+    communications
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:0ab13e757247bc094e9198ad8fdfa0d0739bc9f1174d5836bb579dc9ca063453
+  route_refs:
+  - route:v1:19e8086ed457bdc990f3cdbd9cf89eb671b024960d38749852040f6cbdba17d2
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:0b1ed910deeef45c9689f9490cdd087a65f4cdebee39a0ffd5adb0421df20522
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:0c46ef6b2a452d9268046594d32fca6fad8e473c5f641de37724efcc797deb67
+    refs:
+    - route:v1:c9194e5b499c7712cf10e598855bc13afad7ca21d45a5ab81e0b350ef2cb5381
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - AP-T6-09 is defined as inducing the model to reveal its own system prompt
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:0c46ef6b2a452d9268046594d32fca6fad8e473c5f641de37724efcc797deb67
+  route_refs:
+  - route:v1:c9194e5b499c7712cf10e598855bc13afad7ca21d45a5ab81e0b350ef2cb5381
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The conversational interface (CP-1) and response generation (CA-1-1) are the surfaces
+    for elicitation
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:0d7049ef6c3e804c62bada5b4f8af8f167e19ad8f2bf6a2961646912c53f21ca
+  route_refs:
+  - route:v1:760e26e61521738c68b0aaecb6f8f3063b173fe931b67fd9d8ae8cfd142ce903
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:1542ee307e54f2ddce3bbf9a291479754090f5994084042cf98e967827527fb0
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The system uses retrieval tools (RESP-3) and communication tools (RESP-1)
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:155f8f602932da5f74d6d00d48eb06fd2e52ab5bd7cca30d57a5022917e2177c
+  route_refs:
+  - route:v1:d84536b9af6cc5fc69b5ef39b6c42baf28090b2c863a464e5f18b7a4756cbe49
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - sanitized structural evidence
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:17f6194f0e0a65ab25a9607f52b064092923cfdd8356e0c24cbfc872d3d10001
+  route_refs:
+  - route:v1:4b0ab504d7919cf99a4ba25d0b733b2a7abac04172535e5f20a51663ce348c95
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:18b39b1127b5041ddc38c69dba66a53a420b3bea2f5e9aac30902d3a2197a3af
+    refs:
+    - route:v1:392c7a12b1ec34b4276ee94eb5157ee2d634302aae9260d989a5c71f521dc103
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - sanitized structural evidence
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:18b39b1127b5041ddc38c69dba66a53a420b3bea2f5e9aac30902d3a2197a3af
+  route_refs:
+  - route:v1:392c7a12b1ec34b4276ee94eb5157ee2d634302aae9260d989a5c71f521dc103
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The mechanism describes
+      eliciting fabricated references (hallucinations), but the control path describes
+      a RAG system providing inaccurate policy information. While both involve inaccuracy,
+      the mechanism is about fabricating non-existent entities, whereas the path is
+      about the failure of a retrieval-based grounding system.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:19c3c954e3af01c3622a14d2a9010a064da3f40118b2045d9ce16e3f457ae0e6
+    refs:
+    - route:v1:18e56b3fb9dd06995ac9f7b11dbea44cba1058148224ab79f0f967cfdb5af4f5
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:19c3c954e3af01c3622a14d2a9010a064da3f40118b2045d9ce16e3f457ae0e6
+    refs:
+    - route:v1:fe25b69980d93704bc122695cb97e633b20e1613f6a4071d2691eb2f29c637af
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - provider-structured-consideration
+  - sanitized structural evidence
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:19c3c954e3af01c3622a14d2a9010a064da3f40118b2045d9ce16e3f457ae0e6
+  route_refs:
+  - route:v1:fe25b69980d93704bc122695cb97e633b20e1613f6a4071d2691eb2f29c637af
+  slot_ids:
+  - RESP-3:CA-3-1:NOT_PROVIDED
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:1a22fd69f5b5ded06474a9bdd87c354898b52507e6168e7823c265e05902a641
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:2008b47512f8ce0eab13e03b93d463b56242cbd3c69bbe697801b7f3e061f07e
+    refs:
+    - route:v1:3d648a42890e23643e99aa7ea35b3aac56da1883ab8d313e82bcdcd13bb08f77
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - sanitized structural evidence
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:2008b47512f8ce0eab13e03b93d463b56242cbd3c69bbe697801b7f3e061f07e
+  route_refs:
+  - route:v1:3d648a42890e23643e99aa7ea35b3aac56da1883ab8d313e82bcdcd13bb08f77
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: unresolved_ica_consideration
+    detail: at least one routed slot remains analytically unresolved
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:200e72e86401d5234ca4cebe967e47dc6c9742a50851a93702f480037dd40d11
+    refs:
+    - route:v1:e9e73d23c0fbfca9af511bc089c3eff7ba0ed454aaeed76f810055ba7487d90e
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - provider-structured-consideration
+  - sanitized structural evidence
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:200e72e86401d5234ca4cebe967e47dc6c9742a50851a93702f480037dd40d11
+  route_refs:
+  - route:v1:e9e73d23c0fbfca9af511bc089c3eff7ba0ed454aaeed76f810055ba7487d90e
+  slot_ids:
+  - RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: ica_consideration_unresolved
+- constraint_ids: []
+  diagnostics:
+  - code: missing_ica_consideration
+    detail: targeted route lacks an exact ICA finding
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:211abe468ecf80a9f463415a688cde160019770d3b4a493c8ec517d4b58b895e
+    refs:
+    - route:v1:b6ce8a2922377a948826ffbc29ca5b4589285f921166bdb89c96fcf13888165a
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - provider-structured-consideration
+  - sanitized structural evidence
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:211abe468ecf80a9f463415a688cde160019770d3b4a493c8ec517d4b58b895e
+  route_refs:
+  - route:v1:b6ce8a2922377a948826ffbc29ca5b4589285f921166bdb89c96fcf13888165a
+  slot_ids:
+  - RESP-3:CA-3-1:NOT_PROVIDED
+  stop_reason: ica_consideration_unresolved
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - sanitized structural evidence
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:22223b0a8d23974bcef778b0ccacbc6d7adfe4230c02be6e8ae0d5349bf1f7a4
+  route_refs:
+  - route:v1:1ca5c33a44e5b383faff22b6a49b32bf9e10b1e49a461f1569501238b3ae556e
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is insufficient_evidence: The mechanism
+      describes indirect prompt injection for content substitution, but the control
+      path describes the execution of financial transactions using incorrect parameters.
+      There is no evidence in the path that the incorrect parameters are the result
+      of an indirect prompt injection substituting legitimate data with attacker-controlled
+      values.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:22b3aee68658423737a40ce1d2915c40b67ab893a04377b05491d5ebb107614c
+    refs:
+    - route:v1:bc494615435c94d7821953d768511290ec8a65906dff5b92357182eed2e5d795
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:22b3aee68658423737a40ce1d2915c40b67ab893a04377b05491d5ebb107614c
+    refs:
+    - route:v1:ca6321ee76c293b1833ce91bce9dec5a82f1b534a37e33037c1a1a5115c62e84
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - provider-structured-consideration
+  - sanitized structural evidence
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:22b3aee68658423737a40ce1d2915c40b67ab893a04377b05491d5ebb107614c
+  route_refs:
+  - route:v1:ca6321ee76c293b1833ce91bce9dec5a82f1b534a37e33037c1a1a5115c62e84
+  slot_ids:
+  - RESP-4:CA-4-1:NOT_PROVIDED
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics:
+  - code: routing_record_validation_failed
+    detail: 'ValueError: proposed non-applicability requires an absent mechanism'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:25fbef8f19155904229a0a6ba0d21eca374b76b5a80849ac92c549bc864ba686
+    refs:
+    - initial-batch-3
+    - route:v1:898343a4701db14b8d2e3907f44184cd57d4454515a937d5f859c92db0f9caad
+    severity: warning
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:25fbef8f19155904229a0a6ba0d21eca374b76b5a80849ac92c549bc864ba686
+    refs:
+    - route:v1:45183b86d72806a4b40bf558282d5e8250f8c759e0f4b1ea33fd078642437dc3
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - routing-validation
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:25fbef8f19155904229a0a6ba0d21eca374b76b5a80849ac92c549bc864ba686
+  route_refs:
+  - route:v1:45183b86d72806a4b40bf558282d5e8250f8c759e0f4b1ea33fd078642437dc3
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The conversational interface (CP-1) is a primary channel for user interaction
+    and potential leakage.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:27133a38f76a26f81009ce624ea01fb3a5d8d25e44f3b85e8ea048061beb4ea2
+  route_refs:
+  - route:v1:53e9f02357cb708ab21c2bbd48b1e65a2e1c373950965bda92d91e139011d982
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:2a21be82f8a1eaef7e227b0b89bff38c68d56730bd314cdc6e967578440f3971
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - Users interact with the system via queries/inputs.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:2b30af4cb92e19da0250d837f4896b14dc02e974067d08871467bf56c3a33c65
+  route_refs:
+  - route:v1:bc5c3994e15623800869dc3287625b1e8a7c952bfdabd5615844f3fac38b3d6d
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:2c15143803892cccd3b84293bf0a6564959e80987eac436657cae6a5e8a9eb3b
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The system uses a conversational interface (CP-1) and relies on specific prompts/rules.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:2c388eae760df19bc715e57e0779ec115ec6948972778d62931e42ba705eb9fe
+  route_refs:
+  - route:v1:9a37b704b3298ed2ae916b8a99fdf0dd76d1e8b7e4efed761db651495ea37afe
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:2f27b5d0e5f6e3fa8cc1382ab963b88f5e37d0dea240ad269447acb42b8adfe1
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics:
+  - code: routing_record_validation_failed
+    detail: 'ValueError: proposed non-applicability requires an absent mechanism'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:33fe515d8836301d1ebc93da1e57aea74dc458d9538c93401422b4014f59c436
+    refs:
+    - initial-batch-3
+    - route:v1:2a9bc332692c62ebe04d2df83d5fcfb3fae3f2c7df2dfb2b7b9fdf3e7ecc3fb2
+    severity: warning
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:33fe515d8836301d1ebc93da1e57aea74dc458d9538c93401422b4014f59c436
+    refs:
+    - route:v1:1ac272dafc6a08ca3145fd5c72e66f0a4737d37877d120eb60f28ae77fef11e3
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - routing-validation
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:33fe515d8836301d1ebc93da1e57aea74dc458d9538c93401422b4014f59c436
+  route_refs:
+  - route:v1:1ac272dafc6a08ca3145fd5c72e66f0a4737d37877d120eb60f28ae77fef11e3
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The model generates responses based on user prompts.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:345299760d144718e70f8b28606e437c6360378207c48a1c73f3e2031af5582d
+  route_refs:
+  - route:v1:02f776023984f1ebeb50d1cf600d23cc242a4bd7e5c62436d5b54f1920ca3a73
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:38c3a3762595f381837b64597bf5558fc7124c94256a8bad93eccdc1d4eaaa93
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The system generates responses to users via CP-1.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:3aca1b6e4af6395a967560dff6a3a5e30ab825ffe0e4e4c32e8339d5369f341c
+  route_refs:
+  - route:v1:66dbacfdcf70bdb939c6849d20ceece3b748317e7e7c6ecd5e8ec22bcef362a8
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:3c09f32096725f1f043e02e582205001422aea14256be09499eee132223c21d8
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The system provides natural language responses to users (CA-1-1).
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:3fda6319b505bcb10a1d4c2e8f962bed2f57a1fe9fb6c0ef22e49290d99a90ce
+  route_refs:
+  - route:v1:b2a5f3131976d89d1015c1e4c69d073a03a4e39b61ff9b5c38ea47004cfc1595
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The mechanism describes
+      social engineering via deceptive instructions (phishing/malicious links), but
+      the constraint (SC-2) is narrowly limited to preventing improvised answers regarding
+      financial terms or fees. The constraint does not govern the broader consequence
+      of social engineering or malicious link redirection.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:43288407b0bfa93f7cfe376e6d0157fa205d1967657f4d2569a911d7216c59f3
+    refs:
+    - route:v1:1230d1160cd0e2e5830089585a00529f6bdcab8d28e28f6e84032b90fb7fb4dd
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:43288407b0bfa93f7cfe376e6d0157fa205d1967657f4d2569a911d7216c59f3
+    refs:
+    - route:v1:d783cd63540ed725a221fa569665582726be37723cb022bfb2d5e2656c4c89a8
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 provides CA-1-1 to CP-1
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:43288407b0bfa93f7cfe376e6d0157fa205d1967657f4d2569a911d7216c59f3
+  route_refs:
+  - route:v1:d783cd63540ed725a221fa569665582726be37723cb022bfb2d5e2656c4c89a8
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:462307ec069ed0f3252b7a9bf7ab9f61b872ddf2b110f36707463c3e5d1fcb12
+    refs:
+    - route:v1:77c22d1c1b2f0eb4e026d8022edfd93fa5272f557f284d6e22d3247cda496e90
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - The risk concerns input of NPI/PII, while the concern AP-T6-08 concerns output
+    of sensitive data.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:462307ec069ed0f3252b7a9bf7ab9f61b872ddf2b110f36707463c3e5d1fcb12
+  route_refs:
+  - route:v1:77c22d1c1b2f0eb4e026d8022edfd93fa5272f557f284d6e22d3247cda496e90
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - AP-T6-09 describes revealing system prompts and configuration.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:469c9350defc35b73c48018f843d61e471ec6031a2953514f511b2f277162589
+  route_refs:
+  - route:v1:6ad791703ca830c0d68a94b833b0e5f96edaa4c4e534643d4ccf494bb05b4a4c
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:48ecc43fa73d2aaf50fbf883f66d248596887fe6873ad780df89e6a4746827c4
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - AP-T2-02 involves chaining tools to exfiltrate data.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:499f04368022087683c6e8f1aeb988c07f960d3ea365090cbf7f953061089853
+  route_refs:
+  - route:v1:beac34156ae24f4a194e0a8b58f660f1809ef074344dcf13b89046282d9f720d
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - AP-T5-05 involves inducing the model to fabricate references.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:4a3a1b9836417ccfb79e2bccd1501b8f472ae60999d742e05610743518a26858
+  route_refs:
+  - route:v1:814fdf04f6f74aa0fe4111155bfc5787bd1af7d3b6e15ee51dd61e8967a757e2
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The threat describes employees inputting PII/NPI into external AI systems.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:4a86b9ecb7f2f988d4fbc7cdc7d9a58d81771697a8d63b0965434751c2b1fd91
+  route_refs:
+  - route:v1:f0f6452cb6e9985ce8d41ccb0dee88651a4506523b48d92e85a48a5d60029d6f
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - AP-T6-08 describes eliciting sensitive info via pretext/authority.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:4bb8998794bec9efc2b68f0124595a58a0f5466d8b29b8cb65895f6e7eb6eba8
+  route_refs:
+  - route:v1:3ab3337cd05343f9508c89d799be0a682028925b8fa3198f86a41429bb66b3ea
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The threat describes using AI to create personalized phishing/deepfakes.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:4c574d0027d32453b6e7be2b52f774e26d05f49c5b03355de339447f71b8af8b
+  route_refs:
+  - route:v1:e945047dbc84a3825b5d716b0aec8de0aa8b2819b7dbf40af17351dcd1509883
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - RESP-1 manages conversational responses via CA-1-1 on CP-1.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:541f9e9ce96e8e0e833783ae2d122682df570361d23cd4aa2588099e9c52c84c
+  route_refs:
+  - route:v1:eb72034ed1dd78811f6be3c8d4c2cb095074e9abca01e202ca55e7a6358187de
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:55866286bfe3033dc4be10bfc6633d6d9a6a4eac9565a82790f81cfc1a4f7e55
+    refs:
+    - route:v1:172e92877ea2c87c83150dc6b4ec71f32641bfbc98a42c5f48ddb52f28652faf
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - The system is a customer service/financial tool, not a code generation or creative
+    multimedia tool.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:55866286bfe3033dc4be10bfc6633d6d9a6a4eac9565a82790f81cfc1a4f7e55
+  route_refs:
+  - route:v1:172e92877ea2c87c83150dc6b4ec71f32641bfbc98a42c5f48ddb52f28652faf
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:562fac585201938c6e04cf0fc812f3281db888f7d72bfd6ba007dccd06f3bbc5
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:565a335401bfd3185bb6aeb249d530847c34cbcc454c65e03e56bfa7ce729ad2
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - RESP-6 manages tool execution (CA-6-1) on CP-8 and coordinates with other responders.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:5ea52fcd7348e968c8a6fae2a5c4b6893e40d2e6135ae449239fc6979f7cde21
+  route_refs:
+  - route:v1:38c90eb963ae7b632213ab691a67136ce55253add82234c92d31ad15ad9cfbb0
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - RESP-1 generates responses (CA-1-1) based on user interactions.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:62b165ebb94e0382893b1e0297da158212167bb14ee4ee23e165c97406b21c50
+  route_refs:
+  - route:v1:b0abfbf189c823af0842b73f5bcad7c38a1791cac138635ceff32482781520ee
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The system's core interaction is via natural language prompts in CP-1.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:632b1222c7b4a576382af45cded7e8c7a420464057334be6394b9d372b91b0af
+  route_refs:
+  - route:v1:a3e64308b068920bbca2ff5428d2bba573df32aa5e76bc8a822e9b81aaba54dc
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:656ec1ba53228a82ff5d7040b89f2f6b688608b51de975a48a50af6e96d0b509
+    refs:
+    - route:v1:116fa2153832e532086177c2fda91a492d6a076aee1b843ec6b98d56b2ca4f2a
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - The control actions are limited to specific retrieval, refund, and payment tasks.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:656ec1ba53228a82ff5d7040b89f2f6b688608b51de975a48a50af6e96d0b509
+  route_refs:
+  - route:v1:116fa2153832e532086177c2fda91a492d6a076aee1b843ec6b98d56b2ca4f2a
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - 'CL-5: CM-5 (RESP-6 governing RESP-2) involves retrieval tools.'
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:679ee0f8b1a781e03e07b259e8a8cce20819e800fdac5a7e2b777a715acb6285
+  route_refs:
+  - route:v1:75218fbf35bf056e73977c9b3fe9d3d04fe3e042c701ee45756549d30e3dc604
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The system uses a coordinated tool-calling architecture (CL-4, CL-5).
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:6ede14fd1da31a0c4f2fcc0e6e2a6a3a5295edef761b0c906bd235bc84370b25
+  route_refs:
+  - route:v1:e354122ff4b42bf1c10934f906312ff9636d22c4891a365b46cb1f1d071ee522
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: unresolved_ica_consideration
+    detail: at least one routed slot remains analytically unresolved
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:713e6d9592d88fe2a824a3432ff412a9db8bfde91ae8a9a32402d6df1ba16511
+    refs:
+    - route:v1:1324a22a09dc3d5d5d56fecaae2bd330f7413f7e73a0a9fc37cdf83522f5a2a2
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 controls CP-1 (Conversational User Interface)
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:713e6d9592d88fe2a824a3432ff412a9db8bfde91ae8a9a32402d6df1ba16511
+  route_refs:
+  - route:v1:1324a22a09dc3d5d5d56fecaae2bd330f7413f7e73a0a9fc37cdf83522f5a2a2
+  slot_ids:
+  - RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: ica_consideration_unresolved
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:72661ba36b53b2c3288075a70df00db13ad093655771136768647325231d31e3
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics:
+  - code: unresolved_ica_consideration
+    detail: at least one routed slot remains analytically unresolved
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:72d8f7a2bb642fd8dc624794d43fab969770f2d2aebe4d5f64dabf9dc90e2454
+    refs:
+    - route:v1:680530f1443d4ede5814b6a18e890a1d015c857f6bafa6d4d2872036b9fb7c31
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-2 retrieves account/order info (CA-2-1/CA-2-2)
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:72d8f7a2bb642fd8dc624794d43fab969770f2d2aebe4d5f64dabf9dc90e2454
+  route_refs:
+  - route:v1:680530f1443d4ede5814b6a18e890a1d015c857f6bafa6d4d2872036b9fb7c31
+  slot_ids:
+  - RESP-2:CA-2-2:INCORRECT
+  stop_reason: ica_consideration_unresolved
+- constraint_ids: []
+  diagnostics:
+  - code: unresolved_ica_consideration
+    detail: at least one routed slot remains analytically unresolved
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:7394b9d180ff114b8563eb6e4d75e9caeb5be1234653732a4c05794cec2d77ad
+    refs:
+    - route:v1:f4e98a4f06df160864e963e3e386dbcb035979005088314b6d3ee31dfc8c0ac1
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 provides natural language responses (CA-1-1)
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:7394b9d180ff114b8563eb6e4d75e9caeb5be1234653732a4c05794cec2d77ad
+  route_refs:
+  - route:v1:f4e98a4f06df160864e963e3e386dbcb035979005088314b6d3ee31dfc8c0ac1
+  slot_ids:
+  - RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: ica_consideration_unresolved
+- constraint_ids:
+  - SC-2
+  diagnostics: []
+  disposition: addressed
+  evidence:
+  - RESP-1 manages customer service conversations
+  - provider-structured-consideration
+  exec_candidate_ids:
+  - EXEC:RESP-1:CA-1-1:INCORRECT
+  hazard_ids:
+  - H-2
+  - H-3
+  ica_ids:
+  - RESP-1:CA-1-1:INCORRECT:1
+  - RESP-1:CA-1-1:INCORRECT:2
+  obligation_id: ob:v1:74d37fbf145d41cab5088a659c0091049326873d175c55657daafd4525aabe85
+  route_refs:
+  - route:v1:fe10895bf9cdab2b7bdeaf71283c922465d0724f1ff664985dceaeb321193f50
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: addressed
+- constraint_ids: []
+  diagnostics:
+  - code: routing_record_validation_failed
+    detail: 'ValueError: route controlled process references do not match the selected
+      slot path (expected=[], actual=[''CP-8''])'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:768edc8138308689b01dc7dfbc5fb8b73fc81868f68b5ee7f1a7a131995b07d4
+    refs:
+    - initial-batch-6
+    - route:v1:762e1c48fb205c68cd072659d5a7ad37c722265d8042836f311eb973977b8d82
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - routing-validation
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:768edc8138308689b01dc7dfbc5fb8b73fc81868f68b5ee7f1a7a131995b07d4
+  route_refs:
+  - route:v1:0c159942356dc4489a7df19a9ec59a5317ba188a5355d429d3e1efefa8795b45
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:7690e96df55f0e1195d9c792d7eb20fa6041606a357882295337a0ef46937f49
+    refs:
+    - route:v1:3ddf3f5e6d956d73661fbaf86fbc80713630bc5283d0570036e3584541bf7248
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 provides responses to users
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:7690e96df55f0e1195d9c792d7eb20fa6041606a357882295337a0ef46937f49
+  route_refs:
+  - route:v1:3ddf3f5e6d956d73661fbaf86fbc80713630bc5283d0570036e3584541bf7248
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: unresolved_ica_consideration
+    detail: at least one routed slot remains analytically unresolved
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:78dfe580be12c72ff7ed4bb470749abf59ee90f1b597026c77d1bd81b7cfd0f8
+    refs:
+    - route:v1:32fe51e535ca6515ca0309e5c5cf98f6c9a218e83e95af8c575f5a558e8efa9d
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 provides responses to users
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:78dfe580be12c72ff7ed4bb470749abf59ee90f1b597026c77d1bd81b7cfd0f8
+  route_refs:
+  - route:v1:32fe51e535ca6515ca0309e5c5cf98f6c9a218e83e95af8c575f5a558e8efa9d
+  slot_ids:
+  - RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: ica_consideration_unresolved
+- constraint_ids: []
+  diagnostics:
+  - code: incomplete_non_applicability
+    detail: every routed slot must have explicit structural N/A evidence
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:78f809cda51a3464a79a46e4c162321ce136ab2a473e82d7b9f0c488a480162b
+    refs:
+    - route:v1:08eddcd09f5d0e675d372920e31fda0259b9873f24942bc3deef779a374652e6
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - 'Declared profile evidence: capabilities code interpreter: absent'
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:78f809cda51a3464a79a46e4c162321ce136ab2a473e82d7b9f0c488a480162b
+  route_refs:
+  - route:v1:08eddcd09f5d0e675d372920e31fda0259b9873f24942bc3deef779a374652e6
+  slot_ids: []
+  stop_reason: not_applicable_evidence_incomplete
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - the system contains conversational and escalation components, but no explicit
+    decision-context/interface manipulation mechanism is defined
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:7b5986e607db5e85a5874913adfb0a2fb22d650a48913c895f9490fb93ff4199
+  route_refs:
+  - route:v1:d3f117f4c265c34b1095039ce50f91cfe7c6311372ae2ed80a00e4941725453c
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:7e1ad20ac0d2a80c7df76e1674754662ae30a2f9d1ac53ddceb84293b6130ce0
+    refs:
+    - route:v1:11aba88519e94823819bd7481276d8c5509e4a25f49fcd8909162f7c702530cb
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - AP-T6-08 is about eliciting data, not the risk of employees including IP in queries
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:7e1ad20ac0d2a80c7df76e1674754662ae30a2f9d1ac53ddceb84293b6130ce0
+  route_refs:
+  - route:v1:11aba88519e94823819bd7481276d8c5509e4a25f49fcd8909162f7c702530cb
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - AP-T5-05 describes the fabrication of references which constitutes erroneous output
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:80cfffa6ae3aa2820553ab08334d9507388f307fdfd716c079641b81960853b1
+  route_refs:
+  - route:v1:2e42e3b4a7b16405bdfe126f653c353e4476e206c7f98f8bf3108ae50d336e07
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:80e4cae1f42ffdb1cb3326075019c3e426bf07c9eabfc74fd5d696ca1a1512df
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:815f2de5cd241ec9a31610b7267c4643429a2a854e0b15a259baa8957c89f518
+    refs:
+    - route:v1:916f790b0537eff4e13eacd7f35b35122ff3855ede2f87b14856d06c82bef92c
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - AP-T2-02 involves tool chaining, which is not the same as provider-side data leakage
+    of queries
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:815f2de5cd241ec9a31610b7267c4643429a2a854e0b15a259baa8957c89f518
+  route_refs:
+  - route:v1:916f790b0537eff4e13eacd7f35b35122ff3855ede2f87b14856d06c82bef92c
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:84150767cd85230a000e998cd16ef78a28af2575ebd5c400a14a669c645dd1cb
+    refs:
+    - route:v1:2c5aeacd9fbd4508b78a1a432d22c8f71f58c2a0eb99da973c0ebc32d64c6bfc
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - AP-T10-01 focuses on obscuring context for human oversight, not general robustness/accuracy
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:84150767cd85230a000e998cd16ef78a28af2575ebd5c400a14a669c645dd1cb
+  route_refs:
+  - route:v1:2c5aeacd9fbd4508b78a1a432d22c8f71f58c2a0eb99da973c0ebc32d64c6bfc
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - AP-T6-08 (conversational elicitation) is the direct path to realizing the risk
+    of unauthorized financial disclosure
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:86b9976aac68d39e8ee470f5c686d7ca3c151d1b88d6af94e93f4ddbf9f895a1
+  route_refs:
+  - route:v1:fde08bb2cb3d1cf049b36e28e1a8a347d9c010bcb2ef8f8b38e56a553d5e652a
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:87e81d8e8c2d5bf3219649ee0a44a5276fa9703288b91c16fa6f8eb4172726be
+    refs:
+    - route:v1:14c5f4e652293d76ee52eae6c8af784696be0e75d1f4dc3243ae298e0fe59a99
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - 'Declared profile evidence: capabilities code interpreter is absent'
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:87e81d8e8c2d5bf3219649ee0a44a5276fa9703288b91c16fa6f8eb4172726be
+  route_refs:
+  - route:v1:14c5f4e652293d76ee52eae6c8af784696be0e75d1f4dc3243ae298e0fe59a99
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - AP-T6-08 describes the induction of the model to leak private data via conversational
+    prompts
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:880705b40be237c93acb04378729f4fe95eccbb53d7914c7f85b7ee7277bda0e
+  route_refs:
+  - route:v1:5f88b6b2c793d61469b80bc4378e75cd368a11862699a610ea6ba5cece8befac
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:89050585b6c530a7d3a2bd6c6508981d96c9b32ca349ea273489e68860915dbc
+    refs:
+    - route:v1:d8d153d13af0f9d28ada18397875d8361f4e8e573b15cc66e27bd7d906f43ffb
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - no mechanism for indirect prompt injection or deceptive social engineering instruction
+    generation provided
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:89050585b6c530a7d3a2bd6c6508981d96c9b32ca349ea273489e68860915dbc
+  route_refs:
+  - route:v1:d8d153d13af0f9d28ada18397875d8361f4e8e573b15cc66e27bd7d906f43ffb
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - control interface accessibility is unknown
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:898b5bf91c9e9fa3734dc8c7e7fd952512defa53fe35cd3005a818a5768e5681
+  route_refs:
+  - route:v1:a0a65f7c4022907941cf7a4513c8a9e5421c4a7d39f1ea570af63a0d387d9f8c
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:8a5bc45dc3c2ae20738a42b242da3f375de0a3836df70e0d74c67ba6792e667e
+    refs:
+    - route:v1:4e3504c78b490f83d4f93a13508c14da17df606dd9b112e65911a58932826fc6
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 manages conversational responses and relies on context provided by RESP-2
+    via CL-1
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:8a5bc45dc3c2ae20738a42b242da3f375de0a3836df70e0d74c67ba6792e667e
+  route_refs:
+  - route:v1:4e3504c78b490f83d4f93a13508c14da17df606dd9b112e65911a58932826fc6
+  slot_ids:
+  - CL-1:CM-1:NOT_PROVIDED
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - CL-2 connects RESP-2 and RESP-4
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:8cbaeb5e7bf84448b65bdf714481ec47326e58b744a2899ff7e773cda1223bcc
+  route_refs:
+  - route:v1:c0465b630067e00e25b810057c76dd5e47ce32b11fb306d9f5ba2b5b3677abbd
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:8e6ae836cb7f9e0ad46a0d4888f1bf716abbca5555b37c1f4af2050987f0ac8b
+    refs:
+    - route:v1:9bc4cdd79f9553d26125973432d0ec374c2bfd6dfbfcf37d49478a5c50bce4a7
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 provides natural language responses
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:8e6ae836cb7f9e0ad46a0d4888f1bf716abbca5555b37c1f4af2050987f0ac8b
+  route_refs:
+  - route:v1:9bc4cdd79f9553d26125973432d0ec374c2bfd6dfbfcf37d49478a5c50bce4a7
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:917282ec7c5086f63b21e3a42ba316ee13561b26eb895c8ead5820f84f6159b9
+    refs:
+    - route:v1:b84d79a185165bee7dcfd863a2c1dc36ebb8d843fa54045ad8e7b75e78e8121c
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 generates natural language responses
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:917282ec7c5086f63b21e3a42ba316ee13561b26eb895c8ead5820f84f6159b9
+  route_refs:
+  - route:v1:b84d79a185165bee7dcfd863a2c1dc36ebb8d843fa54045ad8e7b75e78e8121c
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:9215b7b51c20e067eff1c03d5c34cb7ea9ee725e7c9d77e0d8c43703c755a8e6
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - RESP-6 manages tool execution (CA-6-1)
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:940d7c7755ddb594c8fbdea0a4567b298e31c098d58cc7d61c9d2b6d270ad4fb
+  route_refs:
+  - route:v1:fae9fe6822fca87ccfea111125e79c8116953c8ae30f006b2ca1b621a14d8d74
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids:
+  - SC-4
+  diagnostics: []
+  disposition: addressed
+  evidence:
+  - RESP-1 provides responses via CP-1 based on user interaction
+  - provider-structured-consideration
+  exec_candidate_ids:
+  - EXEC:RESP-1:CA-1-1:INCORRECT
+  hazard_ids:
+  - H-5
+  ica_ids:
+  - RESP-1:CA-1-1:INCORRECT:5
+  obligation_id: ob:v1:94edcaa94cd807ec5052fd8ac65f3064599974b1dc7356701f0d8afd96ab7f4d
+  route_refs:
+  - route:v1:19253a543673c2dea38372f41dfc21557b2d7861fabaf12909ffcb56534ef552
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: addressed
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:954426666f1820c23c28b3d80dc76e21f0b26e2c642e653d5b063fb7698f8358
+    refs:
+    - route:v1:6878facf55498d1b094fa81a80bdbf132336d729afff8cf8bd2b9179f2fc70ae
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - 'Declared profile evidence: capabilities code interpreter status: absent'
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:954426666f1820c23c28b3d80dc76e21f0b26e2c642e653d5b063fb7698f8358
+  route_refs:
+  - route:v1:6878facf55498d1b094fa81a80bdbf132336d729afff8cf8bd2b9179f2fc70ae
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The system provides natural language responses (CA-1-1) which are susceptible
+    to substitution
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:95fead3f261557eb337148027a246ed8519e591e7f86e1f108b3f73d3288da49
+  route_refs:
+  - route:v1:44d81339b89280b52b31fe2905989f81329e32948ed58dd7bb426d4466a6ed6a
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:97097348a6c2835bfcea4919b6098dcd9ec49ae69f4684af239c76533d912dbe
+    refs:
+    - route:v1:180784ff979a172c033e3e7fb2d876940730a0569f37d1d979a1ca376ce00b06
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - 'mapping_strength: related_category_expansion'
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:97097348a6c2835bfcea4919b6098dcd9ec49ae69f4684af239c76533d912dbe
+  route_refs:
+  - route:v1:180784ff979a172c033e3e7fb2d876940730a0569f37d1d979a1ca376ce00b06
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - Adversarial prompting can bypass guardrails to reveal prohibited content
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:97bd75503b8eecbf0316385b79bc4228f4134266c7a86d871db22a924f64b203
+  route_refs:
+  - route:v1:da6e2036a2443d563418916a9deffab8ea851d2208a8e60078c373aeceb15df4
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:9926808241883ded389a7c4a834bce17582df8974280c1e14b35b7a007a2538c
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - Users include sensitive information in queries which can then be exfiltrated via
+    subsequent tool calls
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:9be8220c80d9d0fd9a66d9bfcac3c6054808c591b5ab5ec8ba12c6cd968734bd
+  route_refs:
+  - route:v1:e7609efc75bb8ac738be6a980e1e0897553198a6ed545e48b06be1a4b9744e0d
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - Employees may include PII in queries sent to external systems
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:9eb705a8dc64e5fcb0661ab12fde27adf1ded6b9d55dd125c5cf9be73f48e18d
+  route_refs:
+  - route:v1:1702f9efce95c38f320906ea32d86e6ae4a8d6fb85d38cd1a25a1684b7ebde47
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - Multi-tool chains can be used to move sensitive data through the system
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:9f639a9f19597d6467ed085d06abf9d6371effd01e6fabe7afb059719c876ac9
+  route_refs:
+  - route:v1:d60958288c2bf173bb757c9c077ca772fe83caa089f82d14936f0987a077a24e
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - Conversational prompting can be used to bypass traditional access controls to
+    extract data from the model's context
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:a0bfed871dd54cadadc44173e7a37c37855231480ddc03674741b35109a909b8
+  route_refs:
+  - route:v1:4380311fddfadbdeab1eccb676e57ee8cd859fe7f54b170da6904669b4033fe3
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The control action
+      (providing natural language responses) and the constraint (escalating regulated
+      topics to a human) do not govern the specific mechanism of generating deceptive
+      social engineering content; the constraint focuses on topic escalation rather
+      than preventing deceptive/authoritative tone or malicious link generation.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:a25c77a4649787fae4179f1e24f018c68ec822689f9cb713d5d2fabef39ba17d
+    refs:
+    - route:v1:b81dca630a2f17034bdd9b2179b1783e7bd6d2007ca2cc3cf377d759f6edb787
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:a25c77a4649787fae4179f1e24f018c68ec822689f9cb713d5d2fabef39ba17d
+    refs:
+    - route:v1:06a8ccac5b9fc3522a861364d28ec7070de5bbee712c937b4bca25aad7f5d1e6
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - The conversational interface (CP-1) controlled by RESP-1 is the primary channel
+    for AI-mediated communication.
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:a25c77a4649787fae4179f1e24f018c68ec822689f9cb713d5d2fabef39ba17d
+  route_refs:
+  - route:v1:06a8ccac5b9fc3522a861364d28ec7070de5bbee712c937b4bca25aad7f5d1e6
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:aa99f860b66c7926063f93330b276ba8e497041f645c3b964512d7e1cd21cd7c
+    refs:
+    - route:v1:6e82050a70b39db4f3f1e217bd10d27115a086b30368e6387009543d284ebe5c
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - The system is described in terms of conversational and transaction-based interactions,
+    lacking mass-distribution or batch-processing tools.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:aa99f860b66c7926063f93330b276ba8e497041f645c3b964512d7e1cd21cd7c
+  route_refs:
+  - route:v1:6e82050a70b39db4f3f1e217bd10d27115a086b30368e6387009543d284ebe5c
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - While conversational elicitation is plausible, no specific control path is provided
+    that governs the model's internal knowledge boundaries or PII access relative
+    to the user prompt.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:adb62bb59d570293a1165329c6544c99b622fb20a9e9ceea66811fb3b4348bcf
+  route_refs:
+  - route:v1:dd628df934c6e51a082d0f79c3d2e901920be49f235285f59e5175d16e2892df
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The mechanism involves
+      manipulating the decision context for a human overseer, but the selected control
+      path and constraint are focused on escalating specific regulated topics (fees,
+      eligibility, payments) to a human, which does not govern the distortion of the
+      interface or the obscuring of critical information described in the mechanism.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:add0f162e6c83b9470472d810bfc170304a4aecf2c25b9316cecd9a82bb291f9
+    refs:
+    - route:v1:e9b895c3ae4cce82d8352871527547281c209d949e0245025a77720f77469810
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:add0f162e6c83b9470472d810bfc170304a4aecf2c25b9316cecd9a82bb291f9
+    refs:
+    - route:v1:77e277ef4a12352257ee3ad540809a61b442c9fe2f5d398c5aa51df03a68318f
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 provides natural language responses which may be inaccurate, leading to
+    user reliance (H-3).
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:add0f162e6c83b9470472d810bfc170304a4aecf2c25b9316cecd9a82bb291f9
+  route_refs:
+  - route:v1:77e277ef4a12352257ee3ad540809a61b442c9fe2f5d398c5aa51df03a68318f
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The mechanism involves
+      manipulating the decision context for a human overseer, but the selected control
+      path and constraint are focused on escalating specific regulated topics (fees,
+      eligibility, payments) to a human, which does not govern the distortion of the
+      interface or the obscuring of critical information described in the mechanism.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:b15848922a43c70846bcda9e5b7367f1476e824f3d020887574e1108c06c2b1e
+    refs:
+    - route:v1:c4b9bbe719eb6779903b464a9fa34f88b9b0f733c1e1bb8af39fdbbed160c7b6
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:b15848922a43c70846bcda9e5b7367f1476e824f3d020887574e1108c06c2b1e
+    refs:
+    - route:v1:bf111c3cbc385b9f894367f921db0622c9df1a9164528ca7ccc8205afe744811
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 provides responses that may be hallucinated (H-3), violating the requirement
+    for accuracy.
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:b15848922a43c70846bcda9e5b7367f1476e824f3d020887574e1108c06c2b1e
+  route_refs:
+  - route:v1:bf111c3cbc385b9f894367f921db0622c9df1a9164528ca7ccc8205afe744811
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:b1c5fe187a455dfbea57c85bf5fafd39616b91a7221081efed68fa577181bfb3
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:b8f5f1ce23d357b4239c6172b03892b95e5c74069910b0c0f448e6c39affe702
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:bc4b9d1dc5acf1eb06f6610e9b61d51deaae3de1a268bfd3da3e9aa524f1ba46
+    refs:
+    - route:v1:1168b180e43f9c00b1ce58cdd86b79a282b0707766de2d890734070057011566
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - The system description focuses on inference and tool-use, without defining a mechanism
+    for continuous meta-learning or model self-improvement.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:bc4b9d1dc5acf1eb06f6610e9b61d51deaae3de1a268bfd3da3e9aa524f1ba46
+  route_refs:
+  - route:v1:1168b180e43f9c00b1ce58cdd86b79a282b0707766de2d890734070057011566
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The mechanism involves
+      manipulating the decision context for a human overseer, but the selected control
+      path and constraint are focused on escalating specific regulated topics (fees,
+      eligibility, payments) to a human, which does not govern the distortion of the
+      interface or the obscuring of critical information described in the mechanism.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:be0e9a01b1952056844f8509e982b4b2923df0d8bb213546cea87ba59d1ae7ce
+    refs:
+    - route:v1:6fbb3fb865a294ce1013a4e58bf0c04c628081e6a6c99b7851cf6817273766f7
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:be0e9a01b1952056844f8509e982b4b2923df0d8bb213546cea87ba59d1ae7ce
+    refs:
+    - route:v1:6e61e8d1a732015dc84d47129390c5d925e2c09767b6367574e52029402553e1
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1's response generation can lead to incorrect information being presented
+    as fact.
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:be0e9a01b1952056844f8509e982b4b2923df0d8bb213546cea87ba59d1ae7ce
+  route_refs:
+  - route:v1:6e61e8d1a732015dc84d47129390c5d925e2c09767b6367574e52029402553e1
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The mechanism involves
+      manipulating the decision context for a human overseer, but the selected control
+      path and constraint are focused on escalating specific regulated topics (fees,
+      eligibility, payments) to a human, which does not govern the distortion of the
+      interface or the obscuring of critical information described in the mechanism.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:bedf8df79151cb850eae8d3e2c12b582547db3984bd8d6ebf6cc2cf1e4546b57
+    refs:
+    - route:v1:964744646fa3177ce5a9c7adabb631b80ddedc9db1616a9d59caaa2da0292524
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:bedf8df79151cb850eae8d3e2c12b582547db3984bd8d6ebf6cc2cf1e4546b57
+    refs:
+    - route:v1:69c2f1b3b0bb502bbe2e339d472f2f344fd290ee96071ddcf84068f2d29337c1
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 generating incorrect information can lead to users making business decisions
+    based on errors.
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:bedf8df79151cb850eae8d3e2c12b582547db3984bd8d6ebf6cc2cf1e4546b57
+  route_refs:
+  - route:v1:69c2f1b3b0bb502bbe2e339d472f2f344fd290ee96071ddcf84068f2d29337c1
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:ccbf3b183667b296951f1f5033be3c978fa5c6a9542defdcb95dda2c1b9d0d9b
+    refs:
+    - route:v1:7f8ceb1b22b27d01cd07f3c585dde0e38b57c6483c77cd692258d8bf8750beb1
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - The supplied structure focuses on conversational responses and financial transaction
+    execution but does not define a path for indirect prompt injection leading to
+    PII exposure.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:ccbf3b183667b296951f1f5033be3c978fa5c6a9542defdcb95dda2c1b9d0d9b
+  route_refs:
+  - route:v1:7f8ceb1b22b27d01cd07f3c585dde0e38b57c6483c77cd692258d8bf8750beb1
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The mechanism involves
+      substituting operational data for fraudulent transactions, but the selected
+      hazard and constraint focus on deceptive/wrong responses and policy escalation,
+      which do not specifically govern the substitution of data for fraudulent action.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:cd4087aee23d74f41f24364c2d013f86c8dc2112751141cf55adaf255d8fcbdf
+    refs:
+    - route:v1:4cd37e74f5d41df5a43632da459235b6d2f0b21cb7daa3fdee6bf28ea4b0b8dc
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:cd4087aee23d74f41f24364c2d013f86c8dc2112751141cf55adaf255d8fcbdf
+    refs:
+    - route:v1:cb4ad437afd8cac58841516603b94dbff4ed741809a1e162148cc54debdb209e
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 provides CA-1-1 (natural language response) to CP-1 (Conversational User
+    Interface).
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:cd4087aee23d74f41f24364c2d013f86c8dc2112751141cf55adaf255d8fcbdf
+  route_refs:
+  - route:v1:cb4ad437afd8cac58841516603b94dbff4ed741809a1e162148cc54debdb209e
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:ceccae06f9c547ab9a893cbd9edbf7adcd1cb3eec37bff968b831e84e14c4619
+    refs:
+    - route:v1:916f830729b59b9e82612d3146533a09e1cc358126cfceb52f215f3d6953a99a
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - No reflection or self-evaluation control action or process model part is provided
+    in the system structure.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:ceccae06f9c547ab9a893cbd9edbf7adcd1cb3eec37bff968b831e84e14c4619
+  route_refs:
+  - route:v1:916f830729b59b9e82612d3146533a09e1cc358126cfceb52f215f3d6953a99a
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:d1497f565228c32caf5f572f89ff247d74a0b4b3df8c1385b2c1533af9da5f8a
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:dbcfe7bff55a9495895f8778974c96546eace7633023b72cb3315100a1e4a67f
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:dd6ba3512888fbb2c89003a157aafae4eae40cf9ed03705f2cf2193b71b9bdda
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - The control structure shows discrete actions for retrieval and execution but does
+    not define how planning or goal-setting is governed over multiple interactions.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:de9222b55eaa5667d4d530800c02479a187f3904d3ad42b51220c50dd9c8b602
+  route_refs:
+  - route:v1:6c22d5f28982988f977fb20275a65e599daa39229c1885c795417d1e3e4afd09
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:df3d6e6de3f6da2910aa87e9b81a25b63b439463ebd8bd4e577cbf3e56a53377
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:e202e7f672426ab3fa34d04a4b5d7789ac69f459e581a9561fd2434e36a0d052
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:e790d95d18ae59373e43b29bdb90007612db34f5af7d8f47558c136760689cdb
+    refs:
+    - route:v1:1fd4d305f6e11c9106eb86951e558c4e461f20339761aee405e5b4284e805105
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - The system structure includes tool execution (CA-6-1) but lacks the specific code
+    interpreter capability mentioned in the obligation's missing facts.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:e790d95d18ae59373e43b29bdb90007612db34f5af7d8f47558c136760689cdb
+  route_refs:
+  - route:v1:1fd4d305f6e11c9106eb86951e558c4e461f20339761aee405e5b4284e805105
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The mechanism involves
+      incremental plan drift through sub-goal injection, but the selected hazard and
+      constraint focus on the disclosure of PII, which is a different consequence.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:e7c4c3c349b4c88fad0e90f0ce12442dc95a5bbc09431b55e93e777021eacd1a
+    refs:
+    - route:v1:6829a0a302d976cb19ffd076abfd13b9d676dace950dff61bb63fdcfcb256887
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:e7c4c3c349b4c88fad0e90f0ce12442dc95a5bbc09431b55e93e777021eacd1a
+    refs:
+    - route:v1:72517543910de150a6a82a4549a1f159efd1da6015b7069cb896c01f2770e3ff
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-1 manages CP-1 via CA-1-1, which is the primary interface for user input
+    (priming).
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:e7c4c3c349b4c88fad0e90f0ce12442dc95a5bbc09431b55e93e777021eacd1a
+  route_refs:
+  - route:v1:72517543910de150a6a82a4549a1f159efd1da6015b7069cb896c01f2770e3ff
+  slot_ids:
+  - RESP-1:CA-1-1:INCORRECT
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics:
+  - code: mechanism_path_unsubstantiated
+    detail: 'selected STPA path relationship is adjacent_control: The mechanism describes
+      eliciting fabricated references (hallucinations), but the control path describes
+      a RAG system providing inaccurate policy information. While both involve inaccuracy,
+      the mechanism is about fabricating non-existent entities, whereas the path is
+      about the failure of a retrieval-based grounding system.'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:e9b6f9a5529e4dd3edd82cb7e73bef957df7613038ea0c5acd24871faef06248
+    refs:
+    - route:v1:9f193a43d4eb477cb2fc09e54a455cf35f77fb5db793809315a525a6457907ac
+    severity: warning
+  - code: mechanism_path_unsubstantiated
+    detail: the ordinary STPA finding is retained, but the selected path does not
+      establish the taxonomy mechanism
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:e9b6f9a5529e4dd3edd82cb7e73bef957df7613038ea0c5acd24871faef06248
+    refs:
+    - route:v1:60106ebf4e0729012060ea1024c13df3161b7422205a6c876420e5e226c6fd48
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - RESP-3 retrieves policy (CA-3-1) which is then used to ground responses; failure
+    in grounding is a known hazard (H-2).
+  - provider-structured-consideration
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:e9b6f9a5529e4dd3edd82cb7e73bef957df7613038ea0c5acd24871faef06248
+  route_refs:
+  - route:v1:60106ebf4e0729012060ea1024c13df3161b7422205a6c876420e5e226c6fd48
+  slot_ids:
+  - RESP-3:CA-3-1:INCORRECT
+  stop_reason: mechanism_path_unsubstantiated
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:ee077597b4fb00c908dfa8fb60e4675ccdfec3c61bfdf285ee1adb6474352e02
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:f61cb4dbf436c65596d660a82b7576ee7bd8615f8edd2367052dabc40739474a
+    refs:
+    - route:v1:ea4fd0575161f24bf16b80ba0a5d7bf065870d55178a7968e23d688d1f0839c4
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - The system provides conversational and retrieval channels, but the risk context
+    is about human-centric misuse rather than technical exploitation of the substitution
+    mechanism.
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:f61cb4dbf436c65596d660a82b7576ee7bd8615f8edd2367052dabc40739474a
+  route_refs:
+  - route:v1:ea4fd0575161f24bf16b80ba0a5d7bf065870d55178a7968e23d688d1f0839c4
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: incomplete_non_applicability
+    detail: every routed slot must have explicit structural N/A evidence
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:f7f171f4d4465b22d6b9bbee6c756c550aaa22b5276c81e7d7d472aaf8f4cfa1
+    refs:
+    - route:v1:6d1c1d097dc2a168d6b7242b7e31efbdcc8f787b548a6115ee76dad6bbbd6fb4
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - the provided control structure focuses on response generation and policy retrieval
+    without a specific mechanism for reference fabrication
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:f7f171f4d4465b22d6b9bbee6c756c550aaa22b5276c81e7d7d472aaf8f4cfa1
+  route_refs:
+  - route:v1:6d1c1d097dc2a168d6b7242b7e31efbdcc8f787b548a6115ee76dad6bbbd6fb4
+  slot_ids: []
+  stop_reason: not_applicable_evidence_incomplete
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:f982a5311d77e07d2b3c51304f8ba40e4391321c4b30404e6508cf84f947d2c0
+    refs:
+    - route:v1:b3c87f353be55cf792016de656d83e58fddbf7c56044a0d02c34bab54baef265
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - no adaptation or meta-learning feedback loops are present in the control structure
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:f982a5311d77e07d2b3c51304f8ba40e4391321c4b30404e6508cf84f947d2c0
+  route_refs:
+  - route:v1:b3c87f353be55cf792016de656d83e58fddbf7c56044a0d02c34bab54baef265
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: routing_record_validation_failed
+    detail: 'ValueError: route controlled process references do not match the selected
+      slot path (expected=[], actual=[''CP-2''])'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:fd701ac80d2331397cec7bc355dbffaa6b5f2f90cd7859f1e1d8e86cebda037e
+    refs:
+    - initial-batch-12
+    - route:v1:fe10ab16a08c96104158e92ed6da6992b91eabe1df4b463944d6a6b6fde94524
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - routing-validation
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:fd701ac80d2331397cec7bc355dbffaa6b5f2f90cd7859f1e1d8e86cebda037e
+  route_refs:
+  - route:v1:782a3ea557160a1b56ead1d4f568d87986cbb376cb8ba6de96f75e3ee4b94813
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics: []
+  disposition: governance_only
+  evidence:
+  - phase1:governance:reviewed risk did not resolve to an authoritative attack pattern
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:fecd51a4a1953ee98c13a4a3f411fde9d98327e10354c3591c6a876206480306
+  route_refs: []
+  slot_ids: []
+- constraint_ids: []
+  diagnostics:
+  - code: routing_record_validation_failed
+    detail: 'ValueError: route controlled process references do not match the selected
+      slot path (expected=[], actual=[''CP-2''])'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:ff5248a55236e62bcce539a13b74b22068e299c077b5e207acc6d0b4b0f5d5ff
+    refs:
+    - initial-batch-12
+    - route:v1:83b7a22e94f2ce6a5e223375d0aa2f3578502be7fb73f4b5c2430b62fb0b11ed
+    severity: warning
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:ff5248a55236e62bcce539a13b74b22068e299c077b5e207acc6d0b4b0f5d5ff
+    refs:
+    - route:v1:c0662a513f038b287bd4357de7b4441b1d9500954aaf4a75506d7d2e7e01ed04
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - routing-validation
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:ff5248a55236e62bcce539a13b74b22068e299c077b5e207acc6d0b4b0f5d5ff
+  route_refs:
+  - route:v1:c0662a513f038b287bd4357de7b4441b1d9500954aaf4a75506d7d2e7e01ed04
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics:
+  - code: risk_pattern_mismatch
+    detail: the routed mechanism may support an ordinary STPA finding but does not
+      realize the reviewed risk
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:ff78ac1c0baa61d194ba771c0c6f5c7824f204c2c1a11c6fb43396501d3af01c
+    refs:
+    - route:v1:611819ac77ef3554f77fec20ef47484be72b574d6b91c7ed09c501c4bac53d85
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - the system structure describes internal tool management and retrieval, not data
+    leakage to external third-party LLMs via prompt content
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:ff78ac1c0baa61d194ba771c0c6f5c7824f204c2c1a11c6fb43396501d3af01c
+  route_refs:
+  - route:v1:611819ac77ef3554f77fec20ef47484be72b574d6b91c7ed09c501c4bac53d85
+  slot_ids: []
+  stop_reason: risk_pattern_mismatch
+- constraint_ids: []
+  diagnostics: []
+  disposition: unresolved
+  evidence:
+  - the presence of an exposed control interface (the mechanism surface for AP-T3-06)
+    is not specified in the system description
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:ffdfcdb0645f585ece4c29f22f880f72ecdc4a50b9461d3eed687760264b8dc8
+  route_refs:
+  - route:v1:63df4f00a38dd54ac228d10b5272f31c030da886322855d423cdd3a1a623622b
+  slot_ids: []
+  stop_reason: no_structural_route
+- constraint_ids: []
+  diagnostics:
+  - code: routing_record_validation_failed
+    detail: 'ValueError: constraint SC-1 does not govern selected hazard(s) H-3; allowed
+      hazard/constraint pair(s): SC-1 -> H-1'
+    gap_ids: []
+    obligation_ids:
+    - ob:v1:ffe3b446228a10836725037152fdb9a19ebdbe4511c2fb8bedbdb6bfeae1bbd0
+    refs:
+    - initial-batch-12
+    - route:v1:03b1c0025439357b4098a4856f42bbb63f02fd70a403c98522e86adf2dc8f4a4
+    severity: warning
+  disposition: unresolved
+  evidence:
+  - routing-validation
+  exec_candidate_ids: []
+  hazard_ids: []
+  ica_ids: []
+  obligation_id: ob:v1:ffe3b446228a10836725037152fdb9a19ebdbe4511c2fb8bedbdb6bfeae1bbd0
+  route_refs:
+  - route:v1:751d40d6a7af2a599a6e64ccc804a2ccc46c1742b7a75f6c9bdc748b2b22479d
+  slot_ids: []
+  stop_reason: no_structural_route
+schema_version: stpa-obligation-accounting-v1
+semantic_digest: 2f2f7de7f698911c89052076f7c0b7ce8c1ef820f6e84173a1fe9e16efe4b9e5
+slot_hazard_offers:
+  routed_slots: 9
+  shrunk_slots: 0
+  shrunk_slots_under_main_rule: 9
+  slots: 52
+source_pins:
+- artifact_id: ica-enumeration
+  schema_version: ica-enumeration-v1
+  semantic_digest: c22c488b537770bbc2629a392e66531a8043fea3458e792bf43fcec33bdc0b99
+- artifact_id: stpa-control-structure
+  schema_version: stpa-control-structure-v1
+  semantic_digest: f07e9fd3ddd91ff5a8faba21c6cc99a68875840531400ece16510037d8ade672
+- artifact_id: stpa-loss-analysis
+  schema_version: stpa-loss-analysis-v1
+  semantic_digest: ea254a1201651bdbb905fe547b3a4f29fc525e9c9f87d09496877d9095153cfc
+- artifact_id: taxonomy-obligation-plan
+  schema_version: taxonomy-obligation-plan-v1
+  semantic_digest: d42d30762a4496ad78cce04f3e5f30daa839e0d1180a25b52ccbcc3fd00e45f7
+summary:
+  addressed: 2
+  capability_excluded: 0
+  governance_only: 24
+  proposed_not_applicable: 0
+  total: 119
+  unresolved: 93
+  upstream_gap: 0

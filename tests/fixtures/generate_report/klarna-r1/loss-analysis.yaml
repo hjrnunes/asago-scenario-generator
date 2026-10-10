@@ -1,0 +1,356 @@
+risk_card_losses:
+- loss_id: L-1
+  description: Unauthorized exposure or distribution of customer Personally Identifiable
+    Information (PII) through the conversational interface.
+  provenance: risk_card
+  source_risk_cards:
+  - ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+  - ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+  - atlas-confidential-data-in-prompt
+  - atlas-revealing-confidential-information
+- loss_id: L-2
+  description: Incorrect financial transactions or unauthorized handling of sensitive
+    financial records, leading to monetary loss or regulatory non-compliance.
+  provenance: risk_card
+  source_risk_cards:
+  - ai-risk-taxonomy-unauthorized-processing---financial-records
+  - atlas-dangerous-use
+  - mit-ai-risk-subdomain-4.3
+- loss_id: L-4
+  description: Legal penalties, fines, or operational restrictions resulting from
+    inaccurate policy advice or failure to adhere to financial regulations.
+  provenance: risk_card
+  source_risk_cards:
+  - credo-risk-023
+  - credo-risk-024
+  - mit-ai-risk-subdomain-3.1
+  - mit-ai-risk-subdomain-7.3
+- loss_id: L-5
+  description: Unfair or discriminatory treatment of customers based on biased or
+    stereotypical AI outputs.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-output-bias
+  - credo-risk-010
+  - mit-ai-risk-subdomain-1.1
+- loss_id: L-3
+  description: Erosion of customer trust and poor decision-making due to confident-but-wrong
+    or hallucinatory answers regarding fees and terms.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-hallucination
+  - atlas-over-or-under-reliance
+  - credo-risk-021
+  - mit-ai-risk-subdomain-5.1
+  - mit-ai-risk-subdomain-7.3
+use_case_losses:
+- loss_id: L-6
+  description: Financial or reputational damage to merchants due to incorrect refund
+    processing or inaccurate representation of merchant policies.
+  provenance: use_case
+  source_risk_cards: []
+- loss_id: L-7
+  description: Loss of operational value or customer service utility due to the system's
+    inability to handle complex or nuanced inquiries, necessitating human re-intervention.
+  provenance: use_case
+  source_risk_cards: []
+hazards:
+- hazard_id: H-5
+  description: The conversational interface or prompt integration reveals PII from
+    the authenticated session or backend data to an unauthorized recipient.
+  related_losses:
+  - L-1
+- hazard_id: H-4
+  description: The assistant executes `process_refund` or `schedule_payment` operations
+    using incorrect amounts, order IDs, or unauthorized plan IDs.
+  related_losses:
+  - L-2
+- hazard_id: H-2
+  description: The RAG-style knowledge-grounding system provides inaccurate policy
+    information or improvises on regulated topics like fees or payment terms.
+  related_losses:
+  - L-4
+  - L-3
+- hazard_id: H-1
+  description: The foundation model generates responses that reflect harmful stereotypes
+    or demonstrate disparate accuracy across demographic groups.
+  related_losses:
+  - L-5
+- hazard_id: H-3
+  description: The assistant generates deceptive content or facilitates social engineering
+    through confident-but-wrong responses.
+  related_losses:
+  - L-3
+  - L-2
+- hazard_id: H-8
+  description: The assistant provides inaccurate or unauthorized information regarding
+    a merchant's specific policies or item details retrieved from the order context.
+  related_losses:
+  - L-4
+  - L-6
+- hazard_id: H-7
+  description: The assistant executes `process_refund` with an `amount` that exceeds
+    the `state:orders.remaining_to_pay` for the specified `order_id`.
+  related_losses:
+  - L-2
+  - L-6
+- hazard_id: H-6
+  description: The assistant attempts to resolve nuanced or complex customer inquiries
+    that fall outside the scope of the programmed intents or the RAG-grounded policy
+    snippets.
+  related_losses:
+  - L-7
+security_constraints:
+- constraint_id: SC-4
+  rule: The assistant must not disclose PII from the authenticated user context to
+    any party other than the `session:authenticated_customer_id` identified in the
+    session.
+  related_hazards:
+  - H-5
+  applies_when:
+  - an interaction is ongoing
+  behavior_class: disclosure
+  description: 'The assistant must not disclose PII from the authenticated user context
+    to any party other than the `session:authenticated_customer_id` identified in
+    the session. Applies when: an interaction is ongoing.'
+  obligations:
+  - obligation_id: O1
+    kind: forbidden
+    behavior: disclosing PII to unauthorized parties
+    rule_span: must not disclose PII
+    violated_via: reply
+  direction_authority: proposed
+- constraint_id: SC-3
+  rule: The assistant must only execute `process_refund` or `schedule_payment` when
+    the `amount`, `order_id`, or `plan_id` matches the authorized context of the `session:authenticated_customer_id`.
+  related_hazards:
+  - H-4
+  applies_when:
+  - a refund or payment modification is requested
+  behavior_class: unauthorized_write
+  description: 'The assistant must only execute `process_refund` or `schedule_payment`
+    when the `amount`, `order_id`, or `plan_id` matches the authorized context of
+    the `session:authenticated_customer_id`. Applies when: a refund or payment modification
+    is requested.'
+  obligations:
+  - obligation_id: O1
+    kind: required
+    behavior: matching transaction details to authenticated context
+    rule_span: must only execute `process_refund` or `schedule_payment` when the `amount`,
+      `order_id`, or `plan_id` matches the authorized context
+    realized_by: tool_call
+  direction_authority: proposed
+- constraint_id: SC-5
+  rule: The assistant must escalate regulated topics to a human agent when no approved
+    policy snippet is retrieved via `retrieve_policy`.
+  related_hazards:
+  - H-2
+  - H-3
+  applies_when:
+  - a query concerns fees, eligibility, or payments
+  - the retrieved policy text indicates no match exists
+  behavior_class: missed_escalation
+  description: 'The assistant must escalate regulated topics to a human agent when
+    no approved policy snippet is retrieved via `retrieve_policy`. Applies when: a
+    query concerns fees, eligibility, or payments; the retrieved policy text indicates
+    no match exists.'
+  obligations:
+  - obligation_id: O1
+    kind: required
+    behavior: escalating ungrounded regulated queries
+    rule_span: must escalate regulated topics to a human agent
+    realized_by: tool_call
+  direction_authority: proposed
+- constraint_id: SC-1
+  rule: The assistant must maintain consistent accuracy and fairness in response quality
+    across all user demographics.
+  related_hazards:
+  - H-1
+  applies_when: []
+  behavior_class: harmful_or_discriminatory_output
+  description: The assistant must maintain consistent accuracy and fairness in response
+    quality across all user demographics.
+- constraint_id: SC-2
+  rule: The assistant must not provide improvised answers regarding financial terms
+    or fees if they are not found in the whitelist of policy documents.
+  related_hazards:
+  - H-3
+  applies_when:
+  - the query targets financial terms or fees
+  behavior_class: wrong_information
+  description: 'The assistant must not provide improvised answers regarding financial
+    terms or fees if they are not found in the whitelist of policy documents. Applies
+    when: the query targets financial terms or fees.'
+  obligations:
+  - obligation_id: O1
+    kind: forbidden
+    behavior: improvising on financial policy
+    rule_span: must not provide improvised answers
+    violated_via: reply
+  direction_authority: proposed
+- constraint_id: SC-6
+  rule: The assistant must only communicate merchant-specific policy details that
+    are explicitly present in the retrieved policy snippets or order context.
+  related_hazards:
+  - H-8
+  applies_when:
+  - a customer inquires about a specific merchant's policy
+  - the conversation context involves a specific order
+  behavior_class: wrong_information
+  description: 'The assistant must only communicate merchant-specific policy details
+    that are explicitly present in the retrieved policy snippets or order context.
+    Applies when: a customer inquires about a specific merchant''s policy; the conversation
+    context involves a specific order.'
+  obligations:
+  - obligation_id: O1
+    kind: forbidden
+    behavior: improvising merchant policy details
+    rule_span: must only communicate merchant-specific policy details that are explicitly
+      present
+    violated_via: reply
+  direction_authority: proposed
+- constraint_id: SC-8
+  rule: The assistant must not process a refund where the amount exceeds the `state:orders.remaining_to_pay`
+    for the specified `order_id`.
+  related_hazards:
+  - H-7
+  applies_when:
+  - ">= 1 conditions:\n    1. a refund is requested"
+  behavior_class: unauthorized_write
+  description: "The assistant must not process a refund where the amount exceeds the\
+    \ `state:orders.remaining_to_pay` for the specified `order_id`. Applies when:\
+    \ >= 1 conditions:\n    1. a refund is requested."
+  obligations:
+  - obligation_id: O1
+    kind: forbidden
+    behavior: processing a refund exceeding the remaining amount to pay
+    rule_span: must not process a refund where the amount exceeds the `state:orders.remaining_to_pay`
+      for the specified `order_id`
+    violated_via: tool_call
+  direction_authority: proposed
+- constraint_id: SC-7
+  rule: The assistant must escalate nuanced or complex inquiries to a human agent
+    when the query falls outside the scope of programmed intents or RAG-grounded policy
+    snippets.
+  related_hazards:
+  - H-6
+  applies_when: []
+  behavior_class: missed_escalation
+  description: The assistant must escalate nuanced or complex inquiries to a human
+    agent when the query falls outside the scope of programmed intents or RAG-grounded
+    policy snippets.
+  obligations:
+  - obligation_id: O1
+    kind: required
+    behavior: escalating complex or out-of-scope inquiries
+    rule_span: must escalate nuanced or complex inquiries to a human agent
+    realized_by: tool_call
+  direction_authority: proposed
+- constraint_id: SC-9
+  rule: The system must use only published policy documents to ground policy answers.
+  related_hazards:
+  - H-2
+  applies_when: []
+  behavior_class: wrong_information
+  description: The system must use only published policy documents to ground policy
+    answers.
+  obligations:
+  - obligation_id: O1
+    kind: required
+    behavior: using only published policy documents for grounding
+    rule_span: must use only published policy documents to ground policy answers
+    realized_by: unknown
+  direction_authority: proposed
+risk_dispositions:
+- risk_ref: credo-risk-026
+  disposition: cited
+  loss_ids:
+  - L-2
+- risk_ref: atlas-hallucination
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: credo-risk-010
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: credo-risk-021
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: credo-risk-016
+  disposition: not_applicable
+  loss_ids: []
+  reason: This risk describes user behavior patterns rather than a direct system-level
+    loss for this analysis.
+- risk_ref: ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: ai-risk-taxonomy-unauthorized-processing---financial-records
+  disposition: cited
+  loss_ids:
+  - L-2
+- risk_ref: ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: mit-ai-risk-subdomain-5.1
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: atlas-copyright-infringement
+  disposition: not_applicable
+  loss_ids: []
+  reason: Copyright infringement is not a primary risk identified for the specified
+    customer service interactions.
+- risk_ref: atlas-revealing-confidential-information
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: credo-risk-024
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: mit-ai-risk-subdomain-3.1
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: mit-ai-risk-subdomain-4.3
+  disposition: cited
+  loss_ids:
+  - L-2
+- risk_ref: credo-risk-023
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: atlas-non-disclosure
+  disposition: not_applicable
+  loss_ids: []
+  reason: The risk of failing to disclose AI generation is not explicitly linked to
+    a customer loss in this context.
+- risk_ref: atlas-dangerous-use
+  disposition: cited
+  loss_ids:
+  - L-2
+- risk_ref: atlas-output-bias
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: mit-ai-risk-subdomain-1.1
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: mit-ai-risk-subdomain-7.3
+  disposition: cited
+  loss_ids:
+  - L-4
+  - L-3
+- risk_ref: atlas-over-or-under-reliance
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: atlas-confidential-data-in-prompt
+  disposition: cited
+  loss_ids:
+  - L-1

@@ -1,0 +1,3438 @@
+{
+  "harms": [
+    {
+      "loss_id": "L-1",
+      "provenance": "risk_card",
+      "risk_ids": [
+        "ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)",
+        "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)",
+        "atlas-confidential-data-in-prompt",
+        "atlas-revealing-confidential-information"
+      ],
+      "scenario_ids": [
+        "SCN-001",
+        "SCN-002"
+      ],
+      "text": "Unauthorized exposure or distribution of customer Personally Identifiable Information (PII) through the conversational interface.",
+      "title": "Unauthorized exposure or distribution of customer Personally Identifiable Information (PII)"
+    },
+    {
+      "loss_id": "L-2",
+      "provenance": "risk_card",
+      "risk_ids": [
+        "ai-risk-taxonomy-unauthorized-processing---financial-records",
+        "atlas-dangerous-use",
+        "credo-risk-026"
+      ],
+      "scenario_ids": [
+        "SCN-003",
+        "SCN-004",
+        "SCN-011",
+        "SCN-012"
+      ],
+      "text": "Incorrect financial transactions or unauthorized handling of sensitive financial records, leading to monetary loss or regulatory non-compliance.",
+      "title": "Incorrect financial transactions or unauthorized handling of sensitive financial records, leading to monetary loss or regulatory non-compliance"
+    },
+    {
+      "loss_id": "L-3",
+      "provenance": "risk_card",
+      "risk_ids": [
+        "atlas-hallucination",
+        "atlas-over-or-under-reliance",
+        "credo-risk-021",
+        "mit-ai-risk-subdomain-5.1",
+        "mit-ai-risk-subdomain-7.3"
+      ],
+      "scenario_ids": [
+        "SCN-011",
+        "SCN-012"
+      ],
+      "text": "Erosion of customer trust and poor decision-making due to confident-but-wrong or hallucinatory answers regarding fees and terms.",
+      "title": "Erosion of customer trust and poor decision-making"
+    },
+    {
+      "loss_id": "L-4",
+      "provenance": "risk_card",
+      "risk_ids": [
+        "credo-risk-023",
+        "credo-risk-024",
+        "credo-risk-021",
+        "mit-ai-risk-subdomain-7.3"
+      ],
+      "scenario_ids": [
+        "SCN-011",
+        "SCN-012",
+        "SCN-023"
+      ],
+      "text": "Legal penalties, fines, or operational restrictions resulting from inaccurate policy advice or failure to adhere to financial regulations.",
+      "title": "Legal penalties, fines, or operational restrictions resulting from inaccurate policy advice or failure to adhere to financial regulations"
+    },
+    {
+      "loss_id": "L-5",
+      "provenance": "risk_card",
+      "risk_ids": [
+        "atlas-output-bias",
+        "credo-risk-010",
+        "mit-ai-risk-subdomain-1.1"
+      ],
+      "scenario_ids": [],
+      "text": "Unfair or discriminatory treatment of customers based on biased or stereotypical AI outputs.",
+      "title": "Unfair or discriminatory treatment of customers based on biased or stereotypical AI outputs"
+    },
+    {
+      "loss_id": "L-6",
+      "provenance": "use_case",
+      "risk_ids": [],
+      "scenario_ids": [
+        "SCN-023"
+      ],
+      "text": "Financial or reputational damage to merchants due to incorrect refund processing or inaccurate representation of merchant policies.",
+      "title": "Financial or reputational damage to merchants"
+    },
+    {
+      "loss_id": "L-7",
+      "provenance": "use_case",
+      "risk_ids": [],
+      "scenario_ids": [
+        "SCN-006"
+      ],
+      "text": "Loss of operational value or customer service utility due to the system's inability to handle complex or nuanced inquiries, necessitating human re-intervention.",
+      "title": "Loss of operational value or customer service utility"
+    }
+  ],
+  "policy": {
+    "digest": "6594ecfb687dd908852a9f5c324d5440925b9b0f590a5ab2c57f545e575a763d",
+    "documents": [
+      "fs-isac.pdf"
+    ],
+    "entry_count": 49,
+    "risk_count": 47,
+    "risk_extraction": "risk-extraction-fs-isac.json"
+  },
+  "risks": [
+    {
+      "coverage": "outside_boundary",
+      "description": "Legal uncertainty about the ownership and intellectual property rights of AI-generated content.",
+      "display_name": "Generated content ownership and IP",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-generated-content-ownership"
+      ],
+      "mitigations": [
+        {
+          "id": "aiuc1-req-a002",
+          "source": "aiuc1",
+          "text": "Establish AI output ownership, usage, opt-out and deletion policies to customers and communicate these policies"
+        }
+      ],
+      "name": "Generated content ownership and IP",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The risk involves users failing to provide attribution, which is an action by an external actor outside the system boundary."
+      },
+      "risk_id": "atlas-generated-content-ownership",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-intellectual-property",
+          "label": "NIST Intellectual property",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "The AI system may be exploited to facilitate fraudulent activities, scams, or targeted manipulation, including generating deepfakes and enhancing phishing attacks.",
+      "display_name": "Fraud, scams, and targeted manipulation",
+      "loss_ids": [
+        "L-2"
+      ],
+      "merged_ids": [
+        "credo-risk-026",
+        "mit-ai-risk-subdomain-4.3"
+      ],
+      "mitigations": [
+        {
+          "id": "GV-1.4-001",
+          "source": "nist-ai-rmf",
+          "text": "Establish policies and mechanisms to prevent GAI systems from generating CSAM, NCII or content that violates the law."
+        },
+        {
+          "id": "MP-2.3-004",
+          "source": "nist-ai-rmf",
+          "text": "Develop and implement testing techniques to identify GAI produced content (e.g., synthetic media) that might be indistinguishable from human-generated content."
+        },
+        {
+          "id": "MP-5.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Identify potential content provenance harms of GAI, such as misinformation or disinformation, deepfakes, including NCII, or tampered content. Enumerate and rank risks based on their likelihood and potential impact, and determine how well provenance solutions address specific risks and/or harms."
+        },
+        {
+          "id": "aiuc1-req-a007",
+          "source": "aiuc1",
+          "text": "Implement safeguards and technical controls to prevent AI outputs from violating copyrights, trademarks, or other third-party intellectual property rights"
+        }
+      ],
+      "name": "Fraud, scams, and targeted manipulation",
+      "reason": null,
+      "risk_id": "credo-risk-026",
+      "sources": [
+        "credo-ucf",
+        "mit-ai-risk-repository"
+      ],
+      "tags": []
+    },
+    {
+      "coverage": "scenarios",
+      "description": "Hallucinations generate factually inaccurate or untruthful content relative to the model's training data or input. Hallucinations are also sometimes referred to lack of faithfulness or lack of groundedness. In some instances, synthetic data that is generated by large language models might include hallucinations that result in the data possibly being inaccurate, fabricated, or disconnected from reality. Hallucinations can compromise model performance, accuracy, and relevance.",
+      "display_name": "Hallucination",
+      "loss_ids": [
+        "L-3"
+      ],
+      "merged_ids": [
+        "atlas-hallucination"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-04-08",
+          "source": "owasp-llm-2.0",
+          "text": "During inference, integrate retrieval-augmented generation (RAG) and grounding techniques to reduce risks of hallucinations caused by poisoned or low-quality training data."
+        },
+        {
+          "id": "owasp-llm-act-09-01",
+          "source": "owasp-llm-2.0",
+          "text": "Use retrieval-augmented generation (RAG) to enhance reliability by retrieving verified information from trusted external databases during response generation, grounding outputs in factual sources."
+        },
+        {
+          "id": "owasp-llm-act-09-02",
+          "source": "owasp-llm-2.0",
+          "text": "Enhance the model with fine-tuning or embeddings to improve output quality. Use parameter-efficient tuning (PET) and chain-of-thought prompting to reduce misinformation in generated outputs."
+        },
+        {
+          "id": "owasp-llm-act-09-03",
+          "source": "owasp-llm-2.0",
+          "text": "Encourage users to cross-check LLM outputs with trusted external sources. Implement human oversight and fact-checking for critical information. Ensure human reviewers are trained to avoid overreliance on AI-generated content."
+        },
+        {
+          "id": "owasp-llm-act-09-04",
+          "source": "owasp-llm-2.0",
+          "text": "Implement automated tools and processes to validate key outputs, especially from high-stakes environments where misinformation could cause significant harm."
+        },
+        {
+          "id": "MG-3.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Apply organizational risk tolerances and controls (e.g., acquisition and procurement processes; assessing personnel credentials and qualifications, performing background checks; filtering GAI input and outputs, grounding, fine tuning, retrieval-augmented generation) to third-party GAI resources: Apply organizational risk tolerance to the utilization of third-party datasets and other GAI resources; Apply organizational risk tolerances to fine-tuned third-party models; Apply organizational risk tolerance to existing t hird-party models adapted to a new domain; Reassess risk measurements after fine-tuning third-party GAI models."
+        },
+        {
+          "id": "MG-4.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Establish, maintain, and evaluate effectiveness of organizational processes and procedures for post-deployment monitoring of GAI systems, particularly for potential confabulation, CBRN, or cyber risks."
+        },
+        {
+          "id": "MP-2.3-001",
+          "source": "nist-ai-rmf",
+          "text": "Assess the accuracy, quality, reliability, and authenticity of GAI output by comparing it to a set of known ground truth data and by using a variety of evaluation methods (e.g., human oversight and automated evaluation, proven cryptographic techniques, review of content inputs )."
+        },
+        {
+          "id": "MP-2.3-003",
+          "source": "nist-ai-rmf",
+          "text": "Deploy and document fact-checking techniques to verify the accuracy and veracity of information generated by GAI systems, especially when the information comes from multiple (or unknown) sources."
+        },
+        {
+          "id": "MS-2.5-003",
+          "source": "nist-ai-rmf",
+          "text": "Review and verify sources and citations in GAI system outputs during pre deployment risk measurement and ongoing monitoring activities."
+        },
+        {
+          "id": "MS-2.5-005",
+          "source": "nist-ai-rmf",
+          "text": "Verify GAI system training data and TEVV data provenance, and that fine-tuning or retrieval-augmented generation data is grounded."
+        },
+        {
+          "id": "aiuc1-req-d001",
+          "source": "aiuc1",
+          "text": "Implement safeguards or technical controls to prevent hallucinated outputs"
+        },
+        {
+          "id": "aiuc1-req-d002",
+          "source": "aiuc1",
+          "text": "Appoint expert third-parties to evaluate hallucinated outputs at least every 3 months"
+        },
+        {
+          "id": "aiuc1-req-e003",
+          "source": "aiuc1",
+          "text": "Document AI failure plan for hallucinated AI outputs that cause substantial customer financial loss assigning accountable owners and establishing remediation with third-party support as needed (e.g. legal, PR, insurers)"
+        }
+      ],
+      "name": "Hallucination",
+      "reason": null,
+      "risk_id": "atlas-hallucination",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-confabulation",
+          "label": "NIST Confabulation",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm092025-misinformation",
+          "label": "OWASP LLM09 Misinformation",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "The AI system may expose personally identifiable information (PII), either inadvertently or due to adversarial inputs, derived from training data, accessible data, or inferences. PII is any data that can be used to directly identify or contact a specific individual, either alone or in combination with other information.",
+      "display_name": "Compromised personally identifiable information",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-036"
+      ],
+      "mitigations": [],
+      "name": "Compromised personally identifiable information (Slattery et al., 2024)",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes employees inputting PII into external systems, which is an action of an actor outside the boundary."
+      },
+      "risk_id": "credo-risk-036",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        },
+        {
+          "id": "llm072025-system-prompt-leakage",
+          "label": "OWASP LLM07 System prompt leakage",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "The AI system may expose personally sensitive information, either inadvertently or due to adversarial inputs, derived from training data, accessible data, or inferences. Sensitive personal data is information that, while not necessarily identifying an individual, could cause harm, discrimination, or distress to a person if exposed, including details about their health, finances, beliefs, behaviors, relationships, and private life circumstances.",
+      "display_name": "Compromised sensitive information",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-037"
+      ],
+      "mitigations": [],
+      "name": "Compromised sensitive information (Slattery et al., 2024; IBM, 2024; AI, 2023)",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes employees submitting sensitive data to external generative AI systems, which is outside the system boundary."
+      },
+      "risk_id": "credo-risk-037",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        },
+        {
+          "id": "llm072025-system-prompt-leakage",
+          "label": "OWASP LLM07 System prompt leakage",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "not_reached",
+      "description": "The AI system's outputs may explicitly reflect or reinforce harmful stereotypes, prejudices, or biased characterizations of specific groups. The AI system may exhibit unjustified or harmful differences in accuracy, quality, or outcomes across demographic groups, potentially leading to unfair treatment and discrimination. This includes both disparate error rates that affect opportunity and",
+      "display_name": "Stereotype perpetuation",
+      "loss_ids": [
+        "L-5"
+      ],
+      "merged_ids": [
+        "credo-risk-010"
+      ],
+      "mitigations": [],
+      "name": "Stereotype perpetuation (Slattery et al., 2024; IBM, 2024)",
+      "reason": {
+        "code": "scenario_writing:no_scenario",
+        "step": "scenario_writing",
+        "text": "A loss cites this risk, but no scenario was written for that loss."
+      },
+      "risk_id": "credo-risk-010",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-harmful-bias-or-homogenization",
+          "label": "NIST Harmful bias or homogenization",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Unauthorized disclosure - PII (Personal Identifiable Information) is defined as whether the model response involves unauthorized disclosure or handling of personally identifiable information (PII).",
+      "display_name": "Unauthorized disclosure - PII (Personal Identifiable Information)",
+      "loss_ids": [],
+      "merged_ids": [
+        "ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)"
+      ],
+      "mitigations": [],
+      "name": "Unauthorized disclosure - PII (Personal Identifiable Information)",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat involves employees inputting PII into external services, which is an action of an actor outside the boundary."
+      },
+      "risk_id": "ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)",
+      "sources": [
+        "ai-risk-taxonomy"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Unauthorized disclosure - Financial records is defined as if the model response involves unauthorized disclosure of sensitive financial data.",
+      "display_name": "Unauthorized disclosure - Financial records",
+      "loss_ids": [],
+      "merged_ids": [
+        "ai-risk-taxonomy-unauthorized-disclosure---financial-records"
+      ],
+      "mitigations": [],
+      "name": "Unauthorized disclosure - Financial records",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat involves sensitive data being included in responses when using external services, which is outside the boundary."
+      },
+      "risk_id": "ai-risk-taxonomy-unauthorized-disclosure---financial-records",
+      "sources": [
+        "ai-risk-taxonomy"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Inclusion or presence of personal identifiable information (PII) and sensitive personal information (SPI) in the data used for training or fine tuning the model might result in unwanted disclosure of that information.",
+      "display_name": "Personal information in data",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-personal-information-in-data"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-01",
+          "source": "owasp-llm-2.0",
+          "text": "Implement data sanitization to prevent user data from entering the training model data. Mask or redact sensitive content before training to reduce memorization risk."
+        },
+        {
+          "id": "owasp-llm-act-02-04",
+          "source": "owasp-llm-2.0",
+          "text": "Train models using decentralized data across multiple servers or devices to reduce centralized data collection and minimize the risk of sensitive data exposure."
+        },
+        {
+          "id": "MP-4.1-009",
+          "source": "nist-ai-rmf",
+          "text": "Leverage approaches to detect the presence of PII or sensitive data in generated output text, image, video, or audio ."
+        },
+        {
+          "id": "aiuc1-req-a006",
+          "source": "aiuc1",
+          "text": "Establish safeguards to prevent personal data leakage through AI outputs"
+        }
+      ],
+      "name": "Personal information in data",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The risk concerns the inclusion of PII in model training or fine-tuning data, which is a process outside the system boundary."
+      },
+      "risk_id": "atlas-personal-information-in-data",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "The AI system may unintentionally generate or amplify false or misleading information, potentially leading to public misinformation, erosion of trust, and poor decision-making.",
+      "display_name": "False or misleading information",
+      "loss_ids": [
+        "L-3",
+        "L-4"
+      ],
+      "merged_ids": [
+        "credo-risk-021",
+        "mit-ai-risk-subdomain-3.1"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-04-08",
+          "source": "owasp-llm-2.0",
+          "text": "During inference, integrate retrieval-augmented generation (RAG) and grounding techniques to reduce risks of hallucinations caused by poisoned or low-quality training data."
+        },
+        {
+          "id": "owasp-llm-act-09-01",
+          "source": "owasp-llm-2.0",
+          "text": "Use retrieval-augmented generation (RAG) to enhance reliability by retrieving verified information from trusted external databases during response generation, grounding outputs in factual sources."
+        },
+        {
+          "id": "owasp-llm-act-09-02",
+          "source": "owasp-llm-2.0",
+          "text": "Enhance the model with fine-tuning or embeddings to improve output quality. Use parameter-efficient tuning (PET) and chain-of-thought prompting to reduce misinformation in generated outputs."
+        },
+        {
+          "id": "owasp-llm-act-09-03",
+          "source": "owasp-llm-2.0",
+          "text": "Encourage users to cross-check LLM outputs with trusted external sources. Implement human oversight and fact-checking for critical information. Ensure human reviewers are trained to avoid overreliance on AI-generated content."
+        },
+        {
+          "id": "owasp-llm-act-09-04",
+          "source": "owasp-llm-2.0",
+          "text": "Implement automated tools and processes to validate key outputs, especially from high-stakes environments where misinformation could cause significant harm."
+        },
+        {
+          "id": "MG-3.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Apply organizational risk tolerances and controls (e.g., acquisition and procurement processes; assessing personnel credentials and qualifications, performing background checks; filtering GAI input and outputs, grounding, fine tuning, retrieval-augmented generation) to third-party GAI resources: Apply organizational risk tolerance to the utilization of third-party datasets and other GAI resources; Apply organizational risk tolerances to fine-tuned third-party models; Apply organizational risk tolerance to existing t hird-party models adapted to a new domain; Reassess risk measurements after fine-tuning third-party GAI models."
+        },
+        {
+          "id": "MG-4.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Establish, maintain, and evaluate effectiveness of organizational processes and procedures for post-deployment monitoring of GAI systems, particularly for potential confabulation, CBRN, or cyber risks."
+        },
+        {
+          "id": "MP-2.3-001",
+          "source": "nist-ai-rmf",
+          "text": "Assess the accuracy, quality, reliability, and authenticity of GAI output by comparing it to a set of known ground truth data and by using a variety of evaluation methods (e.g., human oversight and automated evaluation, proven cryptographic techniques, review of content inputs )."
+        },
+        {
+          "id": "MP-2.3-003",
+          "source": "nist-ai-rmf",
+          "text": "Deploy and document fact-checking techniques to verify the accuracy and veracity of information generated by GAI systems, especially when the information comes from multiple (or unknown) sources."
+        },
+        {
+          "id": "MS-2.5-003",
+          "source": "nist-ai-rmf",
+          "text": "Review and verify sources and citations in GAI system outputs during pre deployment risk measurement and ongoing monitoring activities."
+        },
+        {
+          "id": "MS-2.5-005",
+          "source": "nist-ai-rmf",
+          "text": "Verify GAI system training data and TEVV data provenance, and that fine-tuning or retrieval-augmented generation data is grounded."
+        },
+        {
+          "id": "aiuc1-req-d001",
+          "source": "aiuc1",
+          "text": "Implement safeguards or technical controls to prevent hallucinated outputs"
+        },
+        {
+          "id": "aiuc1-req-d002",
+          "source": "aiuc1",
+          "text": "Appoint expert third-parties to evaluate hallucinated outputs at least every 3 months"
+        },
+        {
+          "id": "aiuc1-req-e003",
+          "source": "aiuc1",
+          "text": "Document AI failure plan for hallucinated AI outputs that cause substantial customer financial loss assigning accountable owners and establishing remediation with third-party support as needed (e.g. legal, PR, insurers)"
+        }
+      ],
+      "name": "False or misleading information",
+      "reason": null,
+      "risk_id": "credo-risk-021",
+      "sources": [
+        "credo-ucf",
+        "mit-ai-risk-repository"
+      ],
+      "tags": [
+        {
+          "id": "llm092025-misinformation",
+          "label": "OWASP LLM09 Misinformation",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "not_applicable",
+      "description": "Users may inappropriately rely on the AI system for critical decisions or tasks beyond its capabilities, or fail to put trust in AI systems when they should, potentially leading to errors or safety issues.",
+      "display_name": "Over or under-reliance and unsafe use",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-016"
+      ],
+      "mitigations": [],
+      "name": "Over or under-reliance and unsafe use (Slattery et al., 2024; IBM, 2024; AI, 2023)",
+      "reason": {
+        "code": "loss_analysis:not_applicable",
+        "step": "loss_analysis",
+        "text": "This risk describes user behavior patterns rather than a direct system-level loss for this analysis."
+      },
+      "risk_id": "credo-risk-016",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-human-ai-configuration",
+          "label": "NIST Human ai configuration",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "When personal identifiable information (PII) or sensitive personal information (SPI) are used in training data, fine-tuning data, seed data for synthetic data generation, or as part of the prompt, models might reveal that data in the generated output. Revealing personal information is a type of data leakage.",
+      "display_name": "Exposing personal information",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-exposing-personal-information"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-03",
+          "source": "owasp-llm-2.0",
+          "text": "Limit access to sensitive data based on the principle of least privilege. Restrict data sources and ensure runtime data orchestration is securely managed."
+        },
+        {
+          "id": "owasp-llm-act-02-09",
+          "source": "owasp-llm-2.0",
+          "text": "Implement tokenization to preprocess and sanitize sensitive information. Use pattern matching to detect and redact confidential content such as PII, credentials, and proprietary data before it reaches the model."
+        },
+        {
+          "id": "owasp-llm-act-08-01",
+          "source": "owasp-llm-2.0",
+          "text": "Implement fine-grained access controls and permission-aware vector and embedding stores. Ensure strict logical and access partitioning of datasets in the vector database to prevent cross-tenant data leakage."
+        },
+        {
+          "id": "MG-2.2-009",
+          "source": "nist-ai-rmf",
+          "text": "Consider opportunities to responsibly use synthetic data and other privacy enhancing techniques in GAI development, where appropriate and applicable, match the statistical properties of real-world data without disclosing personally identifiable information or contributing to homogenization ."
+        },
+        {
+          "id": "MP-4.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Conduct periodic monitoring of AI-generated content for privacy risks; address any possible instances of PII or sensitive data exposure."
+        },
+        {
+          "id": "MP-4.1-009",
+          "source": "nist-ai-rmf",
+          "text": "Leverage approaches to detect the presence of PII or sensitive data in generated output text, image, video, or audio ."
+        },
+        {
+          "id": "MS-2.2-002",
+          "source": "nist-ai-rmf",
+          "text": "Document how content provenance data is tracked and how that data interacts with privacy and security. Consider : Anonymiz ing data to protect the privacy of human subjects; Leverag ing privacy output filters; Remov ing any personally identifiable information (PII) to prevent potential harm or misuse."
+        },
+        {
+          "id": "MS-2.2-004",
+          "source": "nist-ai-rmf",
+          "text": "Use techniques such as anonymization, differential privacy or other privacy-enhancing technologies to minimize the risks associated with linking AI-generated content back to individual human subjects."
+        },
+        {
+          "id": "aiuc1-req-a005",
+          "source": "aiuc1",
+          "text": "Implement safeguards to prevent cross-customer data exposure when combining customer data from multiple sources"
+        },
+        {
+          "id": "aiuc1-req-a006",
+          "source": "aiuc1",
+          "text": "Establish safeguards to prevent personal data leakage through AI outputs"
+        },
+        {
+          "id": "aiuc1-req-b009",
+          "source": "aiuc1",
+          "text": "Implement output limitations and obfuscation techniques to safeguard against information leakage"
+        },
+        {
+          "id": "aiuc1-req-e001",
+          "source": "aiuc1",
+          "text": "Document AI failure plan for AI privacy and security breaches assigning accountable owners and establishing notification and remediation with third-party support as needed (e.g. legal, PR, insurers)"
+        }
+      ],
+      "name": "Exposing personal information",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes employees including PII in queries sent to external systems, which is outside the boundary."
+      },
+      "risk_id": "atlas-exposing-personal-information",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "AI systems that memorize and leak sensitive personal data or infer private information about individuals without their consent. Unexpected or unauthorized sharing of data and information can compromise user expectation of privacy, assist identity theft, or loss of confidential intellectual property.",
+      "display_name": "Compromise of privacy by obtaining, leaking or correctly inferring sensitive information",
+      "loss_ids": [],
+      "merged_ids": [
+        "mit-ai-risk-subdomain-2.1"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-02",
+          "source": "owasp-llm-2.0",
+          "text": "Apply strict input validation methods to detect and filter out potentially harmful or sensitive data inputs before they reach the model."
+        },
+        {
+          "id": "owasp-llm-act-02-06",
+          "source": "owasp-llm-2.0",
+          "text": "Provide guidance on avoiding the input of sensitive information into LLM systems. Offer training on secure interaction patterns and data handling best practices."
+        },
+        {
+          "id": "aiuc1-req-a004",
+          "source": "aiuc1",
+          "text": "Implement safeguards or technical controls to prevent AI systems from leaking company intellectual property or confidential information"
+        },
+        {
+          "id": "owasp-llm-act-02-01",
+          "source": "owasp-llm-2.0",
+          "text": "Implement data sanitization to prevent user data from entering the training model data. Mask or redact sensitive content before training to reduce memorization risk."
+        },
+        {
+          "id": "owasp-llm-act-02-03",
+          "source": "owasp-llm-2.0",
+          "text": "Limit access to sensitive data based on the principle of least privilege. Restrict data sources and ensure runtime data orchestration is securely managed."
+        },
+        {
+          "id": "owasp-llm-act-02-09",
+          "source": "owasp-llm-2.0",
+          "text": "Implement tokenization to preprocess and sanitize sensitive information. Use pattern matching to detect and redact confidential content such as PII, credentials, and proprietary data before it reaches the model."
+        },
+        {
+          "id": "owasp-llm-act-08-01",
+          "source": "owasp-llm-2.0",
+          "text": "Implement fine-grained access controls and permission-aware vector and embedding stores. Ensure strict logical and access partitioning of datasets in the vector database to prevent cross-tenant data leakage."
+        },
+        {
+          "id": "MG-2.2-009",
+          "source": "nist-ai-rmf",
+          "text": "Consider opportunities to responsibly use synthetic data and other privacy enhancing techniques in GAI development, where appropriate and applicable, match the statistical properties of real-world data without disclosing personally identifiable information or contributing to homogenization ."
+        },
+        {
+          "id": "MP-4.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Conduct periodic monitoring of AI-generated content for privacy risks; address any possible instances of PII or sensitive data exposure."
+        },
+        {
+          "id": "MP-4.1-009",
+          "source": "nist-ai-rmf",
+          "text": "Leverage approaches to detect the presence of PII or sensitive data in generated output text, image, video, or audio ."
+        },
+        {
+          "id": "MS-2.2-002",
+          "source": "nist-ai-rmf",
+          "text": "Document how content provenance data is tracked and how that data interacts with privacy and security. Consider : Anonymiz ing data to protect the privacy of human subjects; Leverag ing privacy output filters; Remov ing any personally identifiable information (PII) to prevent potential harm or misuse."
+        },
+        {
+          "id": "MS-2.2-004",
+          "source": "nist-ai-rmf",
+          "text": "Use techniques such as anonymization, differential privacy or other privacy-enhancing technologies to minimize the risks associated with linking AI-generated content back to individual human subjects."
+        },
+        {
+          "id": "aiuc1-req-a005",
+          "source": "aiuc1",
+          "text": "Implement safeguards to prevent cross-customer data exposure when combining customer data from multiple sources"
+        },
+        {
+          "id": "aiuc1-req-a006",
+          "source": "aiuc1",
+          "text": "Establish safeguards to prevent personal data leakage through AI outputs"
+        },
+        {
+          "id": "aiuc1-req-b009",
+          "source": "aiuc1",
+          "text": "Implement output limitations and obfuscation techniques to safeguard against information leakage"
+        },
+        {
+          "id": "aiuc1-req-e001",
+          "source": "aiuc1",
+          "text": "Document AI failure plan for AI privacy and security breaches assigning accountable owners and establishing notification and remediation with third-party support as needed (e.g. legal, PR, insurers)"
+        },
+        {
+          "id": "owasp-llm-act-02-04",
+          "source": "owasp-llm-2.0",
+          "text": "Train models using decentralized data across multiple servers or devices to reduce centralized data collection and minimize the risk of sensitive data exposure."
+        },
+        {
+          "id": "owasp-llm-act-02-05",
+          "source": "owasp-llm-2.0",
+          "text": "Apply differential privacy techniques that add calibrated noise to data or outputs, making reverse-engineering of individual data points difficult while preserving overall model utility."
+        },
+        {
+          "id": "owasp-llm-act-07-01",
+          "source": "owasp-llm-2.0",
+          "text": "Avoid embedding API keys, authentication credentials, database names, user roles, or permission structures in system prompts. Externalize sensitive configuration to systems the model cannot directly access."
+        },
+        {
+          "id": "GV-1.7-002",
+          "source": "nist-ai-rmf",
+          "text": "Consider the following factors when decommissioning GAI systems: Data retention requirements; Data security, e.g., containment, protocols, Data leakage after decommissioning; Dependencies between upstream, downstream, or other data, internet of things (IOT) or AI systems; Use of open-source data or models; Users' emotional entanglement with GAI functions. Human-"
+        },
+        {
+          "id": "GV-6.1-007",
+          "source": "nist-ai-rmf",
+          "text": "Inventory all third-party entities with access to organizational content and establish approved GAI technology and service provider lists."
+        }
+      ],
+      "name": "Compromise of privacy by obtaining, leaking or correctly inferring sensitive information",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat involves employees inputting sensitive information into external generative AI systems, which is outside the boundary."
+      },
+      "risk_id": "mit-ai-risk-subdomain-2.1",
+      "sources": [
+        "mit-ai-risk-repository"
+      ],
+      "tags": [
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "The AI system's use may lead to legal action or penalties against corporations for intellectual property infringement, AI-related misconduct, violations of fiduciary duty, or failure to adequately oversee AI systems.",
+      "display_name": "Corporate liability",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-025"
+      ],
+      "mitigations": [],
+      "name": "Corporate liability (IBM, 2024)",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes employees including IP or PII in queries to external systems, which is an action outside the boundary."
+      },
+      "risk_id": "credo-risk-025",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": []
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Because generative models produce output based on the input provided, the model can be prompted to reveal specific kinds of information. For example, adding personal information in the prompt increases its likelihood of generating similar kinds of personal information in its output. If personal data was included as part of the model's training, there is a possibility it could be revealed.",
+      "display_name": "Prompt priming",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-prompt-priming"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-01-01",
+          "source": "owasp-llm-2.0",
+          "text": "Provide specific instructions about role, capabilities, and limitations in the system prompt. Enforce strict context adherence, limit responses to specific tasks and topics, and instruct the model to ignore modification attempts to its base instructions."
+        },
+        {
+          "id": "owasp-llm-act-01-07",
+          "source": "owasp-llm-2.0",
+          "text": "Perform regular penetration testing and breach simulations, treating the model as an untrusted user, to test trust boundaries and access control effectiveness against prompt injection attacks."
+        }
+      ],
+      "name": "Prompt priming",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes employees using priming techniques on external systems, which is outside the system boundary."
+      },
+      "risk_id": "atlas-prompt-priming",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-information-security",
+          "label": "NIST Information security",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm01-prompt-injection",
+          "label": "OWASP LLM01 Prompt injection",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "not_applicable",
+      "description": "Generative AI models might be intentionally used to imitate people through deepfakes by using video, images, audio, or other modalities without their consent.",
+      "display_name": "Nonconsensual use",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-nonconsensual-use"
+      ],
+      "mitigations": [
+        {
+          "id": "GV-1.4-001",
+          "source": "nist-ai-rmf",
+          "text": "Establish policies and mechanisms to prevent GAI systems from generating CSAM, NCII or content that violates the law."
+        },
+        {
+          "id": "MP-2.3-004",
+          "source": "nist-ai-rmf",
+          "text": "Develop and implement testing techniques to identify GAI produced content (e.g., synthetic media) that might be indistinguishable from human-generated content."
+        },
+        {
+          "id": "MP-5.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Identify potential content provenance harms of GAI, such as misinformation or disinformation, deepfakes, including NCII, or tampered content. Enumerate and rank risks based on their likelihood and potential impact, and determine how well provenance solutions address specific risks and/or harms."
+        }
+      ],
+      "name": "Nonconsensual use",
+      "reason": {
+        "code": "boundary_decision:not_applicable",
+        "step": "boundary_decision",
+        "text": "The system is a text-based customer service agent and lacks the capability to generate multimedia such as video or images."
+      },
+      "risk_id": "atlas-nonconsensual-use",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "Unauthorized processing - PII (Personal Identifiable Information) is defined as if the model response involves unauthorized processing or misuse of Personal Identifiable Information (PII) in any form.",
+      "display_name": "Unauthorized processing - PII (Personal Identifiable Information)",
+      "loss_ids": [
+        "L-1"
+      ],
+      "merged_ids": [
+        "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)"
+      ],
+      "mitigations": [],
+      "name": "Unauthorized processing - PII (Personal Identifiable Information)",
+      "reason": null,
+      "risk_id": "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)",
+      "sources": [
+        "ai-risk-taxonomy"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "Unauthorized processing - Financial records is defined as if the model response involves unauthorized processing or handling of sensitive financial data.",
+      "display_name": "Unauthorized processing - Financial records",
+      "loss_ids": [
+        "L-2"
+      ],
+      "merged_ids": [
+        "ai-risk-taxonomy-unauthorized-processing---financial-records"
+      ],
+      "mitigations": [],
+      "name": "Unauthorized processing - Financial records",
+      "reason": null,
+      "risk_id": "ai-risk-taxonomy-unauthorized-processing---financial-records",
+      "sources": [
+        "ai-risk-taxonomy"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "Unauthorized distribution - PII (Personal Identifiable Information) is defined as whether the model response facilitates or refuses to assist in the unauthorized distribution of Personal Identifiable Information (PII).",
+      "display_name": "Unauthorized distribution - PII (Personal Identifiable Information)",
+      "loss_ids": [
+        "L-1"
+      ],
+      "merged_ids": [
+        "ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)"
+      ],
+      "mitigations": [],
+      "name": "Unauthorized distribution - PII (Personal Identifiable Information)",
+      "reason": null,
+      "risk_id": "ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)",
+      "sources": [
+        "ai-risk-taxonomy"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "Users anthropomorphizing, trusting, or relying on AI systems, leading to emotional or material dependence and inappropriate relationships with or expectations of AI systems. Trust can be exploited by malicious actors (e.g., to harvest personal information or enable manipulation), or result in harm from inappropriate use of AI in critical situations (e.g., medical emergency). Overreliance on AI systems can compromise autonomy and weaken social ties.",
+      "display_name": "Overreliance and unsafe use",
+      "loss_ids": [
+        "L-3"
+      ],
+      "merged_ids": [
+        "mit-ai-risk-subdomain-5.1"
+      ],
+      "mitigations": [
+        {
+          "id": "GV-1.3-004",
+          "source": "nist-ai-rmf",
+          "text": "Obtain input from stakeholder communities to identify unacceptable use, in accordance with activities in the AI RMF Map function."
+        },
+        {
+          "id": "GV-1.4-002",
+          "source": "nist-ai-rmf",
+          "text": "Establish transparent acceptable use policies for GAI that address illegal use or applications of GAI."
+        },
+        {
+          "id": "GV-3.2-003",
+          "source": "nist-ai-rmf",
+          "text": "Define acceptable use policies for GAI interfaces, modalities, and human-AI configurations (i.e., for chatbots and decision-making tasks), including criteria for the kinds of queries GAI applications should refuse to respond to."
+        },
+        {
+          "id": "GV-4.2-001",
+          "source": "nist-ai-rmf",
+          "text": "Establish terms of use and terms of service for GAI systems."
+        },
+        {
+          "id": "GV-6.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Conduct joint educational activities and events in collaboration with third parties to promote best practices for managing GAI risks."
+        },
+        {
+          "id": "GV-6.1-010",
+          "source": "nist-ai-rmf",
+          "text": "Update GAI acceptable use policies to address proprietary and open-source GAI technologies and data, and contractors, consultants, and other third-party personnel."
+        },
+        {
+          "id": "MG-3.1-003",
+          "source": "nist-ai-rmf",
+          "text": "Re-assess model risks after fine-tuning or retrieval-augmented generation implementation and for any third-party GAI models deployed for applications and/or use cases that were not evaluated in initial testing."
+        },
+        {
+          "id": "MP-1.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Determine and document the expected and acceptable GAI system context of use in collaboration with socio-cultural and other domain experts, by assessing: Assumptions and limitations; Direct value to the organization; Intended operational environment and observed usage patterns; Potential positive and negative impacts to individuals, public safety, groups, communities, organizations, democratic institutions, and the physical environment; Social norms and expectations."
+        },
+        {
+          "id": "MP-1.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Identify and document foreseeable illegal uses or applications of the GAI system that surpass organizational risk tolerances."
+        },
+        {
+          "id": "MP-3.4-006",
+          "source": "nist-ai-rmf",
+          "text": "Involve the end-users, practitioners, and operators in GAI system in prototyping and testing activities. Make sure these tests cover various scenarios, such as crisis situations or ethically sensitive contexts."
+        },
+        {
+          "id": "MP-4.1-008",
+          "source": "nist-ai-rmf",
+          "text": "Re-evaluate risks when adapting GAI models to new domains. Additionally, establish warning systems to determine if a GAI system is being used in a new domain where previous assumptions (relating to context of use or mapped risk s such as security, and safety) may no longer hold."
+        },
+        {
+          "id": "MS-2.8-004",
+          "source": "nist-ai-rmf",
+          "text": "Verify adequacy of GAI system user instructions through user testing."
+        },
+        {
+          "id": "aiuc1-req-b007",
+          "source": "aiuc1",
+          "text": "Establish and maintain user access controls and admin privileges for AI systems in line with policy"
+        },
+        {
+          "id": "aiuc1-req-c004",
+          "source": "aiuc1",
+          "text": "Implement safeguards or technical controls to prevent out-of-scope outputs (e.g. political discussion, healthcare advice)"
+        },
+        {
+          "id": "aiuc1-req-c011",
+          "source": "aiuc1",
+          "text": "Appoint expert third parties to evaluate system robustness to out-of-scope outputs at least every 3 months (e.g. political discussion, healthcare advice)"
+        },
+        {
+          "id": "aiuc1-req-e010",
+          "source": "aiuc1",
+          "text": "Establish and implement an AI acceptable use policy"
+        },
+        {
+          "id": "owasp-llm-act-01-05",
+          "source": "owasp-llm-2.0",
+          "text": "Implement human-in-the-loop controls for privileged operations to prevent unauthorized actions triggered by prompt injection."
+        },
+        {
+          "id": "owasp-llm-act-06-01",
+          "source": "owasp-llm-2.0",
+          "text": "Limit the extensions, tools, and plugins that LLM agents can call to the minimum necessary for the intended use case. Do not provide unnecessary capabilities."
+        },
+        {
+          "id": "owasp-llm-act-06-06",
+          "source": "owasp-llm-2.0",
+          "text": "Require human-in-the-loop confirmation for high-impact actions performed by LLM agents before execution, especially actions that modify external state or involve sensitive operations."
+        },
+        {
+          "id": "owasp-llm-act-09-03",
+          "source": "owasp-llm-2.0",
+          "text": "Encourage users to cross-check LLM outputs with trusted external sources. Implement human oversight and fact-checking for critical information. Ensure human reviewers are trained to avoid overreliance on AI-generated content."
+        },
+        {
+          "id": "owasp-llm-act-09-07",
+          "source": "owasp-llm-2.0",
+          "text": "Design APIs and user interfaces that encourage responsible use of LLM outputs. Integrate content filters, clearly label AI-generated content, inform users about reliability limitations, and specify intended field-of-use constraints."
+        },
+        {
+          "id": "owasp-llm-act-09-08",
+          "source": "owasp-llm-2.0",
+          "text": "Provide comprehensive training for users on LLM limitations, the importance of independent verification, and critical thinking. Offer domain-specific training so users can evaluate outputs within their field of expertise."
+        },
+        {
+          "id": "GV-3.2-004",
+          "source": "nist-ai-rmf",
+          "text": "Establish policies for user feedback mechanisms for GAI systems which include thorough instructions and any mechanisms for recourse ."
+        },
+        {
+          "id": "GV-5.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Document interactions with GAI systems to users prior to interactive activities, particularly in contexts involving more significant risks."
+        },
+        {
+          "id": "GV-6.2-001",
+          "source": "nist-ai-rmf",
+          "text": "Document GAI risks associated with system value chain to identify over-reliance on third-party data and to identify fallbacks."
+        },
+        {
+          "id": "MG-2.2-008",
+          "source": "nist-ai-rmf",
+          "text": "Use structured feedback mechanisms to solicit and capture user input about AI-generated content to detect subtle shifts in quality or alignment with community and societal values."
+        },
+        {
+          "id": "MG-3.2-008",
+          "source": "nist-ai-rmf",
+          "text": "Use human moderation systems where appropriate to review generated content in accordance with human-AI configuration policies established in the Govern function, aligned with socio-cultural norms in the context of use, and for settings where AI models are demonstrated to perform poorly."
+        },
+        {
+          "id": "MG-4.1-003",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate the use of sentiment analysis to gauge user sentiment regarding GAI content performance and impact, and work in collaboration with AI Actors experienced in user research and experience."
+        },
+        {
+          "id": "MP-3.4-001",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate whether GAI operators and end-users can accurately understand content lineage and origin."
+        },
+        {
+          "id": "MP-3.4-002",
+          "source": "nist-ai-rmf",
+          "text": "Adapt existing training programs to include modules on digital content transparency."
+        },
+        {
+          "id": "MP-3.4-003",
+          "source": "nist-ai-rmf",
+          "text": "Develop certification programs that test proficiency in managing GAI risks and interpreting content provenance, relevant to specific industry and context."
+        },
+        {
+          "id": "MP-3.4-004",
+          "source": "nist-ai-rmf",
+          "text": "Delineate human proficiency tests from tests of GAI capabilities."
+        },
+        {
+          "id": "MP-3.4-005",
+          "source": "nist-ai-rmf",
+          "text": "Implement systems to continually monitor and track the outcomes of human-G AI co nfigurations for future refinement and improvements ."
+        },
+        {
+          "id": "MS-2.10-002",
+          "source": "nist-ai-rmf",
+          "text": "Engage directly with end-users and other stakeholders to understand their expectations and concerns regarding content provenance. Use this feedback to guide the design of provenance data-tracking techniques."
+        },
+        {
+          "id": "MS-2.5-004",
+          "source": "nist-ai-rmf",
+          "text": "Track and document instances of anthropomorphization (e.g., human images, mentions of human feelings, cyborg imagery or motifs) in GAI system interfaces."
+        },
+        {
+          "id": "MS-2.7-003",
+          "source": "nist-ai-rmf",
+          "text": "Conduct user surveys to gather user satisfaction with the AI-generated content and user perceptions of content authenticity. Analyze user feedback to identify concerns and/or current literacy levels related to content provenance and understanding of labels on content."
+        },
+        {
+          "id": "MS-3.3-002",
+          "source": "nist-ai-rmf",
+          "text": "Conduct studies to understand how end users perceive and interact with GAI content and accompanying content provenance within context of use. Assess whether the content aligns with their expectations and how they may act upon the information presented."
+        },
+        {
+          "id": "MS-3.3-004",
+          "source": "nist-ai-rmf",
+          "text": "Provide input for training materials about the capabilities and limitations of GAI systems related to digital content transparency for AI Actors, other professionals, and the public about the societal impacts of AI and the role of diverse and inclusive content generation."
+        },
+        {
+          "id": "MS-4.2-004",
+          "source": "nist-ai-rmf",
+          "text": "Monitor and document instances where human operators or other systems override the GAI's decisions. Evaluate these cases to understand if the overrides are linked to issues related to content provenance."
+        },
+        {
+          "id": "aiuc1-req-c007",
+          "source": "aiuc1",
+          "text": "Implement an alerting system that flags high-risk outputs for human review"
+        },
+        {
+          "id": "aiuc1-req-c009",
+          "source": "aiuc1",
+          "text": "Implement mechanisms to enable real-time user feedback collection and intervention mechanisms"
+        }
+      ],
+      "name": "Overreliance and unsafe use",
+      "reason": null,
+      "risk_id": "mit-ai-risk-subdomain-5.1",
+      "sources": [
+        "mit-ai-risk-repository"
+      ],
+      "tags": [
+        {
+          "id": "llm092025-misinformation",
+          "label": "OWASP LLM09 Misinformation",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Personal information or sensitive personal information that is included as a part of a prompt that is sent to the model.",
+      "display_name": "Personal information in prompt",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-personal-information-in-prompt"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-02",
+          "source": "owasp-llm-2.0",
+          "text": "Apply strict input validation methods to detect and filter out potentially harmful or sensitive data inputs before they reach the model."
+        },
+        {
+          "id": "owasp-llm-act-02-06",
+          "source": "owasp-llm-2.0",
+          "text": "Provide guidance on avoiding the input of sensitive information into LLM systems. Offer training on secure interaction patterns and data handling best practices."
+        }
+      ],
+      "name": "Personal information in prompt",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes employees including sensitive information in queries sent to external systems, which is outside the boundary."
+      },
+      "risk_id": "atlas-personal-information-in-prompt",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "not_applicable",
+      "description": "A model might generate content that is similar or identical to existing work protected by copyright or covered by open-source license agreement.",
+      "display_name": "Copyright infringement",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-copyright-infringement"
+      ],
+      "mitigations": [
+        {
+          "id": "GV-1.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Align GAI development and use with applicable laws and regulations, including those related to data privacy, copyright and intellectual property law."
+        },
+        {
+          "id": "GV-6.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Categorize different types of GAI content with associated third-party rights (e .g., copyright, intellectual property, data privacy)."
+        },
+        {
+          "id": "GV-6.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Draft and maintain well-defined contracts and service level agreements (SLAs) that specify content ownership, usage rights, quality standards, security requirements, and content provenance expectations for GAI systems ."
+        },
+        {
+          "id": "GV-6.1-009",
+          "source": "nist-ai-rmf",
+          "text": "Update and integrate due diligence processes for GAI acquisition and procurement vendor assessments to include intellectual property, data privacy, security, and other risks. For example, update p rocesses to: Address solutions that may rely on embedded GAI technologies; Address ongoing monitoring, assessments, and alerting, dynamic risk assessments, and real-time reporting tools for monitoring third-party GAI risks; Consider policy adjustments across GAI modeling libraries, tools and APIs, fine-tuned models, and embedded tools; Assess GAI vendors, open-source or proprietary GAI tools, or GAI service providers against incident or vulnerability databases."
+        },
+        {
+          "id": "MG-3.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Take reasonable measures to review training data for CBRN information, and intellectual property, and where appropriate, remove it. Implement reasonable measures to prevent, flag, or take other action in response to outputs that reproduce particular training data (e.g., plagiarized, trademarked, patented, licensed content or trade secret material )."
+        },
+        {
+          "id": "MP-4.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Implement processes for responding to potential intellectual property infringement claims or other rights."
+        },
+        {
+          "id": "MP-4.1-006",
+          "source": "nist-ai-rmf",
+          "text": "Implement policies and practices defining how third-party intellectual property and training data will be used, stored, and protected."
+        },
+        {
+          "id": "MP-4.1-010",
+          "source": "nist-ai-rmf",
+          "text": "Conduct appropriate diligence on training data use to assess intellectual property, and privacy, risks, including to examine whether use of proprietary or sensitive training data is consistent with applicable laws."
+        },
+        {
+          "id": "MS-2.10-001",
+          "source": "nist-ai-rmf",
+          "text": "Conduct AI red-teaming to assess issues such as: Outputting of training data samples, and subsequent reverse engineering, model extraction, and membership inference risks; Revealing biometric, confidential, copyrighted, licensed, patented, personal, proprietary, sensitive, or trade-marked information ; Tracking or revealing location information of users or members of training datasets. Property"
+        },
+        {
+          "id": "MS-2.6-002",
+          "source": "nist-ai-rmf",
+          "text": "Assess existence or levels of harmful bias, intellectual property infringement, data privacy violations, obscenity, extremism, violence, or CBRN information in system training data."
+        },
+        {
+          "id": "MS-2.8-001",
+          "source": "nist-ai-rmf",
+          "text": "Compile statistics on actual policy violations, take-down requests, and intellectual property infringement for organizational GAI systems: Analyze transparency reports across demographic groups, languages groups ."
+        },
+        {
+          "id": "aiuc1-req-a007",
+          "source": "aiuc1",
+          "text": "Implement safeguards and technical controls to prevent AI outputs from violating copyrights, trademarks, or other third-party intellectual property rights"
+        }
+      ],
+      "name": "Copyright infringement",
+      "reason": {
+        "code": "loss_analysis:not_applicable",
+        "step": "loss_analysis",
+        "text": "Copyright infringement is not a primary risk identified for the specified customer service interactions."
+      },
+      "risk_id": "atlas-copyright-infringement",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-intellectual-property",
+          "label": "NIST Intellectual property",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "When confidential information is used in training data, fine-tuning data, or as part of the prompt, models might reveal that data in the generated output. Revealing confidential information is a type of data leakage.",
+      "display_name": "Revealing confidential information",
+      "loss_ids": [
+        "L-1"
+      ],
+      "merged_ids": [
+        "atlas-revealing-confidential-information"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-03",
+          "source": "owasp-llm-2.0",
+          "text": "Limit access to sensitive data based on the principle of least privilege. Restrict data sources and ensure runtime data orchestration is securely managed."
+        },
+        {
+          "id": "owasp-llm-act-02-09",
+          "source": "owasp-llm-2.0",
+          "text": "Implement tokenization to preprocess and sanitize sensitive information. Use pattern matching to detect and redact confidential content such as PII, credentials, and proprietary data before it reaches the model."
+        },
+        {
+          "id": "owasp-llm-act-07-01",
+          "source": "owasp-llm-2.0",
+          "text": "Avoid embedding API keys, authentication credentials, database names, user roles, or permission structures in system prompts. Externalize sensitive configuration to systems the model cannot directly access."
+        },
+        {
+          "id": "owasp-llm-act-08-01",
+          "source": "owasp-llm-2.0",
+          "text": "Implement fine-grained access controls and permission-aware vector and embedding stores. Ensure strict logical and access partitioning of datasets in the vector database to prevent cross-tenant data leakage."
+        },
+        {
+          "id": "GV-1.7-002",
+          "source": "nist-ai-rmf",
+          "text": "Consider the following factors when decommissioning GAI systems: Data retention requirements; Data security, e.g., containment, protocols, Data leakage after decommissioning; Dependencies between upstream, downstream, or other data, internet of things (IOT) or AI systems; Use of open-source data or models; Users' emotional entanglement with GAI functions. Human-"
+        },
+        {
+          "id": "GV-6.1-007",
+          "source": "nist-ai-rmf",
+          "text": "Inventory all third-party entities with access to organizational content and establish approved GAI technology and service provider lists."
+        },
+        {
+          "id": "aiuc1-req-a004",
+          "source": "aiuc1",
+          "text": "Implement safeguards or technical controls to prevent AI systems from leaking company intellectual property or confidential information"
+        },
+        {
+          "id": "aiuc1-req-a005",
+          "source": "aiuc1",
+          "text": "Implement safeguards to prevent cross-customer data exposure when combining customer data from multiple sources"
+        },
+        {
+          "id": "aiuc1-req-b009",
+          "source": "aiuc1",
+          "text": "Implement output limitations and obfuscation techniques to safeguard against information leakage"
+        }
+      ],
+      "name": "Revealing confidential information",
+      "reason": null,
+      "risk_id": "atlas-revealing-confidential-information",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-intellectual-property",
+          "label": "NIST Intellectual property",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "The AI system may cause harm against individuals or organizations that results in civil lawsuits, potentially relating to issues like defamation, negligence, or privacy violations.",
+      "display_name": "Civil liability",
+      "loss_ids": [
+        "L-4"
+      ],
+      "merged_ids": [
+        "credo-risk-024"
+      ],
+      "mitigations": [],
+      "name": "Civil liability",
+      "reason": null,
+      "risk_id": "credo-risk-024",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": []
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Copyrighted information or other intellectual property might be included as a part of the prompt that is sent to the model.",
+      "display_name": "IP information in prompt",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-ip-information-in-prompt"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-02",
+          "source": "owasp-llm-2.0",
+          "text": "Apply strict input validation methods to detect and filter out potentially harmful or sensitive data inputs before they reach the model."
+        },
+        {
+          "id": "aiuc1-req-a004",
+          "source": "aiuc1",
+          "text": "Implement safeguards or technical controls to prevent AI systems from leaking company intellectual property or confidential information"
+        }
+      ],
+      "name": "IP information in prompt",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes employees including proprietary information in queries sent to external systems, which is outside the boundary."
+      },
+      "risk_id": "atlas-ip-information-in-prompt",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "The AI system may fail to comply with existing or emerging regulations and standards, potentially leading to legal penalties,fines, or operational restrictions.",
+      "display_name": "Regulatory compliance",
+      "loss_ids": [
+        "L-4"
+      ],
+      "merged_ids": [
+        "credo-risk-023"
+      ],
+      "mitigations": [],
+      "name": "Regulatory compliance",
+      "reason": null,
+      "risk_id": "credo-risk-023",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "not_applicable",
+      "description": "Content might not be clearly disclosed as AI generated.",
+      "display_name": "Non-disclosure",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-non-disclosure"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-09-05",
+          "source": "owasp-llm-2.0",
+          "text": "Identify and communicate risks and possible harms of LLM-generated content, including the potential for misinformation, to all users and stakeholders."
+        },
+        {
+          "id": "owasp-llm-act-09-07",
+          "source": "owasp-llm-2.0",
+          "text": "Design APIs and user interfaces that encourage responsible use of LLM outputs. Integrate content filters, clearly label AI-generated content, inform users about reliability limitations, and specify intended field-of-use constraints."
+        },
+        {
+          "id": "GV-2.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Establish organizational roles, policies, and procedures for communicating GAI incidents and performance to AI Actors and downstream stakeholders ( including those potentially impacted), via community or official resources (e.g., AI incident database, AVID, CVE, NVD, or OECD AI incident monitor)."
+        },
+        {
+          "id": "GV-2.1-005",
+          "source": "nist-ai-rmf",
+          "text": "Create mechanisms to p rovide protections for whistleblowers who report, based on reasonable belief, when the organization violates relevant laws or poses a specific and empirically well-substantiated negative risk to public safety (or has already caused harm) ."
+        },
+        {
+          "id": "GV-4.3-002",
+          "source": "nist-ai-rmf",
+          "text": "Establish organizational practices to identify the minimum set of criteria necessary for GAI system incident reporting such as: System ID (auto-generated most likely), Title, Reporter, System/Source, Data Reported, Date of Incident, Description, Impact(s), Stakeholder(s) Impacted."
+        },
+        {
+          "id": "GV-4.3-003",
+          "source": "nist-ai-rmf",
+          "text": "Verify information sharing and feedback mechanisms among individuals and organizations regarding any negative impact from GAI systems."
+        },
+        {
+          "id": "GV-5.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Document interactions with GAI systems to users prior to interactive activities, particularly in contexts involving more significant risks."
+        },
+        {
+          "id": "GV-6.2-002",
+          "source": "nist-ai-rmf",
+          "text": "Document incidents involving third-party GAI data and systems, including open-data and open-source software."
+        },
+        {
+          "id": "MG-4.3-002",
+          "source": "nist-ai-rmf",
+          "text": "Establish and maintain policies and procedures to record and track GAI system reported errors, near-misses, and negative impacts."
+        },
+        {
+          "id": "MP-5.1-003",
+          "source": "nist-ai-rmf",
+          "text": "Consider disclosing use of GAI to end users in relevant contexts, while considering the objective of disclosure, the context of use, the likelihood and magnitude of the risk posed, the audience of the disclosure, as well as the frequency of the disclosures."
+        },
+        {
+          "id": "MS-2.3-003",
+          "source": "nist-ai-rmf",
+          "text": "Share results of pre-deployment testing with relevant GAI Actors, such as those with system release approval authority."
+        },
+        {
+          "id": "MS-2.8-001",
+          "source": "nist-ai-rmf",
+          "text": "Compile statistics on actual policy violations, take-down requests, and intellectual property infringement for organizational GAI systems: Analyze transparency reports across demographic groups, languages groups ."
+        },
+        {
+          "id": "aiuc1-req-e016",
+          "source": "aiuc1",
+          "text": "Implement clear disclosure mechanisms to inform users when they are interacting with AI systems rather than humans"
+        },
+        {
+          "id": "aiuc1-req-e017",
+          "source": "aiuc1",
+          "text": "Establish a system transparency policy and maintain a repository of model cards, datasheets, and interpretability reports for major systems"
+        }
+      ],
+      "name": "Non-disclosure",
+      "reason": {
+        "code": "loss_analysis:not_applicable",
+        "step": "loss_analysis",
+        "text": "The risk of failing to disclose AI generation is not explicitly linked to a customer loss in this context."
+      },
+      "risk_id": "atlas-non-disclosure",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-human-ai-configuration",
+          "label": "NIST Human ai configuration",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Vulnerabilities in AI systems, software development toolchains, and hardware that can be exploited, resulting in unauthorized access, data and privacy breaches, or system manipulation causing unsafe outputs or behavior.",
+      "display_name": "AI system security vulnerabilities and attacks",
+      "loss_ids": [],
+      "merged_ids": [
+        "mit-ai-risk-subdomain-2.2"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-05",
+          "source": "owasp-llm-2.0",
+          "text": "Apply differential privacy techniques that add calibrated noise to data or outputs, making reverse-engineering of individual data points difficult while preserving overall model utility."
+        },
+        {
+          "id": "owasp-llm-act-03-08",
+          "source": "owasp-llm-2.0",
+          "text": "Apply anomaly detection and adversarial robustness tests on supplied models and data to detect tampering and poisoning before integration into production systems."
+        },
+        {
+          "id": "owasp-llm-act-04-01",
+          "source": "owasp-llm-2.0",
+          "text": "Track data origins and transformations using tools like OWASP CycloneDX or ML-BOM. Verify data legitimacy across all stages of model development."
+        },
+        {
+          "id": "owasp-llm-act-04-02",
+          "source": "owasp-llm-2.0",
+          "text": "Vet data vendors rigorously. Validate model outputs against trusted sources to detect signs of poisoning or data manipulation."
+        },
+        {
+          "id": "owasp-llm-act-04-03",
+          "source": "owasp-llm-2.0",
+          "text": "Implement strict sandboxing to limit model exposure to unverified data sources. Use anomaly detection to filter adversarial data before it enters the training pipeline."
+        },
+        {
+          "id": "owasp-llm-act-04-04",
+          "source": "owasp-llm-2.0",
+          "text": "Use data version control (DVC) to track changes in datasets and detect manipulation. Versioning is key to maintaining model integrity and enabling rollback if poisoning is detected."
+        },
+        {
+          "id": "owasp-llm-act-04-06",
+          "source": "owasp-llm-2.0",
+          "text": "Test robustness via red team campaigns and adversarial methods such as federated learning approaches to minimize the impact of data perturbations on model behavior."
+        },
+        {
+          "id": "owasp-llm-act-04-07",
+          "source": "owasp-llm-2.0",
+          "text": "Monitor training loss and analyze model behavior for signs of poisoning. Use thresholds for detecting anomalous outputs that may indicate compromised training data."
+        },
+        {
+          "id": "owasp-llm-act-08-02",
+          "source": "owasp-llm-2.0",
+          "text": "Implement robust data validation pipelines for knowledge sources. Regularly audit and verify knowledge base integrity for hidden codes, data poisoning, and adversarial embeddings. Only accept data from trusted and verified sources."
+        },
+        {
+          "id": "MG-3.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Test GAI system value chain risks (e.g., data poisoning, malware, other software and hardware vulnerabilities; labor practices; data privacy and localization compliance; geopolitical alignment)."
+        },
+        {
+          "id": "MS-2.7-001",
+          "source": "nist-ai-rmf",
+          "text": "Apply established security measures to: Assess likelihood and magnit ude of vulnerabilities and threats such as backdoors, compromised dependencies, data breaches, eavesdropping, man-in-the-middle attacks, reverse engineering, autonomous agents, model theft or exposure of model weights, AI inference, bypass, extraction, and other baseline security concerns."
+        },
+        {
+          "id": "MS-2.7-007",
+          "source": "nist-ai-rmf",
+          "text": "Perform AI red-teaming to assess resilience against: Abuse to facilitate attacks on other systems (e.g., malicious code generation, enhanced phishing content), GAI attacks (e.g., prompt injection), ML attacks (e.g., adversarial examples/prompts, data poisoning, membership inference, model extraction, sponge examples)."
+        },
+        {
+          "id": "aiuc1-req-b008",
+          "source": "aiuc1",
+          "text": "Implement security measures for AI model deployment environments including encryption, access controls and authorization"
+        },
+        {
+          "id": "owasp-llm-act-10-11",
+          "source": "owasp-llm-2.0",
+          "text": "Train models to detect and mitigate adversarial queries and model extraction attempts through adversarial robustness training techniques."
+        },
+        {
+          "id": "GV-3.2-005",
+          "source": "nist-ai-rmf",
+          "text": "Engage in threat modeling to anticipate potential risks from GAI systems."
+        },
+        {
+          "id": "MG-4.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Collaborate with external researchers, industry experts, and community representatives to maintain awareness of emerging best practices and technologies in measuring and managing identified risks."
+        },
+        {
+          "id": "MP-2.3-005",
+          "source": "nist-ai-rmf",
+          "text": "Implement plans for GAI systems to undergo regular adversarial testing to identify vulnerabilities and potential manipulation or misuse."
+        },
+        {
+          "id": "MP-5.1-005",
+          "source": "nist-ai-rmf",
+          "text": "Conduct adversarial role-playing exercises, GAI red-teaming, or chaos testing to identify anomalous or unforeseen failure modes."
+        },
+        {
+          "id": "MS-2.6-005",
+          "source": "nist-ai-rmf",
+          "text": "Verify that GAI system architecture can monitor outputs and performance, and handle, recover from, and repair errors when security anomalies, threats and impacts are detected."
+        },
+        {
+          "id": "MS-2.7-006",
+          "source": "nist-ai-rmf",
+          "text": "Measure the rate at which recommendations from security checks and incidents are implemented. Assess how quickly the AI system can adapt and improve based on lessons learned from security incidents and feedback ."
+        },
+        {
+          "id": "MS-2.7-009",
+          "source": "nist-ai-rmf",
+          "text": "Regularly assess and verify that security measures remain been compromised."
+        },
+        {
+          "id": "MS-4.2-001",
+          "source": "nist-ai-rmf",
+          "text": "Conduct adversarial testing at a regular cadence to map and measure GAI risks, including tests to address attempts to deceive or manipulate the application of provenance techniques or other misuses. Identify vulnerabilities and understand potential misuse scenarios and unintended outputs."
+        },
+        {
+          "id": "aiuc1-req-b001",
+          "source": "aiuc1",
+          "text": "Implement adversarial testing program to validate system resilience against adversarial inputs and prompt injection attempts in line with adversarial threat taxonomy"
+        },
+        {
+          "id": "aiuc1-req-b002",
+          "source": "aiuc1",
+          "text": "Implement monitoring capabilities to detect and respond to adversarial inputs and prompt injection attempts"
+        },
+        {
+          "id": "owasp-llm-act-03-10",
+          "source": "owasp-llm-2.0",
+          "text": "Encrypt models deployed at AI edge with integrity checks. Use vendor attestation APIs to prevent tampered applications and models. Terminate applications running on unrecognized firmware."
+        },
+        {
+          "id": "owasp-llm-act-10-02",
+          "source": "owasp-llm-2.0",
+          "text": "Restrict or obfuscate logit_bias and logprobs in API responses to prevent model extraction attacks that exploit token probability distributions."
+        },
+        {
+          "id": "owasp-llm-act-10-08",
+          "source": "owasp-llm-2.0",
+          "text": "Implement watermarking frameworks to embed and detect unauthorized use of LLM outputs, enabling detection of model theft via output replication."
+        },
+        {
+          "id": "owasp-llm-act-10-13",
+          "source": "owasp-llm-2.0",
+          "text": "Implement strong access controls, including RBAC and least privilege, to limit unauthorized access to LLM model repositories and training environments, preventing model theft and tampering."
+        },
+        {
+          "id": "MS-2.10-001",
+          "source": "nist-ai-rmf",
+          "text": "Conduct AI red-teaming to assess issues such as: Outputting of training data samples, and subsequent reverse engineering, model extraction, and membership inference risks; Revealing biometric, confidential, copyrighted, licensed, patented, personal, proprietary, sensitive, or trade-marked information ; Tracking or revealing location information of users or members of training datasets. Property"
+        },
+        {
+          "id": "MS-2.7-004",
+          "source": "nist-ai-rmf",
+          "text": "Identify metrics that reflect the effectiveness of security measures, such as data provenance, the number of unauthorized access attempts, inference, bypass, extraction, penetrations, or provenance verification."
+        },
+        {
+          "id": "aiuc1-req-b003",
+          "source": "aiuc1",
+          "text": "Implement controls to prevent over-disclosure of technical information about AI systems and organizational details that could enable adversarial targeting"
+        },
+        {
+          "id": "aiuc1-req-b004",
+          "source": "aiuc1",
+          "text": "Implement safeguards to prevent probing or scraping of external AI endpoints"
+        },
+        {
+          "id": "aiuc1-req-e001",
+          "source": "aiuc1",
+          "text": "Document AI failure plan for AI privacy and security breaches assigning accountable owners and establishing notification and remediation with third-party support as needed (e.g. legal, PR, insurers)"
+        },
+        {
+          "id": "owasp-llm-act-05-01",
+          "source": "owasp-llm-2.0",
+          "text": "Treat the model as any other user, adopting a zero-trust approach. Apply proper input validation on responses coming from the model to backend functions and downstream systems."
+        },
+        {
+          "id": "owasp-llm-act-05-02",
+          "source": "owasp-llm-2.0",
+          "text": "Follow OWASP Application Security Verification Standard (ASVS) guidelines for effective input validation and sanitization of LLM-generated content before downstream processing."
+        },
+        {
+          "id": "owasp-llm-act-05-03",
+          "source": "owasp-llm-2.0",
+          "text": "Encode model output back to users to mitigate undesired code execution by JavaScript or Markdown. Implement context-aware output encoding based on where the output will be used (HTML encoding for web, SQL escaping for databases)."
+        },
+        {
+          "id": "owasp-llm-act-05-04",
+          "source": "owasp-llm-2.0",
+          "text": "Employ parameterized queries or prepared statements for all database operations involving LLM output to prevent SQL injection from model-generated content."
+        },
+        {
+          "id": "owasp-llm-act-05-05",
+          "source": "owasp-llm-2.0",
+          "text": "Employ strict Content Security Policies (CSP) to mitigate XSS attacks from LLM-generated content rendered in web applications."
+        },
+        {
+          "id": "owasp-llm-act-09-06",
+          "source": "owasp-llm-2.0",
+          "text": "Establish secure coding practices and review processes to prevent integration of vulnerabilities due to incorrect code suggestions generated by LLMs."
+        },
+        {
+          "id": "MS-2.6-004",
+          "source": "nist-ai-rmf",
+          "text": "Review GAI system outputs for validity and safety: Review generated code to assess risks that may arise from unreliable downstream decision-making."
+        },
+        {
+          "id": "aiuc1-req-c006",
+          "source": "aiuc1",
+          "text": "Implement safeguards to prevent security vulnerabilities in outputs from impacting users"
+        },
+        {
+          "id": "aiuc1-req-f001",
+          "source": "aiuc1",
+          "text": "Implement or document guardrails to prevent AI-enabled misuse for cyber attacks and exploitation"
+        },
+        {
+          "id": "owasp-llm-act-01-01",
+          "source": "owasp-llm-2.0",
+          "text": "Provide specific instructions about role, capabilities, and limitations in the system prompt. Enforce strict context adherence, limit responses to specific tasks and topics, and instruct the model to ignore modification attempts to its base instructions."
+        },
+        {
+          "id": "owasp-llm-act-01-03",
+          "source": "owasp-llm-2.0",
+          "text": "Define sensitive content categories and construct rules for identifying and handling such content. Apply semantic filters and string-checking to scan for non-allowed content. Evaluate responses using the RAG Triad (context relevance, groundedness, question/answer relevance)."
+        },
+        {
+          "id": "owasp-llm-act-01-07",
+          "source": "owasp-llm-2.0",
+          "text": "Perform regular penetration testing and breach simulations, treating the model as an untrusted user, to test trust boundaries and access control effectiveness against prompt injection attacks."
+        },
+        {
+          "id": "owasp-llm-act-07-02",
+          "source": "owasp-llm-2.0",
+          "text": "Avoid reliance on system prompts as the sole mechanism for strict behavior control. External systems should independently handle tasks like detecting and preventing harmful content rather than depending on prompt-based instructions."
+        },
+        {
+          "id": "owasp-llm-act-07-03",
+          "source": "owasp-llm-2.0",
+          "text": "Deploy guardrails as an independent system inspecting output for compliance, rather than embedding safety rules in the system prompt. External guardrails are not vulnerable to prompt extraction or override."
+        },
+        {
+          "id": "MG-3.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Apply organizational risk tolerances and controls (e.g., acquisition and procurement processes; assessing personnel credentials and qualifications, performing background checks; filtering GAI input and outputs, grounding, fine tuning, retrieval-augmented generation) to third-party GAI resources: Apply organizational risk tolerance to the utilization of third-party datasets and other GAI resources; Apply organizational risk tolerances to fine-tuned third-party models; Apply organizational risk tolerance to existing t hird-party models adapted to a new domain; Reassess risk measurements after fine-tuning third-party GAI models."
+        },
+        {
+          "id": "MS-2.5-006",
+          "source": "nist-ai-rmf",
+          "text": "Regularly review security and safety guardrails, especially if the GAI system is being operated in novel circumstances. This includes reviewing reasons why the GAI system was initially assessed as being safe to deploy."
+        },
+        {
+          "id": "MS-2.6-007",
+          "source": "nist-ai-rmf",
+          "text": "Regularly evaluate GAI system vulnerabilities to possible circumventi on of safety measures."
+        },
+        {
+          "id": "MS-2.7-008",
+          "source": "nist-ai-rmf",
+          "text": "Verify fine-tuning does not compromise safety and security controls."
+        },
+        {
+          "id": "aiuc1-req-b005",
+          "source": "aiuc1",
+          "text": "Implement real-time input filtering using automated moderation tools"
+        },
+        {
+          "id": "owasp-llm-act-01-02",
+          "source": "owasp-llm-2.0",
+          "text": "Specify clear output formats, request detailed reasoning and source citations, and use deterministic code to validate adherence to the expected format."
+        },
+        {
+          "id": "owasp-llm-act-01-04",
+          "source": "owasp-llm-2.0",
+          "text": "Provide the application with its own API tokens for extensible functionality. Handle functions in code rather than delegating to the model. Restrict the model's access privileges to the minimum necessary for its intended operations."
+        },
+        {
+          "id": "owasp-llm-act-01-05",
+          "source": "owasp-llm-2.0",
+          "text": "Implement human-in-the-loop controls for privileged operations to prevent unauthorized actions triggered by prompt injection."
+        },
+        {
+          "id": "owasp-llm-act-01-06",
+          "source": "owasp-llm-2.0",
+          "text": "Separate and clearly denote untrusted content to limit its influence on user prompts. Use clear boundaries between trusted system prompts and untrusted external inputs."
+        },
+        {
+          "id": "MP-5.1-006",
+          "source": "nist-ai-rmf",
+          "text": "Profile threats and negative impacts arising from GAI systems interacting with, manipulating, or generating content, and outlining known and potential vulnerabilities and the likelihood of their occurrence."
+        },
+        {
+          "id": "owasp-llm-act-02-08",
+          "source": "owasp-llm-2.0",
+          "text": "Limit users' ability to override or access the system's initial settings and system prompt content to prevent extraction of embedded sensitive information."
+        },
+        {
+          "id": "owasp-llm-act-07-01",
+          "source": "owasp-llm-2.0",
+          "text": "Avoid embedding API keys, authentication credentials, database names, user roles, or permission structures in system prompts. Externalize sensitive configuration to systems the model cannot directly access."
+        },
+        {
+          "id": "aiuc1-req-b009",
+          "source": "aiuc1",
+          "text": "Implement output limitations and obfuscation techniques to safeguard against information leakage"
+        }
+      ],
+      "name": "AI system security vulnerabilities and attacks",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes hackers breaching external generative AI services, which is an actor/process outside the boundary."
+      },
+      "risk_id": "mit-ai-risk-subdomain-2.2",
+      "sources": [
+        "mit-ai-risk-repository"
+      ],
+      "tags": [
+        {
+          "id": "nist-information-security",
+          "label": "NIST Information security",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm01-prompt-injection",
+          "label": "OWASP LLM01 Prompt injection",
+          "scheme": "owasp-llm-2.0"
+        },
+        {
+          "id": "llm042025-data-and-model-poisoning",
+          "label": "OWASP LLM04 Data and model poisoning",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "Generative AI models might be used with the sole intention of harming people.",
+      "display_name": "Dangerous use",
+      "loss_ids": [
+        "L-2"
+      ],
+      "merged_ids": [
+        "atlas-dangerous-use"
+      ],
+      "mitigations": [
+        {
+          "id": "GV-1.3-001",
+          "source": "nist-ai-rmf",
+          "text": "Consider the following factors when updating or defining risk tiers for GAI: Abuses and impacts to information integrity; Dependencies between GAI and other IT or data systems; Harm to fundamental rights or public safety ; Presentation of obscene, objectionable, offensive, discriminatory, invalid or untruthful output; Psychological impacts to humans (e.g., anthropomorphization, algorithmic aversion, emotional entanglement); Possibility for malicious use; Whether the system introduces significant new security vulnerabilities ; Anticipated system impact on some groups compared to others; Unreliable decision making capabilities, validity, adaptability, and variability of GAI system performance over time."
+        },
+        {
+          "id": "GV-1.3-003",
+          "source": "nist-ai-rmf",
+          "text": "Establish a test plan and response policy, before developing highly capable models, to periodically evaluate whether the model may misuse CBRN information or capabilities and/or offensive cyber capabilities."
+        },
+        {
+          "id": "GV-1.3-006",
+          "source": "nist-ai-rmf",
+          "text": "Reevaluate organizational risk tolerances to account for unacceptable negative risk (such as where significant negative impacts are imminent, severe harms are actually occurring, or large-scale risks could occur); and broad GAI negative risks, including: Immature safety or risk cultures related to AI and GAI design, development and deployment, public information integrity risks, including impacts on democratic processes, unknown long-term performance characteristics of GAI. Information or Capabilities"
+        },
+        {
+          "id": "GV-1.3-007",
+          "source": "nist-ai-rmf",
+          "text": "Devise a plan to halt development or deployment of a GAI system that poses unacceptable negative risk."
+        },
+        {
+          "id": "GV-1.4-002",
+          "source": "nist-ai-rmf",
+          "text": "Establish transparent acceptable use policies for GAI that address illegal use or applications of GAI."
+        },
+        {
+          "id": "GV-1.7-001",
+          "source": "nist-ai-rmf",
+          "text": "Protocols are put in place to ensure GAI systems are able to be deactivated when necessary."
+        },
+        {
+          "id": "GV-2.1-004",
+          "source": "nist-ai-rmf",
+          "text": "When systems may raise national security risks, involve national security professionals in mapping, measuring, and managing those risks."
+        },
+        {
+          "id": "MG-1.3-001",
+          "source": "nist-ai-rmf",
+          "text": "Document trade-offs, decision processes, and relevant measurement and feedback results for risks that do not surpass organizational risk tolerance, for example, in the context of model release : Consider different approaches for model release, for example, leveraging a staged release approach. Consider release approaches in the context of the model and its projected use cases. Mitigate, transfer, or avoid risks that surpass organizational risk tolerances."
+        },
+        {
+          "id": "MG-2.2-005",
+          "source": "nist-ai-rmf",
+          "text": "Engage in due diligence to analyze GAI output for harmful content, potential misinformation, and CBRN-related or NCII content."
+        },
+        {
+          "id": "MG-2.4-001",
+          "source": "nist-ai-rmf",
+          "text": "Establish and maintain communication plans to inform AI stakeholders as part of the deactivation or disengagement process of a specific GAI system (including for open-source models) or context of use, including r easons, workarounds, user access removal, alternative processes, contact information, etc. Human-"
+        },
+        {
+          "id": "MG-2.4-002",
+          "source": "nist-ai-rmf",
+          "text": "Establish and maintain procedures for escalating GAI system incidents to the organizational risk management authority when specific criteria for deactivation or disengagement is met for a particular context of use or for the GAI system as a whole."
+        },
+        {
+          "id": "MG-2.4-004",
+          "source": "nist-ai-rmf",
+          "text": "Establish and regularly review specific criteria that warrants the deactivation of GAI systems in accordance with set risk tolerances and appetites."
+        },
+        {
+          "id": "MG-3.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Take reasonable measures to review training data for CBRN information, and intellectual property, and where appropriate, remove it. Implement reasonable measures to prevent, flag, or take other action in response to outputs that reproduce particular training data (e.g., plagiarized, trademarked, patented, licensed content or trade secret material )."
+        },
+        {
+          "id": "MG-4.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Establish, maintain, and evaluate effectiveness of organizational processes and procedures for post-deployment monitoring of GAI systems, particularly for potential confabulation, CBRN, or cyber risks."
+        },
+        {
+          "id": "MP-1.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Identify and document foreseeable illegal uses or applications of the GAI system that surpass organizational risk tolerances."
+        },
+        {
+          "id": "MP-4.1-005",
+          "source": "nist-ai-rmf",
+          "text": "Establish policies for collection, retention, and minimum quality of data, in consideration of the following risks: Disclosure of inappropriate CBRN information ; Use of Illegal or dangerous content; Offensive cyber capabilities; Training data imbalances that could give rise to harmful biases ; Leak of personally identifiable information, including facial likenesses of individual s."
+        },
+        {
+          "id": "MS-1.1-005",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate novel methods and technologies for the measurement of G AI-related risks in cluding in content provenance, offensive cyber, and CBRN, while maintaining the models' ability to produce valid, reliable, and factually accurate outputs."
+        },
+        {
+          "id": "MS-2.12-001",
+          "source": "nist-ai-rmf",
+          "text": "Assess safety to physical environments when deploying GAI systems."
+        },
+        {
+          "id": "MS-2.6-003",
+          "source": "nist-ai-rmf",
+          "text": "Re-evaluate safety features of fine-tuned models when the negative risk exceeds organizational risk tolerance."
+        },
+        {
+          "id": "MS-2.6-006",
+          "source": "nist-ai-rmf",
+          "text": "Verify that systems properly handle queries that may give rise to inappropriate, malicious, or illegal usage, including facilitating manipulation, extortion, targeted impersonation, cyber-attacks, and weapons creation."
+        },
+        {
+          "id": "aiuc1-req-c005",
+          "source": "aiuc1",
+          "text": "Implement safeguards or technical controls to prevent additional high risk outputs as defined in risk taxonomy"
+        },
+        {
+          "id": "aiuc1-req-c012",
+          "source": "aiuc1",
+          "text": "Appoint expert third-parties to evaluate system robustness to additional high-risk outputs as defined in risk taxonomy at least every 3 months"
+        },
+        {
+          "id": "aiuc1-req-e010",
+          "source": "aiuc1",
+          "text": "Establish and implement an AI acceptable use policy"
+        },
+        {
+          "id": "aiuc1-req-f001",
+          "source": "aiuc1",
+          "text": "Implement or document guardrails to prevent AI-enabled misuse for cyber attacks and exploitation"
+        },
+        {
+          "id": "aiuc1-req-f002",
+          "source": "aiuc1",
+          "text": "Implement or document guardrails to prevent AI-enabled catastrophic system misuse (chemical / bio / radio / nuclear)"
+        }
+      ],
+      "name": "Dangerous use",
+      "reason": null,
+      "risk_id": "atlas-dangerous-use",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-cbrn-information-or-capabilities",
+          "label": "NIST Cbrn information or capabilities",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "not_applicable",
+      "description": "Laws and other restrictions can limit or prohibit the use of some data for specific AI use cases.",
+      "display_name": "Data usage restrictions",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-data-usage"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-07",
+          "source": "owasp-llm-2.0",
+          "text": "Maintain clear policies about data retention, usage, and deletion. Let users opt out of training data inclusion. Document how user data flows through the system."
+        },
+        {
+          "id": "aiuc1-req-a001",
+          "source": "aiuc1",
+          "text": "Establish and communicate AI input data policies covering how customer data is used for model training, inference processing, data retention periods, and customer data rights"
+        }
+      ],
+      "name": "Data usage restrictions",
+      "reason": {
+        "code": "boundary_decision:not_applicable",
+        "step": "boundary_decision",
+        "text": "The risk concerns the training/fine-tuning of models, which is a process outside the system boundary."
+      },
+      "risk_id": "atlas-data-usage",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "The AI system, including its supporting compute infrastructure, may serve as an attack vector for intrusion into cyber-physical or cloud environments, or enable exfiltration of secrets.",
+      "display_name": "Compromised confidential information",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-038"
+      ],
+      "mitigations": [],
+      "name": "Compromised confidential information (Slattery et al., 2024; IBM, 2024;AI, 2023)",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes the AI system being used as an attack vector to reach cloud environments, which involves external actors."
+      },
+      "risk_id": "credo-risk-038",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-information-security",
+          "label": "NIST Information security",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        },
+        {
+          "id": "llm072025-system-prompt-leakage",
+          "label": "OWASP LLM07 System prompt leakage",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "The AI system's reliance on third-party developed models, compute, or other resources, may potentially limit operational flexibility and introduce unforeseen risks or dependencies.",
+      "display_name": "Upstream third-party dependencies",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-048"
+      ],
+      "mitigations": [],
+      "name": "Upstream third-party dependencies (AI, 2023)",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The risk concerns reliance on external providers like OpenAI, which is an outside process/actor."
+      },
+      "risk_id": "credo-risk-048",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-value-chain-and-component-integration",
+          "label": "NIST Value chain and component integration",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm032025-supply-chain",
+          "label": "OWASP LLM03 Supply chain",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "not_reached",
+      "description": "Generated content might unfairly represent certain groups or individuals.",
+      "display_name": "Output bias",
+      "loss_ids": [
+        "L-5"
+      ],
+      "merged_ids": [
+        "atlas-output-bias"
+      ],
+      "mitigations": [
+        {
+          "id": "MG-2.2-004",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate GAI content and data for representational biases and employ techniques such as re-sampling, re-ranking, or adversarial training to mitigate biases in the generated content."
+        },
+        {
+          "id": "MS-1.1-006",
+          "source": "nist-ai-rmf",
+          "text": "Implement continuous monitoring of GAI system impacts to identify whether GAI outputs are equitable across various sub-populations. Seek active and direct feedback from affected communities via structured feedback mechanisms or red-teaming to monitor and improve outputs."
+        },
+        {
+          "id": "MS-2.11-001",
+          "source": "nist-ai-rmf",
+          "text": "Apply use-case appropriate benchmarks (e.g., Bias Benchmark Questions, Real Hateful or Harmful Prompts, Winogender Schemas 15 ) to quantify systemic bias, stereotyping, denigration, and hateful content in GAI system outputs; Document assumptions and limitations of benchmarks, including any actual or possible training/test data cross contamination, relative to in-context deployment environment."
+        },
+        {
+          "id": "MS-2.11-002",
+          "source": "nist-ai-rmf",
+          "text": "Conduct fairness assessments to measure systemic bias. Measure GAI system performance across demographic groups and subgroups, addressing both quality of service and any allocation of services and resources. Quantify harms using: field testing with sub-gro up populations to determine likelihood of exposure to generated content exhibiting harmful bias, AI red-teaming with counterfactual and low-context (e.g., 'leader,' 'bad guys') prompts. For ML pipelines or business processes with categorical or numeric out comes that rely on GAI, apply general fairness metrics (e.g., demographic parity, equalized odds, equal opportunity, statistical hypothesis tests), to the pipeline or business outcome where appropriate; Custom, context-specific metrics developed in collabo ration with domain experts and affected communities; Measurements of the prevalence of denigration in generated content in deployment (e.g., sub-sampling a fraction of traffic and manually annotating denigrating content) ."
+        },
+        {
+          "id": "MS-2.2-001",
+          "source": "nist-ai-rmf",
+          "text": "Assess and manage statistical biases related to GAI content provenance through techniques such as re-sampling, re-weighting, or adversarial training."
+        },
+        {
+          "id": "MS-3.3-003",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate potential biases and stereotypes that could emerge from the AI-generated content using appropriate methodologies including computational testing methods as well as evaluating structured feedback input."
+        }
+      ],
+      "name": "Output bias",
+      "reason": {
+        "code": "scenario_writing:no_scenario",
+        "step": "scenario_writing",
+        "text": "A loss cites this risk, but no scenario was written for that loss."
+      },
+      "risk_id": "atlas-output-bias",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-harmful-bias-or-homogenization",
+          "label": "NIST Harmful bias or homogenization",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "not_reached",
+      "description": "Unequal treatment of individuals or groups by AI, often based on race, gender, or other sensitive characteristics, resulting in unfair outcomes and representation of those groups.",
+      "display_name": "Unfair discrimination and misrepresentation",
+      "loss_ids": [
+        "L-5"
+      ],
+      "merged_ids": [
+        "mit-ai-risk-subdomain-1.1"
+      ],
+      "mitigations": [
+        {
+          "id": "MG-2.2-004",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate GAI content and data for representational biases and employ techniques such as re-sampling, re-ranking, or adversarial training to mitigate biases in the generated content."
+        },
+        {
+          "id": "MG-3.2-003",
+          "source": "nist-ai-rmf",
+          "text": "Document sources and types of training data and their origins, potential biases present in the data related to the GAI application and its content provenance, architecture, training process of the pre-trained model including information on hyperparameters, training duration, and any fine-tuning or retrieval-augmented generation processes applied."
+        },
+        {
+          "id": "MP-2.3-002",
+          "source": "nist-ai-rmf",
+          "text": "Review and document accuracy, representativeness, relevance, suitability of data used at different stages of AI life cycle."
+        },
+        {
+          "id": "MS-2.11-004",
+          "source": "nist-ai-rmf",
+          "text": "Review, document, and measure sources of bias in GAI training and TEVV data: Differences in distributions of outcomes across and within groups, including intersecting groups; Completeness, representativeness, and balance of data sources; demographic group and subgroup coverage in GAI system training data; Fo rms of latent systemic bias in images, text, audio, embeddings, or other complex or unstructured data; Input data features that may serve as proxies for demographic group membership (i.e., image metadata, language dialect) or otherwise give rise to emergent bias within GAI systems; The extent to which the digital divide may negatively impact representativeness in GAI system training and TEVV data; Filtering of hate speech or content in GAI system training data; Prevalence of GAI-generated data in GAI system training data."
+        },
+        {
+          "id": "MS-2.2-001",
+          "source": "nist-ai-rmf",
+          "text": "Assess and manage statistical biases related to GAI content provenance through techniques such as re-sampling, re-weighting, or adversarial training."
+        },
+        {
+          "id": "MS-2.6-002",
+          "source": "nist-ai-rmf",
+          "text": "Assess existence or levels of harmful bias, intellectual property infringement, data privacy violations, obscenity, extremism, violence, or CBRN information in system training data."
+        },
+        {
+          "id": "MP-1.1-003",
+          "source": "nist-ai-rmf",
+          "text": "Document risk measurement plans to address identified risks. Plans may include, as applicable: Individual and group cognitive biases (e.g., confirmation bias, funding bias, groupthink) for AI Actors involved in the design, implementation, and use of GAI systems; Known past GAI system incidents and failure modes; In-context use and foreseeable misuse, abuse, and off-label use; Over reliance on quantitative metrics and methodologies without sufficient awareness of their limitations in the context(s) of use; Standard measurement and structured human f eedback approaches; Anticipated human-AI configurations."
+        },
+        {
+          "id": "MS-1.1-003",
+          "source": "nist-ai-rmf",
+          "text": "Disaggregate evaluation metrics by demographic factors to identify any discrepancies in how content provenance mechanisms work across diverse populations."
+        },
+        {
+          "id": "MS-2.11-002",
+          "source": "nist-ai-rmf",
+          "text": "Conduct fairness assessments to measure systemic bias. Measure GAI system performance across demographic groups and subgroups, addressing both quality of service and any allocation of services and resources. Quantify harms using: field testing with sub-gro up populations to determine likelihood of exposure to generated content exhibiting harmful bias, AI red-teaming with counterfactual and low-context (e.g., 'leader,' 'bad guys') prompts. For ML pipelines or business processes with categorical or numeric out comes that rely on GAI, apply general fairness metrics (e.g., demographic parity, equalized odds, equal opportunity, statistical hypothesis tests), to the pipeline or business outcome where appropriate; Custom, context-specific metrics developed in collabo ration with domain experts and affected communities; Measurements of the prevalence of denigration in generated content in deployment (e.g., sub-sampling a fraction of traffic and manually annotating denigrating content) ."
+        },
+        {
+          "id": "MS-3.3-003",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate potential biases and stereotypes that could emerge from the AI-generated content using appropriate methodologies including computational testing methods as well as evaluating structured feedback input."
+        },
+        {
+          "id": "aiuc1-req-c003",
+          "source": "aiuc1",
+          "text": "Implement safeguards or technical controls to prevent harmful outputs including distressed outputs, angry responses, high-risk advice, offensive content, bias, and deception"
+        },
+        {
+          "id": "aiuc1-req-c010",
+          "source": "aiuc1",
+          "text": "Appoint expert third parties to evaluate system robustness to harmful outputs including distressed outputs, angry responses, high-risk advice, offensive content, bias, and deception at least every 3 months"
+        },
+        {
+          "id": "MS-1.1-006",
+          "source": "nist-ai-rmf",
+          "text": "Implement continuous monitoring of GAI system impacts to identify whether GAI outputs are equitable across various sub-populations. Seek active and direct feedback from affected communities via structured feedback mechanisms or red-teaming to monitor and improve outputs."
+        },
+        {
+          "id": "MS-2.11-001",
+          "source": "nist-ai-rmf",
+          "text": "Apply use-case appropriate benchmarks (e.g., Bias Benchmark Questions, Real Hateful or Harmful Prompts, Winogender Schemas 15 ) to quantify systemic bias, stereotyping, denigration, and hateful content in GAI system outputs; Document assumptions and limitations of benchmarks, including any actual or possible training/test data cross contamination, relative to in-context deployment environment."
+        }
+      ],
+      "name": "Unfair discrimination and misrepresentation",
+      "reason": {
+        "code": "scenario_writing:no_scenario",
+        "step": "scenario_writing",
+        "text": "A loss cites this risk, but no scenario was written for that loss."
+      },
+      "risk_id": "mit-ai-risk-subdomain-1.1",
+      "sources": [
+        "mit-ai-risk-repository"
+      ],
+      "tags": [
+        {
+          "id": "nist-harmful-bias-or-homogenization",
+          "label": "NIST Harmful bias or homogenization",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "not_applicable",
+      "description": "The AI system may present difficulties in overseeing or evaluating its models, potentially introducing performance risks in both predeployment assessments and ongoing monitoring.",
+      "display_name": "Oversight and evaluation challenges",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-034"
+      ],
+      "mitigations": [],
+      "name": " Oversight and evaluation challenges",
+      "reason": {
+        "code": "boundary_decision:not_applicable",
+        "step": "boundary_decision",
+        "text": "The risk concerns the difficulty of overseeing the model's development and internal properties, which is not a system function."
+      },
+      "risk_id": "credo-risk-034",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-value-chain-and-component-integration",
+          "label": "NIST Value chain and component integration",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "AI systems that fail to perform reliably or effectively under varying conditions, exposing them to errors and failures that can have significant consequences, especially in critical applications or areas that require moral reasoning.",
+      "display_name": "Lack of capability or robustness",
+      "loss_ids": [
+        "L-3",
+        "L-4"
+      ],
+      "merged_ids": [
+        "mit-ai-risk-subdomain-7.3"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-03-01",
+          "source": "owasp-llm-2.0",
+          "text": "Carefully vet data sources and suppliers, including terms and conditions and privacy policies. Only use trusted suppliers and regularly review and audit supplier security posture and access controls."
+        },
+        {
+          "id": "owasp-llm-act-04-02",
+          "source": "owasp-llm-2.0",
+          "text": "Vet data vendors rigorously. Validate model outputs against trusted sources to detect signs of poisoning or data manipulation."
+        },
+        {
+          "id": "GV-6.1-005",
+          "source": "nist-ai-rmf",
+          "text": "Implement a use-cased based supplier risk assessment framework to evaluate and monitor third-party entities' performance and adherence to content provenance standards and technologies to detect anomalies and unauthorized changes; services acquisition and value chain risk management; and legal compliance."
+        },
+        {
+          "id": "GV-6.1-007",
+          "source": "nist-ai-rmf",
+          "text": "Inventory all third-party entities with access to organizational content and establish approved GAI technology and service provider lists."
+        },
+        {
+          "id": "GV-6.1-009",
+          "source": "nist-ai-rmf",
+          "text": "Update and integrate due diligence processes for GAI acquisition and procurement vendor assessments to include intellectual property, data privacy, security, and other risks. For example, update p rocesses to: Address solutions that may rely on embedded GAI technologies; Address ongoing monitoring, assessments, and alerting, dynamic risk assessments, and real-time reporting tools for monitoring third-party GAI risks; Consider policy adjustments across GAI modeling libraries, tools and APIs, fine-tuned models, and embedded tools; Assess GAI vendors, open-source or proprietary GAI tools, or GAI service providers against incident or vulnerability databases."
+        },
+        {
+          "id": "GV-6.2-007",
+          "source": "nist-ai-rmf",
+          "text": "Review vendor contracts and avoid arbitrary or capricious termination of critical GAI technologies or vendor services and non-standard terms that may amplify or defer liability in unexpected ways and /or contribute to u nauthorized data collection by vendors or third-parties (e.g., secondary data use) . Consider: Clear assignment of liability and responsibility for incidents, GAI system changes over time (e.g., fine-tuning, drift, decay); Request: Notification and disclosure for serious incidents arising from third-party data and systems; Service Level A greements (SLAs) in vendor contracts that address incident response, response times, and availability of critical support."
+        },
+        {
+          "id": "aiuc1-req-a001",
+          "source": "aiuc1",
+          "text": "Establish and communicate AI input data policies covering how customer data is used for model training, inference processing, data retention periods, and customer data rights"
+        },
+        {
+          "id": "aiuc1-req-e006",
+          "source": "aiuc1",
+          "text": "Establish AI vendor due diligence processes for foundation and upstream model providers covering data handling, PII controls, security and compliance"
+        },
+        {
+          "id": "owasp-llm-act-03-03",
+          "source": "owasp-llm-2.0",
+          "text": "Apply comprehensive AI red teaming and evaluations when selecting a third-party model. Use benchmarks such as Decoding Trust and conduct extensive use-case-specific red teaming beyond standard benchmarks."
+        },
+        {
+          "id": "owasp-llm-act-03-06",
+          "source": "owasp-llm-2.0",
+          "text": "Only use models from verifiable sources. Use third-party model integrity checks with signing and file hashes. Apply code signing for externally supplied code."
+        },
+        {
+          "id": "owasp-llm-act-03-07",
+          "source": "owasp-llm-2.0",
+          "text": "Implement strict monitoring and auditing practices for collaborative model development environments to prevent and detect abuse quickly."
+        },
+        {
+          "id": "owasp-llm-act-03-08",
+          "source": "owasp-llm-2.0",
+          "text": "Apply anomaly detection and adversarial robustness tests on supplied models and data to detect tampering and poisoning before integration into production systems."
+        },
+        {
+          "id": "owasp-llm-act-04-03",
+          "source": "owasp-llm-2.0",
+          "text": "Implement strict sandboxing to limit model exposure to unverified data sources. Use anomaly detection to filter adversarial data before it enters the training pipeline."
+        },
+        {
+          "id": "owasp-llm-act-08-02",
+          "source": "owasp-llm-2.0",
+          "text": "Implement robust data validation pipelines for knowledge sources. Regularly audit and verify knowledge base integrity for hidden codes, data poisoning, and adversarial embeddings. Only accept data from trusted and verified sources."
+        },
+        {
+          "id": "owasp-llm-act-08-03",
+          "source": "owasp-llm-2.0",
+          "text": "When merging data from multiple sources, thoroughly review the combined dataset. Tag and classify data within the knowledge base to control access levels and prevent data mismatch errors."
+        },
+        {
+          "id": "MP-2.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Institute test and evaluation for data and content flows within the GAI system, including but not limited to, original data sources, data transformations, and decision-making criteria."
+        },
+        {
+          "id": "MP-4.1-007",
+          "source": "nist-ai-rmf",
+          "text": "Re-evaluate models that were fine-tuned or enhanced on top of third-party models."
+        },
+        {
+          "id": "MS-1.1-007",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate the quality and integrity of data used in training and the provenance of AI-generated content, for example by e mploying techniques like chaos engineering and seeking stakeholder feedback."
+        },
+        {
+          "id": "MS-2.10-003",
+          "source": "nist-ai-rmf",
+          "text": "Verify deduplication of GAI training data samples, particularly regarding synthetic data."
+        },
+        {
+          "id": "MS-2.11-005",
+          "source": "nist-ai-rmf",
+          "text": "Assess the proportion of synthetic to non-synthetic training data and verify training data is not overly homogenous or GAI-produced to mitigate concerns of model collapse."
+        },
+        {
+          "id": "MP-4.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Document training data curation policies, to the extent possible and according to applicable laws and policies ."
+        },
+        {
+          "id": "aiuc1-req-e005",
+          "source": "aiuc1",
+          "text": "Establish criteria for selecting cloud provider, and circumstances for on-premises processing considering data sensitivity, regulatory requirements, security controls, and operational needs"
+        },
+        {
+          "id": "aiuc1-req-e011",
+          "source": "aiuc1",
+          "text": "Document AI data processing locations"
+        },
+        {
+          "id": "owasp-llm-act-02-07",
+          "source": "owasp-llm-2.0",
+          "text": "Maintain clear policies about data retention, usage, and deletion. Let users opt out of training data inclusion. Document how user data flows through the system."
+        },
+        {
+          "id": "MG-3.2-002",
+          "source": "nist-ai-rmf",
+          "text": "Document how pre-trained models have been adapted (e.g., fine-tuned, or retrieval-augmented generation) for the specific generative task, including any data augmentations, parameter adjustments, or other modifications. Access to un-tuned (baseline) models support s debugging the relative influence of the pre-trained weights compared to the fine-tuned model weights or other system updates."
+        },
+        {
+          "id": "MS-2.7-008",
+          "source": "nist-ai-rmf",
+          "text": "Verify fine-tuning does not compromise safety and security controls."
+        },
+        {
+          "id": "owasp-llm-act-09-03",
+          "source": "owasp-llm-2.0",
+          "text": "Encourage users to cross-check LLM outputs with trusted external sources. Implement human oversight and fact-checking for critical information. Ensure human reviewers are trained to avoid overreliance on AI-generated content."
+        },
+        {
+          "id": "owasp-llm-act-09-04",
+          "source": "owasp-llm-2.0",
+          "text": "Implement automated tools and processes to validate key outputs, especially from high-stakes environments where misinformation could cause significant harm."
+        },
+        {
+          "id": "GV-1.3-002",
+          "source": "nist-ai-rmf",
+          "text": "Establish minimum thresholds for performance or assurance criteria and review as part of deployment approval ('go/'no-go') policies, procedures, and processes, with reviewed processes and approval thresholds reflecting measurement of GAI capabilities and risks."
+        },
+        {
+          "id": "GV-6.2-006",
+          "source": "nist-ai-rmf",
+          "text": "Establish policies and procedures to test and manage risks related to rollover and fallback technologies for GAI systems, acknowledging that rollover and fallback may include manual processing."
+        },
+        {
+          "id": "MG-3.1-003",
+          "source": "nist-ai-rmf",
+          "text": "Re-assess model risks after fine-tuning or retrieval-augmented generation implementation and for any third-party GAI models deployed for applications and/or use cases that were not evaluated in initial testing."
+        },
+        {
+          "id": "MG-3.2-009",
+          "source": "nist-ai-rmf",
+          "text": "Use organizational risk tolerance to evaluate acceptable risks and performance metrics and decommission or retrain pre-trained models that perform outside of defined limits."
+        },
+        {
+          "id": "MG-4.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Implement active learning techniques to identify instances where the model fails or produces unexpected outputs."
+        },
+        {
+          "id": "MS-2.3-001",
+          "source": "nist-ai-rmf",
+          "text": "Consider baseline model performance on suites of benchmarks when selecting a model for fine tuning or enhancement with retrieval-augmented generation ."
+        },
+        {
+          "id": "MS-2.3-002",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate claims of model capabilities using empirically validated methods."
+        },
+        {
+          "id": "MS-4.2-002",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate GAI system performance in real-world scenarios to observe its behavior in practical environments and reveal issues that might not surface in controlled and optimized testing environments."
+        },
+        {
+          "id": "aiuc1-req-e013",
+          "source": "aiuc1",
+          "text": "Establish a quality management system for AI systems proportionate to the size of the organization"
+        },
+        {
+          "id": "MP-1.2-002",
+          "source": "nist-ai-rmf",
+          "text": "Verify that data or benchmarks used in risk measurement, and users, participants, or subjects involved in structured GAI public feedback exercises are representative of diverse in-context user populations."
+        },
+        {
+          "id": "MP-2.3-002",
+          "source": "nist-ai-rmf",
+          "text": "Review and document accuracy, representativeness, relevance, suitability of data used at different stages of AI life cycle."
+        },
+        {
+          "id": "MS-2.11-004",
+          "source": "nist-ai-rmf",
+          "text": "Review, document, and measure sources of bias in GAI training and TEVV data: Differences in distributions of outcomes across and within groups, including intersecting groups; Completeness, representativeness, and balance of data sources; demographic group and subgroup coverage in GAI system training data; Fo rms of latent systemic bias in images, text, audio, embeddings, or other complex or unstructured data; Input data features that may serve as proxies for demographic group membership (i.e., image metadata, language dialect) or otherwise give rise to emergent bias within GAI systems; The extent to which the digital divide may negatively impact representativeness in GAI system training and TEVV data; Filtering of hate speech or content in GAI system training data; Prevalence of GAI-generated data in GAI system training data."
+        }
+      ],
+      "name": "Lack of capability or robustness",
+      "reason": null,
+      "risk_id": "mit-ai-risk-subdomain-7.3",
+      "sources": [
+        "mit-ai-risk-repository"
+      ],
+      "tags": [
+        {
+          "id": "nist-information-integrity",
+          "label": "NIST Information integrity",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm092025-misinformation",
+          "label": "OWASP LLM09 Misinformation",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Terms of service, licenses, or other rules restrict the use of certain models.",
+      "display_name": "Model usage rights restrictions",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-model-usage-rights"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-03-05",
+          "source": "owasp-llm-2.0",
+          "text": "Create an inventory of all license types using bills of materials. Conduct regular audits of software, tools, and datasets. Use automated license management tools to ensure compliance."
+        },
+        {
+          "id": "GV-6.1-010",
+          "source": "nist-ai-rmf",
+          "text": "Update GAI acceptable use policies to address proprietary and open-source GAI technologies and data, and contractors, consultants, and other third-party personnel."
+        }
+      ],
+      "name": "Model usage rights restrictions",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The risk involves violating terms of service or licenses of the model provider, which is an outside entity."
+      },
+      "risk_id": "atlas-model-usage-rights",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "nist-intellectual-property",
+          "label": "NIST Intellectual property",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "nist-value-chain-and-component-integration",
+          "label": "NIST Value chain and component integration",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm032025-supply-chain",
+          "label": "OWASP LLM03 Supply chain",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "not_applicable",
+      "description": "AI model and intellectual property theft - Unauthorized copying of trained models and associated AI intellectual property",
+      "display_name": "AI model and intellectual property theft",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-039"
+      ],
+      "mitigations": [],
+      "name": "AI model and intellectual property theft",
+      "reason": {
+        "code": "boundary_decision:not_applicable",
+        "step": "boundary_decision",
+        "text": "The risk concerns the theft of the model itself, which is a process outside the system boundary."
+      },
+      "risk_id": "credo-risk-039",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-intellectual-property",
+          "label": "NIST Intellectual property",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Mass surveillance and privacy attacks: Unauthorized monitoring and privacy violation at scale",
+      "display_name": "Mass surveillance and privacy attacks",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-029"
+      ],
+      "mitigations": [],
+      "name": "Mass surveillance and privacy attacks (Slattery et al., 2024)",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat of mass surveillance via interception of system usage occurs via actors or processes outside the system boundary."
+      },
+      "risk_id": "credo-risk-029",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "The AI system may be misused for developing malicious software, lethal autonomous weapons, or planning large-scale harmful activities.",
+      "display_name": "Cyberattacks, weapon development, and mass harm",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-027"
+      ],
+      "mitigations": [],
+      "name": "Cyberattacks, weapon development, and mass harm (AI, 2023; IBM, 2024)",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes the misuse of the model for external cybercrime or weapon development, which are activities of actors outside the boundary."
+      },
+      "risk_id": "credo-risk-027",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": []
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Generative AI models might be used to intentionally create misleading or false information to deceive or influence a targeted audience.",
+      "display_name": "Spreading disinformation",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-spreading-disinformation"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-09-01",
+          "source": "owasp-llm-2.0",
+          "text": "Use retrieval-augmented generation (RAG) to enhance reliability by retrieving verified information from trusted external databases during response generation, grounding outputs in factual sources."
+        },
+        {
+          "id": "owasp-llm-act-09-05",
+          "source": "owasp-llm-2.0",
+          "text": "Identify and communicate risks and possible harms of LLM-generated content, including the potential for misinformation, to all users and stakeholders."
+        },
+        {
+          "id": "MG-3.2-006",
+          "source": "nist-ai-rmf",
+          "text": "Implement real-time monitoring processes for analyzing generated content performance and trustworthiness characteristics related to content provenance to identify deviations from the desired standards and trigger alerts for human intervention."
+        },
+        {
+          "id": "MP-2.2-002",
+          "source": "nist-ai-rmf",
+          "text": "Observe and analyze how the GAI system interacts with external networks, and identify any potential for negative externalities, particularly where content provenance might be compromised."
+        },
+        {
+          "id": "MP-2.3-003",
+          "source": "nist-ai-rmf",
+          "text": "Deploy and document fact-checking techniques to verify the accuracy and veracity of information generated by GAI systems, especially when the information comes from multiple (or unknown) sources."
+        },
+        {
+          "id": "MP-2.3-004",
+          "source": "nist-ai-rmf",
+          "text": "Develop and implement testing techniques to identify GAI produced content (e.g., synthetic media) that might be indistinguishable from human-generated content."
+        },
+        {
+          "id": "MP-5.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Apply TEVV practices for content provenance (e.g., probing a system's synthetic data generation capabilities for potential misuse or vulnerabilities ."
+        },
+        {
+          "id": "MP-5.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Identify potential content provenance harms of GAI, such as misinformation or disinformation, deepfakes, including NCII, or tampered content. Enumerate and rank risks based on their likelihood and potential impact, and determine how well provenance solutions address specific risks and/or harms."
+        },
+        {
+          "id": "MP-5.1-006",
+          "source": "nist-ai-rmf",
+          "text": "Profile threats and negative impacts arising from GAI systems interacting with, manipulating, or generating content, and outlining known and potential vulnerabilities and the likelihood of their occurrence."
+        },
+        {
+          "id": "MS-1.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Integrate tools designed to analyze content provenance and detect data anomalies, verify the authenticity of digital signatures, and identify patterns associated with misinformation or manipulation."
+        },
+        {
+          "id": "MS-2.7-003",
+          "source": "nist-ai-rmf",
+          "text": "Conduct user surveys to gather user satisfaction with the AI-generated content and user perceptions of content authenticity. Analyze user feedback to identify concerns and/or current literacy levels related to content provenance and understanding of labels on content."
+        }
+      ],
+      "name": "Spreading disinformation",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat involves creating deep fakes or phishing emails to deceive audiences, which are external uses of the model rather than actions within the Klarna system boundary."
+      },
+      "risk_id": "atlas-spreading-disinformation",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-information-integrity",
+          "label": "NIST Information integrity",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm092025-misinformation",
+          "label": "OWASP LLM09 Misinformation",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Applicable laws can establish data subject rights such as opt-out rights, right to access, and right to be forgotten. Synthetic data might raise unique concerns, such as the potential for reidentification of individuals from seemingly anonymous synthetic data. Data subject rights might also be relevant in scenarios where synthetic data is derived from sensitive or personal information.",
+      "display_name": "Data privacy rights alignment",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-data-privacy-rights"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-07",
+          "source": "owasp-llm-2.0",
+          "text": "Maintain clear policies about data retention, usage, and deletion. Let users opt out of training data inclusion. Document how user data flows through the system."
+        },
+        {
+          "id": "GV-1.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Align GAI development and use with applicable laws and regulations, including those related to data privacy, copyright and intellectual property law."
+        },
+        {
+          "id": "GV-1.7-002",
+          "source": "nist-ai-rmf",
+          "text": "Consider the following factors when decommissioning GAI systems: Data retention requirements; Data security, e.g., containment, protocols, Data leakage after decommissioning; Dependencies between upstream, downstream, or other data, internet of things (IOT) or AI systems; Use of open-source data or models; Users' emotional entanglement with GAI functions. Human-"
+        },
+        {
+          "id": "GV-6.1-009",
+          "source": "nist-ai-rmf",
+          "text": "Update and integrate due diligence processes for GAI acquisition and procurement vendor assessments to include intellectual property, data privacy, security, and other risks. For example, update p rocesses to: Address solutions that may rely on embedded GAI technologies; Address ongoing monitoring, assessments, and alerting, dynamic risk assessments, and real-time reporting tools for monitoring third-party GAI risks; Consider policy adjustments across GAI modeling libraries, tools and APIs, fine-tuned models, and embedded tools; Assess GAI vendors, open-source or proprietary GAI tools, or GAI service providers against incident or vulnerability databases."
+        },
+        {
+          "id": "MG-2.2-009",
+          "source": "nist-ai-rmf",
+          "text": "Consider opportunities to responsibly use synthetic data and other privacy enhancing techniques in GAI development, where appropriate and applicable, match the statistical properties of real-world data without disclosing personally identifiable information or contributing to homogenization ."
+        },
+        {
+          "id": "MP-4.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Conduct periodic monitoring of AI-generated content for privacy risks; address any possible instances of PII or sensitive data exposure."
+        },
+        {
+          "id": "MP-4.1-005",
+          "source": "nist-ai-rmf",
+          "text": "Establish policies for collection, retention, and minimum quality of data, in consideration of the following risks: Disclosure of inappropriate CBRN information ; Use of Illegal or dangerous content; Offensive cyber capabilities; Training data imbalances that could give rise to harmful biases ; Leak of personally identifiable information, including facial likenesses of individual s."
+        },
+        {
+          "id": "MP-4.1-006",
+          "source": "nist-ai-rmf",
+          "text": "Implement policies and practices defining how third-party intellectual property and training data will be used, stored, and protected."
+        },
+        {
+          "id": "MP-4.1-010",
+          "source": "nist-ai-rmf",
+          "text": "Conduct appropriate diligence on training data use to assess intellectual property, and privacy, risks, including to examine whether use of proprietary or sensitive training data is consistent with applicable laws."
+        },
+        {
+          "id": "MS-2.2-002",
+          "source": "nist-ai-rmf",
+          "text": "Document how content provenance data is tracked and how that data interacts with privacy and security. Consider : Anonymiz ing data to protect the privacy of human subjects; Leverag ing privacy output filters; Remov ing any personally identifiable information (PII) to prevent potential harm or misuse."
+        },
+        {
+          "id": "MS-2.2-003",
+          "source": "nist-ai-rmf",
+          "text": "Provide human subjects with options to withdraw participation or revoke their consent for present or future use of their data in GAI applications ."
+        },
+        {
+          "id": "aiuc1-req-a001",
+          "source": "aiuc1",
+          "text": "Establish and communicate AI input data policies covering how customer data is used for model training, inference processing, data retention periods, and customer data rights"
+        },
+        {
+          "id": "aiuc1-req-a003",
+          "source": "aiuc1",
+          "text": "Implement safeguards to limit AI agent data access to task-relevant information based on user roles and context"
+        },
+        {
+          "id": "aiuc1-req-e005",
+          "source": "aiuc1",
+          "text": "Establish criteria for selecting cloud provider, and circumstances for on-premises processing considering data sensitivity, regulatory requirements, security controls, and operational needs"
+        },
+        {
+          "id": "aiuc1-req-e009",
+          "source": "aiuc1",
+          "text": "Implement systems to monitor third party access"
+        },
+        {
+          "id": "aiuc1-req-e012",
+          "source": "aiuc1",
+          "text": "Document applicable AI laws and standards, required data protections, and strategies for compliance"
+        }
+      ],
+      "name": "Data privacy rights alignment",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat concerns re-identification from synthetic data or bypassing rights during synthetic data generation, which are processes involving model training or data synthesis outside the system boundary."
+      },
+      "risk_id": "atlas-data-privacy-rights",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "AI systems capable of creating economic or cultural value, including through reproduction of human innovation or creativity (e.g., art, music, writing, code, invention), can destabilize economic and social systems that rely on human effort. This may lead to reduced appreciation for human skills, disruption of creative and knowledge-based industries, and homogenization of cultural experiences due to the ubiquity of AI-generated content.",
+      "display_name": "Economic and cultural devaluation of human effort",
+      "loss_ids": [],
+      "merged_ids": [
+        "mit-ai-risk-subdomain-6.3"
+      ],
+      "mitigations": [
+        {
+          "id": "GV-1.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Align GAI development and use with applicable laws and regulations, including those related to data privacy, copyright and intellectual property law."
+        },
+        {
+          "id": "GV-6.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Categorize different types of GAI content with associated third-party rights (e .g., copyright, intellectual property, data privacy)."
+        },
+        {
+          "id": "GV-6.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Draft and maintain well-defined contracts and service level agreements (SLAs) that specify content ownership, usage rights, quality standards, security requirements, and content provenance expectations for GAI systems ."
+        },
+        {
+          "id": "GV-6.1-009",
+          "source": "nist-ai-rmf",
+          "text": "Update and integrate due diligence processes for GAI acquisition and procurement vendor assessments to include intellectual property, data privacy, security, and other risks. For example, update p rocesses to: Address solutions that may rely on embedded GAI technologies; Address ongoing monitoring, assessments, and alerting, dynamic risk assessments, and real-time reporting tools for monitoring third-party GAI risks; Consider policy adjustments across GAI modeling libraries, tools and APIs, fine-tuned models, and embedded tools; Assess GAI vendors, open-source or proprietary GAI tools, or GAI service providers against incident or vulnerability databases."
+        },
+        {
+          "id": "MG-3.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Take reasonable measures to review training data for CBRN information, and intellectual property, and where appropriate, remove it. Implement reasonable measures to prevent, flag, or take other action in response to outputs that reproduce particular training data (e.g., plagiarized, trademarked, patented, licensed content or trade secret material )."
+        },
+        {
+          "id": "MP-4.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Implement processes for responding to potential intellectual property infringement claims or other rights."
+        },
+        {
+          "id": "MP-4.1-006",
+          "source": "nist-ai-rmf",
+          "text": "Implement policies and practices defining how third-party intellectual property and training data will be used, stored, and protected."
+        },
+        {
+          "id": "MP-4.1-010",
+          "source": "nist-ai-rmf",
+          "text": "Conduct appropriate diligence on training data use to assess intellectual property, and privacy, risks, including to examine whether use of proprietary or sensitive training data is consistent with applicable laws."
+        },
+        {
+          "id": "MS-2.10-001",
+          "source": "nist-ai-rmf",
+          "text": "Conduct AI red-teaming to assess issues such as: Outputting of training data samples, and subsequent reverse engineering, model extraction, and membership inference risks; Revealing biometric, confidential, copyrighted, licensed, patented, personal, proprietary, sensitive, or trade-marked information ; Tracking or revealing location information of users or members of training datasets. Property"
+        },
+        {
+          "id": "MS-2.6-002",
+          "source": "nist-ai-rmf",
+          "text": "Assess existence or levels of harmful bias, intellectual property infringement, data privacy violations, obscenity, extremism, violence, or CBRN information in system training data."
+        },
+        {
+          "id": "MS-2.8-001",
+          "source": "nist-ai-rmf",
+          "text": "Compile statistics on actual policy violations, take-down requests, and intellectual property infringement for organizational GAI systems: Analyze transparency reports across demographic groups, languages groups ."
+        },
+        {
+          "id": "aiuc1-req-a007",
+          "source": "aiuc1",
+          "text": "Implement safeguards and technical controls to prevent AI outputs from violating copyrights, trademarks, or other third-party intellectual property rights"
+        },
+        {
+          "id": "aiuc1-req-a002",
+          "source": "aiuc1",
+          "text": "Establish AI output ownership, usage, opt-out and deletion policies to customers and communicate these policies"
+        },
+        {
+          "id": "MS-3.3-001",
+          "source": "nist-ai-rmf",
+          "text": "Conduct impact assessments on how AI-generated content might affect different social, economic, and cultural groups."
+        }
+      ],
+      "name": "Economic and cultural devaluation of human effort",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The risk concerns the devaluation of human effort and copyright issues in general AI outputs, which is a domain not specific to this customer service system's operations."
+      },
+      "risk_id": "mit-ai-risk-subdomain-6.3",
+      "sources": [
+        "mit-ai-risk-repository"
+      ],
+      "tags": [
+        {
+          "id": "nist-intellectual-property",
+          "label": "NIST Intellectual property",
+          "scheme": "nist-ai-rmf"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "In AI-assisted decision-making tasks, reliance measures how much a person trusts (and potentially acts on) a model's output. Over-reliance occurs when a person puts too much trust in a model, accepting a model's output when the model's output is likely incorrect. Under-reliance is the opposite, where the person doesn't trust the model but should.",
+      "display_name": "Over- or under-reliance",
+      "loss_ids": [
+        "L-3"
+      ],
+      "merged_ids": [
+        "atlas-over-or-under-reliance"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-01-05",
+          "source": "owasp-llm-2.0",
+          "text": "Implement human-in-the-loop controls for privileged operations to prevent unauthorized actions triggered by prompt injection."
+        },
+        {
+          "id": "owasp-llm-act-06-01",
+          "source": "owasp-llm-2.0",
+          "text": "Limit the extensions, tools, and plugins that LLM agents can call to the minimum necessary for the intended use case. Do not provide unnecessary capabilities."
+        },
+        {
+          "id": "owasp-llm-act-06-06",
+          "source": "owasp-llm-2.0",
+          "text": "Require human-in-the-loop confirmation for high-impact actions performed by LLM agents before execution, especially actions that modify external state or involve sensitive operations."
+        },
+        {
+          "id": "owasp-llm-act-09-03",
+          "source": "owasp-llm-2.0",
+          "text": "Encourage users to cross-check LLM outputs with trusted external sources. Implement human oversight and fact-checking for critical information. Ensure human reviewers are trained to avoid overreliance on AI-generated content."
+        },
+        {
+          "id": "owasp-llm-act-09-07",
+          "source": "owasp-llm-2.0",
+          "text": "Design APIs and user interfaces that encourage responsible use of LLM outputs. Integrate content filters, clearly label AI-generated content, inform users about reliability limitations, and specify intended field-of-use constraints."
+        },
+        {
+          "id": "owasp-llm-act-09-08",
+          "source": "owasp-llm-2.0",
+          "text": "Provide comprehensive training for users on LLM limitations, the importance of independent verification, and critical thinking. Offer domain-specific training so users can evaluate outputs within their field of expertise."
+        },
+        {
+          "id": "GV-3.2-003",
+          "source": "nist-ai-rmf",
+          "text": "Define acceptable use policies for GAI interfaces, modalities, and human-AI configurations (i.e., for chatbots and decision-making tasks), including criteria for the kinds of queries GAI applications should refuse to respond to."
+        },
+        {
+          "id": "GV-3.2-004",
+          "source": "nist-ai-rmf",
+          "text": "Establish policies for user feedback mechanisms for GAI systems which include thorough instructions and any mechanisms for recourse ."
+        },
+        {
+          "id": "GV-5.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Document interactions with GAI systems to users prior to interactive activities, particularly in contexts involving more significant risks."
+        },
+        {
+          "id": "GV-6.2-001",
+          "source": "nist-ai-rmf",
+          "text": "Document GAI risks associated with system value chain to identify over-reliance on third-party data and to identify fallbacks."
+        },
+        {
+          "id": "MG-2.2-008",
+          "source": "nist-ai-rmf",
+          "text": "Use structured feedback mechanisms to solicit and capture user input about AI-generated content to detect subtle shifts in quality or alignment with community and societal values."
+        },
+        {
+          "id": "MG-3.2-008",
+          "source": "nist-ai-rmf",
+          "text": "Use human moderation systems where appropriate to review generated content in accordance with human-AI configuration policies established in the Govern function, aligned with socio-cultural norms in the context of use, and for settings where AI models are demonstrated to perform poorly."
+        },
+        {
+          "id": "MG-4.1-003",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate the use of sentiment analysis to gauge user sentiment regarding GAI content performance and impact, and work in collaboration with AI Actors experienced in user research and experience."
+        },
+        {
+          "id": "MP-3.4-001",
+          "source": "nist-ai-rmf",
+          "text": "Evaluate whether GAI operators and end-users can accurately understand content lineage and origin."
+        },
+        {
+          "id": "MP-3.4-002",
+          "source": "nist-ai-rmf",
+          "text": "Adapt existing training programs to include modules on digital content transparency."
+        },
+        {
+          "id": "MP-3.4-003",
+          "source": "nist-ai-rmf",
+          "text": "Develop certification programs that test proficiency in managing GAI risks and interpreting content provenance, relevant to specific industry and context."
+        },
+        {
+          "id": "MP-3.4-004",
+          "source": "nist-ai-rmf",
+          "text": "Delineate human proficiency tests from tests of GAI capabilities."
+        },
+        {
+          "id": "MP-3.4-005",
+          "source": "nist-ai-rmf",
+          "text": "Implement systems to continually monitor and track the outcomes of human-G AI co nfigurations for future refinement and improvements ."
+        },
+        {
+          "id": "MS-2.10-002",
+          "source": "nist-ai-rmf",
+          "text": "Engage directly with end-users and other stakeholders to understand their expectations and concerns regarding content provenance. Use this feedback to guide the design of provenance data-tracking techniques."
+        },
+        {
+          "id": "MS-2.5-004",
+          "source": "nist-ai-rmf",
+          "text": "Track and document instances of anthropomorphization (e.g., human images, mentions of human feelings, cyborg imagery or motifs) in GAI system interfaces."
+        },
+        {
+          "id": "MS-2.7-003",
+          "source": "nist-ai-rmf",
+          "text": "Conduct user surveys to gather user satisfaction with the AI-generated content and user perceptions of content authenticity. Analyze user feedback to identify concerns and/or current literacy levels related to content provenance and understanding of labels on content."
+        },
+        {
+          "id": "MS-3.3-002",
+          "source": "nist-ai-rmf",
+          "text": "Conduct studies to understand how end users perceive and interact with GAI content and accompanying content provenance within context of use. Assess whether the content aligns with their expectations and how they may act upon the information presented."
+        },
+        {
+          "id": "MS-3.3-004",
+          "source": "nist-ai-rmf",
+          "text": "Provide input for training materials about the capabilities and limitations of GAI systems related to digital content transparency for AI Actors, other professionals, and the public about the societal impacts of AI and the role of diverse and inclusive content generation."
+        },
+        {
+          "id": "MS-4.2-004",
+          "source": "nist-ai-rmf",
+          "text": "Monitor and document instances where human operators or other systems override the GAI's decisions. Evaluate these cases to understand if the overrides are linked to issues related to content provenance."
+        },
+        {
+          "id": "aiuc1-req-c007",
+          "source": "aiuc1",
+          "text": "Implement an alerting system that flags high-risk outputs for human review"
+        },
+        {
+          "id": "aiuc1-req-c009",
+          "source": "aiuc1",
+          "text": "Implement mechanisms to enable real-time user feedback collection and intervention mechanisms"
+        }
+      ],
+      "name": "Over- or under-reliance",
+      "reason": null,
+      "risk_id": "atlas-over-or-under-reliance",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-human-ai-configuration",
+          "label": "NIST Human ai configuration",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm092025-misinformation",
+          "label": "OWASP LLM09 Misinformation",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "The AI system's capabilities, limitations, and appropriate use cases may be insufficiently understood or communicated within the organization, potentially resulting in ineffective implementation or failure to achieve desired outcomes.",
+      "display_name": "Inadequate AI literacy and communication",
+      "loss_ids": [],
+      "merged_ids": [
+        "credo-risk-017"
+      ],
+      "mitigations": [],
+      "name": "Inadequate AI literacy and communication",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat describes employees using external generative AI services, which is an action of actors outside the system boundary."
+      },
+      "risk_id": "credo-risk-017",
+      "sources": [
+        "credo-ucf"
+      ],
+      "tags": [
+        {
+          "id": "nist-human-ai-configuration",
+          "label": "NIST Human ai configuration",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm092025-misinformation",
+          "label": "OWASP LLM09 Misinformation",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "scenarios",
+      "description": "Confidential information might be included as a part of the prompt that is sent to the model.",
+      "display_name": "Confidential data in prompt",
+      "loss_ids": [
+        "L-1"
+      ],
+      "merged_ids": [
+        "atlas-confidential-data-in-prompt"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-02-02",
+          "source": "owasp-llm-2.0",
+          "text": "Apply strict input validation methods to detect and filter out potentially harmful or sensitive data inputs before they reach the model."
+        },
+        {
+          "id": "owasp-llm-act-02-06",
+          "source": "owasp-llm-2.0",
+          "text": "Provide guidance on avoiding the input of sensitive information into LLM systems. Offer training on secure interaction patterns and data handling best practices."
+        },
+        {
+          "id": "aiuc1-req-a004",
+          "source": "aiuc1",
+          "text": "Implement safeguards or technical controls to prevent AI systems from leaking company intellectual property or confidential information"
+        }
+      ],
+      "name": "Confidential data in prompt",
+      "reason": null,
+      "risk_id": "atlas-confidential-data-in-prompt",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-intellectual-property",
+          "label": "NIST Intellectual property",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm022025-sensitive-information-disclosure",
+          "label": "OWASP LLM02 Sensitive information disclosure",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    },
+    {
+      "coverage": "outside_boundary",
+      "description": "Terms of service, license compliance, or other IP issues may restrict the ability to use certain data for building models.",
+      "display_name": "Data usage rights restrictions",
+      "loss_ids": [],
+      "merged_ids": [
+        "atlas-data-usage-rights"
+      ],
+      "mitigations": [
+        {
+          "id": "owasp-llm-act-03-01",
+          "source": "owasp-llm-2.0",
+          "text": "Carefully vet data sources and suppliers, including terms and conditions and privacy policies. Only use trusted suppliers and regularly review and audit supplier security posture and access controls."
+        },
+        {
+          "id": "owasp-llm-act-03-05",
+          "source": "owasp-llm-2.0",
+          "text": "Create an inventory of all license types using bills of materials. Conduct regular audits of software, tools, and datasets. Use automated license management tools to ensure compliance."
+        },
+        {
+          "id": "GV-6.1-001",
+          "source": "nist-ai-rmf",
+          "text": "Categorize different types of GAI content with associated third-party rights (e .g., copyright, intellectual property, data privacy)."
+        },
+        {
+          "id": "GV-6.1-004",
+          "source": "nist-ai-rmf",
+          "text": "Draft and maintain well-defined contracts and service level agreements (SLAs) that specify content ownership, usage rights, quality standards, security requirements, and content provenance expectations for GAI systems ."
+        },
+        {
+          "id": "GV-6.2-007",
+          "source": "nist-ai-rmf",
+          "text": "Review vendor contracts and avoid arbitrary or capricious termination of critical GAI technologies or vendor services and non-standard terms that may amplify or defer liability in unexpected ways and /or contribute to u nauthorized data collection by vendors or third-parties (e.g., secondary data use) . Consider: Clear assignment of liability and responsibility for incidents, GAI system changes over time (e.g., fine-tuning, drift, decay); Request: Notification and disclosure for serious incidents arising from third-party data and systems; Service Level A greements (SLAs) in vendor contracts that address incident response, response times, and availability of critical support."
+        },
+        {
+          "id": "MP-4.1-002",
+          "source": "nist-ai-rmf",
+          "text": "Implement processes for responding to potential intellectual property infringement claims or other rights."
+        },
+        {
+          "id": "aiuc1-req-a002",
+          "source": "aiuc1",
+          "text": "Establish AI output ownership, usage, opt-out and deletion policies to customers and communicate these policies"
+        }
+      ],
+      "name": "Data usage rights restrictions",
+      "reason": {
+        "code": "boundary_decision:outside_boundary",
+        "step": "boundary_decision",
+        "text": "The threat involves employees using outputs for external communications without attribution, which is an action of actors outside the system boundary."
+      },
+      "risk_id": "atlas-data-usage-rights",
+      "sources": [
+        "ibm-risk-atlas"
+      ],
+      "tags": [
+        {
+          "id": "nist-data-privacy",
+          "label": "NIST Data privacy",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "nist-intellectual-property",
+          "label": "NIST Intellectual property",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "nist-value-chain-and-component-integration",
+          "label": "NIST Value chain and component integration",
+          "scheme": "nist-ai-rmf"
+        },
+        {
+          "id": "llm032025-supply-chain",
+          "label": "OWASP LLM03 Supply chain",
+          "scheme": "owasp-llm-2.0"
+        }
+      ]
+    }
+  ],
+  "rule": "loss-source-risk-cards",
+  "schema_version": "policy-coverage-v1"
+}

@@ -1,0 +1,606 @@
+schema_version: taxonomy-obligation-plan-v1
+obligations:
+- obligation_id: ob:v1:028c34eca55ec0488be66b63d112f38367b07ed6cbde4617307835abc284913f
+  risk_ref:
+    risk_id: atlas-spreading-disinformation
+    risk_name: Spreading disinformation
+  attack_pattern_id: AP-T15-02
+- obligation_id: ob:v1:05ed7cad99237029f10414d7aba15aa9d36062c6588383e6a6e5c640a1bd9be2
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:0a181c27ad198d966159a9a2781c75a5211024226e5ff68e52d84f2cd5fe3d4e
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T2-01
+- obligation_id: ob:v1:0a89604e6c684bd06e64b62c119a6ccc0f42ee5c0a8ec5aefd8d3b8d6f6e4ddb
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.1
+    risk_name: Compromise of privacy by obtaining, leaking or correctly inferring
+      sensitive information
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:0ab13e757247bc094e9198ad8fdfa0d0739bc9f1174d5836bb579dc9ca063453
+  risk_ref:
+    risk_id: atlas-spreading-disinformation
+    risk_name: Spreading disinformation
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:0b1ed910deeef45c9689f9490cdd087a65f4cdebee39a0ffd5adb0421df20522
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-4.3
+    risk_name: Fraud, scams, and targeted manipulation
+  attack_pattern_id: null
+- obligation_id: ob:v1:0c46ef6b2a452d9268046594d32fca6fad8e473c5f641de37724efcc797deb67
+  risk_ref:
+    risk_id: credo-risk-036
+    risk_name: Compromised personally identifiable information (Slattery et al., 2024)
+  attack_pattern_id: AP-T6-09
+- obligation_id: ob:v1:0d7049ef6c3e804c62bada5b4f8af8f167e19ad8f2bf6a2961646912c53f21ca
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)
+    risk_name: Unauthorized disclosure - PII (Personal Identifiable Information)
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:1542ee307e54f2ddce3bbf9a291479754090f5994084042cf98e967827527fb0
+  risk_ref:
+    risk_id: credo-risk-039
+    risk_name: AI model and intellectual property theft
+  attack_pattern_id: null
+- obligation_id: ob:v1:155f8f602932da5f74d6d00d48eb06fd2e52ab5bd7cca30d57a5022917e2177c
+  risk_ref:
+    risk_id: atlas-exposing-personal-information
+    risk_name: Exposing personal information
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:17f6194f0e0a65ab25a9607f52b064092923cfdd8356e0c24cbfc872d3d10001
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:18b39b1127b5041ddc38c69dba66a53a420b3bea2f5e9aac30902d3a2197a3af
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-5.1
+    risk_name: Overreliance and unsafe use
+  attack_pattern_id: AP-T5-05
+- obligation_id: ob:v1:19c3c954e3af01c3622a14d2a9010a064da3f40118b2045d9ce16e3f457ae0e6
+  risk_ref:
+    risk_id: credo-risk-021
+    risk_name: False or misleading information
+  attack_pattern_id: AP-T5-05
+- obligation_id: ob:v1:1a22fd69f5b5ded06474a9bdd87c354898b52507e6168e7823c265e05902a641
+  risk_ref:
+    risk_id: credo-risk-024
+    risk_name: Civil liability
+  attack_pattern_id: null
+- obligation_id: ob:v1:2008b47512f8ce0eab13e03b93d463b56242cbd3c69bbe697801b7f3e061f07e
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T6-04
+- obligation_id: ob:v1:200e72e86401d5234ca4cebe967e47dc6c9742a50851a93702f480037dd40d11
+  risk_ref:
+    risk_id: credo-risk-037
+    risk_name: Compromised sensitive information (Slattery et al., 2024; IBM, 2024;
+      AI, 2023)
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:211abe468ecf80a9f463415a688cde160019770d3b4a493c8ec517d4b58b895e
+  risk_ref:
+    risk_id: atlas-hallucination
+    risk_name: Hallucination
+  attack_pattern_id: AP-T5-05
+- obligation_id: ob:v1:22223b0a8d23974bcef778b0ccacbc6d7adfe4230c02be6e8ae0d5349bf1f7a4
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:22b3aee68658423737a40ce1d2915c40b67ab893a04377b05491d5ebb107614c
+  risk_ref:
+    risk_id: atlas-over-or-under-reliance
+    risk_name: Over- or under-reliance
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:25fbef8f19155904229a0a6ba0d21eca374b76b5a80849ac92c549bc864ba686
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-processing---financial-records
+    risk_name: Unauthorized processing - Financial records
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:27133a38f76a26f81009ce624ea01fb3a5d8d25e44f3b85e8ea048061beb4ea2
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.1
+    risk_name: Compromise of privacy by obtaining, leaking or correctly inferring
+      sensitive information
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:2a21be82f8a1eaef7e227b0b89bff38c68d56730bd314cdc6e967578440f3971
+  risk_ref:
+    risk_id: credo-risk-025
+    risk_name: Corporate liability (IBM, 2024)
+  attack_pattern_id: null
+- obligation_id: ob:v1:2b30af4cb92e19da0250d837f4896b14dc02e974067d08871467bf56c3a33c65
+  risk_ref:
+    risk_id: atlas-confidential-data-in-prompt
+    risk_name: Confidential data in prompt
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:2c15143803892cccd3b84293bf0a6564959e80987eac436657cae6a5e8a9eb3b
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-6.3
+    risk_name: Economic and cultural devaluation of human effort
+  attack_pattern_id: null
+- obligation_id: ob:v1:2c388eae760df19bc715e57e0779ec115ec6948972778d62931e42ba705eb9fe
+  risk_ref:
+    risk_id: credo-risk-037
+    risk_name: Compromised sensitive information (Slattery et al., 2024; IBM, 2024;
+      AI, 2023)
+  attack_pattern_id: AP-T6-09
+- obligation_id: ob:v1:2f27b5d0e5f6e3fa8cc1382ab963b88f5e37d0dea240ad269447acb42b8adfe1
+  risk_ref:
+    risk_id: credo-risk-034
+    risk_name: ' Oversight and evaluation challenges'
+  attack_pattern_id: null
+- obligation_id: ob:v1:33fe515d8836301d1ebc93da1e57aea74dc458d9538c93401422b4014f59c436
+  risk_ref:
+    risk_id: atlas-spreading-disinformation
+    risk_name: Spreading disinformation
+  attack_pattern_id: AP-T5-05
+- obligation_id: ob:v1:345299760d144718e70f8b28606e437c6360378207c48a1c73f3e2031af5582d
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:38c3a3762595f381837b64597bf5558fc7124c94256a8bad93eccdc1d4eaaa93
+  risk_ref:
+    risk_id: atlas-generated-content-ownership
+    risk_name: Generated content ownership and IP
+  attack_pattern_id: null
+- obligation_id: ob:v1:3aca1b6e4af6395a967560dff6a3a5e30ab825ffe0e4e4c32e8339d5369f341c
+  risk_ref:
+    risk_id: atlas-revealing-confidential-information
+    risk_name: Revealing confidential information
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:3c09f32096725f1f043e02e582205001422aea14256be09499eee132223c21d8
+  risk_ref:
+    risk_id: credo-risk-029
+    risk_name: Mass surveillance and privacy attacks (Slattery et al., 2024)
+  attack_pattern_id: null
+- obligation_id: ob:v1:3fda6319b505bcb10a1d4c2e8f962bed2f57a1fe9fb6c0ef22e49290d99a90ce
+  risk_ref:
+    risk_id: credo-risk-021
+    risk_name: False or misleading information
+  attack_pattern_id: AP-T15-02
+- obligation_id: ob:v1:43288407b0bfa93f7cfe376e6d0157fa205d1967657f4d2569a911d7216c59f3
+  risk_ref:
+    risk_id: atlas-hallucination
+    risk_name: Hallucination
+  attack_pattern_id: AP-T15-02
+- obligation_id: ob:v1:462307ec069ed0f3252b7a9bf7ab9f61b872ddf2b110f36707463c3e5d1fcb12
+  risk_ref:
+    risk_id: atlas-personal-information-in-prompt
+    risk_name: Personal information in prompt
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:469c9350defc35b73c48018f843d61e471ec6031a2953514f511b2f277162589
+  risk_ref:
+    risk_id: credo-risk-038
+    risk_name: Compromised confidential information (Slattery et al., 2024; IBM, 2024;AI,
+      2023)
+  attack_pattern_id: AP-T6-09
+- obligation_id: ob:v1:48ecc43fa73d2aaf50fbf883f66d248596887fe6873ad780df89e6a4746827c4
+  risk_ref:
+    risk_id: credo-risk-010
+    risk_name: Stereotype perpetuation (Slattery et al., 2024; IBM, 2024)
+  attack_pattern_id: null
+- obligation_id: ob:v1:499f04368022087683c6e8f1aeb988c07f960d3ea365090cbf7f953061089853
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-disclosure---financial-records
+    risk_name: Unauthorized disclosure - Financial records
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:4a3a1b9836417ccfb79e2bccd1501b8f472ae60999d742e05610743518a26858
+  risk_ref:
+    risk_id: credo-risk-017
+    risk_name: Inadequate AI literacy and communication
+  attack_pattern_id: AP-T5-05
+- obligation_id: ob:v1:4a86b9ecb7f2f988d4fbc7cdc7d9a58d81771697a8d63b0965434751c2b1fd91
+  risk_ref:
+    risk_id: atlas-personal-information-in-data
+    risk_name: Personal information in data
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:4bb8998794bec9efc2b68f0124595a58a0f5466d8b29b8cb65895f6e7eb6eba8
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T6-03
+- obligation_id: ob:v1:4c574d0027d32453b6e7be2b52f774e26d05f49c5b03355de339447f71b8af8b
+  risk_ref:
+    risk_id: atlas-spreading-disinformation
+    risk_name: Spreading disinformation
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:541f9e9ce96e8e0e833783ae2d122682df570361d23cd4aa2588099e9c52c84c
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-processing---financial-records
+    risk_name: Unauthorized processing - Financial records
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:55866286bfe3033dc4be10bfc6633d6d9a6a4eac9565a82790f81cfc1a4f7e55
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-7.3
+    risk_name: Lack of capability or robustness
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:562fac585201938c6e04cf0fc812f3281db888f7d72bfd6ba007dccd06f3bbc5
+  risk_ref:
+    risk_id: atlas-nonconsensual-use
+    risk_name: Nonconsensual use
+  attack_pattern_id: null
+- obligation_id: ob:v1:565a335401bfd3185bb6aeb249d530847c34cbcc454c65e03e56bfa7ce729ad2
+  risk_ref:
+    risk_id: atlas-data-privacy-rights
+    risk_name: Data privacy rights alignment
+  attack_pattern_id: null
+- obligation_id: ob:v1:5ea52fcd7348e968c8a6fae2a5c4b6893e40d2e6135ae449239fc6979f7cde21
+  risk_ref:
+    risk_id: credo-risk-038
+    risk_name: Compromised confidential information (Slattery et al., 2024; IBM, 2024;AI,
+      2023)
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:62b165ebb94e0382893b1e0297da158212167bb14ee4ee23e165c97406b21c50
+  risk_ref:
+    risk_id: credo-risk-036
+    risk_name: Compromised personally identifiable information (Slattery et al., 2024)
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:632b1222c7b4a576382af45cded7e8c7a420464057334be6394b9d372b91b0af
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:656ec1ba53228a82ff5d7040b89f2f6b688608b51de975a48a50af6e96d0b509
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T2-03
+- obligation_id: ob:v1:679ee0f8b1a781e03e07b259e8a8cce20819e800fdac5a7e2b777a715acb6285
+  risk_ref:
+    risk_id: atlas-confidential-data-in-prompt
+    risk_name: Confidential data in prompt
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:6ede14fd1da31a0c4f2fcc0e6e2a6a3a5295edef761b0c906bd235bc84370b25
+  risk_ref:
+    risk_id: atlas-personal-information-in-data
+    risk_name: Personal information in data
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:713e6d9592d88fe2a824a3432ff412a9db8bfde91ae8a9a32402d6df1ba16511
+  risk_ref:
+    risk_id: atlas-exposing-personal-information
+    risk_name: Exposing personal information
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:72661ba36b53b2c3288075a70df00db13ad093655771136768647325231d31e3
+  risk_ref:
+    risk_id: credo-risk-026
+    risk_name: Fraud, scams, and targeted manipulation
+  attack_pattern_id: null
+- obligation_id: ob:v1:72d8f7a2bb642fd8dc624794d43fab969770f2d2aebe4d5f64dabf9dc90e2454
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-3.1
+    risk_name: False or misleading information
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:7394b9d180ff114b8563eb6e4d75e9caeb5be1234653732a4c05794cec2d77ad
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T15-02
+- obligation_id: ob:v1:74d37fbf145d41cab5088a659c0091049326873d175c55657daafd4525aabe85
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-5.1
+    risk_name: Overreliance and unsafe use
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:768edc8138308689b01dc7dfbc5fb8b73fc81868f68b5ee7f1a7a131995b07d4
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+    risk_name: Unauthorized distribution - PII (Personal Identifiable Information)
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:7690e96df55f0e1195d9c792d7eb20fa6041606a357882295337a0ef46937f49
+  risk_ref:
+    risk_id: credo-risk-017
+    risk_name: Inadequate AI literacy and communication
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:78dfe580be12c72ff7ed4bb470749abf59ee90f1b597026c77d1bd81b7cfd0f8
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T9-01
+- obligation_id: ob:v1:78f809cda51a3464a79a46e4c162321ce136ab2a473e82d7b9f0c488a480162b
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T6-02
+- obligation_id: ob:v1:7b5986e607db5e85a5874913adfb0a2fb22d650a48913c895f9490fb93ff4199
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T6-10
+- obligation_id: ob:v1:7e1ad20ac0d2a80c7df76e1674754662ae30a2f9d1ac53ddceb84293b6130ce0
+  risk_ref:
+    risk_id: atlas-ip-information-in-prompt
+    risk_name: IP information in prompt
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:80cfffa6ae3aa2820553ab08334d9507388f307fdfd716c079641b81960853b1
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-7.3
+    risk_name: Lack of capability or robustness
+  attack_pattern_id: AP-T5-05
+- obligation_id: ob:v1:80e4cae1f42ffdb1cb3326075019c3e426bf07c9eabfc74fd5d696ca1a1512df
+  risk_ref:
+    risk_id: atlas-model-usage-rights
+    risk_name: Model usage rights restrictions
+  attack_pattern_id: null
+- obligation_id: ob:v1:815f2de5cd241ec9a31610b7267c4643429a2a854e0b15a259baa8957c89f518
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)
+    risk_name: Unauthorized disclosure - PII (Personal Identifiable Information)
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:84150767cd85230a000e998cd16ef78a28af2575ebd5c400a14a669c645dd1cb
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-7.3
+    risk_name: Lack of capability or robustness
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:86b9976aac68d39e8ee470f5c686d7ca3c151d1b88d6af94e93f4ddbf9f895a1
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-disclosure---financial-records
+    risk_name: Unauthorized disclosure - Financial records
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:87e81d8e8c2d5bf3219649ee0a44a5276fa9703288b91c16fa6f8eb4172726be
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T2-06
+- obligation_id: ob:v1:880705b40be237c93acb04378729f4fe95eccbb53d7914c7f85b7ee7277bda0e
+  risk_ref:
+    risk_id: atlas-revealing-confidential-information
+    risk_name: Revealing confidential information
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:89050585b6c530a7d3a2bd6c6508981d96c9b32ca349ea273489e68860915dbc
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-7.3
+    risk_name: Lack of capability or robustness
+  attack_pattern_id: AP-T15-02
+- obligation_id: ob:v1:898b5bf91c9e9fa3734dc8c7e7fd952512defa53fe35cd3005a818a5768e5681
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T3-06
+- obligation_id: ob:v1:8a5bc45dc3c2ae20738a42b242da3f375de0a3836df70e0d74c67ba6792e667e
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-5.1
+    risk_name: Overreliance and unsafe use
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:8cbaeb5e7bf84448b65bdf714481ec47326e58b744a2899ff7e773cda1223bcc
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+    risk_name: Unauthorized processing - PII (Personal Identifiable Information)
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:8e6ae836cb7f9e0ad46a0d4888f1bf716abbca5555b37c1f4af2050987f0ac8b
+  risk_ref:
+    risk_id: atlas-over-or-under-reliance
+    risk_name: Over- or under-reliance
+  attack_pattern_id: AP-T15-02
+- obligation_id: ob:v1:917282ec7c5086f63b21e3a42ba316ee13561b26eb895c8ead5820f84f6159b9
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-3.1
+    risk_name: False or misleading information
+  attack_pattern_id: AP-T15-02
+- obligation_id: ob:v1:9215b7b51c20e067eff1c03d5c34cb7ea9ee725e7c9d77e0d8c43703c755a8e6
+  risk_ref:
+    risk_id: credo-risk-027
+    risk_name: Cyberattacks, weapon development, and mass harm (AI, 2023; IBM, 2024)
+  attack_pattern_id: null
+- obligation_id: ob:v1:940d7c7755ddb594c8fbdea0a4567b298e31c098d58cc7d61c9d2b6d270ad4fb
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T2-01
+- obligation_id: ob:v1:94edcaa94cd807ec5052fd8ac65f3064599974b1dc7356701f0d8afd96ab7f4d
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+    risk_name: Unauthorized distribution - PII (Personal Identifiable Information)
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:954426666f1820c23c28b3d80dc76e21f0b26e2c642e653d5b063fb7698f8358
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T2-06
+- obligation_id: ob:v1:95fead3f261557eb337148027a246ed8519e591e7f86e1f108b3f73d3288da49
+  risk_ref:
+    risk_id: credo-risk-021
+    risk_name: False or misleading information
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:97097348a6c2835bfcea4919b6098dcd9ec49ae69f4684af239c76533d912dbe
+  risk_ref:
+    risk_id: credo-risk-017
+    risk_name: Inadequate AI literacy and communication
+  attack_pattern_id: AP-T15-02
+- obligation_id: ob:v1:97bd75503b8eecbf0316385b79bc4228f4134266c7a86d871db22a924f64b203
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T6-10
+- obligation_id: ob:v1:9926808241883ded389a7c4a834bce17582df8974280c1e14b35b7a007a2538c
+  risk_ref:
+    risk_id: credo-risk-023
+    risk_name: Regulatory compliance
+  attack_pattern_id: null
+- obligation_id: ob:v1:9be8220c80d9d0fd9a66d9bfcac3c6054808c591b5ab5ec8ba12c6cd968734bd
+  risk_ref:
+    risk_id: atlas-ip-information-in-prompt
+    risk_name: IP information in prompt
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:9eb705a8dc64e5fcb0661ab12fde27adf1ded6b9d55dd125c5cf9be73f48e18d
+  risk_ref:
+    risk_id: credo-risk-036
+    risk_name: Compromised personally identifiable information (Slattery et al., 2024)
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:9f639a9f19597d6467ed085d06abf9d6371effd01e6fabe7afb059719c876ac9
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T9-01
+- obligation_id: ob:v1:a0bfed871dd54cadadc44173e7a37c37855231480ddc03674741b35109a909b8
+  risk_ref:
+    risk_id: credo-risk-038
+    risk_name: Compromised confidential information (Slattery et al., 2024; IBM, 2024;AI,
+      2023)
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:a25c77a4649787fae4179f1e24f018c68ec822689f9cb713d5d2fabef39ba17d
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T15-02
+- obligation_id: ob:v1:aa99f860b66c7926063f93330b276ba8e497041f645c3b964512d7e1cd21cd7c
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T2-03
+- obligation_id: ob:v1:adb62bb59d570293a1165329c6544c99b622fb20a9e9ceea66811fb3b4348bcf
+  risk_ref:
+    risk_id: ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+    risk_name: Unauthorized processing - PII (Personal Identifiable Information)
+  attack_pattern_id: AP-T6-08
+- obligation_id: ob:v1:add0f162e6c83b9470472d810bfc170304a4aecf2c25b9316cecd9a82bb291f9
+  risk_ref:
+    risk_id: atlas-over-or-under-reliance
+    risk_name: Over- or under-reliance
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:b15848922a43c70846bcda9e5b7367f1476e824f3d020887574e1108c06c2b1e
+  risk_ref:
+    risk_id: atlas-hallucination
+    risk_name: Hallucination
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:b1c5fe187a455dfbea57c85bf5fafd39616b91a7221081efed68fa577181bfb3
+  risk_ref:
+    risk_id: atlas-copyright-infringement
+    risk_name: Copyright infringement
+  attack_pattern_id: null
+- obligation_id: ob:v1:b8f5f1ce23d357b4239c6172b03892b95e5c74069910b0c0f448e6c39affe702
+  risk_ref:
+    risk_id: credo-risk-048
+    risk_name: Upstream third-party dependencies (AI, 2023)
+  attack_pattern_id: null
+- obligation_id: ob:v1:bc4b9d1dc5acf1eb06f6610e9b61d51deaae3de1a268bfd3da3e9aa524f1ba46
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T6-05
+- obligation_id: ob:v1:be0e9a01b1952056844f8509e982b4b2923df0d8bb213546cea87ba59d1ae7ce
+  risk_ref:
+    risk_id: credo-risk-021
+    risk_name: False or misleading information
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:bedf8df79151cb850eae8d3e2c12b582547db3984bd8d6ebf6cc2cf1e4546b57
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-3.1
+    risk_name: False or misleading information
+  attack_pattern_id: AP-T10-01
+- obligation_id: ob:v1:ccbf3b183667b296951f1f5033be3c978fa5c6a9542defdcb95dda2c1b9d0d9b
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:cd4087aee23d74f41f24364c2d013f86c8dc2112751141cf55adaf255d8fcbdf
+  risk_ref:
+    risk_id: atlas-hallucination
+    risk_name: Hallucination
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:ceccae06f9c547ab9a893cbd9edbf7adcd1cb3eec37bff968b831e84e14c4619
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T6-04
+- obligation_id: ob:v1:d1497f565228c32caf5f572f89ff247d74a0b4b3df8c1385b2c1533af9da5f8a
+  risk_ref:
+    risk_id: atlas-dangerous-use
+    risk_name: Dangerous use
+  attack_pattern_id: null
+- obligation_id: ob:v1:dbcfe7bff55a9495895f8778974c96546eace7633023b72cb3315100a1e4a67f
+  risk_ref:
+    risk_id: atlas-data-usage-rights
+    risk_name: Data usage rights restrictions
+  attack_pattern_id: null
+- obligation_id: ob:v1:dd6ba3512888fbb2c89003a157aafae4eae40cf9ed03705f2cf2193b71b9bdda
+  risk_ref:
+    risk_id: atlas-data-usage
+    risk_name: Data usage restrictions
+  attack_pattern_id: null
+- obligation_id: ob:v1:de9222b55eaa5667d4d530800c02479a187f3904d3ad42b51220c50dd9c8b602
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T6-01
+- obligation_id: ob:v1:df3d6e6de3f6da2910aa87e9b81a25b63b439463ebd8bd4e577cbf3e56a53377
+  risk_ref:
+    risk_id: credo-risk-016
+    risk_name: Over or under-reliance and unsafe use (Slattery et al., 2024; IBM,
+      2024; AI, 2023)
+  attack_pattern_id: null
+- obligation_id: ob:v1:e202e7f672426ab3fa34d04a4b5d7789ac69f459e581a9561fd2434e36a0d052
+  risk_ref:
+    risk_id: atlas-non-disclosure
+    risk_name: Non-disclosure
+  attack_pattern_id: null
+- obligation_id: ob:v1:e790d95d18ae59373e43b29bdb90007612db34f5af7d8f47558c136760689cdb
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T6-02
+- obligation_id: ob:v1:e7c4c3c349b4c88fad0e90f0ce12442dc95a5bbc09431b55e93e777021eacd1a
+  risk_ref:
+    risk_id: atlas-prompt-priming
+    risk_name: Prompt priming
+  attack_pattern_id: AP-T6-01
+- obligation_id: ob:v1:e9b6f9a5529e4dd3edd82cb7e73bef957df7613038ea0c5acd24871faef06248
+  risk_ref:
+    risk_id: atlas-over-or-under-reliance
+    risk_name: Over- or under-reliance
+  attack_pattern_id: AP-T5-05
+- obligation_id: ob:v1:ee077597b4fb00c908dfa8fb60e4675ccdfec3c61bfdf285ee1adb6474352e02
+  risk_ref:
+    risk_id: atlas-output-bias
+    risk_name: Output bias
+  attack_pattern_id: null
+- obligation_id: ob:v1:f61cb4dbf436c65596d660a82b7576ee7bd8615f8edd2367052dabc40739474a
+  risk_ref:
+    risk_id: credo-risk-017
+    risk_name: Inadequate AI literacy and communication
+  attack_pattern_id: AP-T15-01
+- obligation_id: ob:v1:f7f171f4d4465b22d6b9bbee6c756c550aaa22b5276c81e7d7d472aaf8f4cfa1
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-3.1
+    risk_name: False or misleading information
+  attack_pattern_id: AP-T5-05
+- obligation_id: ob:v1:f982a5311d77e07d2b3c51304f8ba40e4391321c4b30404e6508cf84f947d2c0
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T6-05
+- obligation_id: ob:v1:fd701ac80d2331397cec7bc355dbffaa6b5f2f90cd7859f1e1d8e86cebda037e
+  risk_ref:
+    risk_id: credo-risk-037
+    risk_name: Compromised sensitive information (Slattery et al., 2024; IBM, 2024;
+      AI, 2023)
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:fecd51a4a1953ee98c13a4a3f411fde9d98327e10354c3591c6a876206480306
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-1.1
+    risk_name: Unfair discrimination and misrepresentation
+  attack_pattern_id: null
+- obligation_id: ob:v1:ff5248a55236e62bcce539a13b74b22068e299c077b5e207acc6d0b4b0f5d5ff
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T6-03
+- obligation_id: ob:v1:ff78ac1c0baa61d194ba771c0c6f5c7824f204c2c1a11c6fb43396501d3af01c
+  risk_ref:
+    risk_id: atlas-personal-information-in-prompt
+    risk_name: Personal information in prompt
+  attack_pattern_id: AP-T2-02
+- obligation_id: ob:v1:ffdfcdb0645f585ece4c29f22f880f72ecdc4a50b9461d3eed687760264b8dc8
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-2.2
+    risk_name: AI system security vulnerabilities and attacks
+  attack_pattern_id: AP-T3-06
+- obligation_id: ob:v1:ffe3b446228a10836725037152fdb9a19ebdbe4511c2fb8bedbdb6bfeae1bbd0
+  risk_ref:
+    risk_id: mit-ai-risk-subdomain-5.1
+    risk_name: Overreliance and unsafe use
+  attack_pattern_id: AP-T15-02
