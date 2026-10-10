@@ -650,7 +650,15 @@ breaks this rule, the actual owner, and the endpoints' own parts.
 A graph-revision response that fails parsing or validation receives one
 correction call carrying the exact validation error and the prior response.
 If the correction also fails, the stage fails with the correction's error;
-`graph_revision_call_count` records both calls.
+`graph_revision_call_count` records both calls. One exception keeps the
+valid rest: when the corrected response fails validation and some
+constraint edits or additions carry an obligation `rule_span` that is not
+part of their rule or a blank `applies_when` entry, code drops those records
+and validates the rest. A dropped edit keeps the prior constraint; code
+never rewrites a blank entry to an empty list, which would delete the prior
+conditions. The round records each drop with its error in
+`dropped_records`. A response with nothing left after the drops still
+fails the stage.
 
 Coverage materialization preserves row-local failures and valid siblings. A
 source handle prevents transcription errors; it does not rescue unsupported
