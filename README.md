@@ -639,7 +639,8 @@ vLLM, `enable_thinking: false` is sent inside
 `chat_template_kwargs`, while guided decoding uses the standard top-level
 `response_format: {type: json_schema, ...}` request shape. Profiles that omit
 `enable_thinking`, including the Gemma examples, retain their existing request
-body.
+body. The optional `repetition_penalty` profile field (a number greater than 0)
+is sent in `extra_body` only when the profile sets it.
 
 Stage 2 retries a semantically empty requirement or responsibility response
 once with corrective feedback. Stage 3 likewise retries a schema-invalid slot
