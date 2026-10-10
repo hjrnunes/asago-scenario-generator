@@ -153,7 +153,7 @@ def _tiles(n: Counts) -> Markup:
             n.sent,
             of=n.written,
             unit="scenarios",
-            source=f"{n.duplicate} duplicates, {n.analytical} analytical only",
+            source=f"{plural(n.duplicate, 'duplicate')}, {n.analytical} analytical only",
         ),
     ]
     if n.risks is not None:

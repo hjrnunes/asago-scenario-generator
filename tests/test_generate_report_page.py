@@ -76,6 +76,13 @@ def test_the_first_sentence_gives_the_outcome(tmp_path: Path) -> None:
     assert "1 failure cost output" in html
 
 
+def test_a_tile_note_agrees_in_number_with_its_count(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    assert "1 duplicate, 1 analytical only" in html
+    assert "1 duplicates" not in html
+
+
 def test_every_metric_key_appears_once(tmp_path: Path) -> None:
     html, _ = built(copy_run(tmp_path))
 
