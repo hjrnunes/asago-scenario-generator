@@ -470,6 +470,110 @@ class TestCallWithPolicy:
         assert outcome.calls == 3
         assert client.prompts == ["Return JSON."] * 3
 
+    def test_an_undecodable_body_under_a_validation_policy_gets_no_correction(
+        self, tmp_path
+    ) -> None:
+        client = ScriptedClient(["{not json", {"item_id": "ok"}])
+
+        outcome = _send(
+            client,
+            tmp_path,
+            policy=CorrectionPolicy(validation_retries=1, feedback=" Fix it."),
+        )
+
+        assert outcome.value is None
+        assert outcome.error.startswith("JSONDecodeError")
+        assert outcome.calls == 1
+        assert len(client.prompts) == 1
+
+    def test_an_opted_in_policy_corrects_an_undecodable_body_once(
+        self, tmp_path
+    ) -> None:
+        client = ScriptedClient(["{not json   \n\n  ", {"item_id": "ok"}])
+        policy = CorrectionPolicy(
+            validation_retries=1,
+            feedback=lambda error: f" Fix {type(error).__name__}.",
+            include_schema=False,
+            include_response=True,
+            correct_undecodable=True,
+        )
+
+        outcome = _send(client, tmp_path, policy=policy, user_prompt="Return JSON.")
+
+        assert outcome.value == _NestedModel(item_id="ok")
+        assert outcome.calls == 2
+        assert client.prompts[1].startswith("Return JSON. Fix JSONDecodeError.")
+        assert "```json\n{not json\n```" in client.prompts[1]
+        assert "JSONDecodeError at line 1, column 2" in client.prompts[1]
+
+    def test_an_opted_in_policy_corrects_an_undecodable_body_only_once(
+        self, tmp_path
+    ) -> None:
+        client = ScriptedClient(["{a", "{b", {"item_id": "ok"}])
+        policy = CorrectionPolicy(validation_retries=1, correct_undecodable=True)
+
+        outcome = _send(client, tmp_path, policy=policy)
+
+        assert outcome.value is None
+        assert outcome.error.startswith("JSONDecodeError")
+        assert outcome.calls == 2
+        assert len(client.prompts) == 2
+
+    def test_an_opt_in_without_a_correction_budget_sends_nothing_more(
+        self, tmp_path
+    ) -> None:
+        client = ScriptedClient(["{not json", {"item_id": "ok"}])
+
+        outcome = _send(
+            client, tmp_path, policy=CorrectionPolicy(correct_undecodable=True)
+        )
+
+        assert outcome.value is None
+        assert outcome.calls == 1
+
+    def test_json_retries_still_come_before_the_opted_in_correction(
+        self, tmp_path
+    ) -> None:
+        client = ScriptedClient(["{a", "{b", {"item_id": "ok"}])
+        policy = CorrectionPolicy(
+            json_retries=1, validation_retries=1, correct_undecodable=True
+        )
+
+        outcome = _send(client, tmp_path, policy=policy, user_prompt="Return JSON.")
+
+        assert outcome.value == _NestedModel(item_id="ok")
+        assert outcome.calls == 3
+        assert client.prompts[1] == "Return JSON."
+        assert client.prompts[2].startswith("Return JSON.")
+        assert "Exact validation error" in client.prompts[2]
+
+    def test_an_opted_in_policy_does_not_correct_a_transport_failure(
+        self, tmp_path
+    ) -> None:
+        client = ScriptedClient([RuntimeError("offline"), {"item_id": "ok"}])
+
+        outcome = _send(
+            client,
+            tmp_path,
+            policy=CorrectionPolicy(validation_retries=1, correct_undecodable=True),
+        )
+
+        assert outcome.error == "RuntimeError: offline"
+        assert outcome.calls == 1
+
+    def test_a_prior_reply_that_fails_validation_keeps_its_trailing_whitespace(
+        self, tmp_path
+    ) -> None:
+        reply = '{"item_id": "malformed"}\n\n   '
+        client = ScriptedClient([reply, {"item_id": "ok"}])
+        policy = CorrectionPolicy(
+            validation_retries=1, include_response=True, correct_undecodable=True
+        )
+
+        _send(client, tmp_path, policy=policy)
+
+        assert f"```json\n{reply}\n```" in client.prompts[1]
+
     def test_a_transport_failure_ends_the_call(self, tmp_path) -> None:
         client = ScriptedClient([RuntimeError("offline"), {"item_id": "ok"}])
 

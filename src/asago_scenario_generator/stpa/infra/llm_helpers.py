@@ -705,11 +705,18 @@ def _retry_kind(
     state: _SafeCallState,
     json_retries_remaining: int,
     validation_retries_remaining: int,
+    *,
+    correct_undecodable: bool = False,
 ) -> str | None:
     """Select the existing bounded retry policy without changing precedence."""
     if isinstance(error, json.JSONDecodeError) and json_retries_remaining:
         return "json"
-    if _validation_retry_requested(error, state) and validation_retries_remaining:
+    if (
+        _validation_retry_requested(
+            error, state, correct_undecodable=correct_undecodable
+        )
+        and validation_retries_remaining
+    ):
         return "validation"
     return None
 
@@ -717,10 +724,16 @@ def _retry_kind(
 def _validation_retry_requested(
     error: BaseException,
     state: _SafeCallState,
+    *,
+    correct_undecodable: bool = False,
 ) -> bool:
-    """Report whether a failure belongs to the existing validation retry set."""
+    """Report whether a failure belongs to the validation retry set.
+
+    An undecodable body joins the set only when the policy opts in and the
+    provider answered, so the correction has a reply to carry.
+    """
     if isinstance(error, json.JSONDecodeError):
-        return False
+        return correct_undecodable and state.result is not None
     return bool(
         isinstance(error, ValidationError)
         or state.raw_result_validation_failed
@@ -741,6 +754,12 @@ class CorrectionPolicy:
     text, or a function from the failure to the text.  ``error_note`` is a
     function from the failure to a note placed right after the exact error;
     an empty note adds nothing.  Every other failure ends the call.
+
+    With ``correct_undecodable``, an undecodable body that no ``json_retries``
+    repeat covers also earns a validation correction.  That correction shows
+    the prior response without its trailing whitespace, so a reply that ended
+    in a whitespace run never reaches the prompt.  Pass a ``feedback``
+    function to word it for the decode error.
     """
 
     json_retries: int = 0
@@ -749,6 +768,7 @@ class CorrectionPolicy:
     include_schema: bool = True
     include_response: bool = False
     error_note: Callable[[Exception], str] | None = None
+    correct_undecodable: bool = False
 
     def __post_init__(self) -> None:
         if self.json_retries < 0 or self.validation_retries < 0:
@@ -833,6 +853,9 @@ def correction_prompt(
     suffix = feedback or ""
     if include_prior_response and prior_result is not None:
         prior_response = _stringify_response_content(prior_result.content)
+        if isinstance(error, json.JSONDecodeError):
+            # A whitespace runaway would add its whole run to the prompt.
+            prior_response = prior_response.rstrip()
         suffix += (
             "\n\nPrior structured response to correct in place:\n"
             f"```json\n{prior_response}\n```"
@@ -1204,6 +1227,7 @@ def call_with_policy(
                 state,
                 json_retries_remaining,
                 validation_retries_remaining,
+                correct_undecodable=policy.correct_undecodable,
             )
             if retry_kind == "json":
                 json_retries_remaining -= 1
