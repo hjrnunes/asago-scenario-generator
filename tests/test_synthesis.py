@@ -30,6 +30,7 @@ from asago_scenario_generator.pipeline.control_action_enrichment import (
     ControlActionOperationEnrichmentRecord,
 )
 from asago_scenario_generator.pipeline.synthesis import (
+    REPORT_FILENAME,
     SynthesisAdapters,
     SynthesisInputs,
     SynthesisRunStatus,
@@ -74,10 +75,6 @@ from asago_scenario_generator.pipeline.synthesis_values import (
     _ica_verification,
     _ordinary_icas,
     _semantic_digest,
-)
-from asago_scenario_generator.report.synthesis import (
-    _candidate_outcomes_html,
-    render_synthesis_report,
 )
 from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
@@ -353,9 +350,23 @@ def test_synthesis_retains_baseline_diagnostics_without_changing_yield(tmp_path)
     assert diagnostics["stage_warnings"] == ["An <input> repair was required."]
     assert result.report_path is not None
     report = result.report_path.read_text()
-    assert "Analysis diagnostics" in report
-    assert all(escape(warning) in report for warning in expected)
+    assert '<section id="warnings">' in report
+    assert all(escape(warning.split(": ", 1)[1]) in report for warning in expected)
     assert "An <input> repair" not in report
+
+
+def test_a_run_writes_the_generate_report_and_its_stage_summary(tmp_path):
+    """The report lives in report/, beside the summary orch reads."""
+    result = run_synthesis(
+        _inputs(tmp_path), SynthesisAdapters.from_object(_FakeAdapters(calls=[]))
+    )
+
+    assert result.report_path == tmp_path / "report" / "index.html"
+    assert REPORT_FILENAME == "report/index.html"
+    summary = json.loads((tmp_path / "report" / "stage-summary.json").read_text())
+    assert summary["stage"] == "generate"
+    assert summary["report"] == "index.html"
+    assert not (tmp_path / "synthesis-report.html").exists()
 
 
 def test_a_run_with_a_risk_extraction_publishes_policy_coverage(tmp_path):
@@ -924,8 +935,8 @@ def test_synthesis_counts_candidates_separately_from_diagnostics(
         "skipped",
     ]
     report = result.report_path.read_text(encoding="utf-8")
-    assert "Failed candidates</th><td>2" in report
-    assert "Diagnostic messages</th><td>4" in report
+    assert "2 failed" in report
+    assert "4 diagnostic" in report
 
 
 def test_synthesis_no_eligible_candidates_has_distinct_valid_status(
@@ -957,8 +968,7 @@ def test_synthesis_no_eligible_candidates_has_distinct_valid_status(
     assert result.run_status == "no_candidates"
     assert (tmp_path / "synthesis-manifest.yaml").exists()
     report = result.report_path.read_text(encoding="utf-8")
-    assert "Scenario generation status</th><td>no_candidates" in report
-    assert "No eligible scenario candidates were available." in report
+    assert "Scenario generation ended no_candidates: no_eligible_candidates." in report
 
 
 def test_synthesis_attempted_zero_yield_is_failed_after_artifacts_publish(
@@ -1003,11 +1013,11 @@ def test_synthesis_attempted_zero_yield_is_failed_after_artifacts_publish(
         "obligation-accounting.yaml",
         "scenario-realization.yaml",
         "synthesis-manifest.yaml",
-        "synthesis-report.html",
+        "report",
     }.issubset({path.name for path in tmp_path.iterdir()})
     report = result.report_path.read_text(encoding="utf-8")
-    assert "Scenario generation status</th><td>failed" in report
-    assert "No scenarios were published after attempting candidates." in report
+    assert "Scenario generation ended failed: zero_yield_after_attempts." in report
+    assert "2 candidates did not publish a scenario" in report
 
 
 def test_synthesis_partial_yield_is_degraded_with_separate_candidate_counts(
@@ -1064,10 +1074,10 @@ def test_synthesis_partial_yield_is_degraded_with_separate_candidate_counts(
         "skipped",
     ]
     report = result.report_path.read_text(encoding="utf-8")
-    assert "Scenario generation status</th><td>degraded" in report
-    assert "Published candidates</th><td>1" in report
-    assert "Failed candidates</th><td>1" in report
-    assert "Skipped candidates</th><td>1" in report
+    assert "Scenario generation ended degraded: partial_candidate_yield." in report
+    assert "2 candidates did not publish a scenario" in report
+    assert "1 failed" in report
+    assert "1 skipped" in report
 
 
 def test_synthesis_status_helper_covers_each_terminal_count_shape() -> None:
@@ -1108,52 +1118,6 @@ def test_synthesis_status_helper_covers_each_terminal_count_shape() -> None:
     )
     for counts, expected in cases:
         assert _scenario_generation_status(counts) == expected
-
-
-def test_candidate_outcomes_report_has_distinct_empty_and_record_views() -> None:
-    """The report distinguishes unavailable, empty, and populated outcomes."""
-    assert "not reported" in _candidate_outcomes_html(None)
-    assert "No scenario candidates were requested." in _candidate_outcomes_html(())
-    report = _candidate_outcomes_html(
-        (
-            SimpleNamespace(
-                scenario_id="SCN-<1>",
-                ica_slot_id="SLOT-1",
-                ica_id=None,
-                status=None,
-                diagnostics=("bad <diagnostic>",),
-            ),
-        )
-    )
-    assert "SCN-&lt;1&gt;" in report
-    assert "bad &lt;diagnostic&gt;" in report
-    assert "<td><code>—</code></td>" in report
-
-
-def test_report_stop_reasons_come_from_the_manifest_counts(tmp_path: Path) -> None:
-    """The report renders the manifest's terminal counts, not its own tally."""
-    path = render_synthesis_report(
-        tmp_path,
-        manifest={
-            "obligation_stop_reason_counts": {
-                "scenario_realized": 2,
-                "addressed": 1,
-            }
-        },
-        plan=None,
-        consideration=None,
-        accounting=SimpleNamespace(
-            rows=(SimpleNamespace(obligation_id="ob-1", stop_reason="other"),)
-        ),
-        realization=None,
-        scenario_result=None,
-    )
-    html = path.read_text(encoding="utf-8")
-    assert (
-        "<tr><th>addressed</th><td>1</td></tr>"
-        "\n<tr><th>scenario_realized</th><td>2</td></tr>"
-    ) in html
-    assert "<th>other</th>" not in html
 
 
 def test_synthesis_manifest_keeps_revision_as_compact_evidence_mapping(

@@ -111,32 +111,14 @@ def _persist_manifest(output_dir: Path, manifest: Any) -> Path:
     return path
 
 
-def _render_report(
-    output_dir: Path,
-    manifest: Any,
-    plan: Any,
-    consideration: Any,
-    accounting: Any,
-    realization: Any,
-    target_realization: Any,
-    scenario_result: Any,
-) -> Path | None:
-    """Render the read-only synthesis report after all normative sidecars."""
+def _render_report(output_dir: Path) -> Path | None:
+    """Render the generate report from the published sidecars; a failure never fails the run."""
     try:
-        from asago_scenario_generator.report.synthesis import render_synthesis_report
+        from asago_scenario_generator.report.generate_report import write_report
 
-        return render_synthesis_report(
-            output_dir,
-            manifest=manifest,
-            plan=plan,
-            consideration=consideration,
-            accounting=accounting,
-            realization=realization,
-            target_realization=target_realization,
-            scenario_result=scenario_result,
-        )
+        return write_report(output_dir).index
     except Exception as exc:  # noqa: BLE001 - report is read-only and non-fatal
-        logger.warning("synthesis report generation failed: %s", exc)
+        logger.warning("generate report failed: %s", exc)
         return None
 
 

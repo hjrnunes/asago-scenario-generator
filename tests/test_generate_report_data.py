@@ -95,3 +95,17 @@ def test_a_null_count_in_the_manifest_loads(tmp_path: Path) -> None:
     )
 
     assert load_run(output).manifest.scenario_counts["requested"] is None
+
+
+def test_a_manifest_that_reports_no_candidate_outcomes_loads_with_none(
+    tmp_path: Path,
+) -> None:
+    from tests.helpers.generate_report_fixture import edit_yaml
+
+    output = copy_run(tmp_path)
+    edit_yaml(
+        output / "synthesis-manifest.yaml",
+        lambda m: m.update(candidate_outcomes=None),
+    )
+
+    assert load_run(output).manifest.candidate_outcomes == []

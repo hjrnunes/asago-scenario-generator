@@ -42,7 +42,7 @@ SCENARIO_REALIZATION_FILENAME = "scenario-realization.yaml"
 MANIFEST_FILENAME = "synthesis-manifest.yaml"
 
 
-REPORT_FILENAME = "synthesis-report.html"
+REPORT_FILENAME = "report/index.html"
 
 
 class SynthesisRunStatus(str, Enum):

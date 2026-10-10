@@ -396,7 +396,7 @@ def test_product_cli_prints_the_report_path_when_one_is_rendered(
     risk, facts, sssom = _input_files(tmp_path)
     output_dir = tmp_path / "run"
     fake = _result(output_dir, "completed")
-    fake.report_path = output_dir / "synthesis-report.html"
+    fake.report_path = output_dir / "report" / "index.html"
 
     with (
         patch(

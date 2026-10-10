@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 
@@ -29,7 +28,6 @@ from asago_scenario_generator.pipeline.synthesis_manifest import (
     _obligation_stop_reason_counts,
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import _run_realization
-from asago_scenario_generator.report.synthesis import render_synthesis_report
 from asago_scenario_generator.stpa.models.scenario_spec import (
     Adversary,
     AdversaryKind,
@@ -495,35 +493,6 @@ class TestFunctionalTestRecordValidation:
     def test_realized_status_rejects_the_functional_stop_reason(self) -> None:
         with pytest.raises(ValidationError, match="require scenario_realized"):
             _realized(stop_reason="scenario_functional_test")
-
-
-def _realization_report(tmp_path: Path, **counts: int) -> str:
-    """Render the report page for a realization with the given summary counts."""
-    summary = derive_scenario_realization_summary(()).model_copy(update=counts)
-    path = render_synthesis_report(
-        tmp_path,
-        manifest={},
-        plan=None,
-        consideration=None,
-        accounting=None,
-        realization=SimpleNamespace(summary=summary, records=()),
-        scenario_result=None,
-    )
-    return path.read_text(encoding="utf-8")
-
-
-def test_report_omits_a_zero_functional_test_row(tmp_path: Path) -> None:
-    html = _realization_report(tmp_path, realized=2)
-
-    assert "<tr><th>realized</th><td>2</td></tr>" in html
-    assert "<th>functional_test</th>" not in html
-
-
-def test_report_counts_functional_tests_apart_from_realized(tmp_path: Path) -> None:
-    html = _realization_report(tmp_path, functional_test=22)
-
-    assert "<tr><th>functional_test</th><td>22</td></tr>" in html
-    assert "<tr><th>realized</th><td>0</td></tr>" in html
 
 
 def _run_realization_stage(scenario_result: Any) -> dict[str, Any]:

@@ -405,16 +405,7 @@ def _run_synthesis(
         getattr(baseline, "risk_actionability", None),
     )
 
-    report_path = _render_report(
-        output_dir,
-        manifest,
-        plan,
-        consideration,
-        accounting,
-        realization,
-        target_realization,
-        scenario_result,
-    )
+    report_path = _render_report(output_dir)
 
     artifact_paths = _artifact_paths(
         output_dir,

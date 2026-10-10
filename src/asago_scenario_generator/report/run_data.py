@@ -16,7 +16,13 @@ from pathlib import Path
 from typing import Any, TypeVar
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, ValidationError
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+)
 
 from asago_scenario_generator.models.obligation_accounting import ObligationAccounting
 from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferReport
@@ -117,6 +123,11 @@ class Manifest(_Read):
     revision: dict[str, Any] | None = None
     source_artifacts: dict[str, dict[str, Any]] = Field(default_factory=dict)
     provider_evidence: _ProviderEvidence = Field(default_factory=_ProviderEvidence)
+
+    @field_validator("candidate_outcomes", mode="before")
+    @classmethod
+    def _unreported(cls, value: Any) -> Any:
+        return [] if value is None else value
 
     @property
     def verifications(self) -> list[VerificationRecord]:
