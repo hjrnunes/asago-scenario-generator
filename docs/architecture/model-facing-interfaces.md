@@ -555,6 +555,16 @@ before: a response that does not decode or fails the provider schema, a
 transport error, a correction call that returns no response, and a gap list
 that is empty in the first response.
 
+A risk-derivation response that declares no grounded loss while risks are
+supplied gets one correction as the call's targeted repair. The correction
+repeats the original system and user prompts and appends the validator's
+feedback, the prior response, and the exact finding. Code validates the
+corrected response with every stage validator and applies no further
+deterministic repair to it; a second failure stops the run. The correction
+is a `repair` entry with identity `risk_card_losses` in
+`loss-analysis-repair.yaml`. Other semantic failures still stop the run
+without a repair call.
+
 The risk-derivation request asks for `risk_dispositions` rows in the
 supplied risk order. When a response reaches its completion-token cap inside
 that array and does not decode, code keeps the decoded graph and every
@@ -562,6 +572,26 @@ complete row, collapses duplicate rows that agree, and sends the risks still
 missing to the existing incomplete-disposition repair. The recovery applies
 only when the text before the array decodes; each use is a
 `truncated_disposition_recovery` entry in `loss-analysis-repair.yaml`.
+When the cut lies inside `risk_card_losses` or `use_case_losses` instead,
+code keeps the collections that decoded before that list and its complete
+loss records, drops the cut record, sets every collection the response
+never reached and `risk_dispositions` to `[]`, and sends every supplied
+risk to the same disposition repair. The recovery needs at least one
+complete loss record; each use is a `truncated_loss_recovery` entry in
+`loss-analysis-repair.yaml` (`applied` names `kept_losses`,
+`dropped_record`, and `emptied`).
+
+The risk-derivation call need not derive the dependent graph; the gap call
+derives hazards and constraints for the declared losses. When a decoded
+risk-derivation body declares no hazard (`"hazards": []`) but writes
+constraints, and no constraint reference names an existing hazard, code
+drops every constraint before the provider schema check, so an error inside
+a dropped constraint sets no failure class. The draft then goes on to the
+gap call with its losses and dispositions, and no request is sent for the
+drop. Each drop is a `hazardless_constraint_drop` entry in
+`loss-analysis-repair.yaml` (`applied.dropped_constraints` names the
+dropped handles, `proposed.undeclared_hazards` the references) and a
+cleanup transformation of the call record.
 
 The Stage 1a density revision prompt follows each `hazard H-n has no
 constraint` check with its repair: a constraint whose `related_hazards`

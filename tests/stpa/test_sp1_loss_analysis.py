@@ -436,10 +436,8 @@ class TestStage1aLossAnalysis:
     ):
         """A model cannot satisfy risk derivation with the empty shortcut.
 
-        The owner authorization (2026-09-11) replaced the bounded whole-object
-        retry with the targeted repair, and an empty baseline is a semantic
-        failure outside its two approved classes, so the run fails typed with
-        no second call.
+        An empty baseline gets the one loss-presence correction (owner choice
+        5, decision 327); a second empty reply fails typed with no third call.
         """
         empty_risk = {
             "risk_card_losses": [],
@@ -449,7 +447,7 @@ class TestStage1aLossAnalysis:
             "risk_dispositions": [],
         }
         client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [empty_risk])
+        client.set_response_for(LossAnalysisDraft, [empty_risk, empty_risk])
 
         with pytest.raises(StageError) as exc_info:
             derive_loss_analysis(
@@ -460,12 +458,12 @@ class TestStage1aLossAnalysis:
             )
 
         message = str(exc_info.value)
-        assert "targeted repair unsupported" in message
-        assert "draft_semantics failure class" in message
+        assert "targeted repair failed" in message
+        assert "loss_presence failure class" in message
         assert "no grounded losses were declared" in message
-        assert len(client.calls) == 1
+        assert len(client.calls) == 2
         entries = read_calls_jsonl(tmp_path)
-        assert [entry["success"] for entry in entries] == [False]
+        assert [entry["success"] for entry in entries] == [False, False]
         assert "complete loss -> hazard" in entries[0]["error"]
 
     def test_risk_call_can_establish_loss_registry_before_gap_graph(self, tmp_path):

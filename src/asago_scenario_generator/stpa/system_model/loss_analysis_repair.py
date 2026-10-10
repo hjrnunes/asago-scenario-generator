@@ -362,19 +362,166 @@ def recover_truncated_risk_dispositions(
 
 def _complete_array_rows(text: str, start: int) -> list[Any]:
     """Decode array elements from ``start`` until the array ends or is cut."""
+    return _array_rows(text, start)[0]
+
+
+def _array_rows(text: str, start: int) -> tuple[list[Any], int | None]:
+    """Decode array elements from ``start``; return them and where a cut starts.
+
+    The cut position is ``None`` when the array closes.
+    """
     decoder = json.JSONDecoder()
     rows: list[Any] = []
     index = start
     while True:
         while index < len(text) and text[index] in " \t\r\n,":
             index += 1
-        if index >= len(text) or text[index] == "]":
-            return rows
+        if index < len(text) and text[index] == "]":
+            return rows, None
+        if index >= len(text):
+            return rows, index
         try:
             row, index = decoder.raw_decode(text, index)
         except json.JSONDecodeError:
-            return rows
+            return rows, index
         rows.append(row)
+
+
+TRUNCATED_LOSS_RECOVERY_KIND = "truncated_loss_recovery"
+
+_LOSS_ARRAYS = re.compile(r'"(risk_card_losses|use_case_losses)"\s*:\s*\[')
+_HANDLE_FIELD = re.compile(r'"handle"\s*:\s*"((?:[^"\\]|\\.)*)"')
+_RISK_WIRE_COLLECTIONS = (
+    "risk_card_losses",
+    "use_case_losses",
+    "hazards",
+    "security_constraints",
+)
+
+
+@dataclass(frozen=True)
+class TruncatedLossRecovery:
+    """What recovery kept from a response cut off inside a loss list."""
+
+    completion_tokens: int
+    collection: str
+    kept_losses: int
+    dropped_record: str
+    emptied: tuple[str, ...]
+
+
+def _cut_loss_list(content: str) -> tuple[dict, str, list[Any], int] | None:
+    """Find the loss list the cut lies in, with the graph decoded before it."""
+    for match in _LOSS_ARRAYS.finditer(content):
+        collection = match.group(1)
+        head = content[: match.start()].rstrip().removesuffix(",")
+        try:
+            graph = json.loads(head + "}")
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(graph, dict) or collection in graph:
+            continue
+        rows, cut_at = _array_rows(content, match.end())
+        if cut_at is not None:
+            return graph, collection, rows, cut_at
+    return None
+
+
+def _cut_record_label(content: str, cut_at: int, index: int) -> str:
+    """Name the cut record by the handle it wrote, else by its position."""
+    handle = _HANDLE_FIELD.search(content, cut_at)
+    return handle.group(1) if handle is not None else f"row {index}"
+
+
+def recover_truncated_risk_losses(
+    result: LLMResult,
+) -> tuple[LLMResult, TruncatedLossRecovery] | None:
+    """Recover a risk-derivation response cut off inside a loss list.
+
+    Models can run away inside one loss record's ``source_risk_cards`` until
+    the completion cap stops them.  Recovery applies only when the response
+    reached its cap, does not decode, the cut lies inside the
+    ``risk_card_losses`` or ``use_case_losses`` list, and at least one
+    complete loss record remains.  It keeps every collection that decoded
+    completely before that list and the list's complete records, drops the
+    cut record, sets each collection the response never reached to ``[]``,
+    and empties ``risk_dispositions`` so the approved disposition repair
+    accounts for every supplied card.  The logged provider response is
+    never mutated.
+    """
+    used = _truncated_completion_tokens(result)
+    if used is None:
+        return None
+    found = _cut_loss_list(result.content)
+    if found is None:
+        return None
+    graph, collection, rows, cut_at = found
+    recovered = {**graph, collection: rows}
+    emptied = tuple(name for name in _RISK_WIRE_COLLECTIONS if name not in recovered)
+    recovered.update(dict.fromkeys(emptied, []))
+    if not any(recovered[name] for name in ("risk_card_losses", "use_case_losses")):
+        return None
+    if recovered.get("risk_dispositions") != []:
+        emptied += ("risk_dispositions",)
+    recovered["risk_dispositions"] = []
+    return (
+        result.model_copy(
+            update={"content": json.dumps(recovered, ensure_ascii=False)}
+        ),
+        TruncatedLossRecovery(
+            completion_tokens=used,
+            collection=collection,
+            kept_losses=len(rows),
+            dropped_record=_cut_record_label(result.content, cut_at, len(rows)),
+            emptied=emptied,
+        ),
+    )
+
+
+def record_truncated_loss_recovery(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    recovery: TruncatedLossRecovery,
+) -> None:
+    """Record one cut-off loss-list recovery in the cross-stage repair artifact."""
+    if repair_record is None:
+        return
+    repair_record.add(
+        stage=step,
+        attempt="first",
+        kind=TRUNCATED_LOSS_RECOVERY_KIND,
+        identity=recovery.collection,
+        reason=(
+            f"the response reached its {recovery.completion_tokens}-token "
+            f"completion cap inside {recovery.collection}; the complete loss "
+            "records were kept, the cut record was dropped, and every "
+            "supplied card was left to the disposition repair"
+        ),
+        proposed={"complete_losses": recovery.kept_losses},
+        applied={
+            "kept_losses": recovery.kept_losses,
+            "dropped_record": recovery.dropped_record,
+            "emptied": list(recovery.emptied),
+        },
+        outcome="applied",
+        raw_step=step,
+    )
+
+
+def record_truncation_recovery(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    recovery: TruncatedDispositionRecovery | TruncatedLossRecovery,
+) -> None:
+    """Record either cut-off recovery under its own kind."""
+    if isinstance(recovery, TruncatedLossRecovery):
+        record_truncated_loss_recovery(repair_record, step=step, recovery=recovery)
+    else:
+        record_truncated_disposition_recovery(
+            repair_record, step=step, recovery=recovery
+        )
 
 
 def _disposition_signature(row: dict) -> tuple[Any, tuple[str, ...]]:
@@ -437,6 +584,93 @@ def record_truncated_disposition_recovery(
             "kept_rows": recovery.kept_rows,
             "collapsed_refs": list(recovery.collapsed_refs),
         },
+        outcome="applied",
+        raw_step=step,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Hazard-less constraint drop (owner choice 9, decision 327)
+# ---------------------------------------------------------------------------
+
+HAZARDLESS_CONSTRAINT_DROP_KIND = "hazardless_constraint_drop"
+
+
+@dataclass(frozen=True)
+class HazardlessConstraintDrop:
+    """The constraints a risk-derivation body lost because no hazard backs them."""
+
+    dropped_constraints: tuple[str, ...]
+    undeclared_hazards: tuple[str, ...]
+
+
+def _constraint_hazard_references(constraints: list[Any]) -> list[str]:
+    """Return every string hazard reference the constraint rows name, in order."""
+    references: list[str] = []
+    for row in constraints:
+        related = row.get("related_hazards") if isinstance(row, dict) else None
+        if isinstance(related, list):
+            references.extend(ref for ref in related if isinstance(ref, str))
+    return references
+
+
+def drop_hazardless_constraints(
+    body: Any,
+    *,
+    allowed_hazard_ids: set[str],
+) -> tuple[dict, HazardlessConstraintDrop] | None:
+    """Drop the constraints of a decoded body that declares no hazard.
+
+    The risk-derivation call need not derive the dependent graph; the gap
+    call derives the hazards and constraints a loss registry lacks.  A body
+    with an empty ``hazards`` list whose constraints cite only hazards that
+    neither the body nor the earlier graph declares cannot resolve any of
+    those references, and no approved repair may add a hazard.  Dropping
+    every constraint leaves the losses and dispositions for the gap call.
+    The drop applies only when no reference names an allowed hazard ID.
+    """
+    if not isinstance(body, dict) or body.get("hazards") != []:
+        return None
+    constraints = body.get("security_constraints")
+    if not isinstance(constraints, list) or not constraints:
+        return None
+    references = _constraint_hazard_references(constraints)
+    if any(ref in allowed_hazard_ids for ref in references):
+        return None
+    return (
+        {**body, "security_constraints": []},
+        HazardlessConstraintDrop(
+            dropped_constraints=tuple(
+                _row_label(row, index, "handle")
+                for index, row in enumerate(constraints)
+            ),
+            undeclared_hazards=tuple(dict.fromkeys(references)),
+        ),
+    )
+
+
+def record_hazardless_constraint_drop(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    drop: HazardlessConstraintDrop,
+) -> None:
+    """Record one hazard-less constraint drop in the cross-stage repair artifact."""
+    if repair_record is None:
+        return
+    repair_record.add(
+        stage=step,
+        attempt="first",
+        kind=HAZARDLESS_CONSTRAINT_DROP_KIND,
+        identity="security_constraints",
+        reason=(
+            "the response declared no hazard, and no constraint reference "
+            "names a declared or existing hazard; every constraint was "
+            "dropped so the gap call derives hazards and constraints for "
+            "the declared losses"
+        ),
+        proposed={"undeclared_hazards": list(drop.undeclared_hazards)},
+        applied={"dropped_constraints": list(drop.dropped_constraints)},
         outcome="applied",
         raw_step=step,
     )
@@ -1340,6 +1574,47 @@ class ObligationRepairPlan:
     salvage_warnings: tuple[str, ...] = ()
 
 
+LOSS_PRESENCE_REPAIR_IDENTITY = "risk_card_losses"
+
+
+@dataclass(frozen=True)
+class LossPresenceRepairPlan:
+    """One correction of a risk-derivation reply that declared no grounded loss.
+
+    The request repeats the original prompts with the validator's exact
+    ``feedback`` and the prior reply (owner choice 5, decision 327).  It is
+    the call's one targeted repair.
+    """
+
+    feedback: str
+
+
+def record_loss_presence_repair(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    finding: str,
+    outcome: str,
+    reason: str = "",
+) -> None:
+    """Record the loss-presence correction with its one terminal outcome."""
+    if repair_record is None:
+        return
+    proposed = {"entries": [LOSS_PRESENCE_REPAIR_IDENTITY]}
+    repaired = outcome == "repaired"
+    repair_record.add(
+        stage=step,
+        attempt="repair",
+        kind="repair",
+        identity=LOSS_PRESENCE_REPAIR_IDENTITY,
+        reason=finding if repaired else f"{finding}; {reason}",
+        proposed=proposed,
+        applied=dict(proposed) if repaired else {},
+        outcome=outcome,
+        raw_step=step + _REPAIR_STEP_SUFFIX,
+    )
+
+
 @dataclass(frozen=True)
 class DroppedObligation:
     """An obligation the repair dropped because its span stays outside the rule."""
@@ -1452,7 +1727,9 @@ class ReferenceRepairPlan:
 
 
 RepairPlan = Union[DispositionRepairPlan, ObligationRepairPlan, ReferenceRepairPlan]
-RepairOutcome = Union[RepairPlan, UnsupportedRepair, DeterministicCleanup]
+RepairOutcome = Union[
+    RepairPlan, LossPresenceRepairPlan, UnsupportedRepair, DeterministicCleanup
+]
 
 
 def select_reference_repairs(
@@ -1646,15 +1923,17 @@ def build_repair_plan(
     first_wire_error: ValidationError | None = None,
     repair_record: RepairRecord | None = None,
     gap_wire: bool = False,
+    validation_feedback: str | None = None,
 ) -> RepairOutcome:
     """Classify one failed Stage 1a attempt and select its repair plan.
 
     ``failure_class`` is the caller's typed label for the first failure:
     ``wire_schema`` (the response never parsed), ``risk_accounting`` (the
-    deterministic accounting validator), ``draft_references``, or
-    ``draft_semantics``.  Only the first two can produce a repair, and the
-    wire path is further scoped by the initial error classification and
-    row-level salvage.
+    deterministic accounting validator), ``loss_presence`` (no grounded
+    loss declared), ``draft_references``, or ``draft_semantics``.  Only the
+    first three can produce a repair, and the wire path is further scoped
+    by the initial error classification and row-level salvage.  The
+    loss-presence correction carries ``validation_feedback``.
     """
     if first_result is None:
         return UnsupportedRepair("no provider response is available to repair")
@@ -1671,6 +1950,8 @@ def build_repair_plan(
             repair_record=repair_record,
             gap_wire=gap_wire,
         )
+    if failure_class == "loss_presence":
+        return LossPresenceRepairPlan(feedback=validation_feedback or "")
     if failure_class == "risk_accounting":
         return _accounting_repair_plan(
             first_result,

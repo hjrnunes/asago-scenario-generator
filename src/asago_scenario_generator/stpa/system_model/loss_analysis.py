@@ -49,6 +49,7 @@ from asago_scenario_generator.stpa.infra.llm import (
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
+    correction_prompt,
     decode_content,
     _transformation,
     parse_llm_result,
@@ -76,20 +77,29 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+    HAZARDLESS_CONSTRAINT_DROP_KIND,
     TRUNCATED_DISPOSITION_RECOVERY_KIND,
+    TRUNCATED_LOSS_RECOVERY_KIND,
     DeterministicCleanup,
     DispositionRepairPlan,
+    HazardlessConstraintDrop,
+    LossPresenceRepairPlan,
     ObligationRepairPlan,
     ReferenceRepairPlan,
     RepairPlan,
     RepairRecord,
     TruncatedDispositionRecovery,
+    TruncatedLossRecovery,
     UnsupportedRepair,
     build_repair_plan,
     classify_wire_validation_errors,
+    drop_hazardless_constraints,
     record_cleanup_rows,
-    record_truncated_disposition_recovery,
+    record_hazardless_constraint_drop,
+    record_loss_presence_repair,
+    record_truncation_recovery,
     recover_truncated_risk_dispositions,
+    recover_truncated_risk_losses,
     revalidate_provider_object,
     run_targeted_repair,
     select_disposition_repairs,
@@ -910,6 +920,10 @@ class _DraftSemanticValidationError(ValueError):
         self.feedback = feedback
 
 
+class _LossPresenceError(_DraftSemanticValidationError):
+    """The loss-producing call declared no grounded loss."""
+
+
 @dataclass(frozen=True)
 class LossAnalysisDiagnostic:
     """A deterministic, human-readable loss-analysis semantic diagnostic."""
@@ -1380,18 +1394,25 @@ class _Stage1aCall:
     normalization_warnings: list[str] | None
     repair_record: RepairRecord | None
     template_vars: dict[str, object]
+    system_prompt: str = ""
+    user_prompt: str = ""
     validation_feedback: str | None = None
+    validation_finding: str = ""
     first_parse_failed: bool = False
     first_wire_error: ValidationError | None = None
     # Typed label of the first failure, used to route the targeted repair:
-    # wire_schema, risk_accounting, draft_references, or draft_semantics.
+    # wire_schema, risk_accounting, loss_presence, draft_references, or
+    # draft_semantics.
     failure_class: str | None = None
     span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
     # The first response with its span repairs applied.  The repair path adapts
     # this body, not the logged provider response, so a repaired span is the
     # span every later validator reads.
     span_repaired_result: LLMResult | None = None
-    truncation_recovery: tuple[LLMResult, TruncatedDispositionRecovery] | None = None
+    truncation_recovery: (
+        tuple[LLMResult, TruncatedDispositionRecovery | TruncatedLossRecovery] | None
+    ) = None
+    hazardless_drop: tuple[LLMResult, HazardlessConstraintDrop] | None = None
 
     def add_warnings(self, warnings: Iterable[str]) -> None:
         """Append each new warning once, when the caller collects warnings."""
@@ -1428,11 +1449,18 @@ class _Stage1aCall:
         completion cap inside ``risk_dispositions``: its complete graph and
         complete rows are recovered, and the missing cards reach the
         disposition repair.
+
+        A risk-derivation body that declares no hazard loses its
+        constraints when none of their references can resolve.  The drop
+        runs on the decoded body before the provider wire parse, so an
+        error inside a dropped constraint never sets the failure class.
         """
         self.span_repairs.clear()
         self.span_repaired_result = None
+        self.hazardless_drop = None
         if self.require_risk_accounting:
             result = self._recover_truncation(result, cleanup)
+            result = self._drop_hazardless_constraints(result, cleanup)
         draft = self._parse_provider_draft(result)
         merged = (
             self.merge_authority(draft)
@@ -1445,24 +1473,64 @@ class _Stage1aCall:
     def _recover_truncation(
         self, result: LLMResult, cleanup: list[dict[str, Any]]
     ) -> LLMResult:
-        """Recover the complete rows of a body cut off inside dispositions."""
-        self.truncation_recovery = recover_truncated_risk_dispositions(result)
+        """Recover the complete records of a body cut off at the completion cap.
+
+        A cut inside a loss list keeps the complete losses; a cut inside
+        dispositions keeps the complete graph and rows.
+        """
+        self.truncation_recovery = recover_truncated_risk_losses(
+            result
+        ) or recover_truncated_risk_dispositions(result)
         if self.truncation_recovery is None:
             return result
         recovered_result, recovery = self.truncation_recovery
         cleanup.append(
             _transformation(
-                TRUNCATED_DISPOSITION_RECOVERY_KIND,
+                (
+                    TRUNCATED_LOSS_RECOVERY_KIND
+                    if isinstance(recovery, TruncatedLossRecovery)
+                    else TRUNCATED_DISPOSITION_RECOVERY_KIND
+                ),
                 result.content,
                 recovered_result.content,
-                detail=(
-                    f"kept {recovery.kept_rows} of "
-                    f"{recovery.complete_rows} complete disposition "
-                    "rows from a response cut off at the completion cap"
-                ),
+                detail=_truncation_detail(recovery),
             )
         )
         return recovered_result
+
+    def _drop_hazardless_constraints(
+        self, result: LLMResult, cleanup: list[dict[str, Any]]
+    ) -> LLMResult:
+        """Drop the constraints of a body that declares no hazard to cite."""
+        evidence: list[dict[str, Any]] = []
+        try:
+            body = decode_content(result, cleanup_transformations=evidence)
+        except (TypeError, ValueError):
+            return result
+        dropped = drop_hazardless_constraints(
+            body, allowed_hazard_ids=self.allowed_hazard_ids
+        )
+        if dropped is None:
+            return result
+        dropped_body, drop = dropped
+        dropped_result = result.model_copy(
+            update={"content": json.dumps(dropped_body, ensure_ascii=False)}
+        )
+        self.hazardless_drop = (dropped_result, drop)
+        cleanup.extend(evidence)
+        cleanup.append(
+            _transformation(
+                HAZARDLESS_CONSTRAINT_DROP_KIND,
+                result.content,
+                dropped_result.content,
+                detail=(
+                    "dropped constraints "
+                    f"{', '.join(drop.dropped_constraints)} citing undeclared "
+                    f"hazards {', '.join(drop.undeclared_hazards)}"
+                ),
+            )
+        )
+        return dropped_result
 
     def _parse_provider_draft(self, result: LLMResult) -> LossAnalysisDraft:
         """Parse the provider wire and record the failure class it raises."""
@@ -1528,6 +1596,9 @@ class _Stage1aCall:
         except _DraftReferenceValidationError:
             self.failure_class = self.failure_class or "draft_references"
             raise
+        except _LossPresenceError:
+            self.failure_class = "loss_presence"
+            raise
         except _DraftSemanticValidationError:
             self.failure_class = "draft_semantics"
             raise
@@ -1573,19 +1644,26 @@ class _Stage1aCall:
             self.run_validators(draft)
         except (_DraftReferenceValidationError, _DraftSemanticValidationError) as exc:
             self.validation_feedback = exc.feedback
+            self.validation_finding = str(exc)
             raise
 
     def record_first_attempt(self, first_result: LLMResult | None) -> LLMResult | None:
         """Record the first attempt's recovery and span repairs.
 
         Returns the first result the repair path reads: the recovered object
-        after a truncation recovery, not the undecodable provider text, and
-        the body with its span repairs applied.
+        after a truncation recovery, not the undecodable provider text, the
+        body without its hazard-less constraints, and the body with its span
+        repairs applied.
         """
         if self.truncation_recovery is not None:
             first_result, recovery = self.truncation_recovery
-            record_truncated_disposition_recovery(
+            record_truncation_recovery(
                 self.repair_record, step=self.step, recovery=recovery
+            )
+        if self.hazardless_drop is not None:
+            first_result, drop = self.hazardless_drop
+            record_hazardless_constraint_drop(
+                self.repair_record, step=self.step, drop=drop
             )
         if self.span_repaired_result is not None:
             first_result = self.span_repaired_result
@@ -1619,6 +1697,22 @@ class _Stage1aCall:
                 outcome="unsupported",
                 raw_step=self.step,
             )
+
+
+def _truncation_detail(
+    recovery: TruncatedDispositionRecovery | TruncatedLossRecovery,
+) -> str:
+    """Describe a cut-off recovery for the call record's cleanup entry."""
+    if isinstance(recovery, TruncatedLossRecovery):
+        return (
+            f"kept {recovery.kept_losses} complete {recovery.collection} "
+            f"records and dropped the cut record {recovery.dropped_record} "
+            "from a response cut off at the completion cap"
+        )
+    return (
+        f"kept {recovery.kept_rows} of {recovery.complete_rows} complete "
+        "disposition rows from a response cut off at the completion cap"
+    )
 
 
 def _provider_reference_feedback(step: str, exc: ValueError) -> str:
@@ -1692,6 +1786,8 @@ def _run_stage1a_call(
         normalization_warnings=normalization_warnings,
         repair_record=repair_record,
         template_vars=template_vars,
+        system_prompt=system_prompt,
+        user_prompt=user_prompt,
     )
     first = call_with_policy(
         llm_client=llm_client,
@@ -1727,6 +1823,8 @@ def _repair_stage1a_failure(
     # three approved failure classes: missing or malformed risk-disposition
     # entries, malformed obligation entries within an otherwise preserved
     # constraint, and unknown reference IDs (decision 243, 2026-10-08).
+    # A risk-derivation reply that declares no grounded loss gets one
+    # correction carrying the validator's feedback (decision 327).
     # Every other failure class gets an explicit typed outcome and no
     # additional model call.
     if call.validation_feedback is None:
@@ -1757,7 +1855,10 @@ def _repair_stage1a_failure(
             issubclass(call.response_format, _Stage1aGapProviderDraft)
             and not issubclass(call.response_format, _Stage1aRiskProviderDraft)
         ),
+        validation_feedback=call.validation_feedback,
     )
+    if isinstance(outcome, LossPresenceRepairPlan):
+        return _repair_loss_presence(call, outcome, first_result, error_msg)
     if isinstance(outcome, UnsupportedRepair):
         raise _unsupported_stop(
             call, outcome.scope, outcome.reason, error_msg, default_class="unknown"
@@ -1767,6 +1868,75 @@ def _repair_stage1a_failure(
             call, outcome, repair_response_format, error_msg
         )
     return _run_stage1a_repairs(call, outcome, repair_response_format)
+
+
+def _repair_loss_presence(
+    call: _Stage1aCall,
+    plan: LossPresenceRepairPlan,
+    first_result: LLMResult | None,
+    error_msg: str,
+) -> LossAnalysisDraft:
+    """Send the one correction of a reply that declared no grounded loss."""
+    # Validating the corrected reply reclassifies the call's failure.
+    failure_class = call.failure_class
+    outcome = call_with_policy(
+        llm_client=call.llm_client,
+        system_prompt=call.system_prompt,
+        user_prompt=correction_prompt(
+            original_prompt=call.user_prompt,
+            feedback=plan.feedback,
+            error=ValueError(call.validation_finding),
+            response_format=call.response_format,
+            include_schema=False,
+            prior_result=first_result,
+            include_prior_response=True,
+        ),
+        response_format=call.response_format,
+        run_dir=call.run_dir,
+        stage=STAGE,
+        step=call.step + "_repair",
+        policy=CorrectionPolicy(),
+        temperature=call.temperature,
+        max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
+        response_parser=lambda result, _cleanup: _parse_loss_presence_reply(
+            call, result
+        ),
+    )
+    repaired = outcome.error is None and outcome.value is not None
+    record_loss_presence_repair(
+        call.repair_record,
+        step=call.step,
+        finding=call.validation_finding,
+        outcome="repaired" if repaired else "failed",
+        reason=outcome.error or "",
+    )
+    if repaired:
+        return outcome.value
+    raise StageError(
+        stage=STAGE,
+        step=call.step,
+        message=(
+            f"targeted repair failed: {outcome.error}; {failure_class} "
+            f"failure class; first attempt failed: {error_msg}. "
+            f"{call.validation_feedback}"
+        ),
+    )
+
+
+def _parse_loss_presence_reply(
+    call: _Stage1aCall, result: LLMResult
+) -> LossAnalysisDraft:
+    """Parse and fully validate the loss-presence correction's reply."""
+    draft = _materialize_provider_draft(
+        parse_llm_result(result, call.response_format),
+        prior=call.authoritative_draft,
+    )
+    merged = (
+        call.merge_authority(draft) if call.authoritative_draft is not None else draft
+    )
+    call.add_warnings(normalize_disposition_citations(merged))
+    call.run_validators(merged)
+    return merged
 
 
 def _correct_references(
@@ -2540,7 +2710,7 @@ def _validate_loss_presence(
         f"{context} must return a complete loss -> hazard -> security constraint "
         "chain anchor: no grounded losses were declared"
     )
-    raise _DraftSemanticValidationError(
+    raise _LossPresenceError(
         message,
         feedback=(
             f"Validation feedback: {message}. Declare at least one grounded "
