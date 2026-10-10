@@ -491,11 +491,12 @@ def _invoke_and_compile_target_derived_icas(
             f"target-derived ICA finding provider failed: {type(exc).__name__}: {exc}",
         )
     compiled = _compile_target_derived_ica_response(response)
-    return _compile_target_derived_ica_findings(
+    findings, diagnostics = _compile_target_derived_ica_findings(
         baseline=baseline,
         realization=realization,
         response=compiled,
     )
+    return findings, (*compiled.provider_diagnostics, *diagnostics)
 
 
 def project_target_realization_to_stpa(

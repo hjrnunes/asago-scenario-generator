@@ -431,21 +431,31 @@ class TargetDerivedICALlmFinder:
         self,
         request: TargetDerivedICARequest,
     ) -> TargetDerivedICAProviderResponse:
-        """Return only findings paired with an exact verifier decision."""
-        draft = self._draft(request)
-        decisions = self._decisions(request, draft)
+        """Return only findings paired with an exact verifier decision.
+
+        Slot repairs and drops made before verification travel as provider
+        diagnostics.  A draft whose every finding was dropped gets no
+        verifier request; a draft the provider returned empty keeps its
+        verifier request, as before.
+        """
+        draft, diagnostics = self._draft(request)
+        decisions = (
+            self._decisions(request, draft) if draft.findings or not diagnostics else {}
+        )
         findings = _compile_derived_findings(
             draft,
             decisions,
             request.target_derived_ica_slots,
             request.target_operation_context,
         )
-        return TargetDerivedICAProviderResponse(findings=findings)
+        return TargetDerivedICAProviderResponse(
+            findings=findings
+        ).with_provider_diagnostics(diagnostics)
 
     def _draft(
         self,
         request: TargetDerivedICARequest,
-    ) -> TargetDerivedICADraftResponse:
+    ) -> tuple[TargetDerivedICADraftResponse, tuple[str, ...]]:
         system_prompt = self._loader.render_prompt("derived_ica_system.j2")
         user_prompt = self._loader.render_prompt(
             "derived_ica_user.j2",
@@ -461,7 +471,11 @@ class TargetDerivedICALlmFinder:
             result = self._correct_repeated_references(
                 system_prompt, user_prompt, raw, repeats
             )
-        return _bind_draft_identities(result)
+        resolved, diagnostics = _resolve_draft_slots(
+            result,
+            {item.slot_id for item in request.target_derived_ica_slots},
+        )
+        return _bind_draft_identities(resolved), diagnostics
 
     def _call_draft(
         self, system_prompt: str, user_prompt: str, *, step: str
@@ -1199,6 +1213,47 @@ def _systemic_baseline_prompt_view(baseline: Any) -> dict[str, Any]:
             for item in baseline.control_structure.controlled_processes
         ],
     }
+
+
+def _resolve_draft_slots(
+    response: TargetDerivedICADraftResponse,
+    slot_ids: set[str],
+) -> tuple[TargetDerivedICADraftResponse, tuple[str, ...]]:
+    """Map each finding's ``slot_id`` onto a request slot, or drop the finding.
+
+    The prompt asks for ICA IDs written as the slot ID plus a ``:<digits>``
+    suffix, and a provider sometimes copies that form into ``slot_id``.  Only
+    an exact request slot followed by one such suffix maps back; any other
+    unknown slot drops its finding.  Both outcomes return a diagnostic.
+    """
+    findings: list[TargetDerivedICADraft] = []
+    diagnostics: list[str] = []
+    for item in response.findings:
+        slot_id = _request_slot_for(item.slot_id, slot_ids)
+        if slot_id is None:
+            diagnostics.append(
+                f"target-derived ICA finding {item.ica_id} is unresolved: unknown "
+                f"slot {item.slot_id}; dropped before verification"
+            )
+            continue
+        if slot_id != item.slot_id:
+            diagnostics.append(
+                f"target-derived ICA finding slot_id {item.slot_id} is request "
+                f"slot {slot_id} plus an ICA suffix; mapped to slot {slot_id}"
+            )
+            item = item.model_copy(update={"slot_id": slot_id})
+        findings.append(item)
+    return TargetDerivedICADraftResponse(findings=tuple(findings)), tuple(diagnostics)
+
+
+def _request_slot_for(slot_id: str, slot_ids: set[str]) -> str | None:
+    """Return the request slot ``slot_id`` names exactly or as ``<slot>:<digits>``."""
+    if slot_id in slot_ids:
+        return slot_id
+    prefix, _, suffix = slot_id.rpartition(":")
+    if prefix in slot_ids and suffix.isascii() and suffix.isdigit():
+        return prefix
+    return None
 
 
 def _bind_draft_identities(
