@@ -1014,6 +1014,77 @@ def test_call2b_reference_correction_is_bounded(tmp_path) -> None:
     assert "RESP-T_S" in exc_info.value.message
 
 
+_DECLARED_PROCESS_CORRECTION = """\
+The prior response names references that this structure does not hold.
+Correct only these references, and keep every other record as written.
+
+Unknown references in the prior response:
+- control_actions[0].target: RESP-T_S
+- feedback[1].source: CP-9
+- control_actions[0].process_model_refs: PM-1-1 (not a process model part of RESP-2)
+
+Valid action targets and feedback sources:
+- RESP-1 (responsibility): Authorizes requests
+- RESP-2 (responsibility): Verifies outcomes
+- CP-1 (controlled process): Transaction processor
+A target or source may also name a controlled process that you add to
+`controlled_processes` in this response.
+
+An action's `process_model_refs` name only process model parts of the action's
+own responsibility. Valid process model parts:
+- RESP-2: PM-2-1: Outcome state
+
+
+Prior structured response to correct in place"""
+
+_RESPONSIBILITY_ONLY_CORRECTION = """\
+The prior response names references that this structure does not hold.
+Correct only these references, and keep every other record as written.
+
+Unknown references in the prior response:
+- control_actions[0].target: RESP-9
+- feedback[0].source: RESP-7
+- feedback[1].source: RESP-7
+
+Valid action targets and feedback sources:
+- RESP-1 (responsibility): Authorizes requests
+- RESP-2 (responsibility): Verifies outcomes
+A target or source may also name a controlled process that you add to
+`controlled_processes` in this response.
+
+
+Prior structured response to correct in place"""
+
+
+def _responsibility_only_payload() -> dict:
+    payload = _valid_payload()
+    payload["controlled_processes"] = []
+    payload["control_actions"][0]["target"] = {"type": "responsibility", "id": "RESP-9"}
+    payload["control_actions"][0]["effect_kind"] = "agent_message"
+    for channel in payload["feedback"]:
+        channel["source"] = {"type": "responsibility", "id": "RESP-7"}
+    return payload
+
+
+@pytest.mark.parametrize(
+    ("invalid", "expected"),
+    [
+        (_invented_reference_payload, _DECLARED_PROCESS_CORRECTION),
+        (_responsibility_only_payload, _RESPONSIBILITY_ONLY_CORRECTION),
+    ],
+    ids=["declared-process", "no-process-reference"],
+)
+def test_call2b_reference_correction_without_an_omission_keeps_its_bytes(
+    tmp_path, invalid, expected: str
+) -> None:
+    client = MockLLMClient()
+    client.set_response_for(ControlElementSet, [invalid(), invalid(), _valid_payload()])
+
+    _run_call_2b(client, tmp_path)
+
+    assert expected in client.calls[2].user_prompt
+
+
 def test_call2b_other_failures_get_no_reference_correction(tmp_path) -> None:
     unserved = _valid_payload()
     unserved["control_actions"] = unserved["control_actions"][:1]

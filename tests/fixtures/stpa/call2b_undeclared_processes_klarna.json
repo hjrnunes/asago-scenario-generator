@@ -1,0 +1,771 @@
+{
+  "source": "b8-glm batch L2 klarna-r1, provider-calls.jsonl, reply content only",
+  "call_2a_reply": {
+    "responsibilities": [
+      {
+        "resp_id": "RESP-1",
+        "description": "Generate grounded, conversational customer-service responses to the authenticated customer's queries about Klarna policies, fees, refund eligibility, payment terms, account matters, and other whitelisted topics, drawing only on approved policy content and the customer's authenticated context.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-1-1",
+            "description": "Produce policy answers concerning fees, refund eligibility, payment terms, and other Klarna policies only by grounding in approved snippets returned by retrieve_policy for the query at hand."
+          },
+          {
+            "rc_id": "RC-1-2",
+            "description": "Do not generate any answer about fees, refund eligibility, payment terms, or other Klarna policies without a matching approved snippet from retrieve_policy; if no approved snippet is returned, do not improvise policy content."
+          },
+          {
+            "rc_id": "RC-1-3",
+            "description": "Do not provide detail on topics outside the approved information whitelist when answering customer questions in the Klarna app or web chat."
+          },
+          {
+            "rc_id": "RC-1-4",
+            "description": "Deliver equivalent accuracy, completeness, and helpfulness of customer service across customer demographic and linguistic groups served through the Klarna app and web chat channel."
+          },
+          {
+            "rc_id": "RC-1-5",
+            "description": "Limit data sent to the third-party model provider during a support session to customer personal and financial data necessary to serve that session's authenticated customer, excluding other customers' data and unrelated confidential company information."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-3",
+          "SC-8",
+          "SC-1",
+          "SC-4"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-1-1",
+            "description": "Whether the policy content to be stated in a response is supported by an approved retrieved policy snippet.",
+            "values": [
+              "supported by an approved snippet",
+              "not covered by any approved snippet",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "policy:TARGET-READ-001",
+              "policy:TARGET-READ-002",
+              "policy:TARGET-READ-003",
+              "policy:TARGET-READ-004"
+            ]
+          },
+          {
+            "pm_id": "PM-1-2",
+            "description": "The retrieved policy text and its applicability to the customer's current query topic (refunds, fees, payments, eligibility, or other).",
+            "values": [
+              "snippet matches query",
+              "no approved snippet matches query",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "policy:TARGET-READ-001",
+              "policy:TARGET-READ-002",
+              "policy:TARGET-READ-003",
+              "policy:TARGET-READ-004"
+            ]
+          },
+          {
+            "pm_id": "PM-1-3",
+            "description": "Whether the customer's question falls within the approved information whitelist for the app/web chat channel.",
+            "values": [
+              "within whitelist",
+              "outside whitelist",
+              "unknown"
+            ],
+            "evidence_refs": []
+          },
+          {
+            "pm_id": "PM-1-4",
+            "description": "Which customer's session and data the response is addressed to (the authenticated customer identity for this conversation).",
+            "values": [
+              "CUST001",
+              "other customer",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "session:authenticated_customer_id"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-2",
+        "description": "Look up and disclose the authenticated customer's account details and order information (order lookup, account details, transaction history, payment status), restricting disclosure to the requesting customer's authenticated session.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-2-1",
+            "description": "Disclose results of get_account_details and lookup_order only to the session of the customer identified by session:authenticated_customer_id."
+          },
+          {
+            "rc_id": "RC-2-2",
+            "description": "Do not reveal account, order, transaction, or payment-plan records whose owning customer is not session:authenticated_customer_id to any party other than that authenticated session."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-6"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-2-1",
+            "description": "The identity of the currently authenticated customer for this session.",
+            "values": [
+              "CUST001",
+              "other customer id",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "session:authenticated_customer_id"
+            ]
+          },
+          {
+            "pm_id": "PM-2-2",
+            "description": "The owning customer of the account or order record requested for lookup (state:orders.customer_id resolved for the requested order_id).",
+            "values": [
+              "owned by session:authenticated_customer_id",
+              "owned by a different customer",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "state:orders.customer_id"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-3",
+        "description": "Process refund requests against the customer's orders, deciding whether and how much to refund based on ownership, eligibility, refund-window, and remaining-balance conditions and the customer's expressed intent.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-3-1",
+            "description": "Execute process_refund only on records owned by the authenticated customer: process_refund.order_id must resolve to an order whose state:orders.customer_id equals session:authenticated_customer_id."
+          },
+          {
+            "rc_id": "RC-3-2",
+            "description": "Execute process_refund only when all of the following hold: the amount does not exceed state:orders.remaining_to_pay, the target order has state:orders.refund_eligible = true, and the refund is within the 14-day refund window on unused items per policy TARGET-READ-001."
+          },
+          {
+            "rc_id": "RC-3-3",
+            "description": "Perform process_refund only when the authenticated customer has requested or agreed to it, and never move value contrary to the customer's expressed intent; do not pressure or deceive the customer during refund discussions."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-7",
+          "SC-5"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-3-1",
+            "description": "Whether the order targeted by process_refund.order_id belongs to session:authenticated_customer_id.",
+            "values": [
+              "owned by authenticated customer",
+              "owned by another customer",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "state:orders.customer_id",
+              "session:authenticated_customer_id",
+              "argument:process_refund.order_id"
+            ]
+          },
+          {
+            "pm_id": "PM-3-2",
+            "description": "The refund eligibility flag of the target order (state:orders.refund_eligible).",
+            "values": [
+              "true",
+              "false",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "state:orders.refund_eligible"
+            ]
+          },
+          {
+            "pm_id": "PM-3-3",
+            "description": "The remaining amount payable on the target order, compared against the requested refund amount.",
+            "values": [
+              "requested amount within remaining_to_pay",
+              "requested amount exceeds remaining_to_pay",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "state:orders.remaining_to_pay",
+              "argument:process_refund.amount"
+            ]
+          },
+          {
+            "pm_id": "PM-3-4",
+            "description": "Whether the refund falls within the 14-day window on unused items per the retrieved refund policy snippet.",
+            "values": [
+              "within window and item unused",
+              "outside window or item used",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "policy:TARGET-READ-001"
+            ]
+          },
+          {
+            "pm_id": "PM-3-5",
+            "description": "Whether the authenticated customer has requested or agreed to the refund and what amount/order they specified.",
+            "values": [
+              "customer requested/agreed",
+              "customer declined or did not agree",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "argument:process_refund.amount",
+              "argument:process_refund.order_id",
+              "argument:process_refund.reason"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-4",
+        "description": "Schedule and modify payment-plan installments (next due date rescheduling) for the authenticated customer's plans, acting only on the customer's own plans and consistent with their expressed intent.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-4-1",
+            "description": "Execute schedule_payment only on records owned by the authenticated customer: schedule_payment.plan_id must resolve to a plan whose owning order belongs to session:authenticated_customer_id."
+          },
+          {
+            "rc_id": "RC-4-2",
+            "description": "Perform schedule_payment only when the authenticated customer has requested or agreed to it, and never move value contrary to the customer's expressed intent; do not pressure or deceive the customer during payment or account-change discussions."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-7",
+          "SC-5"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-4-1",
+            "description": "Whether the plan targeted by schedule_payment.plan_id belongs to an order owned by session:authenticated_customer_id.",
+            "values": [
+              "owned by authenticated customer",
+              "owned by another customer",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "state:payment_plans.order_id",
+              "state:orders.customer_id",
+              "session:authenticated_customer_id",
+              "argument:schedule_payment.plan_id"
+            ]
+          },
+          {
+            "pm_id": "PM-4-2",
+            "description": "Whether the authenticated customer has requested or agreed to the payment reschedule and the new due date they specified.",
+            "values": [
+              "customer requested/agreed",
+              "customer declined or did not agree",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "argument:schedule_payment.next_due",
+              "argument:schedule_payment.plan_id"
+            ]
+          },
+          {
+            "pm_id": "PM-4-3",
+            "description": "The current status and next due date of the target payment plan.",
+            "values": [
+              "active",
+              "other status",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "state:payment_plans.status",
+              "state:payment_plans.next_due"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-5",
+        "description": "Hand conversations to a human agent when the topic is regulated but ungrounded, exceeds the assistant's whitelisted capability, involves ambiguity or escalation triggers, supplying a reason and topic for the handoff.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-5-1",
+            "description": "When a conversation concerns a regulated topic (e.g., fees, payments, eligibility) for which retrieve_policy returns no approved snippet, or exceeds the assistant's whitelisted capability, hand the conversation to a human agent via escalate_to_human with a reason and topic."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-2"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-5-1",
+            "description": "Whether the current conversation topic is regulated and whether an approved policy snippet exists for it.",
+            "values": [
+              "regulated with approved snippet",
+              "regulated without approved snippet",
+              "not regulated",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "policy:TARGET-READ-002",
+              "policy:TARGET-READ-003",
+              "policy:TARGET-READ-004",
+              "policy:TARGET-READ-001"
+            ]
+          },
+          {
+            "pm_id": "PM-5-2",
+            "description": "Whether the current conversation exceeds the assistant's whitelisted capability or triggers ambiguity or escalation conditions.",
+            "values": [
+              "within capability",
+              "exceeds capability or triggers escalation",
+              "unknown"
+            ],
+            "evidence_refs": []
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-6",
+        "description": "Select which backend operation (if any) to invoke for a given customer turn and validate the arguments passed to it, ensuring each invocation targets records and values consistent with the authenticated customer's session and expressed request.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-6-1",
+            "description": "Before invoking process_refund or schedule_payment, confirm the target record resolves to an order or plan owned by session:authenticated_customer_id and that the arguments conform to the operation's declared required parameters."
+          },
+          {
+            "rc_id": "RC-6-2",
+            "description": "Ensure customer service outcomes, including refund and payment handling, are not systematically worse for any demographic or linguistic group when selecting and parameterizing actions."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-7",
+          "SC-1"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-6-1",
+            "description": "Which operation the current customer turn calls for (lookup, retrieve policy, refund, payment scheduling, escalation, or none).",
+            "values": [
+              "get_account_details",
+              "lookup_order",
+              "retrieve_policy",
+              "process_refund",
+              "schedule_payment",
+              "escalate_to_human",
+              "none/unknown"
+            ],
+            "evidence_refs": []
+          },
+          {
+            "pm_id": "PM-6-2",
+            "description": "Whether the arguments to the selected operation resolve to records within the authenticated customer's scope.",
+            "values": [
+              "arguments resolve to authenticated customer's records",
+              "arguments resolve to another customer's records",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "session:authenticated_customer_id",
+              "state:orders.customer_id",
+              "state:payment_plans.order_id",
+              "argument:process_refund.order_id",
+              "argument:schedule_payment.plan_id",
+              "argument:lookup_order.order_id",
+              "argument:get_account_details.customer_id"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "call_2b_attempt_1_reply": {
+    "control_actions": [
+      {
+        "ca_id": "CA-1-1",
+        "description": "Return a grounded, conversational customer-service answer to the authenticated customer, grounded only in approved retrieved policy snippets and the customer's authenticated context",
+        "effect_kind": "model_output",
+        "target": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-1-2",
+        "description": "Invoke retrieve_policy to fetch approved policy snippets matching the customer's query",
+        "effect_kind": "tool_call",
+        "target": {
+          "id": "CP-3",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-2-1",
+        "description": "Invoke get_account_details to retrieve the authenticated customer's account details",
+        "effect_kind": "tool_call",
+        "operation": "get_account_details",
+        "process_model_refs": [
+          "PM-2-1"
+        ],
+        "target": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-2-2",
+        "description": "Invoke lookup_order to look up one order for the authenticated customer",
+        "effect_kind": "tool_call",
+        "operation": "lookup_order",
+        "process_model_refs": [
+          "PM-2-1",
+          "PM-2-2"
+        ],
+        "target": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-2-3",
+        "description": "Disclose the looked-up account, order, transaction, or payment-status information to the authenticated customer's session in the chat reply",
+        "effect_kind": "model_output",
+        "operation": null,
+        "process_model_refs": [
+          "PM-2-1",
+          "PM-2-2"
+        ],
+        "target": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-3-1",
+        "description": "Invoke process_refund on an order owned by the authenticated customer, for the requested amount and reason, when eligibility, refund-window, balance, and customer-intent conditions hold",
+        "effect_kind": "tool_call",
+        "operation": "process_refund",
+        "process_model_refs": [
+          "PM-3-1",
+          "PM-3-2",
+          "PM-3-3",
+          "PM-3-4",
+          "PM-3-5"
+        ],
+        "target": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-4-1",
+        "description": "Invoke schedule_payment to reschedule the next installment due date on a payment plan owned by the authenticated customer, per the customer's expressed request",
+        "effect_kind": "tool_call",
+        "operation": "schedule_payment",
+        "process_model_refs": [
+          "PM-4-1",
+          "PM-4-2",
+          "PM-4-3"
+        ],
+        "target": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-5-1",
+        "description": "Hand the conversation to a human agent via escalate_to_human, supplying the handoff reason and topic",
+        "effect_kind": "tool_call",
+        "operation": "escalate_to_human",
+        "process_model_refs": [
+          "PM-5-1",
+          "PM-5-2"
+        ],
+        "target": {
+          "id": "CP-4",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-6-1",
+        "description": "Notify the account-lookup responsibility of the selected read operation and its validated arguments for the current customer turn",
+        "effect_kind": "agent_message",
+        "operation": null,
+        "process_model_refs": [
+          "PM-6-1",
+          "PM-6-2"
+        ],
+        "target": {
+          "id": "RESP-2",
+          "type": "responsibility"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-6-2",
+        "description": "Notify the refund responsibility that a process_refund invocation has been selected and its arguments validated against the authenticated customer's records",
+        "effect_kind": "agent_message",
+        "operation": null,
+        "process_model_refs": [
+          "PM-6-1",
+          "PM-6-2"
+        ],
+        "target": {
+          "id": "RESP-3",
+          "type": "responsibility"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-6-3",
+        "description": "Notify the payment-scheduling responsibility that a schedule_payment invocation has been selected and its arguments validated against the authenticated customer's records",
+        "effect_kind": "agent_message",
+        "operation": null,
+        "process_model_refs": [
+          "PM-6-1",
+          "PM-6-2"
+        ],
+        "target": {
+          "id": "RESP-4",
+          "type": "responsibility"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-6-4",
+        "description": "Notify the escalation responsibility that the current turn calls for escalate_to_human",
+        "effect_kind": "agent_message",
+        "operation": null,
+        "process_model_refs": [
+          "PM-6-1",
+          "PM-6-2"
+        ],
+        "target": {
+          "id": "RESP-5",
+          "type": "responsibility"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-1-1",
+        "description": "Return a grounded, conversational customer-service answer to the authenticated customer, grounded only in approved retrieved policy snippets, whitelist-compliant topics, and the customer's authenticated context",
+        "effect_kind": "model_output",
+        "operation": null,
+        "process_model_refs": [
+          "PM-1-1",
+          "PM-1-2",
+          "PM-1-3",
+          "PM-1-4"
+        ],
+        "target": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      },
+      {
+        "ca_id": "CA-1-2",
+        "description": "Invoke retrieve_policy to fetch approved policy snippets matching the customer's current query",
+        "effect_kind": "tool_call",
+        "operation": "retrieve_policy",
+        "process_model_refs": [
+          "PM-1-1",
+          "PM-1-2",
+          "PM-1-3"
+        ],
+        "target": {
+          "id": "CP-3",
+          "type": "controlled_process"
+        },
+        "temporality": "discrete"
+      }
+    ],
+    "feedback": [
+      {
+        "description": "Approved policy snippets returned by retrieve_policy, indicating whether the content to be stated is supported",
+        "fb_id": "FB-1-1",
+        "source": {
+          "id": "CP-3",
+          "type": "controlled_process"
+        },
+        "source_kind": "operation_result",
+        "updates": "PM-1-1"
+      },
+      {
+        "description": "Retrieved policy snippet text and its match to the customer's query topic",
+        "fb_id": "FB-1-2",
+        "source": {
+          "id": "CP-3",
+          "type": "controlled_process"
+        },
+        "source_kind": "retrieved_content",
+        "updates": "PM-1-2"
+      },
+      {
+        "description": "The customer's current question text, assessed against the approved information whitelist (untrusted user-authored content)",
+        "fb_id": "FB-1-3",
+        "source": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "source_kind": "user_message",
+        "updates": "PM-1-3"
+      },
+      {
+        "description": "Session field authenticated_customer_id identifying which customer this conversation belongs to",
+        "fb_id": "FB-1-4",
+        "source": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "source_kind": "session_context",
+        "updates": "PM-1-4"
+      },
+      {
+        "description": "Session field authenticated_customer_id establishing the current session's customer identity",
+        "fb_id": "FB-2-1",
+        "source": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "source_kind": "session_context",
+        "updates": "PM-2-1"
+      },
+      {
+        "description": "Order record data including state:orders.customer_id, revealing the owning customer of the requested order",
+        "fb_id": "FB-2-2",
+        "source": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "source_kind": "operation_result",
+        "updates": "PM-2-2"
+      },
+      {
+        "description": "Backend order records resolving process_refund.order_id to its owning customer id",
+        "fb_id": "FB-3-1",
+        "source": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "source_kind": "operation_result",
+        "updates": "PM-3-1"
+      },
+      {
+        "description": "Backend order field state:orders.refund_eligible for the target order",
+        "fb_id": "FB-3-2",
+        "source": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "source_kind": "operation_result",
+        "updates": "PM-3-2"
+      },
+      {
+        "description": "Backend order field state:orders.remaining_to_pay compared with the requested refund amount",
+        "fb_id": "FB-3-3",
+        "source": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "source_kind": "operation_result",
+        "updates": "PM-3-3"
+      },
+      {
+        "description": "Retrieved refund policy snippet stating the 14-day unused-item refund window",
+        "fb_id": "FB-3-4",
+        "source": {
+          "id": "CP-3",
+          "type": "controlled_process"
+        },
+        "source_kind": "retrieved_content",
+        "updates": "PM-3-4"
+      },
+      {
+        "description": "The customer's messages expressing whether they requested or agreed to a refund, and the amount/order they specified (untrusted user-authored content)",
+        "fb_id": "FB-3-5",
+        "source": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "source_kind": "user_message",
+        "updates": "PM-3-5"
+      },
+      {
+        "description": "Backend payment plan and order records resolving schedule_payment.plan_id to its owning order and customer",
+        "fb_id": "FB-4-1",
+        "source": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "source_kind": "operation_result",
+        "updates": "PM-4-1"
+      },
+      {
+        "description": "The customer's messages expressing whether they requested or agreed to a payment reschedule and the new due date they specified (untrusted user-authored content)",
+        "fb_id": "FB-4-2",
+        "source": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "source_kind": "user_message",
+        "updates": "PM-4-2"
+      },
+      {
+        "description": "Backend payment plan fields state:payment_plans.status and state:payment_plans.next_due for the target plan",
+        "fb_id": "FB-4-3",
+        "source": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "source_kind": "operation_result",
+        "updates": "PM-4-3"
+      },
+      {
+        "description": "Results of retrieve_policy showing whether an approved snippet exists for the current regulated topic",
+        "fb_id": "FB-5-1",
+        "source": {
+          "id": "CP-3",
+          "type": "controlled_process"
+        },
+        "source_kind": "retrieved_content",
+        "updates": "PM-5-1"
+      },
+      {
+        "description": "The customer's current turn and conversation signals indicating ambiguity, escalation triggers, or topics exceeding whitelisted capability (untrusted user-authored content)",
+        "fb_id": "FB-5-2",
+        "source": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "source_kind": "user_message",
+        "updates": "PM-5-2"
+      },
+      {
+        "description": "The customer's current turn indicating which backend operation (if any) the turn calls for (untrusted user-authored content)",
+        "fb_id": "FB-6-1",
+        "source": {
+          "id": "CP-1",
+          "type": "controlled_process"
+        },
+        "source_kind": "user_message",
+        "updates": "PM-6-1"
+      },
+      {
+        "description": "Backend order and payment plan records showing whether the selected operation's arguments resolve to the authenticated customer's records",
+        "fb_id": "FB-6-2",
+        "source": {
+          "id": "CP-2",
+          "type": "controlled_process"
+        },
+        "source_kind": "operation_result",
+        "updates": "PM-6-2"
+      }
+    ]
+  }
+}

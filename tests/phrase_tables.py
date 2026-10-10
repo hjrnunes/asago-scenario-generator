@@ -153,6 +153,19 @@ UNKNOWN_REFERENCES = {
         ControlledProcess(cp_id="CP-1", description="Request processor")
     ],
     "process_model_owners": ONE_RESPONSIBILITY["responsibilities"],
+    "undeclared_controlled_processes": [],
+}
+
+# A reply that left out `controlled_processes` and still targets CP-1 and CP-3.
+UNDECLARED_CONTROLLED_PROCESSES = {
+    "unknown_references": [
+        UnknownReference("control_actions[0].target", "CP-1"),
+        UnknownReference("feedback[0].source", "CP-3"),
+    ],
+    "responsibilities": ONE_RESPONSIBILITY["responsibilities"],
+    "controlled_processes": [],
+    "process_model_owners": [],
+    "undeclared_controlled_processes": ["CP-1", "CP-3"],
 }
 
 EMPTY_STRUCTURE = {
@@ -353,6 +366,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "no-probes": _system_model(taxonomy_probes=[]),
     "empty-structure": _system_model(**EMPTY_STRUCTURE),
     "unknown-references": _system_model(**UNKNOWN_REFERENCES),
+    "undeclared-controlled-processes": _system_model(**UNDECLARED_CONTROLLED_PROCESSES),
     "target-blind": _stage5(dict),
     "operation": _stage5(lambda: {"target_operation": _target_operation()}),
     "observations": _stage5(lambda: {"target_observations": _record_observations()}),

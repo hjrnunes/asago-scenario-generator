@@ -2215,17 +2215,8 @@ def _correct_call_2b_references(
     failure = outcome.failure
     if not isinstance(failure, UnknownReferenceError) or outcome.result is None:
         return None
-    owners = {item.owner for item in failure.references if item.owner is not None}
-    feedback = "\n\n" + loader.render_prompt(
-        "stage2_call2b_reference_correction.j2",
-        unknown_references=failure.references,
-        responsibilities=responsibilities,
-        controlled_processes=failure.controlled_processes,
-        process_model_owners=[
-            responsibility
-            for responsibility in responsibilities
-            if responsibility.resp_id in owners
-        ],
+    feedback = "\n\n" + _call_2b_reference_feedback(
+        failure, responsibilities=responsibilities, loader=loader
     )
     corrected = call_with_policy(
         llm_client=llm_client,
@@ -2253,6 +2244,49 @@ def _correct_call_2b_references(
             stage=STAGE, step="call_2b_control_elements", message=corrected.error
         )
     return corrected.value
+
+
+def _call_2b_reference_feedback(
+    failure: UnknownReferenceError,
+    *,
+    responsibilities: Sequence[Responsibility],
+    loader: TemplateLoader,
+) -> str:
+    """Render the reference correction text for one Call 2b failure."""
+    owners = {item.owner for item in failure.references if item.owner is not None}
+    return loader.render_prompt(
+        "stage2_call2b_reference_correction.j2",
+        unknown_references=failure.references,
+        responsibilities=responsibilities,
+        controlled_processes=failure.controlled_processes,
+        process_model_owners=[
+            responsibility
+            for responsibility in responsibilities
+            if responsibility.resp_id in owners
+        ],
+        undeclared_controlled_processes=_undeclared_controlled_processes(failure),
+    )
+
+
+_CONTROLLED_PROCESS_ID = re.compile(r"CP-\d+")
+
+
+def _undeclared_controlled_processes(failure: UnknownReferenceError) -> list[str]:
+    """Return the ``CP-*`` targets and sources of a reply that declared no process.
+
+    A provider may leave the optional ``controlled_processes`` collection out,
+    and the client then fills it with ``[]``.  Once the reply declares any
+    controlled process, an unknown ``CP-*`` is an ordinary wrong reference and
+    this returns nothing.
+    """
+    if failure.controlled_processes:
+        return []
+    undeclared = {
+        item.value
+        for item in failure.references
+        if item.owner is None and _CONTROLLED_PROCESS_ID.fullmatch(item.value)
+    }
+    return sorted(undeclared, key=lambda cp_id: (_extract_resp_num(cp_id), cp_id))
 
 
 # ---------------------------------------------------------------------------
