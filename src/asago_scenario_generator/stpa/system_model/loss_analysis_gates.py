@@ -2001,7 +2001,7 @@ def _run_density_revision(
                     template_loader=inputs.template_loader,
                     temperature=inputs.temperature,
                     attempts_out=attempts,
-                    drop_unquoted_spans=True,
+                    drop_defective_records=True,
                 )
         except StageError as exc:
             # The revision itself failed (provider error or a response that
@@ -2245,7 +2245,7 @@ def _run_stated_rule_revision(
                 attempts_out=attempts,
                 stated_rules=findings,
                 addition_only=True,
-                drop_unquoted_spans=True,
+                drop_defective_records=True,
             )
     except Exception as exc:  # noqa: BLE001 - this revision is advisory
         _record_revision_span_repairs(repair_record, run_dir, attempts, accepted=False)
@@ -2504,14 +2504,14 @@ def _run_graph_revision_call(
     attempts_out: list[_RevisionAttempt],
     stated_rules: Sequence[StatedRuleFinding] = (),
     addition_only: bool = False,
-    drop_unquoted_spans: bool = False,
+    drop_defective_records: bool = False,
 ) -> LossAnalysis:
     """Make the bounded graph-revision call and validate its result.
 
     A caller counts the requests it sent, a correction included and a request
     the prompt preflight blocked excluded, with :func:`count_requests`.
 
-    With ``drop_unquoted_spans``, a final response that fails validation
+    With ``drop_defective_records``, a final response that fails validation
     because some record's obligation ``rule_span`` is not part of that
     record's rule, or because a record has a blank ``applies_when`` entry,
     yields the response without those records (see
@@ -2605,7 +2605,7 @@ def _run_graph_revision_call(
         result_validator=validate_revision,
     )
     revised = outcome.value
-    if revised is None and drop_unquoted_spans:
+    if revised is None and drop_defective_records:
         revised = _revision_without_defective_records(
             loss_analysis,
             attempts_out,

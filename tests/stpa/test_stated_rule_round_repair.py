@@ -94,7 +94,7 @@ def _call(tmp_path, replies, *, addition_only: bool, analysis=None):
         attempts_out=attempts,
         stated_rules=(FEE_FINDING,),
         addition_only=addition_only,
-        drop_unquoted_spans=True,
+        drop_defective_records=True,
     )
     return prior, revised, attempts, client
 

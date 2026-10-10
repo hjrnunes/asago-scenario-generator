@@ -68,7 +68,7 @@ def _call(tmp_path: Path, replies: list[dict], prior: LossAnalysis | None = None
         template_loader=TemplateLoader(PROMPTS_DIR),
         temperature=0.4,
         attempts_out=attempts,
-        drop_unquoted_spans=True,
+        drop_defective_records=True,
     )
     return revised, attempts, client
 
