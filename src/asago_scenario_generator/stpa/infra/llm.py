@@ -402,6 +402,28 @@ def _top_k_extra_body(top_k: int | None) -> dict[str, Any]:
     return {"top_k": top_k}
 
 
+def _validated_repetition_penalty(value: Any) -> float | int | None:
+    """Return a profile's repetition penalty, or reject a non-positive number."""
+    if value is None:
+        return None
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not 0 < value < float("inf")
+    ):
+        raise ValueError(
+            f"repetition_penalty must be a number greater than 0, got {value!r}"
+        )
+    return value
+
+
+def _repetition_penalty_extra_body(penalty: float | None) -> dict[str, Any]:
+    """The extra_body entries for the repetition_penalty control."""
+    if penalty is None:
+        return {}
+    return {"repetition_penalty": penalty}
+
+
 def _thinking_extra_body(enable_thinking: bool | None) -> dict[str, Any]:
     """Map the profile switch to the vLLM chat-template request body."""
     if enable_thinking is not None:
@@ -471,6 +493,7 @@ class LLMClient:
         extra_headers: dict[str, str] | None = None,
         top_p: float | None = None,
         top_k: int | None = None,
+        repetition_penalty: float | None = None,
         enable_thinking: bool | None = None,
         use_guided_decoding: bool | None = None,
         timeout: float | None = None,
@@ -512,6 +535,7 @@ class LLMClient:
             maximum=1.0,
         )
         self.top_k = _resolve_optional_int(top_k, _ENV_TOP_K, minimum=1)
+        self.repetition_penalty = _validated_repetition_penalty(repetition_penalty)
         self.seed = (
             _validated_int(seed, "seed", minimum=0) if seed is not None else None
         )
@@ -584,6 +608,7 @@ class LLMClient:
             {
                 **_top_k_extra_body(self.top_k),
                 **_thinking_extra_body(self.enable_thinking),
+                **_repetition_penalty_extra_body(self.repetition_penalty),
             }
             if self.sampling_controls
             else {}

@@ -30,8 +30,11 @@ request once with `service_tier_fallback` and records the tier change. A
 separate retry, made once per request, follows an HTTP 5xx status or a
 non-timeout connection error (`provider-calls.jsonl` records both attempts).
 Set
-`sampling_controls: false` to omit temperature, top-p, top-k, seed, and
-chat-template thinking controls. The client accepts `strict_json_schema` only
+`repetition_penalty` (a number greater than 0) in a profile to send it in
+`extra_body` next to `top_k` and the thinking control; a profile that omits it
+sends nothing. Set
+`sampling_controls: false` to omit temperature, top-p, top-k, repetition
+penalty, seed, and chat-template thinking controls. The client accepts `strict_json_schema` only
 as `false` (or absent); `true` fails at client construction, and run records
 do not carry the key. Set `json_schema_strict: false` to send the
 Pydantic schema with `"strict": false`; local Pydantic validation remains
