@@ -443,6 +443,93 @@ def record_truncated_disposition_recovery(
 
 
 # ---------------------------------------------------------------------------
+# Hazard-less constraint drop (owner choice 9, decision 327)
+# ---------------------------------------------------------------------------
+
+HAZARDLESS_CONSTRAINT_DROP_KIND = "hazardless_constraint_drop"
+
+
+@dataclass(frozen=True)
+class HazardlessConstraintDrop:
+    """The constraints a risk-derivation body lost because no hazard backs them."""
+
+    dropped_constraints: tuple[str, ...]
+    undeclared_hazards: tuple[str, ...]
+
+
+def _constraint_hazard_references(constraints: list[Any]) -> list[str]:
+    """Return every string hazard reference the constraint rows name, in order."""
+    references: list[str] = []
+    for row in constraints:
+        related = row.get("related_hazards") if isinstance(row, dict) else None
+        if isinstance(related, list):
+            references.extend(ref for ref in related if isinstance(ref, str))
+    return references
+
+
+def drop_hazardless_constraints(
+    body: Any,
+    *,
+    allowed_hazard_ids: set[str],
+) -> tuple[dict, HazardlessConstraintDrop] | None:
+    """Drop the constraints of a decoded body that declares no hazard.
+
+    The risk-derivation call need not derive the dependent graph; the gap
+    call derives the hazards and constraints a loss registry lacks.  A body
+    with an empty ``hazards`` list whose constraints cite only hazards that
+    neither the body nor the earlier graph declares cannot resolve any of
+    those references, and no approved repair may add a hazard.  Dropping
+    every constraint leaves the losses and dispositions for the gap call.
+    The drop applies only when no reference names an allowed hazard ID.
+    """
+    if not isinstance(body, dict) or body.get("hazards") != []:
+        return None
+    constraints = body.get("security_constraints")
+    if not isinstance(constraints, list) or not constraints:
+        return None
+    references = _constraint_hazard_references(constraints)
+    if any(ref in allowed_hazard_ids for ref in references):
+        return None
+    return (
+        {**body, "security_constraints": []},
+        HazardlessConstraintDrop(
+            dropped_constraints=tuple(
+                _row_label(row, index, "handle")
+                for index, row in enumerate(constraints)
+            ),
+            undeclared_hazards=tuple(dict.fromkeys(references)),
+        ),
+    )
+
+
+def record_hazardless_constraint_drop(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    drop: HazardlessConstraintDrop,
+) -> None:
+    """Record one hazard-less constraint drop in the cross-stage repair artifact."""
+    if repair_record is None:
+        return
+    repair_record.add(
+        stage=step,
+        attempt="first",
+        kind=HAZARDLESS_CONSTRAINT_DROP_KIND,
+        identity="security_constraints",
+        reason=(
+            "the response declared no hazard, and no constraint reference "
+            "names a declared or existing hazard; every constraint was "
+            "dropped so the gap call derives hazards and constraints for "
+            "the declared losses"
+        ),
+        proposed={"undeclared_hazards": list(drop.undeclared_hazards)},
+        applied={"dropped_constraints": list(drop.dropped_constraints)},
+        outcome="applied",
+        raw_step=step,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Wire-error classification (R2.1/R2.2): before any salvage or cleanup
 # ---------------------------------------------------------------------------
 

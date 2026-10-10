@@ -76,9 +76,11 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
+    HAZARDLESS_CONSTRAINT_DROP_KIND,
     TRUNCATED_DISPOSITION_RECOVERY_KIND,
     DeterministicCleanup,
     DispositionRepairPlan,
+    HazardlessConstraintDrop,
     ObligationRepairPlan,
     ReferenceRepairPlan,
     RepairPlan,
@@ -87,7 +89,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     UnsupportedRepair,
     build_repair_plan,
     classify_wire_validation_errors,
+    drop_hazardless_constraints,
     record_cleanup_rows,
+    record_hazardless_constraint_drop,
     record_truncated_disposition_recovery,
     recover_truncated_risk_dispositions,
     revalidate_provider_object,
@@ -1392,6 +1396,7 @@ class _Stage1aCall:
     # span every later validator reads.
     span_repaired_result: LLMResult | None = None
     truncation_recovery: tuple[LLMResult, TruncatedDispositionRecovery] | None = None
+    hazardless_drop: tuple[LLMResult, HazardlessConstraintDrop] | None = None
 
     def add_warnings(self, warnings: Iterable[str]) -> None:
         """Append each new warning once, when the caller collects warnings."""
@@ -1428,11 +1433,18 @@ class _Stage1aCall:
         completion cap inside ``risk_dispositions``: its complete graph and
         complete rows are recovered, and the missing cards reach the
         disposition repair.
+
+        A risk-derivation body that declares no hazard loses its
+        constraints when none of their references can resolve.  The drop
+        runs on the decoded body before the provider wire parse, so an
+        error inside a dropped constraint never sets the failure class.
         """
         self.span_repairs.clear()
         self.span_repaired_result = None
+        self.hazardless_drop = None
         if self.require_risk_accounting:
             result = self._recover_truncation(result, cleanup)
+            result = self._drop_hazardless_constraints(result, cleanup)
         draft = self._parse_provider_draft(result)
         merged = (
             self.merge_authority(draft)
@@ -1463,6 +1475,40 @@ class _Stage1aCall:
             )
         )
         return recovered_result
+
+    def _drop_hazardless_constraints(
+        self, result: LLMResult, cleanup: list[dict[str, Any]]
+    ) -> LLMResult:
+        """Drop the constraints of a body that declares no hazard to cite."""
+        evidence: list[dict[str, Any]] = []
+        try:
+            body = decode_content(result, cleanup_transformations=evidence)
+        except (TypeError, ValueError):
+            return result
+        dropped = drop_hazardless_constraints(
+            body, allowed_hazard_ids=self.allowed_hazard_ids
+        )
+        if dropped is None:
+            return result
+        dropped_body, drop = dropped
+        dropped_result = result.model_copy(
+            update={"content": json.dumps(dropped_body, ensure_ascii=False)}
+        )
+        self.hazardless_drop = (dropped_result, drop)
+        cleanup.extend(evidence)
+        cleanup.append(
+            _transformation(
+                HAZARDLESS_CONSTRAINT_DROP_KIND,
+                result.content,
+                dropped_result.content,
+                detail=(
+                    "dropped constraints "
+                    f"{', '.join(drop.dropped_constraints)} citing undeclared "
+                    f"hazards {', '.join(drop.undeclared_hazards)}"
+                ),
+            )
+        )
+        return dropped_result
 
     def _parse_provider_draft(self, result: LLMResult) -> LossAnalysisDraft:
         """Parse the provider wire and record the failure class it raises."""
@@ -1579,13 +1625,19 @@ class _Stage1aCall:
         """Record the first attempt's recovery and span repairs.
 
         Returns the first result the repair path reads: the recovered object
-        after a truncation recovery, not the undecodable provider text, and
-        the body with its span repairs applied.
+        after a truncation recovery, not the undecodable provider text, the
+        body without its hazard-less constraints, and the body with its span
+        repairs applied.
         """
         if self.truncation_recovery is not None:
             first_result, recovery = self.truncation_recovery
             record_truncated_disposition_recovery(
                 self.repair_record, step=self.step, recovery=recovery
+            )
+        if self.hazardless_drop is not None:
+            first_result, drop = self.hazardless_drop
+            record_hazardless_constraint_drop(
+                self.repair_record, step=self.step, drop=drop
             )
         if self.span_repaired_result is not None:
             first_result = self.span_repaired_result
