@@ -401,7 +401,8 @@ def realize_target_derived_icas(
     diagnostic.
 
     A provider may return a finding only for a known target-derived slot and
-    must use the exact slot-relative ICA identity.  Only findings carrying a
+    must use the exact slot-relative ICA identity; a finding for any other
+    slot is dropped with a diagnostic.  Only findings carrying a
     ``verified`` verification status enter the effective candidate universe.
     Rejected or unverified findings leave their target slot visible as a
     traceable N/A slot and add a diagnostic, while invented identities or
@@ -800,7 +801,7 @@ def _compile_target_derived_ica_findings(
     """Accept only verified findings for the exact accepted target slots."""
     slots = {item.slot_id: item for item in realization.target_derived_ica_slots}
     baseline_ica_ids, hazard_ids, constraint_ids = _target_ica_reference_sets(baseline)
-    by_slot = _group_target_ica_findings(
+    by_slot, diagnostics = _group_target_ica_findings(
         response.findings,
         slots,
         baseline_ica_ids,
@@ -808,7 +809,6 @@ def _compile_target_derived_ica_findings(
         constraint_ids,
     )
     accepted: list[TargetDerivedICAFinding] = []
-    diagnostics: list[str] = []
     for slot_id in sorted(slots):
         slot_findings = by_slot.get(slot_id, [])
         verified, slot_diagnostics = _verified_slot_findings(slot_id, slot_findings)
@@ -970,31 +970,34 @@ def _group_target_ica_findings(
     baseline_ica_ids: set[str],
     hazard_ids: set[str],
     constraint_ids: set[str],
-) -> dict[str, list[TargetDerivedICAFinding]]:
+) -> tuple[dict[str, list[TargetDerivedICAFinding]], list[str]]:
+    """Group findings by known slot; an unknown slot drops only its finding."""
     by_slot: dict[str, list[TargetDerivedICAFinding]] = {}
+    diagnostics: list[str] = []
     for finding in findings:
+        if finding.slot_id not in slots:
+            diagnostics.append(
+                _target_constraint_diagnostic(
+                    finding, f"unknown slot {finding.slot_id}"
+                )
+            )
+            continue
         _validate_target_ica_finding(
             finding,
-            slots,
             baseline_ica_ids,
             hazard_ids,
             constraint_ids,
         )
         by_slot.setdefault(finding.slot_id, []).append(finding)
-    return by_slot
+    return by_slot, diagnostics
 
 
 def _validate_target_ica_finding(
     finding: TargetDerivedICAFinding,
-    slots: Mapping[str, Any],
     baseline_ica_ids: set[str],
     hazard_ids: set[str],
     constraint_ids: set[str],
 ) -> None:
-    if finding.slot_id not in slots:
-        raise ValueError(
-            f"target-derived ICA finder references an unknown slot: {finding.slot_id}"
-        )
     if finding.ica_id in baseline_ica_ids:
         raise ValueError(
             f"target-derived ICA identity collides with baseline: {finding.ica_id}"
