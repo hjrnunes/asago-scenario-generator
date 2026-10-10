@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from html.parser import HTMLParser
 import re
 from pathlib import Path
 
@@ -395,3 +396,37 @@ def test_every_scenario_of_the_run_has_a_row_in_the_page_and_the_summary(
     assert metric(html, "scenarios.written") == (7, None)
     assert 'id="row-SCN-012"' not in html
     assert len(re.findall(r'<tr id="row-SCN-\d+"', html)) == 7
+
+
+class _Shown(HTMLParser):
+    """Collect, for each keyed number, the first text the page shows after its tag."""
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.pending: str | None = None
+        self.found: dict[str, tuple[str, str]] = {}
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        values = dict(attrs)
+        if "data-metric" in values:
+            self.pending = values["data-metric"]
+            self.value = values.get("data-value") or ""
+
+    def handle_data(self, data: str) -> None:
+        if self.pending is not None and data.strip():
+            self.found[self.pending] = (self.value, data.strip())
+            self.pending = None
+
+
+def test_every_keyed_number_shows_the_value_it_is_keyed_to(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+    scan = _Shown()
+    scan.feed(html)
+
+    assert len(scan.found) == len(read_metrics(html))
+    wrong = {
+        key: (value, text)
+        for key, (value, text) in scan.found.items()
+        if value.isdigit() and text != f"{int(value):,}"
+    }
+    assert wrong == {}
