@@ -4,7 +4,7 @@ created_at: '2026-10-09T23:56:15.608127+00:00'
 run_status: completed
 run_status_reason: all_requested_candidates_resolved
 scenario_counts:
-  generated: 28
+  generated: 8
   failed: 0
   requested: 59
   attempted: 59
