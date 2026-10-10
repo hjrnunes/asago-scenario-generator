@@ -7,7 +7,7 @@ from pathlib import Path
 
 import yaml
 
-from asago_scenario_generator.report.common import code_id
+from asago_scenario_generator.report.common import code_id, plural
 from asago_scenario_generator.report.run_data import RunData
 from asago_scenario_generator.report_kit import (
     Column,
@@ -122,6 +122,37 @@ def _disagreement(run: RunData) -> Markup:
     return callout("warning", "Manifest and files disagree", body)
 
 
+PUBLISHED = ("published", "functional_test")
+
+
+def _unpublished(run: RunData) -> Markup:
+    missed = [c for c in run.manifest.candidate_outcomes if c.status not in PUBLISHED]
+    if not missed:
+        return Markup("")
+    rows = [
+        Row(
+            [
+                code_id(c.scenario_id),
+                code_id(c.ica_slot_id or "none"),
+                c.status or "not reported",
+                "; ".join(c.diagnostics) or "none",
+            ],
+            id=f"unpublished-{c.scenario_id}",
+        )
+        for c in missed
+    ]
+    columns = [
+        Column("Candidate"),
+        Column("Slot"),
+        Column("Status"),
+        Column("Diagnostics", sortable=False),
+    ]
+    lead = Markup(
+        f"<p>{plural(len(missed), 'candidate')} did not publish a scenario.</p>"
+    )
+    return join([lead, table(columns, rows, "unpublished-candidates")])
+
+
 def handoff_section(run: RunData) -> Markup:
     """Render the files the producer hands on, with schema versions."""
     columns = [
@@ -140,6 +171,7 @@ def handoff_section(run: RunData) -> Markup:
             table(columns, _rows(run), "handoff-files"),
             _counts_line(run),
             _disagreement(run),
+            _unpublished(run),
         ]
     )
     return section("handoff", "What authoring receives", QUESTION, body)

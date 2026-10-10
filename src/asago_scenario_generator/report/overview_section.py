@@ -103,6 +103,14 @@ def _cost(n: Counts) -> str:
     return f"{n.failed} of {n.requests} model requests failed; {cost} output."
 
 
+def _ended(run: RunData) -> str:
+    manifest = run.manifest
+    if manifest.run_status == "completed":
+        return ""
+    why = f": {manifest.run_status_reason}" if manifest.run_status_reason else ""
+    return f"Scenario generation ended {manifest.run_status}{why}. "
+
+
 def _risk_sentence(n: Counts) -> str:
     if n.risks is None:
         return ""
@@ -164,7 +172,7 @@ def answer_section(run: RunData) -> Markup:
         f"{plural(n.attack, 'attack scenario')} and {plural(n.everyday, 'everyday check')}. "
         f"{n.sent} go to authoring."
     )
-    detail = f"{_risk_sentence(n)}{_cost(n)}"
+    detail = f"{_ended(run)}{_risk_sentence(n)}{_cost(n)}"
     body = join(
         [Markup(f"<p><b>{esc(sentence)}</b></p><p>{esc(detail)}</p>"), _tiles(n)]
     )

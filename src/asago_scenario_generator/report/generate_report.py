@@ -46,6 +46,12 @@ SCHEMA = (
     / "stage-summary-v1.schema.json"
 )
 EXTRA_CSS = ""
+RUN_STATUS = {
+    "completed": "pass",
+    "degraded": "warn",
+    "failed": "fail",
+    "no_candidates": "skip",
+}
 ITEM = {
     "canonical": ("pass", "Sent to authoring"),
     "duplicate": ("skip", "Duplicate of {of}"),
@@ -153,7 +159,7 @@ def _items(run: RunData) -> list[dict[str, str]]:
 
 
 def _summary(run: RunData, n: Counts) -> dict[str, Any]:
-    status = "fail" if run.manifest.run_status != "completed" else "pass"
+    status = RUN_STATUS.get(run.manifest.run_status, "unknown")
     if status == "pass" and (n.lost or n.degraded):
         status = "warn"
     return {

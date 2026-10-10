@@ -256,3 +256,68 @@ def test_a_summary_that_disagrees_with_the_page_is_not_written(
         write_report(output)
 
     assert not (output / "report" / "stage-summary.json").exists()
+
+
+def test_a_run_that_did_not_complete_says_so_in_the_answer(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
+
+    def fail(manifest: dict) -> None:
+        manifest["run_status"] = "failed"
+        manifest["run_status_reason"] = "zero_yield_after_attempts"
+
+    edit_yaml(output / "synthesis-manifest.yaml", fail)
+
+    html, summary = built(output)
+
+    answer = html.split('<section id="answer">')[1].split("</section>")[0]
+    assert "Scenario generation ended failed: zero_yield_after_attempts." in answer
+    assert summary["status"] == "fail"
+
+
+def test_a_completed_run_does_not_repeat_its_status_in_the_answer(
+    tmp_path: Path,
+) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    answer = html.split('<section id="answer">')[1].split("</section>")[0]
+    assert "Scenario generation ended" not in answer
+
+
+def test_candidates_that_published_nothing_are_listed_with_their_diagnostics(
+    tmp_path: Path,
+) -> None:
+    output = copy_run(tmp_path)
+
+    def add(manifest: dict) -> None:
+        manifest["candidate_outcomes"] += [
+            {
+                "scenario_id": "SCN-090",
+                "ica_slot_id": "RESP-9:CA-9-1:INCORRECT",
+                "ica_id": None,
+                "status": "rendering_failed",
+                "diagnostics": ["bad <diagnostic>"],
+            },
+            {
+                "scenario_id": "SCN-091",
+                "ica_slot_id": "RESP-9:CA-9-1:WRONG_TIMING",
+                "ica_id": None,
+                "status": "skipped",
+                "diagnostics": [],
+            },
+        ]
+
+    edit_yaml(output / "synthesis-manifest.yaml", add)
+
+    html, _ = built(output)
+
+    handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
+    assert "2 candidates did not publish a scenario" in handoff
+    assert "bad &lt;diagnostic&gt;" in handoff
+    assert 'id="unpublished-SCN-091"' in handoff
+
+
+def test_a_run_whose_candidates_all_published_lists_none(tmp_path: Path) -> None:
+    html, _ = built(copy_run(tmp_path))
+
+    handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
+    assert "did not publish" not in handoff
