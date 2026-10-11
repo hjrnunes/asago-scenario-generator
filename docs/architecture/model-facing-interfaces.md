@@ -602,8 +602,17 @@ feedback, the prior response, and the exact finding. Code validates the
 corrected response with every stage validator and applies no further
 deterministic repair to it; a second failure stops the run. The correction
 is a `repair` entry with identity `risk_card_losses` in
+`loss-analysis-repair.yaml`.
+
+A gap response gets the same kind of correction when the call needs a
+complete chain, losses are declared or supplied, and neither the response
+nor the prior view has a hazard or a security constraint. The feedback is
+the complete-chain validator's own text. The corrected response passes every
+gap validator, including the complete-chain check; a second failure stops
+the run. The correction is a `missing_hazard_chain_correction` entry in
 `loss-analysis-repair.yaml`. Other semantic failures still stop the run
-without a repair call.
+without a repair call, including a hazard that cites no loss, a constraint
+that cites no hazard, and hazards without constraints.
 
 The risk-derivation request asks for `risk_dispositions` rows in the
 supplied risk order. When a response reaches its completion-token cap inside
