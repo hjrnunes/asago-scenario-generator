@@ -451,12 +451,22 @@ def _fill(value: Any, node: Any, defs: Mapping[str, Any]) -> Any:
     if value is None or not isinstance(node, Mapping):
         return value
     if isinstance(node.get("anyOf"), list):
-        rest = [o for o in node["anyOf"] if o != _NULL]
-        return _fill(value, rest[0], defs) if len(rest) == 1 else value
+        return _fill_nullable(value, node["anyOf"], defs)
     if isinstance(value, list):
         return [_fill(item, node.get("items"), defs) for item in value]
-    if not isinstance(value, dict):
-        return value
+    if isinstance(value, dict):
+        return _fill_object(value, node, defs)
+    return value
+
+
+def _fill_nullable(value: Any, options: list, defs: Mapping[str, Any]) -> Any:
+    rest = [o for o in options if o != _NULL]
+    return _fill(value, rest[0], defs) if len(rest) == 1 else value
+
+
+def _fill_object(
+    value: dict[str, Any], node: Mapping[str, Any], defs: Mapping[str, Any]
+) -> dict[str, Any]:
     properties = node.get("properties", {})
     filled = {
         key: _fill(item, properties.get(key), defs) for key, item in value.items()
