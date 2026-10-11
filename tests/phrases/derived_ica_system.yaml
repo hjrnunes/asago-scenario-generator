@@ -1,0 +1,14 @@
+template: derived_ica_system.j2
+cases:
+  no-target-variables:
+    once:
+      - >-
+        Write each finding's `slot_id` exactly as one supplied `slot_id`; code
+        assigns each ICA ID.
+    required:
+      - >-
+        Do not reconsider baseline findings, create slots, change IDs, or add
+        execution details.
+    forbidden:
+      - ICA IDs must be the exact slot_id
+      - 1-based suffix

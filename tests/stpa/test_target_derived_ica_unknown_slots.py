@@ -190,9 +190,9 @@ class TestFinderDropsOtherUnknownSlots:
 
         assert [f.ica_id for f in response.findings] == [f"{_NOT_PROVIDED}:1"]
         assert response.provider_diagnostics == (
-            "target-derived ICA finding RESP-1:CA-1-4:INCORRECT:1 is unresolved: "
+            "target-derived ICA finding findings[0] is unresolved: "
             "unknown slot RESP-9:CA-9-1:INCORRECT; dropped before verification",
-            "target-derived ICA finding RESP-1:CA-1-4:WRONG_TIMING:1 is unresolved: "
+            "target-derived ICA finding findings[2] is unresolved: "
             "unknown slot RESP-1:CA-1-4:WRONG_TIMING:x; dropped before verification",
         )
         sent = _proposed(client.calls[1].user_prompt)
@@ -247,7 +247,7 @@ class TestFinderDropsOtherUnknownSlots:
             f"{extended}:1"
         ]
         assert (
-            "target-derived ICA finding RESP-1:CA-1-4:NOT_PROVIDED:1 is unresolved: "
+            "target-derived ICA finding findings[1] is unresolved: "
             "unknown slot RESP-9:CA-9-1:X; dropped before verification"
         ) in enhanced.diagnostics
 
