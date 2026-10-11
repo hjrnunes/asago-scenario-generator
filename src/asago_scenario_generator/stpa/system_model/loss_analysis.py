@@ -415,8 +415,9 @@ class _RevisionConstraintEdit(BaseModel):
     constraint_id: str = Field(min_length=1)
     rule: str = Field(min_length=1)
     # No item bound: the endpoint matches a pattern against the whole string,
-    # so any pattern or minLength here shrinks each condition to one character.
-    # The revision's blank-condition drop is the only guard.
+    # so a pattern such as \S shrinks each condition to one character, and
+    # minLength: 1 would stop only the empty string.  The revision's
+    # blank-condition drop is the only guard.
     applies_when: list[str] = Field(min_length=0, max_length=4)
     # Omitted (``None``) keeps the constraint's existing class.
     behavior_class: BehaviorClass | None = None
