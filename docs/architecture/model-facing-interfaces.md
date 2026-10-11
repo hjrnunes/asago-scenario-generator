@@ -563,6 +563,16 @@ fails too, the stage error says that the correction was tried. The setting is
 so `risk_derivation`, `gap_analysis`, and every other step end on an undecodable
 reply as before.
 
+A `hazard_graph_revision` reply that adds or edits a hazard whose description
+is blank (empty, or whitespace only) fails validation and gets the step's one
+correction. The schema already rejects an empty string; the post-parse check
+also rejects whitespace, because synthesis keeps a hazard without a description
+out of every prompt's reference slice, so each ICA prompt that offers such a
+hazard fails the prompt-reference check. The error
+(`stage1a_graph_revision_blank_hazard_error.j2`) names each such record, for
+example `hazard addition NEW-1`. A corrected reply that still carries one ends
+the step, like any other failed correction.
+
 A `risk_derivation` or `gap_analysis` response that parses but has a hazard
 `related_losses` or constraint `related_hazards` list naming an ID no
 declared record has gets exactly one reference correction call, provided
@@ -711,6 +721,18 @@ dropped phrase and asks the model to keep it or preserve the constraint.
 A call 3 coordination link may name a `shared_pm` only when one endpoint
 responsibility owns that process-model part. A retry lists every link that
 breaks this rule, the actual owner, and the endpoints' own parts.
+
+Every ID-like token in a Call 3 coordination link's `description` or its
+`coordination_mechanism.description` must be an exact ID from the control
+structure or loss analysis that Call 3 received, or a link or mechanism ID the
+reply itself adds. Synthesis prompts carry these texts, and the prompt-reference
+check reads each such token as a reference, so a shortened ID such as `PM-3`
+for `PM-3-1` would fail every prompt that shows the link. The token pattern is
+the preflight's own (`_REFERENCE_TOKEN_RE` in `stpa/infra/prompt_preflight.py`),
+imported rather than copied. A reply that breaks this rule gets the call's
+existing retry; the error (`stage2_call3_unknown_reference_error.j2`) names
+each unknown token with its link, and the ID the token probably shortens when
+exactly one ID extends it by a `-` segment.
 
 A graph-revision response that fails parsing or validation receives one
 correction call carrying the exact validation error and the prior response.

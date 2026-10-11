@@ -1,0 +1,1 @@
+{% for item in references %}{{ item.location }} names '{{ item.token }}', which is not an exact ID in the supplied control structure or loss analysis{% if item.candidate %}; it probably means '{{ item.candidate }}'{% endif %}. {% endfor %}Write each ID in a coordination description exactly as the supplied records spell it, or name the record in words without an ID.

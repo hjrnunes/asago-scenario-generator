@@ -285,9 +285,16 @@ unattempted yield. A compiled adversarial spec whose publication failed is a
 `publication_failed` candidate: attempted, never yielded, and never counted
 in `generated`. Candidate counts, artifact counts (`generated`,
 `functional_specifications`), and draft counts stay independent denominators.
-The product `generate` persists and
-reports its diagnostic/accounting sidecars before returning non-zero for the
-attempted zero-yield status.
+One exception keeps a lost run from passing as a valid empty analysis: when
+no candidate was requested and at least one call failed the prompt contract
+check (`PromptContractError`, stopped before dispatch), the status is `failed`
+with the reason `prompt_contract_failures: <n> calls failed the prompt
+contract check before dispatch`. A manifest records the count as
+`prompt_contract_failures` only when it is above zero, so a run that keeps
+candidates despite such failures keeps its status and still shows the count,
+and a run without them keeps its manifest shape. The product `generate`
+persists and reports its diagnostic/accounting sidecars before returning
+non-zero for either `failed` status.
 
 Baseline assembly, heuristic, solution-neutrality and post-revision findings
 are retained with their source category in synthesis `stage_warnings` and the

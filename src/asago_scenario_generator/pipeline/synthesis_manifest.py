@@ -17,6 +17,7 @@ from asago_scenario_generator.pipeline.synthesis_types import (
     SynthesisRunStatus,
 )
 from asago_scenario_generator.pipeline.synthesis_values import _digest_value, _dump
+from asago_scenario_generator.stpa.infra.prompt_preflight import PromptContractError
 from asago_scenario_generator.stpa.models.control_structure import (
     MAX_CONTEXT_ROWS_PER_ACTION,
     ControlStructure,
@@ -82,7 +83,10 @@ def _build_manifest(
         scenario_result=scenario_result,
     )
     scenario_counts = _manifest_scenario_counts(scenario_result, len(scenarios))
-    run_status, run_status_reason = _scenario_generation_status(scenario_counts)
+    contract_failures = _prompt_contract_failure_count(call_records)
+    run_status, run_status_reason = _scenario_generation_status(
+        scenario_counts, prompt_contract_failures=contract_failures
+    )
     payload: dict[str, Any] = {
         "schema_version": _MANIFEST_SCHEMA,
         "run_id": f"synthesis-{datetime.now(UTC).strftime('%Y%m%dT%H%M%SZ')}",
@@ -126,6 +130,7 @@ def _build_manifest(
         ),
         "run_status": run_status.value,
         "run_status_reason": run_status_reason,
+        **_prompt_contract_block(contract_failures),
         "scenario_counts": scenario_counts,
         "candidate_outcomes": _manifest_candidate_outcomes(scenario_result),
         "scenario_errors": list(scenario_result.stage_errors),
@@ -136,6 +141,29 @@ def _build_manifest(
     payload.update(_replay_fill_block(replay_fill))
     payload["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, payload)
     return payload
+
+
+_PROMPT_CONTRACT_ERROR_PREFIX = f"{PromptContractError.__name__}:"
+PROMPT_CONTRACT_REASON = "prompt_contract_failures"
+
+
+def _prompt_contract_failure_count(
+    call_records: list[dict[str, Any]] | None,
+) -> int:
+    """Count the call records the prompt contract check stopped before dispatch."""
+    return sum(
+        str(record.get("error") or "").startswith(_PROMPT_CONTRACT_ERROR_PREFIX)
+        for record in call_records or ()
+    )
+
+
+def _prompt_contract_block(failures: int) -> dict[str, int]:
+    """Return the manifest's contract-failure count, empty when there is none.
+
+    A run without contract failures keeps its manifest shape, so replays
+    compare byte for byte.
+    """
+    return {"prompt_contract_failures": failures} if failures else {}
 
 
 def _replay_fill_block(replay_fill: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -552,10 +580,30 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
     return counts
 
 
+def _zero_request_status(
+    prompt_contract_failures: int,
+) -> tuple[SynthesisRunStatus, str]:
+    """Return the status of a run that requested no candidate."""
+    if prompt_contract_failures > 0:
+        return (
+            SynthesisRunStatus.FAILED,
+            f"{PROMPT_CONTRACT_REASON}: {prompt_contract_failures} calls "
+            "failed the prompt contract check before dispatch",
+        )
+    return (SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates")
+
+
 def _scenario_generation_status(
     counts: Mapping[str, int | None],
+    *,
+    prompt_contract_failures: int = 0,
 ) -> tuple[SynthesisRunStatus, str]:
-    """Derive a truthful product status from candidate lifecycle counts."""
+    """Derive a truthful product status from candidate lifecycle counts.
+
+    Zero requested candidates is a valid analysis unless the prompt contract
+    check stopped calls before dispatch: those calls never asked for the
+    candidates, so the run failed rather than found none.
+    """
     requested = counts.get("requested")
     attempted = counts.get("attempted")
     generated = counts.get("generated")
@@ -567,10 +615,7 @@ def _scenario_generation_status(
         )
     resolved = (generated or 0) + functional_test
     choices = (
-        (
-            requested == 0,
-            (SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates"),
-        ),
+        (requested == 0, _zero_request_status(prompt_contract_failures)),
         (
             attempted > 0 and generated == 0 and functional_test == 0,
             (SynthesisRunStatus.FAILED, "zero_yield_after_attempts"),

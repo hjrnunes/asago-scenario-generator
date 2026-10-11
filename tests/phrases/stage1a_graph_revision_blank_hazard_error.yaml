@@ -1,0 +1,14 @@
+template: stage1a_graph_revision_blank_hazard_error.j2
+cases:
+  blank-hazard-records:
+    once:
+      - "hazard addition NEW-1, hazard edit H-2:"
+      - >-
+        a hazard description must state the hazard in words, and a blank or
+        whitespace-only description is not a hazard.
+      - >-
+        Write the description, or leave that hazard out of the revision patch.
+    ordered:
+      - - "hazard addition NEW-1, hazard edit H-2:"
+        - a hazard description must state the hazard in words
+        - Write the description, or leave that hazard out of the revision patch.

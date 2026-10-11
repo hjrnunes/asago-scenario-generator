@@ -1,0 +1,15 @@
+template: stage2_call3_unknown_reference_error.j2
+cases:
+  unknown-coordination-references:
+    once:
+      - "', which is not an exact ID in the supplied control structure or loss analysis. "
+      - "', which is not an exact ID in the supplied control structure or loss analysis; it probably means '"
+      - >-
+        Write each ID in a coordination description exactly as the supplied
+        records spell it, or name the record in words without an ID.
+    required:
+      - "names '"
+    ordered:
+      - - "', which is not an exact ID in the supplied control structure or loss analysis. "
+        - "; it probably means '"
+        - Write each ID in a coordination description exactly as the supplied
