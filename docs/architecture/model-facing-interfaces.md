@@ -722,6 +722,18 @@ A call 3 coordination link may name a `shared_pm` only when one endpoint
 responsibility owns that process-model part. A retry lists every link that
 breaks this rule, the actual owner, and the endpoints' own parts.
 
+Every ID-like token in a Call 3 coordination link's `description` or its
+`coordination_mechanism.description` must be an exact ID from the control
+structure or loss analysis that Call 3 received, or a link or mechanism ID the
+reply itself adds. Synthesis prompts carry these texts, and the prompt-reference
+check reads each such token as a reference, so a shortened ID such as `PM-3`
+for `PM-3-1` would fail every prompt that shows the link. The token pattern is
+the preflight's own (`_REFERENCE_TOKEN_RE` in `stpa/infra/prompt_preflight.py`),
+imported rather than copied. A reply that breaks this rule gets the call's
+existing retry; the error (`stage2_call3_unknown_reference_error.j2`) names
+each unknown token with its link, and the ID the token probably shortens when
+exactly one ID extends it by a `-` segment.
+
 A graph-revision response that fails parsing or validation receives one
 correction call carrying the exact validation error and the prior response.
 If the correction also fails, the stage fails with the correction's error;

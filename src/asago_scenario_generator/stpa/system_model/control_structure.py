@@ -53,6 +53,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     strip_json_fence,
 )
 from asago_scenario_generator.stpa._model_data import raw_model_data
+from asago_scenario_generator.stpa.infra.prompt_preflight import _REFERENCE_TOKEN_RE
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -2473,8 +2474,106 @@ def _validate_semantic_review_response(
     )
     analysis = CoordinationAnalysis.model_validate(value)
     errors = _coordination_ownership_errors(structure, analysis.coordination_links)
+    errors += _coordination_reference_errors(
+        structure, loss_analysis, analysis.coordination_links
+    )
     if errors:
         raise ValueError("; ".join(errors))
+
+
+@dataclass(frozen=True)
+class _UnknownCoordinationReference:
+    """An ID-like token in a coordination description that names no record."""
+
+    location: str
+    token: str
+    candidate: str | None
+
+
+def _coordination_reference_errors(
+    structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    links: Sequence[CoordinationLink],
+) -> list[str]:
+    """Describe every token in a link description that is not an exact ID.
+
+    Synthesis checks each token ``_REFERENCE_TOKEN_RE`` matches in a prompt
+    against the records it supplies, so a shortened ID such as ``PM-3`` for
+    ``PM-3-1`` fails every prompt that carries the link.
+    """
+    known = _call3_known_ids(structure, loss_analysis, links)
+    unknown = [
+        _UnknownCoordinationReference(
+            location=location,
+            token=token,
+            candidate=_probable_id(token, known),
+        )
+        for location, text in _coordination_texts(links)
+        for token in dict.fromkeys(_REFERENCE_TOKEN_RE.findall(text))
+        if token not in known
+    ]
+    if not unknown:
+        return []
+    message = TemplateLoader(PROMPTS_DIR).render_prompt(
+        "stage2_call3_unknown_reference_error.j2", references=unknown
+    )
+    return [message.strip()]
+
+
+def _coordination_texts(
+    links: Sequence[CoordinationLink],
+) -> list[tuple[str, str]]:
+    """Return the link texts synthesis prompts show, each with its location."""
+    return [
+        pair
+        for link in links
+        for pair in (
+            (f"coordination link {link.link_id} description", link.description),
+            (
+                f"coordination link {link.link_id} coordination_mechanism description",
+                link.coordination_mechanism.description,
+            ),
+        )
+    ]
+
+
+def _call3_known_ids(
+    structure: ControlStructure,
+    loss_analysis: LossAnalysis,
+    links: Sequence[CoordinationLink],
+) -> set[str]:
+    """Return every exact ID Call 3 received, plus the links its reply adds."""
+    responsibilities = structure.responsibilities
+    all_links = (*structure.coordination_links, *links)
+    return {
+        *(resp.resp_id for resp in responsibilities),
+        *(
+            item.rc_id
+            for resp in responsibilities
+            for item in resp.responsibility_constraints
+        ),
+        *(item.pm_id for resp in responsibilities for item in resp.process_model_parts),
+        *(item.ca_id for resp in responsibilities for item in resp.control_actions),
+        *(item.fb_id for resp in responsibilities for item in resp.feedback_channels),
+        *(item.cp_id for item in structure.controlled_processes),
+        *(link.link_id for link in all_links),
+        *(link.coordination_mechanism.cm_id for link in all_links),
+        *(
+            loss.loss_id
+            for loss in (
+                *loss_analysis.risk_card_losses,
+                *loss_analysis.use_case_losses,
+            )
+        ),
+        *(hazard.hazard_id for hazard in loss_analysis.hazards),
+        *(item.constraint_id for item in loss_analysis.security_constraints),
+    }
+
+
+def _probable_id(token: str, known: set[str]) -> str | None:
+    """Return the one known ID that extends ``token`` by a ``-`` segment."""
+    matches = [identifier for identifier in known if identifier.startswith(f"{token}-")]
+    return matches[0] if len(matches) == 1 else None
 
 
 def _coordination_ownership_errors(

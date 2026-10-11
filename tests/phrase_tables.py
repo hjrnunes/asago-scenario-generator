@@ -398,6 +398,20 @@ CASES: dict[str, Callable[[str], str]] = {
     "blank-hazard-records": _system_model(
         records=["hazard addition NEW-1", "hazard edit H-2"]
     ),
+    "unknown-coordination-references": _system_model(
+        references=[
+            SimpleNamespace(
+                location="coordination link CL-7 description",
+                token="PM-3",
+                candidate=None,
+            ),
+            SimpleNamespace(
+                location="coordination link CL-7 description",
+                token="PM-4",
+                candidate="PM-4-3",
+            ),
+        ]
+    ),
     **{case: _obligation_aware(case) for case in OBLIGATION_AWARE_BUILDS},
 }
 

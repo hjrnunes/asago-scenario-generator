@@ -1,0 +1,63 @@
+{
+  "source": "b8-glm batch L3 occiai-r1, stage_2 call_3_coordination: coordination link CL-7 as the reply wrote it (control-structure.yaml), whose description names PM-3 and PM-4 although the real IDs are PM-3-1 to PM-3-4 and PM-4-1 to PM-4-4. Every synthesis routing prompt then failed the prompt-reference check. Trimmed to CL-7, constraint SC-8 and hazard H-9 that the description cites, and the IDs the link needs: RESP-3 keeps PM-3-1 and PM-3-2, RESP-4 keeps only its shared PM-4-3. The texts of records other than CL-7 are shortened.",
+  "loss_analysis": {
+    "risk_card_losses": [],
+    "use_case_losses": [
+      {
+        "loss_id": "L-1",
+        "description": "Unreviewed content enters a patient's EHR record.",
+        "provenance": "use_case",
+        "source_risk_cards": []
+      }
+    ],
+    "hazards": [
+      {
+        "hazard_id": "H-9",
+        "description": "A draft that is not reviewed is committed to the EHR record.",
+        "related_losses": ["L-1"]
+      }
+    ],
+    "security_constraints": [
+      {
+        "constraint_id": "SC-8",
+        "rule": "The assistant must not commit a draft whose status is not REVIEWED.",
+        "related_hazards": ["H-9"],
+        "applies_when": []
+      }
+    ]
+  },
+  "control_structure": {
+    "responsibilities": [
+      {
+        "resp_id": "RESP-3",
+        "description": "Summarize conversation content into an EHR draft.",
+        "security_constraint_refs": [],
+        "process_model_parts": [
+          {"pm_id": "PM-3-1", "description": "The conversation content to summarize."},
+          {"pm_id": "PM-3-2", "description": "The draft created for the patient."}
+        ]
+      },
+      {
+        "resp_id": "RESP-4",
+        "description": "Commit a clinician-reviewed EHR draft to the patient's EHR record.",
+        "security_constraint_refs": ["SC-8"],
+        "process_model_parts": [
+          {"pm_id": "PM-4-3", "description": "The review status of the target draft."}
+        ]
+      }
+    ],
+    "controlled_processes": []
+  },
+  "coordination_link": {
+    "link_id": "CL-7",
+    "source": "RESP-3",
+    "target": "RESP-4",
+    "shared_pm": "PM-4-3",
+    "coordination_mechanism": {
+      "cm_id": "CM-7",
+      "description": "RESP-3 notifies draft creation (AWAITING_REVIEW) and RESP-4 shares current review status of drafts before any commit.",
+      "payload": "draft_id, patient_id, review status"
+    },
+    "description": "Order-dependent actions on the same draft resource: a draft must exist and carry REVIEWED status before commit; exchanging draft existence and status prevents committing unreviewed drafts (SC-8) and resolves the shared draft state between PM-3 and PM-4."
+  }
+}
