@@ -352,12 +352,26 @@ def _report_generate_result(result: Any, plan_filename: str) -> None:
     status = result.run_status
     typer.echo(f"  Scenario generation: {status}")
     if status == "failed":
-        typer.echo(
-            "Error: scenario generation published no scenarios after "
-            "attempting candidates; diagnostic artifacts were preserved.",
-            err=True,
-        )
+        typer.echo(_failed_generation_message(result), err=True)
         raise typer.Exit(code=1)
+
+
+def _failed_generation_message(result: Any) -> str:
+    """Word a failed run: candidates attempted, or none requested at all."""
+    from asago_scenario_generator.pipeline.synthesis_manifest import (
+        PROMPT_CONTRACT_REASON,
+    )
+
+    reason = str(getattr(result, "run_status_reason", "") or "")
+    if reason.startswith(PROMPT_CONTRACT_REASON):
+        return (
+            f"Error: scenario generation requested no candidates ({reason}); "
+            "diagnostic artifacts were preserved."
+        )
+    return (
+        "Error: scenario generation published no scenarios after "
+        "attempting candidates; diagnostic artifacts were preserved."
+    )
 
 
 def build_taxonomy_inputs(

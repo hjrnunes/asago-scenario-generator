@@ -296,3 +296,8 @@ class SynthesisResult:
         """Return the stable terminal product status from the manifest."""
         value = self.manifest.get("run_status")
         return str(value or SynthesisRunStatus.UNKNOWN.value)
+
+    @property
+    def run_status_reason(self) -> str:
+        """Return why the run ended with its status, from the manifest."""
+        return str(self.manifest.get("run_status_reason") or "")
