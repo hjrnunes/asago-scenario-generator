@@ -43,7 +43,7 @@ omit keys.
 {
   "risk_card_losses": [
     {"handle": "loss_1", "description": "...", "provenance": "risk_card",
-     "source_risk_cards": ["<risk-id>", "..."]}
+     "source_risk_cards": ["<risk-id>"]}
   ],
   "use_case_losses": [],
   "hazards": [
@@ -76,7 +76,8 @@ quota.
 
 ## Structural requirements
 
-- Every loss must cite its source risk IDs in `source_risk_cards`.
+- Every loss must cite its source risk IDs in `source_risk_cards`. A loss
+  cites only supplied risk IDs, and cites each one once.
 - Every hazard references at least one valid local loss handle in `related_losses`.
 - Every security constraint references at least one valid local hazard handle in `related_hazards`.
 - Every supplied organizational risk appears exactly once in `risk_dispositions`,
