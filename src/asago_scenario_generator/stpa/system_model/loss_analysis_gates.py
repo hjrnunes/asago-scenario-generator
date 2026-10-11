@@ -112,6 +112,7 @@ REVISION_CORRECTION_FEEDBACK = (
     + rule_span_requirement()
 )
 REVISION_UNDECODABLE_TEMPLATE = "stage1a_graph_revision_undecodable_correction.j2"
+REVISION_BLANK_HAZARD_TEMPLATE = "stage1a_graph_revision_blank_hazard_error.j2"
 
 
 @dataclass
@@ -2576,6 +2577,7 @@ def _run_graph_revision_call(
                 if attempt.rejection is not None:
                     return _draft_from_analysis(loss_analysis)
                 attempt.warnings.extend(_dropped_edit_warnings(dropped))
+            _reject_blank_hazards(patch, template_loader)
             return _revision_patch_to_draft(
                 loss_analysis,
                 patch,
@@ -2659,6 +2661,32 @@ def _revision_failure_message(
             f"undecodable reply: {error}"
         )
     return f"graph revision call failed: {error}"
+
+
+def _reject_blank_hazards(
+    patch: _Stage1aRevisionPatch, template_loader: TemplateLoader
+) -> None:
+    """Raise when a hazard addition or edit has a blank description.
+
+    The schema only rejects an empty string, so a whitespace description would
+    otherwise reach the graph, and synthesis keeps such a hazard out of every
+    prompt's reference slice.
+    """
+    records = [
+        f"hazard addition {hazard.handle}"
+        for hazard in patch.hazard_additions
+        if not hazard.description.strip()
+    ] + [
+        f"hazard edit {hazard.hazard_id}"
+        for hazard in patch.hazard_edits
+        if not hazard.description.strip()
+    ]
+    if records:
+        raise ValueError(
+            template_loader.render_prompt(
+                REVISION_BLANK_HAZARD_TEMPLATE, records=records
+            ).strip()
+        )
 
 
 def _check_revision(prior: LossAnalysis, draft: LossAnalysisDraft) -> None:

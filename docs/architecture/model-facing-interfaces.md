@@ -563,6 +563,16 @@ fails too, the stage error says that the correction was tried. The setting is
 so `risk_derivation`, `gap_analysis`, and every other step end on an undecodable
 reply as before.
 
+A `hazard_graph_revision` reply that adds or edits a hazard whose description
+is blank (empty, or whitespace only) fails validation and gets the step's one
+correction. The schema already rejects an empty string; the post-parse check
+also rejects whitespace, because synthesis keeps a hazard without a description
+out of every prompt's reference slice, so each ICA prompt that offers such a
+hazard fails the prompt-reference check. The error
+(`stage1a_graph_revision_blank_hazard_error.j2`) names each such record, for
+example `hazard addition NEW-1`. A corrected reply that still carries one ends
+the step, like any other failed correction.
+
 A `risk_derivation` or `gap_analysis` response that parses but has a hazard
 `related_losses` or constraint `related_hazards` list naming an ID no
 declared record has gets exactly one reference correction call, provided

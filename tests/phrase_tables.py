@@ -395,6 +395,9 @@ CASES: dict[str, Callable[[str], str]] = {
     "realistic-no-tool-call": _stage5(lambda: _realistic_request_facts(False)),
     "stated-rules": _system_model(stated_rules=True),
     "no-findings": _system_model(**NO_FINDINGS),
+    "blank-hazard-records": _system_model(
+        records=["hazard addition NEW-1", "hazard edit H-2"]
+    ),
     **{case: _obligation_aware(case) for case in OBLIGATION_AWARE_BUILDS},
 }
 
