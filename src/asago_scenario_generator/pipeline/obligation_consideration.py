@@ -393,7 +393,10 @@ def _account_findings(
     evidence: tuple[str, ...],
     diagnostics: list[ConsiderationDiagnostic],
 ) -> ObligationAccountingRow:
-    """Build an addressed row from exact finding pairs."""
+    """Build an addressed row from exact finding pairs.
+
+    An ID that several findings cite appears once on the row.
+    """
     return _account_route_row(
         row,
         route,
@@ -401,18 +404,10 @@ def _account_findings(
         stop_reason="addressed",
         evidence=evidence,
         diagnostics=diagnostics,
-        ica_ids=tuple(ica_id for item in findings for ica_id in item.ica_ids),
-        exec_candidate_ids=tuple(
-            candidate_id
-            for item in findings
-            for candidate_id in item.exec_candidate_ids
-        ),
-        hazard_ids=tuple(
-            hazard_id for item in findings for hazard_id in item.hazard_ids
-        ),
-        constraint_ids=tuple(
-            constraint_id for item in findings for constraint_id in item.constraint_ids
-        ),
+        ica_ids=_gather_unique(findings, "ica_ids"),
+        exec_candidate_ids=_gather_unique(findings, "exec_candidate_ids"),
+        hazard_ids=_gather_unique(findings, "hazard_ids"),
+        constraint_ids=_gather_unique(findings, "constraint_ids"),
     )
 
 
@@ -571,10 +566,11 @@ def _account_governance(
     """Credit a governance-only row whose every routed slot has a finding.
 
     The row keeps its governance-only disposition and carries the finding's
-    identities. A targeted route whose slots produced no finding is recorded
-    on the row with its own stop reason. A row with no route, a declined
-    route, or a mix of findings and other slot outcomes stays bare, as it was
-    before governance rows were routed.
+    identities; an ID that several findings cite appears once. A targeted
+    route whose slots produced no finding is recorded on the row with its own
+    stop reason. A row with no route, a declined route, or a mix of findings
+    and other slot outcomes stays bare, as it was before governance rows were
+    routed.
     """
     evidence = _phase1_evidence(obligation)
     findings = tuple(item for item in pairs if item.disposition == "finding")
@@ -591,10 +587,10 @@ def _account_governance(
         disposition="governance_only",
         slot_ids=route.slot_ids,
         route_refs=(route.route_id,),
-        ica_ids=_gather(findings, "ica_ids"),
-        exec_candidate_ids=_gather(findings, "exec_candidate_ids"),
-        hazard_ids=_gather(findings, "hazard_ids"),
-        constraint_ids=_gather(findings, "constraint_ids"),
+        ica_ids=_gather_unique(findings, "ica_ids"),
+        exec_candidate_ids=_gather_unique(findings, "exec_candidate_ids"),
+        hazard_ids=_gather_unique(findings, "hazard_ids"),
+        constraint_ids=_gather_unique(findings, "constraint_ids"),
         evidence=(*evidence, *_account_evidence(route, findings)),
         diagnostics=_gather((route, *findings), "diagnostics"),
     )
@@ -634,6 +630,17 @@ def _credits_governance(
 def _gather(items: Iterable[Any], field_name: str) -> tuple[Any, ...]:
     """Concatenate one tuple field across items, in order."""
     return tuple(value for item in items for value in getattr(item, field_name))
+
+
+def _gather_unique(items: Iterable[Any], field_name: str) -> tuple[Any, ...]:
+    """Gather one ID field across items, keeping each value once in first-seen order.
+
+    One obligation has a finding for each routed slot, and two findings may cite
+    the same hazard, constraint, ICA, or execution candidate. A repeat across
+    findings is one citation; a repeat inside one finding is still rejected by
+    the finding's own model.
+    """
+    return tuple(dict.fromkeys(_gather(items, field_name)))
 
 
 def _accounting_row_for(

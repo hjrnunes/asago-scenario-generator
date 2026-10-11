@@ -19,6 +19,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationRoute,
 )
 from asago_scenario_generator.pipeline.obligation_consideration import (
+    _gather_unique,
     _governance_route_map,
     build_consideration_artifact,
     build_neutral_briefs,
@@ -396,5 +397,181 @@ def test_capability_excluded_rows_still_reject_findings() -> None:
             obligation_id=_GOVERNANCE_ID,
             disposition="capability_excluded",
             ica_ids=("ica-1",),
+            evidence=("e",),
+        )
+
+
+# Trimmed from the governance obligation of the airbnb-r1 L4 fill recording:
+# its ICA findings, one per routed slot, repeat H-8 and SC-4 across slots.
+_REPEATED_FINDINGS_FIXTURE = {
+    "source": "airbnb-r1 L4 fill recording, governance obligation, trimmed",
+    "findings": (
+        {
+            "slot_id": "RESP-1:CA-1-1:NOT_PROVIDED",
+            "ica_ids": ("ica-gov-1",),
+            "hazard_ids": ("H-8", "H-2"),
+            "constraint_ids": ("SC-4",),
+        },
+        {
+            "slot_id": "RESP-1:CA-1-1:INCORRECT",
+            "ica_ids": ("ica-gov-2",),
+            "hazard_ids": ("H-8",),
+            "constraint_ids": ("SC-4", "SC-7"),
+        },
+        {
+            "slot_id": "RESP-1:CA-1-1:WRONG_TIMING",
+            "ica_ids": ("ica-gov-3",),
+            "hazard_ids": ("H-6", "H-8"),
+            "constraint_ids": ("SC-4",),
+        },
+    ),
+}
+
+
+_TWO_SLOTS = ("RESP-1:CA-1-1:NOT_PROVIDED", "RESP-1:CA-1-1:INCORRECT")
+
+
+def _finding(
+    route: ObligationRoute,
+    *,
+    slot: str,
+    ica_ids: tuple[str, ...] = ("ica-1",),
+    exec_ids: tuple[str, ...] | None = None,
+    hazard_ids: tuple[str, ...] = ("H-1",),
+    constraint_ids: tuple[str, ...] = ("SC-1",),
+) -> ObligationIcaConsideration:
+    return ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=slot,
+        disposition="finding",
+        ica_ids=ica_ids,
+        exec_candidate_ids=exec_ids if exec_ids is not None else (f"EXEC:{slot}",),
+        hazard_ids=hazard_ids,
+        constraint_ids=constraint_ids,
+        evidence=("ica evidence",),
+    )
+
+
+def _route_for(obligation_id: str, slots: tuple[str, ...]) -> ObligationRoute:
+    return _governance_route(slots=slots).model_copy(
+        update={"obligation_id": obligation_id}
+    )
+
+
+def _account(
+    *, governance: bool, slots: tuple[str, ...], make_pairs: Any
+) -> tuple[Any, ObligationAccounting]:
+    """Account findings for a governance row or for the pattern row."""
+    plan, consideration, _ = _inputs()
+    pattern_id = consideration.final_routes[0].obligation_id
+    obligation_id = _GOVERNANCE_ID if governance else pattern_id
+    kwargs: dict[str, Any] = {}
+    if governance:
+        route = ObligationRoute.model_validate(
+            _route_for(obligation_id, slots).model_dump(mode="json")
+        )
+        kwargs["governance_routes"] = (route,)
+    else:
+        route = ObligationRoute(
+            obligation_id=pattern_id,
+            disposition="targeted",
+            slot_ids=slots,
+            hazard_ids=("H-1",),
+            constraint_ids=("SC-1",),
+            evidence=("route evidence",),
+        )
+        consideration = build_consideration_artifact(
+            plan=plan,
+            briefs=consideration.briefs,
+            initial_routes=(route,),
+            final_routes=(route,),
+        )
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=make_pairs(route),
+        source_pins=_accounting_pins(plan),
+        **kwargs,
+    )
+    return _row(accounting, obligation_id), accounting
+
+
+def _shared_pairs(route: ObligationRoute) -> tuple[ObligationIcaConsideration, ...]:
+    return tuple(
+        _finding(
+            route,
+            slot=slot,
+            ica_ids=("ica-shared",),
+            exec_ids=("EXEC:shared",),
+            hazard_ids=("H-1",),
+            constraint_ids=("SC-1",),
+        )
+        for slot in _TWO_SLOTS
+    )
+
+
+@pytest.mark.parametrize("governance", (False, True), ids=("addressed", "governance"))
+def test_findings_that_cite_the_same_ids_give_each_id_once(governance: bool) -> None:
+    row, accounting = _account(
+        governance=governance, slots=_TWO_SLOTS, make_pairs=_shared_pairs
+    )
+
+    assert row.ica_ids == ("ica-shared",)
+    assert row.exec_candidate_ids == ("EXEC:shared",)
+    assert row.hazard_ids == ("H-1",)
+    assert row.constraint_ids == ("SC-1",)
+    assert row.slot_ids == tuple(sorted(_TWO_SLOTS))
+    accounting.assert_integrity()
+
+
+@pytest.mark.parametrize("governance", (False, True), ids=("addressed", "governance"))
+def test_the_recorded_findings_account_without_a_repeat(governance: bool) -> None:
+    findings = _REPEATED_FINDINGS_FIXTURE["findings"]
+
+    def pairs(route: ObligationRoute) -> tuple[ObligationIcaConsideration, ...]:
+        return tuple(
+            _finding(
+                route,
+                slot=item["slot_id"],
+                ica_ids=item["ica_ids"],
+                hazard_ids=item["hazard_ids"],
+                constraint_ids=item["constraint_ids"],
+            )
+            for item in findings
+        )
+
+    row, _ = _account(
+        governance=governance,
+        slots=tuple(item["slot_id"] for item in findings),
+        make_pairs=pairs,
+    )
+
+    assert row.hazard_ids == ("H-2", "H-6", "H-8")
+    assert row.constraint_ids == ("SC-4", "SC-7")
+    assert len(row.ica_ids) == 3
+    assert len(row.exec_candidate_ids) == 3
+
+
+def test_a_gathered_id_list_keeps_the_order_of_first_sight() -> None:
+    findings = [
+        SimpleNamespace(hazard_ids=("H-9", "H-2")),
+        SimpleNamespace(hazard_ids=("H-2", "H-5", "H-9")),
+        SimpleNamespace(hazard_ids=("H-1", "H-5")),
+    ]
+
+    assert _gather_unique(findings, "hazard_ids") == ("H-9", "H-2", "H-5", "H-1")
+
+
+def test_a_repeat_inside_one_finding_still_fails() -> None:
+    route = _governance_route()
+
+    with pytest.raises(ValueError, match="unique"):
+        _finding(route, slot=_SLOT, hazard_ids=("H-8", "H-8"))
+    with pytest.raises(ValueError, match="unique"):
+        ObligationAccountingRow(
+            obligation_id=_GOVERNANCE_ID,
+            disposition="governance_only",
+            hazard_ids=("H-8", "H-8"),
             evidence=("e",),
         )
