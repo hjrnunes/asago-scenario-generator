@@ -22,7 +22,11 @@ from asago_scenario_generator.stpa.infra.provider_record import (
     ProviderCallSession,
 )
 from asago_scenario_generator.stpa.infra.transport_retry import retry_once
-from asago_scenario_generator.request_schema import portable_request_schema
+from asago_scenario_generator.request_schema import (
+    find_unions,
+    portable_request_schema,
+    restore_flat_reply_for,
+)
 
 DEFAULT_TEMPERATURE: float = 0.4
 
@@ -372,9 +376,13 @@ def _locally_parse_response_content(
         return content
     try:
         if isinstance(content, dict):
-            return response_format.model_validate(content)
+            return response_format.model_validate(
+                restore_flat_reply_for(response_format, content)
+            )
         if isinstance(content, str):
-            return response_format.model_validate(json.loads(content))
+            return response_format.model_validate(
+                restore_flat_reply_for(response_format, json.loads(content))
+            )
     except Exception:  # noqa: BLE001 - retain raw content for safe parsing
         return content
     return content
@@ -436,13 +444,24 @@ def _json_schema_response_format(
     *,
     json_schema_strict: bool = True,
 ) -> dict[str, Any]:
-    """Build the OpenAI-compatible JSON Schema request shape."""
+    """Build the OpenAI-compatible JSON Schema request shape.
+
+    Raises ``ValueError`` when the request schema still holds a union: GLM's
+    endpoint decodes a union by always taking its last branch.
+    """
+    schema = portable_request_schema(response_format.model_json_schema())
+    unions = find_unions(schema)
+    if unions:
+        raise ValueError(
+            f"request schema {response_format.__name__} still holds a union at "
+            + ", ".join(unions)
+        )
     return {
         "type": "json_schema",
         "json_schema": {
             "name": response_format.__name__,
             "strict": json_schema_strict,
-            "schema": portable_request_schema(response_format.model_json_schema()),
+            "schema": schema,
         },
     }
 

@@ -264,6 +264,8 @@ unsafe-control-action category (UCA type) `{{ selected_uca_type }}`.
 {% if has_condition_references %}   Also return `discriminating_condition` under `unsafe_outcome`: the
    condition that separates unsafe from safe behavior. Set it to `null` for
    an analytical-only scenario.
+   Each shape below lists only the fields its variant uses; set every other
+   field the schema lists for that object to `null`.
    - `statement`: one plain sentence, at most 400 characters.
    - `comparisons`: one to six entries restating the statement.
      `{"kind":"value","left":<operand>,"op":<op>,"right":<operand>}` holds

@@ -2,6 +2,12 @@ template: structural_routing_system.j2
 cases:
   routing-batch:
     required:
+      - >-
+        The response schema lists the fields of every disposition; set each
+        field that the selected disposition does not use to `null`, as the
+        unresolved example shows, never to an empty list.
+      - '"disposition":"unresolved","slot_ids":null'
+      - '"missing_concepts":null'
       - whether the system has the surface
       - free-text input, tool calls, or retrieval
       - not whether the system description mentions or describes the
@@ -12,3 +18,5 @@ cases:
       - neither establishes semantic separation
       - the disposition must be `unresolved`
       - capability flags, or integration IDs cannot substitute
+    forbidden:
+      - Common empty collections belong only to the inward compiled route

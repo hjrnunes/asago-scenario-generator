@@ -48,6 +48,10 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
     enforce_prompt_audit,
 )
 from asago_scenario_generator.stpa._model_data import raw_model_data
+from asago_scenario_generator.request_schema import (
+    restore_flat_reply_for,
+    restores_flat_replies,
+)
 
 _T = TypeVar("_T", bound=BaseModel)
 
@@ -329,12 +333,12 @@ def parse_llm_result(
     if isinstance(content, model_class):
         return content
     if isinstance(content, dict):
-        return model_class.model_validate(content)
+        return model_class.model_validate(restore_flat_reply_for(model_class, content))
     if isinstance(content, str):
         decoded, transformations = _decode_json_text_with_evidence(content)
         if cleanup_transformations is not None:
             cleanup_transformations.extend(transformations)
-        return model_class.model_validate(decoded)
+        return model_class.model_validate(restore_flat_reply_for(model_class, decoded))
     raise TypeError(
         f"Unexpected LLM result content type: {type(content).__name__}, "
         f"expected {model_class.__name__}, dict, or str."
@@ -936,7 +940,7 @@ def _parse_structured_result(
     """Parse a structured result with the stage parser or the response model."""
     if response_parser is not None:
         return response_parser(
-            result,
+            _restored_result(result, response_format),
             cleanup_transformations if cleanup_transformations is not None else [],
         )
     return parse_llm_result(
@@ -944,6 +948,33 @@ def _parse_structured_result(
         response_format,
         cleanup_transformations=cleanup_transformations,
     )
+
+
+def _restored_result(result: LLMResult, response_format: type[_T]) -> LLMResult:
+    """Return ``result`` with a flat reply restored for a stage parser.
+
+    The parser still decodes the content itself, so restored text stays text.
+    The result the caller keeps (and logs) is not changed.
+    """
+    if not restores_flat_replies(response_format):
+        return result
+    content = result.content
+    if isinstance(content, str):
+        try:
+            decoded = json.loads(strip_json_fence(content))
+        except json.JSONDecodeError:
+            return result
+        restored = restore_flat_reply_for(response_format, decoded)
+        text = json.dumps(restored, ensure_ascii=False)
+        return result if restored == decoded else _with_content(result, text)
+    if isinstance(content, dict):
+        restored = restore_flat_reply_for(response_format, content)
+        return result if restored == content else _with_content(result, restored)
+    return result
+
+
+def _with_content(result: LLMResult, content: Any) -> LLMResult:
+    return result.model_copy(update={"content": content})
 
 
 def log_llm_call(

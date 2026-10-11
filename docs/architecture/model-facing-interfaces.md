@@ -51,6 +51,28 @@ receives the static schemas byte for byte, pinned by digest in
 draft that its promotion to `CapabilityProfile` would reject fails
 validation and receives one correction.
 
+Every request schema carries each object union as one flat object
+(`schema_unions.flatten_unions`, called by
+`request_schema.portable_request_schema`). A union is a `oneOf`, or an
+`anyOf` with two or more object branches. GLM's endpoint decodes a `oneOf`
+by taking its last branch whatever the model chose, and leans to the last
+branch of the other unions. The flat object merges the discriminator into
+one enum in branch order and keeps properties every branch shares. A
+property only some branches define becomes nullable and required, and its
+description gains a sentence naming the discriminator values it applies to.
+The Stage 5 payload (adversary, causal factors, temporal condition,
+comparisons, operands, record selection), the routing routes, and the
+Stage 2 control actions carry unions today. A schema without a union is sent
+unchanged. Before a reply is validated, each discriminated union position
+drops the null keys its selected branch does not define
+(`restore_flat_reply_for`, in `parse_llm_result`, in the stage-parser input
+of `_parse_structured_result`, and in `_locally_parse_response_content`). A
+non-null value outside the branch stays and fails validation, so the Pydantic
+types remain authoritative. `_json_schema_response_format` raises if a union
+survives. Prompts describe the flat form: a field the selected variant does
+not use is `null`, and the routing examples show it. The OpenRouter
+JSON-object path still embeds the original schema in the prompt.
+
 Under guided decoding, Stage 1b requires `kc_subcodes` with at least one
 known KC or KCX code and requires `tool_inventory` (it may be empty). The
 Stage 1a risk-derivation schema

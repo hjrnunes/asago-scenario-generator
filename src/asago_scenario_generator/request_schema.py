@@ -17,6 +17,14 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from asago_scenario_generator.schema_unions import (
+    find_unions,
+    flat_reply,
+    flatten_unions,
+    restore_flat_reply_for,
+    restores_flat_replies,
+)
+
 SchemaExtra = Callable[[dict[str, Any]], None]
 _ModelT = TypeVar("_ModelT", bound=type[BaseModel])
 
@@ -144,8 +152,14 @@ def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
 
     vLLM's xgrammar backend rejects a string schema that combines ``pattern``
     with ``minLength`` or ``maxLength``.  When the pattern cannot match an
-    empty string, ``minLength: 1`` adds nothing and is dropped here.  The
-    response is still validated against the original Pydantic model.
+    empty string, ``minLength: 1`` adds nothing and is dropped here.
+
+    Every object union then becomes one flat object
+    (:func:`~asago_scenario_generator.schema_unions.flatten_unions`), because
+    GLM's endpoint decodes a ``oneOf`` by always taking its last branch.  The
+    response is still validated against the original Pydantic model, after
+    :func:`restore_flat_reply_for` drops the null fields that its selected
+    branches do not define.
     """
 
     def portable(node: Any) -> Any:
@@ -163,7 +177,16 @@ def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
             return [portable(value) for value in node]
         return copy.deepcopy(node)
 
-    return portable(schema)
+    return flatten_unions(portable(schema))
+
+
+def flat_example_for(model: type[BaseModel], value: Any) -> Any:
+    """Write ``value`` as a reply to ``model``'s request schema.
+
+    Use this for prompt examples, so an example lists every property the
+    flattened schema requires.
+    """
+    return flat_reply(value, portable_request_schema(model.model_json_schema()))
 
 
 def _pattern_rejects_empty(pattern: str) -> bool:
@@ -174,7 +197,11 @@ def _pattern_rejects_empty(pattern: str) -> bool:
 
 
 __all__ = [
+    "flat_example_for",
+    "find_unions",
     "portable_request_schema",
+    "restore_flat_reply_for",
+    "restores_flat_replies",
     "string_enum",
     "string_items_enum",
     "uses_guided_decoding",

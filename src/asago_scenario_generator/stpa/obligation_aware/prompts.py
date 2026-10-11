@@ -35,6 +35,7 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.request_schema import flat_example_for
 from asago_scenario_generator.pipeline.risk_pattern_crosswalk import (
     resolve_risk_pattern_mapping_strength,
 )
@@ -199,7 +200,11 @@ def _yaml(value: Any) -> str:
 
 
 def _routing_wire_examples() -> tuple[str, str]:
-    """Render complete route examples through the exact provider wire model."""
+    """Render complete route examples through the exact provider wire model.
+
+    The examples take the request's flat form: a field the route's
+    disposition does not use is present and null.
+    """
     # Import lazily: provider.py imports this module for prompt construction.
     from asago_scenario_generator.stpa.obligation_aware.provider import (
         _routing_provider_payload_type,
@@ -250,7 +255,10 @@ def _routing_wire_examples() -> tuple[str, str]:
         }
     )
     return tuple(
-        json.dumps(item.model_dump(mode="json"), separators=(",", ":"))
+        json.dumps(
+            flat_example_for(payload_type, item.model_dump(mode="json")),
+            separators=(",", ":"),
+        )
         for item in (targeted, unresolved)
     )
 

@@ -208,8 +208,8 @@ is who and why, never how: it carries no attack mechanism. The closed kinds are:
 - `none`: no one gains, so the case is a functional test.
 
 If nobody gains from the unsafe outcome, use `kind: none` rather than
-inventing an adversary and omit `gain`; the compiler supplies the functional
-classification. For an adversarial kind, `gain` is one nonblank sentence
+inventing an adversary and set `gain` to `null`; the compiler supplies the
+functional classification. For an adversarial kind, `gain` is one nonblank sentence
 saying what the adversary gets; it must not restate the governing constraint.
 A malicious customer is a legitimate adversary choice when the entitlement
 breach is the point.
@@ -330,6 +330,11 @@ Do not reconstruct hidden IDs and do not invent a source or step.
 Return the `type` discriminator on every temporal condition and
 `evidence_status` on every causal factor. Never infer a missing discriminator
 from neighboring fields or prose.
+
+Several response objects have variants that a `kind`, `type`,
+`evidence_status`, `source`, or `status` field selects. The response schema
+lists the fields of every variant; set each field that the selected variant
+does not use to `null`.
 
 Declare only factors that contribute to the same causal story and the same
 invocation. If one source explains
