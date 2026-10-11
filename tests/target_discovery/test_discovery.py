@@ -515,6 +515,42 @@ def test_inventory_preserves_nonsecret_schema_values_and_redacts_secrets_but_has
     assert tool.input_schema["properties"]["password"]["examples"] == ["[REDACTED]"]
 
 
+@pytest.mark.parametrize(
+    "credential_text",
+    (
+        "Bearer EXAMPLE_ONLY_TOKEN",
+        "Basic RVhBTVBMRV9PTkxZX1RPS0VO",
+    ),
+)
+def test_authorization_credential_reaches_neither_the_profile_nor_the_prompt(
+    credential_text,
+):
+    secret = credential_text.split()[1]
+    row = {
+        "name": "fetch_report",
+        "title": "Report fetcher",
+        "description": f"Fetch a report. Header Authorization: {credential_text}",
+        "inputSchema": {"type": "object", "properties": {}},
+    }
+    interpreter = InMemoryInterpreter()
+
+    result = discover_mcp_target(
+        _inputs(), InMemoryInventory({"tools": [row]}), interpreter
+    )
+
+    assert result.profile is not None
+    assert interpreter.requests
+    rendered = "\n".join(
+        part
+        for request in interpreter.requests
+        for part in build_interpretation_prompt(request)
+    )
+    profile_json = json.dumps(result.profile.model_dump(mode="json"), sort_keys=True)
+    assert secret not in profile_json
+    assert secret not in rendered
+    assert "Authorization: [REDACTED]" in rendered
+
+
 @pytest.mark.parametrize("field", ("resources", "interpretations"))
 def test_profile_evidence_refs_must_resolve_to_exact_inventory_fields(field):
     result = discover_mcp_target(

@@ -309,6 +309,9 @@ writes a self-contained `execution-target-profile.json` alongside its sanitized
 inventory, manifest, and call log. Before publication, secret-like values in
 descriptions, schema examples/defaults, and annotations are redacted; each
 sanitized tool observation retains the SHA-256 of its original normalized row.
+After an `authorization` key in a description, redaction removes the whole
+value, including a scheme word (`Bearer`, `Basic`, and similar) and the
+credential after it; every other key redacts one token.
 MCP profiles retain separate observed
 inventory and inferred semantic authority; each resource and operation keeps
 the exact MCP tool name. Product `generate` strictly loads that profile file and
