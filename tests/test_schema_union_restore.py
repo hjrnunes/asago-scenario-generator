@@ -1,0 +1,531 @@
+"""A flat reply is restored to its union branch before validation.
+
+The request carries every union as one flat object, so a reply lists every
+property and sets the ones its branch does not use to null.  Before the
+reply is validated against its response type, each discriminated union
+position drops the null keys the selected branch does not define.  Nothing
+else changes: a non-null value outside the branch still fails validation.
+"""
+
+from __future__ import annotations
+
+import copy
+import json
+from typing import Any
+
+import jsonschema
+import pytest
+from pydantic import BaseModel, ValidationError
+
+from asago_scenario_generator.request_schema import (
+    restore_flat_reply_for,
+)
+from asago_scenario_generator.schema_unions import restore_flat_reply
+from asago_scenario_generator.stpa.infra.llm import (
+    LLMResult,
+    _json_schema_response_format,
+    _locally_parse_response_content,
+)
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    _parse_structured_result,
+    parse_llm_result,
+)
+from asago_scenario_generator.stpa.obligation_aware.provider import (
+    _routing_provider_payload_type,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+    _parse_context_bdi_result,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.schema import (
+    _scenario_semantics_payload_type,
+)
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    _ControlElementProviderSet,
+)
+
+_NULL = {"type": "null"}
+
+_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "items": {
+            "type": "array",
+            "items": {
+                "oneOf": [{"$ref": "#/$defs/A"}, {"$ref": "#/$defs/B"}],
+                "discriminator": {
+                    "propertyName": "kind",
+                    "mapping": {"a": "#/$defs/A", "b": "#/$defs/B"},
+                },
+            },
+        },
+        "maybe": {
+            "anyOf": [
+                {
+                    "oneOf": [{"$ref": "#/$defs/A"}, {"$ref": "#/$defs/B"}],
+                    "discriminator": {
+                        "propertyName": "kind",
+                        "mapping": {"a": "#/$defs/A", "b": "#/$defs/B"},
+                    },
+                },
+                _NULL,
+            ]
+        },
+        "rows": {"type": "array", "prefixItems": [{"$ref": "#/$defs/Holder"}]},
+    },
+    "$defs": {
+        "A": {
+            "type": "object",
+            "properties": {
+                "kind": {"const": "a"},
+                "n": {"type": "integer"},
+                "opt": {"anyOf": [{"type": "string"}, _NULL]},
+            },
+        },
+        "B": {
+            "type": "object",
+            "properties": {"kind": {"const": "b"}, "s": {"type": "string"}},
+        },
+        "Holder": {
+            "type": "object",
+            "properties": {
+                "inner": {
+                    "oneOf": [{"$ref": "#/$defs/A"}, {"$ref": "#/$defs/B"}],
+                    "discriminator": {
+                        "propertyName": "kind",
+                        "mapping": {"a": "#/$defs/A", "b": "#/$defs/B"},
+                    },
+                }
+            },
+        },
+    },
+}
+
+
+def test_restore_drops_only_null_keys_the_selected_branch_lacks() -> None:
+    reply = {
+        "items": [
+            {"kind": "a", "n": 1, "opt": None, "s": None},
+            {"kind": "b", "n": None, "opt": None, "s": "x"},
+        ],
+        "maybe": {"kind": "b", "n": None, "opt": None, "s": "y"},
+        "rows": [{"inner": {"kind": "a", "n": 2, "opt": None, "s": None}}],
+    }
+    original = copy.deepcopy(reply)
+    assert restore_flat_reply(reply, _SCHEMA) == {
+        "items": [{"kind": "a", "n": 1, "opt": None}, {"kind": "b", "s": "x"}],
+        "maybe": {"kind": "b", "s": "y"},
+        "rows": [{"inner": {"kind": "a", "n": 2, "opt": None}}],
+    }
+    assert reply == original
+
+
+def test_restore_keeps_a_non_null_foreign_value_and_an_unknown_branch() -> None:
+    reply = {
+        "items": [
+            {"kind": "a", "n": 1, "s": "kept"},
+            {"kind": "c", "n": None},
+            {"n": None},
+            "not an object",
+        ],
+        "maybe": None,
+    }
+    assert restore_flat_reply(reply, _SCHEMA) == reply
+
+
+_STAGE5 = _scenario_semantics_payload_type(
+    3,
+    duration_eligible=True,
+    observation_criteria_required=True,
+    condition_references_supplied=True,
+)
+_ROUTING = _routing_provider_payload_type(1)
+_OB = "ob:v1:" + "0" * 64
+
+
+def _stage5(**changes: Any) -> dict[str, Any]:
+    reply: dict[str, Any] = {
+        "adversary": {"kind": "malicious_customer", "gain": "Reads another order."},
+        "attacker_bdi": {
+            "beliefs": ["The assistant trusts the order number."],
+            "desires": ["See another customer's order."],
+            "intentions": [
+                {
+                    "description": "Ask for a foreign order.",
+                    "source_handles": ["cause_1"],
+                }
+            ],
+        },
+        "causal_factors": [
+            {
+                "source_handle": "cause_1",
+                "evidence": "The lookup does not check the owner.",
+                "temporal_condition": None,
+                "evidence_status": "structural_failure",
+            }
+        ],
+        "unsafe_outcome": {
+            "semantic_proposition": "The reply shows another customer's order.",
+            "observation_criteria": [
+                {
+                    "criterion_id": "LEAK",
+                    "outcome": "The reply names a foreign order.",
+                    "observable": True,
+                    "claim_level": "reply",
+                    "evidence": "assistant_message",
+                    "operation_name": None,
+                    "reason": "The reply text shows the order.",
+                }
+            ],
+            "safe_observable_outcome": {
+                "observable": True,
+                "statement": "The reply names no foreign order.",
+                "claim_level": "reply",
+                "evidence": "assistant_message",
+                "operation_name": None,
+            },
+            "discriminating_condition": {
+                "statement": "The order belongs to another customer.",
+                "comparisons": [
+                    {
+                        "kind": "value",
+                        "left": {
+                            "source": "fact",
+                            "path": "TARGET-STATE.orders.O-1.owner",
+                        },
+                        "op": "ne",
+                        "right": {
+                            "source": "fact",
+                            "path": "TARGET-STATE.session.customer",
+                        },
+                    }
+                ],
+                "record_selection": {
+                    "status": "observed",
+                    "record_path": "TARGET-STATE.orders.O-1",
+                    "argument_values": [],
+                },
+            },
+        },
+    }
+    for path, value in changes.items():
+        _set(reply, path.split("__"), value)
+    return reply
+
+
+def _set(node: Any, keys: list[str], value: Any) -> None:
+    for key in keys[:-1]:
+        node = node[int(key)] if isinstance(node, list) else node[key]
+    if isinstance(node, list):
+        node[int(keys[-1])] = value
+    else:
+        node[keys[-1]] = value
+
+
+def _factor(status: str, temporal: Any = None, **extra: Any) -> list[dict[str, Any]]:
+    return [
+        {
+            "source_handle": "cause_1",
+            "evidence": "The lookup does not check the owner.",
+            "temporal_condition": temporal,
+            "evidence_status": status,
+            **extra,
+        }
+    ]
+
+
+def _comparison(**fields: Any) -> list[dict[str, Any]]:
+    return [fields]
+
+
+_CONDITION = "unsafe_outcome__discriminating_condition"
+
+_STAGE5_REPLIES = {
+    "adversary-attacker": _stage5(),
+    "adversary-none": _stage5(
+        adversary={"kind": "none"},
+        attacker_bdi={"beliefs": [], "desires": [], "intentions": []},
+    ),
+    "factor-reachable": _stage5(
+        causal_factors=_factor(
+            "reachable_capability", capability_refs=["CAP-1"], access_refs=["ACC-1"]
+        )
+    ),
+    "factor-bounded": _stage5(
+        causal_factors=_factor("bounded_assumption", bounded_assumption="It may.")
+    ),
+    "temporal-ordering": _stage5(
+        causal_factors=_factor(
+            "structural_failure",
+            {
+                "type": "ordering",
+                "reference_handle": "target_action",
+                "relation": "before",
+            },
+        )
+    ),
+    "temporal-delay": _stage5(
+        causal_factors=_factor(
+            "structural_failure",
+            {"type": "delay", "reference_handle": "target_action", "delay_ms": 500},
+        )
+    ),
+    "temporal-duration": _stage5(
+        causal_factors=_factor(
+            "structural_failure",
+            {
+                "type": "duration",
+                "reference_handle": "target_action",
+                "duration_ms": 500,
+            },
+        )
+    ),
+    "temporal-window": _stage5(
+        causal_factors=_factor(
+            "structural_failure",
+            {
+                "type": "window",
+                "reference_handle": "target_action",
+                "window_from_ms": 0,
+                "window_to_ms": 1000,
+            },
+        )
+    ),
+    "temporal-absence": _stage5(
+        causal_factors=_factor(
+            "structural_failure",
+            {
+                "type": "absence",
+                "reference_handle": "cause_2",
+                "until_step_handle": "target_action",
+            },
+        )
+    ),
+    "comparison-operands": _stage5(
+        **{
+            f"{_CONDITION}__comparisons": _comparison(
+                kind="value",
+                left={
+                    "source": "argument",
+                    "operation": "refund",
+                    "argument": "amount",
+                },
+                op="gt",
+                right={"source": "literal", "value": 100},
+            )
+        }
+    ),
+    "comparison-order": _stage5(
+        **{
+            f"{_CONDITION}__comparisons": _comparison(
+                kind="order",
+                operation="refund",
+                requires_prior="verify",
+                same_argument="order_id",
+            )
+        }
+    ),
+    "comparison-not-called": _stage5(
+        **{
+            f"{_CONDITION}__comparisons": _comparison(
+                kind="not_called", operation="verify"
+            )
+        }
+    ),
+    "record-unavailable": _stage5(
+        **{
+            f"{_CONDITION}__record_selection": {
+                "status": "unavailable",
+                "reason": "No listed order matches.",
+            }
+        }
+    ),
+}
+
+
+def _route(disposition: str, **fields: Any) -> dict[str, Any]:
+    return {
+        "routes": [
+            {
+                "obligation_id": _OB,
+                "semantic_assessment": {
+                    "mechanism_assessment": "plausible_in_system",
+                    "risk_alignment": "supported",
+                    "mechanism_rationale": "The path exists.",
+                    "risk_alignment_rationale": "It realizes the risk.",
+                },
+                "rationale": "Why this disposition.",
+                "evidence": ["RESP-1 handles refunds."],
+                "disposition": disposition,
+                **fields,
+            }
+        ]
+    }
+
+
+_TARGETED_IDS = {
+    name: []
+    for name in (
+        "controller_ids",
+        "control_action_ids",
+        "responsibility_ids",
+        "process_model_part_ids",
+        "feedback_channel_ids",
+        "controlled_process_ids",
+        "coordination_link_ids",
+    )
+}
+
+_ROUTING_REPLIES = {
+    "targeted": _route(
+        "targeted",
+        slot_ids=["RESP-1:CA-1-1:NOT_PROVIDED"],
+        **_TARGETED_IDS,
+        hazard_ids=["H-1"],
+        constraint_ids=["SC-1"],
+    ),
+    "proposed-not-applicable": _route("proposed_not_applicable"),
+    "upstream-gap": _route(
+        "upstream_gap",
+        missing_concepts=[
+            {
+                "concept_type": "controlled_process",
+                "description": "No payment process is modelled.",
+                "concept_id": None,
+                "evidence_refs": ["RESP-1"],
+                "obligation_id": None,
+            }
+        ],
+    ),
+    "unresolved": _route("unresolved"),
+}
+
+_STAGE2_REPLY = {
+    "control_actions": [
+        {
+            "ca_id": "CA-1-1",
+            "description": "Ask the checker.",
+            "target": {"type": "responsibility", "id": "RESP-2"},
+            "effect_kind": "agent_message",
+            "temporality": "discrete",
+            "operation": None,
+            "process_model_refs": ["PM-1-1"],
+        },
+        {
+            "ca_id": "CA-1-2",
+            "description": "Issue a refund.",
+            "target": {"type": "controlled_process", "id": "CP-1"},
+            "effect_kind": "tool_call",
+            "temporality": "instantaneous",
+            "operation": "refund",
+            "process_model_refs": ["PM-1-1"],
+        },
+    ],
+    "feedback": [
+        {
+            "fb_id": "FB-1-1",
+            "description": "Refund result.",
+            "updates": "PM-1-1",
+            "source": {"type": "controlled_process", "id": "CP-1"},
+            "source_kind": None,
+        }
+    ],
+    "controlled_processes": [{"cp_id": "CP-1", "description": "Payments."}],
+}
+
+_CASES = [
+    *((f"stage5-{k}", _STAGE5, v) for k, v in _STAGE5_REPLIES.items()),
+    *((f"routing-{k}", _ROUTING, v) for k, v in _ROUTING_REPLIES.items()),
+    ("stage2-both-forms", _ControlElementProviderSet, _STAGE2_REPLY),
+]
+
+
+def _flat_reply(value: Any, node: Any, defs: dict[str, Any]) -> Any:
+    """Write ``value`` the way the flat request schema asks: every key present."""
+    if isinstance(node, dict) and "$ref" in node:
+        node = defs[node["$ref"].rsplit("/", 1)[-1]]
+    if value is None or not isinstance(node, dict):
+        return value
+    if "anyOf" in node:
+        objects = [o for o in node["anyOf"] if o != _NULL]
+        return _flat_reply(value, objects[0], defs) if len(objects) == 1 else value
+    if isinstance(value, list):
+        return [_flat_reply(v, node.get("items"), defs) for v in value]
+    if not isinstance(value, dict):
+        return value
+    properties = node.get("properties", {})
+    return {
+        name: _flat_reply(value[name], schema, defs) if name in value else None
+        for name, schema in properties.items()
+        if name in value or name in node.get("required", ())
+    }
+
+
+def _flat_case(model: type[BaseModel], reply: dict[str, Any]) -> dict[str, Any]:
+    schema = _json_schema_response_format(model)["json_schema"]["schema"]
+    flat = _flat_reply(reply, schema, schema.get("$defs", {}))
+    jsonschema.Draft202012Validator(schema).validate(flat)
+    return flat
+
+
+@pytest.mark.parametrize(("name", "model", "reply"), _CASES, ids=[c[0] for c in _CASES])
+def test_a_flat_reply_restores_and_validates_as_its_original(
+    name: str, model: type[BaseModel], reply: dict[str, Any]
+) -> None:
+    expected = model.model_validate(reply)
+    flat = _flat_case(model, reply)
+    assert model.model_validate(restore_flat_reply_for(model, flat)) == expected
+
+
+@pytest.mark.parametrize(
+    "name",
+    ["stage5-adversary-attacker", "stage5-temporal-window", "routing-upstream-gap"],
+)
+def test_a_flat_reply_needs_the_restore(name: str) -> None:
+    _, model, reply = next(c for c in _CASES if c[0] == name)
+    with pytest.raises(ValidationError):
+        model.model_validate(_flat_case(model, reply))
+
+
+def test_a_null_in_a_field_the_branch_defines_still_fails() -> None:
+    reply = _route(
+        "targeted", slot_ids=None, hazard_ids=["H-1"], constraint_ids=["SC-1"]
+    )
+    with pytest.raises(ValidationError, match="slot_ids"):
+        _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, reply))
+
+
+def test_a_type_without_a_discriminated_union_is_left_alone() -> None:
+    reply = {"control_actions": [], "extra": None}
+    assert restore_flat_reply_for(_ControlElementProviderSet, reply) is reply
+
+
+def _flat_text(name: str) -> tuple[type[BaseModel], str, BaseModel]:
+    _, model, reply = next(c for c in _CASES if c[0] == name)
+    return model, json.dumps(_flat_case(model, reply)), model.model_validate(reply)
+
+
+def test_parse_llm_result_restores_text_and_mapping_content() -> None:
+    model, text, expected = _flat_text("routing-upstream-gap")
+    assert parse_llm_result(LLMResult(content=text, duration_ms=0), model) == expected
+    mapping = json.loads(text)
+    assert (
+        parse_llm_result(LLMResult(content=mapping, duration_ms=0), model) == expected
+    )
+
+
+def test_a_stage_parser_receives_the_restored_reply() -> None:
+    model, text, expected = _flat_text("stage5-temporal-absence")
+    result = LLMResult(content=text, duration_ms=0, raw_response=text)
+    parsed = _parse_structured_result(
+        result,
+        model,
+        response_parser=lambda value, _cleanup: _parse_context_bdi_result(value, model),
+    )
+    assert parsed == expected
+    assert result.content == text
+
+
+def test_the_strict_local_parse_restores_the_reply() -> None:
+    model, text, expected = _flat_text("stage5-adversary-none")
+    assert _locally_parse_response_content(text, model) == expected
+    assert _locally_parse_response_content(json.loads(text), model) == expected

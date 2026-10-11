@@ -17,7 +17,12 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
-from asago_scenario_generator.schema_unions import find_unions, flatten_unions
+from asago_scenario_generator.schema_unions import (
+    find_unions,
+    flatten_unions,
+    restore_flat_reply_for,
+    restores_flat_replies,
+)
 
 SchemaExtra = Callable[[dict[str, Any]], None]
 _ModelT = TypeVar("_ModelT", bound=type[BaseModel])
@@ -151,7 +156,9 @@ def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
     Every object union then becomes one flat object
     (:func:`~asago_scenario_generator.schema_unions.flatten_unions`), because
     GLM's endpoint decodes a ``oneOf`` by always taking its last branch.  The
-    response is still validated against the original Pydantic model.
+    response is still validated against the original Pydantic model, after
+    :func:`restore_flat_reply_for` drops the null fields that its selected
+    branches do not define.
     """
 
     def portable(node: Any) -> Any:
@@ -182,6 +189,8 @@ def _pattern_rejects_empty(pattern: str) -> bool:
 __all__ = [
     "find_unions",
     "portable_request_schema",
+    "restore_flat_reply_for",
+    "restores_flat_replies",
     "string_enum",
     "string_items_enum",
     "uses_guided_decoding",

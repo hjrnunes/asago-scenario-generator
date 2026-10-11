@@ -9,12 +9,18 @@ and required.  Replies are validated against the original Pydantic models.
 A union is a ``oneOf``, or an ``anyOf`` with two or more object branches
 after ``$ref`` resolution.  A nullable field (one schema and
 ``{"type": "null"}``) and a choice of scalars are not unions.
+
+:func:`restore_flat_reply` undoes the flattening on a reply before it is
+validated: it drops the null keys a discriminated branch does not define.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from functools import lru_cache
 from typing import Any
+
+from pydantic import BaseModel
 
 _NULL = {"type": "null"}
 _DEF_PREFIX = "#/$defs/"
@@ -331,4 +337,111 @@ def _refs(node: Any) -> set[str]:
     return found
 
 
-__all__ = ["UnionMergeError", "find_unions", "flatten_unions"]
+def restore_flat_reply(value: Any, schema: Mapping[str, Any]) -> Any:
+    """Return ``value`` with each flat union restored to its selected branch.
+
+    ``schema`` is the original (unflattened) schema.  At each discriminated
+    union, the keys whose value is null and that the selected branch does not
+    define are dropped.  Everything else is kept, so a non-null value outside
+    the branch still fails validation.  ``value`` is not modified.
+    """
+    return _Restorer(schema.get("$defs", {})).value(value, schema)
+
+
+@lru_cache(maxsize=256)
+def _restorable_schema(model: type) -> Mapping[str, Any] | None:
+    if not (isinstance(model, type) and issubclass(model, BaseModel)):
+        return None
+    schema = model.model_json_schema()
+    return schema if _has_discriminator(schema) else None
+
+
+def restores_flat_replies(model: type) -> bool:
+    """Whether replies to ``model`` can carry flat unions to restore."""
+    return _restorable_schema(model) is not None
+
+
+def restore_flat_reply_for(model: type, value: Any) -> Any:
+    """Restore a reply against ``model``'s schema; return it as is without unions."""
+    schema = _restorable_schema(model)
+    return value if schema is None else restore_flat_reply(value, schema)
+
+
+def _has_discriminator(node: Any) -> bool:
+    if isinstance(node, list):
+        return any(_has_discriminator(v) for v in node)
+    if not isinstance(node, Mapping):
+        return False
+    return "discriminator" in node or any(_has_discriminator(v) for v in node.values())
+
+
+class _Restorer:
+    def __init__(self, defs: Mapping[str, Any]) -> None:
+        self._defs = defs
+
+    def value(self, value: Any, node: Any) -> Any:
+        node = _deref(node, self._defs)
+        if not isinstance(node, Mapping):
+            return value
+        options = node.get("oneOf", node.get("anyOf"))
+        if isinstance(options, list):
+            return self._union(value, node, options)
+        if isinstance(value, dict):
+            return self._object(value, node)
+        if isinstance(value, list):
+            return self._array(value, node)
+        return value
+
+    def _union(self, value: Any, node: Mapping[str, Any], options: list) -> Any:
+        branch = _selected_branch(value, node, options)
+        if branch is None:
+            return value
+        if "discriminator" in node:
+            defined = _deref(branch, self._defs).get("properties", {})
+            value = {k: v for k, v in value.items() if v is not None or k in defined}
+        return self.value(value, branch)
+
+    def _object(self, value: dict[str, Any], node: Mapping[str, Any]) -> dict:
+        properties = node.get("properties", {})
+        return {
+            key: self.value(item, properties[key]) if key in properties else item
+            for key, item in value.items()
+        }
+
+    def _array(self, value: list[Any], node: Mapping[str, Any]) -> list[Any]:
+        prefix = node.get("prefixItems") or []
+        items = node.get("items")
+        return [
+            self.value(item, prefix[i] if i < len(prefix) else items)
+            for i, item in enumerate(value)
+        ]
+
+
+def _selected_branch(value: Any, node: Mapping[str, Any], options: list) -> Any:
+    """Return the branch ``value`` takes, or ``None`` when no single one does."""
+    if value is None:
+        return None
+    discriminator = node.get("discriminator")
+    if isinstance(discriminator, Mapping):
+        return _mapped_branch(value, discriminator)
+    rest = [o for o in options if o != _NULL]
+    return rest[0] if len(rest) == 1 else None
+
+
+def _mapped_branch(value: Any, discriminator: Mapping[str, Any]) -> Any:
+    if not isinstance(value, dict):
+        return None
+    tag = value.get(discriminator.get("propertyName"))
+    mapping = discriminator.get("mapping", {})
+    target = mapping.get(tag) if isinstance(tag, str) else None
+    return {"$ref": target} if target else None
+
+
+__all__ = [
+    "UnionMergeError",
+    "find_unions",
+    "flatten_unions",
+    "restore_flat_reply",
+    "restore_flat_reply_for",
+    "restores_flat_replies",
+]

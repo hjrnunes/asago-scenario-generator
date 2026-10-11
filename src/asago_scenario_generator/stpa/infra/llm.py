@@ -25,6 +25,7 @@ from asago_scenario_generator.stpa.infra.transport_retry import retry_once
 from asago_scenario_generator.request_schema import (
     find_unions,
     portable_request_schema,
+    restore_flat_reply_for,
 )
 
 DEFAULT_TEMPERATURE: float = 0.4
@@ -375,9 +376,13 @@ def _locally_parse_response_content(
         return content
     try:
         if isinstance(content, dict):
-            return response_format.model_validate(content)
+            return response_format.model_validate(
+                restore_flat_reply_for(response_format, content)
+            )
         if isinstance(content, str):
-            return response_format.model_validate(json.loads(content))
+            return response_format.model_validate(
+                restore_flat_reply_for(response_format, json.loads(content))
+            )
     except Exception:  # noqa: BLE001 - retain raw content for safe parsing
         return content
     return content
