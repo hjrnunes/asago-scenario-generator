@@ -14,6 +14,7 @@ import json
 from typing import Annotated, Any, Literal
 
 import pytest
+from jsonschema import Draft202012Validator
 from pydantic import BaseModel, ConfigDict, Field
 
 from asago_scenario_generator.request_schema import portable_request_schema
@@ -416,6 +417,86 @@ def test_a_nullable_union_flattens_inside_its_anyof() -> None:
     assert prop["anyOf"][1] == _NULL
     assert prop["anyOf"][0]["properties"]["type"]["enum"] == ["a", "b"]
     assert find_unions(prop) == []
+
+
+def test_a_union_with_a_null_branch_flattens_to_a_nullable_wrapper() -> None:
+    schema = {
+        "type": "object",
+        "properties": {
+            "item": {
+                "anyOf": [{"$ref": "#/$defs/A"}, {"$ref": "#/$defs/B"}, _NULL],
+                "title": "Item",
+                "default": None,
+            }
+        },
+        "required": ["item"],
+        "$defs": {
+            "A": _obj(
+                {"shared": {"type": "string"}, "a": {"type": "integer"}},
+                ["shared", "a"],
+            ),
+            "B": _obj(
+                {"shared": {"type": "string"}, "b": {"type": "boolean"}},
+                ["shared", "b"],
+            ),
+        },
+    }
+    sentence = "Applies to some forms of this object only; null otherwise."
+    merged = _obj(
+        {
+            "shared": {"type": "string"},
+            "a": {
+                "anyOf": [{"type": "integer"}, _NULL],
+                "description": sentence,
+            },
+            "b": {
+                "anyOf": [{"type": "boolean"}, _NULL],
+                "description": sentence,
+            },
+        },
+        ["shared", "a", "b"],
+    )
+    assert find_unions(schema) == ["/properties/item"]
+
+    flat = flatten_unions(schema)
+
+    assert flat["properties"]["item"] == {
+        "anyOf": [merged, _NULL],
+        "title": "Item",
+        "default": None,
+    }
+    assert "$defs" not in flat
+    assert find_unions(flat) == []
+    validator = Draft202012Validator(flat)
+    assert validator.is_valid({"item": None})
+    assert validator.is_valid({"item": {"shared": "s", "a": 1, "b": None}})
+    assert not validator.is_valid({"item": {"shared": "s"}})
+
+
+def test_a_discriminated_union_with_a_null_branch_keeps_its_nullable_wrapper() -> None:
+    schema = _union_schema(
+        _obj(
+            {"kind": {"const": "a", "type": "string"}, "a": {"type": "integer"}},
+            ["kind", "a"],
+        ),
+        _obj({"kind": {"const": "b", "type": "string"}}, ["kind"]),
+        _NULL,
+        discriminator={"propertyName": "kind"},
+        title="Item",
+    )
+
+    flat = flatten_unions(schema)
+
+    item = flat["properties"]["item"]
+    assert item["title"] == "Item"
+    assert "discriminator" not in item
+    assert len(item["anyOf"]) == 2
+    assert item["anyOf"][1] == _NULL
+    assert item["anyOf"][0]["properties"]["kind"]["enum"] == ["a", "b"]
+    assert find_unions(flat) == []
+    validator = Draft202012Validator(flat)
+    assert validator.is_valid({"item": None})
+    assert validator.is_valid({"item": {"kind": "b", "a": None}})
 
 
 class _Fact(BaseModel):
