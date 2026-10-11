@@ -302,8 +302,10 @@ def test_other_chain_failures_still_get_no_correction(tmp_path, gap_reply):
     assert not _chain_entries(tmp_path)
 
 
-# Request digests at producer f704e000, before the correction existed.
-_RISK_SYSTEM_DIGEST = "fe4aa73538a690bf1a9ff1b3a562fdccbb300bf42c1857297cb986453340876d"
+# Request digests at producer f704e000, before the correction existed.  The
+# risk system digest follows later edits of that prompt, which this
+# correction does not touch.
+_RISK_SYSTEM_DIGEST = "215d6d8b8f96327b589d2ab2d03718d3abc6ee3b0374500cf07719ddc10efecd"
 _RISK_USER_DIGEST = "ee6f683a5c3af1cc3dadf9657cd75ab4a5616a612c7a37e7d2f10f349db6791c"
 _GAP_SYSTEM_DIGEST = "a9f69e438586a6902c2d5ec174ca421e407e1fe5f65db4d767c62aa6ba7c97cd"
 _GAP_USER_DIGEST = "df41179e9d22db69444b21756396ed73ddb795575a50e31d408184db30eb53a5"

@@ -174,10 +174,11 @@ class TestBothRepliesUndecodable:
         assert "ValidationError" in str(raised.value)
 
 
-# SHA-256 of the first request's keyword arguments as the start commit sends
-# them for ``_call``'s inputs; a valid first reply keeps sending exactly this.
+# SHA-256 of the first request's keyword arguments as the current revision
+# prompt sends them for ``_call``'s inputs; a valid first reply sends exactly
+# this.
 _FIRST_REQUEST_DIGEST = (
-    "c622db4b18b3688cb2a5ef676ddb9a3a330dd427db7f2ca96050a28e8cfcf2a4"
+    "7f95b8e0f4dbb07d6273bbcfdf07ae4d362ed83674559f881a896ea2784c1e6b"
 )
 
 

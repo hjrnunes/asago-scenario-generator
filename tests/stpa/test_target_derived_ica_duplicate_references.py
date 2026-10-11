@@ -135,9 +135,9 @@ class TestProviderCorrection:
         assert suffix.endswith(
             "\n\nExact validation error from the prior response:\n"
             "ValueError: target-derived ICA draft repeats references:\n"
-            f"findings[0] (ica_id 'provider-0', slot {_PAYMENT_SLOT}): "
+            f"findings[0] (slot {_PAYMENT_SLOT}): "
             "related_constraints repeats SC-1\n"
-            f"findings[1] (ica_id 'provider-1', slot {_PAYMENT_SLOT}): "
+            f"findings[1] (slot {_PAYMENT_SLOT}): "
             "related_hazards repeats H-1, H-2"
             "\n\nReturn one JSON object matching the response schema already "
             "supplied."
@@ -194,7 +194,7 @@ class TestRealizationOutcomes:
         assert (
             "target-derived ICA finding provider failed: ValueError: "
             "target-derived ICA correction still repeats references: "
-            f"findings[0] (ica_id 'provider-0', slot {_EXTENDED_SLOT}): "
+            f"findings[0] (slot {_EXTENDED_SLOT}): "
             "related_hazards repeats H-1"
         ) in enhanced.diagnostics
         assert len(client.calls) == 2

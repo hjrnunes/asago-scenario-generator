@@ -243,11 +243,27 @@ def _risk_call(client: MockLLMClient, tmp_path):
     return call.response_format, cards
 
 
-def test_risk_derivation_unguided_request_schema_is_mains(tmp_path):
-    model, _ = _risk_call(MockLLMClient(), tmp_path)
+def test_risk_derivation_static_wire_schema_is_mains():
+    _assert_main_payload("stage1a_risk_derivation", _Stage1aRiskProviderDraft)
 
-    assert model is _Stage1aRiskProviderDraft
-    _assert_main_payload("stage1a_risk_derivation", model)
+
+def test_risk_derivation_unguided_schema_bounds_only_source_risk_cards(tmp_path):
+    """Without guided decoding the schema caps each loss's card list only."""
+    model, cards = _risk_call(MockLLMClient(), tmp_path)
+    ids = [card.risk_id for card in cards]
+
+    assert model.__name__ == "_Stage1aRiskProviderDraft"
+    schema = model.model_json_schema()
+    static = _Stage1aRiskProviderDraft.model_json_schema()
+    assert (
+        schema["properties"]["risk_dispositions"]
+        == (static["properties"]["risk_dispositions"])
+    )
+    for collection in ("risk_card_losses", "use_case_losses"):
+        loss = _resolve(schema, schema["properties"][collection]["items"])
+        cards_schema = loss["properties"]["source_risk_cards"]
+        assert cards_schema["items"]["enum"] == ids
+        assert cards_schema["maxItems"] == 32
 
 
 def test_risk_derivation_guided_schema_asks_for_each_card_once_in_order(tmp_path):
@@ -263,6 +279,7 @@ def test_risk_derivation_guided_schema_asks_for_each_card_once_in_order(tmp_path
     for collection in ("risk_card_losses", "use_case_losses"):
         loss = _resolve(schema, schema["properties"][collection]["items"])
         assert loss["properties"]["source_risk_cards"]["items"]["enum"] == ids
+        assert loss["properties"]["source_risk_cards"]["maxItems"] == 32
         assert next(iter(loss["properties"])) == "handle"
 
 

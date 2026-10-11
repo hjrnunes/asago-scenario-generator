@@ -1,9 +1,10 @@
 """The Call 2b reference correction for a reply that declares no controlled process.
 
-A provider can leave the optional `controlled_processes` collection out of its
-reply. The client then fills it with `[]`, and every `CP-*` target and source
-fails as unknown. The reference correction names that omission and the
-undeclared processes; every other correction keeps its earlier text.
+A provider can leave `controlled_processes` out of its reply even though the
+request schema requires it. The stage wire then reads it as empty, and every
+`CP-*` target and source fails as unknown. The reference correction names that
+omission and the undeclared processes; every other correction keeps its
+earlier text.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import json
 from pathlib import Path
 
 import pytest
+from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -188,11 +190,11 @@ def _klarna_failure() -> tuple[UnknownReferenceError, list[Responsibility]]:
     responsibilities = parse_responsibility_set_response(
         fixture["call_2a_reply"]
     ).responsibilities
-    # The client hands the stage the provider model, which fills the key the
-    # reply left out.
-    reply = _ControlElementProviderSet.model_validate(
-        fixture["call_2b_attempt_1_reply"]
-    )
+    # The provider schema requires the key, so the client's local parse fails
+    # and hands the stage the reply text as written.
+    with pytest.raises(ValidationError):
+        _ControlElementProviderSet.model_validate(fixture["call_2b_attempt_1_reply"])
+    reply = json.dumps(fixture["call_2b_attempt_1_reply"])
     with pytest.raises(UnknownReferenceError) as exc_info:
         parse_control_element_set_response(reply, responsibilities=responsibilities)
     return exc_info.value, responsibilities

@@ -41,6 +41,8 @@ cases:
       - Each hazard MUST name at least one specific component
       - Every loss must cite its source risk IDs
       - "Every loss must cite its source risk IDs in `source_risk_cards`."
+      - A loss cites only supplied risk IDs, and cites each one once.
+      - '"source_risk_cards": ["<risk-id>"]}'
       - Reject a generic catalog statement
       - "component cause such as \"the sensor fails."
       - first expansion
@@ -60,7 +62,12 @@ cases:
       - unless that score and threshold were supplied
     once:
       - Express each constraint as the safe relationship
+      - >-
+        A constraint may cite only a hazard declared in this same response,
+        and a response that declares no hazard declares no constraint, because
+        the gap-analysis call derives both.
     forbidden:
+      - '["<risk-id>", "..."]'
       - patient chatbot
       - refund processing API
       - Klarna

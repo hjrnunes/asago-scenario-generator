@@ -17,7 +17,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     derive_loss_analysis,
     _Stage1aGapProviderDraft,
-    _Stage1aRiskProviderDraft,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
@@ -295,7 +294,8 @@ def test_stage1a_calls_forward_exact_completion_cap(tmp_path):
     stage1a_calls = [
         call
         for call in client.calls
-        if call.response_format in {_Stage1aRiskProviderDraft, _Stage1aGapProviderDraft}
+        if call.response_format is not None
+        and issubclass(call.response_format, _Stage1aGapProviderDraft)
     ]
     assert len(stage1a_calls) == 2
     assert [call.max_completion_tokens for call in stage1a_calls] == [8192, 8192]

@@ -361,11 +361,6 @@ def _has_error(errors: list[tuple[str, str]], location: str, fragment: str) -> b
     [
         (
             _payload_with(controlled_processes=None, feedback=None),
-            "controlled_processes",
-            "Field required",
-        ),
-        (
-            _payload_with(controlled_processes=None, feedback=None),
             "feedback",
             "Field required",
         ),
@@ -385,7 +380,6 @@ def _has_error(errors: list[tuple[str, str]], location: str, fragment: str) -> b
         (_payload_with(extra=[]), "extra", "Extra inputs are not permitted"),
     ],
     ids=[
-        "missing-processes",
         "missing-feedback",
         "both-feedback-spellings",
         "actions-not-list",
@@ -399,6 +393,17 @@ def test_call2b_parser_rejects_malformed_top_level_collections(
     payload: dict, location: str, fragment: str
 ) -> None:
     assert _has_error(_wire_errors(payload), location, fragment)
+
+
+def test_call2b_parser_reads_absent_processes_as_none_declared() -> None:
+    payload = _payload_with(controlled_processes=None)
+
+    with pytest.raises(UnknownReferenceError) as exc_info:
+        parse_control_element_set_response(
+            payload, responsibilities=_responsibilities().responsibilities
+        )
+    assert exc_info.value.controlled_processes == ()
+    assert "CP-1" in {item.value for item in exc_info.value.references}
 
 
 def test_call2b_parser_rejects_a_non_object_response() -> None:

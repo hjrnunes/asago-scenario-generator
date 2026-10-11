@@ -124,6 +124,8 @@ STEP_MERGE = "merge"
 # a typed terminal outcome of the first attempt, never a retry trigger.
 JSON_DECODE_RETRIES = 0
 STAGE1A_MAX_COMPLETION_TOKENS = 8192
+# Above the longest list a stop reply has cited (23 cards), below a runaway.
+MAX_SOURCE_RISK_CARDS = 32
 
 
 class _ProviderSecurityConstraint(SecurityConstraint):
@@ -305,32 +307,45 @@ def _risk_provider_draft_type(
 ) -> type[_Stage1aRiskProviderDraft]:
     """Build the risk-derivation wire whose schema names the supplied cards.
 
-    Without guided decoding, or without cards, this is the static wire.
-    Under guided decoding the schema closes ``source_risk_cards`` to the supplied risk-card IDs
-    and asks for exactly one disposition row per card, in supplied order,
-    so a guided decoder cannot invent, repeat, or skip a card.  Local
-    validation is the static wire's: the risk-accounting validator still
-    reports unknown, missing, or duplicate cards with its targeted repair
-    feedback.  The classes keep their static names because call records and
-    test clients identify the wire by name.
+    Without cards this is the static wire.  Otherwise the schema closes
+    ``source_risk_cards`` to the supplied risk-card IDs and caps it at
+    :data:`MAX_SOURCE_RISK_CARDS` items, so a reply cannot count invented
+    IDs or cycle until the completion cap.  An enum does not stop repeats,
+    which the domain loss collapses.  Under guided decoding the schema also
+    asks for exactly one disposition row per card, in supplied order, so a
+    guided decoder cannot invent, repeat, or skip a card.  Local validation
+    is the static wire's: the risk-accounting validator still reports
+    unknown, missing, or duplicate cards with its targeted repair feedback.
+    The classes keep their static names because call records and test
+    clients identify the wire by name.
     """
     ids = list(dict.fromkeys(risk_ids))
-    if not guided or not ids:
+    if not ids:
         return _Stage1aRiskProviderDraft
+    # Each docstring is a model-facing schema description; create_model drops it.
     loss = create_model(
         "_ProviderLoss",
         __base__=_ProviderLoss,
+        __doc__=_ProviderLoss.__doc__,
         source_risk_cards=(
             list[str],
-            Field(default_factory=list, json_schema_extra=string_items_enum(ids)),
+            Field(
+                default_factory=list,
+                json_schema_extra=string_items_enum(
+                    ids, max_items=MAX_SOURCE_RISK_CARDS
+                ),
+            ),
         ),
     )
     draft = create_model(
         "_Stage1aRiskProviderDraft",
         __base__=_Stage1aRiskProviderDraft,
+        __doc__=_Stage1aRiskProviderDraft.__doc__,
         risk_card_losses=(list[loss], Field(min_length=0, max_length=16)),
         use_case_losses=(list[loss], Field(min_length=0, max_length=16)),
     )
+    if not guided:
+        return draft
     return with_keyed_rows(
         draft, array_field="risk_dispositions", key_field="risk_ref", keys=ids
     )
@@ -399,6 +414,10 @@ class _RevisionConstraintEdit(BaseModel):
 
     constraint_id: str = Field(min_length=1)
     rule: str = Field(min_length=1)
+    # No item bound: the endpoint matches a pattern against the whole string,
+    # so a pattern such as \S shrinks each condition to one character, and
+    # minLength: 1 would stop only the empty string.  The revision's
+    # blank-condition drop is the only guard.
     applies_when: list[str] = Field(min_length=0, max_length=4)
     # Omitted (``None``) keeps the constraint's existing class.
     behavior_class: BehaviorClass | None = None

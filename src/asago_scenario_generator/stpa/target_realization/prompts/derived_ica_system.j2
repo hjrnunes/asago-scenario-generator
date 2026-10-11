@@ -31,5 +31,6 @@ prohibit meaningful omission findings when the supplied context explicitly
 explains why absence of the named operation is harmful.
 
 Do not reconsider baseline findings, create slots, change IDs, or add execution
-details. ICA IDs must be the exact slot_id followed by a 1-based suffix such as
-`:1`. Return only the structured response requested by the response schema.
+details. Write each finding's `slot_id` exactly as one supplied `slot_id`; code
+assigns each ICA ID. Return only the structured response requested by the
+response schema.

@@ -149,6 +149,11 @@ field that combines `pattern` with `minLength` or `maxLength` (HTTP 400,
 "features not supported by xgrammar"). The request schema therefore drops a
 `minLength: 1` that the field's pattern already implies
 (`request_schema.portable_request_schema`).
+The Gemma decoder also matches `pattern` against the whole string, not a
+substring: probe p-schema2 sent `pattern: "\\S"` on the revision
+`applies_when` items and every condition came back as one character. Use
+`pattern` only for a field whose whole value fits it, such as an ID, and bound
+no free-text item with it.
 These limits describe the servers as measured on 2026-09-30 and 2026-10-01.
 Probe again before you enable thinking after a server upgrade.
 

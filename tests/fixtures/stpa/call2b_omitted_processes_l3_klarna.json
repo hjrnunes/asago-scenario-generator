@@ -1,0 +1,128 @@
+{
+  "source": "b8-glm batch L3 klarna-r2 (rerun, decision 340), provider-calls.jsonl, reply content only; trimmed to RESP-1 and RESP-2 and their Call 2b records",
+  "call_2a_reply": {
+    "responsibilities": [
+      {
+        "resp_id": "RESP-1",
+        "description": "Answer customer questions about Klarna policies, fees, payments, and eligibility by retrieving approved policy snippets and composing replies grounded only in published policy documents and the approved information whitelist.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-1-1",
+            "description": "Ground policy answers only in approved policy snippets from retrieve_policy; never answer from the model's own knowledge or unpublished sources."
+          },
+          {
+            "rc_id": "RC-1-2",
+            "description": "Do not provide details that are not on the approved information whitelist."
+          },
+          {
+            "rc_id": "RC-1-3",
+            "description": "When a customer asks about fees, payments, or eligibility and retrieve_policy returns no matching approved policy snippet, do not answer from own knowledge and escalate to a human agent instead."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-4",
+          "SC-11",
+          "SC-12"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-1-1",
+            "description": "Whether the customer's policy question topic is covered by an approved policy snippet",
+            "values": [
+              "approved snippet matches",
+              "no approved snippet matches",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "policy:TARGET-READ-001",
+              "policy:TARGET-READ-002",
+              "policy:TARGET-READ-003",
+              "policy:TARGET-READ-004"
+            ]
+          },
+          {
+            "pm_id": "PM-1-2",
+            "description": "The customer's question topic category (fees, payments, eligibility, refunds, or other)",
+            "values": [
+              "fees",
+              "payments",
+              "eligibility",
+              "refunds",
+              "other"
+            ],
+            "evidence_refs": []
+          },
+          {
+            "pm_id": "PM-1-3",
+            "description": "Whether the content of a drafted reply is supported by an approved source",
+            "values": [
+              "supported by approved policy snippet or order record",
+              "not covered by any approved source",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "policy:TARGET-READ-001"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-2",
+        "description": "Look up and describe the authenticated customer's account details, orders, and payment status, stating only details present on the retrieved records.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-2-1",
+            "description": "When describing a customer's order in a reply or tool arguments, state only the merchant, item, price, and purchase-date values present on the record returned by lookup_order, and never state any detail the retrieved record does not support."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-3"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-2-1",
+            "description": "Which customer is authenticated in the current session",
+            "values": [
+              "CUST001",
+              "CUST002",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "session:authenticated_customer_id"
+            ]
+          },
+          {
+            "pm_id": "PM-2-2",
+            "description": "The retrieved order record's owner, item, merchant, price, and status",
+            "values": [],
+            "evidence_refs": [
+              "state:orders.customer_id",
+              "state:orders.item",
+              "state:orders.merchant",
+              "state:orders.original_price",
+              "state:orders.status"
+            ]
+          },
+          {
+            "pm_id": "PM-2-3",
+            "description": "Whether the record requested by the customer belongs to the authenticated customer",
+            "values": [
+              "record owned by authenticated customer",
+              "record owned by another customer",
+              "ownership unknown"
+            ],
+            "evidence_refs": [
+              "state:orders.customer_id",
+              "session:authenticated_customer_id"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "call_2b_reply_texts": [
+    "{\"control_actions\": [{\"ca_id\": \"CA-1-1\", \"description\": \"Retrieve approved policy snippets matching the customer's policy question via retrieve_policy\", \"effect_kind\": \"tool_call\", \"target\": {\"id\": \"CP-4\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-1-2\", \"description\": \"Return a grounded policy answer to the customer composed only from approved policy snippets on the approved information whitelist\", \"effect_kind\": \"model_output\", \"target\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-2-1\", \"description\": \"Look up one order for the authenticated customer via lookup_order\", \"effect_kind\": \"tool_call\", \"operation\": \"lookup_order\", \"process_model_refs\": [\"PM-2-3\"], \"target\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-2-2\", \"description\": \"Retrieve the authenticated customer's account details via get_account_details\", \"effect_kind\": \"tool_call\", \"operation\": \"get_account_details\", \"process_model_refs\": [\"PM-2-1\"], \"target\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-2-3\", \"description\": \"Return a reply describing the customer's account, order, and payment status stating only details present on the retrieved records\", \"effect_kind\": \"model_output\", \"target\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}], \"feedback\": [{\"description\": \"Approved policy snippet match or no-match result from retrieve_policy for the customer's question\", \"fb_id\": \"FB-1-1\", \"source\": {\"id\": \"CP-4\", \"type\": \"controlled_process\"}, \"source_kind\": \"retrieved_content\", \"updates\": \"PM-1-1\"}, {\"description\": \"Customer's current message stating the topic being asked about\", \"fb_id\": \"FB-1-2\", \"source\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"source_kind\": \"user_message\", \"updates\": \"PM-1-2\"}, {\"description\": \"Retrieved approved policy snippets against which drafted reply statements are checked for support\", \"fb_id\": \"FB-1-3\", \"source\": {\"id\": \"CP-4\", \"type\": \"controlled_process\"}, \"source_kind\": \"retrieved_content\", \"updates\": \"PM-1-3\"}, {\"description\": \"Runtime-set authenticated customer id for the session\", \"fb_id\": \"FB-2-1\", \"source\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"source_kind\": \"session_context\", \"updates\": \"PM-2-1\"}, {\"description\": \"Order record contents (owner, item, merchant, price, status) returned by lookup_order\", \"fb_id\": \"FB-2-2\", \"source\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"source_kind\": \"operation_result\", \"updates\": \"PM-2-2\"}, {\"description\": \"Recorded customer_id on the retrieved order compared against the session identity\", \"fb_id\": \"FB-2-3\", \"source\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"source_kind\": \"operation_result\", \"updates\": \"PM-2-3\"}]}",
+    "{\"control_actions\": [{\"ca_id\": \"CA-1-1\", \"description\": \"Retrieve approved policy snippets matching the customer's policy question via retrieve_policy\", \"effect_kind\": \"tool_call\", \"operation\": \"retrieve_policy\", \"process_model_refs\": [\"PM-1-1\", \"PM-1-2\"], \"target\": {\"id\": \"CP-4\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-1-2\", \"description\": \"Return a grounded policy answer to the customer composed only from approved policy snippets on the approved information whitelist\", \"effect_kind\": \"model_output\", \"operation\": null, \"process_model_refs\": [\"PM-1-1\", \"PM-1-3\"], \"target\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-2-1\", \"description\": \"Look up one order for the authenticated customer via lookup_order\", \"effect_kind\": \"tool_call\", \"operation\": \"lookup_order\", \"process_model_refs\": [\"PM-2-3\"], \"target\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-2-2\", \"description\": \"Retrieve the authenticated customer's account details via get_account_details\", \"effect_kind\": \"tool_call\", \"operation\": \"get_account_details\", \"process_model_refs\": [\"PM-2-1\"], \"target\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-2-3\", \"description\": \"Return a reply describing the customer's account, order, and payment status stating only details present on the retrieved records\", \"effect_kind\": \"model_output\", \"operation\": null, \"process_model_refs\": [\"PM-2-2\", \"PM-2-3\"], \"target\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}], \"feedback\": [{\"description\": \"Approved policy snippet match or no-match result from retrieve_policy for the customer's question\", \"fb_id\": \"FB-1-1\", \"source\": {\"id\": \"CP-4\", \"type\": \"controlled_process\"}, \"source_kind\": \"retrieved_content\", \"updates\": \"PM-1-1\"}, {\"description\": \"Customer's current message stating the topic being asked about\", \"fb_id\": \"FB-1-2\", \"source\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"source_kind\": \"user_message\", \"updates\": \"PM-1-2\"}, {\"description\": \"Retrieved approved policy snippets against which drafted reply statements are checked for support\", \"fb_id\": \"FB-1-3\", \"source\": {\"id\": \"CP-4\", \"type\": \"controlled_process\"}, \"source_kind\": \"retrieved_content\", \"updates\": \"PM-1-3\"}, {\"description\": \"Runtime-set authenticated customer id for the session\", \"fb_id\": \"FB-2-1\", \"source\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"source_kind\": \"session_context\", \"updates\": \"PM-2-1\"}, {\"description\": \"Order record contents (owner, item, merchant, price, status) returned by lookup_order\", \"fb_id\": \"FB-2-2\", \"source\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"source_kind\": \"operation_result\", \"updates\": \"PM-2-2\"}, {\"description\": \"Recorded customer_id on the retrieved order compared against the session identity\", \"fb_id\": \"FB-2-3\", \"source\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"source_kind\": \"operation_result\", \"updates\": \"PM-2-3\"}]}",
+    "{\"control_actions\": [{\"ca_id\": \"CA-1-1\", \"description\": \"Retrieve approved policy snippets matching the customer's policy question via retrieve_policy\", \"effect_kind\": \"tool_call\", \"operation\": \"retrieve_policy\", \"process_model_refs\": [\"PM-1-1\", \"PM-1-2\"], \"target\": {\"id\": \"CP-4\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-1-2\", \"description\": \"Return a grounded policy answer to the customer composed only from approved policy snippets on the approved information whitelist\", \"effect_kind\": \"model_output\", \"operation\": null, \"process_model_refs\": [\"PM-1-1\", \"PM-1-3\"], \"target\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-2-1\", \"description\": \"Look up one order for the authenticated customer via lookup_order\", \"effect_kind\": \"tool_call\", \"operation\": \"lookup_order\", \"process_model_refs\": [\"PM-2-3\"], \"target\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-2-2\", \"description\": \"Retrieve the authenticated customer's account details via get_account_details\", \"effect_kind\": \"tool_call\", \"operation\": \"get_account_details\", \"process_model_refs\": [\"PM-2-1\"], \"target\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}, {\"ca_id\": \"CA-2-3\", \"description\": \"Return a reply describing the customer's account, order, and payment status stating only details present on the retrieved records\", \"effect_kind\": \"model_output\", \"operation\": null, \"process_model_refs\": [\"PM-2-2\", \"PM-2-3\"], \"target\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"temporality\": \"discrete\"}], \"feedback\": [{\"description\": \"Approved policy snippet match or no-match result from retrieve_policy for the customer's question\", \"fb_id\": \"FB-1-1\", \"source\": {\"id\": \"CP-4\", \"type\": \"controlled_process\"}, \"source_kind\": \"retrieved_content\", \"updates\": \"PM-1-1\"}, {\"description\": \"Customer's current message stating the topic being asked about\", \"fb_id\": \"FB-1-2\", \"source\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"source_kind\": \"user_message\", \"updates\": \"PM-1-2\"}, {\"description\": \"Retrieved approved policy snippets against which drafted reply statements are checked for support\", \"fb_id\": \"FB-1-3\", \"source\": {\"id\": \"CP-4\", \"type\": \"controlled_process\"}, \"source_kind\": \"retrieved_content\", \"updates\": \"PM-1-3\"}, {\"description\": \"Runtime-set authenticated customer id for the session\", \"fb_id\": \"FB-2-1\", \"source\": {\"id\": \"CP-1\", \"type\": \"controlled_process\"}, \"source_kind\": \"session_context\", \"updates\": \"PM-2-1\"}, {\"description\": \"Order record contents (owner, item, merchant, price, status) returned by lookup_order\", \"fb_id\": \"FB-2-2\", \"source\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"source_kind\": \"operation_result\", \"updates\": \"PM-2-2\"}, {\"description\": \"Recorded customer_id on the retrieved order compared against the session identity\", \"fb_id\": \"FB-2-3\", \"source\": {\"id\": \"CP-2\", \"type\": \"controlled_process\"}, \"source_kind\": \"operation_result\", \"updates\": \"PM-2-3\"}]}"
+  ]
+}

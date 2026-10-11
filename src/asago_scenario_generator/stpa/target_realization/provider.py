@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from pydantic import Field
+from pydantic import BaseModel, Field
 
 from asago_scenario_generator.models.canonical import ClosedCanonicalModel
 from asago_scenario_generator.models.target_realization import (
@@ -25,6 +25,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationVerification,
     target_operation_action_description,
 )
+from asago_scenario_generator.request_schema import string_enum
 from asago_scenario_generator.stpa.infra.llm import LLMClient, LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     ExactFeedbackError,
@@ -111,10 +112,14 @@ class TargetRealizationVerificationDecision(ClosedCanonicalModel):
 
 
 class TargetDerivedICADraft(ClosedCanonicalModel):
-    """One target-derived ICA before its independent verification."""
+    """One target-derived ICA before its independent verification.
+
+    Code binds ``ica_id`` once the slot is resolved.  The request schema
+    leaves the field out, and a value a reply still writes is replaced.
+    """
 
     slot_id: str = Field(min_length=1)
-    ica_id: str = Field(min_length=1)
+    ica_id: str = ""
     ica_text: str = Field(min_length=1)
     deviation: str | None = Field(default=None, min_length=1)
     hazardous_context: str = Field(min_length=1)
@@ -516,30 +521,34 @@ class TargetDerivedICALlmFinder:
             "derived_ica_user.j2",
             request_yaml=_yaml(_derived_ica_prompt_view(request)),
         )
+        slot_ids = [item.slot_id for item in request.target_derived_ica_slots]
+        draft_type = _derived_ica_draft_type(slot_ids)
         result, raw, error = self._call_draft(
-            system_prompt, user_prompt, step=TARGET_DERIVED_ICA_STEP
+            system_prompt, user_prompt, draft_type, step=TARGET_DERIVED_ICA_STEP
         )
         if error is not None or result is None:
             raise ValueError(f"target-derived ICA provider failed: {error}")
         repeats = _repeated_draft_references(result)
         if repeats:
             result = self._correct_repeated_references(
-                system_prompt, user_prompt, raw, repeats
+                system_prompt, user_prompt, draft_type, raw, repeats
             )
-        resolved, diagnostics = _resolve_draft_slots(
-            result,
-            {item.slot_id for item in request.target_derived_ica_slots},
-        )
+        resolved, diagnostics = _resolve_draft_slots(result, set(slot_ids))
         return _bind_draft_identities(resolved), diagnostics
 
     def _call_draft(
-        self, system_prompt: str, user_prompt: str, *, step: str
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        draft_type: type[TargetDerivedICADraftResponse],
+        *,
+        step: str,
     ) -> tuple[TargetDerivedICADraftResponse | None, LLMResult | None, Any]:
         outcome = call_with_policy(
             llm_client=self._client,
             system_prompt=system_prompt,
             user_prompt=user_prompt,
-            response_format=TargetDerivedICADraftResponse,
+            response_format=draft_type,
             run_dir=self._run_dir,
             stage="target_realization",
             step=step,
@@ -553,6 +562,7 @@ class TargetDerivedICALlmFinder:
         self,
         system_prompt: str,
         user_prompt: str,
+        draft_type: type[TargetDerivedICADraftResponse],
         prior: LLMResult | None,
         repeats: list[str],
     ) -> TargetDerivedICADraftResponse:
@@ -574,7 +584,7 @@ class TargetDerivedICALlmFinder:
             include_prior_response=True,
         )
         corrected, _raw, error = self._call_draft(
-            system_prompt, prompt, step=TARGET_DERIVED_ICA_CORRECTION_STEP
+            system_prompt, prompt, draft_type, step=TARGET_DERIVED_ICA_CORRECTION_STEP
         )
         if error is not None or corrected is None:
             raise ValueError(f"target-derived ICA correction failed: {error}")
@@ -1308,25 +1318,59 @@ def _systemic_baseline_prompt_view(baseline: Any) -> dict[str, Any]:
     }
 
 
+def _derived_ica_draft_type(
+    slot_ids: Sequence[str],
+) -> type[TargetDerivedICADraftResponse]:
+    """Return the draft request type for one request's slots.
+
+    Its schema lists the request's slot IDs as the only ``slot_id`` values
+    and leaves out ``ica_id``, which code binds.  It keeps the static draft's
+    name and validation, so a reply from a server that does not enforce the
+    schema still reaches the slot mapping and drop in
+    :func:`_resolve_draft_slots`.
+    """
+    choices = list(dict.fromkeys(slot_ids))
+
+    def model_json_schema(cls: type[BaseModel], *args: Any, **kwargs: Any):
+        schema = super(draft_type, cls).model_json_schema(*args, **kwargs)
+        finding = schema["$defs"][TargetDerivedICADraft.__name__]
+        del finding["properties"]["ica_id"]
+        string_enum(choices)(finding["properties"]["slot_id"])
+        return schema
+
+    draft_type = type(
+        TargetDerivedICADraftResponse.__name__,
+        (TargetDerivedICADraftResponse,),
+        {
+            "__module__": TargetDerivedICADraftResponse.__module__,
+            "__qualname__": TargetDerivedICADraftResponse.__qualname__,
+            # The docstring is the schema's model-facing description.
+            "__doc__": TargetDerivedICADraftResponse.__doc__,
+            "model_json_schema": classmethod(model_json_schema),
+        },
+    )
+    return draft_type
+
+
 def _resolve_draft_slots(
     response: TargetDerivedICADraftResponse,
     slot_ids: set[str],
 ) -> tuple[TargetDerivedICADraftResponse, tuple[str, ...]]:
     """Map each finding's ``slot_id`` onto a request slot, or drop the finding.
 
-    The prompt asks for ICA IDs written as the slot ID plus a ``:<digits>``
-    suffix, and a provider sometimes copies that form into ``slot_id``.  Only
-    an exact request slot followed by one such suffix maps back; any other
-    unknown slot drops its finding.  Both outcomes return a diagnostic.
+    A provider has copied the ICA ID form, the slot ID plus a ``:<digits>``
+    suffix, into ``slot_id``.  Only an exact request slot followed by one
+    such suffix maps back; any other unknown slot drops its finding.  Both
+    outcomes return a diagnostic, which names the finding by its position.
     """
     findings: list[TargetDerivedICADraft] = []
     diagnostics: list[str] = []
-    for item in response.findings:
+    for index, item in enumerate(response.findings):
         slot_id = _request_slot_for(item.slot_id, slot_ids)
         if slot_id is None:
             diagnostics.append(
-                f"target-derived ICA finding {item.ica_id} is unresolved: unknown "
-                f"slot {item.slot_id}; dropped before verification"
+                f"target-derived ICA finding findings[{index}] is unresolved: "
+                f"unknown slot {item.slot_id}; dropped before verification"
             )
             continue
         if slot_id != item.slot_id:
@@ -1365,8 +1409,9 @@ def _bind_draft_identities(
 def _repeated_draft_references(response: TargetDerivedICADraftResponse) -> list[str]:
     """Name each finding that lists a hazard or constraint more than once.
 
-    Findings are named by position and the provider's own ``ica_id`` because
-    the correction request shows the response as the provider wrote it.
+    Findings are named by position and slot because the correction request
+    shows the response as the provider wrote it, and code binds ICA IDs only
+    after the correction.
     """
     problems = []
     for index, item in enumerate(response.findings):
@@ -1375,8 +1420,8 @@ def _repeated_draft_references(response: TargetDerivedICADraftResponse) -> list[
             repeated = sorted({ref for ref in references if references.count(ref) > 1})
             if repeated:
                 problems.append(
-                    f"findings[{index}] (ica_id '{item.ica_id}', slot "
-                    f"{item.slot_id}): {field_name} repeats " + ", ".join(repeated)
+                    f"findings[{index}] (slot {item.slot_id}): {field_name} "
+                    "repeats " + ", ".join(repeated)
                 )
     return problems
 

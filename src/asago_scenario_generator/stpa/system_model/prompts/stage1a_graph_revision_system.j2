@@ -14,7 +14,10 @@ assembled graph against every failed check.
 - `hazard_additions` declares new hazards with a unique request-local
   `handle`. Their persisted `H-*` IDs are compiler-owned.
 - `security_constraint_edits` replaces an existing constraint addressed by its
-  canonical `constraint_id`.
+  canonical `constraint_id`. A constraint edit replaces the whole constraint,
+  so its `applies_when` repeats, word for word, each existing condition the
+  edit keeps; an empty list removes every condition, and no condition may be
+  blank.
 - An edit target must be an ID present in the supplied graph. An invented ID
   (for example `SC-11` when the graph holds `SC-1`..`SC-10`) is rejected as
   an unknown target and the whole revision fails. If an addition already
@@ -64,7 +67,8 @@ Return exactly one JSON object with these four keys and no others:
     {"handle": "new_hazard", "description": "...", "related_losses": ["L-1"]}
   ],
   "security_constraint_edits": [
-    {"constraint_id": "SC-1", "rule": "...", "applies_when": [],
+    {"constraint_id": "SC-1", "rule": "...",
+     "applies_when": ["<each existing condition the edit keeps>"],
      "behavior_class": null,
      "obligations": [], "related_hazards": ["H-1"]}
   ],
