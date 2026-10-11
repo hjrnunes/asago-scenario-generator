@@ -443,7 +443,8 @@ adversarial scenario. The user adversary kinds (`external_attacker`,
 `indirect`.
 
 Deduplication runs after the shape step. Scenarios that share a deduplication
-key form a group. The canonical of a group is the smallest scenario ID among
+key form a group, and a group never mixes scenario kinds: a functional scenario
+and an adversarial scenario with the same key each keep their own canonical. The canonical of a group is the smallest scenario ID among
 the members whose shape has `source: stage5_validated`; a group with no such
 member keeps its smallest ID as canonical. The shape does not join the key, and
 `testability.yaml` and every handoff's `deduplication` block read this result.

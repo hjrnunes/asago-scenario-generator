@@ -143,6 +143,55 @@ def test_functional_tests_have_no_shape_and_keep_the_smallest_id() -> None:
     }
 
 
+def test_a_functional_and_an_adversarial_scenario_keep_one_canonical_each() -> None:
+    fallback = default_attack_shape(ShapeDowngradeReason.SHAPE_CALL_FAILED)
+
+    records = deduplicate_scenario_specs(
+        [_functional("SCN-001"), _shaped("SCN-002", fallback)]
+    )
+
+    assert _roles(records) == {
+        "SCN-001": ("canonical", None),
+        "SCN-002": ("canonical", None),
+    }
+    assert records["SCN-001"].key == records["SCN-002"].key
+
+
+def test_a_validated_adversarial_shape_does_not_discard_the_functional_scenario() -> (
+    None
+):
+    records = deduplicate_scenario_specs(
+        [_functional("SCN-001"), _shaped("SCN-002", _validated_shape())]
+    )
+
+    assert _roles(records) == {
+        "SCN-001": ("canonical", None),
+        "SCN-002": ("canonical", None),
+    }
+
+
+def test_duplicates_are_marked_within_each_kind_of_a_mixed_set() -> None:
+    fallback = default_attack_shape(ShapeDowngradeReason.SHAPE_CALL_FAILED)
+
+    records = deduplicate_scenario_specs(
+        [
+            _functional("SCN-001"),
+            _shaped("SCN-002", fallback),
+            _functional("SCN-003"),
+            _shaped("SCN-004", _validated_shape()),
+            _shaped("SCN-005", fallback),
+        ]
+    )
+
+    assert _roles(records) == {
+        "SCN-001": ("canonical", None),
+        "SCN-002": ("duplicate", "SCN-004"),
+        "SCN-003": ("duplicate", "SCN-001"),
+        "SCN-004": ("canonical", None),
+        "SCN-005": ("duplicate", "SCN-004"),
+    }
+
+
 def test_the_shape_does_not_join_the_key() -> None:
     records = deduplicate_scenario_specs(
         [

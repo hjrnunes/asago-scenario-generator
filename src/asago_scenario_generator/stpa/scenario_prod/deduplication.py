@@ -113,7 +113,8 @@ def deduplicate_scenario_specs(
 ) -> dict[str, ScenarioDeduplication]:
     """Mark executable duplicates while leaving analytical scenarios alone.
 
-    Call this after the shape step. A group's canonical is the smallest
+    Call this after the shape step. A group holds scenarios of one kind
+    (functional or adversarial) that share a key. A group's canonical is the smallest
     scenario ID among its members whose shape the model proposed and code
     validated; a group with no such member takes its smallest ID. The rule
     never reads provider or worker completion order.
@@ -121,15 +122,19 @@ def deduplicate_scenario_specs(
 
     keys = {spec.scenario_id: scenario_deduplication_key(spec) for spec in specs}
     validated = {spec.scenario_id for spec in specs if _has_validated_shape(spec)}
+    # The scenario kind partitions the groups without joining the persisted
+    # key: a functional scenario and an adversarial one with the same key need
+    # different stimuli, so neither may stand in for the other.
     groups: dict[
-        tuple[str, str, str | None, str, str | None, tuple[str, ...]], list[str]
+        tuple[bool, tuple[str, str, str | None, str, str | None, tuple[str, ...]]],
+        list[str],
     ] = defaultdict(list)
     records: dict[str, ScenarioDeduplication] = {}
     for spec in specs:
         key = keys[spec.scenario_id]
         record = _ungrouped_record(spec, key)
         if record is None:
-            groups[key.as_tuple()].append(spec.scenario_id)
+            groups[(spec.is_functional_test, key.as_tuple())].append(spec.scenario_id)
         else:
             records[spec.scenario_id] = record
 

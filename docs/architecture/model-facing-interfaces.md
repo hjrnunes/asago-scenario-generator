@@ -836,7 +836,8 @@ kind.
 Deduplication runs after this step. A duplicate group keeps as canonical the
 smallest scenario ID among the members with a validated shape, so a shape the
 model proposed is not dropped in favor of a smaller ID that holds only the
-default.
+default. Groups never mix scenario kinds, so a functional scenario is never
+the duplicate of an adversarial one.
 
 Neither summary validation nor successful publication establishes test soundness or executed
 safety.
