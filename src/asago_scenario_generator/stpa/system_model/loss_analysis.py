@@ -2731,12 +2731,8 @@ def _validate_complete_chain(
         f"{context} must return a complete loss -> hazard -> security constraint chain: "
         + "; ".join(problems)
     )
-    # Only losses left with no hazard and no constraint at all earn the one
-    # correction (decision 347); every other incomplete chain stops the unit.
-    error_type = (
-        _MissingHazardChainError
-        if loss_ids and not hazard_ids and not draft.security_constraints
-        else _DraftSemanticValidationError
+    error_type = _chain_error_type(
+        loss_ids, hazard_ids, has_constraints=bool(draft.security_constraints)
     )
     raise error_type(
         message,
@@ -2747,6 +2743,19 @@ def _validate_complete_chain(
             "the supplied risks and return linked IDs for every record."
         ),
     )
+
+
+def _chain_error_type(
+    loss_ids: set[str], hazard_ids: set[str], *, has_constraints: bool
+) -> type[_DraftSemanticValidationError]:
+    """Pick the error of an incomplete chain.
+
+    Only losses left with no hazard and no constraint at all earn the one
+    correction (decision 347); every other incomplete chain stops the unit.
+    """
+    if loss_ids and not hazard_ids and not has_constraints:
+        return _MissingHazardChainError
+    return _DraftSemanticValidationError
 
 
 def _validate_loss_presence(
