@@ -220,6 +220,11 @@ class _ControlElementProviderSet(ControlElementSet):
     """
 
     control_actions: list[_ResponsibilityAction | _ProcessAction]
+    # No default on either collection, so the request schema lists both in
+    # ``required``.  A docstring note here would reach the model as the
+    # schema description.
+    feedback_channels: list[FeedbackChannel] = Field(validation_alias="feedback")
+    controlled_processes: list[ControlledProcess]
 
 
 class CoordinationAnalysis(BaseModel):
@@ -989,6 +994,12 @@ class _Call2bResponse(_Call2bWire):
 
     ``feedback`` is the provider-facing collection name; the historical
     ``feedback_channels`` spelling is accepted on input, never both.
+
+    The request schema requires ``controlled_processes``, but a server that
+    does not enforce it can still return a reply without the key.  Such a
+    reply declares no controlled process: its ``CP-*`` references then fail
+    as unknown, which earns the reference correction that names the
+    omission, rather than a missing-field error that no correction explains.
     """
 
     control_actions: list[_Call2bAction] = Field(min_length=1)
@@ -996,7 +1007,7 @@ class _Call2bResponse(_Call2bWire):
         min_length=1,
         validation_alias=AliasChoices("feedback", "feedback_channels"),
     )
-    controlled_processes: list[_Call2bProcess]
+    controlled_processes: list[_Call2bProcess] = Field(default_factory=list)
 
     @model_validator(mode="before")
     @classmethod
@@ -2275,8 +2286,8 @@ _CONTROLLED_PROCESS_ID = re.compile(r"CP-\d+")
 def _undeclared_controlled_processes(failure: UnknownReferenceError) -> list[str]:
     """Return the ``CP-*`` targets and sources of a reply that declared no process.
 
-    A provider may leave the optional ``controlled_processes`` collection out,
-    and the client then fills it with ``[]``.  Once the reply declares any
+    A provider may leave ``controlled_processes`` out or send it empty, and
+    the stage wire reads either as no declared process.  Once the reply declares any
     controlled process, an unknown ``CP-*`` is an ordinary wrong reference and
     this returns nothing.
     """
