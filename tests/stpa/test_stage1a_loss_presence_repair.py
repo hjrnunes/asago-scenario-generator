@@ -436,6 +436,10 @@ def _damage_container(body: dict) -> None:
     body["hazards"] = "none"
 
 
+def _damage_disposition_container(body: dict) -> None:
+    body["risk_dispositions"] = "none"
+
+
 def _damage_loss_row(body: dict) -> None:
     body["risk_card_losses"][0]["provenance"] = "invented"
 
@@ -461,6 +465,11 @@ def _cite_an_undeclared_hazard(body: dict) -> None:
     ("damage", "finding"),
     [
         pytest.param(_damage_container, "hazards", id="container-damage"),
+        pytest.param(
+            _damage_disposition_container,
+            "ValidationError",
+            id="disposition-container-damage",
+        ),
         pytest.param(_damage_loss_row, "provenance", id="malformed-loss-row"),
         pytest.param(
             _break_a_supplied_disposition,
@@ -560,3 +569,27 @@ def test_salvage_of_a_reply_with_no_failing_row_is_unsupported():
 
     assert isinstance(outcome, UnsupportedRepair)
     assert "no record-level row" in outcome.reason
+
+
+def test_salvage_of_a_reply_with_a_malformed_hazard_is_unsupported():
+    reply = LLMResult(
+        content={
+            "risk_card_losses": [],
+            "use_case_losses": [],
+            "hazards": [{"hazard_id": "H-1"}],
+            "security_constraints": [],
+            "risk_dispositions": [],
+        },
+        duration_ms=0,
+    )
+
+    outcome = salvage_corrected_reply(
+        reply,
+        constraint_wire_model=_ProviderSecurityConstraint,
+        response_format=_Stage1aRiskRepairDraft,
+        gap_wire=False,
+    )
+
+    assert isinstance(outcome, UnsupportedRepair)
+    assert "outside the approved repair scope" in outcome.reason
+    assert "H-1" in outcome.reason
