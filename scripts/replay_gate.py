@@ -252,12 +252,17 @@ def _rewrite_arguments(
 
 
 def _copied_input(item: str, inputs: Path, path_map: dict[str, str]) -> str:
-    """Copy an absolute input file into *inputs*; return the argument to use."""
+    """Copy an absolute input file into *inputs*; return the argument to use.
+
+    Each copy keeps its file name inside a numbered folder, because outputs may
+    record an input's base name (``policy-coverage.json`` does).
+    """
     prefix, raw = ("@", item[1:]) if item.startswith("@") else ("", item)
     source = Path(raw)
     if not (source.is_absolute() and source.is_file()):
         return item
-    copy = inputs / f"{len(path_map):02d}-{source.name}"
+    copy = inputs / f"{len(path_map):02d}" / source.name
+    copy.parent.mkdir()
     shutil.copy2(source, copy)
     path_map[str(copy)] = str(source)
     return prefix + str(copy)
