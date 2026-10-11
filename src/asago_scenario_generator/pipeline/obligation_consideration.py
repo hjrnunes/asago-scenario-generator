@@ -566,11 +566,11 @@ def _account_governance(
     """Credit a governance-only row whose every routed slot has a finding.
 
     The row keeps its governance-only disposition and carries the finding's
-    identities; an ID that several findings cite appears once, in first-seen
-    order. A targeted route whose slots produced no finding is recorded
-    on the row with its own stop reason. A row with no route, a declined
-    route, or a mix of findings and other slot outcomes stays bare, as it was
-    before governance rows were routed.
+    identities; an ID that several findings cite appears once. A targeted
+    route whose slots produced no finding is recorded on the row with its own
+    stop reason. A row with no route, a declined route, or a mix of findings
+    and other slot outcomes stays bare, as it was before governance rows were
+    routed.
     """
     evidence = _phase1_evidence(obligation)
     findings = tuple(item for item in pairs if item.disposition == "finding")
