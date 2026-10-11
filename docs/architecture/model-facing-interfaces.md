@@ -598,21 +598,37 @@ that is empty in the first response.
 A risk-derivation response that declares no grounded loss while risks are
 supplied gets one correction as the call's targeted repair. The correction
 repeats the original system and user prompts and appends the validator's
-feedback, the prior response, and the exact finding. Code validates the
-corrected response with every stage validator and applies no further
-deterministic repair to it; a second failure stops the run. The correction
-is a `repair` entry with identity `risk_card_losses` in
+feedback, the prior response, and the exact finding. Code gives the
+corrected response the record-level recovery of a first response (see
+"Recovery of a corrected response" below), then validates it with every
+stage validator; a second failure stops the run. The correction is a
+`repair` entry with identity `risk_card_losses` in
 `loss-analysis-repair.yaml`.
 
 A gap response gets the same kind of correction when the call needs a
 complete chain, losses are declared or supplied, and neither the response
 nor the prior view has a hazard or a security constraint. The feedback is
-the complete-chain validator's own text. The corrected response passes every
-gap validator, including the complete-chain check; a second failure stops
-the run. The correction is a `missing_hazard_chain_correction` entry in
-`loss-analysis-repair.yaml`. Other semantic failures still stop the run
-without a repair call, including a hazard that cites no loss, a constraint
-that cites no hazard, and hazards without constraints.
+the complete-chain validator's own text. The corrected response gets the same
+record-level recovery and passes every gap validator, including the
+complete-chain check; a second failure stops the run. The correction is a
+`missing_hazard_chain_correction` entry in `loss-analysis-repair.yaml`.
+Other semantic failures still stop the run without a repair call, including
+a hazard that cites no loss, a constraint that cites no hazard, and hazards
+without constraints.
+
+Recovery of a corrected response. The reply of the loss-presence and
+missing-hazard-chain corrections gets the record-level recovery its first
+response gets, and sends no further request. Code repairs unambiguous
+`rule_span` values, then, when the provider schema still rejects a record,
+removes the obligation entries and disposition rows that fail their own
+schema. A container or top-level defect, a malformed loss, hazard, or
+constraint, and a duplicate obligation ID stop the unit. The salvaged draft
+re-validates against the provider schema and passes the authority merge,
+citation normalization, and every stage validator; a draft that fails any of
+them stops the unit with the correction's typed error. Each repair is a
+`rule_span_repaired` entry and each removed row a `salvage` entry in
+`loss-analysis-repair.yaml`, with `attempt: repair` and a `raw_step` that
+names the repair step; code writes them only for an accepted draft.
 
 The risk-derivation request asks for `risk_dispositions` rows in the
 supplied risk order. When a response reaches its completion-token cap inside
@@ -644,7 +660,7 @@ cleanup transformation of the call record. The reply of the loss-presence
 correction (above) gets the same drop before its provider schema check, with
 no extra request; its entry has `attempt: repair` and a `raw_step` that names
 the repair step, and the correction's call record carries the cleanup
-transformation. Every other defect in the corrected reply still stops the
+transformation. A defect the recovery above does not settle still stops the
 unit.
 
 The Stage 1a density revision prompt follows each `hazard H-n has no
