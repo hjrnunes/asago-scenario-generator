@@ -84,6 +84,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DispositionRepairPlan,
     HazardlessConstraintDrop,
     LossPresenceRepairPlan,
+    MissingHazardChainRepairPlan,
     ObligationRepairPlan,
     ReferenceRepairPlan,
     RepairPlan,
@@ -97,6 +98,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     record_cleanup_rows,
     record_hazardless_constraint_drop,
     record_loss_presence_repair,
+    record_missing_hazard_chain_repair,
     record_truncation_recovery,
     recover_truncated_risk_dispositions,
     recover_truncated_risk_losses,
@@ -924,6 +926,10 @@ class _LossPresenceError(_DraftSemanticValidationError):
     """The loss-producing call declared no grounded loss."""
 
 
+class _MissingHazardChainError(_DraftSemanticValidationError):
+    """A complete-chain reply left its losses with no hazard and no constraint."""
+
+
 @dataclass(frozen=True)
 class LossAnalysisDiagnostic:
     """A deterministic, human-readable loss-analysis semantic diagnostic."""
@@ -1401,8 +1407,8 @@ class _Stage1aCall:
     first_parse_failed: bool = False
     first_wire_error: ValidationError | None = None
     # Typed label of the first failure, used to route the targeted repair:
-    # wire_schema, risk_accounting, loss_presence, draft_references, or
-    # draft_semantics.
+    # wire_schema, risk_accounting, loss_presence, missing_hazard_chain,
+    # draft_references, or draft_semantics.
     failure_class: str | None = None
     span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
     # The first response with its span repairs applied.  The repair path adapts
@@ -1574,6 +1580,9 @@ class _Stage1aCall:
             raise
         except _LossPresenceError:
             self.failure_class = "loss_presence"
+            raise
+        except _MissingHazardChainError:
+            self.failure_class = "missing_hazard_chain"
             raise
         except _DraftSemanticValidationError:
             self.failure_class = "draft_semantics"
@@ -1839,7 +1848,9 @@ def _repair_stage1a_failure(
     # entries, malformed obligation entries within an otherwise preserved
     # constraint, and unknown reference IDs (decision 243, 2026-10-08).
     # A risk-derivation reply that declares no grounded loss gets one
-    # correction carrying the validator's feedback (decision 327).
+    # correction carrying the validator's feedback (decision 327), and so
+    # does a gap reply that leaves its losses with no hazard and no
+    # constraint (decision 347).
     # Every other failure class gets an explicit typed outcome and no
     # additional model call.
     if call.validation_feedback is None:
@@ -1872,8 +1883,8 @@ def _repair_stage1a_failure(
         ),
         validation_feedback=call.validation_feedback,
     )
-    if isinstance(outcome, LossPresenceRepairPlan):
-        return _repair_loss_presence(call, outcome, first_result, error_msg)
+    if isinstance(outcome, (LossPresenceRepairPlan, MissingHazardChainRepairPlan)):
+        return _send_feedback_correction(call, outcome, first_result, error_msg)
     if isinstance(outcome, UnsupportedRepair):
         raise _unsupported_stop(
             call, outcome.scope, outcome.reason, error_msg, default_class="unknown"
@@ -1885,13 +1896,27 @@ def _repair_stage1a_failure(
     return _run_stage1a_repairs(call, outcome, repair_response_format)
 
 
-def _repair_loss_presence(
+_FEEDBACK_CORRECTIONS: dict[type, tuple[Callable[..., None], str]] = {
+    LossPresenceRepairPlan: (record_loss_presence_repair, "targeted repair"),
+    MissingHazardChainRepairPlan: (
+        record_missing_hazard_chain_repair,
+        "missing-hazard-chain correction",
+    ),
+}
+
+
+def _send_feedback_correction(
     call: _Stage1aCall,
-    plan: LossPresenceRepairPlan,
+    plan: LossPresenceRepairPlan | MissingHazardChainRepairPlan,
     first_result: LLMResult | None,
     error_msg: str,
 ) -> LossAnalysisDraft:
-    """Send the one correction of a reply that declared no grounded loss."""
+    """Send the one correction that carries the validator's feedback.
+
+    It serves a risk-derivation reply that declared no grounded loss and a gap
+    reply that left its losses with no hazard and no constraint.
+    """
+    record, label = _FEEDBACK_CORRECTIONS[type(plan)]
     # Validating the corrected reply reclassifies the call's failure.
     failure_class = call.failure_class
     outcome = call_with_policy(
@@ -1913,12 +1938,12 @@ def _repair_loss_presence(
         policy=CorrectionPolicy(),
         temperature=call.temperature,
         max_completion_tokens=STAGE1A_MAX_COMPLETION_TOKENS,
-        response_parser=lambda result, cleanup: _parse_loss_presence_reply(
+        response_parser=lambda result, cleanup: _parse_corrected_reply(
             call, result, cleanup
         ),
     )
     repaired = outcome.error is None and outcome.value is not None
-    record_loss_presence_repair(
+    record(
         call.repair_record,
         step=call.step,
         finding=call.validation_finding,
@@ -1931,23 +1956,27 @@ def _repair_loss_presence(
         stage=STAGE,
         step=call.step,
         message=(
-            f"targeted repair failed: {outcome.error}; {failure_class} "
+            f"{label} failed: {outcome.error}; {failure_class} "
             f"failure class; first attempt failed: {error_msg}. "
             f"{call.validation_feedback}"
         ),
     )
 
 
-def _parse_loss_presence_reply(
+def _parse_corrected_reply(
     call: _Stage1aCall, result: LLMResult, cleanup: list[dict[str, Any]]
 ) -> LossAnalysisDraft:
-    """Parse and fully validate the loss-presence correction's reply.
+    """Parse and fully validate the reply of a feedback correction.
 
-    The reply loses the constraints it writes beside no declared hazard, as the
-    first reply does, before the provider schema check; every other defect
-    stops the unit.
+    When the first reply gets the hazard-less constraint drop (a call with
+    risk accounting), the corrected reply gets it too, before the provider
+    schema check; every other defect stops the unit.
     """
-    dropped = _drop_hazardless_body(result, call.allowed_hazard_ids, cleanup)
+    dropped = (
+        _drop_hazardless_body(result, call.allowed_hazard_ids, cleanup)
+        if call.require_risk_accounting
+        else None
+    )
     if dropped is not None:
         result, drop = dropped
         record_hazardless_constraint_drop(
@@ -2702,7 +2731,14 @@ def _validate_complete_chain(
         f"{context} must return a complete loss -> hazard -> security constraint chain: "
         + "; ".join(problems)
     )
-    raise _DraftSemanticValidationError(
+    # Only losses left with no hazard and no constraint at all earn the one
+    # correction (decision 347); every other incomplete chain stops the unit.
+    error_type = (
+        _MissingHazardChainError
+        if loss_ids and not hazard_ids and not draft.security_constraints
+        else _DraftSemanticValidationError
+    )
+    raise error_type(
         message,
         feedback=(
             f"Validation feedback: {message}. An empty response is not valid "

@@ -43,6 +43,13 @@ correction specification revision 2, 2026-09-11):
 - The corrected original wire object re-validates against the original
   provider schema before the domain merge (boundary 1), and the merged
   draft re-validates against the complete original inputs (boundary 2).
+- Two semantic failures get one feedback correction instead of a scoped
+  repair wire: the original prompts, the validator's feedback, and the prior
+  reply.  They are a risk-derivation reply that declares no grounded loss
+  (``loss_presence``, decision 327) and a gap reply that leaves the declared
+  or supplied losses with no hazard and no constraint
+  (``missing_hazard_chain``, decision 347).  Every other semantic failure,
+  including any other incomplete chain, stops with no repair call.
 - Exactly one repair call follows one failed first attempt, and the repair is
   never retried.  Every transformation (salvage drop, deterministic
   cleanup, repair, unsupported outcome) is recorded in one run-level,
@@ -1620,6 +1627,50 @@ def record_loss_presence_repair(
     )
 
 
+MISSING_HAZARD_CHAIN_REPAIR_KIND = "missing_hazard_chain_correction"
+MISSING_HAZARD_CHAIN_REPAIR_IDENTITY = "hazards+security_constraints"
+
+
+@dataclass(frozen=True)
+class MissingHazardChainRepairPlan:
+    """One correction of a gap reply that left declared losses with no chain.
+
+    The gap call needed a complete chain, losses were declared or supplied,
+    and neither the reply nor the prior view had a hazard or a constraint.
+    The request repeats the original prompts with the validator's exact
+    ``feedback`` and the prior reply (decision 347).  It is the call's one
+    targeted repair.
+    """
+
+    feedback: str
+
+
+def record_missing_hazard_chain_repair(
+    repair_record: RepairRecord | None,
+    *,
+    step: str,
+    finding: str,
+    outcome: str,
+    reason: str = "",
+) -> None:
+    """Record the missing-hazard-chain correction with its one terminal outcome."""
+    if repair_record is None:
+        return
+    proposed = {"entries": ["hazards", "security_constraints"]}
+    repaired = outcome == "repaired"
+    repair_record.add(
+        stage=step,
+        attempt="repair",
+        kind=MISSING_HAZARD_CHAIN_REPAIR_KIND,
+        identity=MISSING_HAZARD_CHAIN_REPAIR_IDENTITY,
+        reason=finding if repaired else f"{finding}; {reason}",
+        proposed=proposed,
+        applied=dict(proposed) if repaired else {},
+        outcome=outcome,
+        raw_step=step + _REPAIR_STEP_SUFFIX,
+    )
+
+
 @dataclass(frozen=True)
 class DroppedObligation:
     """An obligation the repair dropped because its span stays outside the rule."""
@@ -1733,7 +1784,11 @@ class ReferenceRepairPlan:
 
 RepairPlan = Union[DispositionRepairPlan, ObligationRepairPlan, ReferenceRepairPlan]
 RepairOutcome = Union[
-    RepairPlan, LossPresenceRepairPlan, UnsupportedRepair, DeterministicCleanup
+    RepairPlan,
+    LossPresenceRepairPlan,
+    MissingHazardChainRepairPlan,
+    UnsupportedRepair,
+    DeterministicCleanup,
 ]
 
 
@@ -1935,10 +1990,12 @@ def build_repair_plan(
     ``failure_class`` is the caller's typed label for the first failure:
     ``wire_schema`` (the response never parsed), ``risk_accounting`` (the
     deterministic accounting validator), ``loss_presence`` (no grounded
-    loss declared), ``draft_references``, or ``draft_semantics``.  Only the
-    first three can produce a repair, and the wire path is further scoped
-    by the initial error classification and row-level salvage.  The
-    loss-presence correction carries ``validation_feedback``.
+    loss declared), ``missing_hazard_chain`` (a gap reply that leaves the
+    declared or supplied losses with no hazard and no constraint),
+    ``draft_references``, or ``draft_semantics``.  Only the first four can
+    produce a repair, and the wire path is further scoped by the initial
+    error classification and row-level salvage.  The loss-presence and
+    missing-hazard-chain corrections carry ``validation_feedback``.
     """
     if first_result is None:
         return UnsupportedRepair("no provider response is available to repair")
@@ -1957,6 +2014,8 @@ def build_repair_plan(
         )
     if failure_class == "loss_presence":
         return LossPresenceRepairPlan(feedback=validation_feedback or "")
+    if failure_class == "missing_hazard_chain":
+        return MissingHazardChainRepairPlan(feedback=validation_feedback or "")
     if failure_class == "risk_accounting":
         return _accounting_repair_plan(
             first_result,
