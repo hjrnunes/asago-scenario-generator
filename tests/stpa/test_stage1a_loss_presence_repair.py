@@ -16,9 +16,10 @@ import json
 import pytest
 
 from asago_scenario_generator.models.risk_card import RiskCard
-from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+from asago_scenario_generator.stpa.models.loss_analysis import Hazard, LossAnalysisDraft
+from asago_scenario_generator.stpa.system_model import loss_analysis
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _ProviderSecurityConstraint,
     _Stage1aRiskRepairDraft,
@@ -593,3 +594,34 @@ def test_salvage_of_a_reply_with_a_malformed_hazard_is_unsupported():
     assert isinstance(outcome, UnsupportedRepair)
     assert "outside the approved repair scope" in outcome.reason
     assert "H-1" in outcome.reason
+
+
+def test_salvaged_draft_that_leaves_the_provider_schema_stops_the_unit(
+    tmp_path, monkeypatch
+):
+    # Salvage builds its draft from valid rows, so only a faulty salvage can
+    # exceed the schema; the check is the boundary that catches it.
+    oversized = LossAnalysisDraft.model_construct(
+        risk_card_losses=[],
+        use_case_losses=[],
+        hazards=[
+            Hazard(hazard_id=f"H-{index}", description="d", related_losses=["L-1"])
+            for index in range(1, 18)
+        ],
+        security_constraints=[],
+        risk_dispositions=[],
+    )
+    real = loss_analysis.salvage_corrected_reply
+
+    def faulty(reply, **kwargs):
+        outcome = real(reply, **kwargs)
+        return (oversized, outcome[1])
+
+    monkeypatch.setattr(loss_analysis, "salvage_corrected_reply", faulty)
+    client = _client(_EMPTY_REPLY, _chain_reply(), _gap_reply())
+
+    with pytest.raises(StageError) as exc_info:
+        _derive(client, tmp_path)
+
+    assert "no longer satisfies the original provider schema" in str(exc_info.value)
+    assert len(client.calls) == 2
