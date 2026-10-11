@@ -2,6 +2,10 @@ template: stage5_context_system.j2
 cases:
   target-blind:
     required:
+      - 'use `kind: none` rather than inventing an adversary and set `gain` to `null`'
+      - >-
+        The response schema lists the fields of every variant; set each field
+        that the selected variant does not use to `null`.
       - adversary
       - attacker_bdi
       - causal_factors
@@ -42,6 +46,7 @@ cases:
     once:
       - A negative or empty feedback result can be valid
     forbidden:
+      - omit `gain`
       - Security mechanism
       - compatible_mechanisms
       - injected_instruction

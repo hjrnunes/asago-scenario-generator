@@ -76,8 +76,9 @@ rationale, evidence, and semantic assessment. A `proposed_not_applicable` route
 has no missing concepts or fabricated structural placement. An `upstream_gap`
 route requires non-empty `missing_concepts`, rationale, and evidence. An
 `unresolved` route requires rationale and evidence without structural placement.
-Common empty collections belong only to the inward compiled route; do not add
-them to a branch where they are not meaningful. Category expansion is a way to
+The response schema lists the fields of every disposition; set each field that
+the selected disposition does not use to `null`, as the unresolved example
+shows, never to an empty list. Category expansion is a way to
 discover questions, never mechanism evidence.
 
 Complete targeted example (the handle is only a schema-valid fixture; copy the

@@ -18,6 +18,7 @@ import pytest
 from pydantic import BaseModel, ValidationError
 
 from asago_scenario_generator.request_schema import (
+    flat_example_for,
     restore_flat_reply_for,
 )
 from asago_scenario_generator.schema_unions import restore_flat_reply
@@ -29,6 +30,9 @@ from asago_scenario_generator.stpa.infra.llm import (
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     _parse_structured_result,
     parse_llm_result,
+)
+from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    _routing_wire_examples,
 )
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     _routing_provider_payload_type,
@@ -529,3 +533,22 @@ def test_the_strict_local_parse_restores_the_reply() -> None:
     model, text, expected = _flat_text("stage5-adversary-none")
     assert _locally_parse_response_content(text, model) == expected
     assert _locally_parse_response_content(json.loads(text), model) == expected
+
+
+def test_flat_example_fills_every_absent_required_key_with_null() -> None:
+    route = _ROUTING.model_validate(_ROUTING_REPLIES["unresolved"])
+    example = flat_example_for(_ROUTING, route.model_dump(mode="json"))
+    schema = _json_schema_response_format(_ROUTING)["json_schema"]["schema"]
+    jsonschema.Draft202012Validator(schema).validate(example)
+    (flat_route,) = example["routes"]
+    assert flat_route["slot_ids"] is None
+    assert flat_route["missing_concepts"] is None
+    assert _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, example)) == route
+
+
+def test_the_routing_prompt_examples_are_flat_request_replies() -> None:
+    schema = _json_schema_response_format(_ROUTING)["json_schema"]["schema"]
+    for text in _routing_wire_examples():
+        example = json.loads(text)
+        jsonschema.Draft202012Validator(schema).validate(example)
+        _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, example))

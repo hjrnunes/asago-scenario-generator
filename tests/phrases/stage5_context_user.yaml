@@ -106,6 +106,9 @@ cases:
       - required status is not held
   realistic-request:
     required:
+      - >-
+        Each shape below lists only the fields its variant uses; set every other
+        field the schema lists for that object to `null`.
       - "## Observed target operations"
       - &assistant-message-capture >-
         The `assistant_message` capture holds the full text of every assistant

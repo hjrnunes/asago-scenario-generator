@@ -19,6 +19,7 @@ from pydantic import BaseModel
 
 from asago_scenario_generator.schema_unions import (
     find_unions,
+    flat_reply,
     flatten_unions,
     restore_flat_reply_for,
     restores_flat_replies,
@@ -179,6 +180,15 @@ def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
     return flatten_unions(portable(schema))
 
 
+def flat_example_for(model: type[BaseModel], value: Any) -> Any:
+    """Write ``value`` as a reply to ``model``'s request schema.
+
+    Use this for prompt examples, so an example lists every property the
+    flattened schema requires.
+    """
+    return flat_reply(value, portable_request_schema(model.model_json_schema()))
+
+
 def _pattern_rejects_empty(pattern: str) -> bool:
     try:
         return re.search(pattern, "") is None
@@ -187,6 +197,7 @@ def _pattern_rejects_empty(pattern: str) -> bool:
 
 
 __all__ = [
+    "flat_example_for",
     "find_unions",
     "portable_request_schema",
     "restore_flat_reply_for",

@@ -8,6 +8,7 @@ import re
 import pytest
 from pydantic import ValidationError
 
+from asago_scenario_generator.request_schema import restore_flat_reply_for
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationSemanticAssessment,
@@ -150,7 +151,7 @@ def test_routing_wire_schema_requires_disposition_specific_fields() -> None:
 
 
 def test_structural_routing_prompt_examples_validate_as_wire_payloads() -> None:
-    """Prompt examples are complete JSON objects accepted by the exact wire model."""
+    """Prompt examples are flat replies the wire model accepts after the restore."""
     brief = _brief()
     system_prompt, _ = build_structural_routing_prompts(
         briefs=(brief,),
@@ -161,7 +162,12 @@ def test_structural_routing_prompt_examples_validate_as_wire_payloads() -> None:
     blocks = re.findall(r"```json\s*(\{.*?\})\s*```", system_prompt, re.DOTALL)
     assert blocks, "routing system prompt must contain complete JSON examples"
     payload_type = _routing_provider_payload_type(1)
-    payloads = [payload_type.model_validate(json.loads(block)) for block in blocks]
+    payloads = [
+        payload_type.model_validate(
+            restore_flat_reply_for(payload_type, json.loads(block))
+        )
+        for block in blocks
+    ]
     dispositions = {payload.routes[0].disposition for payload in payloads}
     assert {"targeted", "unresolved"} <= dispositions
 

@@ -437,8 +437,37 @@ def _mapped_branch(value: Any, discriminator: Mapping[str, Any]) -> Any:
     return {"$ref": target} if target else None
 
 
+def flat_reply(value: Any, flat_schema: Mapping[str, Any]) -> Any:
+    """Return ``value`` written as a reply to the flattened ``flat_schema``.
+
+    Each required property ``value`` lacks is added as null, which is how a
+    flat union says "this branch does not use the property".
+    """
+    return _fill(value, flat_schema, flat_schema.get("$defs", {}))
+
+
+def _fill(value: Any, node: Any, defs: Mapping[str, Any]) -> Any:
+    node = _deref(node, defs)
+    if value is None or not isinstance(node, Mapping):
+        return value
+    if isinstance(node.get("anyOf"), list):
+        rest = [o for o in node["anyOf"] if o != _NULL]
+        return _fill(value, rest[0], defs) if len(rest) == 1 else value
+    if isinstance(value, list):
+        return [_fill(item, node.get("items"), defs) for item in value]
+    if not isinstance(value, dict):
+        return value
+    properties = node.get("properties", {})
+    filled = {
+        key: _fill(item, properties.get(key), defs) for key, item in value.items()
+    }
+    missing = [k for k in node.get("required", ()) if k not in filled]
+    return {**filled, **dict.fromkeys(missing)}
+
+
 __all__ = [
     "UnionMergeError",
+    "flat_reply",
     "find_unions",
     "flatten_unions",
     "restore_flat_reply",

@@ -48,8 +48,10 @@ _GOLDEN_SLOT_USER = "51f6875173344befda32d0a1fdbe879b7487e072808b8dafd2d89f9679c
 _GOLDEN_SLOT_USER_EMPTY = (
     "6a174dc144a7788395f2e38a60457edd891714dbd795c06411dad9616a4f9667"
 )
+# The routing system digest was recaptured when the routing prompt began
+# describing the flat route form (null for fields a disposition does not use).
 _GOLDEN_ROUTING_SYSTEM = (
-    "14ada42af0294a27de7af646f0043a1a0963bba6653f8faec6d8c59096abd7a1"
+    "7015d14a38f664179e201c6959fef0952e87b7695aff1b0a9b7e558dc8fb898a"
 )
 _GOLDEN_ROUTING_USER = (
     "cc9264807d70b8e674d7cb3de8def297c2f76104ae0c5c8558b34a1ca63f15a7"
