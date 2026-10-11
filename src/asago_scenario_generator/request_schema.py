@@ -17,6 +17,8 @@ from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
+from asago_scenario_generator.schema_unions import find_unions, flatten_unions
+
 SchemaExtra = Callable[[dict[str, Any]], None]
 _ModelT = TypeVar("_ModelT", bound=type[BaseModel])
 
@@ -144,7 +146,11 @@ def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
 
     vLLM's xgrammar backend rejects a string schema that combines ``pattern``
     with ``minLength`` or ``maxLength``.  When the pattern cannot match an
-    empty string, ``minLength: 1`` adds nothing and is dropped here.  The
+    empty string, ``minLength: 1`` adds nothing and is dropped here.
+
+    Every object union then becomes one flat object
+    (:func:`~asago_scenario_generator.schema_unions.flatten_unions`), because
+    GLM's endpoint decodes a ``oneOf`` by always taking its last branch.  The
     response is still validated against the original Pydantic model.
     """
 
@@ -163,7 +169,7 @@ def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
             return [portable(value) for value in node]
         return copy.deepcopy(node)
 
-    return portable(schema)
+    return flatten_unions(portable(schema))
 
 
 def _pattern_rejects_empty(pattern: str) -> bool:
@@ -174,6 +180,7 @@ def _pattern_rejects_empty(pattern: str) -> bool:
 
 
 __all__ = [
+    "find_unions",
     "portable_request_schema",
     "string_enum",
     "string_items_enum",
