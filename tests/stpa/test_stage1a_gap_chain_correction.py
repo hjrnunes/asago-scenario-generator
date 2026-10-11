@@ -391,3 +391,123 @@ def test_only_the_absent_hazard_chain_raises_the_dedicated_error(
         )
 
     assert isinstance(exc_info.value, _MissingHazardChainError) is missing_chain
+
+
+# Source: derived from the klarna-r1 refund constraint above.  The recorded
+# gap replies carry no obligations, so the obligation rows here are written
+# for the fixture: one quotes the rule, one paraphrases it.
+_REFUND_RULE = _constraint()["rule"]
+_QUOTED_SPAN = "must issue a refund only for an order the verified customer owns"
+_PARAPHRASED_SPAN = "refund only when the policy covers the order"
+
+
+def _obligation(obligation_id: str, rule_span: str) -> dict:
+    return {
+        "obligation_id": obligation_id,
+        "kind": "forbidden",
+        "behavior": "refund an order the customer does not own",
+        "rule_span": rule_span,
+        "violated_via": "tool_call",
+    }
+
+
+def _gap_reply_with_spans(*spans: str) -> str:
+    constraint = _constraint()
+    constraint["obligations"] = [
+        _obligation(f"O{index}", span) for index, span in enumerate(spans, start=1)
+    ]
+    return _gap_reply(hazards=[_hazard(["L-1"])], constraints=[constraint])
+
+
+def test_paraphrased_span_in_the_chain_correction_is_removed_and_recorded(tmp_path):
+    client = _client(
+        _RISK_REPLY,
+        _CHAINLESS_GAP_REPLY,
+        _gap_reply_with_spans(_QUOTED_SPAN, _PARAPHRASED_SPAN),
+    )
+
+    result = _derive(client, tmp_path)
+
+    assert len(client.calls) == 3
+    (constraint,) = result.security_constraints
+    assert [obligation.obligation_id for obligation in constraint.obligations] == ["O1"]
+    (removed,) = [
+        entry
+        for entry in _repair_record(tmp_path)["records"]
+        if entry["kind"] == "salvage"
+    ]
+    assert removed["stage"] == "gap_analysis"
+    assert removed["attempt"] == "repair"
+    assert removed["identity"] == f"{constraint.constraint_id}/O2"
+    assert removed["outcome"] == "removed"
+    assert removed["raw_step"] == "gap_analysis_repair"
+    (chain,) = _chain_entries(tmp_path)
+    assert chain["outcome"] == "repaired"
+
+
+def test_whitespace_span_in_the_chain_correction_is_repaired(tmp_path):
+    spaced = _QUOTED_SPAN.replace("a refund", "a  refund")
+    client = _client(_RISK_REPLY, _CHAINLESS_GAP_REPLY, _gap_reply_with_spans(spaced))
+
+    result = _derive(client, tmp_path)
+
+    (constraint,) = result.security_constraints
+    assert [obligation.rule_span for obligation in constraint.obligations] == [
+        _QUOTED_SPAN
+    ]
+    records = _repair_record(tmp_path)["records"]
+    assert not [entry for entry in records if entry["kind"] == "salvage"]
+    (repaired,) = [entry for entry in records if entry["kind"] == "rule_span_repaired"]
+    assert repaired["attempt"] == "repair"
+    assert repaired["identity"] == f"{constraint.constraint_id}/O1"
+    assert repaired["raw_step"] == "gap_analysis_repair"
+
+
+def test_damaged_chain_correction_beside_a_bad_span_stops_after_three_requests(
+    tmp_path,
+):
+    body = json.loads(_gap_reply_with_spans(_PARAPHRASED_SPAN))
+    body["hazards"][0]["related_losses"] = []
+    client = _client(_RISK_REPLY, _CHAINLESS_GAP_REPLY, json.dumps(body))
+
+    with pytest.raises(StageError) as exc_info:
+        _derive(client, tmp_path)
+
+    message = str(exc_info.value)
+    assert "missing-hazard-chain correction failed" in message
+    assert "related_losses" in message
+    assert len(client.calls) == 3
+    assert not [
+        entry
+        for entry in _repair_record(tmp_path)["records"]
+        if entry["kind"] == "salvage"
+    ]
+    (record,) = _chain_entries(tmp_path)
+    assert record["outcome"] == "failed"
+
+
+# Digests taken at producer e21ba7cf, before the correction salvaged a reply.
+_CLEAN_REQUEST_DIGESTS = ["ee6f683a5c3a", "df41179e9d22", "efd41690cddc"]
+_CLEAN_DRAFT_DIGEST = "d02c95d73dc4a4db"
+_CLEAN_RECORD_DIGEST = "7143840bc55237c1"
+
+
+def test_clean_chain_correction_sends_the_same_requests_and_gives_the_same_draft(
+    tmp_path,
+):
+    client = _client(
+        _RISK_REPLY, _CHAINLESS_GAP_REPLY, _gap_reply_with_spans(_QUOTED_SPAN)
+    )
+
+    result = _derive(client, tmp_path)
+
+    assert [_digest(call.user_prompt)[:12] for call in client.calls] == (
+        _CLEAN_REQUEST_DIGESTS
+    )
+    draft = json.dumps(result.model_dump(mode="json"), sort_keys=True)
+    assert _digest(draft)[:16] == _CLEAN_DRAFT_DIGEST
+    records = _repair_record(tmp_path)["records"]
+    assert _digest(json.dumps(records, sort_keys=True))[:16] == _CLEAN_RECORD_DIGEST
+    assert [(entry["kind"], entry["outcome"]) for entry in records] == [
+        (MISSING_HAZARD_CHAIN_REPAIR_KIND, "repaired")
+    ]

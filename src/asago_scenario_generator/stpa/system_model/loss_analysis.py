@@ -89,6 +89,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     ReferenceRepairPlan,
     RepairPlan,
     RepairRecord,
+    SalvageReport,
     TruncatedDispositionRecovery,
     TruncatedLossRecovery,
     UnsupportedRepair,
@@ -96,6 +97,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     classify_wire_validation_errors,
     drop_hazardless_constraints,
     record_cleanup_rows,
+    record_corrected_reply_salvage,
     record_hazardless_constraint_drop,
     record_loss_presence_repair,
     record_missing_hazard_chain_repair,
@@ -104,6 +106,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     recover_truncated_risk_losses,
     revalidate_provider_object,
     run_targeted_repair,
+    salvage_corrected_reply,
     select_disposition_repairs,
     select_reference_repairs,
 )
@@ -1933,7 +1936,9 @@ def _send_feedback_correction(
     """Send the one correction that carries the validator's feedback.
 
     It serves a risk-derivation reply that declared no grounded loss and a gap
-    reply that left its losses with no hazard and no constraint.
+    reply that left its losses with no hazard and no constraint.  The
+    corrected reply gets the record-level recovery of a first reply and no
+    further request (see ``_parse_corrected_reply``).
     """
     record, label = _FEEDBACK_CORRECTIONS[type(plan)]
     # Validating the corrected reply reclassifies the call's failure.
@@ -1987,9 +1992,12 @@ def _parse_corrected_reply(
 ) -> LossAnalysisDraft:
     """Parse and fully validate the reply of a feedback correction.
 
-    When the first reply gets the hazard-less constraint drop (a call with
-    risk accounting), the corrected reply gets it too, before the provider
-    schema check; every other defect stops the unit.
+    The corrected reply gets the record-level recovery a first reply gets,
+    before the provider schema check: the hazard-less constraint drop (a call
+    with risk accounting), the rule-span repair, and the removal of the
+    obligation entries and disposition rows that fail their own wire models.
+    The removals send no further request; the salvaged draft then passes the
+    same validators as any response.  Every other defect stops the unit.
     """
     dropped = (
         _drop_hazardless_body(result, call.allowed_hazard_ids, cleanup)
@@ -2001,16 +2009,79 @@ def _parse_corrected_reply(
         record_hazardless_constraint_drop(
             call.repair_record, step=call.step, drop=drop, attempt="repair"
         )
-    draft = _materialize_provider_draft(
-        parse_llm_result(result, call.response_format),
-        prior=call.authoritative_draft,
-    )
+    span_repairs: list[RuleSpanRepairRecord] = []
+    result = _repair_provider_rule_spans(result, span_repairs)
+    report: SalvageReport | None = None
+    try:
+        provider_draft = parse_llm_result(result, call.response_format)
+    except ValidationError as exc:
+        draft, report = _salvage_corrected_reply(call, result, exc)
+    else:
+        draft = _materialize_provider_draft(
+            provider_draft, prior=call.authoritative_draft
+        )
+        if isinstance(provider_draft, _Stage1aGapProviderDraft):
+            _canonicalize_span_repairs(span_repairs, provider_draft, draft)
     merged = (
         call.merge_authority(draft) if call.authoritative_draft is not None else draft
     )
     call.add_warnings(normalize_disposition_citations(merged))
     call.run_validators(merged)
+    _record_corrected_reply_repairs(call, span_repairs, report)
     return merged
+
+
+def _salvage_corrected_reply(
+    call: _Stage1aCall, result: LLMResult, wire_error: ValidationError
+) -> tuple[LossAnalysisDraft, SalvageReport]:
+    """Remove the failing rows of a corrected reply the strict parse refused.
+
+    Container and top-level damage keeps ``wire_error``.  Any other failure
+    that removing rows cannot settle stops with its reason and no request.
+    """
+    if classify_wire_validation_errors(wire_error).unsupported_reason is not None:
+        raise wire_error
+    prepared = _prepare_current_provider_repair_input(
+        result, response_format=call.response_format, prior=call.authoritative_draft
+    )
+    if prepared is None:
+        raise wire_error
+    adapted, repair_format = prepared
+    salvaged = salvage_corrected_reply(
+        adapted,
+        constraint_wire_model=_ProviderSecurityConstraint,
+        response_format=repair_format,
+        gap_wire=not issubclass(call.response_format, _Stage1aRiskProviderDraft),
+    )
+    if isinstance(salvaged, UnsupportedRepair):
+        raise ValueError(
+            f"{salvaged.reason}; the corrected reply violated the response "
+            f"schema: {_wire_error_summary(wire_error)}"
+        ) from wire_error
+    draft, report = salvaged
+    revalidate_provider_object(draft, repair_format, step=call.step)
+    return draft, report
+
+
+def _record_corrected_reply_repairs(
+    call: _Stage1aCall,
+    span_repairs: list[RuleSpanRepairRecord],
+    report: SalvageReport | None,
+) -> None:
+    """Record the span repairs and removed rows of an accepted corrected reply."""
+    record_rule_span_repairs(
+        call.repair_record,
+        step=call.step,
+        attempt="repair",
+        repairs=span_repairs,
+        outcome="applied",
+        raw_step=call.step + "_repair",
+    )
+    call.add_warnings(rule_span_repair_warnings(call.step, span_repairs))
+    if report is not None:
+        record_corrected_reply_salvage(
+            report, step=call.step, repair_record=call.repair_record
+        )
 
 
 def _correct_references(

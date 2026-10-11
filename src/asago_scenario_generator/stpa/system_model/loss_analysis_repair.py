@@ -49,7 +49,12 @@ correction specification revision 2, 2026-09-11):
   (``loss_presence``, decision 327) and a gap reply that leaves the declared
   or supplied losses with no hazard and no constraint
   (``missing_hazard_chain``, decision 347).  Every other semantic failure,
-  including any other incomplete chain, stops with no repair call.
+  including any other incomplete chain, stops with no repair call.  The
+  corrected reply gets the first reply's record-level recovery (decision
+  353): rule-span repair, then removal of the obligation entries and
+  disposition rows that fail their own wire models (``salvage_corrected_reply``).
+  It never gets a model repair: an out-of-scope failure, a scope error, or a
+  draft that fails the full validators stops the unit.
 - Exactly one repair call follows one failed first attempt, and the repair is
   never retried.  Every transformation (salvage drop, deterministic
   cleanup, repair, unsupported outcome) is recorded in one run-level,
@@ -1927,13 +1932,15 @@ def _record_salvage_drops(
     step: str,
     repair_record: RepairRecord | None,
     repair_identities: Container[str] | None = None,
+    attempt: str = "first",
 ) -> None:
     """Record every salvage drop that feeds a repair as a record entry.
 
     When ``repair_identities`` is provided, only dropped disposition rows
     whose original identity joins the repair selection are recorded; rows
     routed to the deterministic cleanup record their own cleanup entry, so
-    no removed row is ever recorded twice.
+    no removed row is ever recorded twice.  ``attempt`` is ``repair`` for the
+    reply of a feedback correction, whose ``raw_step`` names the repair step.
     """
     if repair_record is None:
         return
@@ -1942,32 +1949,50 @@ def _record_salvage_drops(
             original_ref is None or original_ref not in repair_identities
         ):
             continue
-        repair_record.add(
-            stage=step,
-            attempt="first",
-            kind="salvage",
-            identity=label,
-            reason=reason,
-            proposed={"dropped_entries": [label]},
-            applied={"dropped_entries": [label]},
-            outcome="removed",
-            raw_step=step,
-        )
+        _record_removed_entry(repair_record, step, attempt, label, label, reason)
     for constraint_id, retained in report.obligation_salvage:
         for entry_raw, entry_errors in retained:
             entry_id = entry_raw.get("obligation_id")
-            identity = entry_id if isinstance(entry_id, str) else "unnamed entry"
-            repair_record.add(
-                stage=step,
-                attempt="first",
-                kind="salvage",
-                identity=f"{constraint_id}/{identity}",
-                reason="; ".join(entry_errors),
-                proposed={"dropped_entries": [identity]},
-                applied={"dropped_entries": [identity]},
-                outcome="removed",
-                raw_step=step,
+            entry = entry_id if isinstance(entry_id, str) else "unnamed entry"
+            _record_removed_entry(
+                repair_record,
+                step,
+                attempt,
+                f"{constraint_id}/{entry}",
+                entry,
+                "; ".join(entry_errors),
             )
+
+
+def _record_removed_entry(
+    repair_record: RepairRecord,
+    step: str,
+    attempt: str,
+    identity: str,
+    dropped: str,
+    reason: str,
+) -> None:
+    """Append one ``salvage`` entry for a row the salvage removed."""
+    repair_record.add(
+        stage=step,
+        attempt=attempt,
+        kind="salvage",
+        identity=identity,
+        reason=reason,
+        proposed={"dropped_entries": [dropped]},
+        applied={"dropped_entries": [dropped]},
+        outcome="removed",
+        raw_step=step if attempt == "first" else step + _REPAIR_STEP_SUFFIX,
+    )
+
+
+def record_corrected_reply_salvage(
+    report: SalvageReport, *, step: str, repair_record: RepairRecord | None
+) -> None:
+    """Record each row removed from a feedback correction's reply."""
+    _record_salvage_drops(
+        report, step=step, repair_record=repair_record, attempt="repair"
+    )
 
 
 def build_repair_plan(
@@ -2156,8 +2181,40 @@ def _salvage_first_response(
         )
 
 
-def _unsupported_salvage_report(report: SalvageReport) -> UnsupportedRepair | None:
-    """Fail closed when salvage found failures no single repair can fix."""
+def salvage_corrected_reply(
+    reply: LLMResult,
+    *,
+    constraint_wire_model: type[SecurityConstraint],
+    response_format: type[LossAnalysisDraft],
+    gap_wire: bool,
+) -> UnsupportedRepair | tuple[LossAnalysisDraft, SalvageReport]:
+    """Salvage the record-level wire failures of a feedback correction's reply.
+
+    The reply gets the salvage a first reply gets, but no repair call follows:
+    the obligation entries and disposition rows that fail their own wire
+    models are removed.  An out-of-scope failure, a scope error, or a reply
+    from which salvage removed nothing is unsupported.  The caller validates
+    the salvaged draft like any other response.
+    """
+    salvaged = _salvage_first_response(
+        reply,
+        constraint_wire_model=constraint_wire_model,
+        response_format=response_format,
+        gap_wire=gap_wire,
+    )
+    if isinstance(salvaged, UnsupportedRepair):
+        return salvaged
+    report = salvaged[1]
+    unsupported = _out_of_scope_salvage(report)
+    if unsupported is not None:
+        return unsupported
+    if not (report.obligation_salvage or report.dropped_dispositions):
+        return UnsupportedRepair("salvage found no record-level row to remove")
+    return salvaged
+
+
+def _out_of_scope_salvage(report: SalvageReport) -> UnsupportedRepair | None:
+    """Fail closed on a salvage drop or scope error no row removal can settle."""
     if report.out_of_scope_wire_failures:
         return UnsupportedRepair(
             "wire violation outside the approved repair scope: "
@@ -2169,6 +2226,14 @@ def _unsupported_salvage_report(report: SalvageReport) -> UnsupportedRepair | No
             + "; ".join(report.scope_errors),
             scope="obligation entries",
         )
+    return None
+
+
+def _unsupported_salvage_report(report: SalvageReport) -> UnsupportedRepair | None:
+    """Fail closed when salvage found failures no single repair can fix."""
+    out_of_scope = _out_of_scope_salvage(report)
+    if out_of_scope is not None:
+        return out_of_scope
     if report.obligation_constraint_ids and report.dropped_dispositions:
         return UnsupportedRepair(
             "the response mixes obligation-entry and risk-disposition "
