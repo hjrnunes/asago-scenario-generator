@@ -1944,38 +1944,46 @@ def _record_salvage_drops(
     """
     if repair_record is None:
         return
-    raw_step = step if attempt == "first" else step + _REPAIR_STEP_SUFFIX
     for label, reason, original_ref in report.dropped_dispositions:
         if repair_identities is not None and (
             original_ref is None or original_ref not in repair_identities
         ):
             continue
-        repair_record.add(
-            stage=step,
-            attempt=attempt,
-            kind="salvage",
-            identity=label,
-            reason=reason,
-            proposed={"dropped_entries": [label]},
-            applied={"dropped_entries": [label]},
-            outcome="removed",
-            raw_step=raw_step,
-        )
+        _record_removed_entry(repair_record, step, attempt, label, label, reason)
     for constraint_id, retained in report.obligation_salvage:
         for entry_raw, entry_errors in retained:
             entry_id = entry_raw.get("obligation_id")
-            identity = entry_id if isinstance(entry_id, str) else "unnamed entry"
-            repair_record.add(
-                stage=step,
-                attempt=attempt,
-                kind="salvage",
-                identity=f"{constraint_id}/{identity}",
-                reason="; ".join(entry_errors),
-                proposed={"dropped_entries": [identity]},
-                applied={"dropped_entries": [identity]},
-                outcome="removed",
-                raw_step=raw_step,
+            entry = entry_id if isinstance(entry_id, str) else "unnamed entry"
+            _record_removed_entry(
+                repair_record,
+                step,
+                attempt,
+                f"{constraint_id}/{entry}",
+                entry,
+                "; ".join(entry_errors),
             )
+
+
+def _record_removed_entry(
+    repair_record: RepairRecord,
+    step: str,
+    attempt: str,
+    identity: str,
+    dropped: str,
+    reason: str,
+) -> None:
+    """Append one ``salvage`` entry for a row the salvage removed."""
+    repair_record.add(
+        stage=step,
+        attempt=attempt,
+        kind="salvage",
+        identity=identity,
+        reason=reason,
+        proposed={"dropped_entries": [dropped]},
+        applied={"dropped_entries": [dropped]},
+        outcome="removed",
+        raw_step=step if attempt == "first" else step + _REPAIR_STEP_SUFFIX,
+    )
 
 
 def record_corrected_reply_salvage(
