@@ -401,16 +401,6 @@ class _RevisionHazardAddition(BaseModel):
         return self
 
 
-def _non_blank_conditions(schema: dict[str, Any]) -> None:
-    """Ask the request schema for a non-blank character in each condition.
-
-    The bound is schema-only: a blank condition a server still returns
-    parses, then reaches the revision's blank-condition drop.  ``pattern``
-    stands alone because xgrammar rejects it next to ``minLength``.
-    """
-    schema["items"] = {**schema.get("items", {}), "pattern": r"\S"}
-
-
 class _RevisionConstraintEdit(BaseModel):
     """Complete replacement for one existing security constraint.
 
@@ -424,9 +414,10 @@ class _RevisionConstraintEdit(BaseModel):
 
     constraint_id: str = Field(min_length=1)
     rule: str = Field(min_length=1)
-    applies_when: list[str] = Field(
-        min_length=0, max_length=4, json_schema_extra=_non_blank_conditions
-    )
+    # No item bound: the endpoint matches a pattern against the whole string,
+    # so any pattern or minLength here shrinks each condition to one character.
+    # The revision's blank-condition drop is the only guard.
+    applies_when: list[str] = Field(min_length=0, max_length=4)
     # Omitted (``None``) keeps the constraint's existing class.
     behavior_class: BehaviorClass | None = None
     related_hazards: list[str] = Field(min_length=1)
@@ -448,9 +439,7 @@ class _RevisionConstraintAddition(BaseModel):
 
     handle: str = Field(min_length=1)
     rule: str = Field(min_length=1)
-    applies_when: list[str] = Field(
-        min_length=0, max_length=4, json_schema_extra=_non_blank_conditions
-    )
+    applies_when: list[str] = Field(min_length=0, max_length=4)
     behavior_class: BehaviorClass | None = None
     related_hazards: list[str] = Field(min_length=1)
     obligations: list[_ProviderObligation] = Field(default_factory=list)
