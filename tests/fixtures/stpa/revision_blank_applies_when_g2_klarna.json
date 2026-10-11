@@ -1,0 +1,30 @@
+{
+  "source": "b8 Gemma batch G2 klarna-r2, Stage 1a graph revision attempt 2 (row 28): the SC-1 constraint edit, trimmed to that one record",
+  "security_constraint_edit": {
+    "constraint_id": "SC-1",
+    "rule": "The assistant must only provide policy information retrieved from approved policy snippets and must escalate regulated topics when no snippet matches.",
+    "applies_when": [
+      ""
+    ],
+    "behavior_class": "wrong_information",
+    "related_hazards": [
+      "H-2"
+    ],
+    "obligations": [
+      {
+        "obligation_id": "O1",
+        "kind": "required",
+        "behavior": "escalate regulated topics when no approved snippet matches",
+        "rule_span": "must escalate regulated topics when no snippet matches",
+        "realized_by": "unknown",
+        "violated_via": null,
+        "observation_role": null,
+        "source_outcome": null,
+        "completion": null,
+        "projection": null,
+        "residual": null,
+        "note": null
+      }
+    ]
+  }
+}

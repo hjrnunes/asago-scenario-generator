@@ -54,8 +54,14 @@ cases:
       - >-
         complete, compatible `obligations` list whose `rule_span` values meet
         the `rule_span` requirement below.
+      - >-
+        A constraint edit replaces the whole constraint, so its `applies_when`
+        repeats, word for word, each existing condition the edit keeps; an
+        empty list removes every condition, and no condition may be blank.
+      - '"applies_when": ["<each existing condition the edit keeps>"]'
     forbidden:
       - share no subject phrase
+      - '"applies_when": [], "behavior_class": null'
       - wrong subject wording
       - values quoting the new rule
       - already serves the constraint's own

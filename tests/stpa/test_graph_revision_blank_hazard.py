@@ -161,10 +161,10 @@ class TestBothRepliesBlank:
         assert [e["success"] for e in read_calls_jsonl(tmp_path)] == [False, False]
 
 
-# The first request of ``_call`` as the start commit sends it: the same digest
+# The first request of ``_call`` as the current revision prompt sends it: the same digest
 # pins the first request in test_graph_revision_undecodable_reply.py.
 _FIRST_REQUEST_DIGEST = (
-    "c622db4b18b3688cb2a5ef676ddb9a3a330dd427db7f2ca96050a28e8cfcf2a4"
+    "7f95b8e0f4dbb07d6273bbcfdf07ae4d362ed83674559f881a896ea2784c1e6b"
 )
 
 
