@@ -18,10 +18,20 @@ _SENSITIVE_KEY = re.compile(
     re.IGNORECASE,
 )
 _SENSITIVE_TEXT = re.compile(
-    r"(\b(?:secret|token|password|passwd|credential|authorization|"
+    r"(\b(?:secret|token|password|passwd|credential|"
     r"api[_-]?key|access[_-]?key|private[_-]?key|default|examples?|sample)"
     r"\b\s*[:=]\s*)"
     r"([^\s,;\]}]+)",
+    re.IGNORECASE,
+)
+# An authorization value is usually "<scheme> <credential>" (Bearer, Basic,
+# Digest, ...). The optional scheme word and the credential after it both
+# belong to the value, so neither survives. The scheme and credential stay on
+# one line.
+_AUTHORIZATION_TEXT = re.compile(
+    r"(\bauthorization\b\s*[:=]\s*)"
+    r"(?:[\"']?[A-Za-z][A-Za-z0-9_-]*[ \t]+)?"
+    r"[^\s,;\]}]+",
     re.IGNORECASE,
 )
 
@@ -172,6 +182,7 @@ def _redacted_json_value(value: Any) -> Any:
 
 def _sanitize_text(value: str) -> str:
     """Redact credential-like key/value fragments embedded in prose."""
+    value = _AUTHORIZATION_TEXT.sub(rf"\1{_REDACTED}", value)
     return _SENSITIVE_TEXT.sub(rf"\1{_REDACTED}", value)
 
 
