@@ -62,6 +62,10 @@ cases:
       - unless that score and threshold were supplied
     once:
       - Express each constraint as the safe relationship
+      - >-
+        A constraint may cite only a hazard declared in this same response,
+        and a response that declares no hazard declares no constraint, because
+        the gap-analysis call derives both.
     forbidden:
       - '["<risk-id>", "..."]'
       - patient chatbot
