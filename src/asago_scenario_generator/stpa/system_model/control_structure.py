@@ -2543,31 +2543,39 @@ def _call3_known_ids(
     links: Sequence[CoordinationLink],
 ) -> set[str]:
     """Return every exact ID Call 3 received, plus the links its reply adds."""
-    responsibilities = structure.responsibilities
     all_links = (*structure.coordination_links, *links)
     return {
-        *(resp.resp_id for resp in responsibilities),
         *(
-            item.rc_id
-            for resp in responsibilities
-            for item in resp.responsibility_constraints
+            identifier
+            for resp in structure.responsibilities
+            for identifier in _responsibility_ids(resp)
         ),
-        *(item.pm_id for resp in responsibilities for item in resp.process_model_parts),
-        *(item.ca_id for resp in responsibilities for item in resp.control_actions),
-        *(item.fb_id for resp in responsibilities for item in resp.feedback_channels),
         *(item.cp_id for item in structure.controlled_processes),
         *(link.link_id for link in all_links),
         *(link.coordination_mechanism.cm_id for link in all_links),
-        *(
-            loss.loss_id
-            for loss in (
-                *loss_analysis.risk_card_losses,
-                *loss_analysis.use_case_losses,
-            )
-        ),
+        *_loss_analysis_ids(loss_analysis),
+    }
+
+
+def _responsibility_ids(resp: Responsibility) -> tuple[str, ...]:
+    """Return a responsibility's ID and the IDs of the records it owns."""
+    return (
+        resp.resp_id,
+        *(item.rc_id for item in resp.responsibility_constraints),
+        *(item.pm_id for item in resp.process_model_parts),
+        *(item.ca_id for item in resp.control_actions),
+        *(item.fb_id for item in resp.feedback_channels),
+    )
+
+
+def _loss_analysis_ids(loss_analysis: LossAnalysis) -> tuple[str, ...]:
+    """Return the loss, hazard, and constraint IDs Call 3 received."""
+    losses = (*loss_analysis.risk_card_losses, *loss_analysis.use_case_losses)
+    return (
+        *(loss.loss_id for loss in losses),
         *(hazard.hazard_id for hazard in loss_analysis.hazards),
         *(item.constraint_id for item in loss_analysis.security_constraints),
-    }
+    )
 
 
 def _probable_id(token: str, known: set[str]) -> str | None:

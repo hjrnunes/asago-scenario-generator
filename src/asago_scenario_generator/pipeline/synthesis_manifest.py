@@ -580,6 +580,19 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
     return counts
 
 
+def _zero_request_status(
+    prompt_contract_failures: int,
+) -> tuple[SynthesisRunStatus, str]:
+    """Return the status of a run that requested no candidate."""
+    if prompt_contract_failures > 0:
+        return (
+            SynthesisRunStatus.FAILED,
+            f"{PROMPT_CONTRACT_REASON}: {prompt_contract_failures} calls "
+            "failed the prompt contract check before dispatch",
+        )
+    return (SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates")
+
+
 def _scenario_generation_status(
     counts: Mapping[str, int | None],
     *,
@@ -602,18 +615,7 @@ def _scenario_generation_status(
         )
     resolved = (generated or 0) + functional_test
     choices = (
-        (
-            requested == 0 and prompt_contract_failures > 0,
-            (
-                SynthesisRunStatus.FAILED,
-                f"{PROMPT_CONTRACT_REASON}: {prompt_contract_failures} calls "
-                "failed the prompt contract check before dispatch",
-            ),
-        ),
-        (
-            requested == 0,
-            (SynthesisRunStatus.NO_CANDIDATES, "no_eligible_candidates"),
-        ),
+        (requested == 0, _zero_request_status(prompt_contract_failures)),
         (
             attempted > 0 and generated == 0 and functional_test == 0,
             (SynthesisRunStatus.FAILED, "zero_yield_after_attempts"),
