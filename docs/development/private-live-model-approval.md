@@ -149,6 +149,10 @@ field that combines `pattern` with `minLength` or `maxLength` (HTTP 400,
 "features not supported by xgrammar"). The request schema therefore drops a
 `minLength: 1` that the field's pattern already implies
 (`request_schema.portable_request_schema`).
+GLM's structured-output endpoint decodes a `oneOf` by always taking its last
+branch (probe p-r30-probe, decision 372), so the request schema also carries
+every object union as one flat object; see
+`docs/architecture/model-facing-interfaces.md`.
 The Gemma decoder also matches `pattern` against the whole string, not a
 substring: probe p-schema2 sent `pattern: "\\S"` on the revision
 `applies_when` items and every condition came back as one character. Use
