@@ -322,8 +322,8 @@ def test_prepare_run_copies_inputs_and_redirects_the_output(tmp_path: Path) -> N
 
     prepared = prepare_run(arguments, recorded=recorded, work=work)
 
-    copied_use_case = work / "inputs" / "00-use-case.txt"
-    copied_risk = work / "inputs" / "01-risk.json"
+    copied_use_case = work / "inputs" / "00" / "use-case.txt"
+    copied_risk = work / "inputs" / "01" / "risk.json"
     assert prepared.arguments == [
         "generate",
         "--output-dir",
@@ -343,6 +343,35 @@ def test_prepare_run_copies_inputs_and_redirects_the_output(tmp_path: Path) -> N
     assert (work / "record" / RECORD_FILENAME).exists()
     assert prepared.path_map[str(work / "output")] == "/runs/r1/output"
     assert prepared.path_map[str(copied_risk)] == str(source / "risk.json")
+
+
+def test_prepare_run_keeps_each_input_file_name(tmp_path: Path) -> None:
+    # The producer records an input's base name (policy-coverage.json names the
+    # risk extraction file), so a renamed copy would differ from the recording.
+    first, second = tmp_path / "a", tmp_path / "b"
+    first.mkdir()
+    second.mkdir()
+    (first / "risk-extraction-fs-isac.json").write_text("{}")
+    (second / "risk-extraction-fs-isac.json").write_text('{"b": 1}')
+    recorded = tmp_path / "recorded"
+    recorded.mkdir()
+    (recorded / RECORD_FILENAME).write_text("")
+    arguments = [
+        "generate",
+        "--output-dir",
+        "/runs/r1/output",
+        "--risk-extraction",
+        str(first / "risk-extraction-fs-isac.json"),
+        "--sssom",
+        str(second / "risk-extraction-fs-isac.json"),
+    ]
+
+    prepared = prepare_run(arguments, recorded=recorded, work=tmp_path / "work")
+
+    copies = [Path(prepared.arguments[4]), Path(prepared.arguments[6])]
+    assert [copy.name for copy in copies] == ["risk-extraction-fs-isac.json"] * 2
+    assert copies[0] != copies[1]
+    assert [copy.read_text() for copy in copies] == ["{}", '{"b": 1}']
 
 
 def test_replay_environment_drops_model_settings_and_credentials() -> None:

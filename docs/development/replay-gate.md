@@ -37,7 +37,8 @@ first difference in each file; re-record after an intended change.
 ## What the gate does
 
 - Reruns `generate` with the recorded arguments. It copies each input file into a
-  scratch directory, writes a fresh output directory there, and adds
+  numbered folder of a scratch directory, keeping the file name because outputs
+  such as `policy-coverage.json` record it, writes a fresh output directory there, and adds
   `--replay-calls` pointing at a copy of the record. It reads `--profiles-file`
   in place because the file holds endpoint credentials. The recorded run
   directory is never written.
