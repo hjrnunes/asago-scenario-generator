@@ -159,8 +159,9 @@ def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
     (:func:`~asago_scenario_generator.schema_unions.flatten_unions`), because
     GLM's endpoint decodes a ``oneOf`` by always taking its last branch.  The
     response is still validated against the original Pydantic model, after
-    :func:`restore_flat_reply_for` drops the null fields that its selected
-    branches do not define.
+    :func:`restore_flat_reply_for` keeps only the fields that each selected
+    branch defines and drops a null that one of the branch's own fields
+    rejects.
     """
 
     def portable(node: Any) -> Any:

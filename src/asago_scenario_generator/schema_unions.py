@@ -11,7 +11,8 @@ after ``$ref`` resolution.  A nullable field (one schema and
 ``{"type": "null"}``) and a choice of scalars are not unions.
 
 :func:`restore_flat_reply` undoes the flattening on a reply before it is
-validated: it drops the null keys a discriminated branch does not define.
+validated: it keeps only the keys the selected branch defines and drops a null
+in one of the branch's own fields that the branch rejects.
 """
 
 from __future__ import annotations

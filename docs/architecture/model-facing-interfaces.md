@@ -64,14 +64,33 @@ The Stage 5 payload (adversary, causal factors, temporal condition,
 comparisons, operands, record selection), the routing routes, and the
 Stage 2 control actions carry unions today. A schema without a union is sent
 unchanged. Before a reply is validated, each discriminated union position
-drops the null keys its selected branch does not define
+keeps only the keys its selected branch defines
 (`restore_flat_reply_for`, in `parse_llm_result`, in the stage-parser input
-of `_parse_structured_result`, and in `_locally_parse_response_content`). A
-non-null value outside the branch stays and fails validation, so the Pydantic
-types remain authoritative. `_json_schema_response_format` raises if a union
-survives. Prompts describe the flat form: a field the selected variant does
-not use is `null`, and the routing examples show it. The OpenRouter
-JSON-object path still embeds the original schema in the prompt.
+of `_parse_structured_result`, and in `_locally_parse_response_content`).
+Models fill fields of other branches, so the restore drops every key the
+branch does not define, null or not. It also drops a null in a field the
+branch defines when the branch's schema for that field rejects null: the flat
+schema made the field nullable, and the field's default applies. A required
+field without a default then fails validation as a missing field and takes
+the usual correction path. The restore applies these rules at every union
+the flattener rewrote, including unions nested in a branch (comparison
+operands) and unions inside a nullable `anyOf` (`temporal_condition`). Nulls
+outside a union position stay. The Stage 2 control actions union has no
+discriminator and its two branches define the same fields, so it needs no
+drop. The Pydantic types remain authoritative: the restore removes keys but
+never adds or changes a value.
+
+Each call record in `calls.jsonl` lists the drops the restore made for the
+reply in `flat_restore_drops`: the JSON pointer of the dropped key, the
+selected branch (the discriminator value), and the reason, `foreign_value`
+(a non-null value the branch does not define) or `null_to_default` (a null
+its own field rejects). A foreign null is the normal flat form and is not
+listed. The record does not copy the dropped values; `raw_response` keeps
+them. `provider-calls.jsonl` is unchanged. `_json_schema_response_format`
+raises if a union survives. Prompts describe the flat form: a field the
+selected variant does not use is `null`, and the routing examples show it.
+The OpenRouter JSON-object path still embeds the original schema in the
+prompt.
 
 Under guided decoding, Stage 1b requires `kc_subcodes` with at least one
 known KC or KCX code and requires `tool_inventory` (it may be empty). The
