@@ -11,7 +11,8 @@ after ``$ref`` resolution.  A nullable field (one schema and
 ``{"type": "null"}``) and a choice of scalars are not unions.
 
 :func:`restore_flat_reply` undoes the flattening on a reply before it is
-validated: it drops the null keys a discriminated branch does not define.
+validated: it keeps only the keys the selected branch defines and drops a null
+in one of the branch's own fields that the branch rejects.
 """
 
 from __future__ import annotations
@@ -337,15 +338,30 @@ def _refs(node: Any) -> set[str]:
     return found
 
 
-def restore_flat_reply(value: Any, schema: Mapping[str, Any]) -> Any:
+def restore_flat_reply(
+    value: Any,
+    schema: Mapping[str, Any],
+    drops: list[dict[str, str]] | None = None,
+) -> Any:
     """Return ``value`` with each flat union restored to its selected branch.
 
     ``schema`` is the original (unflattened) schema.  At each discriminated
-    union, the keys whose value is null and that the selected branch does not
-    define are dropped.  Everything else is kept, so a non-null value outside
-    the branch still fails validation.  ``value`` is not modified.
+    union, only the keys the selected branch defines are kept: every other
+    key is dropped, whether its value is null or not.  A key the branch
+    defines whose value is null is dropped too when the branch's schema for
+    that key does not accept null, so the field's default applies; a required
+    field without a default then fails validation as a missing field.  Nulls
+    outside a union position stay.  ``value`` is not modified.
+
+    When ``drops`` is given, each drop is appended to it as ``path`` (a JSON
+    pointer to the dropped key), ``branch`` (the discriminator value), and
+    ``reason``: ``foreign_value`` for a non-null value the branch does not
+    define, ``null_to_default`` for a null its own field rejects.  A foreign
+    null is the normal flat form and is not recorded.  The dropped values are
+    not copied.
     """
-    return _Restorer(schema.get("$defs", {})).value(value, schema)
+    restorer = _Restorer(schema.get("$defs", {}), [] if drops is None else drops)
+    return restorer.value(value, schema, "")
 
 
 @lru_cache(maxsize=256)
@@ -361,10 +377,22 @@ def restores_flat_replies(model: type) -> bool:
     return _restorable_schema(model) is not None
 
 
-def restore_flat_reply_for(model: type, value: Any) -> Any:
-    """Restore a reply against ``model``'s schema; return it as is without unions."""
+def restore_flat_reply_for(
+    model: type, value: Any, drops: list[dict[str, str]] | None = None
+) -> Any:
+    """Restore a reply against ``model``'s schema; return it as is without unions.
+
+    ``drops`` collects the drops as :func:`restore_flat_reply` records them.
+    """
     schema = _restorable_schema(model)
-    return value if schema is None else restore_flat_reply(value, schema)
+    return value if schema is None else restore_flat_reply(value, schema, drops)
+
+
+def flat_restore_drops(model: type, value: Any) -> list[dict[str, str]]:
+    """Return the drops that restoring ``value`` against ``model`` makes."""
+    drops: list[dict[str, str]] = []
+    restore_flat_reply_for(model, value, drops)
+    return drops
 
 
 def _has_discriminator(node: Any) -> bool:
@@ -376,45 +404,78 @@ def _has_discriminator(node: Any) -> bool:
 
 
 class _Restorer:
-    def __init__(self, defs: Mapping[str, Any]) -> None:
+    def __init__(self, defs: Mapping[str, Any], drops: list[dict[str, str]]) -> None:
         self._defs = defs
+        self._drops = drops
 
-    def value(self, value: Any, node: Any) -> Any:
+    def value(self, value: Any, node: Any, path: str) -> Any:
         node = _deref(node, self._defs)
         if not isinstance(node, Mapping):
             return value
         options = node.get("oneOf", node.get("anyOf"))
         if isinstance(options, list):
-            return self._union(value, node, options)
+            return self._union(value, node, options, path)
         if isinstance(value, dict):
-            return self._object(value, node)
+            return self._object(value, node, path)
         if isinstance(value, list):
-            return self._array(value, node)
+            return self._array(value, node, path)
         return value
 
-    def _union(self, value: Any, node: Mapping[str, Any], options: list) -> Any:
+    def _union(
+        self, value: Any, node: Mapping[str, Any], options: list, path: str
+    ) -> Any:
         branch = _selected_branch(value, node, options)
         if branch is None:
             return value
         if "discriminator" in node:
-            defined = _deref(branch, self._defs).get("properties", {})
-            value = {k: v for k, v in value.items() if v is not None or k in defined}
-        return self.value(value, branch)
+            tag = value[node["discriminator"]["propertyName"]]
+            value = self._within_branch(value, branch, tag, path)
+        return self.value(value, branch, path)
 
-    def _object(self, value: dict[str, Any], node: Mapping[str, Any]) -> dict:
+    def _within_branch(
+        self, value: dict[str, Any], branch: Any, tag: str, path: str
+    ) -> dict[str, Any]:
+        properties = _deref(branch, self._defs).get("properties", {})
+        kept = {}
+        for key, item in value.items():
+            fate = self._fate(key, item, properties)
+            if fate == "keep":
+                kept[key] = item
+            elif fate != "foreign_null":
+                self._drops.append(
+                    {"path": _pointer(path, key), "branch": tag, "reason": fate}
+                )
+        return kept
+
+    def _fate(self, key: str, item: Any, properties: Mapping[str, Any]) -> str:
+        if key not in properties:
+            return "foreign_null" if item is None else "foreign_value"
+        if item is None and not _accepts_null(properties[key], self._defs):
+            return "null_to_default"
+        return "keep"
+
+    def _object(
+        self, value: dict[str, Any], node: Mapping[str, Any], path: str
+    ) -> dict:
         properties = node.get("properties", {})
         return {
-            key: self.value(item, properties[key]) if key in properties else item
+            key: self.value(item, properties[key], _pointer(path, key))
+            if key in properties
+            else item
             for key, item in value.items()
         }
 
-    def _array(self, value: list[Any], node: Mapping[str, Any]) -> list[Any]:
+    def _array(self, value: list[Any], node: Mapping[str, Any], path: str) -> list[Any]:
         prefix = node.get("prefixItems") or []
         items = node.get("items")
         return [
-            self.value(item, prefix[i] if i < len(prefix) else items)
+            self.value(item, prefix[i] if i < len(prefix) else items, f"{path}/{i}")
             for i, item in enumerate(value)
         ]
+
+
+def _pointer(path: str, key: str) -> str:
+    return f"{path}/{key.replace('~', '~0').replace('/', '~1')}"
 
 
 def _selected_branch(value: Any, node: Mapping[str, Any], options: list) -> Any:
@@ -426,6 +487,28 @@ def _selected_branch(value: Any, node: Mapping[str, Any], options: list) -> Any:
         return _mapped_branch(value, discriminator)
     rest = [o for o in options if o != _NULL]
     return rest[0] if len(rest) == 1 else None
+
+
+def _accepts_null(schema: Any, defs: Mapping[str, Any]) -> bool:
+    """Whether ``schema`` allows null; a schema it cannot read counts as allowing it."""
+    schema = _deref(schema, defs)
+    if not isinstance(schema, Mapping):
+        return True
+    for key in ("anyOf", "oneOf"):
+        if isinstance(schema.get(key), list):
+            return any(_accepts_null(option, defs) for option in schema[key])
+    return _literal_accepts_null(schema)
+
+
+def _literal_accepts_null(schema: Mapping[str, Any]) -> bool:
+    if "const" in schema:
+        return schema["const"] is None
+    if "enum" in schema:
+        return None in schema["enum"]
+    kind = schema.get("type")
+    if kind is None:
+        return True
+    return kind == "null" or (isinstance(kind, list) and "null" in kind)
 
 
 def _mapped_branch(value: Any, discriminator: Mapping[str, Any]) -> Any:
@@ -478,6 +561,7 @@ def _fill_object(
 __all__ = [
     "UnionMergeError",
     "flat_reply",
+    "flat_restore_drops",
     "find_unions",
     "flatten_unions",
     "restore_flat_reply",

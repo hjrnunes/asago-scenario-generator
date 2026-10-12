@@ -193,12 +193,14 @@ def _response_fields(
     raw_response: Any | None,
     cleaned_response: Any | None,
     cleanup_transformations: tuple[Mapping[str, Any], ...],
+    flat_restore_drops: tuple[Mapping[str, str], ...],
 ) -> dict[str, Any]:
-    """Build raw/cleaned response evidence and ordered cleanup records."""
+    """Build raw/cleaned response evidence, cleanup records, and restore drops."""
     fields: dict[str, Any] = {
         "cleanup_transformations": [
             dict(transformation) for transformation in cleanup_transformations
-        ]
+        ],
+        "flat_restore_drops": [dict(drop) for drop in flat_restore_drops],
     }
     for name, value, frame in (
         ("raw_response", raw_response, "stpa-provider-raw-response-v1"),
@@ -248,6 +250,7 @@ def make_call_log_entry(
     raw_response: Any | None = None,
     cleaned_response: Any | None = None,
     cleanup_transformations: tuple[Mapping[str, Any], ...] = (),
+    flat_restore_drops: tuple[Mapping[str, str], ...] = (),
     attempt_id: str | None = None,
     attempt_number: int | None = None,
     failure_class: str | None = None,
@@ -281,6 +284,8 @@ def make_call_log_entry(
         retry_of: ``attempt_id`` of the failed attempt this request retries;
             the key is absent from a first request.
         response_content: Optional full response content (string representation).
+        flat_restore_drops: The drops the flat-reply restore made (path,
+            branch, reason); the dropped values stay in ``raw_response``.
 
     Returns:
         A dict suitable for JSONL serialization.
@@ -347,6 +352,7 @@ def make_call_log_entry(
             raw_response=raw_response,
             cleaned_response=cleaned_response,
             cleanup_transformations=cleanup_transformations,
+            flat_restore_drops=flat_restore_drops,
         )
     )
     entry.update(

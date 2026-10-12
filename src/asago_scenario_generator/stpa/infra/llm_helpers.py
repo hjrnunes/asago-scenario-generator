@@ -49,6 +49,7 @@ from asago_scenario_generator.stpa.infra.prompt_preflight import (
 )
 from asago_scenario_generator.stpa._model_data import raw_model_data
 from asago_scenario_generator.request_schema import (
+    flat_restore_drops,
     restore_flat_reply_for,
     restores_flat_replies,
 )
@@ -411,6 +412,7 @@ class _SafeCallState:
     draft_parsed: bool = False
     semantic_validation_passed: bool = False
     cleanup_transformations: list[dict[str, Any]] = field(default_factory=list)
+    flat_restore_drops: tuple[dict[str, str], ...] = ()
     cleaned_response: Any | None = None
     attempt_number: int = 1
     dispatched: bool = False
@@ -551,6 +553,7 @@ def _parse_and_validate_result(
     state: _SafeCallState,
 ) -> _T:
     """Parse one result and run optional stage-local semantic validation."""
+    state.flat_restore_drops = _flat_restore_drops(result, response_format)
     try:
         model = _parse_structured_result(
             result,
@@ -635,6 +638,7 @@ def _perform_safe_call(
         prompt_template_hashes=prompt_template_hashes,
         attempt_number=state.attempt_number,
         cleanup_transformations=tuple(state.cleanup_transformations),
+        flat_restore_drops=state.flat_restore_drops,
         cleaned_response=model,
         request_controls=_request_controls(state.result, state),
         call_log=call_log_of(llm_client),
@@ -682,6 +686,7 @@ def _log_structured_failure(
         raw_response=_raw_response_for_failure(state.result, evidence),
         cleaned_response=state.cleaned_response,
         cleanup_transformations=tuple(state.cleanup_transformations),
+        flat_restore_drops=state.flat_restore_drops,
         attempt_number=state.attempt_number,
         request_controls=_request_controls(state.result, state),
         failure_class=_failure_class(
@@ -950,6 +955,28 @@ def _parse_structured_result(
     )
 
 
+def _flat_restore_drops(
+    result: LLMResult, response_format: type[BaseModel]
+) -> tuple[dict[str, str], ...]:
+    """Return the drops the flat-reply restore makes for ``result``.
+
+    The restore runs at several parse sites, each on the same decoded reply,
+    so one pass over that reply lists what any of them drops.  A reply that
+    does not decode has no drop.
+    """
+    if not restores_flat_replies(response_format):
+        return ()
+    content = result.content
+    if not isinstance(content, (dict, str)):
+        content = result.raw_response
+    if isinstance(content, str):
+        try:
+            content = _decode_json_text_with_evidence(content)[0]
+        except ValueError:
+            return ()
+    return tuple(flat_restore_drops(response_format, content))
+
+
 def _restored_result(result: LLMResult, response_format: type[_T]) -> LLMResult:
     """Return ``result`` with a flat reply restored for a stage parser.
 
@@ -990,6 +1017,7 @@ def log_llm_call(
     prompt_template_hashes: Mapping[str, str] | None = None,
     attempt_number: int = 1,
     cleanup_transformations: tuple[Mapping[str, Any], ...] = (),
+    flat_restore_drops: tuple[Mapping[str, str], ...] = (),
     cleaned_response: Any | None = None,
     request_controls: Mapping[str, Any] | None = None,
     call_log: CallLog | None = None,
@@ -1032,6 +1060,7 @@ def log_llm_call(
             result.content if cleaned_response is None else cleaned_response
         ),
         cleanup_transformations=cleanup_transformations,
+        flat_restore_drops=flat_restore_drops,
         attempt_number=attempt_number,
         request_controls=(
             dict(result.request_controls)
@@ -1077,6 +1106,7 @@ def log_llm_call_failure(
     raw_response: Any | None = None,
     cleaned_response: Any | None = None,
     cleanup_transformations: tuple[Mapping[str, Any], ...] = (),
+    flat_restore_drops: tuple[Mapping[str, str], ...] = (),
     attempt_number: int = 1,
     request_controls: Mapping[str, Any] | None = None,
     failure_class: str | None = None,
@@ -1116,6 +1146,7 @@ def log_llm_call_failure(
         raw_response=raw_response,
         cleaned_response=cleaned_response,
         cleanup_transformations=cleanup_transformations,
+        flat_restore_drops=flat_restore_drops,
         attempt_number=attempt_number,
         request_controls=request_controls,
         failure_class=failure_class,

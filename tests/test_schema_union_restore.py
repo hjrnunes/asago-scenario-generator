@@ -3,8 +3,10 @@
 The request carries every union as one flat object, so a reply lists every
 property and sets the ones its branch does not use to null.  Before the
 reply is validated against its response type, each discriminated union
-position drops the null keys the selected branch does not define.  Nothing
-else changes: a non-null value outside the branch still fails validation.
+position keeps only the keys the selected branch defines and drops a null
+that one of the branch's own fields rejects, so the field's default applies.
+Each drop that is not a foreign null is recorded with its path, branch, and
+reason.
 """
 
 from __future__ import annotations
@@ -21,7 +23,11 @@ from asago_scenario_generator.request_schema import (
     flat_example_for,
     restore_flat_reply_for,
 )
-from asago_scenario_generator.schema_unions import restore_flat_reply
+from asago_scenario_generator.schema_unions import (
+    find_unions,
+    flat_restore_drops,
+    restore_flat_reply,
+)
 from asago_scenario_generator.stpa.infra.llm import (
     LLMResult,
     _json_schema_response_format,
@@ -123,16 +129,121 @@ def test_restore_drops_only_null_keys_the_selected_branch_lacks() -> None:
     assert reply == original
 
 
-def test_restore_keeps_a_non_null_foreign_value_and_an_unknown_branch() -> None:
+def test_restore_drops_a_non_null_value_the_selected_branch_lacks() -> None:
     reply = {
         "items": [
-            {"kind": "a", "n": 1, "s": "kept"},
-            {"kind": "c", "n": None},
-            {"n": None},
+            {"kind": "a", "n": 1, "s": "foreign"},
+            {"kind": "b", "n": 7, "opt": "foreign", "s": "x"},
+        ],
+        "maybe": {"kind": "b", "n": 3, "s": "y"},
+        "rows": [{"inner": {"kind": "a", "n": 2, "s": "foreign"}}],
+    }
+    assert restore_flat_reply(reply, _SCHEMA) == {
+        "items": [{"kind": "a", "n": 1}, {"kind": "b", "s": "x"}],
+        "maybe": {"kind": "b", "s": "y"},
+        "rows": [{"inner": {"kind": "a", "n": 2}}],
+    }
+
+
+def test_restore_keeps_an_unknown_branch_and_a_missing_discriminator() -> None:
+    reply = {
+        "items": [
+            {"kind": "c", "n": None, "s": "kept"},
+            {"n": None, "s": "kept"},
             "not an object",
         ],
         "maybe": None,
     }
+    assert restore_flat_reply(reply, _SCHEMA) == reply
+
+
+_NULLABLE_FORMS = {
+    "type": "object",
+    "properties": {"top": {"$ref": "#/$defs/X"}},
+    "$defs": {
+        "Maybe": {"anyOf": [{"type": "string"}, _NULL]},
+        "Plain": {"type": "object", "properties": {"v": {"type": "string"}}},
+        "X": {
+            "type": "object",
+            "properties": {
+                "kind": {"const": "x"},
+                "plain_integer": {"type": "integer"},
+                "plain_object": {"$ref": "#/$defs/Plain"},
+                "plain_enum": {"enum": ["p", "q"]},
+                "any_of_null": {"anyOf": [{"type": "string"}, _NULL]},
+                "type_list": {"type": ["string", "null"]},
+                "enum_null": {"enum": ["p", None]},
+                "const_null": {"const": None},
+                "ref_to_nullable": {"$ref": "#/$defs/Maybe"},
+                "nullable_ref": {"anyOf": [{"$ref": "#/$defs/Plain"}, _NULL]},
+            },
+        },
+        "Y": {"type": "object", "properties": {"kind": {"const": "y"}}},
+    },
+}
+_NULLABLE_FORMS["properties"]["top"] = {
+    "oneOf": [{"$ref": "#/$defs/X"}, {"$ref": "#/$defs/Y"}],
+    "discriminator": {
+        "propertyName": "kind",
+        "mapping": {"x": "#/$defs/X", "y": "#/$defs/Y"},
+    },
+}
+
+
+def test_restore_drops_a_null_the_branch_field_rejects_and_keeps_the_others() -> None:
+    nulls = dict.fromkeys(_NULLABLE_FORMS["$defs"]["X"]["properties"])
+    reply = {"top": {**nulls, "kind": "x"}}
+    kept = ["any_of_null", "type_list", "enum_null", "const_null"]
+    kept += ["ref_to_nullable", "nullable_ref"]
+    assert restore_flat_reply(reply, _NULLABLE_FORMS) == {
+        "top": {"kind": "x", **dict.fromkeys(kept)}
+    }
+
+
+def test_restore_drops_a_null_in_every_union_position() -> None:
+    reply = {
+        "maybe": {"kind": "a", "n": None, "opt": None},
+        "items": [{"kind": "a", "n": None, "opt": "x"}],
+        "rows": [{"inner": {"kind": "a", "n": None, "opt": None}}],
+    }
+    assert restore_flat_reply(reply, _SCHEMA) == {
+        "maybe": {"kind": "a", "opt": None},
+        "items": [{"kind": "a", "opt": "x"}],
+        "rows": [{"inner": {"kind": "a", "opt": None}}],
+    }
+
+
+def test_restore_records_each_drop_by_path_branch_and_reason() -> None:
+    reply = {
+        "items": [
+            {"kind": "a", "n": None, "opt": None, "s": "foreign", "a/b~c": 1},
+            {"kind": "b", "n": None, "s": "x"},
+        ],
+        "maybe": {"kind": "b", "s": None, "n": 3},
+        "rows": [{"inner": {"kind": "a", "n": None, "s": None}}],
+    }
+    drops: list[dict[str, str]] = []
+    restored = restore_flat_reply(reply, _SCHEMA, drops)
+    assert drops == [
+        {"path": "/items/0/n", "branch": "a", "reason": "null_to_default"},
+        {"path": "/items/0/s", "branch": "a", "reason": "foreign_value"},
+        {"path": "/items/0/a~1b~0c", "branch": "a", "reason": "foreign_value"},
+        {"path": "/maybe/s", "branch": "b", "reason": "null_to_default"},
+        {"path": "/maybe/n", "branch": "b", "reason": "foreign_value"},
+        {"path": "/rows/0/inner/n", "branch": "a", "reason": "null_to_default"},
+    ]
+    assert restored == restore_flat_reply(reply, _SCHEMA)
+
+
+def test_restore_records_no_drop_for_a_reply_in_flat_form() -> None:
+    reply = {"items": [{"kind": "a", "n": 1, "opt": None, "s": None}]}
+    drops: list[dict[str, str]] = []
+    restore_flat_reply(reply, _SCHEMA, drops)
+    assert drops == []
+
+
+def test_restore_leaves_keys_outside_a_union_alone() -> None:
+    reply = {"rows": [{"inner": {"kind": "b", "s": "x"}, "extra": None}], "more": 1}
     assert restore_flat_reply(reply, _SCHEMA) == reply
 
 
@@ -490,12 +601,110 @@ def test_a_flat_reply_needs_the_restore(name: str) -> None:
         model.model_validate(_flat_case(model, reply))
 
 
-def test_a_null_in_a_field_the_branch_defines_still_fails() -> None:
+_COND = "unsafe_outcome__discriminating_condition"
+_FACTOR = "causal_factors__0"
+
+# Each case fills fields its selected branch does not define with values.
+_FOREIGN_VALUES = {
+    "stage5-factor-reachable": {f"{_FACTOR}__bounded_assumption": "It may."},
+    "stage5-temporal-window": {
+        f"{_FACTOR}__temporal_condition__relation": "before",
+        f"{_FACTOR}__temporal_condition__delay_ms": 500,
+    },
+    "stage5-comparison-operands": {
+        f"{_COND}__comparisons__0__left__path": "TARGET-STATE.x",
+        f"{_COND}__comparisons__0__right__operation": "refund",
+        f"{_COND}__comparisons__0__requires_prior": "verify",
+    },
+    "stage5-record-unavailable": {
+        f"{_COND}__record_selection__record_path": "TARGET-STATE.orders.O-1",
+        f"{_COND}__record_selection__argument_values": [],
+    },
+    "routing-unresolved": {
+        "routes__0__slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
+        "routes__0__missing_concepts": [],
+    },
+    "routing-targeted": {"routes__0__missing_concepts": []},
+}
+
+
+@pytest.mark.parametrize("name", list(_FOREIGN_VALUES))
+def test_a_value_outside_the_selected_branch_is_dropped_before_validation(
+    name: str,
+) -> None:
+    _, model, reply = next(c for c in _CASES if c[0] == name)
+    flat = _flat_case(model, reply)
+    for path, value in _FOREIGN_VALUES[name].items():
+        _set(flat, path.split("__"), value)
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        model.model_validate(flat)
+    assert model.model_validate(restore_flat_reply_for(model, flat)) == (
+        model.model_validate(reply)
+    )
+
+
+def test_a_null_in_an_optional_field_of_the_branch_takes_its_default() -> None:
+    flat = _flat_case(_ROUTING, _ROUTING_REPLIES["targeted"])
+    route = flat["routes"][0]
+    assert route["controller_ids"] == []
+    for name in _TARGETED_IDS:
+        route[name] = None
+    with pytest.raises(ValidationError, match="tuple_type"):
+        _ROUTING.model_validate(flat)
+    restored = _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, flat))
+    assert restored == _ROUTING.model_validate(_ROUTING_REPLIES["targeted"])
+
+
+def test_the_drops_of_a_production_reply_name_the_selected_branch() -> None:
+    flat = _flat_case(_ROUTING, _ROUTING_REPLIES["targeted"])
+    route = flat["routes"][0]
+    route["controller_ids"] = None
+    route["missing_concepts"] = []
+    drops = flat_restore_drops(_ROUTING, flat)
+    assert drops == [
+        {
+            "path": "/routes/0/controller_ids",
+            "branch": "targeted",
+            "reason": "null_to_default",
+        },
+        {
+            "path": "/routes/0/missing_concepts",
+            "branch": "targeted",
+            "reason": "foreign_value",
+        },
+    ]
+    appended: list[dict[str, str]] = []
+    restore_flat_reply_for(_ROUTING, flat, appended)
+    assert appended == drops
+
+
+def test_a_reply_with_nothing_to_drop_and_a_type_without_unions_record_none() -> None:
+    flat = _flat_case(_ROUTING, _ROUTING_REPLIES["targeted"])
+    assert flat_restore_drops(_ROUTING, flat) == []
+    assert flat_restore_drops(_ControlElementProviderSet, _STAGE2_REPLY) == []
+    assert flat_restore_drops(_ROUTING, "not an object") == []
+
+
+def test_a_required_field_of_the_branch_set_to_null_still_fails() -> None:
     reply = _route(
         "targeted", slot_ids=None, hazard_ids=["H-1"], constraint_ids=["SC-1"]
     )
     with pytest.raises(ValidationError, match="slot_ids"):
         _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, reply))
+
+
+def test_the_stage_2_union_branches_share_their_fields() -> None:
+    schema = _ControlElementProviderSet.model_json_schema()
+    (pointer,) = find_unions(schema)
+    assert pointer == "/properties/control_actions/items"
+    union = schema["properties"]["control_actions"]["items"]
+    assert "discriminator" not in union
+    fields = [
+        set(schema["$defs"][option["$ref"].rsplit("/", 1)[-1]]["properties"])
+        for option in union["anyOf"]
+    ]
+    assert len(fields) == 2
+    assert fields[0] == fields[1]
 
 
 def test_a_type_without_a_discriminated_union_is_left_alone() -> None:
