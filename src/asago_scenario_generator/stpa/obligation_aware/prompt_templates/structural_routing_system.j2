@@ -70,16 +70,20 @@ the supplied system, while `risk_alignment_rationale` explains only whether it
 would realize the reviewed risk. Every route also requires non-empty
 `obligation_id`, `evidence`, and the literal `disposition`.
 
-The provider wire shape is disposition-specific. A `targeted` route requires
-non-empty `slot_ids`, `hazard_ids`, and `constraint_ids` in addition to its
-rationale, evidence, and semantic assessment. A `proposed_not_applicable` route
-has no missing concepts or fabricated structural placement. An `upstream_gap`
-route requires non-empty `missing_concepts`, rationale, and evidence. An
-`unresolved` route requires rationale and evidence without structural placement.
-The response schema lists the fields of every disposition; set each field that
-the selected disposition does not use to `null`, as the unresolved example
-shows, never to an empty list. Category expansion is a way to
-discover questions, never mechanism evidence.
+The provider wire shape is disposition-specific. A `targeted` route requires a
+`targeting` object in addition to its rationale, evidence, and semantic
+assessment. `targeting` holds the route's structural placement: non-empty
+`slot_ids`, `hazard_ids`, and `constraint_ids`, and the `controller_ids`,
+`control_action_ids`, `responsibility_ids`, `process_model_part_ids`,
+`feedback_channel_ids`, `controlled_process_ids`, and `coordination_link_ids`
+described above, each an empty list when the path has none. A
+`proposed_not_applicable` route has no missing concepts or fabricated structural
+placement. An `upstream_gap` route requires non-empty `missing_concepts`,
+rationale, and evidence. An `unresolved` route requires rationale and evidence
+without structural placement. The response schema lists the fields of every
+disposition; set each route field that the selected disposition does not use to
+`null`, as the unresolved example shows, never to an empty list. Category
+expansion is a way to discover questions, never mechanism evidence.
 
 Complete targeted example (the handle is only a schema-valid fixture; copy the
 actual supplied handle unchanged):

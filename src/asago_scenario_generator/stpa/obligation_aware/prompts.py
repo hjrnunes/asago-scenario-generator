@@ -228,9 +228,11 @@ def _routing_wire_examples() -> tuple[str, str]:
                     **common,
                     "disposition": "targeted",
                     "semantic_assessment": semantic_assessment,
-                    "slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
-                    "hazard_ids": ["H-1"],
-                    "constraint_ids": ["SC-1"],
+                    "targeting": {
+                        "slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
+                        "hazard_ids": ["H-1"],
+                        "constraint_ids": ["SC-1"],
+                    },
                     "rationale": "the selected owner, slot, hazard, and constraint form a path worth analysing",
                 }
             ]

@@ -128,6 +128,32 @@ def provider_slot_payload(draft: SlotIcaDraft) -> dict:
     return payload
 
 
+TARGETING_FIELDS = (
+    "slot_ids",
+    "controller_ids",
+    "control_action_ids",
+    "responsibility_ids",
+    "process_model_part_ids",
+    "feedback_channel_ids",
+    "controlled_process_ids",
+    "coordination_link_ids",
+    "hazard_ids",
+    "constraint_ids",
+)
+
+
+def provider_route_payload(route: dict) -> dict:
+    """Return a route dump as the routing provider wire carries it.
+
+    The wire nests a targeted route's ID lists in its ``targeting`` object and
+    has no ID list on any other route.
+    """
+    wire = {k: v for k, v in route.items() if k not in TARGETING_FIELDS}
+    if route.get("disposition") == "targeted":
+        wire["targeting"] = {k: route[k] for k in TARGETING_FIELDS if k in route}
+    return wire
+
+
 def route_assessment(
     brief,
     *,

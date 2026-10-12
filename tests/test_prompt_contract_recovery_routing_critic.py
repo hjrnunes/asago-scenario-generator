@@ -137,8 +137,10 @@ def test_routing_wire_schema_requires_disposition_specific_fields() -> None:
                         **base,
                         "disposition": "targeted",
                         "rationale": "the supplied control path is relevant",
-                        "hazard_ids": ["H-1"],
-                        "constraint_ids": ["SC-1"],
+                        "targeting": {
+                            "hazard_ids": ["H-1"],
+                            "constraint_ids": ["SC-1"],
+                        },
                     }
                 ]
             }

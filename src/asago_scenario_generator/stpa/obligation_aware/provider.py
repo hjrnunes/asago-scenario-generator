@@ -368,15 +368,15 @@ class _RoutingProviderRouteBase(_Model):
     evidence: tuple[str, ...] = Field(min_length=1)
 
 
-class _RoutingProviderRoute(_RoutingProviderRouteBase):
-    """Provider-facing targeted route semantics without derived identity.
+class _RoutingProviderTargeting(_Model):
+    """The structural placement of a targeted route.
 
-    The historical private name is retained because deterministic callers
-    inspect the provider schema by definition name.  The payload uses this
-    model as one branch of a discriminated union.
+    The lists sit in one object rather than on the route because the request
+    schema is sent flat, which makes every field of a single disposition
+    nullable: grouped, only the object can be null, and a model that writes
+    it must name at least one slot, hazard, and constraint.
     """
 
-    disposition: Literal["targeted"]
     slot_ids: tuple[str, ...] = Field(min_length=1)
     controller_ids: tuple[str, ...] = ()
     control_action_ids: tuple[str, ...] = ()
@@ -387,6 +387,18 @@ class _RoutingProviderRoute(_RoutingProviderRouteBase):
     coordination_link_ids: tuple[str, ...] = ()
     hazard_ids: tuple[str, ...] = Field(min_length=1)
     constraint_ids: tuple[str, ...] = Field(min_length=1)
+
+
+class _RoutingProviderRoute(_RoutingProviderRouteBase):
+    """Provider-facing targeted route semantics without derived identity.
+
+    The historical private name is retained because deterministic callers
+    inspect the provider schema by definition name.  The payload uses this
+    model as one branch of a discriminated union.
+    """
+
+    disposition: Literal["targeted"]
+    targeting: _RoutingProviderTargeting
 
 
 class _RoutingProviderNotApplicableRoute(_RoutingProviderRouteBase):
@@ -471,6 +483,7 @@ def _materialize_routing_route(
 ) -> ObligationRoute:
     """Derive authoritative route and gap IDs from provider semantics."""
     data = value.model_dump(mode="python")
+    data.update(data.pop("targeting", None) or {})
     assessment = dict(data["semantic_assessment"])
     assessment["mapping_strength"] = mapping_strength
     data["semantic_assessment"] = assessment
@@ -1413,6 +1426,7 @@ class ObligationAwareLLMAdapter:
                 "routes",
                 "obligation_id",
                 "disposition",
+                "targeting",
                 "slot_ids",
                 "hazard_ids",
                 "constraint_ids",

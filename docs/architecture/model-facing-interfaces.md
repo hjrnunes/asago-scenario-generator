@@ -72,8 +72,14 @@ branch does not define, null or not. It also drops a null in a field the
 branch defines when the branch's schema for that field rejects null: the flat
 schema made the field nullable, and the field's default applies. A required
 field without a default then fails validation as a missing field and takes
-the usual correction path. The restore applies these rules at every union
-the flattener rewrote, including unions nested in a branch (comparison
+the usual correction path. Because a flat field cannot be required for one
+branch only, a targeted routing route keeps its ID lists in one `targeting`
+object: only the object is nullable, and inside it `slot_ids`, `hazard_ids`
+and `constraint_ids` require at least one item, so a model that writes the
+object must name a slot. When the lists were loose fields, Gemma sent
+`slot_ids: null` in 144 of 347 targeted routes. The restore applies these
+rules at every union the flattener rewrote, including unions nested in a
+branch (comparison
 operands) and unions inside a nullable `anyOf` (`temporal_condition`). Nulls
 outside a union position stay. The Stage 2 control actions union has no
 discriminator and its two branches define the same fields, so it needs no

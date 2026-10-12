@@ -495,10 +495,12 @@ _TARGETED_IDS = {
 _ROUTING_REPLIES = {
     "targeted": _route(
         "targeted",
-        slot_ids=["RESP-1:CA-1-1:NOT_PROVIDED"],
-        **_TARGETED_IDS,
-        hazard_ids=["H-1"],
-        constraint_ids=["SC-1"],
+        targeting={
+            "slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
+            **_TARGETED_IDS,
+            "hazard_ids": ["H-1"],
+            "constraint_ids": ["SC-1"],
+        },
     ),
     "proposed-not-applicable": _route("proposed_not_applicable"),
     "upstream-gap": _route(
@@ -623,7 +625,11 @@ _FOREIGN_VALUES = {
         f"{_COND}__record_selection__argument_values": [],
     },
     "routing-unresolved": {
-        "routes__0__slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
+        "routes__0__targeting": {
+            "slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
+            "hazard_ids": ["H-1"],
+            "constraint_ids": ["SC-1"],
+        },
         "routes__0__missing_concepts": [],
     },
     "routing-targeted": {"routes__0__missing_concepts": []},
@@ -646,26 +652,26 @@ def test_a_value_outside_the_selected_branch_is_dropped_before_validation(
 
 
 def test_a_null_in_an_optional_field_of_the_branch_takes_its_default() -> None:
-    flat = _flat_case(_ROUTING, _ROUTING_REPLIES["targeted"])
-    route = flat["routes"][0]
-    assert route["controller_ids"] == []
-    for name in _TARGETED_IDS:
-        route[name] = None
-    with pytest.raises(ValidationError, match="tuple_type"):
-        _ROUTING.model_validate(flat)
-    restored = _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, flat))
-    assert restored == _ROUTING.model_validate(_ROUTING_REPLIES["targeted"])
+    _, model, reply = next(c for c in _CASES if c[0] == "stage5-adversary-attacker")
+    flat = _flat_case(model, reply)
+    selection = flat["unsafe_outcome"]["discriminating_condition"]["record_selection"]
+    assert selection["argument_values"] == []
+    selection["argument_values"] = None
+    with pytest.raises(ValidationError, match="argument_values"):
+        model.model_validate(flat)
+    restored = model.model_validate(restore_flat_reply_for(model, flat))
+    assert restored == model.model_validate(reply)
 
 
 def test_the_drops_of_a_production_reply_name_the_selected_branch() -> None:
     flat = _flat_case(_ROUTING, _ROUTING_REPLIES["targeted"])
     route = flat["routes"][0]
-    route["controller_ids"] = None
+    route["targeting"] = None
     route["missing_concepts"] = []
     drops = flat_restore_drops(_ROUTING, flat)
     assert drops == [
         {
-            "path": "/routes/0/controller_ids",
+            "path": "/routes/0/targeting",
             "branch": "targeted",
             "reason": "null_to_default",
         },
@@ -688,8 +694,12 @@ def test_a_reply_with_nothing_to_drop_and_a_type_without_unions_record_none() ->
 
 
 def test_a_required_field_of_the_branch_set_to_null_still_fails() -> None:
+    reply = _route("targeted", targeting=None)
+    with pytest.raises(ValidationError, match="targeting"):
+        _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, reply))
     reply = _route(
-        "targeted", slot_ids=None, hazard_ids=["H-1"], constraint_ids=["SC-1"]
+        "targeted",
+        targeting={"slot_ids": None, "hazard_ids": ["H-1"], "constraint_ids": ["SC-1"]},
     )
     with pytest.raises(ValidationError, match="slot_ids"):
         _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, reply))
@@ -752,7 +762,7 @@ def test_flat_example_fills_every_absent_required_key_with_null() -> None:
     schema = _json_schema_response_format(_ROUTING)["json_schema"]["schema"]
     jsonschema.Draft202012Validator(schema).validate(example)
     (flat_route,) = example["routes"]
-    assert flat_route["slot_ids"] is None
+    assert flat_route["targeting"] is None
     assert flat_route["missing_concepts"] is None
     assert _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, example)) == route
 

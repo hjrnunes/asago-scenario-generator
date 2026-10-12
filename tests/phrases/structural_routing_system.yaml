@@ -4,9 +4,15 @@ cases:
     required:
       - >-
         The response schema lists the fields of every disposition; set each
-        field that the selected disposition does not use to `null`, as the
-        unresolved example shows, never to an empty list.
-      - '"disposition":"unresolved","slot_ids":null'
+        route field that the selected disposition does not use to `null`, as
+        the unresolved example shows, never to an empty list.
+      - A `targeted` route requires a `targeting` object
+      - >-
+        `targeting` holds the route's structural placement: non-empty
+        `slot_ids`, `hazard_ids`, and `constraint_ids`
+      - each an empty list when the path has none
+      - '"disposition":"targeted","targeting":{"slot_ids":["RESP-1:CA-1-1:NOT_PROVIDED"]'
+      - '"disposition":"unresolved","targeting":null'
       - '"missing_concepts":null'
       - whether the system has the surface
       - free-text input, tool calls, or retrieval
