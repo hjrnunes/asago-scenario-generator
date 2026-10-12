@@ -74,6 +74,7 @@ from tests.helpers.obligation_aware import (
     _controls,
     _loss_analysis,
     _provider_slot_request,
+    provider_route_payload,
     provider_slot_payload,
     route_assessment,
 )
@@ -395,7 +396,7 @@ def test_focused_verifier_retains_path_without_granting_mechanism_credit(
             )
             provider_route["semantic_assessment"].pop("mapping_strength", None)
             content = (
-                {"routes": [provider_route]}
+                {"routes": [provider_route_payload(provider_route)]}
                 if self.calls == 1
                 else {
                     "verdicts": [

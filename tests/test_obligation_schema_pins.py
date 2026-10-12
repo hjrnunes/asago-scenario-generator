@@ -104,17 +104,17 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "routing-1": (
         "_RoutingProviderPayload1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "f281ddb0e1c14619d6dad8ccaf48f2b33f07ef62049cd27c9baeb1bb19441026",
+        "42268f443da3a03f61242a81887c18c3ec058549f14a8e2b749c7b84c799e110",
     ),
     "routing-3": (
         "_RoutingProviderPayload3",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "f57eb9c3f58661a02a5a779d47b0caf868ab0e0bc9ba8129b10cc42dbc037def",
+        "8eb606e31024c3ebaea40c032ee1dbb78b128c25e6e41835efcd93d1a007dbf7",
     ),
     "routing-exact": (
         "_RoutingProviderPayload2",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "2b25bcefda3a3124d6afa9ae247b35cf272bf11d4d26a96567689fe8a02c9448",
+        "f6e528678529b869196dd6cc8966c5501b4b2add195a86cbf99fd085094f23ec",
     ),
     "slot-1-0": (
         "_SlotProviderPayload1Pairs0",

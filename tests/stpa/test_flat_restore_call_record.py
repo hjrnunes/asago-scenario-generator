@@ -47,10 +47,12 @@ def _flat_route(**changes: Any) -> dict[str, Any]:
         "rationale": "Why this disposition.",
         "evidence": ["RESP-1 handles refunds."],
         "disposition": "targeted",
-        "slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
-        **dict.fromkeys(_IDS, []),
-        "hazard_ids": ["H-1"],
-        "constraint_ids": ["SC-1"],
+        "targeting": {
+            "slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
+            **dict.fromkeys(_IDS, []),
+            "hazard_ids": ["H-1"],
+            "constraint_ids": ["SC-1"],
+        },
         "missing_concepts": None,
     }
     route.update(changes)
@@ -79,11 +81,6 @@ def _parse_routing(result: LLMResult, _cleanup: list[dict[str, Any]]) -> Any:
 
 _DROPPED = [
     {
-        "path": "/routes/0/controller_ids",
-        "branch": "targeted",
-        "reason": "null_to_default",
-    },
-    {
         "path": "/routes/0/missing_concepts",
         "branch": "targeted",
         "reason": "foreign_value",
@@ -92,7 +89,7 @@ _DROPPED = [
 
 
 def test_a_successful_call_records_its_drops(tmp_path: Path) -> None:
-    route = _flat_route(controller_ids=None, missing_concepts=[])
+    route = _flat_route(missing_concepts=[])
     outcome = _call(tmp_path, route)
 
     assert outcome.error is None
@@ -103,7 +100,7 @@ def test_a_successful_call_records_its_drops(tmp_path: Path) -> None:
 
 
 def test_a_stage_parser_call_records_its_drops(tmp_path: Path) -> None:
-    route = _flat_route(controller_ids=None, missing_concepts=[])
+    route = _flat_route(missing_concepts=[])
     outcome = _call(tmp_path, route, response_parser=_parse_routing)
 
     assert outcome.error is None
@@ -114,14 +111,14 @@ def test_a_stage_parser_call_records_its_drops(tmp_path: Path) -> None:
 def test_a_failed_call_records_the_drops_made_before_it_failed(
     tmp_path: Path,
 ) -> None:
-    outcome = _call(tmp_path, _flat_route(slot_ids=None, missing_concepts=["x"]))
+    outcome = _call(tmp_path, _flat_route(targeting=None, missing_concepts=["x"]))
 
     assert outcome.value is None
     [entry] = read_calls_jsonl(tmp_path)
     assert entry["success"] is False
     assert entry["flat_restore_drops"] == [
         {
-            "path": "/routes/0/slot_ids",
+            "path": "/routes/0/targeting",
             "branch": "targeted",
             "reason": "null_to_default",
         },

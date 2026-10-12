@@ -18,7 +18,12 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
-from tests.helpers.obligation_aware import _control_structure, _controls, _loss_analysis
+from tests.helpers.obligation_aware import (
+    _control_structure,
+    _controls,
+    _loss_analysis,
+    provider_route_payload,
+)
 
 
 def _routing_answer(obligation_id: str) -> dict:
@@ -48,7 +53,7 @@ def _routing_answer(obligation_id: str) -> dict:
         },
     )
     route["semantic_assessment"].pop("mapping_strength", None)
-    return {"routes": [route]}
+    return {"routes": [provider_route_payload(route)]}
 
 
 class _VerifierClient:

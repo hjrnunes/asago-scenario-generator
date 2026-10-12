@@ -108,6 +108,7 @@ from tests.helpers.obligation_aware import (
     _loss_analysis,
     _provider_slot_request,
     _routed_slot_draft,
+    provider_route_payload,
     provider_slot_payload,
     route_assessment,
 )
@@ -605,7 +606,7 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
                     },
                 )
                 provider_route["semantic_assessment"].pop("mapping_strength", None)
-                content = {"routes": [provider_route]}
+                content = {"routes": [provider_route_payload(provider_route)]}
             else:
                 content = {
                     "verdicts": [
