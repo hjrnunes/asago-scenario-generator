@@ -341,9 +341,9 @@ def restore_flat_reply(value: Any, schema: Mapping[str, Any]) -> Any:
     """Return ``value`` with each flat union restored to its selected branch.
 
     ``schema`` is the original (unflattened) schema.  At each discriminated
-    union, the keys whose value is null and that the selected branch does not
-    define are dropped.  Everything else is kept, so a non-null value outside
-    the branch still fails validation.  ``value`` is not modified.
+    union, only the keys the selected branch defines are kept: every other
+    key is dropped, whether its value is null or not.  ``value`` is not
+    modified.
     """
     return _Restorer(schema.get("$defs", {})).value(value, schema)
 
@@ -398,7 +398,7 @@ class _Restorer:
             return value
         if "discriminator" in node:
             defined = _deref(branch, self._defs).get("properties", {})
-            value = {k: v for k, v in value.items() if v is not None or k in defined}
+            value = {k: v for k, v in value.items() if k in defined}
         return self.value(value, branch)
 
     def _object(self, value: dict[str, Any], node: Mapping[str, Any]) -> dict:

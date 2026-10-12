@@ -123,16 +123,36 @@ def test_restore_drops_only_null_keys_the_selected_branch_lacks() -> None:
     assert reply == original
 
 
-def test_restore_keeps_a_non_null_foreign_value_and_an_unknown_branch() -> None:
+def test_restore_drops_a_non_null_value_the_selected_branch_lacks() -> None:
     reply = {
         "items": [
-            {"kind": "a", "n": 1, "s": "kept"},
-            {"kind": "c", "n": None},
-            {"n": None},
+            {"kind": "a", "n": 1, "s": "foreign"},
+            {"kind": "b", "n": 7, "opt": "foreign", "s": "x"},
+        ],
+        "maybe": {"kind": "b", "n": 3, "s": "y"},
+        "rows": [{"inner": {"kind": "a", "n": 2, "s": "foreign"}}],
+    }
+    assert restore_flat_reply(reply, _SCHEMA) == {
+        "items": [{"kind": "a", "n": 1}, {"kind": "b", "s": "x"}],
+        "maybe": {"kind": "b", "s": "y"},
+        "rows": [{"inner": {"kind": "a", "n": 2}}],
+    }
+
+
+def test_restore_keeps_an_unknown_branch_and_a_missing_discriminator() -> None:
+    reply = {
+        "items": [
+            {"kind": "c", "n": None, "s": "kept"},
+            {"n": None, "s": "kept"},
             "not an object",
         ],
         "maybe": None,
     }
+    assert restore_flat_reply(reply, _SCHEMA) == reply
+
+
+def test_restore_leaves_keys_outside_a_union_alone() -> None:
+    reply = {"rows": [{"inner": {"kind": "b", "s": "x"}, "extra": None}], "more": 1}
     assert restore_flat_reply(reply, _SCHEMA) == reply
 
 
@@ -490,7 +510,49 @@ def test_a_flat_reply_needs_the_restore(name: str) -> None:
         model.model_validate(_flat_case(model, reply))
 
 
-def test_a_null_in_a_field_the_branch_defines_still_fails() -> None:
+_COND = "unsafe_outcome__discriminating_condition"
+_FACTOR = "causal_factors__0"
+
+# Each case fills fields its selected branch does not define with values.
+_FOREIGN_VALUES = {
+    "stage5-factor-reachable": {f"{_FACTOR}__bounded_assumption": "It may."},
+    "stage5-temporal-window": {
+        f"{_FACTOR}__temporal_condition__relation": "before",
+        f"{_FACTOR}__temporal_condition__delay_ms": 500,
+    },
+    "stage5-comparison-operands": {
+        f"{_COND}__comparisons__0__left__path": "TARGET-STATE.x",
+        f"{_COND}__comparisons__0__right__operation": "refund",
+        f"{_COND}__comparisons__0__requires_prior": "verify",
+    },
+    "stage5-record-unavailable": {
+        f"{_COND}__record_selection__record_path": "TARGET-STATE.orders.O-1",
+        f"{_COND}__record_selection__argument_values": [],
+    },
+    "routing-unresolved": {
+        "routes__0__slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
+        "routes__0__missing_concepts": [],
+    },
+    "routing-targeted": {"routes__0__missing_concepts": []},
+}
+
+
+@pytest.mark.parametrize("name", list(_FOREIGN_VALUES))
+def test_a_value_outside_the_selected_branch_is_dropped_before_validation(
+    name: str,
+) -> None:
+    _, model, reply = next(c for c in _CASES if c[0] == name)
+    flat = _flat_case(model, reply)
+    for path, value in _FOREIGN_VALUES[name].items():
+        _set(flat, path.split("__"), value)
+    with pytest.raises(ValidationError, match="extra_forbidden"):
+        model.model_validate(flat)
+    assert model.model_validate(restore_flat_reply_for(model, flat)) == (
+        model.model_validate(reply)
+    )
+
+
+def test_a_required_field_of_the_branch_set_to_null_still_fails() -> None:
     reply = _route(
         "targeted", slot_ids=None, hazard_ids=["H-1"], constraint_ids=["SC-1"]
     )
