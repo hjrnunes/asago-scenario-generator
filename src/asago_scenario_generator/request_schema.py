@@ -20,6 +20,7 @@ from pydantic import BaseModel
 from asago_scenario_generator.schema_unions import (
     find_unions,
     flat_reply,
+    flat_restore_drops,
     flatten_unions,
     restore_flat_reply_for,
     restores_flat_replies,
@@ -199,6 +200,7 @@ def _pattern_rejects_empty(pattern: str) -> bool:
 __all__ = [
     "flat_example_for",
     "find_unions",
+    "flat_restore_drops",
     "portable_request_schema",
     "restore_flat_reply_for",
     "restores_flat_replies",
