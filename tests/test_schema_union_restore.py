@@ -24,6 +24,7 @@ from asago_scenario_generator.request_schema import (
     restore_flat_reply_for,
 )
 from asago_scenario_generator.schema_unions import (
+    find_unions,
     flat_restore_drops,
     restore_flat_reply,
 )
@@ -690,6 +691,20 @@ def test_a_required_field_of_the_branch_set_to_null_still_fails() -> None:
     )
     with pytest.raises(ValidationError, match="slot_ids"):
         _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, reply))
+
+
+def test_the_stage_2_union_branches_share_their_fields() -> None:
+    schema = _ControlElementProviderSet.model_json_schema()
+    (pointer,) = find_unions(schema)
+    assert pointer == "/properties/control_actions/items"
+    union = schema["properties"]["control_actions"]["items"]
+    assert "discriminator" not in union
+    fields = [
+        set(schema["$defs"][option["$ref"].rsplit("/", 1)[-1]]["properties"])
+        for option in union["anyOf"]
+    ]
+    assert len(fields) == 2
+    assert fields[0] == fields[1]
 
 
 def test_a_type_without_a_discriminated_union_is_left_alone() -> None:
