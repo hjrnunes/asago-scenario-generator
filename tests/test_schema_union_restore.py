@@ -176,6 +176,8 @@ _NULLABLE_FORMS = {
                 "const_null": {"const": None},
                 "ref_to_nullable": {"$ref": "#/$defs/Maybe"},
                 "nullable_ref": {"anyOf": [{"$ref": "#/$defs/Plain"}, _NULL]},
+                "untyped": {},
+                "boolean_schema": True,
             },
         },
         "Y": {"type": "object", "properties": {"kind": {"const": "y"}}},
@@ -194,7 +196,7 @@ def test_restore_drops_a_null_the_branch_field_rejects_and_keeps_the_others() ->
     nulls = dict.fromkeys(_NULLABLE_FORMS["$defs"]["X"]["properties"])
     reply = {"top": {**nulls, "kind": "x"}}
     kept = ["any_of_null", "type_list", "enum_null", "const_null"]
-    kept += ["ref_to_nullable", "nullable_ref"]
+    kept += ["ref_to_nullable", "nullable_ref", "untyped", "boolean_schema"]
     assert restore_flat_reply(reply, _NULLABLE_FORMS) == {
         "top": {"kind": "x", **dict.fromkeys(kept)}
     }
