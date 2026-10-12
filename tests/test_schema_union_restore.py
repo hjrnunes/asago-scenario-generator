@@ -3,8 +3,10 @@
 The request carries every union as one flat object, so a reply lists every
 property and sets the ones its branch does not use to null.  Before the
 reply is validated against its response type, each discriminated union
-position drops the null keys the selected branch does not define.  Nothing
-else changes: a non-null value outside the branch still fails validation.
+position keeps only the keys the selected branch defines and drops a null
+that one of the branch's own fields rejects, so the field's default applies.
+Each drop that is not a foreign null is recorded with its path, branch, and
+reason.
 """
 
 from __future__ import annotations
@@ -21,7 +23,10 @@ from asago_scenario_generator.request_schema import (
     flat_example_for,
     restore_flat_reply_for,
 )
-from asago_scenario_generator.schema_unions import restore_flat_reply
+from asago_scenario_generator.schema_unions import (
+    flat_restore_drops,
+    restore_flat_reply,
+)
 from asago_scenario_generator.stpa.infra.llm import (
     LLMResult,
     _json_schema_response_format,
@@ -205,6 +210,35 @@ def test_restore_drops_a_null_in_every_union_position() -> None:
         "items": [{"kind": "a", "opt": "x"}],
         "rows": [{"inner": {"kind": "a", "opt": None}}],
     }
+
+
+def test_restore_records_each_drop_by_path_branch_and_reason() -> None:
+    reply = {
+        "items": [
+            {"kind": "a", "n": None, "opt": None, "s": "foreign", "a/b~c": 1},
+            {"kind": "b", "n": None, "s": "x"},
+        ],
+        "maybe": {"kind": "b", "s": None, "n": 3},
+        "rows": [{"inner": {"kind": "a", "n": None, "s": None}}],
+    }
+    drops: list[dict[str, str]] = []
+    restored = restore_flat_reply(reply, _SCHEMA, drops)
+    assert drops == [
+        {"path": "/items/0/n", "branch": "a", "reason": "null_to_default"},
+        {"path": "/items/0/s", "branch": "a", "reason": "foreign_value"},
+        {"path": "/items/0/a~1b~0c", "branch": "a", "reason": "foreign_value"},
+        {"path": "/maybe/s", "branch": "b", "reason": "null_to_default"},
+        {"path": "/maybe/n", "branch": "b", "reason": "foreign_value"},
+        {"path": "/rows/0/inner/n", "branch": "a", "reason": "null_to_default"},
+    ]
+    assert restored == restore_flat_reply(reply, _SCHEMA)
+
+
+def test_restore_records_no_drop_for_a_reply_in_flat_form() -> None:
+    reply = {"items": [{"kind": "a", "n": 1, "opt": None, "s": None}]}
+    drops: list[dict[str, str]] = []
+    restore_flat_reply(reply, _SCHEMA, drops)
+    assert drops == []
 
 
 def test_restore_leaves_keys_outside_a_union_alone() -> None:
@@ -618,6 +652,36 @@ def test_a_null_in_an_optional_field_of_the_branch_takes_its_default() -> None:
         _ROUTING.model_validate(flat)
     restored = _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, flat))
     assert restored == _ROUTING.model_validate(_ROUTING_REPLIES["targeted"])
+
+
+def test_the_drops_of_a_production_reply_name_the_selected_branch() -> None:
+    flat = _flat_case(_ROUTING, _ROUTING_REPLIES["targeted"])
+    route = flat["routes"][0]
+    route["controller_ids"] = None
+    route["missing_concepts"] = []
+    drops = flat_restore_drops(_ROUTING, flat)
+    assert drops == [
+        {
+            "path": "/routes/0/controller_ids",
+            "branch": "targeted",
+            "reason": "null_to_default",
+        },
+        {
+            "path": "/routes/0/missing_concepts",
+            "branch": "targeted",
+            "reason": "foreign_value",
+        },
+    ]
+    appended: list[dict[str, str]] = []
+    restore_flat_reply_for(_ROUTING, flat, appended)
+    assert appended == drops
+
+
+def test_a_reply_with_nothing_to_drop_and_a_type_without_unions_record_none() -> None:
+    flat = _flat_case(_ROUTING, _ROUTING_REPLIES["targeted"])
+    assert flat_restore_drops(_ROUTING, flat) == []
+    assert flat_restore_drops(_ControlElementProviderSet, _STAGE2_REPLY) == []
+    assert flat_restore_drops(_ROUTING, "not an object") == []
 
 
 def test_a_required_field_of_the_branch_set_to_null_still_fails() -> None:
