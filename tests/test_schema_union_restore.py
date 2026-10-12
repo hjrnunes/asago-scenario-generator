@@ -151,6 +151,62 @@ def test_restore_keeps_an_unknown_branch_and_a_missing_discriminator() -> None:
     assert restore_flat_reply(reply, _SCHEMA) == reply
 
 
+_NULLABLE_FORMS = {
+    "type": "object",
+    "properties": {"top": {"$ref": "#/$defs/X"}},
+    "$defs": {
+        "Maybe": {"anyOf": [{"type": "string"}, _NULL]},
+        "Plain": {"type": "object", "properties": {"v": {"type": "string"}}},
+        "X": {
+            "type": "object",
+            "properties": {
+                "kind": {"const": "x"},
+                "plain_integer": {"type": "integer"},
+                "plain_object": {"$ref": "#/$defs/Plain"},
+                "plain_enum": {"enum": ["p", "q"]},
+                "any_of_null": {"anyOf": [{"type": "string"}, _NULL]},
+                "type_list": {"type": ["string", "null"]},
+                "enum_null": {"enum": ["p", None]},
+                "const_null": {"const": None},
+                "ref_to_nullable": {"$ref": "#/$defs/Maybe"},
+                "nullable_ref": {"anyOf": [{"$ref": "#/$defs/Plain"}, _NULL]},
+            },
+        },
+        "Y": {"type": "object", "properties": {"kind": {"const": "y"}}},
+    },
+}
+_NULLABLE_FORMS["properties"]["top"] = {
+    "oneOf": [{"$ref": "#/$defs/X"}, {"$ref": "#/$defs/Y"}],
+    "discriminator": {
+        "propertyName": "kind",
+        "mapping": {"x": "#/$defs/X", "y": "#/$defs/Y"},
+    },
+}
+
+
+def test_restore_drops_a_null_the_branch_field_rejects_and_keeps_the_others() -> None:
+    nulls = dict.fromkeys(_NULLABLE_FORMS["$defs"]["X"]["properties"])
+    reply = {"top": {**nulls, "kind": "x"}}
+    kept = ["any_of_null", "type_list", "enum_null", "const_null"]
+    kept += ["ref_to_nullable", "nullable_ref"]
+    assert restore_flat_reply(reply, _NULLABLE_FORMS) == {
+        "top": {"kind": "x", **dict.fromkeys(kept)}
+    }
+
+
+def test_restore_drops_a_null_in_every_union_position() -> None:
+    reply = {
+        "maybe": {"kind": "a", "n": None, "opt": None},
+        "items": [{"kind": "a", "n": None, "opt": "x"}],
+        "rows": [{"inner": {"kind": "a", "n": None, "opt": None}}],
+    }
+    assert restore_flat_reply(reply, _SCHEMA) == {
+        "maybe": {"kind": "a", "opt": None},
+        "items": [{"kind": "a", "opt": "x"}],
+        "rows": [{"inner": {"kind": "a", "opt": None}}],
+    }
+
+
 def test_restore_leaves_keys_outside_a_union_alone() -> None:
     reply = {"rows": [{"inner": {"kind": "b", "s": "x"}, "extra": None}], "more": 1}
     assert restore_flat_reply(reply, _SCHEMA) == reply
@@ -550,6 +606,18 @@ def test_a_value_outside_the_selected_branch_is_dropped_before_validation(
     assert model.model_validate(restore_flat_reply_for(model, flat)) == (
         model.model_validate(reply)
     )
+
+
+def test_a_null_in_an_optional_field_of_the_branch_takes_its_default() -> None:
+    flat = _flat_case(_ROUTING, _ROUTING_REPLIES["targeted"])
+    route = flat["routes"][0]
+    assert route["controller_ids"] == []
+    for name in _TARGETED_IDS:
+        route[name] = None
+    with pytest.raises(ValidationError, match="tuple_type"):
+        _ROUTING.model_validate(flat)
+    restored = _ROUTING.model_validate(restore_flat_reply_for(_ROUTING, flat))
+    assert restored == _ROUTING.model_validate(_ROUTING_REPLIES["targeted"])
 
 
 def test_a_required_field_of_the_branch_set_to_null_still_fails() -> None:

@@ -342,8 +342,11 @@ def restore_flat_reply(value: Any, schema: Mapping[str, Any]) -> Any:
 
     ``schema`` is the original (unflattened) schema.  At each discriminated
     union, only the keys the selected branch defines are kept: every other
-    key is dropped, whether its value is null or not.  ``value`` is not
-    modified.
+    key is dropped, whether its value is null or not.  A key the branch
+    defines whose value is null is dropped too when the branch's schema for
+    that key does not accept null, so the field's default applies; a required
+    field without a default then fails validation as a missing field.  Nulls
+    outside a union position stay.  ``value`` is not modified.
     """
     return _Restorer(schema.get("$defs", {})).value(value, schema)
 
@@ -397,9 +400,19 @@ class _Restorer:
         if branch is None:
             return value
         if "discriminator" in node:
-            defined = _deref(branch, self._defs).get("properties", {})
-            value = {k: v for k, v in value.items() if k in defined}
+            value = self._within_branch(value, branch)
         return self.value(value, branch)
+
+    def _within_branch(self, value: dict[str, Any], branch: Any) -> dict[str, Any]:
+        properties = _deref(branch, self._defs).get("properties", {})
+        return {
+            key: item
+            for key, item in value.items()
+            if key in properties and not self._rejected_null(item, properties[key])
+        }
+
+    def _rejected_null(self, item: Any, schema: Any) -> bool:
+        return item is None and not _accepts_null(schema, self._defs)
 
     def _object(self, value: dict[str, Any], node: Mapping[str, Any]) -> dict:
         properties = node.get("properties", {})
@@ -426,6 +439,28 @@ def _selected_branch(value: Any, node: Mapping[str, Any], options: list) -> Any:
         return _mapped_branch(value, discriminator)
     rest = [o for o in options if o != _NULL]
     return rest[0] if len(rest) == 1 else None
+
+
+def _accepts_null(schema: Any, defs: Mapping[str, Any]) -> bool:
+    """Whether ``schema`` allows null; a schema it cannot read counts as allowing it."""
+    schema = _deref(schema, defs)
+    if not isinstance(schema, Mapping):
+        return True
+    for key in ("anyOf", "oneOf"):
+        if isinstance(schema.get(key), list):
+            return any(_accepts_null(option, defs) for option in schema[key])
+    return _literal_accepts_null(schema)
+
+
+def _literal_accepts_null(schema: Mapping[str, Any]) -> bool:
+    if "const" in schema:
+        return schema["const"] is None
+    if "enum" in schema:
+        return None in schema["enum"]
+    kind = schema.get("type")
+    if kind is None:
+        return True
+    return kind == "null" or (isinstance(kind, list) and "null" in kind)
 
 
 def _mapped_branch(value: Any, discriminator: Mapping[str, Any]) -> Any:
