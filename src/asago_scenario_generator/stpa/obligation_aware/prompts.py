@@ -77,6 +77,7 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlacehol
 
 PROMPT_TEMPLATES_DIR = Path(__file__).with_name("prompt_templates")
 _TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
+_QUESTION_PROSE = "prose/obligation_question.j2"
 
 # The repository preflight rejects a view field with an entry of the first list
 # as one of its snake_case words (a plural ``s`` included) and a field equal to
@@ -103,24 +104,17 @@ _STRUCTURAL_REFERENCE_TOKEN = re.compile(
     r"\b(?:RESP|CA|FB|CP|PM|RC|SC|H|L|REQ|CL|CM)-[A-Za-z0-9][A-Za-z0-9_.:-]*\b"
 )
 
-_MAPPING_STRENGTH_MEANINGS = {
-    "direct_curated_pair": (
-        "The reviewed risk was linked directly to this attack pattern. This is "
-        "discovery evidence, not proof that the mechanism exists in this system."
-    ),
-    "exact_then_category_expansion": (
-        "The risk first matched an equivalent taxonomy concept, then expanded "
-        "through a broader category to this pattern. Judge this pair explicitly."
-    ),
-    "broad_category_expansion": (
-        "The risk reached this pattern through a broader taxonomy category. Shared "
-        "category membership does not establish risk alignment."
-    ),
-    "related_category_expansion": (
-        "The risk reached this pattern through a related taxonomy concept and a "
-        "broader category. Treat the pairing as a discovery hypothesis only."
-    ),
-}
+
+def render_prose(template: str, section: str, **context: object) -> str:
+    """Render one named section of a prose template as a single field value.
+
+    Each section is one unwrapped line without a trailing newline, so the
+    result is the exact text a view field carries into the prompt.
+    """
+    text = _TEMPLATE_LOADER.render_prompt(template, section=section, **context)
+    if not text:
+        raise ValueError(f"{template} has no section {section!r}")
+    return text
 
 
 def obligation_prompt_template_hashes() -> dict[str, str]:
@@ -343,10 +337,8 @@ def _fact_views(
                     name=_plain_fact_name(fact),
                     value=value,
                     status=fact_evidence.status,
-                    meaning=(
-                        f"Qualification reading for {evaluation.step_id}; use the "
-                        "status as evidence about applicability, not as proof of a "
-                        "system-specific control mechanism."
+                    meaning=render_prose(
+                        _QUESTION_PROSE, "fact_meaning", step_id=evaluation.step_id
                     ),
                 )
                 if fact_evidence.status in {"unknown", "contradictory", "absent"}:
@@ -408,14 +400,10 @@ def project_obligation_question(
             ProviderSystemResource(
                 resource_id=resource_id,
                 resource_type=kind,
-                description=(
-                    f"Known {kind} resource from the supplied system snapshot; "
-                    "no mechanism or reachability is implied by this reference."
+                description=render_prose(
+                    _QUESTION_PROSE, "resource_description", kind=kind
                 ),
-                relevance=(
-                    "Contextual evidence only. Select it only when the supplied "
-                    "STPA control path independently makes it relevant."
-                ),
+                relevance=render_prose(_QUESTION_PROSE, "resource_relevance"),
             )
         )
     risk = brief.risk_ref
@@ -435,26 +423,23 @@ def project_obligation_question(
             impact=risk.impact,
         ),
         applicability=ProviderApplicability(
-            conclusion=(
-                "The reviewed obligation is qualified for consideration; "
-                f"qualification status is {brief.qualification_disposition}."
+            conclusion=render_prose(
+                _QUESTION_PROSE,
+                "conclusion_pattern",
+                disposition=brief.qualification_disposition,
             ),
             relevant_facts=relevant_facts,
             missing_or_conflicting_facts=missing_facts,
         ),
         mapping_strength=ProviderMappingStrength(
             label=mapping_strength,
-            meaning=_MAPPING_STRENGTH_MEANINGS[mapping_strength],
+            meaning=render_prose(_QUESTION_PROSE, f"mapping_{mapping_strength}"),
         ),
         known_system_resources=tuple(
             sorted(resources, key=lambda item: item.resource_id)
         ),
-        analyst_instruction=(
-            "The obligation_handle is an opaque handle: copy unchanged and do "
-            "not interpret its syntax. Treat the known concern as a hypothesis. "
-            "Find a system-specific STPA control path or explicitly reject it; "
-            "the reviewed risk and resource references are context, not proof, "
-            "and do not prescribe an attack sequence or coverage."
+        analyst_instruction=render_prose(
+            _QUESTION_PROSE, "analyst_instruction_pattern"
         ),
     )
 
@@ -479,19 +464,16 @@ def project_governance_question(
             impact=risk.impact,
         ),
         applicability=ProviderApplicability(
-            conclusion=(
-                "The reviewed risk is qualified for consideration; "
-                f"qualification status is {brief.qualification_disposition}."
+            conclusion=render_prose(
+                _QUESTION_PROSE,
+                "conclusion_governance",
+                disposition=brief.qualification_disposition,
             ),
             relevant_facts=relevant_facts,
             missing_or_conflicting_facts=missing_facts,
         ),
-        analyst_instruction=(
-            "The obligation_handle is an opaque handle: copy unchanged and do "
-            "not interpret its syntax. Treat the reviewed risk as a hypothesis. "
-            "No attack pattern covers it; find a system-specific unsafe control "
-            "action through which it could come about, or report that none does. "
-            "Do not prescribe an attack sequence or coverage."
+        analyst_instruction=render_prose(
+            _QUESTION_PROSE, "analyst_instruction_governance"
         ),
     )
 

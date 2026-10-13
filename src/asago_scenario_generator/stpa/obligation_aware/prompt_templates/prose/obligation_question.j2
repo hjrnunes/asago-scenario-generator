@@ -1,0 +1,24 @@
+{#- Instruction prose of the typed obligation question, one section per field. Each section is one unwrapped line, so the rendered field has no line break. -#}
+{%- if section == "analyst_instruction_pattern" -%}
+The obligation_handle is an opaque handle: copy unchanged and do not interpret its syntax. Treat the known concern as a hypothesis. Find a system-specific STPA control path or explicitly reject it; the reviewed risk and resource references are context, not proof, and do not prescribe an attack sequence or coverage.
+{%- elif section == "analyst_instruction_governance" -%}
+The obligation_handle is an opaque handle: copy unchanged and do not interpret its syntax. Treat the reviewed risk as a hypothesis. No attack pattern covers it; find a system-specific unsafe control action through which it could come about, or report that none does. Do not prescribe an attack sequence or coverage.
+{%- elif section == "resource_description" -%}
+Known {{ kind }} resource from the supplied system snapshot; no mechanism or reachability is implied by this reference.
+{%- elif section == "resource_relevance" -%}
+Contextual evidence only. Select it only when the supplied STPA control path independently makes it relevant.
+{%- elif section == "fact_meaning" -%}
+Qualification reading for {{ step_id }}; use the status as evidence about applicability, not as proof of a system-specific control mechanism.
+{%- elif section == "conclusion_pattern" -%}
+The reviewed obligation is qualified for consideration; qualification status is {{ disposition }}.
+{%- elif section == "conclusion_governance" -%}
+The reviewed risk is qualified for consideration; qualification status is {{ disposition }}.
+{%- elif section == "mapping_direct_curated_pair" -%}
+The reviewed risk was linked directly to this attack pattern. This is discovery evidence, not proof that the mechanism exists in this system.
+{%- elif section == "mapping_exact_then_category_expansion" -%}
+The risk first matched an equivalent taxonomy concept, then expanded through a broader category to this pattern. Judge this pair explicitly.
+{%- elif section == "mapping_broad_category_expansion" -%}
+The risk reached this pattern through a broader taxonomy category. Shared category membership does not establish risk alignment.
+{%- elif section == "mapping_related_category_expansion" -%}
+The risk reached this pattern through a related taxonomy concept and a broader category. Treat the pairing as a discovery hypothesis only.
+{%- endif -%}
