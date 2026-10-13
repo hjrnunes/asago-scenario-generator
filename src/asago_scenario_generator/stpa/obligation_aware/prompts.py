@@ -79,6 +79,7 @@ PROMPT_TEMPLATES_DIR = Path(__file__).with_name("prompt_templates")
 _TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
 _QUESTION_PROSE = "prose/obligation_question.j2"
 _ROUTING_PROSE = "prose/routing.j2"
+_REVISION_PROSE = "prose/revision.j2"
 
 # The repository preflight rejects a view field with an entry of the first list
 # as one of its snake_case words (a plural ``s`` included) and a field equal to
@@ -1159,10 +1160,7 @@ def project_revision_context(
                 trigger_obligation_handle=gap.obligation_id
                 or "unattributed-obligation",
                 plain_description=gap.description,
-                why_the_concept_is_needed=(
-                    "The supplied evidence says this concept is needed before "
-                    "STPA can decide how the obligation relates to the system."
-                ),
+                why_the_concept_is_needed=render_prose(_REVISION_PROSE, "gap_need"),
                 expected_concept_kind=gap.concept_type,
                 related_existing_context=_revision_related_context(
                     gap,
@@ -1177,14 +1175,7 @@ def project_revision_context(
             control_structure,
             loss_analysis=loss_analysis,
         ),
-        instructions=(
-            "For every gap_handle choose exactly one disposition: "
-            "propose_addition, dismiss_unsupported, or unresolved. "
-            "Copy each gap_handle unchanged. Additions may reference supplied "
-            "existing IDs or declared request-local handles only. Do not invent "
-            "final STPA IDs; the compiler allocates them. The complete delta is "
-            "validated and applied atomically as one bounded round."
-        ),
+        instructions=render_prose(_REVISION_PROSE, "instructions"),
     )
 
 

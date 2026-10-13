@@ -1,0 +1,6 @@
+{#- Instruction prose of the structural-revision view, one section per field. Each section is one unwrapped line, so the rendered field has no line break. -#}
+{%- if section == "instructions" -%}
+For every gap_handle choose exactly one disposition: propose_addition, dismiss_unsupported, or unresolved. Copy each gap_handle unchanged. Additions may reference supplied existing IDs or declared request-local handles only. Do not invent final STPA IDs; the compiler allocates them. The complete delta is validated and applied atomically as one bounded round.
+{%- elif section == "gap_need" -%}
+The supplied evidence says this concept is needed before STPA can decide how the obligation relates to the system.
+{%- endif -%}
