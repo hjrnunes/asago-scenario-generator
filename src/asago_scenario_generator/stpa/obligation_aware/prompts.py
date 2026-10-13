@@ -1664,4 +1664,5 @@ __all__ = [
     "project_revision_context",
     "obligation_prompt_template_hashes",
     "mapping_strength_for_brief",
+    "render_prose",
 ]

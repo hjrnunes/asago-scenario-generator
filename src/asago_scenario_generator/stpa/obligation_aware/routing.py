@@ -50,6 +50,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     authoritative_hazard_constraint_pairs,
     build_structural_routing_prompts,
     mapping_strength_for_brief,
+    render_prose,
 )
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
     StpaIndex,
@@ -65,6 +66,7 @@ ROUTING_RESPONSE_DIGEST_DOMAIN = (
     "asago-scenario-generator:stpa-obligation-routing-response:v1"
 )
 _ROUTING_RETRY_ERROR_MAX_CHARS = 1024
+_ROUTING_RETRY_PROSE = "prose/routing_retry.j2"
 _ROUTING_MAX_COMPLETION_TOKENS = 8192
 
 
@@ -540,50 +542,30 @@ def _routing_validation_feedback(error: BaseException) -> str:
     detail = " ".join(str(error).replace("\r", " ").replace("\n", " ").split())
     if len(detail) > _ROUTING_RETRY_ERROR_MAX_CHARS:
         detail = detail[:_ROUTING_RETRY_ERROR_MAX_CHARS].rstrip() + "..."
-    lowered = detail.lower()
+    return render_prose(
+        _ROUTING_RETRY_PROSE,
+        "feedback",
+        repair=render_prose(_ROUTING_RETRY_PROSE, _repair_section(detail.lower())),
+        error_type=type(error).__name__,
+        detail=detail,
+    )
+
+
+def _repair_section(lowered_detail: str) -> str:
+    """Name the retry correction that fits the lower-cased validation error."""
     if any(
-        marker in lowered
+        marker in lowered_detail
         for marker in (
             "opaque obligation identity mismatch",
             "unexpected obligation id",
         )
     ):
-        repair = (
-            "Repair code copied_opaque_identity_mismatch: copy every supplied "
-            "obligation_id byte-for-byte, including its final character; do not "
-            "normalize, regenerate, or substitute an opaque handle."
-        )
-    elif "rationale" in lowered:
-        repair = (
-            "Repair code missing_route_rationale: every route branch must contain "
-            "a non-empty string rationale explaining the selected disposition. "
-            'For example: {"disposition":"unresolved","rationale":"the '
-            'required system path is not supplied","evidence":["evidence '
-            'is insufficient"]}.'
-        )
-    elif "disposition" in lowered:
-        repair = (
-            "Repair code missing_route_disposition: include the required literal "
-            "disposition on every route (targeted, proposed_not_applicable, "
-            "upstream_gap, or unresolved)."
-        )
-    else:
-        repair = (
-            "Use the disposition-specific route shape: targeted requires a "
-            "non-empty slot_ids, hazard_ids, constraint_ids, rationale, and "
-            "evidence; upstream_gap requires non-empty missing_concepts, "
-            "rationale, and evidence; other branches require rationale and "
-            "evidence without fabricated structural placement."
-        )
-    return (
-        "The previous response failed local validation. Correct only the invalid "
-        f"fields. {repair} The exact local validation error was: "
-        f"{type(error).__name__}: {detail}. "
-        "Use only the exact typed hazard/constraint pair(s) named by this error; "
-        "do not infer pairings from descriptions. "
-        "Return exactly one route for every supplied obligation ID and preserve "
-        "exact STPA identities."
-    )
+        return "repair_opaque_identity"
+    if "rationale" in lowered_detail:
+        return "repair_rationale"
+    if "disposition" in lowered_detail:
+        return "repair_disposition"
+    return "repair_route_shape"
 
 
 def _typed_response(raw: Any) -> StructuralRoutingResponse:

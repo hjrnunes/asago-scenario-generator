@@ -1,0 +1,12 @@
+{#- Correction text appended to a structural-routing retry, one section per branch. Each section is one unwrapped line, so the rendered text has no line break. -#}
+{%- if section == "repair_opaque_identity" -%}
+Repair code copied_opaque_identity_mismatch: copy every supplied obligation_id byte-for-byte, including its final character; do not normalize, regenerate, or substitute an opaque handle.
+{%- elif section == "repair_rationale" -%}
+Repair code missing_route_rationale: every route branch must contain a non-empty string rationale explaining the selected disposition. For example: {"disposition":"unresolved","rationale":"the required system path is not supplied","evidence":["evidence is insufficient"]}.
+{%- elif section == "repair_disposition" -%}
+Repair code missing_route_disposition: include the required literal disposition on every route (targeted, proposed_not_applicable, upstream_gap, or unresolved).
+{%- elif section == "repair_route_shape" -%}
+Use the disposition-specific route shape: targeted requires a non-empty slot_ids, hazard_ids, constraint_ids, rationale, and evidence; upstream_gap requires non-empty missing_concepts, rationale, and evidence; other branches require rationale and evidence without fabricated structural placement.
+{%- elif section == "feedback" -%}
+The previous response failed local validation. Correct only the invalid fields. {{ repair }} The exact local validation error was: {{ error_type }}: {{ detail }}. Use only the exact typed hazard/constraint pair(s) named by this error; do not infer pairings from descriptions. Return exactly one route for every supplied obligation ID and preserve exact STPA identities.
+{%- endif -%}
