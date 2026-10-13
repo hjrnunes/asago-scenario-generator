@@ -23,7 +23,6 @@ if TYPE_CHECKING:
 MAX_CONDITION_DEPTH = 4
 MAX_CONDITION_NODES = 32
 MAX_CONDITION_OPERANDS = 16
-MAX_MEMBERSHIP_VALUES = 32
 MAX_PROPERTY_PATH_SEGMENTS = 4
 
 Digest = Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")]
@@ -154,52 +153,11 @@ class EqualityCondition(ContractModel):
         return self
 
 
-def _membership_values_unique(values: tuple[Scalar, ...]) -> bool:
-    """True when canonical membership values are pairwise distinct."""
-    return len({_canonical_json(v) for v in values}) == len(values)
-
-
-def _validate_membership_values(
-    fact: AuthoritativeFactReference, values: tuple[Scalar, ...]
-) -> None:
-    """Membership values must match the fact type and be unique."""
-    for value in values:
-        validate_fact_scalar(fact, value)
-    if not _membership_values_unique(values):
-        raise ValueError("membership values must be unique")
-
-
-class MembershipCondition(ContractModel):
-    op: Literal["membership"]
-    schema_version: Literal["1"]
-    fact: AuthoritativeFactReference
-    values: tuple[Scalar, ...] = Field(min_length=1, max_length=MAX_MEMBERSHIP_VALUES)
-
-    @model_validator(mode="after")
-    def unique_values(self) -> MembershipCondition:
-        _validate_membership_values(self.fact, self.values)
-        return self
-
-
 class ExistenceCondition(ContractModel):
     op: Literal["existence"]
     schema_version: Literal["1"]
     fact: AuthoritativeFactReference
     exists: StrictBool
-
-
-class PropertyMatchCondition(ContractModel):
-    op: Literal["property_match"]
-    schema_version: Literal["1"]
-    fact: AuthoritativeFactReference
-    value: Scalar
-
-    @model_validator(mode="after")
-    def matching_type_and_path(self) -> PropertyMatchCondition:
-        if not self.fact.property_path:
-            raise ValueError("property_match requires a nonempty property path")
-        validate_fact_scalar(self.fact, self.value)
-        return self
 
 
 class AllCondition(ContractModel):
@@ -240,13 +198,7 @@ class NotCondition(ContractModel):
 
 
 Condition: TypeAlias = Annotated[
-    EqualityCondition
-    | MembershipCondition
-    | ExistenceCondition
-    | PropertyMatchCondition
-    | AllCondition
-    | AnyCondition
-    | NotCondition,
+    EqualityCondition | ExistenceCondition | AllCondition | AnyCondition | NotCondition,
     Field(discriminator="op"),
 ]
 
@@ -578,17 +530,6 @@ def _not_verdict(
     return {"true": "false", "false": "true", "unknown": "unknown"}[result]
 
 
-def _present_verdict(
-    node: Condition, item: EvaluatedFactEvidence
-) -> Literal["true", "false"]:
-    """Verdict for a present fact against its leaf condition."""
-    if isinstance(node, MembershipCondition):
-        matches = item.value in node.values
-    else:
-        matches = item.value == node.value
-    return "true" if matches else "false"
-
-
 def _leaf_verdict(
     node: Condition, item: EvaluatedFactEvidence
 ) -> Literal["true", "false", "unknown"]:
@@ -600,7 +541,7 @@ def _leaf_verdict(
         return "true" if present == node.exists else "false"
     if item.status == "absent":
         return "false"
-    return _present_verdict(node, item)
+    return "true" if item.value == node.value else "false"
 
 
 def _evaluate_node(

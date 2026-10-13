@@ -779,35 +779,11 @@ def equality_variant() -> dict[str, Any]:
     }
 
 
-def test_membership_condition_value_branches() -> None:
-    """Membership values match the fact type and stay unique."""
-    adapter = TypeAdapter(Condition)
-    valid = adapter.validate_python(
-        {
-            "op": "membership",
-            "schema_version": "1",
-            "fact": fact(),
-            "values": ["active", "draining"],
-        }
-    )
-    assert valid.op == "membership"
-    with pytest.raises(ValidationError, match="membership values must be unique"):
-        adapter.validate_python(
-            {
-                "op": "membership",
-                "schema_version": "1",
-                "fact": fact(),
-                "values": ["active", "active"],
-            }
-        )
-    with pytest.raises(ValidationError, match="exactly match"):
-        adapter.validate_python(
-            {
-                "op": "membership",
-                "schema_version": "1",
-                "fact": fact(),
-                "values": [1, 2],
-            }
+@pytest.mark.parametrize("op", ["membership", "property_match"])
+def test_condition_kinds_without_a_catalog_user_are_rejected(op: str) -> None:
+    with pytest.raises(ValidationError, match="does not match any of the expected"):
+        TypeAdapter(Condition).validate_python(
+            {"op": op, "schema_version": "1", "fact": fact(), "value": "active"}
         )
 
 
