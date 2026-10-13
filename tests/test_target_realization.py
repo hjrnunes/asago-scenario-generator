@@ -2397,3 +2397,26 @@ def test_an_ica_without_a_cited_row_serializes_and_digests_as_before():
     text = realization.to_yaml()
     assert "context_row" not in text
     TargetRealizationResult.from_yaml(text).assert_integrity()
+
+
+def test_projection_carries_a_cited_context_row_into_the_stpa_ica():
+    slot = SystemicICASlot(
+        slot_id="RESP-1:CA-1-2:INCORRECT",
+        responsibility="RESP-1",
+        control_action="CA-1-2",
+        uca_type="INCORRECT",
+        is_na=False,
+        icas=(
+            SystemicICA(
+                ica_id="RESP-1:CA-1-2:INCORRECT:1",
+                ica_text="Derived unsafe action.",
+                hazardous_context="Derived context.",
+                loss_scenario="Derived loss scenario.",
+                context_row="CA-1-2:ROW-1",
+            ),
+        ),
+    )
+
+    projected = target_realization_module._ica_slot_to_stpa(slot)
+
+    assert projected.icas[0].context_row == "CA-1-2:ROW-1"

@@ -749,6 +749,7 @@ def _ica_slot_to_stpa(slot: SystemicICASlot) -> ICASlot:
                 loss_scenario=ica.loss_scenario,
                 related_hazards=list(ica.related_hazards),
                 related_constraints=list(ica.related_constraints),
+                context_row=ica.context_row,
                 quality_warnings=list(ica.quality_warnings),
             )
             for ica in slot.icas
