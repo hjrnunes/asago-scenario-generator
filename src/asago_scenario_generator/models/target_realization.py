@@ -388,6 +388,13 @@ class SystemicICA(ClosedCanonicalModel):
     loss_scenario: str = Field(min_length=1)
     related_hazards: tuple[str, ...] = ()
     related_constraints: tuple[str, ...] = ()
+    # Omitted from dumps when absent, so an ICA that cites no row keeps the
+    # bytes and the baseline digest it had before the field existed.
+    context_row: str | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description="Cited row of the control action's context table.",
+    )
     quality_warnings: tuple[str, ...] = ()
 
     @model_validator(mode="after")
