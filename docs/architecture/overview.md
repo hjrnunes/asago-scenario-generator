@@ -296,7 +296,7 @@ and a run without them keeps its manifest shape. The product `generate`
 persists and reports its diagnostic/accounting sidecars before returning
 non-zero for either `failed` status.
 
-Baseline assembly, heuristic, solution-neutrality and post-revision findings
+Baseline assembly, heuristic and post-revision findings
 are retained with their source category in synthesis `stage_warnings` and the
 report's Analysis diagnostics section. Later stage-manifest writes must not
 erase them. These diagnostics do not change candidate counts or claim that a

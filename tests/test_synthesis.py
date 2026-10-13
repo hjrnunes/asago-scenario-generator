@@ -317,9 +317,6 @@ def test_synthesis_retains_baseline_diagnostics_without_changing_yield(tmp_path)
         "stage_warnings": ["An <input> repair was required."],
         "heuristic_errors": ["A feedback connection remains missing."],
         "heuristic_warnings": ["A responsibility has no feedback."],
-        "solution_neutrality_warnings": [
-            "An implementation assumption needs evidence."
-        ],
         "post_revision_warnings": [
             "Revision made no structural changes; the explicit gaps remain unresolved."
         ],
