@@ -1,4 +1,4 @@
-"""Stage 5 provider wire models, the published BDI result, and source choices."""
+"""Stage 5 provider wire models, the declared causal factor, and source choices."""
 
 from __future__ import annotations
 
@@ -21,25 +21,12 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticCondition,
     SemanticValue,
-    normalize_semantic_proposition,
 )
 from asago_scenario_generator.stpa.observation_contract import (
-    ObservationAssessment,
-    ObservationCriterion,
     SafeObservableOutcome,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import (
-    Adversary,
     AdversaryKind,
-    AttackerBDI,
-)
-from asago_scenario_generator.stpa.discriminating_condition import (
-    ConditionCheck,
-    DiscriminatingCondition,
-)
-from asago_scenario_generator.stpa.tool_call_condition import (
-    ToolCallCondition,
-    ToolCallConditionStatus,
 )
 
 
@@ -75,32 +62,6 @@ class CausalFactorDeclaration(BaseModel):
             self.access_refs,
             self.bounded_assumption,
         )
-        return self
-
-
-class UnsafeOutcomeDeclaration(BaseModel):
-    """Stage 5's unsafe outcome: one bounded semantic proposition.
-
-    The scenario handoff derives its hazard and constraint lineage from the
-    immutable context, and the wire requests no executable condition, so the
-    proposition is the only provider-authored field.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    semantic_proposition: StrictStr | None = None
-
-    @model_validator(mode="after")
-    def normalize_proposition(self) -> "UnsafeOutcomeDeclaration":
-        if self.semantic_proposition is not None:
-            object.__setattr__(
-                self,
-                "semantic_proposition",
-                normalize_semantic_proposition(
-                    self.semantic_proposition,
-                    required=True,
-                ),
-            )
         return self
 
 
@@ -180,32 +141,6 @@ class _ContextAbsenceTemporalWire(_ContextTemporalConditionWire):
     type: Literal["absence"]
     reference_handle: StrictStr = Field(min_length=1)
     until_step_handle: StrictStr = Field(min_length=1)
-
-
-class BDIGenerationResult(BaseModel):
-    """LLM response model for the combined BDI generation call."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    defender_vulnerabilities: dict[str, str] = Field(default_factory=dict)
-    attacker_bdi: AttackerBDI
-    causal_factors: list[CausalFactorDeclaration] = Field(min_length=1)
-    # Optional only for historical direct callers.  Corrected context
-    # requests use a strict dynamic subtype where this field is required.
-    unsafe_outcome: UnsafeOutcomeDeclaration | None = None
-    # Phase 3.1 adversary record.  Optional only for historical direct
-    # callers; corrected contextual requests require it on the wire.
-    adversary: Adversary | None = None
-    observation_criteria: list[ObservationCriterion] = Field(default_factory=list)
-    observation_assessment: ObservationAssessment | None = None
-    observation_contract_id: str | None = None
-    observation_contract_digest: str | None = None
-    safe_observable_outcome: SafeObservableOutcome | None = None
-    discriminating_condition: DiscriminatingCondition | None = None
-    condition_check: ConditionCheck | None = None
-    condition_omitted_reason: str | None = None
-    tool_call_condition_status: ToolCallConditionStatus | None = None
-    tool_call_condition: ToolCallCondition | None = None
 
 
 def _reject_evidence_status_label(value: str) -> None:

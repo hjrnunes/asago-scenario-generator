@@ -1,8 +1,8 @@
 """Stage 5 provider call for both paths: plan, call, and publish.
 
 ``generate_bdi_for_context`` renders the semantics-only request, makes the
-one provider call with its bounded length retry, and compiles and records
-the reply.
+one provider call with its bounded length retry, and compiles the reply into
+the published ScenarioSpec and records it.
 """
 
 from __future__ import annotations
@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.observation_contract import (
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
+from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 
 from .._constants import PROMPTS_DIR
@@ -49,8 +50,8 @@ from ..condition_check import (
 )
 from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
+from .assemble import ScenarioAssembly, ScenarioAssemblyError
 from .wire import (
-    BDIGenerationResult,
     _CausalSourceChoice,
 )
 from .sources import (
@@ -77,7 +78,7 @@ from .prompt_view import (
     build_context_bdi_prompts,
 )
 from .compile import (
-    _materialize_normal_context_bdi,
+    compile_scenario_spec,
 )
 
 
@@ -116,14 +117,20 @@ def generate_bdi_for_context(
     content_surface: ContentSurfaceFacts | None = None,
     observation_contract: ObservationContract | None = None,
     condition_family: ConditionFamily | None = None,
-) -> tuple[BDIGenerationResult | None, str | None]:
-    """Generate one Stage 5 scenario-semantics result.
+    *,
+    assembly: ScenarioAssembly,
+) -> tuple[ScenarioSpec | None, str | None]:
+    """Generate one Stage 5 ScenarioSpec, or the error that prevented it.
 
     The response requests scenario semantics and causal evidence only: the
     scenario handoff carries no stimulus, route, or executable condition, so
     no artifact-feasibility gate runs. ``condition_family`` is an optional
     code-derived hint rendered with the discriminating-condition
-    instructions; it never enters the context.
+    instructions; it never enters the context. ``assembly`` is the
+    deterministic authority the compiled reply is assembled against.
+
+    Raises:
+        ScenarioAssemblyError: When that authority rejects the compiled reply.
     """
     if loader is None:
         loader = TemplateLoader(PROMPTS_DIR)
@@ -154,6 +161,7 @@ def generate_bdi_for_context(
         content_surface=content_surface,
         observation_contract=observation_contract,
         condition_family=condition_family,
+        assembly=assembly,
     )
 
 
@@ -200,7 +208,8 @@ def _generate_semantics(
     content_surface: ContentSurfaceFacts | None,
     observation_contract: ObservationContract | None,
     condition_family: ConditionFamily | None,
-) -> tuple[BDIGenerationResult | None, str | None]:
+    assembly: ScenarioAssembly,
+) -> tuple[ScenarioSpec | None, str | None]:
     """Request, validate, and compile scenario semantics and evidence only.
 
     The supplied target facts (``target_operation`` and
@@ -308,7 +317,7 @@ def _generate_semantics(
         recovered: tuple[BaseModel, str | None] | None,
         issues: tuple[ValidationIssue, ...],
         corrections: int,
-    ) -> tuple[BDIGenerationResult | None, str | None]:
+    ) -> tuple[ScenarioSpec | None, str | None]:
         condition_omitted_reason: str | None = None
         if recovered is not None:
             # The condition must never be the reason a scenario is lost: after
@@ -320,18 +329,27 @@ def _generate_semantics(
                 issues, route, corrections
             )
         published = next((check for check in checks if check.draft is draft), None)
-        result, error = _finish_normal_context_bdi(
-            draft,
-            error,
-            choices,
-            scenario_context,
-            observation_contract,
-            condition_universe=condition_universe,
-            condition_omitted_reason=condition_omitted_reason,
-            condition_outcome=(
-                published.condition_outcome if published is not None else None
-            ),
-        )
+        try:
+            result, error = _finish_normal_context_bdi(
+                draft,
+                error,
+                choices,
+                scenario_context,
+                assembly,
+                observation_contract,
+                condition_universe=condition_universe,
+                condition_omitted_reason=condition_omitted_reason,
+                condition_outcome=(
+                    published.condition_outcome if published is not None else None
+                ),
+            )
+        except ScenarioAssemblyError:
+            # The draft compiled, so its normalizations are recorded even
+            # though the deterministic authority rejected the result.
+            _write_stage5_normalization_record(
+                published.normalizations, scenario_context, run_dir
+            )
+            raise
         if result is not None:
             _write_stage5_normalization_record(
                 published.normalizations, scenario_context, run_dir
@@ -401,21 +419,27 @@ def _finish_normal_context_bdi(
     error: str | None,
     choices: tuple[_CausalSourceChoice, ...],
     context: ScenarioGenerationContext,
+    assembly: ScenarioAssembly,
     observation_contract: ObservationContract | None = None,
     *,
     condition_universe: ConditionUniverse | None = None,
     condition_omitted_reason: str | None = None,
     condition_outcome: ConditionCheckOutcome | None = None,
-) -> tuple[BDIGenerationResult | None, str | None]:
-    """Compile one normal-path draft without any execution materialization."""
+) -> tuple[ScenarioSpec | None, str | None]:
+    """Compile one normal-path draft without any execution materialization.
+
+    A draft that does not compile returns its error; an assembly rejection
+    propagates as :class:`ScenarioAssemblyError`.
+    """
     if error is not None or draft is None:
         return None, error
     try:
         return (
-            _materialize_normal_context_bdi(
+            compile_scenario_spec(
                 draft,
                 choices,
                 context,
+                assembly,
                 observation_contract,
                 condition_universe=condition_universe,
                 condition_omitted_reason=condition_omitted_reason,
@@ -423,6 +447,8 @@ def _finish_normal_context_bdi(
             ),
             None,
         )
+    except ScenarioAssemblyError:
+        raise
     except (KeyError, TypeError, ValueError) as exc:
         return None, f"{type(exc).__name__}: {exc}"
 

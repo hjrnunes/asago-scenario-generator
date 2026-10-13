@@ -26,7 +26,11 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.helpers.normal_authoring_wire import _normal_payload, _wrong_timing_context
+from tests.helpers.normal_authoring_wire import (
+    _normal_payload,
+    _wrong_timing_assembly,
+    _wrong_timing_context,
+)
 
 
 #: Stage 5 request budget in estimated tokens (system + user + schema).
@@ -155,6 +159,7 @@ def _generate(client: MockLLMClient, tmp_path, *, scenario_id=None, **overrides)
         "target_operation": _operation(),
         "target_observations": _observations(),
         "observation_contract": default_observation_contract(),
+        "assembly": _wrong_timing_assembly(context),
     }
     arguments.update(overrides)
     return generate_bdi_for_context(client, context, tmp_path, **arguments)

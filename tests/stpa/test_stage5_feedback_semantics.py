@@ -14,6 +14,7 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 )
 
 from tests.helpers.sp3_stage5_provider_contract import (
+    _typed_tool_assembly,
     _provider_payload,
     _typed_tool_context,
 )
@@ -54,7 +55,12 @@ def test_stage5_rejects_status_only_evidence_and_retries(tmp_path, status: str) 
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([invalid, valid]))
 
-    result, error = generate_bdi_for_context(client, _typed_tool_context(), tmp_path)
+    result, error = generate_bdi_for_context(
+        client,
+        _typed_tool_context(),
+        tmp_path,
+        assembly=_typed_tool_assembly(_typed_tool_context()),
+    )
 
     assert error is None
     assert result is not None
@@ -69,11 +75,18 @@ def test_stage5_allows_status_word_inside_explanatory_evidence(tmp_path) -> None
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([payload]))
 
-    result, error = generate_bdi_for_context(client, _typed_tool_context(), tmp_path)
+    result, error = generate_bdi_for_context(
+        client,
+        _typed_tool_context(),
+        tmp_path,
+        assembly=_typed_tool_assembly(_typed_tool_context()),
+    )
 
     assert error is None
     assert result is not None
-    assert result.causal_factors[0].evidence == payload["causal_factors"][0]["evidence"]
+    assert (
+        result.causal_factors[0].description == payload["causal_factors"][0]["evidence"]
+    )
 
 
 def test_stage5_observation_view_keeps_empty_read_as_quoted_feedback() -> None:

@@ -21,13 +21,18 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     StructuralThreat,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.models.scenario_context import ScenarioConstraint
-from asago_scenario_generator.stpa.models.scenario_spec import (
-    AttackerBDI,
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
+    Loss,
+    LossAnalysis,
+    LossProvenance,
+    SecurityConstraint,
 )
+from asago_scenario_generator.stpa.scenario_prod.context import (
+    build_scenario_generation_context,
+)
+from asago_scenario_generator.stpa.models.scenario_context import ScenarioConstraint
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    BDIGenerationResult,
-    CausalFactorDeclaration,
     _ContextAbsenceTemporalWire,
     _ContextDelayTemporalWire,
     _ContextDurationTemporalWire,
@@ -36,7 +41,6 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _ContextWindowTemporalWire,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
-    assemble_scenario_spec,
     generate_scenario_id,
     parse_ica_slot_id,
 )
@@ -67,7 +71,12 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from tests.helpers.normal_authoring_wire import _wrong_timing_context
+from tests.helpers.normal_authoring_wire import (
+    _wrong_timing_assembly,
+    _wrong_timing_context,
+)
+from tests.helpers.stage5_assembly import stage5_assembly
+from tests.helpers.stage5_compile import compile_draft, draft_payload, factor, handle_of
 
 
 def _make_control_structure(
@@ -157,16 +166,6 @@ def _make_structural_threat(
     )
 
 
-def _causal_factors() -> list[CausalFactorDeclaration]:
-    return [
-        CausalFactorDeclaration(
-            kind=CausalFactorKind.process_model_flaw,
-            source_id="PM-1-1",
-            evidence="The selected process-model state can be stale.",
-        )
-    ]
-
-
 class TestPopulateDefenderBDI:
     """Tests for deterministic defender BDI pre-population."""
 
@@ -227,13 +226,64 @@ class TestPopulateDefenderBDI:
             assert "RESP-99" in str(e)
 
 
-class TestAssembleScenarioSpec:
-    """Tests for ScenarioSpec assembly."""
+def _loss_analysis() -> LossAnalysis:
+    return LossAnalysis(
+        risk_card_losses=[],
+        use_case_losses=[
+            Loss(
+                loss_id="L-1",
+                description="The user is misled about a refund",
+                provenance=LossProvenance.use_case,
+            )
+        ],
+        hazards=[
+            Hazard(
+                hazard_id="H-1",
+                description="The agent omits a required tool call",
+                related_losses=["L-1"],
+            )
+        ],
+        security_constraints=[
+            SecurityConstraint(
+                constraint_id="SC-1",
+                rule="Select the tool the request requires",
+                related_hazards=["H-1"],
+            )
+        ],
+    )
+
+
+_STALE_INTENT = (
+    CausalFactorKind.process_model_flaw,
+    "PM-1-1",
+    "The selected process-model state can be stale.",
+)
+
+
+def _compile_spec(threat, declared, *, scenario_index: int = 0):
+    """Compile one draft declaring ``(kind, source_id, evidence)`` factors."""
+    structure = _make_control_structure()
+    context = build_scenario_generation_context(
+        threat,
+        structure,
+        _loss_analysis(),
+        scenario_id=generate_scenario_id(scenario_index),
+    )
+    choices = _causal_source_choices(context)
+    payload = draft_payload(
+        [
+            factor(handle_of(choices, kind, source_id), evidence)
+            for kind, source_id, evidence in declared
+        ]
+    )
+    return compile_draft(payload, context, stage5_assembly(context, threat, structure))
+
+
+class TestCompileScenarioSpec:
+    """Tests for the ScenarioSpec that Stage 5 compilation assembles."""
 
     def test_threat_source_and_catalog_context(self):
         """SP3-BDI-09: ScenarioSpec assembled with threat source and catalog."""
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
         threat = _make_structural_threat(
             catalog_mappings=[
                 CatalogMapping(
@@ -244,12 +294,7 @@ class TestAssembleScenarioSpec:
                 )
             ]
         )
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v1", "PM-1-2": "v2"},
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-        )
-        spec = assemble_scenario_spec(bdi, llm_result, threat, cs, scenario_index=0)
+        spec = _compile_spec(threat, [_STALE_INTENT])
         assert spec.threat_source.ica_slot_id == "RESP-1:CA-1-1:NOT_PROVIDED"
         assert spec.threat_source.provenance == "structural"
         assert spec.target_controller == "RESP-1"
@@ -259,53 +304,42 @@ class TestAssembleScenarioSpec:
 
     def test_scenario_id_format(self):
         """SP3-BDI-10: scenario ID follows SCN-NNN format."""
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
         threat = _make_structural_threat()
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={"PM-1-1": "v", "PM-1-2": "v"},
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
-        )
-        spec = assemble_scenario_spec(bdi, llm_result, threat, cs, scenario_index=0)
+        spec = _compile_spec(threat, [_STALE_INTENT], scenario_index=0)
         assert spec.scenario_id == "SCN-001"
-        spec2 = assemble_scenario_spec(bdi, llm_result, threat, cs, scenario_index=4)
+        spec2 = _compile_spec(threat, [_STALE_INTENT], scenario_index=4)
         assert spec2.scenario_id == "SCN-005"
 
     def test_vulnerabilities_merged(self):
         """SP3-BDI-06: vulnerabilities merged into defender beliefs."""
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={
-                "PM-1-1": "exploitable via injection",
-                "PM-1-2": "schema bypass",
-            },
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
+        spec = _compile_spec(
+            _make_structural_threat(),
+            [
+                (
+                    CausalFactorKind.process_model_flaw,
+                    "PM-1-1",
+                    "exploitable via injection",
+                ),
+                (CausalFactorKind.process_model_flaw, "PM-1-2", "schema bypass"),
+            ],
         )
-        spec = assemble_scenario_spec(bdi, llm_result, threat, cs)
         assert spec.defender_bdi.beliefs[0].vulnerability == "exploitable via injection"
         assert spec.defender_bdi.beliefs[1].vulnerability == "schema bypass"
 
     def test_llm_altered_ids_replaced(self):
-        """SP3-BDI-16: LLM-altered defender BDI IDs replaced with deterministic values."""
-        cs = _make_control_structure()
-        bdi = populate_defender_bdi(cs, "RESP-1")
-        threat = _make_structural_threat()
-        # LLM returns vulnerabilities with altered pm_id keys
-        llm_result = BDIGenerationResult(
-            defender_vulnerabilities={
-                "PM-99-1": "wrong",
-                "PM-1-1": "correct1",
-                "PM-1-2": "correct2",
-            },
-            causal_factors=_causal_factors(),
-            attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
+        """SP3-BDI-16: defender BDI IDs stay the deterministic values.
+
+        The provider names a source only by its request-local handle, so the
+        belief IDs are the structure's own and each vulnerability attaches by
+        the original ``pm_id``.
+        """
+        spec = _compile_spec(
+            _make_structural_threat(),
+            [
+                (CausalFactorKind.process_model_flaw, "PM-1-1", "correct1"),
+                (CausalFactorKind.process_model_flaw, "PM-1-2", "correct2"),
+            ],
         )
-        spec = assemble_scenario_spec(bdi, llm_result, threat, cs)
-        # Original deterministic pm_ids are used, vulnerabilities matched by original pm_id
         assert spec.defender_bdi.beliefs[0].pm_id == "PM-1-1"
         assert spec.defender_bdi.beliefs[1].pm_id == "PM-1-2"
         assert spec.defender_bdi.beliefs[0].vulnerability == "correct1"
@@ -380,10 +414,12 @@ class TestContextEnvironmentInputs:
         client = MockLLMClient()
 
         with pytest.raises(TypeError, match=message):
+            context = _wrong_timing_context()
             generate_bdi_for_context(
                 client,
-                _wrong_timing_context(),
+                context,
                 tmp_path,
+                assembly=_wrong_timing_assembly(context),
                 **{keyword: {"not": "typed"}},
             )
         assert client.calls == []

@@ -11,9 +11,6 @@ from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
-    assemble_scenario_spec,
-)
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
 )
@@ -28,14 +25,13 @@ from asago_scenario_generator.stpa.scenario_prod.presentation import (
 from tests.stpa.sp1_helpers import MockLLMClient
 
 from tests.helpers.normal_authoring_wire import (
-    _defender_bdi,
     _normal_payload,
     _record_observations,
     _target_operation,
+    _wrong_timing_assembly,
     _wrong_timing_context,
-    _wrong_timing_threat,
 )
-from tests.helpers.sp3_scenario_continuity import _control_structure, _loss_analysis
+from tests.helpers.sp3_scenario_continuity import _loss_analysis
 from tests.helpers.stage5_safe_outcome import (
     OBSERVED_CONDITION,
     _command_attempt_payload,
@@ -102,6 +98,7 @@ def test_stage5_materializes_the_supplied_safe_observable_outcome(tmp_path) -> N
         target_operation=_target_operation(),
         target_observations=_record_observations(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None
@@ -144,12 +141,7 @@ def test_not_provided_observation_uses_expected_call_as_safe_boundary(tmp_path) 
     payload["unsafe_outcome"]["discriminating_condition"] = OBSERVED_CONDITION
     client = MockLLMClient()
     client.set_response_queue([payload])
-    context = _wrong_timing_context()
-    context = context.model_copy(
-        update={
-            "ica": context.ica.model_copy(update={"uca_type": UCAType.not_provided})
-        }
-    )
+    context = _wrong_timing_context(uca_type=UCAType.not_provided)
 
     result, error = generate_bdi_for_context(
         client,
@@ -158,6 +150,7 @@ def test_not_provided_observation_uses_expected_call_as_safe_boundary(tmp_path) 
         target_operation=_target_operation(),
         target_observations=_record_observations(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(context),
     )
 
     assert error is None, error
@@ -196,25 +189,18 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
     client = MockLLMClient()
     client.set_response_queue([payload])
     context = _wrong_timing_context(scenario_id="SCN-001")
-    result, error = generate_bdi_for_context(
+    spec, error = generate_bdi_for_context(
         client,
         context,
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(context),
     )
     assert error is None
-    assert result is not None
+    assert spec is not None
 
-    spec = assemble_scenario_spec(
-        _defender_bdi(context),
-        result,
-        _wrong_timing_threat(),
-        _control_structure(),
-        0,
-        scenario_context=context,
-    )
     narrative, tree, gherkin = render_scenario_summary(spec)
     envelope = assemble_envelope(
         scenario_id=spec.scenario_id,
@@ -291,6 +277,7 @@ def test_safe_outcome_rejects_references_outside_supplied_inputs(
         target_operation=_target_operation(),
         target_observations=_record_observations(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -342,6 +329,7 @@ def test_safe_outcome_record_paths_move_to_fact_refs(
         target_operation=_target_operation(),
         target_observations=_nested_observations(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None, error
@@ -378,6 +366,7 @@ def test_safe_outcome_rejects_unsupplied_record_refs(tmp_path, record_ref) -> No
         target_operation=_target_operation(),
         target_observations=_nested_observations(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -419,6 +408,7 @@ def test_analytical_only_safe_outcome_is_coerced_to_not_observable(tmp_path) -> 
         _wrong_timing_context(),
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None, error
@@ -489,6 +479,7 @@ def test_executable_reply_only_safe_outcome_is_coerced_to_observable(
         _wrong_timing_context(),
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None, error
@@ -563,6 +554,35 @@ def _declared_attempt_safe_outcome() -> dict:
     }
 
 
+def test_assembly_rejection_still_records_the_draft_normalizations(
+    tmp_path, monkeypatch
+) -> None:
+    """A draft that compiled keeps its normalization record when assembly fails."""
+    from asago_scenario_generator.stpa.scenario_prod.stage5 import assemble
+
+    def reject(*_args, **_kwargs):
+        raise ValueError("the authority rejects this draft")
+
+    monkeypatch.setattr(assemble, "_assemble", reject)
+    payload = _outcome_payload([_REPLY_CRITERION], _declared_attempt_safe_outcome())
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+    context = _wrong_timing_context()
+
+    with pytest.raises(assemble.ScenarioAssemblyError, match="authority rejects"):
+        generate_bdi_for_context(
+            client,
+            context,
+            tmp_path,
+            observation_contract=default_observation_contract(),
+            assembly=_wrong_timing_assembly(context),
+        )
+
+    [record] = _normalization_records(tmp_path)
+    assert record["scenario_id"] == context.scenario_identity.scenario_id
+    assert record["normalizations"]
+
+
 def test_safe_outcome_is_coerced_to_the_only_supported_reply_criterion(
     tmp_path,
 ) -> None:
@@ -575,6 +595,7 @@ def test_safe_outcome_is_coerced_to_the_only_supported_reply_criterion(
         _wrong_timing_context(),
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None, error
@@ -633,6 +654,7 @@ def test_safe_outcome_is_coerced_to_the_only_supported_attempt_criterion(
         tmp_path,
         target_operation=_target_operation(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None, error
@@ -665,6 +687,7 @@ def test_a_safe_outcome_that_matches_its_only_criterion_is_not_recorded(
         _wrong_timing_context(),
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None, error
@@ -687,6 +710,7 @@ def test_safe_outcome_is_not_coerced_when_two_criteria_are_supported(
         _wrong_timing_context(),
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -731,6 +755,7 @@ def test_executable_command_attempt_safe_outcome_must_be_observable(
         tmp_path,
         target_operation=_target_operation(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -753,6 +778,7 @@ def test_normal_intention_pruning_is_recorded(tmp_path) -> None:
         client,
         _wrong_timing_context(),
         tmp_path,
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None, error
@@ -781,6 +807,7 @@ def test_normal_intention_without_declared_handle_fails_with_repair_code(
         client,
         _wrong_timing_context(),
         tmp_path,
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -821,6 +848,7 @@ def test_analytical_only_safe_outcome_has_no_executable_references(tmp_path) -> 
         _wrong_timing_context(),
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None
@@ -857,6 +885,7 @@ def test_observable_safe_outcome_can_omit_operation_reference(tmp_path) -> None:
         _wrong_timing_context(),
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None
@@ -907,6 +936,7 @@ def test_command_attempt_observation_requires_exact_inventory_operation(
         tmp_path,
         target_operation=_target_operation(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None
@@ -944,6 +974,7 @@ def test_non_null_reply_operation_must_be_in_inventory(tmp_path) -> None:
         tmp_path,
         target_operation=_target_operation(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -1027,24 +1058,17 @@ def test_handoff_names_an_operation_once_when_two_authorities_agree(tmp_path) ->
     client = MockLLMClient()
     client.set_response_queue([payload])
     context = _wrong_timing_context(scenario_id="SCN-001")
-    result, error = generate_bdi_for_context(
+    spec, error = generate_bdi_for_context(
         client,
         context,
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(context),
     )
     assert error is None
-    assert result is not None
-    spec = assemble_scenario_spec(
-        _defender_bdi(context),
-        result,
-        _wrong_timing_threat(),
-        _control_structure(),
-        0,
-        scenario_context=context,
-    )
+    assert spec is not None
     narrative, tree, gherkin = render_scenario_summary(spec)
     envelope = assemble_envelope(
         scenario_id=spec.scenario_id,
@@ -1086,6 +1110,7 @@ def test_a_missing_safe_operation_is_taken_from_the_only_supported_criterion(
         tmp_path,
         target_operation=_target_operation(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None, error
@@ -1125,6 +1150,7 @@ def test_a_missing_safe_operation_is_not_filled_from_two_supported_criteria(
         tmp_path,
         target_operation=_target_operation(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None

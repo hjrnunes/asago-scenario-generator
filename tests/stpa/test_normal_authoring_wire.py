@@ -27,12 +27,9 @@ from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.stage5 import wire
+from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    BDIGenerationResult,
     _ContextScenarioSemanticsPayload,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
-    assemble_scenario_spec,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
@@ -58,17 +55,15 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 from tests.stpa.sp1_helpers import MockLLMClient
 
 from tests.helpers.sp3_scenario_continuity import (
-    _control_structure,
     _loss_analysis,
 )
 from tests.helpers.normal_authoring_wire import (
     PROPOSITION,
-    _defender_bdi,
     _normal_payload,
     _record_observations,
     _target_operation,
+    _wrong_timing_assembly,
     _wrong_timing_context,
-    _wrong_timing_threat,
 )
 
 
@@ -354,6 +349,7 @@ def test_normal_prompt_carries_target_operation_and_observed_record_values(
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
     assert error is None
     assert result is not None
@@ -434,6 +430,7 @@ def test_normal_response_schema_carries_no_execution_design(tmp_path) -> None:
         client,
         context,
         tmp_path,
+        assembly=_wrong_timing_assembly(context),
     )
     assert error is None
     assert result is not None
@@ -457,6 +454,7 @@ def test_normal_contract_requires_observation_criteria(tmp_path) -> None:
         _wrong_timing_context(),
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -475,6 +473,7 @@ def test_functional_normal_response_can_omit_gain(tmp_path) -> None:
         client,
         _wrong_timing_context(),
         tmp_path,
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None
@@ -495,17 +494,17 @@ def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
         client,
         _wrong_timing_context(),
         tmp_path,
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
     assert error is None
     assert result is not None
     dumped = result.model_dump(mode="json")
     assert "stimulus" not in dumped
     assert "execution_route" not in dumped
-    assert "execution_route" not in BDIGenerationResult.model_fields
+    assert "execution_route" not in ScenarioSpec.model_fields
     assert not hasattr(wire, "AnalyticalOnlyRouteSelection")
-    assert result.unsafe_outcome is not None
-    assert set(dumped["unsafe_outcome"]) == {"semantic_proposition"}
-    assert result.unsafe_outcome.semantic_proposition == PROPOSITION
+    assert result.unsafe_outcome_condition is None
+    assert result.unsafe_outcome_semantic_proposition == PROPOSITION
 
 
 @pytest.mark.parametrize(
@@ -524,11 +523,11 @@ def test_af_run1_failure_classes_publish_through_normal_wire(draft, tmp_path) ->
         client,
         _wrong_timing_context(),
         tmp_path,
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
     assert error is None, f"af-run1 failure class still blocks authoring: {error}"
     assert result is not None
-    assert result.unsafe_outcome is not None
-    assert result.unsafe_outcome.semantic_proposition
+    assert result.unsafe_outcome_semantic_proposition
 
 
 @pytest.mark.parametrize(
@@ -593,6 +592,7 @@ def test_causally_invalid_drafts_still_reject_with_typed_reasons(
         client,
         _wrong_timing_context(),
         tmp_path,
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -610,22 +610,15 @@ def test_normal_draft_publishes_to_handoff_without_execution_content(tmp_path) -
     client = MockLLMClient()
     client.set_response_queue([_normal_payload()])
     context = _wrong_timing_context(scenario_id="SCN-001")
-    result, error = generate_bdi_for_context(
+    spec, error = generate_bdi_for_context(
         client,
         context,
         tmp_path,
+        assembly=_wrong_timing_assembly(context),
     )
     assert error is None
-    assert result is not None
+    assert spec is not None
 
-    spec = assemble_scenario_spec(
-        _defender_bdi(context),
-        result,
-        _wrong_timing_threat(),
-        _control_structure(),
-        0,
-        scenario_context=context,
-    )
     narrative, tree, gherkin = render_scenario_summary(spec)
     envelope = assemble_envelope(
         scenario_id=spec.scenario_id,
@@ -665,6 +658,7 @@ def test_context_without_causal_sources_makes_no_provider_call(tmp_path) -> None
         client,
         _context_without_causal_sources(),
         tmp_path,
+        assembly=_wrong_timing_assembly(_context_without_causal_sources()),
     )
 
     assert result is None
@@ -688,6 +682,7 @@ def test_repeated_length_failure_retries_once_with_a_shorter_request(
         client,
         _wrong_timing_context(),
         tmp_path,
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -725,12 +720,12 @@ def test_length_failure_then_a_complete_reply_publishes_the_retry(tmp_path) -> N
         client,
         _wrong_timing_context(),
         tmp_path,
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None
     assert result is not None
-    assert result.unsafe_outcome is not None
-    assert result.unsafe_outcome.semantic_proposition == PROPOSITION
+    assert result.unsafe_outcome_semantic_proposition == PROPOSITION
     [retry] = client.calls
     assert retry.max_completion_tokens == 2048
     assert retry.user_prompt.endswith(

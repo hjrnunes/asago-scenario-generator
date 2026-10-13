@@ -65,12 +65,18 @@ def _assemble_scenario_spec_parameters() -> Collection[str]:
     return inspect.signature(assemble_scenario_spec).parameters
 
 
-def _stage5_result_fields() -> Collection[str]:
+def _stage5_draft_fields() -> Collection[str]:
     from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-        BDIGenerationResult,
+        _ContextScenarioSemanticsPayload,
     )
 
-    return BDIGenerationResult.model_fields
+    return _ContextScenarioSemanticsPayload.model_fields
+
+
+def _stage5_wire_names() -> Collection[str]:
+    from asago_scenario_generator.stpa.scenario_prod.stage5 import wire
+
+    return dir(wire)
 
 
 def _scenario_spec_fields() -> Collection[str]:
@@ -158,9 +164,14 @@ REMOVED_SURFACES: list[
         ("execution_design",),
     ),
     (
-        "stage 5 result fields: the semantic execution contract",
-        _stage5_result_fields,
+        "stage 5 draft fields: the semantic execution contract",
+        _stage5_draft_fields,
         ("execution_contract",),
+    ),
+    (
+        "stage 5 wire names: the intermediate result compile returned",
+        _stage5_wire_names,
+        ("BDIGenerationResult", "UnsafeOutcomeDeclaration"),
     ),
     (
         "scenario spec fields: the semantic execution contract",

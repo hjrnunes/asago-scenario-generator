@@ -7,38 +7,32 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from tests.helpers.sp3_scenario_continuity import (
-    _control_structure,
     _loss_analysis,
+    _structure_with_effect,
     _threat,
+    _threat_of_type,
 )
+from tests.helpers.stage5_assembly import stage5_assembly
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
 
 
 def _typed_tool_context(uca_type=UCAType.incorrect):
-    structure = _control_structure()
-    action = (
-        structure.responsibilities[0]
-        .control_actions[0]
-        .model_copy(update={"effect_kind": ControlActionEffectKind.tool_call})
-    )
-    responsibility = structure.responsibilities[0].model_copy(
-        update={"control_actions": [action]}
-    )
-    structure = structure.model_copy(update={"responsibilities": [responsibility]})
-    threat = _threat()
-    threat = threat.model_copy(
-        update={
-            "ica_slot_id": threat.ica_slot_id.replace("INCORRECT", uca_type.value),
-            "ica_id": threat.ica_id.replace("INCORRECT", uca_type.value),
-        }
-    )
     return build_scenario_generation_context(
-        threat,
-        structure,
+        _threat_of_type(uca_type),
+        _structure_with_effect(ControlActionEffectKind.tool_call),
         _loss_analysis(),
-        scenario_id="SCN-STAGE5-ROLE-FREE",
+        scenario_id="SCN-001",
+    )
+
+
+def _typed_tool_assembly(context):
+    """The assembly authority of a ``_typed_tool_context`` context."""
+    return stage5_assembly(
+        context,
+        _threat_of_type(context.ica.uca_type),
+        _structure_with_effect(ControlActionEffectKind.tool_call),
     )
 
 
@@ -75,19 +69,18 @@ def _provider_payload() -> dict:
 
 
 def _model_output_context():
-    structure = _control_structure()
-    action = (
-        structure.responsibilities[0]
-        .control_actions[0]
-        .model_copy(update={"effect_kind": ControlActionEffectKind.model_output})
-    )
-    responsibility = structure.responsibilities[0].model_copy(
-        update={"control_actions": [action]}
-    )
-    structure = structure.model_copy(update={"responsibilities": [responsibility]})
     return build_scenario_generation_context(
         _threat(),
-        structure,
+        _structure_with_effect(ControlActionEffectKind.model_output),
         _loss_analysis(),
-        scenario_id="SCN-STAGE5-MODEL-OUTPUT",
+        scenario_id="SCN-001",
+    )
+
+
+def _model_output_assembly(context):
+    """The assembly authority of a ``_model_output_context`` context."""
+    return stage5_assembly(
+        context,
+        _threat(),
+        _structure_with_effect(ControlActionEffectKind.model_output),
     )

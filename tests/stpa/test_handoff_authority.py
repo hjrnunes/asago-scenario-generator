@@ -23,14 +23,8 @@ import yaml
 
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
-    assemble_scenario_spec,
-)
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
-    populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
@@ -46,6 +40,7 @@ from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.helpers.stage5_assembly import stage5_assembly
 from tests.helpers.scenario_handoff_publication import _normal_semantics_payload
 from tests.helpers.sp3_run import _make_ets
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
@@ -140,21 +135,14 @@ def _handoff_for(
     )
     client = MockLLMClient()
     client.set_response_queue([_normal_semantics_payload()])
-    result, error = generate_bdi_for_context(
+    spec, error = generate_bdi_for_context(
         client,
         context,
         tmp_path,
+        assembly=stage5_assembly(context, _real_threat(threat), structure),
     )
     assert error is None, error
-    assert result is not None
-    spec = assemble_scenario_spec(
-        populate_defender_bdi(structure, "RESP-1"),
-        result,
-        _real_threat(threat),
-        structure,
-        0,
-        scenario_context=context,
-    )
+    assert spec is not None
     narrative, tree, gherkin = render_scenario_summary(spec)
     envelope = assemble_envelope(
         scenario_id=spec.scenario_id,

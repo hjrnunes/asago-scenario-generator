@@ -1,6 +1,10 @@
-"""Deterministic assembly of the ScenarioSpec from a Stage 5 result."""
+"""Deterministic assembly of the ScenarioSpec from compiled Stage 5 output."""
 
 from __future__ import annotations
+
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from typing import Any
 
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
@@ -21,7 +25,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ThreatSource,
 )
 from .wire import (
-    BDIGenerationResult,
+    CausalFactorDeclaration,
 )
 
 
@@ -61,55 +65,75 @@ def parse_ica_slot_id(slot_id: str) -> dict[str, str]:
     }
 
 
-def assemble_scenario_spec(
-    defender_bdi: DefenderBDI,
-    llm_result: BDIGenerationResult,
-    threat: StructuralThreat,
-    control_structure: ControlStructure,
-    scenario_index: int = 0,
-    *,
-    scenario_context: ScenarioGenerationContext | None = None,
-) -> ScenarioSpec:
-    """Assemble a ScenarioSpec from the defender BDI and LLM result.
+@dataclass(frozen=True)
+class ScenarioAssembly:
+    """The deterministic authority one Stage 5 draft compiles against.
 
-    Merges vulnerability annotations into the defender BDI and combines
-    with the attacker BDI. The defender BDI IDs are NOT trusted from the
-    LLM — the original deterministic values are used, and vulnerabilities
-    are extracted by matching to the original pm_id values.
-
-    Declared causal factors are selected in declared order with their
-    evidence descriptions and temporal conditions; every factor reference is
-    validated against the control structure (a ``ValueError`` names the
-    invalid causal-factor reference) so unbacked structural presence
-    never invents a factor.
-
-    Args:
-        defender_bdi: Pre-populated defender BDI (will be mutated in place).
-        llm_result: The LLM generation result.
-        threat: The structural threat.
-        control_structure: The full control structure.
-        scenario_index: Zero-based index for scenario ID generation.
-
-    Returns:
-        A :class:`ScenarioSpec`.
+    Assembly writes the compiled vulnerability annotations into
+    ``defender_bdi`` in place.
     """
-    slot_parts = parse_ica_slot_id(threat.ica_slot_id)
-    _validate_optional_assembly_context(scenario_context, threat, scenario_index)
-    _merge_defender_vulnerabilities(defender_bdi, llm_result)
-    causal_factors = _materialize_causal_factors(llm_result)
-    _validate_assembled_factors(causal_factors, control_structure, scenario_context)
-    if scenario_context is not None:
-        # Context is the only authoritative source for selected consequence
-        # lineage.  The contextual provider wire carries descriptions only;
-        # deterministic assembly derives the exact IDs here.
-        hazard_refs = [item.hazard_id for item in scenario_context.hazards]
-        constraint_refs = [item.constraint_id for item in scenario_context.constraints]
-    else:
-        hazard_refs = list(threat.related_hazards)
-        constraint_refs = list(threat.related_constraints)
 
+    defender_bdi: DefenderBDI
+    threat: StructuralThreat
+    control_structure: ControlStructure
+    scenario_index: int
+
+
+class ScenarioAssemblyError(ValueError):
+    """The deterministic authority rejected a compiled Stage 5 draft."""
+
+
+def assemble_scenario_spec(
+    assembly: ScenarioAssembly,
+    scenario_context: ScenarioGenerationContext,
+    *,
+    defender_vulnerabilities: Mapping[str, str],
+    causal_factors: Sequence[CausalFactorDeclaration],
+    **compiled_fields: Any,
+) -> ScenarioSpec:
+    """Assemble a ScenarioSpec from compiled Stage 5 output.
+
+    The defender BDI IDs are NOT trusted from the provider: the deterministic
+    values are kept, and vulnerabilities attach by matching the original
+    ``pm_id`` values. Declared causal factors keep their declared order,
+    evidence, and temporal conditions; every factor reference is validated
+    against the control structure and the selected control path, so
+    unbacked structural presence never invents a factor. The context is the
+    only authority for the hazard and constraint lineage.
+
+    ``compiled_fields`` are the remaining provider-derived ScenarioSpec
+    fields, passed through unchanged.
+
+    Raises:
+        ScenarioAssemblyError: When the authority rejects the compiled draft.
+    """
+    try:
+        return _assemble(
+            assembly,
+            scenario_context,
+            defender_vulnerabilities,
+            causal_factors,
+            compiled_fields,
+        )
+    except ValueError as exc:
+        raise ScenarioAssemblyError(str(exc)) from exc
+
+
+def _assemble(
+    assembly: ScenarioAssembly,
+    context: ScenarioGenerationContext,
+    defender_vulnerabilities: Mapping[str, str],
+    declarations: Sequence[CausalFactorDeclaration],
+    compiled_fields: Mapping[str, Any],
+) -> ScenarioSpec:
+    threat = assembly.threat
+    slot_parts = parse_ica_slot_id(threat.ica_slot_id)
+    _validate_context_matches_threat(context, threat, assembly.scenario_index)
+    _merge_defender_vulnerabilities(assembly.defender_bdi, defender_vulnerabilities)
+    causal_factors = _materialize_causal_factors(declarations)
+    _validate_assembled_factors(causal_factors, assembly.control_structure, context)
     return ScenarioSpec(
-        scenario_id=generate_scenario_id(scenario_index),
+        scenario_id=generate_scenario_id(assembly.scenario_index),
         threat_source=ThreatSource(
             ica_slot_id=threat.ica_slot_id,
             provenance=threat.provenance,
@@ -118,30 +142,16 @@ def assemble_scenario_spec(
         target_controller=slot_parts["controller"],
         target_control_action=slot_parts["control_action"],
         ica_type=UCAType(slot_parts["ica_type"]),
-        defender_bdi=defender_bdi,
-        attacker_bdi=llm_result.attacker_bdi,
+        defender_bdi=assembly.defender_bdi,
         catalog_context=threat.catalog_mappings,
         loss_scenario=threat.loss_scenario,
         causal_factors=causal_factors,
-        unsafe_outcome_semantic_proposition=(
-            llm_result.unsafe_outcome.semantic_proposition
-            if llm_result.unsafe_outcome is not None
-            else None
-        ),
-        unsafe_outcome_hazard_refs=hazard_refs,
-        unsafe_outcome_constraint_refs=constraint_refs,
-        scenario_context=scenario_context,
-        adversary=llm_result.adversary,
-        observation_criteria=llm_result.observation_criteria,
-        observation_assessment=llm_result.observation_assessment,
-        observation_contract_id=llm_result.observation_contract_id,
-        observation_contract_digest=llm_result.observation_contract_digest,
-        safe_observable_outcome=llm_result.safe_observable_outcome,
-        discriminating_condition=llm_result.discriminating_condition,
-        condition_check=llm_result.condition_check,
-        condition_omitted_reason=llm_result.condition_omitted_reason,
-        tool_call_condition_status=llm_result.tool_call_condition_status,
-        tool_call_condition=llm_result.tool_call_condition,
+        unsafe_outcome_hazard_refs=[item.hazard_id for item in context.hazards],
+        unsafe_outcome_constraint_refs=[
+            item.constraint_id for item in context.constraints
+        ],
+        scenario_context=context,
+        **compiled_fields,
     )
 
 
@@ -185,27 +195,17 @@ def _threat_identity(
     )
 
 
-def _validate_optional_assembly_context(
-    context: ScenarioGenerationContext | None,
-    threat: StructuralThreat,
-    scenario_index: int,
-) -> None:
-    """Validate a supplied scenario context before compiling provider output."""
-    if context is not None:
-        _validate_context_matches_threat(context, threat, scenario_index)
-
-
 def _merge_defender_vulnerabilities(
     defender_bdi: DefenderBDI,
-    llm_result: BDIGenerationResult,
+    vulnerabilities: Mapping[str, str],
 ) -> None:
-    """Attach provider vulnerability prose to deterministic belief IDs."""
+    """Attach compiled vulnerability prose to deterministic belief IDs."""
     for belief in defender_bdi.beliefs:
-        belief.vulnerability = llm_result.defender_vulnerabilities.get(belief.pm_id, "")
+        belief.vulnerability = vulnerabilities.get(belief.pm_id, "")
 
 
 def _materialize_causal_factors(
-    llm_result: BDIGenerationResult,
+    declarations: Sequence[CausalFactorDeclaration],
 ) -> list[CausalFactor]:
     """Compile the declared Stage 5 factor records without inference."""
     return [
@@ -219,19 +219,17 @@ def _materialize_causal_factors(
             bounded_assumption=declaration.bounded_assumption,
             temporal_condition=declaration.temporal_condition,
         )
-        for declaration in llm_result.causal_factors
+        for declaration in declarations
     ]
 
 
 def _validate_assembled_factors(
     causal_factors: list[CausalFactor],
     control_structure: ControlStructure,
-    context: ScenarioGenerationContext | None,
+    context: ScenarioGenerationContext,
 ) -> None:
-    """Validate factor references against structure and optional context."""
+    """Validate factor references against the structure and the context."""
     validate_factor_sources(control_structure, causal_factors)
-    if context is None:
-        return
     validate_factor_evidence(context, causal_factors)
     _validate_context_factor_sources(context, causal_factors)
 

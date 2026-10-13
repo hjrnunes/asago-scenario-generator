@@ -21,6 +21,8 @@ from pydantic import ValidationError
 from tests.stpa.stage5_wire import normal_wire_queue
 import json
 from tests.helpers.sp3_stage5_provider_contract import (
+    _model_output_assembly,
+    _typed_tool_assembly,
     _model_output_context,
     _provider_payload,
     _typed_tool_context,
@@ -66,12 +68,16 @@ def test_context_materialization_preserves_proposition(
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([_model_output_payload()]))
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        assembly=_model_output_assembly(context),
+    )
 
     assert error is None
     assert result is not None
-    assert result.unsafe_outcome is not None
-    assert result.unsafe_outcome.semantic_proposition == (
+    assert result.unsafe_outcome_semantic_proposition == (
         "The response authorizes an unsafe action prohibited by policy."
     )
 
@@ -86,7 +92,12 @@ def test_context_provider_retries_empty_attacker_bdi_members(tmp_path, field) ->
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([invalid, valid]))
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        assembly=_typed_tool_assembly(context),
+    )
 
     assert error is None
     assert result is not None
@@ -104,7 +115,12 @@ def test_context_provider_rejects_empty_attacker_intentions_after_bounded_retry(
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([invalid, invalid]))
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        assembly=_typed_tool_assembly(context),
+    )
 
     assert result is None
     assert error is not None
@@ -125,7 +141,12 @@ def test_stage5_resolves_local_temporal_reference_before_materialization(
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([payload]))
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        assembly=_typed_tool_assembly(context),
+    )
 
     assert error is None
     assert result is not None

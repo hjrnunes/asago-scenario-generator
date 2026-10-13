@@ -34,6 +34,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
     _action_duration_eligible,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.helpers.stage5_assembly import stage5_assembly
 from tests.stpa.stage5_wire import normal_wire_queue
 from tests.helpers.sp3_scenario_continuity import (
     _control_structure,
@@ -65,8 +66,13 @@ def _context(temporality: ControlActionTemporality | None) -> ScenarioGeneration
         _threat(),
         _structure(temporality),
         _loss_analysis(),
-        scenario_id="SCN-TEMPORALITY",
+        scenario_id="SCN-001",
     )
+
+
+def _assembly(context: ScenarioGenerationContext):
+    temporality = context.target_control_path.control_action.temporality
+    return stage5_assembly(context, _threat(), _structure(temporality))
 
 
 @pytest.mark.parametrize("temporality", list(ControlActionTemporality))
@@ -181,7 +187,10 @@ def test_a_continuous_action_accepts_a_duration_condition(tmp_path) -> None:
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([_duration_payload()]))
 
-    result, error = generate_bdi_for_context(client, _context(T.continuous), tmp_path)
+    context = _context(T.continuous)
+    result, error = generate_bdi_for_context(
+        client, context, tmp_path, assembly=_assembly(context)
+    )
 
     assert error is None
     assert result is not None
@@ -193,8 +202,9 @@ def test_an_instantaneous_action_offers_no_duration_condition(tmp_path) -> None:
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([_duration_payload()]))
 
+    context = _context(T.instantaneous)
     result, error = generate_bdi_for_context(
-        client, _context(T.instantaneous), tmp_path
+        client, context, tmp_path, assembly=_assembly(context)
     )
 
     assert result is None

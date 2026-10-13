@@ -2,9 +2,6 @@
 
 from __future__ import annotations
 
-from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
-    populate_defender_bdi,
-)
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservation,
     TargetObservationSnapshot,
@@ -22,10 +19,11 @@ from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
 )
 from tests.helpers.sp3_scenario_continuity import (
-    _control_structure,
     _loss_analysis,
-    _threat,
+    _structure_with_effect,
+    _threat_of_type,
 )
+from tests.helpers.stage5_assembly import stage5_assembly
 
 
 PROPOSITION = (
@@ -34,32 +32,27 @@ PROPOSITION = (
 )
 
 
-def _wrong_timing_context(scenario_id: str = "SCN-A1-NORMAL"):
-    """One WRONG_TIMING context with the standard four causal sources."""
-    structure = _control_structure()
-    action = (
-        structure.responsibilities[0]
-        .control_actions[0]
-        .model_copy(update={"effect_kind": ControlActionEffectKind.model_output})
-    )
-    responsibility = structure.responsibilities[0].model_copy(
-        update={"control_actions": [action]}
-    )
-    structure = structure.model_copy(update={"responsibilities": [responsibility]})
-    threat = _threat()
-    threat = threat.model_copy(
-        update={
-            "ica_slot_id": threat.ica_slot_id.replace(
-                "INCORRECT", UCAType.wrong_timing.value
-            ),
-            "ica_id": threat.ica_id.replace("INCORRECT", UCAType.wrong_timing.value),
-        }
-    )
+def _wrong_timing_structure():
+    """The standard structure whose action emits model output."""
+    return _structure_with_effect(ControlActionEffectKind.model_output)
+
+
+def _wrong_timing_context(
+    scenario_id: str = "SCN-001", uca_type: UCAType = UCAType.wrong_timing
+):
+    """One context, WRONG_TIMING by default, with the standard causal sources."""
     return build_scenario_generation_context(
-        threat,
-        structure,
+        _threat_of_type(uca_type),
+        _wrong_timing_structure(),
         _loss_analysis(),
         scenario_id=scenario_id,
+    )
+
+
+def _wrong_timing_assembly(context):
+    """The assembly authority of a ``_wrong_timing_context`` context."""
+    return stage5_assembly(
+        context, _threat_of_type(context.ica.uca_type), _wrong_timing_structure()
     )
 
 
@@ -132,19 +125,3 @@ def _record_observations() -> TargetObservationSnapshot:
     return _state_snapshot(
         '{"order_id": "ORD-104", "refund_eligible": false, "owner_id": "cus-778"}'
     )
-
-
-def _wrong_timing_threat():
-    threat = _threat()
-    return threat.model_copy(
-        update={
-            "ica_slot_id": threat.ica_slot_id.replace(
-                "INCORRECT", UCAType.wrong_timing.value
-            ),
-            "ica_id": threat.ica_id.replace("INCORRECT", UCAType.wrong_timing.value),
-        }
-    )
-
-
-def _defender_bdi(context):
-    return populate_defender_bdi(_control_structure(), "RESP-1")

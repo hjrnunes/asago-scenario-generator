@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
+    ControlActionEffectKind,
     ControlStructure,
     ControlledProcess,
     ElementRef,
@@ -13,6 +14,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
 )
 from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralThreat
+from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
     CausalFactorKind,
@@ -135,6 +137,31 @@ def _threat(*, constraint_id: str = "SC-MASS") -> StructuralThreat:
         related_hazards=["H-MASS"],
         related_constraints=[constraint_id],
     )
+
+
+def _threat_of_type(uca_type: UCAType) -> StructuralThreat:
+    """The standard threat with its ICA type replaced."""
+    threat = _threat()
+    return threat.model_copy(
+        update={
+            "ica_slot_id": threat.ica_slot_id.replace("INCORRECT", uca_type.value),
+            "ica_id": threat.ica_id.replace("INCORRECT", uca_type.value),
+        }
+    )
+
+
+def _structure_with_effect(effect_kind: ControlActionEffectKind) -> ControlStructure:
+    """The standard structure whose one control action has ``effect_kind``."""
+    structure = _control_structure()
+    action = (
+        structure.responsibilities[0]
+        .control_actions[0]
+        .model_copy(update={"effect_kind": effect_kind})
+    )
+    responsibility = structure.responsibilities[0].model_copy(
+        update={"control_actions": [action]}
+    )
+    return structure.model_copy(update={"responsibilities": [responsibility]})
 
 
 def _context():

@@ -219,9 +219,8 @@ and every attacker intention must cite a handle with a declared factor.
 The contextual provider supplies one causal statement per declared handle.
 Defender-belief annotations are derived from that statement's exact PM source;
 the provider does not separately rewrite it. An undeclared PM is marked as not
-selected in this scenario, not as proven free of vulnerabilities. The public
-BDI result retains complete belief annotations and the legacy non-contextual
-provider seam is unchanged. The deterministic summary renderer consumes that
+selected in this scenario, not as proven free of vulnerabilities. The
+compiled `ScenarioSpec` retains complete belief annotations. The deterministic summary renderer consumes that
 same context, so an unrelated global constraint cannot leak into a scenario. An adversary may take
 advantage of a declared structural failure without that prose being mistaken
 for a new access path. Capability and access-path assertions are validated
@@ -487,8 +486,8 @@ the exact hazard, governing-constraint, and reachable-loss references without
 substitution or fallback expansion.
 
 Stage 5 runs through `generate_bdi_for_context`, which validates local
-handles and resolves them to the fixed STPA identities; it materializes no
-execution contract.
+handles and resolves them to the fixed STPA identities, then compiles the
+draft directly into the `ScenarioSpec`; it materializes no execution contract.
 Its provider prompt is a purpose-built view of the immutable context, not a
 serialization of that artifact. It omits digests, source pins, scenario/ICA
 bookkeeping identities, raw causal-source IDs, and catalog labels. Exact target

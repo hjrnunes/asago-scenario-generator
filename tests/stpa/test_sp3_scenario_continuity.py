@@ -33,26 +33,21 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import (
-    AttackerBDI,
     ScenarioSpec,
 )
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    BDIGenerationResult,
-    CausalFactorDeclaration,
-    UnsafeOutcomeDeclaration,
+from asago_scenario_generator.stpa.scenario_prod.stage5.schema import (
+    _scenario_semantics_payload_type,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
-    assemble_scenario_spec,
+from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
+    CausalFactorDeclaration,
+    _CausalSourceChoice,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     generate_bdi_for_context,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
-    populate_defender_bdi,
 )
 from asago_scenario_generator.stpa.scenario_prod.context import (
     build_scenario_generation_context,
@@ -66,6 +61,8 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
     _causal_source_choices,
 )
 from tests.stpa.stage5_wire import normal_wire_queue
+from tests.helpers.stage5_assembly import stage5_assembly
+from tests.helpers.stage5_compile import compile_draft, draft_payload, factor, handle_of
 from tests.helpers.sp3_scenario_continuity import (
     _context,
     _contextual_spec,
@@ -73,6 +70,11 @@ from tests.helpers.sp3_scenario_continuity import (
     _loss_analysis,
     _threat,
 )
+
+
+def _assembly(context: ScenarioGenerationContext):
+    """The authority a ``_context()`` assembles against."""
+    return stage5_assembly(context, _threat(), _control_structure())
 
 
 def test_target_derived_temporal_slot_builds_scenario_context() -> None:
@@ -161,7 +163,7 @@ def test_context_supports_exact_coordination_link_path() -> None:
         _coordination_threat(),
         _coordination_control_structure(),
         _loss_analysis(),
-        scenario_id="SCN-CL-001",
+        scenario_id="SCN-001",
     )
 
     path = context.target_control_path
@@ -189,7 +191,7 @@ def test_context_stage5_offers_only_compiler_owned_causal_source_handles() -> No
         _coordination_threat(),
         _coordination_control_structure(),
         _loss_analysis(),
-        scenario_id="SCN-CL-001",
+        scenario_id="SCN-001",
     )
 
     _system, prompt = build_context_bdi_prompts(context, TemplateLoader(PROMPTS_DIR))
@@ -264,17 +266,24 @@ def test_context_stage5_compiles_local_handles_to_exact_structural_sources(
         )
     )
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    spec, error = generate_bdi_for_context(
+        client, context, tmp_path, assembly=_assembly(context)
+    )
 
     assert error is None
-    assert result is not None
-    assert result.causal_factors[0].kind is CausalFactorKind.process_model_flaw
-    assert result.causal_factors[0].source_id == "PM-1-1"
-    assert result.defender_vulnerabilities == {
+    assert spec is not None
+    assert spec.causal_factors[0].kind is CausalFactorKind.process_model_flaw
+    assert spec.causal_factors[0].source_id == "PM-1-1"
+    assert _vulnerabilities(spec) == {
         "PM-1-1": "The selected process-model state stays stale."
     }
-    assert "PM-1-1" in result.attacker_bdi.intentions[0]
-    assert "cause_1" not in result.model_dump_json()
+    assert "PM-1-1" in spec.attacker_bdi.intentions[0]
+    assert "cause_1" not in spec.model_dump_json()
+
+
+def _vulnerabilities(spec: ScenarioSpec) -> dict[str, str]:
+    """The defender's per-belief vulnerabilities, keyed by process-model part."""
+    return {belief.pm_id: belief.vulnerability for belief in spec.defender_bdi.beliefs}
 
 
 def _executable_route_payload() -> dict:
@@ -347,15 +356,18 @@ def test_context_validator_corrects_a_copy_and_leaves_its_input(
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([payload]))
 
-    result, error = generate_bdi_for_context(client, _context(), tmp_path)
+    context = _context()
+    spec, error = generate_bdi_for_context(
+        client, context, tmp_path, assembly=_assembly(context)
+    )
 
     assert error is None, error
-    assert result is not None
+    assert spec is not None
     [(before, after, draft)] = seen
     assert after == before
     proposition = draft["unsafe_outcome"]["semantic_proposition"]
     assert "CA-1-1" not in proposition
-    assert result.unsafe_outcome.semantic_proposition == proposition
+    assert spec.unsafe_outcome_semantic_proposition == proposition
 
 
 def test_context_stage5_rejects_typed_compiler_contract(tmp_path) -> None:
@@ -365,31 +377,20 @@ def test_context_stage5_rejects_typed_compiler_contract(tmp_path) -> None:
     client.set_response_queue(
         normal_wire_queue(
             [
-                BDIGenerationResult(
-                    defender_vulnerabilities={"PM-1-1": "The state can be stale."},
-                    attacker_bdi=AttackerBDI(
-                        beliefs=["b"],
-                        desires=["d"],
-                        intentions=["Rely on PM-1-1."],
-                    ),
-                    causal_factors=[
-                        CausalFactorDeclaration(
-                            kind=CausalFactorKind.process_model_flaw,
-                            source_id="PM-1-1",
-                            evidence="The selected state can be stale.",
-                        )
-                    ],
-                    unsafe_outcome=UnsafeOutcomeDeclaration(
-                        semantic_proposition="The response approves the action.",
-                    ),
+                CausalFactorDeclaration(
+                    kind=CausalFactorKind.process_model_flaw,
+                    source_id="PM-1-1",
+                    evidence="The selected state can be stale.",
                 )
             ]
         )
     )
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    spec, error = generate_bdi_for_context(
+        client, context, tmp_path, assembly=_assembly(context)
+    )
 
-    assert result is None
+    assert spec is None
     assert error is not None
     assert "Unexpected LLM result content type" in error
 
@@ -452,11 +453,13 @@ def test_context_stage5_preserves_explicit_assumption_when_status_is_mislabeled(
         )
     )
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    spec, error = generate_bdi_for_context(
+        client, context, tmp_path, assembly=_assembly(context)
+    )
 
     assert error is None
-    assert result is not None
-    factor = result.causal_factors[0]
+    assert spec is not None
+    factor = spec.causal_factors[0]
     assert factor.evidence_status == "bounded_assumption"
     assert factor.bounded_assumption == "Assume the update arrives late."
 
@@ -560,9 +563,11 @@ def test_context_stage5_intentions_must_reference_a_declared_factor(tmp_path) ->
         )
     )
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    spec, error = generate_bdi_for_context(
+        client, context, tmp_path, assembly=_assembly(context)
+    )
 
-    assert result is None
+    assert spec is None
     assert error is not None
     assert "intention source handles must have declared causal factors" in error
     assert "intention_handle_undeclared" in error
@@ -626,14 +631,16 @@ def test_context_stage5_intentions_drop_undeclared_handles_beside_declared_ones(
         )
     )
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    spec, error = generate_bdi_for_context(
+        client, context, tmp_path, assembly=_assembly(context)
+    )
 
     assert error is None, error
-    assert result is not None
+    assert spec is not None
     assert client.call_count == 1
     declared_source = choices[0].source_id
     undeclared_source = choices[1].source_id
-    [intention] = result.attacker_bdi.intentions
+    [intention] = spec.attacker_bdi.intentions
     assert intention.endswith(f"[structural sources: {declared_source}]")
     assert undeclared_source not in intention
 
@@ -643,7 +650,7 @@ def _coordination_context() -> ScenarioGenerationContext:
         _coordination_threat(),
         _coordination_control_structure(),
         _loss_analysis(),
-        scenario_id="SCN-CL-001",
+        scenario_id="SCN-001",
     )
 
 
@@ -678,7 +685,7 @@ def test_context_stage5_derives_public_pm_annotations_from_causal_factors(
         _coordination_threat(),
         _coordination_control_structure(),
         _loss_analysis(),
-        scenario_id="SCN-CL-001",
+        scenario_id="SCN-001",
     )
     client = MockLLMClient()
     response = {
@@ -733,16 +740,24 @@ def test_context_stage5_derives_public_pm_annotations_from_causal_factors(
     }
     client.set_response_queue(normal_wire_queue([response]))
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    spec, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        assembly=stage5_assembly(
+            context, _coordination_threat(), _coordination_control_structure()
+        ),
+    )
 
     assert error is None
-    assert result is not None
-    assert result.defender_vulnerabilities == {
+    assert spec is not None
+    vulnerabilities = _vulnerabilities(spec)
+    assert vulnerabilities == {
         "PM-1-1": "The selected state remains stale.",
         "PM-2-1": "Not selected as a causal factor in this scenario.",
     }
-    assert result.defender_vulnerabilities[result.causal_factors[0].source_id] == (
-        result.causal_factors[0].evidence
+    assert vulnerabilities[spec.causal_factors[0].source_id] == (
+        spec.causal_factors[0].description
     )
 
 
@@ -756,7 +771,7 @@ def test_context_rejects_unknown_coordination_link() -> None:
             threat,
             _coordination_control_structure(),
             _loss_analysis(),
-            scenario_id="SCN-CL-001",
+            scenario_id="SCN-001",
         )
 
 
@@ -770,7 +785,7 @@ def test_context_rejects_coordination_slot_with_wrong_mechanism() -> None:
             threat,
             _coordination_control_structure(),
             _loss_analysis(),
-            scenario_id="SCN-CL-001",
+            scenario_id="SCN-001",
         )
 
 
@@ -790,7 +805,7 @@ def test_context_rejects_dangling_coordination_endpoint() -> None:
             _coordination_threat(),
             unchecked_structure,
             _loss_analysis(),
-            scenario_id="SCN-CL-001",
+            scenario_id="SCN-001",
         )
 
 
@@ -804,37 +819,16 @@ def test_coordination_bdi_and_spec_validate_against_exact_link() -> None:
         scenario_id="SCN-001",
     )
 
-    defender_bdi = populate_defender_bdi(control_structure, "CL-1")
-    result = BDIGenerationResult(
-        defender_vulnerabilities={
-            item.pm_id: "The shared state can be stale."
-            for item in control_structure.responsibilities[0].process_model_parts
-        },
-        attacker_bdi=AttackerBDI(
-            beliefs=["The coordination state can be manipulated."],
-            desires=["Induce the selected coordination ICA."],
-            intentions=["Manipulate PM-1-1 before CM-1 is used."],
-        ),
-        causal_factors=[
-            CausalFactorDeclaration(
-                kind=CausalFactorKind.process_model_flaw,
-                source_id="PM-1-1",
-                evidence="The shared policy state can be stale when synchronized.",
-            )
-        ],
-        unsafe_outcome=UnsafeOutcomeDeclaration(
-            semantic_proposition=(
-                "The coordination response authorizes an unsafe action."
-            ),
-        ),
+    handle = handle_of(
+        _causal_source_choices(context), CausalFactorKind.process_model_flaw, "PM-1-1"
+    )
+    payload = draft_payload(
+        [factor(handle, "The shared policy state can be stale when synchronized.")],
+        proposition="The coordination response authorizes an unsafe action.",
     )
 
-    spec = assemble_scenario_spec(
-        defender_bdi,
-        result,
-        threat,
-        control_structure,
-        scenario_context=context,
+    spec = compile_draft(
+        payload, context, stage5_assembly(context, threat, control_structure)
     )
 
     assert spec.target_controller == "CL-1"
@@ -948,41 +942,26 @@ def test_stage5_context_preserves_mass_action_meaning_and_excludes_unrelated_pii
 def test_successful_stage5_response_requires_explicit_nonempty_causal_factors(
     causal_factors,
 ) -> None:
-    payload = {
-        "defender_vulnerabilities": {"PM-1-1": "count feedback can be stale"},
-        "attacker_bdi": AttackerBDI(
-            beliefs=["The action count can be stale"],
-            desires=["Induce the selected ICA"],
-            intentions=["Manipulate FB-1-1"],
-        ).model_dump(mode="json"),
-    }
-    if causal_factors is not None:
+    choices = _causal_source_choices(_context())
+    payload = draft_payload([factor(choices[0].handle, "count feedback can be stale")])
+    if causal_factors is None:
+        del payload["causal_factors"]
+    else:
         payload["causal_factors"] = causal_factors
 
     with pytest.raises(ValidationError, match="causal_factors"):
-        BDIGenerationResult.model_validate(payload)
+        _scenario_semantics_payload_type(len(choices)).model_validate(payload)
 
 
 def test_stage5_response_cannot_replace_authoritative_scenario_context() -> None:
+    choices = _causal_source_choices(_context())
+    payload = draft_payload(
+        [factor(choices[0].handle, "The feedback update arrives after authorization.")]
+    )
+    payload["ica_text"] = "Replace the mass-action ICA with a PII masking bypass"
+
     with pytest.raises(ValidationError, match="ica_text"):
-        BDIGenerationResult.model_validate(
-            {
-                "defender_vulnerabilities": {"PM-1-1": "stale feedback"},
-                "attacker_bdi": {
-                    "beliefs": ["stale feedback"],
-                    "desires": ["induce ICA"],
-                    "intentions": ["manipulate FB-1-1"],
-                },
-                "causal_factors": [
-                    {
-                        "kind": "feedback_delay",
-                        "source_id": "FB-1-1",
-                        "evidence": "The feedback update arrives after authorization.",
-                    }
-                ],
-                "ica_text": "Replace the mass-action ICA with a PII masking bypass",
-            }
-        )
+        _scenario_semantics_payload_type(len(choices)).model_validate(payload)
 
 
 def test_context_fails_closed_when_selected_constraint_does_not_govern_hazard() -> None:
@@ -1070,29 +1049,27 @@ def test_stage5_rejects_causal_factor_from_unselected_control_path() -> None:
         _loss_analysis(),
         scenario_id="SCN-001",
     )
-    result = BDIGenerationResult(
-        defender_vulnerabilities={"PM-1-1": "stale count"},
-        attacker_bdi=AttackerBDI(
-            beliefs=["PII state is reachable"],
-            desires=["change the selected concern"],
-            intentions=["manipulate PM-2-1"],
+    # The context never offers PM-2-1, so bind it to an extra local handle
+    # and let assembly reject it.
+    offered = _causal_source_choices(context)
+    outside = f"cause_{len(offered) + 1}"
+    choices = (
+        *offered,
+        _CausalSourceChoice(
+            handle=outside,
+            kind=CausalFactorKind.process_model_flaw,
+            source_id="PM-2-1",
+            description="PII classification state",
         ),
-        causal_factors=[
-            CausalFactorDeclaration(
-                kind=CausalFactorKind.process_model_flaw,
-                source_id="PM-2-1",
-                evidence="Unrelated PII classification evidence",
-            )
-        ],
     )
+    payload = draft_payload([factor(outside, "Unrelated PII classification evidence")])
 
     with pytest.raises(ValueError, match="outside the selected scenario control path"):
-        assemble_scenario_spec(
-            populate_defender_bdi(control_structure, "RESP-1"),
-            result,
-            _threat(),
-            control_structure,
-            scenario_context=context,
+        compile_draft(
+            payload,
+            context,
+            stage5_assembly(context, _threat(), control_structure),
+            choices=choices,
         )
 
 
