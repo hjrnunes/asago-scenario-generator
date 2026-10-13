@@ -529,6 +529,28 @@ class TestErrorPaths:
                 is SP3CandidateStatus.generation_failed
             )
 
+    def test_stage5_assembly_rejection_keeps_its_own_error(self, monkeypatch):
+        """An assembly rejection is a Stage 5 error, not a generation failure."""
+        from asago_scenario_generator.stpa.scenario_prod.stage5 import assemble
+
+        def reject(*_args, **_kwargs):
+            raise ValueError("the authority rejects this draft")
+
+        monkeypatch.setattr(assemble, "_assemble", reject)
+        client = _setup_mock_client(1)
+
+        with TemporaryDirectory() as tmpdir:
+            result = run_sp3(
+                llm_client=client,
+                enriched_threat_set=_make_ets(num_threats=1),
+                control_structure=make_cs(),
+                loss_analysis=make_loss_analysis(),
+                run_dir=Path(tmpdir),
+            )
+
+        assert len(result.scenario_envelopes) == 0
+        assert result.stage_errors == ["Stage 5: the authority rejects this draft"]
+
     def test_repeated_structured_length_failure_aborts_remaining_threats(self):
         """An exhausted length retry opens the circuit before later threats run."""
 

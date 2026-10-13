@@ -554,6 +554,35 @@ def _declared_attempt_safe_outcome() -> dict:
     }
 
 
+def test_assembly_rejection_still_records_the_draft_normalizations(
+    tmp_path, monkeypatch
+) -> None:
+    """A draft that compiled keeps its normalization record when assembly fails."""
+    from asago_scenario_generator.stpa.scenario_prod.stage5 import assemble
+
+    def reject(*_args, **_kwargs):
+        raise ValueError("the authority rejects this draft")
+
+    monkeypatch.setattr(assemble, "_assemble", reject)
+    payload = _outcome_payload([_REPLY_CRITERION], _declared_attempt_safe_outcome())
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+    context = _wrong_timing_context()
+
+    with pytest.raises(assemble.ScenarioAssemblyError, match="authority rejects"):
+        generate_bdi_for_context(
+            client,
+            context,
+            tmp_path,
+            observation_contract=default_observation_contract(),
+            assembly=_wrong_timing_assembly(context),
+        )
+
+    [record] = _normalization_records(tmp_path)
+    assert record["scenario_id"] == context.scenario_identity.scenario_id
+    assert record["normalizations"]
+
+
 def test_safe_outcome_is_coerced_to_the_only_supported_reply_criterion(
     tmp_path,
 ) -> None:
