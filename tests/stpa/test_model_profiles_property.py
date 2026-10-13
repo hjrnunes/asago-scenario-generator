@@ -8,15 +8,16 @@ These tests verify invariants that should hold across broad input ranges:
   fields that were present in the source.
 - **Optional field omission**: Optional fields absent from the source are
   absent from the result; optional fields present are preserved.
-- **Empty required field rejection**: An empty-string required field always
-  raises ValueError.
+
+Rejection of empty, missing and unknown values runs from the ``model-profile``
+contract in ``test_model_profile_contract.py``.
 """
 
 from __future__ import annotations
 
 
 import yaml
-from hypothesis import HealthCheck, given, settings, strategies as st, assume
+from hypothesis import HealthCheck, given, settings, strategies as st
 
 from asago_scenario_generator.model_profiles import (
     OPTIONAL_FIELDS,
@@ -45,7 +46,11 @@ st_optional_field_values = st.fixed_dictionaries(
         "temperature": st.floats(min_value=0.0, max_value=2.0, allow_nan=False),
         "top_p": st.floats(min_value=0.0, max_value=1.0, allow_nan=False),
         "top_k": st.integers(min_value=1, max_value=100),
-        "headers": st.dictionaries(st_nonempty_str, st_nonempty_str, max_size=3),
+        "headers": st.dictionaries(
+            st_nonempty_str.filter(lambda name: name.strip()),
+            st_nonempty_str,
+            max_size=3,
+        ),
     },
 )
 
@@ -132,92 +137,6 @@ class TestRequiredFieldConservation:
 # ---------------------------------------------------------------------------
 
 
-class TestEmptyRequiredFieldRejection:
-    """An empty-string required field always raises ValueError."""
-
-    @given(
-        profile_name=st_profile_name,
-        field_name=st.sampled_from(list(REQUIRED_FIELDS)),
-    )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_empty_required_field_rejected(self, tmp_path, profile_name, field_name):
-        """An empty string for any required field always raises ValueError."""
-        profile = _build_profile_dict({})
-        profile[field_name] = ""
-        path = tmp_path / "profiles.yaml"
-        path.write_text(
-            yaml.dump({profile_name: profile}, default_flow_style=False),
-            encoding="utf-8",
-        )
-        try:
-            load_profile(path, profile_name)
-            raise AssertionError(
-                f"Expected ValueError for empty required field '{field_name}'"
-            )
-        except ValueError:
-            pass  # expected
-
-    @given(
-        profile_name=st_profile_name,
-        field_name=st.sampled_from(list(REQUIRED_FIELDS)),
-    )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_none_required_field_rejected(self, tmp_path, profile_name, field_name):
-        """A None (missing) required field always raises ValueError."""
-        profile = _build_profile_dict({})
-        del profile[field_name]
-        path = tmp_path / "profiles.yaml"
-        path.write_text(
-            yaml.dump({profile_name: profile}, default_flow_style=False),
-            encoding="utf-8",
-        )
-        try:
-            load_profile(path, profile_name)
-            raise AssertionError(
-                f"Expected ValueError for missing required field '{field_name}'"
-            )
-        except ValueError:
-            pass  # expected
-
-
 # ---------------------------------------------------------------------------
 # Unknown profile name rejection property tests
 # ---------------------------------------------------------------------------
-
-
-class TestUnknownProfileRejection:
-    """An unknown profile name always raises KeyError."""
-
-    @given(
-        profile_name=st_profile_name,
-        unknown_name=st.from_regex(r"[a-z][a-z0-9_-]*", fullmatch=True),
-    )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_unknown_name_rejected(self, tmp_path, profile_name, unknown_name):
-        """Loading a non-existent profile name always raises KeyError."""
-        assume(profile_name != unknown_name)
-        profile = _build_profile_dict({})
-        path = tmp_path / "profiles.yaml"
-        path.write_text(
-            yaml.dump({profile_name: profile}, default_flow_style=False),
-            encoding="utf-8",
-        )
-        try:
-            load_profile(path, unknown_name)
-            raise AssertionError(
-                f"Expected KeyError for unknown profile '{unknown_name}'"
-            )
-        except KeyError:
-            pass  # expected

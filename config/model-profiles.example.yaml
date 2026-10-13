@@ -59,3 +59,23 @@ luna:
   strict_json_schema: false
   json_schema_strict: false
   timeout: 900
+# GLM 5.3 behind an internal gateway, as the Gemma-versus-GLM comparison used it.
+glm53-enmaas-65k-low-rp:
+  base_url: https://your-glm-gateway.example.com/v1
+  model: rits/zai-org/glm-5-3
+  api_key: YOUR-API-KEY-HERE
+  # The 65k window is the comparison's choice, not the gateway's (262144).
+  context_window: 65536
+  # Medium reasoning effort spends the whole 16384 cap on reasoning and returns
+  # no content, and the gateway times a request out at about 300 seconds, so
+  # the cap stays and the effort drops to low.
+  max_completion_tokens: 16384
+  reasoning_effort: low
+  # Z.ai's recommended sampling for GLM; no top_k or seed.
+  temperature: 1.0
+  top_p: 0.95
+  # Without a penalty, 4 of 34 replies looped to the cap; at 1.05, 1 of 326.
+  # The gateway forwards the field in extra_body. Its notes warn that
+  # penalties can make GLM drift into Chinese; keep the value small.
+  repetition_penalty: 1.05
+  timeout: 900
