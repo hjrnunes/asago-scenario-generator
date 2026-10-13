@@ -467,7 +467,7 @@ def test_production_resolver_is_atlas_only_and_deterministic(
     resolver = bundled_resolver
     context = resolver.taxonomy_context
     assert context.atlas == bundled_pin
-    assert context.laaf is None
+    assert "laaf" not in context.model_dump()
     assert context.mapping_set_digest == compute_mapping_set_digest()
     assert resolver.taxonomy_context == load_taxonomy_resolver().taxonomy_context
     # Bundled pinned ATLAS ids resolve; unknown ids fail.
@@ -476,9 +476,8 @@ def test_production_resolver_is_atlas_only_and_deterministic(
     assert not resolver.contains("ATLAS", "AML.T9999")
     assert not resolver.contains("ATLAS", "AML.CS0000")
     # SSSOM skos:relatedMatch rows are provenance content: "S1" is mapped in
-    # the bundled SSSOM files yet never becomes LAAF resolver membership.
-    assert not resolver.contains("LAAF", "S1")
-    assert not resolver.contains("LAAF", "AML.T0051.001")
+    # the bundled SSSOM files yet never becomes resolver membership.
+    assert not resolver.contains("ATLAS", "S1")
 
 
 def test_resolver_is_pure_in_memory_after_construction(
@@ -492,68 +491,25 @@ def test_resolver_is_pure_in_memory_after_construction(
     monkeypatch.setattr("builtins.open", _explode)
     monkeypatch.setattr(Path, "read_bytes", _explode)
     assert resolver.contains("ATLAS", "AML.T0051.001")
-    assert not resolver.contains("LAAF", "S1")
-    assert resolver.taxonomy_context.laaf is None
 
 
-def test_laaf_pin_and_membership_must_be_supplied_together(
+def test_resolver_rejects_empty_or_blank_atlas_membership(
     bundled_pin: TaxonomyPin,
     bundled_identifiers: frozenset[str],
 ) -> None:
-    pin = TaxonomyPin(release="laaf-test", digest="a" * 64)
-    atlas_pin = bundled_pin
-    atlas_ids = bundled_identifiers
     digest = compute_mapping_set_digest()
-    with pytest.raises(ValueError, match="together"):
-        PinnedTaxonomyResolver(
-            atlas_pin=atlas_pin,
-            atlas_identifiers=atlas_ids,
-            mapping_set_digest=digest,
-            laaf_pin=pin,
-        )
-    with pytest.raises(ValueError, match="together"):
-        PinnedTaxonomyResolver(
-            atlas_pin=atlas_pin,
-            atlas_identifiers=atlas_ids,
-            mapping_set_digest=digest,
-            laaf_identifiers={"L1"},
-        )
     with pytest.raises(ValueError, match="must not be empty"):
         PinnedTaxonomyResolver(
-            atlas_pin=atlas_pin,
-            atlas_identifiers=atlas_ids,
-            mapping_set_digest=digest,
-            laaf_pin=pin,
-            laaf_identifiers=set(),
-        )
-    with pytest.raises(ValueError, match="non-empty strings"):
-        PinnedTaxonomyResolver(
-            atlas_pin=atlas_pin,
-            atlas_identifiers=atlas_ids,
-            mapping_set_digest=digest,
-            laaf_pin=pin,
-            laaf_identifiers={""},
-        )
-    with pytest.raises(ValueError, match="must not be empty"):
-        PinnedTaxonomyResolver(
-            atlas_pin=atlas_pin,
+            atlas_pin=bundled_pin,
             atlas_identifiers=set(),
             mapping_set_digest=digest,
         )
-
-
-def test_explicit_laaf_pin_and_membership_is_strictly_scoped(
-    bundled_resolver: PinnedTaxonomyResolver,
-) -> None:
-    pin = TaxonomyPin(release="laaf-test", digest="b" * 64)
-    resolver = load_taxonomy_resolver(laaf_pin=pin, laaf_identifiers={"L1", "M3"})
-    assert resolver.taxonomy_context.laaf == pin
-    assert resolver.contains("LAAF", "L1")
-    assert resolver.contains("LAAF", "M3")
-    assert not resolver.contains("LAAF", "S1")
-    assert resolver.contains("ATLAS", "AML.T0051.001")
-    # taxonomy_context equality stays meaningful across the optional axis.
-    assert resolver.taxonomy_context != bundled_resolver.taxonomy_context
+    with pytest.raises(ValueError, match="non-empty strings"):
+        PinnedTaxonomyResolver(
+            atlas_pin=bundled_pin,
+            atlas_identifiers=set(bundled_identifiers) | {""},
+            mapping_set_digest=digest,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -665,7 +621,6 @@ def test_production_resolver_qualifies_atlas_only_chains(
     resolver = bundled_resolver
     pattern = validate_attack_pattern(_production_pattern(resolver), resolver)
     assert pattern.id == "AP-T1-01"
-    assert pattern.canonical_chain.taxonomy_context.laaf is None
 
 
 def test_production_resolver_rejects_unknown_atlas_ids(
@@ -682,7 +637,7 @@ def test_production_resolver_rejects_unknown_atlas_ids(
         validate_attack_pattern(raw, resolver)
 
 
-def test_production_resolver_fails_closed_on_any_laaf_decision(
+def test_production_resolver_rejects_a_laaf_decision(
     bundled_resolver: PinnedTaxonomyResolver,
 ) -> None:
     resolver = bundled_resolver
@@ -697,46 +652,8 @@ def test_production_resolver_fails_closed_on_any_laaf_decision(
             },
         ],
     )
-    with pytest.raises(ValueError, match="LAAF taxonomy pin"):
+    with pytest.raises(ValueError, match="taxonomy"):
         validate_attack_pattern(raw, resolver)
-
-
-def test_explicit_laaf_resolver_qualifies_only_member_ids() -> None:
-    pin = TaxonomyPin(release="laaf-test", digest="c" * 64)
-    resolver = load_taxonomy_resolver(laaf_pin=pin, laaf_identifiers={"L1"})
-    member = _production_pattern(
-        resolver,
-        chain_mappings=[
-            {"decision": "exact", "taxonomy": "ATLAS", "ids": ["AML.T0051.001"]},
-            {"decision": "exact", "taxonomy": "LAAF", "ids": ["L1"]},
-        ],
-    )
-    assert validate_attack_pattern(member, resolver)
-    outsider = _production_pattern(
-        resolver,
-        chain_mappings=[
-            {"decision": "exact", "taxonomy": "ATLAS", "ids": ["AML.T0051.001"]},
-            {"decision": "exact", "taxonomy": "LAAF", "ids": ["L2"]},
-        ],
-    )
-    with pytest.raises(ValueError, match="unknown LAAF id"):
-        validate_attack_pattern(outsider, resolver)
-
-
-def test_atlas_only_resolver_cannot_accept_a_pinned_laaf_chain(
-    bundled_resolver: PinnedTaxonomyResolver,
-) -> None:
-    pin = TaxonomyPin(release="laaf-test", digest="d" * 64)
-    pinned = load_taxonomy_resolver(laaf_pin=pin, laaf_identifiers={"L1"})
-    raw = _production_pattern(
-        pinned,
-        chain_mappings=[
-            {"decision": "exact", "taxonomy": "ATLAS", "ids": ["AML.T0051.001"]},
-            {"decision": "exact", "taxonomy": "LAAF", "ids": ["L1"]},
-        ],
-    )
-    with pytest.raises(ValueError, match="pins"):
-        validate_attack_pattern(raw, bundled_resolver)
 
 
 class TestPinningHelperBranches:

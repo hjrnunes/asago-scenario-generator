@@ -16,10 +16,9 @@
 #     proposed exact mapping is checked against the production resolver
 #     (membership) and must carry a nonblank operational-identity rationale
 #     plus an evidence citation (semantic gate).
-#   - LAAF is absent for v1: taxonomy_context.laaf must be null.  Legacy LAAF
-#     strings and every SSSOM skos:relatedMatch row are migration provenance
-#     only and live exclusively under provenance blocks, never in mapping
-#     fields.
+#   - LAAF is not a taxonomy axis.  Legacy LAAF strings and every SSSOM
+#     skos:relatedMatch row are migration provenance only and live
+#     exclusively under provenance blocks, never in mapping fields.
 #
 # Digest: release.semantic_digest is the deterministic semantic digest over
 # the artifact's normalized content (NFC, order-insensitive, excluding only
@@ -63,7 +62,7 @@ properties:
   taxonomy_context:
     type: object
     additionalProperties: false
-    required: [atlas, laaf, mapping_set_digest]
+    required: [atlas, mapping_set_digest]
     properties:
       atlas:
         type: object
@@ -76,9 +75,6 @@ properties:
           digest:
             type: string
             pattern: '^[0-9a-f]{64}$'
-      laaf:
-        type: 'null'
-        description: LAAF is absent (non-authoritative) for v1; must be null.
       mapping_set_digest:
         type: string
         pattern: '^[0-9a-f]{64}$'

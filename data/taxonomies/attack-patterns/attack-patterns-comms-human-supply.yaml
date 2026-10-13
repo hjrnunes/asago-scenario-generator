@@ -67,7 +67,6 @@ patterns:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
         mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
       mappings:
       - decision: exact
@@ -336,7 +335,7 @@ patterns:
         kind: trust_boundary
         purpose: supporting
       initial_ingress_slot_id: ingress
-      semantic_digest: 8c130bd1dd37bac18c7973eee9f14ee6c92551e299455067ad7b4a414f94b452
+      semantic_digest: 84564071f25520d2af5c4c550aeaf03526ff8d231779a7cef951c15c4a5fbe4e
   AP-T12-03:
     id: AP-T12-03
     threat_id: T12
@@ -369,7 +368,6 @@ patterns:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
         mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
       mappings:
       - decision: exact
@@ -675,7 +673,7 @@ patterns:
         kind: trust_boundary
         purpose: supporting
       initial_ingress_slot_id: ingress
-      semantic_digest: 4adbd38404232fe8758c0d2322ca89a1d7211d3be7680a23aa6fbc130c82bc40
+      semantic_digest: 89e5b450efc6fe6586ed54f6f4890d6e690552c759c40115e5b174d3652f2153
   AP-T15-01:
     id: AP-T15-01
     threat_id: T15
@@ -715,7 +713,6 @@ patterns:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
         mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
       mappings:
       - decision: exact
@@ -945,7 +942,7 @@ patterns:
         kind: trust_boundary
         purpose: supporting
       initial_ingress_slot_id: ingress
-      semantic_digest: 67ed543c176533a4780969baa0ec927e25fb6167a309ca56556936fd123009b1
+      semantic_digest: 6341bbb3302f3ba946384643c4a7c5949b25af8a2a57d08c9aa504a12e59dde8
   AP-T15-02:
     id: AP-T15-02
     threat_id: T15
@@ -985,7 +982,6 @@ patterns:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
         mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
       mappings:
       - decision: exact
@@ -1211,7 +1207,7 @@ patterns:
         kind: trust_boundary
         purpose: supporting
       initial_ingress_slot_id: ingress
-      semantic_digest: 93c4af7cd64e41de999e929ef0090e0320ef0ed264ab1c5e7c93b55d897c18e8
+      semantic_digest: b41a9a5710bb1e43658118916cf82297b72465d9e438d7fbc7a8b6ce89f0d0ad
   AP-T17-01:
     id: AP-T17-01
     threat_id: T17
@@ -1243,7 +1239,6 @@ patterns:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
         mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
       mappings:
       - decision: exact
@@ -1626,4 +1621,4 @@ patterns:
         kind: trust_boundary
         purpose: supporting
       initial_ingress_slot_id: ingress
-      semantic_digest: 18576fd0ffc71654b04db644f2d804a4013bd381d151e2ab9e0d595a2d240c88
+      semantic_digest: 6702919281956227bb1045f66279a5eb0b3789fd0e49941f007856a9e857e720

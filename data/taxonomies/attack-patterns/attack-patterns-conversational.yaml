@@ -54,12 +54,11 @@ patterns:
       pattern_id: AP-T6-08
       chain_id: AP-T6-08.chain.1
       semantic_revision: 1
-      semantic_digest: ba37cfefbbb3ca6680ba383879dc3d29f5fd31de1684a9c44e7f5086517dd401
+      semantic_digest: 0be252b4929202c984485864db8c5dde46577bdd05002b77d599f50a109d78cc
       taxonomy_context:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
         mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
       mappings:
       - decision: exact
@@ -230,12 +229,11 @@ patterns:
       pattern_id: AP-T6-09
       chain_id: AP-T6-09.chain.1
       semantic_revision: 1
-      semantic_digest: b44973f679664d48640b7883e37f2f8aa6db4fa121d2078bcece9a02119b0fd9
+      semantic_digest: eede43706c185b7fbe6f528cede9e4808ad1060c003123f22b8955f761055c62
       taxonomy_context:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
         mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
       mappings:
       - decision: exact
@@ -407,12 +405,11 @@ patterns:
       pattern_id: AP-T6-10
       chain_id: AP-T6-10.chain.1
       semantic_revision: 1
-      semantic_digest: 52de635056595df30efbd702f7b7f4dac30004991c061577f4feff7ed6d4b1a6
+      semantic_digest: 0b0a86493368f3cc7ee7f1b3b00cad456570bccc4792e3891202a2fef5425283
       taxonomy_context:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
         mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
       mappings:
       - decision: exact
@@ -585,12 +582,11 @@ patterns:
       pattern_id: AP-T5-05
       chain_id: AP-T5-05.chain.1
       semantic_revision: 1
-      semantic_digest: 4a81e9092594a82b8a4df7a7e53fc0261e25dcd2232df100b3c496166015e1ba
+      semantic_digest: f4fcf3d583201a1ed7febf43d340d65fac2a20d6ee1dcce7a7cc8a661c902d75
       taxonomy_context:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
         mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
       mappings:
       - decision: exact

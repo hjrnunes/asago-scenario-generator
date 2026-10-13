@@ -67,12 +67,11 @@ patterns:
       pattern_id: "AP-T8-01"
       chain_id: "chain.AP-T8-01"
       semantic_revision: 1
-      semantic_digest: "d6d31a4498a5079eceec4d78b2415b9e3f43ec3c641c4ceec82707a1898ef932"
+      semantic_digest: "22d7c47931000b4e2cd343f33e3e245f10544a813076dc4d5c53b94e240046d4"
       taxonomy_context:
         atlas:
           release: "2026.05"
           digest: "defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a"
-        laaf: null
         mapping_set_digest: "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
       mappings:
         - decision: "exact"
@@ -328,12 +327,11 @@ patterns:
       pattern_id: "AP-T9-01"
       chain_id: "chain.AP-T9-01"
       semantic_revision: 1
-      semantic_digest: "96d294da71f3500287c97deb3ca162ee5340ee93b9a0c783713aa9585467cf30"
+      semantic_digest: "73256b90462f35490107b38f14f7655d89f33ce8bdad61d21a6820a07c210d6b"
       taxonomy_context:
         atlas:
           release: "2026.05"
           digest: "defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a"
-        laaf: null
         mapping_set_digest: "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
       mappings:
         - decision: "exact"
@@ -668,12 +666,11 @@ patterns:
       pattern_id: "AP-T9-02"
       chain_id: "chain.AP-T9-02"
       semantic_revision: 1
-      semantic_digest: "76ccd3e1b16c32dcd80323156d63705dfc027709b06dd5f66da2ef4cebee447d"
+      semantic_digest: "815bd836dde3fe9dc981a424544a56498c782ad895fd132d7d5f400b970d4890"
       taxonomy_context:
         atlas:
           release: "2026.05"
           digest: "defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a"
-        laaf: null
         mapping_set_digest: "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
       mappings:
         - decision: "exact"
@@ -1141,12 +1138,11 @@ patterns:
       pattern_id: "AP-T9-05"
       chain_id: "chain.AP-T9-05"
       semantic_revision: 1
-      semantic_digest: "ca7014fc34722418877090b4f2a02f09a93dffd54c280b8ba3c7b5a93b98af15"
+      semantic_digest: "0a9168f2bb38bd5b068e02409da16212d1c43a4808b27f276ede73ce5308f034"
       taxonomy_context:
         atlas:
           release: "2026.05"
           digest: "defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a"
-        laaf: null
         mapping_set_digest: "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
       mappings:
         - decision: "exact"
@@ -1562,12 +1558,11 @@ patterns:
       pattern_id: "AP-T9-06"
       chain_id: "chain.AP-T9-06"
       semantic_revision: 1
-      semantic_digest: "14e06aaaa9e8db4c8e6b881df44062192ab3daeede163c04a7fa6cd9f4768746"
+      semantic_digest: "7098963e528a0c290616818d83fff53bc59ce8457696a7c415a11e9facb00883"
       taxonomy_context:
         atlas:
           release: "2026.05"
           digest: "defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a"
-        laaf: null
         mapping_set_digest: "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
       mappings:
         - decision: "exact"
@@ -2166,12 +2161,11 @@ patterns:
       pattern_id: "AP-T9-07"
       chain_id: "chain.AP-T9-07"
       semantic_revision: 1
-      semantic_digest: "a8c87ced501c7c95a7dc8dc8c7f9a7e77333876e58702205d60db26108c5a496"
+      semantic_digest: "c5c5bcba20d40fd9a4ad87aefabcbc2977a9dc2a76dad258c75b3d077a2375d1"
       taxonomy_context:
         atlas:
           release: "2026.05"
           digest: "defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a"
-        laaf: null
         mapping_set_digest: "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
       mappings:
         - decision: "exact"
@@ -2331,12 +2325,11 @@ patterns:
       pattern_id: "AP-T10-01"
       chain_id: "chain.AP-T10-01"
       semantic_revision: 1
-      semantic_digest: "c0492a7a98f8c6e650a9d90913168578f10e410dc99a6e87ca6787fea761136f"
+      semantic_digest: "01ed2f652f7d3cf1c2586900d2c78604ce34583ed490fd16a77534de44a350d8"
       taxonomy_context:
         atlas:
           release: "2026.05"
           digest: "defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a"
-        laaf: null
         mapping_set_digest: "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
       mappings:
         - decision: "exact"
@@ -2802,12 +2795,11 @@ patterns:
       pattern_id: "AP-T16-02"
       chain_id: "chain.AP-T16-02"
       semantic_revision: 1
-      semantic_digest: "5f5c9c060935b9917ab3aa28393238ddc545df63ae087ef14b5e8f4114c3c5b2"
+      semantic_digest: "aa017685293fe6acd5fec3133a2b92e846655448381205213d169669734d863c"
       taxonomy_context:
         atlas:
           release: "2026.05"
           digest: "defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a"
-        laaf: null
         mapping_set_digest: "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
       mappings:
         - decision: "exact"
@@ -3140,12 +3132,11 @@ patterns:
       pattern_id: "AP-T16-03"
       chain_id: "chain.AP-T16-03"
       semantic_revision: 1
-      semantic_digest: "a6314bed1ec99946200e4ab24ba6dfcb50896fdec24078f4739c99733f37338c"
+      semantic_digest: "926c3f751537044c914f0c3a170da6fc8a44f771e8703518e2c852b05395ecbb"
       taxonomy_context:
         atlas:
           release: "2026.05"
           digest: "defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a"
-        laaf: null
         mapping_set_digest: "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
       mappings:
         - decision: "exact"

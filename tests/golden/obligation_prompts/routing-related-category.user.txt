@@ -46,7 +46,7 @@ Compact obligation questions:
     label: related_category_expansion
     meaning: The risk reached this pattern through a related taxonomy concept and
       a broader category. Treat the pairing as a discovery hypothesis only.
-  obligation_handle: ob:v1:0382f967048ad1f0a5bfeaa91b100bfdbfa2637d8345ca21837dbbb355be66ed
+  obligation_handle: ob:v1:3a6a40a37c2dfac704c43b5bb3e6886fe1ba8aa6ea08702d5e2258a7c035623d
   reviewed_risk:
     consequence: null
     impact: null

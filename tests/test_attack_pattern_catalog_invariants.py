@@ -307,7 +307,6 @@ def test_semantic_digests_match_pins(catalog: Catalog) -> None:
 def test_taxonomy_context_matches_production_pins(catalog: Catalog, resolver) -> None:
     for pid, chain in catalog.chains():
         assert chain.taxonomy_context == resolver.taxonomy_context, pid
-        assert chain.taxonomy_context.laaf is None, pid
         for scope in _mapping_scopes(chain):
             assert all(m.taxonomy == "ATLAS" for m in scope), pid
 

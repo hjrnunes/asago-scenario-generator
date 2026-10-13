@@ -46,7 +46,7 @@ Compact obligation questions:
     label: exact_then_category_expansion
     meaning: The risk first matched an equivalent taxonomy concept, then expanded
       through a broader category to this pattern. Judge this pair explicitly.
-  obligation_handle: ob:v1:1149e2f478f4c40bbbb9f253c3f57e7c534d5f027923961a3b40c29fcb97518c
+  obligation_handle: ob:v1:a62b3e4ad2fd3bc2db998fbbb1c050b3f890ee715343784bc3111d6f57f3257e
   reviewed_risk:
     consequence: null
     impact: null

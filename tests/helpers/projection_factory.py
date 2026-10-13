@@ -140,7 +140,6 @@ def _pattern() -> dict[str, Any]:
         "semantic_digest": ZERO,
         "taxonomy_context": {
             "atlas": {"release": "v1", "digest": ZERO},
-            "laaf": None,
             "mapping_set_digest": ZERO,
         },
         "mappings": [{"decision": "exact", "taxonomy": "ATLAS", "ids": ["AML.T0001"]}],

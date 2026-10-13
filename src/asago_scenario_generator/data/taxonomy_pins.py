@@ -12,9 +12,6 @@ Authority rules:
   resolver membership and never confer ``ExactMapping`` authority.  The
   mapping-set pin itself is fail-closed: see
   :func:`compute_mapping_set_digest` for the strict v1 canonical profile.
-- LAAF is optional and non-authoritative for v1.  Nothing LAAF is bundled
-  or vendored here; a future authoritative LAAF release must be supplied
-  explicitly as pin plus identifier membership, with strict coherence.
 
 The resolver performs all I/O at construction time via this module's
 loaders; the constructed object is a pure in-memory implementation of the
@@ -442,25 +439,17 @@ def compute_mapping_set_digest(paths: Iterable[str | Path] | None = None) -> str
     return _mapping_set_payload(scalar_metadata, curie_map, rows)
 
 
-def _checked_identifiers(identifiers: Iterable[str], *, label: str) -> frozenset[str]:
+def _checked_identifiers(identifiers: Iterable[str]) -> frozenset[str]:
     values = frozenset(identifiers)
     if not values:
-        raise ValueError(f"{label} identifier membership must not be empty")
+        raise ValueError("ATLAS identifier membership must not be empty")
     if any(not isinstance(value, str) or not value for value in values):
-        raise ValueError(f"{label} identifiers must be non-empty strings")
+        raise ValueError("ATLAS identifiers must be non-empty strings")
     return values
 
 
 class PinnedTaxonomyResolver:
-    """No-I/O taxonomy resolver over pinned membership snapshots.
-
-    ATLAS membership and pins come from the bundled pinned source.  An
-    ATLAS-only resolver carries no LAAF pin, so ``taxonomy_context``
-    equality fails closed against any chain that pins LAAF.  Explicit LAAF
-    support requires the caller to supply both the authoritative pin and
-    its identifier membership; exact LAAF ids outside that membership fail
-    qualification.
-    """
+    """No-I/O taxonomy resolver over the pinned ATLAS membership snapshot."""
 
     def __init__(
         self,
@@ -468,23 +457,10 @@ class PinnedTaxonomyResolver:
         atlas_pin: TaxonomyPin,
         atlas_identifiers: Iterable[str],
         mapping_set_digest: str,
-        laaf_pin: TaxonomyPin | None = None,
-        laaf_identifiers: Iterable[str] | None = None,
     ) -> None:
-        if (laaf_pin is None) != (laaf_identifiers is None):
-            raise ValueError(
-                "an explicit LAAF pin and its identifier membership must be "
-                "supplied together"
-            )
-        self._atlas_identifiers = _checked_identifiers(atlas_identifiers, label="ATLAS")
-        self._laaf_identifiers = (
-            _checked_identifiers(laaf_identifiers, label="LAAF")
-            if laaf_identifiers is not None
-            else frozenset()
-        )
+        self._atlas_identifiers = _checked_identifiers(atlas_identifiers)
         self._taxonomy_context = TaxonomyContext(
             atlas=atlas_pin,
-            laaf=laaf_pin,
             mapping_set_digest=mapping_set_digest,
         )
 
@@ -492,30 +468,21 @@ class PinnedTaxonomyResolver:
     def taxonomy_context(self) -> TaxonomyContext:
         return self._taxonomy_context
 
-    def contains(self, taxonomy: Literal["ATLAS", "LAAF"], identifier: str) -> bool:
-        if taxonomy == "ATLAS":
-            return identifier in self._atlas_identifiers
-        return identifier in self._laaf_identifiers
+    def contains(self, taxonomy: Literal["ATLAS"], identifier: str) -> bool:
+        return identifier in self._atlas_identifiers
 
 
 def load_taxonomy_resolver(
     *,
     atlas_path: str | Path | None = None,
     mapping_set_paths: Iterable[str | Path] | None = None,
-    laaf_pin: TaxonomyPin | None = None,
-    laaf_identifiers: Iterable[str] | None = None,
 ) -> PinnedTaxonomyResolver:
     """Construct the production resolver from the pinned bundled sources.
 
     Performs all I/O up front; the returned resolver is purely in-memory.
-    The default is ATLAS-only.  LAAF authority is never bundled: callers
-    with a future authoritative LAAF release must explicitly supply both
-    its pin and its identifier membership.
     """
     return PinnedTaxonomyResolver(
         atlas_pin=load_atlas_pin(atlas_path),
         atlas_identifiers=load_atlas_identifiers(atlas_path),
         mapping_set_digest=compute_mapping_set_digest(mapping_set_paths),
-        laaf_pin=laaf_pin,
-        laaf_identifiers=laaf_identifiers,
     )
