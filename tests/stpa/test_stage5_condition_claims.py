@@ -9,9 +9,6 @@ import pytest
 from asago_scenario_generator.stpa.discriminating_condition import (
     DiscriminatingCondition,
 )
-from asago_scenario_generator.stpa.models.control_structure import (
-    ControlActionEffectKind,
-)
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.observation_contract import (
     SafeObservableOutcome,
@@ -19,9 +16,6 @@ from asago_scenario_generator.stpa.observation_contract import (
 )
 from asago_scenario_generator.stpa.scenario_prod.condition_check import (
     target_observation_fact_values,
-)
-from asago_scenario_generator.stpa.scenario_prod.context import (
-    build_scenario_generation_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.condition_claims import (
     condition_claim_findings,
@@ -43,10 +37,9 @@ from tests.helpers.discriminating_condition import (
     _ownership_condition,
     _payload_with,
 )
-from tests.helpers.sp3_scenario_continuity import (
-    _control_structure,
-    _loss_analysis,
-    _threat,
+from tests.helpers.normal_authoring_wire import (
+    _wrong_timing_assembly,
+    _wrong_timing_context,
 )
 
 COMMAND_ATTEMPT = SafeObservableOutcome(
@@ -200,33 +193,17 @@ def test_each_code_has_repair_guidance(code) -> None:
 # --- Stage 5 correction and publication -------------------------------------
 
 
-def _incorrect_context():
-    """One INCORRECT context with the standard four causal sources."""
-    structure = _control_structure()
-    action = (
-        structure.responsibilities[0]
-        .control_actions[0]
-        .model_copy(update={"effect_kind": ControlActionEffectKind.model_output})
-    )
-    responsibility = structure.responsibilities[0].model_copy(
-        update={"control_actions": [action]}
-    )
-    structure = structure.model_copy(update={"responsibilities": [responsibility]})
-    threat = _threat()
-    assert UCAType.incorrect.value in threat.ica_slot_id
-    return build_scenario_generation_context(
-        threat, structure, _loss_analysis(), scenario_id="SCN-A1-NORMAL"
-    )
-
-
 def _generate_incorrect(client: MockLLMClient, tmp_path):
+    """Generate for one INCORRECT context with the standard causal sources."""
+    context = _wrong_timing_context(uca_type=UCAType.incorrect)
     return generate_bdi_for_context(
         client,
-        _incorrect_context(),
+        context,
         tmp_path,
         target_operation=_operation(),
         target_observations=_observations(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(context),
     )
 
 

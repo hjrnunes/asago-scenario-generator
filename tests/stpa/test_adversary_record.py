@@ -25,6 +25,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     ThreatSource,
 )
 from tests.helpers.sp3_stage5_provider_contract import (
+    _typed_tool_assembly,
     _provider_payload,
     _typed_tool_context,
 )
@@ -156,7 +157,10 @@ class TestStage5AdversaryWire:
         client.set_response_queue(normal_wire_queue([payload, payload]))
 
         result, error = generate_bdi_for_context(
-            client, _typed_tool_context(), tmp_path
+            client,
+            _typed_tool_context(),
+            tmp_path,
+            assembly=_typed_tool_assembly(_typed_tool_context()),
         )
 
         assert result is None
@@ -172,7 +176,10 @@ class TestStage5AdversaryWire:
         client.set_response_queue(normal_wire_queue([payload, payload]))
 
         result, error = generate_bdi_for_context(
-            client, _typed_tool_context(), tmp_path
+            client,
+            _typed_tool_context(),
+            tmp_path,
+            assembly=_typed_tool_assembly(_typed_tool_context()),
         )
 
         assert result is None
@@ -195,7 +202,10 @@ class TestStage5AdversaryWire:
         client.set_response_queue(normal_wire_queue([payload, payload]))
 
         result, error = generate_bdi_for_context(
-            client, _typed_tool_context(), tmp_path
+            client,
+            _typed_tool_context(),
+            tmp_path,
+            assembly=_typed_tool_assembly(_typed_tool_context()),
         )
 
         assert error is None
@@ -210,7 +220,10 @@ class TestStage5AdversaryWire:
         client.set_response_queue(normal_wire_queue([_provider_payload()]))
 
         result, error = generate_bdi_for_context(
-            client, _typed_tool_context(), tmp_path
+            client,
+            _typed_tool_context(),
+            tmp_path,
+            assembly=_typed_tool_assembly(_typed_tool_context()),
         )
 
         assert error is None

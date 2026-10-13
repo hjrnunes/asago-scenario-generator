@@ -4,6 +4,7 @@ from __future__ import annotations
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from tests.helpers.sp3_stage5_provider_contract import (
+    _typed_tool_assembly,
     _provider_payload,
     _typed_tool_context,
 )
@@ -31,7 +32,12 @@ def test_stage5_rejects_condition_reference_outside_declared_factor_closure(
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([payload, payload]))
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        assembly=_typed_tool_assembly(context),
+    )
 
     assert result is None
     assert error is not None
@@ -48,11 +54,16 @@ def test_stage5_resolves_explained_structural_ids_in_prose(tmp_path) -> None:
     client = MockLLMClient()
     client.set_response_queue(normal_wire_queue([payload]))
 
-    result, error = generate_bdi_for_context(client, context, tmp_path)
+    result, error = generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        assembly=_typed_tool_assembly(context),
+    )
 
     assert error is None
     assert result is not None
-    proposition = result.unsafe_outcome.semantic_proposition
+    proposition = result.unsafe_outcome_semantic_proposition
     assert proposition is not None
     assert "CA-1-1" not in proposition
     assert "Authorize a bounded batch of payment actions" in proposition

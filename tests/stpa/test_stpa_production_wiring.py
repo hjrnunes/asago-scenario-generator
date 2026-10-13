@@ -9,6 +9,7 @@ from __future__ import annotations
 
 
 import pytest
+from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactor,
@@ -19,20 +20,16 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
     CoverageAnalysis,
     EnrichedThreatSet,
 )
-from asago_scenario_generator.stpa.models.scenario_spec import (
-    AttackerBDI,
-    ScenarioSpec,
+from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
+from asago_scenario_generator.stpa.scenario_prod.context import (
+    build_scenario_generation_context,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
+    _causal_source_choices,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    BDIGenerationResult,
     CausalFactorDeclaration,
-    UnsafeOutcomeDeclaration,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
-    assemble_scenario_spec,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.defender import (
-    populate_defender_bdi,
+    _CausalSourceChoice,
 )
 from tests.stpa.helpers import (
     make_minimal_control_structure,
@@ -57,9 +54,14 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.sp3_run import _semantics_wire
+from tests.helpers.stage5_assembly import stage5_assembly
+from tests.helpers.stage5_compile import compile_draft, draft_payload, factor
 
 UCA_SLOT = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = "RESP-1:CA-1-1:WRONG_TIMING:1"
+
+
+_PROPOSITION = "The response exhibits the unsafe semantic behavior."
 
 
 def _threat() -> StructuralThreat:
@@ -69,38 +71,64 @@ def _threat() -> StructuralThreat:
         ica_text="Unsafe control action",
         hazardous_context="Context",
         loss_scenario="Loss scenario",
+        related_hazards=["H-1"],
+        related_constraints=["SC-1"],
     )
 
 
-def _attacker_bdi() -> AttackerBDI:
-    return AttackerBDI(
-        beliefs=["b"],
-        desires=["d"],
-        intentions=["i concerning CA-1-1"],
+def _control_structure() -> ControlStructure:
+    """RESP-1 controls CP-1 through CA-1-1, with PM-1-1 and FB-1-1."""
+    return ControlStructure(
+        responsibilities=[
+            Responsibility(
+                resp_id="RESP-1",
+                description="R1",
+                process_model_parts=[
+                    ProcessModelPart(pm_id="PM-1-1", description="State")
+                ],
+                control_actions=[
+                    ControlAction(
+                        ca_id="CA-1-1",
+                        description="Action",
+                        target=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    )
+                ],
+                feedback_channels=[
+                    FeedbackChannel(
+                        fb_id="FB-1-1",
+                        description="Feedback",
+                        updates="PM-1-1",
+                        source=ElementRef(
+                            type=ReferenceType.controlled_process, id="CP-1"
+                        ),
+                    )
+                ],
+            )
+        ],
+        controlled_processes=[ControlledProcess(cp_id="CP-1", description="Interface")],
     )
 
 
-def _unsafe_outcome() -> UnsafeOutcomeDeclaration:
-    """Return the typed wrong-timing outcome used by corrected Stage 5 mocks."""
-    return UnsafeOutcomeDeclaration(
-        semantic_proposition="The response exhibits the unsafe semantic behavior.",
+def _loss_analysis() -> LossAnalysis:
+    return LossAnalysis(
+        risk_card_losses=[
+            Loss(
+                loss_id="L-1",
+                description="Loss",
+                provenance=LossProvenance.risk_card,
+                source_risk_cards=["r1"],
+            )
+        ],
+        use_case_losses=[],
+        hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
+        security_constraints=[
+            SecurityConstraint(
+                constraint_id="SC-1", rule="Must validate", related_hazards=["H-1"]
+            )
+        ],
     )
-
-
-def _llm_result(
-    declarations: list[CausalFactorDeclaration] | None = None,
-) -> BDIGenerationResult:
-    values = {
-        "defender_vulnerabilities": {"PM-1-1": "v"},
-        "attacker_bdi": _attacker_bdi(),
-        "causal_factors": declarations or [],
-    }
-    if declarations:
-        return BDIGenerationResult(**values)
-    # Compatibility-only fixture for pre-correction ScenarioSpec artifacts.
-    # Corrected provider responses go through normal validation and cannot be
-    # empty; this bypass exists solely to retain legacy projection coverage.
-    return BDIGenerationResult.model_construct(**values)
 
 
 def _declare(
@@ -116,17 +144,48 @@ def _declare(
     )
 
 
-def _assemble(
-    declarations: list[CausalFactorDeclaration] | None = None,
-) -> ScenarioSpec:
-    control_structure = make_minimal_control_structure()
-    bdi = populate_defender_bdi(control_structure, "RESP-1")
-    return assemble_scenario_spec(
-        bdi,
-        _llm_result(declarations),
-        _threat(),
-        control_structure,
-        scenario_index=0,
+def _assemble(declarations: list[CausalFactorDeclaration]) -> ScenarioSpec:
+    """Compile a draft that declares ``declarations`` in order.
+
+    A declaration whose source the context does not offer is bound to an
+    extra request-local handle, so only assembly can reject it.
+    """
+    control_structure = _control_structure()
+    context = build_scenario_generation_context(
+        _threat(), control_structure, _loss_analysis(), scenario_id="SCN-001"
+    )
+    choices = list(_causal_source_choices(context))
+    handles = []
+    for declaration in declarations:
+        known = [
+            choice.handle
+            for choice in choices
+            if (choice.kind, choice.source_id)
+            == (declaration.kind, declaration.source_id)
+        ]
+        if not known:
+            choices.append(
+                _CausalSourceChoice(
+                    handle=f"cause_{len(choices) + 1}",
+                    kind=declaration.kind,
+                    source_id=declaration.source_id,
+                    description="A source outside the control structure",
+                )
+            )
+            known = [choices[-1].handle]
+        handles.append(known[0])
+    payload = draft_payload(
+        [
+            factor(handle, declaration.evidence)
+            for handle, declaration in zip(handles, declarations)
+        ],
+        proposition=_PROPOSITION,
+    )
+    return compile_draft(
+        payload,
+        context,
+        stage5_assembly(context, _threat(), control_structure),
+        choices=choices,
     )
 
 
@@ -182,9 +241,9 @@ class TestStage5EvidenceBackedSelection:
         spec.validate_against(make_minimal_control_structure())  # no raise
 
     def test_no_factor_selected_from_structural_presence_alone(self):
-        """Empty declarations yield an empty factor list despite structure."""
-        spec = _assemble([])
-        assert spec.causal_factors == []
+        """Only the declared factor is stored despite the structure."""
+        spec = _assemble([_declare(CausalFactorKind.process_model_flaw, "PM-1-1")])
+        assert [factor.source_id for factor in spec.causal_factors] == ["PM-1-1"]
         # The full structure still contains PM-1-1, FB-1-1, CA-1-1.
         control_structure = make_minimal_control_structure()
         spec.validate_against(control_structure)
@@ -229,13 +288,12 @@ class TestStage5InvalidReferenceStopsProjection:
 
 
 class TestExplicitEmptyContract:
-    """STPA-PROD-WIRING-04: explicit empty stays present and empty."""
+    """STPA-PROD-WIRING-04: an explicit empty factor list never compiles."""
 
-    def test_scenario_spec_has_present_empty_causal_factors(self):
-        """An explicit empty Stage 5 list is a present empty field."""
-        spec = _assemble([])
-        assert spec.causal_factors == []
-        assert isinstance(spec.causal_factors, list)
+    def test_explicit_empty_causal_factors_are_rejected(self):
+        """A draft that declares no causal factor fails Stage 5."""
+        with pytest.raises(ValidationError, match="causal_factors"):
+            _assemble([])
 
 
 class TestRunSp3ProductionWiring:
@@ -249,60 +307,8 @@ class TestRunSp3ProductionWiring:
         num_threats: int = 1,
     ):
 
-        control_structure = ControlStructure(
-            responsibilities=[
-                Responsibility(
-                    resp_id="RESP-1",
-                    description="R1",
-                    process_model_parts=[
-                        ProcessModelPart(pm_id="PM-1-1", description="State")
-                    ],
-                    control_actions=[
-                        ControlAction(
-                            ca_id="CA-1-1",
-                            description="Action",
-                            target=ElementRef(
-                                type=ReferenceType.controlled_process, id="CP-1"
-                            ),
-                        )
-                    ],
-                    feedback_channels=[
-                        FeedbackChannel(
-                            fb_id="FB-1-1",
-                            description="Feedback",
-                            updates="PM-1-1",
-                            source=ElementRef(
-                                type=ReferenceType.controlled_process, id="CP-1"
-                            ),
-                        )
-                    ],
-                )
-            ],
-            controlled_processes=[
-                ControlledProcess(cp_id="CP-1", description="Interface")
-            ],
-        )
-        loss_analysis = LossAnalysis(
-            risk_card_losses=[
-                Loss(
-                    loss_id="L-1",
-                    description="Loss",
-                    provenance=LossProvenance.risk_card,
-                    source_risk_cards=["r1"],
-                )
-            ],
-            use_case_losses=[],
-            hazards=[
-                Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])
-            ],
-            security_constraints=[
-                SecurityConstraint(
-                    constraint_id="SC-1",
-                    rule="Must validate",
-                    related_hazards=["H-1"],
-                )
-            ],
-        )
+        control_structure = _control_structure()
+        loss_analysis = _loss_analysis()
         threats = [
             StructuralThreat(
                 ica_slot_id=UCA_SLOT,
@@ -376,7 +382,7 @@ class TestRunSp3ProductionWiring:
                             for index, declaration in enumerate(declarations, start=1)
                         ],
                         "unsafe_outcome": {
-                            **_unsafe_outcome().model_dump(mode="json"),
+                            "semantic_proposition": _PROPOSITION,
                             "condition": {
                                 "type": "ordering",
                                 "reference_handle": "cause_1",

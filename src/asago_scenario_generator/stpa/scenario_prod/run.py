@@ -73,8 +73,11 @@ from .deduplication import (
     build_testability_summary,
     deduplicate_scenario_specs,
 )
-from .stage5.wire import BDIGenerationResult
-from .stage5.assemble import assemble_scenario_spec, parse_ica_slot_id
+from .stage5.assemble import (
+    ScenarioAssembly,
+    ScenarioAssemblyError,
+    parse_ica_slot_id,
+)
 from .stage5.generate import generate_bdi_for_context, is_bdi_length_retry_exhausted
 from .stage5.defender import populate_defender_bdi
 from .stage5.shape_step import (
@@ -1126,13 +1129,14 @@ def _run_stage5_for_threat(
 
     target_operation = _target_operation_for_context(target_realization, context)
 
-    llm_result, failure = _stage5_bdi(
+    spec, failure = _stage5_bdi(
         llm_client,
         context,
         run_dir,
         loader,
         temperature,
         stage_errors,
+        ScenarioAssembly(defender_bdi, threat, control_structure, scenario_index),
         execution_target_profile=execution_target_profile,
         target_operation=target_operation,
         target_observations=target_observations,
@@ -1142,18 +1146,6 @@ def _run_stage5_for_threat(
     )
     if failure is not None:
         return failure
-
-    spec = _stage5_spec(
-        defender_bdi,
-        llm_result,
-        threat,
-        control_structure,
-        scenario_index,
-        context,
-        stage_errors,
-    )
-    if spec is None:
-        return _Stage5ThreatResult(None)
     prior_error_count = len(stage_errors)
     _validate_stage5_spec(spec, control_structure, stage_errors)
     if len(stage_errors) != prior_error_count:
@@ -1168,6 +1160,7 @@ def _stage5_bdi(
     loader: TemplateLoader,
     temperature: float,
     stage_errors: list[str],
+    assembly: ScenarioAssembly,
     *,
     target_operation: TargetOperationObservation | None,
     execution_target_profile: ExecutionTargetProfile | None,
@@ -1175,23 +1168,28 @@ def _stage5_bdi(
     observation_contract: ObservationContract | None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
-) -> tuple[BDIGenerationResult | None, _Stage5ThreatResult | None]:
-    """Generate one closed BDI result or one typed local failure."""
-    llm_result, error = generate_bdi_for_context(
-        llm_client,
-        context,
-        run_dir,
-        loader=loader,
-        temperature=temperature,
-        target_operation=target_operation,
-        execution_target_profile=execution_target_profile,
-        target_observations=target_observations,
-        observation_contract=observation_contract,
-        content_surface=content_surface,
-        condition_family=condition_family,
-    )
-    if error is None and llm_result is not None:
-        return llm_result, None
+) -> tuple[ScenarioSpec | None, _Stage5ThreatResult | None]:
+    """Generate one assembled ScenarioSpec or one typed local failure."""
+    try:
+        spec, error = generate_bdi_for_context(
+            llm_client,
+            context,
+            run_dir,
+            loader=loader,
+            temperature=temperature,
+            target_operation=target_operation,
+            execution_target_profile=execution_target_profile,
+            target_observations=target_observations,
+            observation_contract=observation_contract,
+            content_surface=content_surface,
+            condition_family=condition_family,
+            assembly=assembly,
+        )
+    except ScenarioAssemblyError as exc:
+        stage_errors.append(f"Stage 5: {exc}")
+        return None, _Stage5ThreatResult(None)
+    if error is None and spec is not None:
+        return spec, None
     stage_errors.append(f"Stage 5 BDI generation failed: {error}")
     return None, _Stage5ThreatResult(
         None,
@@ -1248,30 +1246,6 @@ def _target_operation_for_context(
     return realized_operation(
         realization, context.target_control_path.control_action.action_id
     )
-
-
-def _stage5_spec(
-    defender_bdi: DefenderBDI,
-    llm_result: BDIGenerationResult,
-    threat,
-    control_structure: ControlStructure,
-    scenario_index: int,
-    context: ScenarioGenerationContext,
-    stage_errors: list[str],
-) -> ScenarioSpec | None:
-    """Compile one Stage 5 draft and retain an assembly failure locally."""
-    try:
-        return assemble_scenario_spec(
-            defender_bdi,
-            llm_result,
-            threat,
-            control_structure,
-            scenario_index,
-            scenario_context=context,
-        )
-    except ValueError as exc:
-        stage_errors.append(f"Stage 5: {exc}")
-        return None
 
 
 def _scenario_context_for_threat(

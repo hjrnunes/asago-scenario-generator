@@ -1,4 +1,4 @@
-"""Compilation of validated Stage 5 drafts into BDIGenerationResult."""
+"""Compilation of validated Stage 5 drafts into the ScenarioSpec."""
 
 from __future__ import annotations
 
@@ -28,6 +28,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     AdversaryKind,
     AdversaryReach,
     AttackerBDI,
+    ScenarioSpec,
 )
 from asago_scenario_generator.stpa.discriminating_condition import (
     ConditionCheck,
@@ -38,10 +39,9 @@ from ..condition_check import (
     ConditionUniverse,
 )
 from ..tool_call_binding import bind_tool_call_condition
+from .assemble import ScenarioAssembly, assemble_scenario_spec
 from .wire import (
-    BDIGenerationResult,
     CausalFactorDeclaration,
-    UnsafeOutcomeDeclaration,
     _CausalSourceChoice,
 )
 from .conditions import (
@@ -113,22 +113,28 @@ def _materialize_adversary(draft: BaseModel) -> Adversary:
     return Adversary(kind=draft.kind, gain=gain, reaches_target_via=reach)
 
 
-def _materialize_normal_context_bdi(
+def compile_scenario_spec(
     draft: BaseModel,
     choices: tuple[_CausalSourceChoice, ...],
     context: ScenarioGenerationContext,
+    assembly: ScenarioAssembly,
     observation_contract: ObservationContract | None = None,
     *,
     condition_universe: ConditionUniverse | None = None,
     condition_omitted_reason: str | None = None,
     condition_outcome: ConditionCheckOutcome | None = None,
-) -> BDIGenerationResult:
-    """Compile a normal-path draft: semantics and evidence, no execution wire.
+) -> ScenarioSpec:
+    """Compile a normal-path draft into the published ScenarioSpec.
 
-    The result carries no execution contract and no executable unsafe-outcome
+    The spec carries no execution contract and no executable unsafe-outcome
     condition; nothing is generated and later stripped.  Lineage stays
     compiler-owned: the exact hazard/constraint IDs derive from the immutable
     context.
+
+    Raises:
+        ScenarioAssemblyError: When the deterministic authority rejects the
+            compiled draft. Any other ``KeyError``, ``TypeError`` or
+            ``ValueError`` means the draft itself did not compile.
     """
     choices_by_handle = {choice.handle: choice for choice in choices}
     attacker_bdi = _materialize_context_attacker_bdi(draft, choices_by_handle)
@@ -151,16 +157,16 @@ def _materialize_normal_context_bdi(
         condition_universe.fact_values if condition_universe is not None else {},
         condition_omitted_reason=omitted_reason,
     )
-    return BDIGenerationResult(
+    return assemble_scenario_spec(
+        assembly,
+        context,
         defender_vulnerabilities=_materialize_context_vulnerabilities(
             factors,
             context,
         ),
-        attacker_bdi=attacker_bdi,
         causal_factors=factors,
-        unsafe_outcome=UnsafeOutcomeDeclaration(
-            semantic_proposition=outcome.semantic_proposition,
-        ),
+        attacker_bdi=attacker_bdi,
+        unsafe_outcome_semantic_proposition=outcome.semantic_proposition,
         adversary=adversary,
         observation_criteria=criteria,
         observation_assessment=assessment,

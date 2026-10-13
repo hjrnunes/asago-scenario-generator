@@ -33,6 +33,7 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.normal_authoring_wire import (
     _normal_payload,
     _target_operation,
+    _wrong_timing_assembly,
     _wrong_timing_context,
 )
 from tests.helpers.stage5_safe_outcome import (
@@ -174,11 +175,13 @@ def test_condition_note_ignores_a_code_quoted_in_unrelated_prose() -> None:
 def _generate(tmp_path, payload, **kwargs):
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
+    context = _wrong_timing_context()
     result = generate_bdi_for_context(
         client,
-        _wrong_timing_context(),
+        context,
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(context),
         **kwargs,
     )
     return client, result

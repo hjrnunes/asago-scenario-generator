@@ -21,7 +21,6 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
-    BDIGenerationResult,
     _ContextScenarioSemanticsPayload,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
@@ -508,7 +507,9 @@ class TestErrorPaths:
         la = make_loss_analysis()
         ets = _make_ets(num_threats=1)
         client = MockLLMClient()
-        client.set_exception_for(BDIGenerationResult, RuntimeError("LLM down"))
+        client.set_exception_for(
+            _ContextScenarioSemanticsPayload, RuntimeError("LLM down")
+        )
 
         with TemporaryDirectory() as tmpdir:
             result = run_sp3(
@@ -522,6 +523,7 @@ class TestErrorPaths:
             assert any(
                 "Stage 5 BDI generation failed" in e for e in result.stage_errors
             )
+            assert any("LLM down" in e for e in result.stage_errors)
             assert (
                 result.candidate_outcomes[0].status
                 is SP3CandidateStatus.generation_failed

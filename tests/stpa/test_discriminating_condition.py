@@ -29,9 +29,6 @@ from asago_scenario_generator.stpa.observation_contract import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.schema import (
     _scenario_semantics_payload_type,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.assemble import (
-    assemble_scenario_spec,
-)
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
 )
@@ -79,11 +76,10 @@ from tests.stpa.sp1_helpers import MockLLMClient
 
 from .condition_prompt_fixture import realistic_observations, realistic_profile
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
-from tests.helpers.sp3_scenario_continuity import _control_structure, _loss_analysis
+from tests.helpers.sp3_scenario_continuity import _loss_analysis
 from tests.helpers.normal_authoring_wire import (
-    _defender_bdi,
+    _wrong_timing_assembly,
     _wrong_timing_context,
-    _wrong_timing_threat,
 )
 from tests.helpers.scenario_deduplication import _scenario
 from tests.helpers.discriminating_condition import (
@@ -683,17 +679,9 @@ def test_analytical_only_condition_is_discarded_with_a_note(tmp_path) -> None:
 def _spec_with(condition: dict, tmp_path):
     client = MockLLMClient()
     client.set_response_queue([_payload_with(condition)])
-    result, error = _generate(client, tmp_path, scenario_id="SCN-001")
-    assert error is None and result is not None
-    context = _wrong_timing_context(scenario_id="SCN-001")
-    return assemble_scenario_spec(
-        _defender_bdi(context),
-        result,
-        _wrong_timing_threat(),
-        _control_structure(),
-        0,
-        scenario_context=context,
-    )
+    spec, error = _generate(client, tmp_path)
+    assert error is None and spec is not None
+    return spec
 
 
 def test_gherkin_states_the_condition_and_the_observed_record(tmp_path) -> None:
@@ -889,25 +877,18 @@ def test_omitted_condition_reason_reaches_the_handoff(tmp_path) -> None:
     bad = _payload_with(_ownership_condition("ORD-1"))
     client = MockLLMClient()
     client.set_response_queue([bad, copy.deepcopy(bad)])
-    context = _wrong_timing_context(scenario_id="SCN-001")
-    result, error = generate_bdi_for_context(
+    context = _wrong_timing_context()
+    spec, error = generate_bdi_for_context(
         client,
         context,
         tmp_path,
         target_operation=_operation(),
         target_observations=_observations(),
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(context),
     )
-    assert error is None and result is not None
-    spec = assemble_scenario_spec(
-        _defender_bdi(context),
-        result,
-        _wrong_timing_threat(),
-        _control_structure(),
-        0,
-        scenario_context=context,
-    )
-    assert spec.condition_omitted_reason == result.condition_omitted_reason
+    assert error is None and spec is not None
+    assert spec.condition_omitted_reason is not None
     narrative, tree, gherkin = render_scenario_summary(spec)
     envelope = assemble_envelope(
         scenario_id=spec.scenario_id,
@@ -924,7 +905,7 @@ def test_omitted_condition_reason_reaches_the_handoff(tmp_path) -> None:
     )
     payload = handoff.model_dump(mode="json", exclude_none=True)
     assert "discriminating_condition" not in payload
-    assert payload["condition_omitted_reason"] == result.condition_omitted_reason
+    assert payload["condition_omitted_reason"] == spec.condition_omitted_reason
 
 
 # --- rendered request on a realistic fixture ------------------------------

@@ -15,7 +15,10 @@ from tests.helpers.discriminating_condition import (
     _ownership_condition,
     _payload_with,
 )
-from tests.helpers.normal_authoring_wire import _wrong_timing_context
+from tests.helpers.normal_authoring_wire import (
+    _wrong_timing_assembly,
+    _wrong_timing_context,
+)
 from tests.helpers.stage5_safe_outcome import _command_attempt_payload
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -59,6 +62,7 @@ def test_a_non_condition_correction_carries_the_first_reply(tmp_path) -> None:
         _wrong_timing_context(),
         tmp_path,
         observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert client.call_count == 2
