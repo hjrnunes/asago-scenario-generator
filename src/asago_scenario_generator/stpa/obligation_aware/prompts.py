@@ -78,6 +78,7 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlacehol
 PROMPT_TEMPLATES_DIR = Path(__file__).with_name("prompt_templates")
 _TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
 _QUESTION_PROSE = "prose/obligation_question.j2"
+_ROUTING_PROSE = "prose/routing.j2"
 
 # The repository preflight rejects a view field with an entry of the first list
 # as one of its snake_case words (a plural ``s`` included) and a field equal to
@@ -286,11 +287,8 @@ def _hazard_constraint_pair_ledger(loss_analysis: LossAnalysis) -> str:
     """Render a compact, ID-only ledger for structural routing."""
     pairs = authoritative_hazard_constraint_pairs(loss_analysis)
     lines = [
-        "AUTHORITATIVE HAZARD-CONSTRAINT PAIR LEDGER (typed IDs only):",
-        "Use only the exact constraint_id -> hazard_id pairs listed here. "
-        "Descriptions, including parenthetical IDs, are not relationship evidence. "
-        "This ledger validates structural references only; it does not make a "
-        "taxonomy concern applicable or force a targeted route.",
+        render_prose(_ROUTING_PROSE, "ledger_header"),
+        render_prose(_ROUTING_PROSE, "ledger_rule"),
     ]
     if pairs:
         lines.extend(
@@ -1103,14 +1101,7 @@ def project_obligation_routing_context(
             slots=slots,
             loss_analysis=loss_analysis,
         ),
-        instructions=(
-            "Every selectable ID below has a description and relationship. "
-            "The obligation_handle is opaque and must be copied unchanged. "
-            "A targeted route must prove owner, action, controlled process, slot, "
-            "hazard, loss, and governing constraint relationships. Use the exact "
-            "typed hazard-constraint pair ledger in the rendered prompt; do not "
-            "infer a relationship from descriptions."
-        ),
+        instructions=render_prose(_ROUTING_PROSE, "instructions"),
     )
 
 
