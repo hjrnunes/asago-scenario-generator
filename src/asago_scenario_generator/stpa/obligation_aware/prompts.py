@@ -77,6 +77,13 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlacehol
 
 PROMPT_TEMPLATES_DIR = Path(__file__).with_name("prompt_templates")
 _TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
+# The prose templates sit in a subfolder because every provider call records
+# ``prompt_template_hashes`` over the top-level ``*.j2`` files only; a new
+# top-level file would add a key to each recorded call and fail strict replay.
+_QUESTION_PROSE = "prose/obligation_question.j2"
+_ROUTING_PROSE = "prose/routing.j2"
+_REVISION_PROSE = "prose/revision.j2"
+_SLOT_PROSE = "prose/slot.j2"
 
 # The repository preflight rejects a view field with an entry of the first list
 # as one of its snake_case words (a plural ``s`` included) and a field equal to
@@ -103,24 +110,17 @@ _STRUCTURAL_REFERENCE_TOKEN = re.compile(
     r"\b(?:RESP|CA|FB|CP|PM|RC|SC|H|L|REQ|CL|CM)-[A-Za-z0-9][A-Za-z0-9_.:-]*\b"
 )
 
-_MAPPING_STRENGTH_MEANINGS = {
-    "direct_curated_pair": (
-        "The reviewed risk was linked directly to this attack pattern. This is "
-        "discovery evidence, not proof that the mechanism exists in this system."
-    ),
-    "exact_then_category_expansion": (
-        "The risk first matched an equivalent taxonomy concept, then expanded "
-        "through a broader category to this pattern. Judge this pair explicitly."
-    ),
-    "broad_category_expansion": (
-        "The risk reached this pattern through a broader taxonomy category. Shared "
-        "category membership does not establish risk alignment."
-    ),
-    "related_category_expansion": (
-        "The risk reached this pattern through a related taxonomy concept and a "
-        "broader category. Treat the pairing as a discovery hypothesis only."
-    ),
-}
+
+def render_prose(template: str, section: str, **context: object) -> str:
+    """Render one named section of a prose template as a single field value.
+
+    Each section is one unwrapped line without a trailing newline, so the
+    result is the exact text a view field carries into the prompt.
+    """
+    text = _TEMPLATE_LOADER.render_prompt(template, section=section, **context)
+    if not text:
+        raise ValueError(f"{template} has no section {section!r}")
+    return text
 
 
 def obligation_prompt_template_hashes() -> dict[str, str]:
@@ -292,11 +292,8 @@ def _hazard_constraint_pair_ledger(loss_analysis: LossAnalysis) -> str:
     """Render a compact, ID-only ledger for structural routing."""
     pairs = authoritative_hazard_constraint_pairs(loss_analysis)
     lines = [
-        "AUTHORITATIVE HAZARD-CONSTRAINT PAIR LEDGER (typed IDs only):",
-        "Use only the exact constraint_id -> hazard_id pairs listed here. "
-        "Descriptions, including parenthetical IDs, are not relationship evidence. "
-        "This ledger validates structural references only; it does not make a "
-        "taxonomy concern applicable or force a targeted route.",
+        render_prose(_ROUTING_PROSE, "ledger_header"),
+        render_prose(_ROUTING_PROSE, "ledger_rule"),
     ]
     if pairs:
         lines.extend(
@@ -343,10 +340,8 @@ def _fact_views(
                     name=_plain_fact_name(fact),
                     value=value,
                     status=fact_evidence.status,
-                    meaning=(
-                        f"Qualification reading for {evaluation.step_id}; use the "
-                        "status as evidence about applicability, not as proof of a "
-                        "system-specific control mechanism."
+                    meaning=render_prose(
+                        _QUESTION_PROSE, "fact_meaning", step_id=evaluation.step_id
                     ),
                 )
                 if fact_evidence.status in {"unknown", "contradictory", "absent"}:
@@ -408,14 +403,10 @@ def project_obligation_question(
             ProviderSystemResource(
                 resource_id=resource_id,
                 resource_type=kind,
-                description=(
-                    f"Known {kind} resource from the supplied system snapshot; "
-                    "no mechanism or reachability is implied by this reference."
+                description=render_prose(
+                    _QUESTION_PROSE, "resource_description", kind=kind
                 ),
-                relevance=(
-                    "Contextual evidence only. Select it only when the supplied "
-                    "STPA control path independently makes it relevant."
-                ),
+                relevance=render_prose(_QUESTION_PROSE, "resource_relevance"),
             )
         )
     risk = brief.risk_ref
@@ -435,26 +426,23 @@ def project_obligation_question(
             impact=risk.impact,
         ),
         applicability=ProviderApplicability(
-            conclusion=(
-                "The reviewed obligation is qualified for consideration; "
-                f"qualification status is {brief.qualification_disposition}."
+            conclusion=render_prose(
+                _QUESTION_PROSE,
+                "conclusion_pattern",
+                disposition=brief.qualification_disposition,
             ),
             relevant_facts=relevant_facts,
             missing_or_conflicting_facts=missing_facts,
         ),
         mapping_strength=ProviderMappingStrength(
             label=mapping_strength,
-            meaning=_MAPPING_STRENGTH_MEANINGS[mapping_strength],
+            meaning=render_prose(_QUESTION_PROSE, f"mapping_{mapping_strength}"),
         ),
         known_system_resources=tuple(
             sorted(resources, key=lambda item: item.resource_id)
         ),
-        analyst_instruction=(
-            "The obligation_handle is an opaque handle: copy unchanged and do "
-            "not interpret its syntax. Treat the known concern as a hypothesis. "
-            "Find a system-specific STPA control path or explicitly reject it; "
-            "the reviewed risk and resource references are context, not proof, "
-            "and do not prescribe an attack sequence or coverage."
+        analyst_instruction=render_prose(
+            _QUESTION_PROSE, "analyst_instruction_pattern"
         ),
     )
 
@@ -479,19 +467,16 @@ def project_governance_question(
             impact=risk.impact,
         ),
         applicability=ProviderApplicability(
-            conclusion=(
-                "The reviewed risk is qualified for consideration; "
-                f"qualification status is {brief.qualification_disposition}."
+            conclusion=render_prose(
+                _QUESTION_PROSE,
+                "conclusion_governance",
+                disposition=brief.qualification_disposition,
             ),
             relevant_facts=relevant_facts,
             missing_or_conflicting_facts=missing_facts,
         ),
-        analyst_instruction=(
-            "The obligation_handle is an opaque handle: copy unchanged and do "
-            "not interpret its syntax. Treat the reviewed risk as a hypothesis. "
-            "No attack pattern covers it; find a system-specific unsafe control "
-            "action through which it could come about, or report that none does. "
-            "Do not prescribe an attack sequence or coverage."
+        analyst_instruction=render_prose(
+            _QUESTION_PROSE, "analyst_instruction_governance"
         ),
     )
 
@@ -860,9 +845,11 @@ def _project_slot_context(
         views.append(
             ProviderSlot(
                 id=slot.slot_id,
-                description=(
-                    f"{slot.uca_type.value} slot for {action.description}; "
-                    "copy this slot handle unchanged in the response."
+                description=render_prose(
+                    _SLOT_PROSE,
+                    "slot_description",
+                    uca_type=slot.uca_type.value,
+                    action=action.description,
                 ),
                 uca_type=slot.uca_type,
                 action_temporality=slot.action_temporality,
@@ -1121,14 +1108,7 @@ def project_obligation_routing_context(
             slots=slots,
             loss_analysis=loss_analysis,
         ),
-        instructions=(
-            "Every selectable ID below has a description and relationship. "
-            "The obligation_handle is opaque and must be copied unchanged. "
-            "A targeted route must prove owner, action, controlled process, slot, "
-            "hazard, loss, and governing constraint relationships. Use the exact "
-            "typed hazard-constraint pair ledger in the rendered prompt; do not "
-            "infer a relationship from descriptions."
-        ),
+        instructions=render_prose(_ROUTING_PROSE, "instructions"),
     )
 
 
@@ -1186,10 +1166,7 @@ def project_revision_context(
                 trigger_obligation_handle=gap.obligation_id
                 or "unattributed-obligation",
                 plain_description=gap.description,
-                why_the_concept_is_needed=(
-                    "The supplied evidence says this concept is needed before "
-                    "STPA can decide how the obligation relates to the system."
-                ),
+                why_the_concept_is_needed=render_prose(_REVISION_PROSE, "gap_need"),
                 expected_concept_kind=gap.concept_type,
                 related_existing_context=_revision_related_context(
                     gap,
@@ -1204,14 +1181,7 @@ def project_revision_context(
             control_structure,
             loss_analysis=loss_analysis,
         ),
-        instructions=(
-            "For every gap_handle choose exactly one disposition: "
-            "propose_addition, dismiss_unsupported, or unresolved. "
-            "Copy each gap_handle unchanged. Additions may reference supplied "
-            "existing IDs or declared request-local handles only. Do not invent "
-            "final STPA IDs; the compiler allocates them. The complete delta is "
-            "validated and applied atomically as one bounded round."
-        ),
+        instructions=render_prose(_REVISION_PROSE, "instructions"),
     )
 
 
@@ -1223,10 +1193,7 @@ def _route_payload(route: ObligationRoute) -> ProviderRoutedRoute:
         slot_ids=tuple(route.slot_ids),
         hazard_ids=tuple(route.hazard_ids),
         constraint_ids=tuple(route.constraint_ids),
-        instruction=(
-            "Copy route_handle and obligation_handle unchanged. These references "
-            "are evidence to consider; they do not force an ICA finding."
-        ),
+        instruction=render_prose(_SLOT_PROSE, "route_instruction"),
     )
 
 
@@ -1420,9 +1387,7 @@ def _compact_routing_slots(
     return [
         {
             "id": glossary.remember(
-                item.id,
-                "Unsafe-control slot; its exact action, owner, target, and UCA "
-                "type are stated in the slots relationship table.",
+                item.id, render_prose(_ROUTING_PROSE, "slot_glossary")
             ),
             "uca_type": item.uca_type.value,
             "action_temporality": _temporality_value(item),
@@ -1648,12 +1613,13 @@ def render_synthesis_slot_prompts(
     """Render the ICA target prompt from an already projected target view."""
     target_index, questions, routes = projection
     slot_ids = {slot.slot_id for slot in slots}
+    copy_instruction = render_prose(_SLOT_PROSE, "copy_handles")
     required_pairs = [
         {
             "route_handle": route.route_handle,
             "obligation_handle": route.obligation_handle,
             "slot_id": slot_id,
-            "copy_instruction": "copy each opaque handle unchanged",
+            "copy_instruction": copy_instruction,
         }
         for route in routes
         for slot_id in sorted(set(route.slot_ids).intersection(slot_ids))
@@ -1699,4 +1665,5 @@ __all__ = [
     "project_revision_context",
     "obligation_prompt_template_hashes",
     "mapping_strength_for_brief",
+    "render_prose",
 ]

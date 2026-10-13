@@ -1,0 +1,172 @@
+Fill every supplied STPA ICA slot for exactly this target. Analyze every
+slot, including slots with no routed obligation, exactly once. Return one structured slot
+draft per supplied slot. Use each slot_id as an opaque handle and copy it unchanged.
+
+STPA (System-Theoretic Process Analysis) examines how feedback control can lead
+to stakeholder loss. A controller uses decision-relevant process-model
+information, issues a control action to a controlled process, and receives
+feedback that updates its model.
+
+
+Standard STPA calls an unsafe action a UCA (unsafe control action). In this
+project, an ICA is one concrete security finding within a fixed
+controller/action/category slot.
+
+An ICA states the real context in which the fixed controller action becomes
+unsafe and links that action to a hazard. A controller belief or causal failure
+may explain the ICA later, but is not the real hazardous context itself.
+
+Four ICA types:
+
+- NOT_PROVIDED: the required control action is absent when it is needed.
+- INCORRECT: the action is provided, but its value, content, destination, or effect is unsafe.
+- WRONG_TIMING: the action is provided too early, too late, or in an unsafe order.
+- WRONG_DURATION: a continuous action stops too soon, continues too long, or is applied for an unsafe duration.
+
+Apply the category to the exact named action, not a neighbouring safeguard.
+For `release a laboratory sample`, missing approval is not NOT_PROVIDED release:
+it is a different missing action, or a condition making an actual release unsafe.
+For `send an alarm`, INCORRECT requires an alarm that is sent with unsafe content,
+destination or effect; `no alarm is sent` belongs to NOT_PROVIDED. Do not duplicate
+one omission across both categories merely to fill the slots.
+
+An ICA context is a state of the controlled process or of the controller's
+process model, not a missing procedure step. "A check is not performed before
+the action" names a design omission; the ICA is the state in which issuing the
+action is unsafe, for example "the pallet is on quality hold" for `release a
+pallet`.
+
+Wrong order is a WRONG_TIMING finding only when the earlier step is itself an
+observable control action or operation in the supplied structure and the
+source requires that order. Do not create an ordering finding for a reasoning
+step that has no observable action.
+
+Timing and duration are distinct. WRONG_DURATION is eligible only when the
+supplied `action_temporality` is `continuous` or `bounded_duration`; do not
+infer continuing behavior from action prose. An ICA describes
+unsafe controller behavior; a safeguard, recommendation, policy, or
+requirement such as "implement MFA" or "add rate limiting" is not an ICA.
+
+Unrelated example: a greenhouse climate controller providing `start heating`
+while the actual temperature is already above the safe limit is INCORRECT. “The
+temperature reading is delayed” is a possible cause, not the ICA context, and
+“replace the sensor” is a mitigation, not an ICA.
+
+An authorized omission is not automatically unsafe: intentionally omitting an
+optional status update while no protected operation is pending is not a
+NOT_PROVIDED finding. In contrast, a controller executing a protected state
+change for a request that lacks the required approval is an unsafe execution;
+the real hazardous state is the unapproved request being accepted, and a
+plausible loss is the protected record being changed without authorization.
+“The system is susceptible to misuse” is only a susceptibility claim, not a
+hazardous state, and “the system is compromised” is an asserted consequence,
+not a reasoned loss connection.
+
+
+The ordinary STPA method requires a hazardous context, a loss consequence, exact hazard and
+governing-constraint references, and process-model or feedback references where relevant.
+For each finding return one non-empty `deviation` clause describing only the condition that
+makes the supplied control action unsafe for that slot's stated UCA type. The deterministic
+compiler owns the slot's exact UCA type and supplies the authoritative controller,
+control-action prose, and unsafe-action sentence frame; do not repeat or rewrite them.
+
+Keep the deviation to one condition, normally no more than 32 words or 220 characters. Do not
+put examples, alternatives, mitigations, hazards, losses, constraints, IDs, or taxonomy attack
+stories in it. A routed obligation is advisory: it may result in a finding,
+proposed_not_applicable with complete structural evidence, or unresolved. A route never
+forces an ICA finding and no consideration may claim taxonomy coverage.
+Do not put an unsupported attack story into the ICA itself.
+
+For N/A use `is_na=true`, a non-empty `na_rationale` citing a complete structural
+property, and no findings. For an unsafe-control result use `is_na=false`,
+`na_rationale=null`, and at least one structured item in `findings`. Do not return the
+legacy `responsibility`, `control_action`, `uca_type`, or `icas` fields. Do not return
+final ICA IDs, EXEC identities, or replacement controller/action text. Each finding
+must select exactly one supplied governing constraint that governs its selected hazard.
+
+For every item under `Required routed consideration pairs`, put exactly one result in
+the matching slot's `consideration_results` array:
+
+- Use `finding` only when one or more findings in that same slot directly express the
+  routed concern through the route's supplied hazard and governing constraint. Put the
+  matching zero-based positions from the slot's `findings` array in `finding_indexes`.
+- Use `proposed_not_applicable` only when that slot is N/A and its complete structural
+  property proves the routed mechanism cannot occur. Leave `finding_indexes` empty.
+- Use `unresolved` only when the supplied evidence is missing or contradictory. State
+  what evidence is missing or contradictory; do not use `unresolved` merely because a
+  route is advisory or does not force a finding. Leave `finding_indexes` empty.
+
+Do not attach an obligation to an unrelated finding merely because both appear in the
+same target. Copy each `obligation_handle` unchanged; route handles are input evidence
+and are resolved locally, so they are not output fields.
+
+An ICA finding is a system-specific scenario hypothesis about unsafe control behavior;
+it is not proof that the current control already recognizes or names the taxonomy attack
+technique. The routed taxonomy mechanism is not established evidence. The `deviation` and
+`hazardous_context` must describe the unsafe control or system condition in mechanism-neutral
+terms. Put the relationship between the obligation and the unsafe-control finding in the
+consideration `rationale`; keep unsupported attack stories out of the ICA itself.
+Bad: `when an adversary uses poisoned persistent memory`.
+Good: `the current authorization is not revalidated after stored context is restored`.
+
+Choose `finding` when the known concern is a concrete way the same supplied control action can
+be absent, incorrect, mistimed, or misapplied and can lead to the same hazard. Compare the
+concern and finding by subject, operation, affected object, and effect. Shared words such as
+`value`, `input`, `parameter`, or `threshold` are not mechanism evidence. A memory concern
+requires a supplied storage-and-reuse path; endpoint exfiltration requires a supplied
+outbound-call path. When the required operation or path is absent, choose `unresolved` and
+name it. Choose `unresolved` when the concern requires another control path, an unsupplied
+access path, or another missing system fact.
+a detector's score threshold is not tool-call parameter pollution.
+
+## Context tables
+
+A control action may list `process_model_refs`, and its process-model parts may list
+`values`. The target index then carries `context_rows` for that action: each row assigns one
+value to each referenced process-model variable and has an exact `id`. Examine every row of
+the slot's action. When a row is a context in which the slot's deviation is unsafe, write one
+finding for it, set `context_row` to that row's exact `id`, and include the row's
+process-model IDs in `process_model_refs`. The table covers only the variables the action
+references; it does not limit which deviations are unsafe. When the deviation is unsafe in a
+context no row expresses, write that finding as well, with `context_row: null`, and do not
+recast it as a finding about a listed variable. A process-model part with `evidence_refs` is
+read from observed target state; an action with `operation` invokes that observed operation. A
+feedback channel marked `untrusted: true` carries information an adversary can author (the
+user's message, earlier conversation turns, or retrieved text); a finding may rely on such a
+channel as the source of a wrong process-model value.
+
+## Replies limited to what a source supplies
+
+A governing constraint can limit what a reply may state to what a source supplies, such as
+a document, a policy text, a record, or a tool result. When the reply action references a
+process-model variable that a feedback channel updates from that source, treat each value
+of that variable as its own context. A reply breaks such a constraint in two distinct
+ways: the source supplies an applicable answer and the reply misstates it, contradicts it,
+or adds details it does not contain; or the source supplies no applicable answer and the
+reply states one anyway. Examine both. Write a separate finding, citing its own
+`context_row`, for each context in which the reply is unsafe; one finding about a missing
+answer does not cover a reply that departs from an answer the source did supply.
+
+
+The structured slot-draft fields are `slot_id`, `is_na`, `na_rationale`, `findings`, and
+`consideration_results`; each finding contains the plain string `deviation`, `hazardous_context`,
+`loss_consequence`, `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,
+`feedback_refs`, and `context_row`. A finding consideration contains `obligation_handle`,
+`disposition`, `finding_indexes`, and `rationale`. In the example below, a warehouse
+controller releases a pallet; its context table has a row in which the pallet's hold status
+is "on quality hold". Releasing the pallet in that row is the unsafe control condition, the
+held pallet leaving the warehouse is the hazardous system state, and a defective shipment
+reaching a customer is a plausible loss consequence. Omitting an optional status update while
+no release is pending would be an authorized omission and is not this finding; conversely,
+describing the system as merely "susceptible to misuse" is not a hazardous state, and claiming
+that "the system is compromised" is not a supported loss chain. Valid example:
+{"filled_slots":[{"slot_id":"<slot_id>","is_na":false,"na_rationale":null,
+"findings":[{"deviation":"the pallet's hold status is on quality hold",
+"hazardous_context":"a pallet on quality hold leaves the warehouse",
+"loss_consequence":"a defective shipment reaches a customer",
+"related_hazard_ids":["<hazard_id>"],"related_constraint_ids":["<constraint_id>"],
+"process_model_refs":["<pm_id>"],"feedback_refs":[],"context_row":"<context_row_id>"}],
+"consideration_results":[{"obligation_handle":
+"<obligation_handle>","disposition":"finding","finding_indexes":[0],
+"rationale":"finding 0 directly expresses the routed concern"}]}]}.
+Return one JSON object matching the structured slot-draft schema.

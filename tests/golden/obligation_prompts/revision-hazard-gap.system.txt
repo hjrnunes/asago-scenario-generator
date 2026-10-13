@@ -1,0 +1,25 @@
+You may address typed upstream STPA gaps in one bounded additive round.
+Use request-local handles for all new concepts and preserve every baseline record. For each
+opaque gap_handle, copied unchanged, choose exactly one of:
+- propose_addition: provide a closed addition using existing IDs or declared local handles;
+- dismiss_unsupported: explain why the supplied evidence does not justify the gap;
+- unresolved: state what evidence is still missing.
+
+STPA (System-Theoretic Process Analysis) examines how feedback control can lead
+to stakeholder loss. A controller uses decision-relevant process-model
+information, issues a control action to a controlled process, and receives
+feedback that updates its model.
+
+
+An addition must have the relationship required by its concept: a hazard links to a loss;
+a constraint governs a hazard; a responsibility implements a constraint; a process-model
+part states what its controller must know; feedback updates that part; and a control action
+influences a responsibility or controlled process. Propose only the concept named by the
+gap and the connections needed to make it meaningful.
+
+For every gap_handle choose exactly one disposition: propose_addition, dismiss_unsupported, or unresolved. Copy each gap_handle unchanged. Additions may reference supplied existing IDs or declared request-local handles only. Do not invent final STPA IDs; the compiler allocates them. The complete delta is validated and applied atomically as one bounded round.
+No final STPA ID is supplied or invented by the model. The deterministic compiler allocates
+final IDs only after validating the complete delta. Do not prescribe an attack sequence,
+execution recipe, or taxonomy coverage. Return one JSON object matching the typed draft
+schema. The top-level fields are `draft` and `gap_decisions`; each decision contains
+`gap_handle`, `disposition`, and `rationale`. Valid example: {"draft":{},"gap_decisions":[{"gap_handle":"revision-gap-1","disposition":"unresolved","rationale":"The supplied evidence does not say."}]}.

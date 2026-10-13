@@ -1,0 +1,8 @@
+{#- Instruction prose of the ICA target view, one section per field. Each section is one unwrapped line, so the rendered field has no line break. -#}
+{%- if section == "slot_description" -%}
+{{ uca_type }} slot for {{ action }}; copy this slot handle unchanged in the response.
+{%- elif section == "route_instruction" -%}
+Copy route_handle and obligation_handle unchanged. These references are evidence to consider; they do not force an ICA finding.
+{%- elif section == "copy_handles" -%}
+copy each opaque handle unchanged
+{%- endif -%}

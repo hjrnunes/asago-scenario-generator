@@ -1,0 +1,216 @@
+Target handle: RESP-1 (copy unchanged)
+Compact target STPA index:
+constraints:
+- description: Constraint
+  id: SC-1
+  related_hazards:
+  - description: Hazard
+    id: H-1
+control_actions:
+- action_temporality: null
+  description: Action
+  id: CA-1-1
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+controlled_processes: []
+coordination_paths: []
+feedback_channels:
+- description: Feedback
+  id: FB-1-1
+  owner:
+    description: Controller
+    id: RESP-1
+  source:
+    description: Controller
+    id: RESP-1
+  updates:
+    description: State
+    id: PM-1-1
+hazards:
+- description: Hazard
+  id: H-1
+  related_losses:
+  - description: Loss
+    id: L-1
+losses:
+- description: Loss
+  id: L-1
+process_model_parts:
+- description: State
+  id: PM-1-1
+  owner:
+    description: Controller
+    id: RESP-1
+referenced_records: []
+responsibilities:
+- assigned_constraints: []
+  controlled_process: null
+  description: Controller
+  id: RESP-1
+slots:
+- action_temporality: null
+  control_action:
+    description: Action
+    id: CA-1-1
+  coordination_path: null
+  description: INCORRECT slot for Action; copy this slot handle unchanged in the response.
+  id: RESP-1:CA-1-1:INCORRECT
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+  uca_type: INCORRECT
+- action_temporality: null
+  control_action:
+    description: Action
+    id: CA-1-1
+  coordination_path: null
+  description: NOT_PROVIDED slot for Action; copy this slot handle unchanged in the
+    response.
+  id: RESP-1:CA-1-1:NOT_PROVIDED
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+  uca_type: NOT_PROVIDED
+- action_temporality: null
+  control_action:
+    description: Action
+    id: CA-1-1
+  coordination_path: null
+  description: WRONG_DURATION slot for Action; copy this slot handle unchanged in
+    the response.
+  id: RESP-1:CA-1-1:WRONG_DURATION
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+  uca_type: WRONG_DURATION
+- action_temporality: null
+  control_action:
+    description: Action
+    id: CA-1-1
+  coordination_path: null
+  description: WRONG_TIMING slot for Action; copy this slot handle unchanged in the
+    response.
+  id: RESP-1:CA-1-1:WRONG_TIMING
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+  uca_type: WRONG_TIMING
+target_id: RESP-1
+target_kind: responsibility
+
+Obligation considerations for this target (hypotheses only):
+- analyst_instruction: 'The obligation_handle is an opaque handle: copy unchanged
+    and do not interpret its syntax. Treat the known concern as a hypothesis. Find
+    a system-specific STPA control path or explicitly reject it; the reviewed risk
+    and resource references are context, not proof, and do not prescribe an attack
+    sequence or coverage.'
+  applicability:
+    conclusion: The reviewed obligation is qualified for consideration; qualification
+      status is ready.
+    missing_or_conflicting_facts: []
+    relevant_facts:
+    - fact_id: mode
+      meaning: Qualification reading for step.2; use the status as evidence about
+        applicability, not as proof of a system-specific control mechanism.
+      name: 'Declared profile evidence: mode'
+      status: present
+      value: active
+  known_concern:
+    attack_pattern_id: AP-T1-01
+    description: Canonical
+    name: Pattern
+  known_system_resources:
+  - description: Known entry_point resource from the supplied system snapshot; no
+      mechanism or reachability is implied by this reference.
+    relevance: Contextual evidence only. Select it only when the supplied STPA control
+      path independently makes it relevant.
+    resource_id: ep:v1:51220354a529a6a08ce8bd995e149164
+    resource_type: entry_point
+  - description: Known integration resource from the supplied system snapshot; no
+      mechanism or reachability is implied by this reference.
+    relevance: Contextual evidence only. Select it only when the supplied STPA control
+      path independently makes it relevant.
+    resource_id: int:v1:6abb941a0d1112346cd1b3bde9af24af
+    resource_type: integration
+  - description: Known trust_boundary resource from the supplied system snapshot;
+      no mechanism or reachability is implied by this reference.
+    relevance: Contextual evidence only. Select it only when the supplied STPA control
+      path independently makes it relevant.
+    resource_id: tb:v1:41a75fea1864f16e89f7c0e66ea48258
+    resource_type: trust_boundary
+  - description: Known tool resource from the supplied system snapshot; no mechanism
+      or reachability is implied by this reference.
+    relevance: Contextual evidence only. Select it only when the supplied STPA control
+      path independently makes it relevant.
+    resource_id: tool:v1:b93006774cbdd4b299389a03ac3d88c3
+    resource_type: tool
+  mapping_strength:
+    label: direct_curated_pair
+    meaning: The reviewed risk was linked directly to this attack pattern. This is
+      discovery evidence, not proof that the mechanism exists in this system.
+  obligation_handle: R1
+  reviewed_risk:
+    consequence: null
+    impact: null
+    name: Risk risk-a
+    risk_id: risk-a
+    threat: null
+- analyst_instruction: 'The obligation_handle is an opaque handle: copy unchanged
+    and do not interpret its syntax. Treat the reviewed risk as a hypothesis. No attack
+    pattern covers it; find a system-specific unsafe control action through which
+    it could come about, or report that none does. Do not prescribe an attack sequence
+    or coverage.'
+  applicability:
+    conclusion: The reviewed risk is qualified for consideration; qualification status
+      is not_attempted.
+    missing_or_conflicting_facts: []
+    relevant_facts: []
+  kind: governance_risk
+  obligation_handle: R2
+  reviewed_risk:
+    consequence: null
+    description: A reviewed risk used by planner tests.
+    impact: null
+    name: Risk risk-b
+    risk_id: risk-b
+    threat: null
+
+Routed route evidence (opaque handles; copy unchanged):
+- constraint_ids:
+  - SC-1
+  hazard_ids:
+  - H-1
+  instruction: Copy route_handle and obligation_handle unchanged. These references
+    are evidence to consider; they do not force an ICA finding.
+  obligation_handle: R1
+  route_handle: R1
+  slot_ids:
+  - RESP-1:CA-1-1:NOT_PROVIDED
+- constraint_ids:
+  - SC-1
+  hazard_ids:
+  - H-1
+  instruction: Copy route_handle and obligation_handle unchanged. These references
+    are evidence to consider; they do not force an ICA finding.
+  obligation_handle: R2
+  route_handle: R2
+  slot_ids:
+  - RESP-1:CA-1-1:NOT_PROVIDED
+
+Required routed consideration pairs:
+- copy_instruction: copy each opaque handle unchanged
+  obligation_handle: R1
+  route_handle: R1
+  slot_id: RESP-1:CA-1-1:NOT_PROVIDED
+- copy_instruction: copy each opaque handle unchanged
+  obligation_handle: R2
+  route_handle: R2
+  slot_id: RESP-1:CA-1-1:NOT_PROVIDED
+
+Return the structured slot-draft schema described above.
