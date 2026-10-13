@@ -1,0 +1,146 @@
+Target handle: RESP-1 (copy unchanged)
+Compact target STPA index:
+constraints:
+- description: Constraint
+  id: SC-1
+  related_hazards:
+  - description: Hazard
+    id: H-1
+control_actions:
+- action_temporality: null
+  description: Action
+  id: CA-1-1
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+controlled_processes: []
+coordination_paths: []
+feedback_channels:
+- description: Feedback
+  id: FB-1-1
+  owner:
+    description: Controller
+    id: RESP-1
+  source:
+    description: Controller
+    id: RESP-1
+  updates:
+    description: State
+    id: PM-1-1
+hazards:
+- description: Hazard
+  id: H-1
+  related_losses:
+  - description: Loss
+    id: L-1
+losses:
+- description: Loss
+  id: L-1
+process_model_parts:
+- description: State
+  id: PM-1-1
+  owner:
+    description: Controller
+    id: RESP-1
+referenced_records: []
+responsibilities:
+- assigned_constraints: []
+  controlled_process: null
+  description: Controller
+  id: RESP-1
+slots:
+- action_temporality: null
+  control_action:
+    description: Action
+    id: CA-1-1
+  coordination_path: null
+  description: INCORRECT slot for Action; copy this slot handle unchanged in the response.
+  id: RESP-1:CA-1-1:INCORRECT
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+  uca_type: INCORRECT
+- action_temporality: null
+  control_action:
+    description: Action
+    id: CA-1-1
+  coordination_path: null
+  description: NOT_PROVIDED slot for Action; copy this slot handle unchanged in the
+    response.
+  id: RESP-1:CA-1-1:NOT_PROVIDED
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+  uca_type: NOT_PROVIDED
+- action_temporality: null
+  control_action:
+    description: Action
+    id: CA-1-1
+  coordination_path: null
+  description: WRONG_DURATION slot for Action; copy this slot handle unchanged in
+    the response.
+  id: RESP-1:CA-1-1:WRONG_DURATION
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+  uca_type: WRONG_DURATION
+- action_temporality: null
+  control_action:
+    description: Action
+    id: CA-1-1
+  coordination_path: null
+  description: WRONG_TIMING slot for Action; copy this slot handle unchanged in the
+    response.
+  id: RESP-1:CA-1-1:WRONG_TIMING
+  owner:
+    description: Controller
+    id: RESP-1
+  target_process: null
+  uca_type: WRONG_TIMING
+target_id: RESP-1
+target_kind: responsibility
+
+Obligation considerations for this target (hypotheses only):
+- analyst_instruction: 'The obligation_handle is an opaque handle: copy unchanged
+    and do not interpret its syntax. Treat the reviewed risk as a hypothesis. No attack
+    pattern covers it; find a system-specific unsafe control action through which
+    it could come about, or report that none does. Do not prescribe an attack sequence
+    or coverage.'
+  applicability:
+    conclusion: The reviewed risk is qualified for consideration; qualification status
+      is not_attempted.
+    missing_or_conflicting_facts: []
+    relevant_facts: []
+  kind: governance_risk
+  obligation_handle: R1
+  reviewed_risk:
+    consequence: null
+    description: A reviewed risk used by planner tests.
+    impact: null
+    name: Risk risk-b
+    risk_id: risk-b
+    threat: null
+
+Routed route evidence (opaque handles; copy unchanged):
+- constraint_ids:
+  - SC-1
+  hazard_ids:
+  - H-1
+  instruction: Copy route_handle and obligation_handle unchanged. These references
+    are evidence to consider; they do not force an ICA finding.
+  obligation_handle: R1
+  route_handle: R1
+  slot_ids:
+  - RESP-1:CA-1-1:NOT_PROVIDED
+
+Required routed consideration pairs:
+- copy_instruction: copy each opaque handle unchanged
+  obligation_handle: R1
+  route_handle: R1
+  slot_id: RESP-1:CA-1-1:NOT_PROVIDED
+
+Return the structured slot-draft schema described above.

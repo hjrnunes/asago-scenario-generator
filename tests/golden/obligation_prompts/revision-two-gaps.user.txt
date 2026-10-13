@@ -1,0 +1,95 @@
+Compact revision gaps:
+- expected_concept_kind: responsibility
+  gap_handle: revision-gap-1
+  plain_description: A reviewing responsibility is needed.
+  related_existing_context:
+  - description: Validate request.
+    id: CA-1-1
+  - description: Request process.
+    id: CP-1
+  - description: Request feedback.
+    id: FB-1-1
+  - description: Request state.
+    id: PM-1-1
+  - description: Requests must be validated.
+    id: RC-1-1
+  - description: Validate incoming requests.
+    id: RESP-1
+  trigger_obligation_handle: unattributed-obligation
+  why_the_concept_is_needed: The supplied evidence says this concept is needed before
+    STPA can decide how the obligation relates to the system.
+- expected_concept_kind: constraint
+  gap_handle: revision-gap-2
+  plain_description: A governing constraint is missing.
+  related_existing_context:
+  - description: An unsafe request is accepted.
+    id: H-1
+  - description: A protected operation is harmed.
+    id: L-1
+  - description: Requests must satisfy policy.
+    id: SC-1
+  trigger_obligation_handle: unattributed-obligation
+  why_the_concept_is_needed: The supplied evidence says this concept is needed before
+    STPA can decide how the obligation relates to the system.
+
+Compact baseline STPA index:
+constraints:
+- description: Requests must satisfy policy.
+  id: SC-1
+  related_hazards:
+  - description: An unsafe request is accepted.
+    id: H-1
+control_actions:
+- action_temporality: null
+  description: Validate request.
+  id: CA-1-1
+  owner:
+    description: Validate incoming requests.
+    id: RESP-1
+  target_process:
+    description: Request process.
+    id: CP-1
+controlled_processes:
+- description: Request process.
+  id: CP-1
+coordination_paths: []
+feedback_channels:
+- description: Request feedback.
+  id: FB-1-1
+  owner:
+    description: Validate incoming requests.
+    id: RESP-1
+  source:
+    description: Request process.
+    id: CP-1
+  updates:
+    description: Request state.
+    id: PM-1-1
+hazards:
+- description: An unsafe request is accepted.
+  id: H-1
+  related_losses:
+  - description: A protected operation is harmed.
+    id: L-1
+losses:
+- description: A protected operation is harmed.
+  id: L-1
+process_model_parts:
+- description: Request state.
+  id: PM-1-1
+  owner:
+    description: Validate incoming requests.
+    id: RESP-1
+referenced_records: []
+responsibilities:
+- assigned_constraints: []
+  controlled_process:
+    description: Request process.
+    id: CP-1
+  description: Validate incoming requests.
+  id: RESP-1
+slots: []
+target_id: null
+target_kind: all
+
+Return one typed gap decision for every gap_handle and one complete request-local draft.

@@ -1,0 +1,150 @@
+Known concern glossary (each pattern is defined once; questions refer to it by
+known_concern_ref):
+- attack_pattern_id: AP-T1-01
+  description: Canonical
+  name: Pattern
+
+
+Compact obligation questions:
+- applicability:
+    conclusion: The reviewed obligation is qualified for consideration; qualification
+      status is ready.
+    missing_or_conflicting_facts: []
+    relevant_facts:
+    - meaning: Qualification reading for step.2; use the status as evidence about
+        applicability, not as proof of a system-specific control mechanism.
+      name: 'Declared profile evidence: mode'
+      status: present
+      value: active
+  known_concern_ref: AP-T1-01
+  known_system_resources:
+  - description: Known entry_point resource from the supplied system snapshot; no
+      mechanism or reachability is implied by this reference.
+    relevance: Contextual evidence only. Select it only when the supplied STPA control
+      path independently makes it relevant.
+    resource_id: ep:v1:51220354a529a6a08ce8bd995e149164
+    resource_type: entry_point
+  - description: Known integration resource from the supplied system snapshot; no
+      mechanism or reachability is implied by this reference.
+    relevance: Contextual evidence only. Select it only when the supplied STPA control
+      path independently makes it relevant.
+    resource_id: int:v1:6abb941a0d1112346cd1b3bde9af24af
+    resource_type: integration
+  - description: Known trust_boundary resource from the supplied system snapshot;
+      no mechanism or reachability is implied by this reference.
+    relevance: Contextual evidence only. Select it only when the supplied STPA control
+      path independently makes it relevant.
+    resource_id: tb:v1:41a75fea1864f16e89f7c0e66ea48258
+    resource_type: trust_boundary
+  - description: Known tool resource from the supplied system snapshot; no mechanism
+      or reachability is implied by this reference.
+    relevance: Contextual evidence only. Select it only when the supplied STPA control
+      path independently makes it relevant.
+    resource_id: tool:v1:b93006774cbdd4b299389a03ac3d88c3
+    resource_type: tool
+  mapping_strength:
+    label: direct_curated_pair
+    meaning: The reviewed risk was linked directly to this attack pattern. This is
+      discovery evidence, not proof that the mechanism exists in this system.
+  obligation_handle: ob:v1:00de7835aa424ddd0eb2ecf07096df75664b46fa438a3ef11c37d4cc597b7624
+  reviewed_risk:
+    consequence: null
+    impact: null
+    name: Risk risk-a
+    risk_id: risk-a
+    threat: null
+
+Every obligation_handle is an opaque reference: copy unchanged.
+AUTHORITATIVE HAZARD-CONSTRAINT PAIR LEDGER (typed IDs only):
+Use only the exact constraint_id -> hazard_id pairs listed here. Descriptions, including parenthetical IDs, are not relationship evidence. This ledger validates structural references only; it does not make a taxonomy concern applicable or force a targeted route.
+- <none>
+
+Compact STPA target index: relationships use IDs; the ID glossary explains each ID exactly once.
+constraints: []
+control_actions:
+- action_temporality: null
+  id: CA-1-1
+  owner_id: RESP-1
+  target_process_id: CP-1
+controlled_process_ids:
+- CP-1
+coordination_paths: []
+feedback_channels:
+- id: FB-1-1
+  owner_id: RESP-1
+  source_id: CP-1
+  updates_id: PM-1-1
+hazards:
+- id: H-1
+  related_loss_ids:
+  - L-1
+id_glossary:
+- id: CA-1-1
+  meaning: Validate request.
+- id: CP-1
+  meaning: Request process.
+- id: FB-1-1
+  meaning: Request feedback.
+- id: H-1
+  meaning: An unsafe request is accepted.
+- id: L-1
+  meaning: A protected operation is harmed.
+- id: PM-1-1
+  meaning: Request state.
+- id: RESP-1
+  meaning: Validate incoming requests.
+- id: RESP-1:CA-1-1:INCORRECT
+  meaning: Unsafe-control slot; its exact action, owner, target, and UCA type are
+    stated in the slots relationship table.
+- id: RESP-1:CA-1-1:NOT_PROVIDED
+  meaning: Unsafe-control slot; its exact action, owner, target, and UCA type are
+    stated in the slots relationship table.
+- id: RESP-1:CA-1-1:WRONG_DURATION
+  meaning: Unsafe-control slot; its exact action, owner, target, and UCA type are
+    stated in the slots relationship table.
+- id: RESP-1:CA-1-1:WRONG_TIMING
+  meaning: Unsafe-control slot; its exact action, owner, target, and UCA type are
+    stated in the slots relationship table.
+loss_ids:
+- L-1
+process_model_parts:
+- id: PM-1-1
+  owner_id: RESP-1
+referenced_records: []
+responsibilities:
+- assigned_constraint_ids: []
+  controlled_process_id: CP-1
+  id: RESP-1
+slots:
+- action_temporality: null
+  control_action_id: CA-1-1
+  coordination_path_id: null
+  id: RESP-1:CA-1-1:INCORRECT
+  owner_id: RESP-1
+  target_process_id: CP-1
+  uca_type: INCORRECT
+- action_temporality: null
+  control_action_id: CA-1-1
+  coordination_path_id: null
+  id: RESP-1:CA-1-1:NOT_PROVIDED
+  owner_id: RESP-1
+  target_process_id: CP-1
+  uca_type: NOT_PROVIDED
+- action_temporality: null
+  control_action_id: CA-1-1
+  coordination_path_id: null
+  id: RESP-1:CA-1-1:WRONG_DURATION
+  owner_id: RESP-1
+  target_process_id: CP-1
+  uca_type: WRONG_DURATION
+- action_temporality: null
+  control_action_id: CA-1-1
+  coordination_path_id: null
+  id: RESP-1:CA-1-1:WRONG_TIMING
+  owner_id: RESP-1
+  target_process_id: CP-1
+  uca_type: WRONG_TIMING
+target_id: null
+target_kind: all
+
+Return typed route dispositions with exact references and evidence.
