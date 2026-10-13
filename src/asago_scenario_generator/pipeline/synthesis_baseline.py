@@ -38,7 +38,6 @@ def _baseline_diagnostics(baseline: Any) -> list[str]:
         "stage_warnings",
         "heuristic_errors",
         "heuristic_warnings",
-        "solution_neutrality_warnings",
         "post_revision_warnings",
     )
     return [

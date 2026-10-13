@@ -1,6 +1,6 @@
-"""Tests for SP1 structural heuristics and solution-neutrality checks.
+"""Tests for SP1 structural heuristics.
 
-Covers SP1-HEUR-01 through SP1-HEUR-09 and SP1-NEUT-01 through SP1-NEUT-06.
+Covers SP1-HEUR-01 through SP1-HEUR-09.
 """
 
 from __future__ import annotations
@@ -24,9 +24,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     LossProvenance,
     SecurityConstraint,
-)
-from asago_scenario_generator.stpa.system_model.heuristics import (
-    check_solution_neutrality,
 )
 
 
@@ -198,91 +195,3 @@ class TestStructuralHeuristics:
         result = check_structural_heuristics(cs, la)
         assert result.passed
         assert len(result.errors) == 0
-
-
-class TestSolutionNeutrality:
-    """SP1-NEUT-01 through SP1-NEUT-06."""
-
-    @pytest.mark.parametrize(
-        "component_name",
-        ["LLM", "proxy", "orchestrator", "guardrail", "prompt", "API"],
-    )
-    def test_neut_01_component_in_responsibility_description(self, component_name):
-        """SP1-NEUT-01: component name in responsibility description produces warning."""
-        resp = _make_responsibility(
-            description=f"The {component_name} must validate requests"
-        )
-        cs = _make_control_structure(responsibilities=[resp])
-        warnings = check_solution_neutrality(cs)
-        assert any(component_name.lower() in w.lower() for w in warnings)
-
-    @pytest.mark.parametrize(
-        "component_name",
-        ["LLM", "proxy", "orchestrator", "guardrail", "prompt", "API"],
-    )
-    def test_neut_02_component_in_pm_description(self, component_name):
-        """SP1-NEUT-02: component name in PM description produces warning."""
-        resp = Responsibility(
-            resp_id="RESP-1",
-            description="Controller",
-            process_model_parts=[
-                ProcessModelPart(
-                    pm_id="PM-1-1",
-                    description=f"State of the {component_name}",
-                )
-            ],
-            control_actions=[ControlAction(ca_id="CA-1-1", description="Action")],
-            feedback_channels=[
-                FeedbackChannel(
-                    fb_id="FB-1-1",
-                    description="FB",
-                    updates="PM-1-1",
-                    source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
-                )
-            ],
-        )
-        cs = _make_control_structure(responsibilities=[resp])
-        warnings = check_solution_neutrality(cs)
-        assert any(component_name.lower() in w.lower() for w in warnings)
-
-    def test_neut_03_neutral_description_no_warning(self):
-        """SP1-NEUT-03: solution-neutral description produces no warning."""
-        resp = _make_responsibility(
-            description="The system must validate that user requests are within authorized scope"
-        )
-        cs = _make_control_structure(responsibilities=[resp])
-        warnings = check_solution_neutrality(cs)
-        assert len(warnings) == 0
-
-    def test_neut_04_case_insensitive(self):
-        """SP1-NEUT-04: check is case-insensitive."""
-        resp = _make_responsibility(description="The llm must validate requests")
-        cs = _make_control_structure(responsibilities=[resp])
-        warnings = check_solution_neutrality(cs)
-        assert len(warnings) > 0
-
-    def test_neut_05_scans_all_element_types(self):
-        """SP1-NEUT-05: check scans all element types (CA description)."""
-        resp = Responsibility(
-            resp_id="RESP-1",
-            description="Controller",
-            process_model_parts=[ProcessModelPart(pm_id="PM-1-1", description="State")],
-            control_actions=[
-                ControlAction(
-                    ca_id="CA-1-1",
-                    description="The orchestrator sends commands",
-                )
-            ],
-            feedback_channels=[
-                FeedbackChannel(
-                    fb_id="FB-1-1",
-                    description="FB",
-                    updates="PM-1-1",
-                    source=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
-                )
-            ],
-        )
-        cs = _make_control_structure(responsibilities=[resp])
-        warnings = check_solution_neutrality(cs)
-        assert any("CA-1-1" in w for w in warnings)
-        assert any("orchestrator" in w.lower() for w in warnings)

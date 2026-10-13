@@ -8,8 +8,6 @@ foundation property tests in ``test_property.py``:
   ``CriticFindings`` round-trip through YAML without loss.
 - **Parse-ability**: Any valid dict representation of the internal models
   is accepted by ``model_validate``.
-- **Solution-neutrality**: The keyword scan consistently flags
-  implementation-specific terms and never flags neutral descriptions.
 - **Taxonomy probe gating**: ``_build_taxonomy_probes`` always returns a
   subset of the known probe texts and respects the profile predicates.
 """
@@ -31,7 +29,6 @@ from asago_scenario_generator.models.capability_profile import (
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml, write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
-    ControlStructure,
     ElementRef,
     FeedbackChannel,
     ProcessModelPart,
@@ -47,10 +44,6 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     CriticGap,
     _build_taxonomy_probes,
-)
-from asago_scenario_generator.stpa.system_model.heuristics import (
-    check_solution_neutrality,
-    _SOLUTION_NEUTRALITY_KEYWORDS,
 )
 from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra.llm_helpers import (
@@ -246,94 +239,6 @@ class TestEmptyModelInvariants:
             ],
         )
         assert len(rs.responsibilities) == 1
-
-
-# ---------------------------------------------------------------------------
-# Solution-neutrality property tests
-# ---------------------------------------------------------------------------
-
-
-class TestSolutionNeutrality:
-    """The keyword scan consistently flags implementation-specific terms
-    and never flags neutral descriptions."""
-
-    @given(
-        keyword=st.sampled_from(list(_SOLUTION_NEUTRALITY_KEYWORDS)),
-    )
-    @settings(max_examples=20, deadline=None)
-    def test_keyword_always_flagged(self, keyword):
-        """Every known keyword in a description always produces a warning."""
-        cs = ControlStructure(
-            responsibilities=[
-                Responsibility(
-                    resp_id="RESP-1",
-                    description=f"Monitor the {keyword} for safety",
-                    process_model_parts=[
-                        ProcessModelPart(pm_id="PM-1-1", description="State"),
-                    ],
-                    control_actions=[
-                        ControlAction(ca_id="CA-1-1", description="Act"),
-                    ],
-                    feedback_channels=[
-                        FeedbackChannel(
-                            fb_id="FB-1-1",
-                            description="FB",
-                            updates="PM-1-1",
-                            source=ElementRef(
-                                type=ReferenceType.responsibility, id="RESP-1"
-                            ),
-                        ),
-                    ],
-                ),
-            ],
-        )
-        warnings = check_solution_neutrality(cs)
-        assert len(warnings) >= 1
-        assert any(keyword.lower() in w.lower() for w in warnings)
-
-    @given(
-        neutral_desc=st.text(
-            alphabet=st.characters(
-                whitelist_categories=("Ll", "Lu", "Nd"),
-                whitelist_characters=(" ", "-", "_"),
-            ),
-            min_size=5,
-            max_size=30,
-        )
-    )
-    @settings(max_examples=30, deadline=None)
-    def test_neutral_description_no_warning(self, neutral_desc):
-        """A description without any keyword never produces a warning."""
-        # Ensure none of the keywords appear (case-insensitive).
-        desc_lower = neutral_desc.lower()
-        if any(kw.lower() in desc_lower for kw in _SOLUTION_NEUTRALITY_KEYWORDS):
-            return  # skip — random text may contain a keyword substring
-        cs = ControlStructure(
-            responsibilities=[
-                Responsibility(
-                    resp_id="RESP-1",
-                    description=neutral_desc,
-                    process_model_parts=[
-                        ProcessModelPart(pm_id="PM-1-1", description="State"),
-                    ],
-                    control_actions=[
-                        ControlAction(ca_id="CA-1-1", description="Act"),
-                    ],
-                    feedback_channels=[
-                        FeedbackChannel(
-                            fb_id="FB-1-1",
-                            description="FB",
-                            updates="PM-1-1",
-                            source=ElementRef(
-                                type=ReferenceType.responsibility, id="RESP-1"
-                            ),
-                        ),
-                    ],
-                ),
-            ],
-        )
-        warnings = check_solution_neutrality(cs)
-        assert warnings == []
 
 
 # ---------------------------------------------------------------------------

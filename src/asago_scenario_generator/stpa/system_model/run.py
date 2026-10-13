@@ -54,7 +54,6 @@ from asago_scenario_generator.stpa.system_model.critic import (
     strip_empty_responsibilities,
 )
 from asago_scenario_generator.stpa.system_model.heuristics import (
-    check_solution_neutrality,
     uncited_security_constraints,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
@@ -125,7 +124,6 @@ class SP1RunResult:
     critic_findings: CriticFindings | None = None
     heuristic_errors: list[str] = field(default_factory=list)
     heuristic_warnings: list[str] = field(default_factory=list)
-    solution_neutrality_warnings: list[str] = field(default_factory=list)
     post_revision_warnings: list[str] = field(default_factory=list)
     revised: bool = False
     stage_errors: list[str] = field(default_factory=list)
@@ -351,7 +349,6 @@ def run_sp1(
         critic_findings=stage2_result.critic_findings,
         heuristic_errors=stage2_result.heuristic_errors,
         heuristic_warnings=stage2_result.heuristic_warnings,
-        solution_neutrality_warnings=stage2_result.solution_neutrality_warnings,
         post_revision_warnings=stage2_result.post_revision_warnings,
         revised=stage2_result.revised,
         stage_errors=stage_errors,
@@ -469,7 +466,6 @@ class _Stage2Result:
     critic_findings: CriticFindings | None = None
     heuristic_errors: list[str] = field(default_factory=list)
     heuristic_warnings: list[str] = field(default_factory=list)
-    solution_neutrality_warnings: list[str] = field(default_factory=list)
     post_revision_warnings: list[str] = field(default_factory=list)
     revised: bool = False
     model_call_count: int = 0
@@ -893,7 +889,6 @@ def _run_stage_2_steps(
 
     # Structural heuristics (always run after Call 3)
     heuristic_result = check_structural_heuristics(control_structure, loss_analysis)
-    solution_neutrality_warnings = check_solution_neutrality(control_structure)
 
     # Completeness critic (graceful — returns empty findings on failure)
     critic_findings = run_completeness_critic(
@@ -956,7 +951,6 @@ def _run_stage_2_steps(
         critic_findings=critic_findings,
         heuristic_errors=list(heuristic_result.errors),
         heuristic_warnings=list(heuristic_result.warnings),
-        solution_neutrality_warnings=solution_neutrality_warnings,
         post_revision_warnings=post_revision_warnings,
         revised=revised,
     )
