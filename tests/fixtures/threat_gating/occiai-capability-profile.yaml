@@ -1,0 +1,103 @@
+zones_active:
+- input
+- reasoning
+- tool_execution
+entry_points:
+- name: Patient Chat Interface
+  entry_point_type: other
+  direction: bidirectional
+  controllability: direct
+  entry_point_id: ep:v1:1192214f055ae86b6139eff589f3151d
+- name: Approved Education Material (Knowledge Base)
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:6fbfd83c45d1543209990627a45069ca
+- name: EHR Drafts and Ledgers
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:4e218b62e43a0695687509e372e9d76f
+confidence: high
+kc_subcodes:
+- KC1.1
+- KC2.1
+- KC4.1
+- KC5.3
+- KC6.1.1
+- KC6.3.2
+- KC6.3.3
+- KCX-AUDIT
+- KCX-HITL
+- KCX-PSTATE
+tool_inventory:
+- name: get_referral
+  description: Read the authenticated patient's referral details including specialty,
+    reason, and status.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:ffdd9ab95a728b4a72270a8461664688
+- name: get_education
+  description: Read approved education material specific to the patient's referral
+    specialty.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:522a06c5f9678737f5a3b545d886f486
+- name: ask_clinical_question
+  description: Answer questions based on approved education scripts.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:0a3b8388132955c5f0418a5e83fb7518
+- name: submit_questionnaire
+  description: Store a structured questionnaire containing symptoms, medications,
+    allergies, and accessibility needs.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:fb8d23a57eba127489969da9101b0993
+- name: summarize_for_ehr
+  description: Store a conversation summary as an Electronic Health Record (EHR) draft
+    with AWAITING_REVIEW status.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:69bbec260fbbed298edaf329f2daf2bc
+- name: commit_to_ehr
+  description: Create an Electronic Health Record (EHR) record from a previously REVIEWED
+    draft.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:7d682295fa20620053fa6bcca28ded91
+- name: generate_education_video
+  description: Generate a video based on approved education material in the patient's
+    specialty.
+  supported_operations:
+  - execute_code
+  tool_id: tool:v1:94895dbccf6c569aae8c3e85f0a0444f
+- name: escalate_to_clinician
+  description: Open an escalation case for human clinical follow-up.
+  supported_operations:
+  - transmit_data
+  tool_id: tool:v1:1253ea2fae8ab0c19f65dc6f6c668536
+- name: get_occiai_state_summary
+  description: Read-only ledger view of drafts, records, commit attempts, questionnaires,
+    escalations, and the audit log.
+  supported_operations:
+  - retrieve_data
+  tool_id: tool:v1:2bbb379e95d09389176a6befd82c9e06
+entry_point_completeness: inferred_partial
+entry_point_evidence: []
+tool_inventory_completeness: inferred_partial
+tool_inventory_evidence: []
+has_persistent_memory: false
+multi_agent: false
+hitl: true
+kc_subcodes_display:
+  KC1.1: Large Language Model (LLM)
+  KC2.1: Predefined workflows
+  KC4.1: In-agent, session-only memory
+  KC5.3: Managed API
+  KC6.1.1: Limited API access
+  KC6.3.2: Database full CRUD
+  KC6.3.3: RAG context data sources
+  KCX-AUDIT: System has exploitable audit or logging architecture
+  KCX-HITL: System has human-in-the-loop review or approval controls
+  KCX-PSTATE: System has persistent state enabling self-model or self-preservation
