@@ -32,7 +32,11 @@ non-timeout connection error (`provider-calls.jsonl` records both attempts).
 Set
 `repetition_penalty` (a number greater than 0) in a profile to send it in
 `extra_body` next to `top_k` and the thinking control; a profile that omits it
-sends nothing. Set
+sends nothing. The `model-profile` contract in `data/contracts/model-profile/`
+fixes each profile field's rule and the request each profile produces; a test
+runs its cases against this client. The contract's field table is the single
+field list: adding a model means adding a profile, and adding a field means
+changing the contract first and then each reader. Set
 `sampling_controls: false` to omit temperature, top-p, top-k, repetition
 penalty, seed, and chat-template thinking controls. The client accepts `strict_json_schema` only
 as `false` (or absent); `true` fails at client construction, and run records

@@ -70,50 +70,6 @@ class TestLoadProfile:
         assert result["max_completion_tokens"] == 16384
         assert result["temperature"] == 0.4
 
-    def test_mp02_load_profile_with_top_p_and_top_k(self, tmp_path):
-        """MP-02: loading a profile with optional top_p and top_k."""
-        profiles = _write_profile(
-            tmp_path / "tuned.yaml",
-            "tuned",
-            base_url="https://local.example.com/v1",
-            model="local-lm",
-            **{_KEY: "unused"},
-            top_p=0.9,
-            top_k=40,
-        )
-        result = load_profile(profiles, "tuned")
-        assert result["top_p"] == 0.9
-        assert result["top_k"] == 40
-
-    def test_load_profile_preserves_explicit_thinking_switch(self, tmp_path):
-        profiles = _write_profile(
-            tmp_path / "qwen.yaml",
-            "qwen",
-            base_url="https://local.example.com/v1",
-            model="qwen",
-            **{_KEY: "unused"},
-            enable_thinking=False,
-        )
-
-        result = load_profile(profiles, "qwen")
-
-        assert result["enable_thinking"] is False
-
-    def test_mp03_load_profile_with_custom_headers(self, tmp_path):
-        """MP-03: loading a profile with custom headers."""
-        profiles = _write_profile(
-            tmp_path / "headers.yaml",
-            "with-hdr",
-            base_url="https://custom.example.com/v1",
-            model="custom-1",
-            **{_KEY: "dummy"},
-            headers={"X-Custom": "value", "X-Region": "eu"},
-        )
-        result = load_profile(profiles, "with-hdr")
-        assert "headers" in result
-        assert result["headers"]["X-Custom"] == "value"
-        assert result["headers"]["X-Region"] == "eu"
-
     def test_mp04_profile_without_optional_fields_uses_defaults(self, tmp_path):
         """MP-04: loading a profile without optional fields omits them."""
         profiles = _make_default_profiles(tmp_path)
@@ -138,24 +94,6 @@ class TestLoadProfile:
         missing = tmp_path / "nonexistent.yaml"
         with pytest.raises(FileNotFoundError, match=str(missing)):
             load_profile(missing, "any")
-
-    def test_mp07_unknown_profile_name_raises_keyerror(self, tmp_path):
-        """MP-07: unknown profile name raises KeyError with name."""
-        profiles = _make_default_profiles(tmp_path)
-        with pytest.raises(KeyError, match="nonexistent"):
-            load_profile(profiles, "nonexistent")
-
-    def test_mp08_profile_missing_required_field_raises_valueerror(self, tmp_path):
-        """MP-08: profile missing a required field raises ValueError."""
-        profiles = _write_profile(
-            tmp_path / "bad.yaml",
-            "missing-url",
-            base_url="",
-            model="some-model",
-            **{_KEY: "dummy"},
-        )
-        with pytest.raises(ValueError, match="base_url"):
-            load_profile(profiles, "missing-url")
 
     def test_profile_name_in_non_mapping_yaml_raises_keyerror(self, tmp_path):
         """A profile name in a YAML sequence is still an invalid top-level profile."""
@@ -184,17 +122,6 @@ class TestLoadProfile:
         assert secret_value not in message
         assert "0.9" not in message
         assert "local.example.com" not in message
-
-    def test_unknown_profile_key_with_null_value_still_fails(self, tmp_path):
-        """A null value does not hide an unknown key."""
-        profiles = tmp_path / "null.yaml"
-        profiles.write_text(
-            "p:\n  base_url: https://x.example/v1\n  model: m\n"
-            f"  {_KEY}: k\n  stray:\n",
-            encoding="utf-8",
-        )
-        with pytest.raises(ValueError, match="stray"):
-            load_profile(profiles, "p")
 
     def test_unknown_key_in_another_profile_does_not_fail_the_named_one(self, tmp_path):
         """Only the requested profile is checked."""

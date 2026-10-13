@@ -53,6 +53,7 @@ LOCKS = {
     },
     "tool-call-condition": {"version": "tool-call-condition-v1"},
     "policy-coverage": {"schema_version": "policy-coverage-v1"},
+    "model-profile": {"version": "model-profile-v1"},
 }
 
 

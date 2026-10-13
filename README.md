@@ -174,8 +174,15 @@ variables:
 
 For named model profiles, copy
 `config/model-profiles.example.yaml` to `config/model-profiles.yaml`. The real
-file is ignored because it may contain credentials. `generate` accepts named
-profiles. STPA sampling values use the same
+file is ignored because it may contain credentials. The example file also holds
+`glm53-enmaas-65k-low-rp`, the GLM profile with low reasoning effort and a
+repetition penalty of 1.05. `data/contracts/model-profile/` lists every profile
+field with its validity rule and the load and request cases, and it is the
+single field list; the consumer and orch mirror it and run the same cases. To
+add a model, add a profile. To add a field, change the contract first, then
+each reader. A profile with an unknown or invalid
+field fails to load and the error names the field, not its value. `generate`
+accepts named profiles. STPA sampling values use the same
 precedence: an explicit Python argument, then the selected profile or
 environment value, then the client default; `generate` has no sampling override.
 Invalid numeric or
