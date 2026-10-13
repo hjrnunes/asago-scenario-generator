@@ -1384,9 +1384,7 @@ def _compact_routing_slots(
     return [
         {
             "id": glossary.remember(
-                item.id,
-                "Unsafe-control slot; its exact action, owner, target, and UCA "
-                "type are stated in the slots relationship table.",
+                item.id, render_prose(_ROUTING_PROSE, "slot_glossary")
             ),
             "uca_type": item.uca_type.value,
             "action_temporality": _temporality_value(item),

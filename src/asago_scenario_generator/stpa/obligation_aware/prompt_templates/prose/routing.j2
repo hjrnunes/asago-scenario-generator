@@ -1,6 +1,8 @@
 {#- Instruction prose of the structural-routing view, one section per field. Each section is one unwrapped line, so the rendered field has no line break. -#}
 {%- if section == "instructions" -%}
 Every selectable ID below has a description and relationship. The obligation_handle is opaque and must be copied unchanged. A targeted route must prove owner, action, controlled process, slot, hazard, loss, and governing constraint relationships. Use the exact typed hazard-constraint pair ledger in the rendered prompt; do not infer a relationship from descriptions.
+{%- elif section == "slot_glossary" -%}
+Unsafe-control slot; its exact action, owner, target, and UCA type are stated in the slots relationship table.
 {%- elif section == "ledger_header" -%}
 AUTHORITATIVE HAZARD-CONSTRAINT PAIR LEDGER (typed IDs only):
 {%- elif section == "ledger_rule" -%}
