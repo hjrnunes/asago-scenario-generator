@@ -80,6 +80,7 @@ _TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
 _QUESTION_PROSE = "prose/obligation_question.j2"
 _ROUTING_PROSE = "prose/routing.j2"
 _REVISION_PROSE = "prose/revision.j2"
+_SLOT_PROSE = "prose/slot.j2"
 
 # The repository preflight rejects a view field with an entry of the first list
 # as one of its snake_case words (a plural ``s`` included) and a field equal to
@@ -841,9 +842,11 @@ def _project_slot_context(
         views.append(
             ProviderSlot(
                 id=slot.slot_id,
-                description=(
-                    f"{slot.uca_type.value} slot for {action.description}; "
-                    "copy this slot handle unchanged in the response."
+                description=render_prose(
+                    _SLOT_PROSE,
+                    "slot_description",
+                    uca_type=slot.uca_type.value,
+                    action=action.description,
                 ),
                 uca_type=slot.uca_type,
                 action_temporality=slot.action_temporality,
@@ -1187,10 +1190,7 @@ def _route_payload(route: ObligationRoute) -> ProviderRoutedRoute:
         slot_ids=tuple(route.slot_ids),
         hazard_ids=tuple(route.hazard_ids),
         constraint_ids=tuple(route.constraint_ids),
-        instruction=(
-            "Copy route_handle and obligation_handle unchanged. These references "
-            "are evidence to consider; they do not force an ICA finding."
-        ),
+        instruction=render_prose(_SLOT_PROSE, "route_instruction"),
     )
 
 
@@ -1612,12 +1612,13 @@ def render_synthesis_slot_prompts(
     """Render the ICA target prompt from an already projected target view."""
     target_index, questions, routes = projection
     slot_ids = {slot.slot_id for slot in slots}
+    copy_instruction = render_prose(_SLOT_PROSE, "copy_handles")
     required_pairs = [
         {
             "route_handle": route.route_handle,
             "obligation_handle": route.obligation_handle,
             "slot_id": slot_id,
-            "copy_instruction": "copy each opaque handle unchanged",
+            "copy_instruction": copy_instruction,
         }
         for route in routes
         for slot_id in sorted(set(route.slot_ids).intersection(slot_ids))
