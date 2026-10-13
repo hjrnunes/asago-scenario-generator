@@ -10,7 +10,7 @@ from asago_scenario_generator.cli.synthesis import (
     _DEFAULT_LLM_PATTERN_TABLE,
     build_taxonomy_inputs,
 )
-from asago_scenario_generator.data.threat_gating import determine_threat_scope
+from asago_scenario_generator.data.threat_gating import in_scope_attack_pattern_ids
 from asago_scenario_generator.pipeline.obligation_contracts import (
     compute_mapping_bundle_digest,
 )
@@ -84,11 +84,7 @@ def test_only_reviewed_owasp_llm_rows_with_a_pattern_path_are_kept(tmp_path) -> 
 def test_llm_pattern_edges_close_over_risk_llm_pattern_paths(tmp_path) -> None:
     value, profile = _build(tmp_path)
     edges = value.cross_taxonomy_mappings
-    in_scope = {
-        pattern
-        for entry in determine_threat_scope(profile).in_scope
-        for pattern in entry.attack_pattern_ids
-    }
+    in_scope = set(in_scope_attack_pattern_ids(profile))
 
     assert edges
     assert {edge.source_id for edge in edges} == {"LLM01", "LLM02"}

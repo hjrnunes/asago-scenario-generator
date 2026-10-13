@@ -17,17 +17,13 @@ from __future__ import annotations
 import pytest
 from pydantic import ValidationError
 
-from asago_scenario_generator.data.threat_gating import (
-    _evaluate_prerequisite_capabilities,
-    _filter_attack_patterns,
-)
+from asago_scenario_generator.data.threat_gating import _kc_requires_met
 from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     KC_SUBCODE_NAMES,
     KCX_PREFIX,
     KCX_SUBCODES,
     Stage1Profile,
-    ToolInventoryEntry,
     VALID_KC_SUBCODES,
 )
 from tests.helpers.kc_subcodes import _base_stage1_data
@@ -49,27 +45,6 @@ def _base_profile_data(**overrides) -> dict:
     }
     data.update(overrides)
     return data
-
-
-def _make_profile(
-    *,
-    kc_subcodes: list[str] | None = None,
-) -> CapabilityProfile:
-    """Build a CapabilityProfile with sensible defaults for testing."""
-    if kc_subcodes is None:
-        kc_subcodes = ["KC1.1", "KC6.1.1"]
-    kw = {}
-    if any(c.startswith("KC5.") or c.startswith("KC6.") for c in kc_subcodes):
-        kw["tool_inventory"] = [
-            ToolInventoryEntry(name="test_tool", description="A test tool")
-        ]
-    return CapabilityProfile(
-        zones_active=["input", "reasoning"],
-        entry_points=["user input (zone 1)"],
-        confidence="medium",
-        kc_subcodes=kc_subcodes,
-        **kw,
-    )
 
 
 # Synthetic T3 attack patterns matching real YAML structure
@@ -198,8 +173,7 @@ class TestKCXGatingFiltering:
         ],
     )
     def test_t3_pattern_gating(self, pattern, codes, survives):
-        result = _filter_attack_patterns([pattern], _make_profile(kc_subcodes=codes))
-        assert (pattern["id"] in result) is survives
+        assert _kc_requires_met(pattern, set(codes)) is survives
 
 
 # ---------------------------------------------------------------------------
@@ -225,9 +199,8 @@ class TestKCXPrerequisiteEvaluation:
         ids=["any_passes", "any_fails", "all_passes", "all_fails"],
     )
     def test_kc_requires_with_kcx_codes(self, codes, kc_requires, expected):
-        profile = _make_profile(kc_subcodes=codes)
-        prereqs = {"kc_requires": kc_requires}
-        assert _evaluate_prerequisite_capabilities(prereqs, profile) is expected
+        pattern = {"prerequisite_capabilities": {"kc_requires": kc_requires}}
+        assert _kc_requires_met(pattern, set(codes)) is expected
 
 
 # ---------------------------------------------------------------------------

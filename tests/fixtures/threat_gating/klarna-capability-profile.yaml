@@ -1,0 +1,55 @@
+zones_active:
+- input
+- reasoning
+- tool_execution
+entry_points:
+- name: Natural Language Customer Queries
+  entry_point_type: other
+  direction: input
+  controllability: direct
+  entry_point_id: ep:v1:6b6efc389eadfd59390cb1ffe6115bb2
+- name: Authenticated User Context (Purchase History, Payment Status, etc.)
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:931a9d8175847906989af42c81666945
+- name: Retrieval-Augmented Generation (RAG) Knowledge Base
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:2d73051ffb5cbef206048e6e9071d8cb
+- name: Klarna Backend API Responses
+  entry_point_type: other
+  direction: input
+  controllability: indirect
+  entry_point_id: ep:v1:395ac227aee8fd9201cc15188ff33c33
+confidence: high
+kc_subcodes:
+- KC1.1
+- KC5.3
+- KC6.1.2
+- KC6.3.2
+- KC6.3.3
+- KCX-HITL
+tool_inventory:
+- name: Klarna Backend Systems API
+  description: Direct API integrations to Klarna's backend services for account, transaction,
+    and payment management.
+  supported_operations:
+  - retrieve_data
+  - transmit_data
+  tool_id: tool:v1:24122383f5464aaea7ea1a885a3858c1
+entry_point_completeness: inferred_partial
+entry_point_evidence: []
+tool_inventory_completeness: inferred_partial
+tool_inventory_evidence: []
+has_persistent_memory: false
+multi_agent: false
+hitl: true
+kc_subcodes_display:
+  KC1.1: Large Language Model (LLM)
+  KC5.3: Managed API
+  KC6.1.2: Extensive API access
+  KC6.3.2: Database full CRUD
+  KC6.3.3: RAG context data sources
+  KCX-HITL: System has human-in-the-loop review or approval controls

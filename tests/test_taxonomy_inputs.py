@@ -8,7 +8,7 @@ import pytest
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.sssom import SSSOMMapping
-from asago_scenario_generator.data.threat_gating import determine_threat_scope
+from asago_scenario_generator.data.threat_gating import in_scope_attack_pattern_ids
 from asago_scenario_generator.pipeline.taxonomy_inputs import (
     OBLIGATION_EDGES_RELEASE,
     bundled_attack_pattern_catalog,
@@ -77,11 +77,7 @@ def test_llm_pattern_edges_cover_in_scope_patterns_only() -> None:
     profile = make_inputs().capability_snapshot.profile.model_copy(
         update={"kc_subcodes": [f"KC6.{index}" for index in range(1, 8)]}
     )
-    in_scope = {
-        pattern
-        for entry in determine_threat_scope(profile).in_scope
-        for pattern in entry.attack_pattern_ids
-    }
+    in_scope = set(in_scope_attack_pattern_ids(profile))
     out_of_scope = sorted(set(load_attack_patterns()) - in_scope)[0]
     inside = sorted(in_scope)[0]
 
