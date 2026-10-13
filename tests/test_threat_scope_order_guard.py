@@ -12,7 +12,7 @@ from pathlib import Path
 import pytest
 import yaml
 
-from asago_scenario_generator.data.threat_gating import determine_threat_scope
+from asago_scenario_generator.data.threat_gating import in_scope_attack_pattern_ids
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 
 FIXTURES = Path(__file__).parent / "fixtures" / "threat_gating"
@@ -54,11 +54,7 @@ EXPECTED = {
 
 
 def _in_scope_pattern_ids(profile: CapabilityProfile) -> list[str]:
-    return [
-        pattern_id
-        for entry in determine_threat_scope(profile).in_scope
-        for pattern_id in entry.attack_pattern_ids
-    ]
+    return in_scope_attack_pattern_ids(profile)
 
 
 @pytest.mark.parametrize("target", sorted(EXPECTED))

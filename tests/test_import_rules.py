@@ -446,12 +446,6 @@ RULES: list[Rule] = [
     ),
     # threat scope
     Rule(
-        "threat-scope-contract-stays-in-the-model-layer",
-        f"{PUBLIC_MODELS}.threat_scope",
-        "the contract imports only models and pydantic, never data or pipeline",
-        allowed=(PUBLIC_MODELS, "pydantic", "typing"),
-    ),
-    Rule(
         "data-below-pipeline",
         DATA,
         "the taxonomy and gating layer never imports pipeline modules",

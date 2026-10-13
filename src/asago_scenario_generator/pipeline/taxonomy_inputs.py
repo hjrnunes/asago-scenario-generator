@@ -104,15 +104,11 @@ def reviewed_owasp_llm_rows(
 
 def llm_pattern_edges(llm_pattern_table: Any, capability_profile: Any) -> list[dict]:
     """Return the LLM-to-attack-pattern edges of the in-scope patterns."""
-    from asago_scenario_generator.data.threat_gating import determine_threat_scope
+    from asago_scenario_generator.data.threat_gating import in_scope_attack_pattern_ids
 
     if not isinstance(llm_pattern_table, dict):
         raise ValueError("LLM-to-attack-pattern table must contain an object")
-    in_scope = {
-        pattern_id
-        for entry in determine_threat_scope(capability_profile).in_scope
-        for pattern_id in entry.attack_pattern_ids
-    }
+    in_scope = set(in_scope_attack_pattern_ids(capability_profile))
     relation = llm_pattern_table["predicate"]
     return [
         {

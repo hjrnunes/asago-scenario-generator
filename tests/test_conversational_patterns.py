@@ -14,7 +14,7 @@ import yaml
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
-from asago_scenario_generator.data.threat_gating import determine_threat_scope
+from asago_scenario_generator.data.threat_gating import in_scope_attack_pattern_ids
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
 from asago_scenario_generator.models.attack_pattern_digests import (
     compute_chain_semantic_digest,
@@ -117,13 +117,7 @@ class TestCatalogRecords:
 
 class TestGating:
     def test_a_bare_language_model_keeps_all_four_patterns(self):
-        scope = determine_threat_scope(_bare_language_model_profile())
-
-        kept = {
-            pattern_id
-            for entry in scope.in_scope
-            for pattern_id in entry.attack_pattern_ids
-        }
+        kept = set(in_scope_attack_pattern_ids(_bare_language_model_profile()))
         assert set(EXPECTED) <= kept
 
 
