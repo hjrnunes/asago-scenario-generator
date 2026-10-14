@@ -1,0 +1,12 @@
+template: stage1a_reference_repair_user.j2
+cases:
+  reference-repair:
+    required:
+      - writing each ID exactly as this message shows it.
+    forbidden:
+      - canonical IDs
+  reference-repair-dispositions:
+    required:
+      - writing each ID exactly as this message shows it.
+    forbidden:
+      - canonical IDs

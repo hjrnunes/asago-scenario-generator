@@ -384,6 +384,20 @@ CASES: dict[str, Callable[[str], str]] = {
         use_case_text="Test use case", selected_constraints=[]
     ),
     "no-probes": _system_model(taxonomy_probes=[]),
+    "reference-repair": _system_model(
+        use_case_text="Test use case",
+        selected_lists=[],
+        feedback="",
+        unknown_ids=True,
+        disposition_lists=False,
+    ),
+    "reference-repair-dispositions": _system_model(
+        use_case_text="Test use case",
+        selected_lists=[],
+        feedback="",
+        unknown_ids=True,
+        disposition_lists=True,
+    ),
     "empty-structure": _system_model(**EMPTY_STRUCTURE),
     "unknown-references": _system_model(**UNKNOWN_REFERENCES),
     "undeclared-controlled-processes": _system_model(**UNDECLARED_CONTROLLED_PROCESSES),

@@ -19,7 +19,7 @@ from pydantic import ValidationError
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
-    _prepare_current_provider_repair_input,
+    _handle_repair_input,
     _Stage1aGapProviderDraft,
     _Stage1aGapRepairDraft,
     _Stage1aRiskProviderDraft,
@@ -255,7 +255,7 @@ def _handle_wire() -> dict[str, Any]:
 
 
 def _adapt(wire: dict[str, Any], response_format: type) -> Any:
-    return _prepare_current_provider_repair_input(
+    return _handle_repair_input(
         LLMResult(content=wire, prompt_tokens=1, completion_tokens=1, duration_ms=1),
         response_format=response_format,
         prior=None,
@@ -288,7 +288,5 @@ def test_distinct_local_handles_map_to_distinct_canonical_ids() -> None:
     adapted = _adapt(wire, _Stage1aRiskProviderDraft)
 
     assert adapted is not None
-    translated, repair_model = adapted
-    ids = [row["hazard_id"] for row in translated.content["hazards"]]
-    assert len(set(ids)) == 2
-    repair_model.model_validate(translated.content)
+    assert len(set(adapted.ids.hazards.values())) == 2
+    adapted.response_format.model_validate(adapted.result.content)

@@ -1,0 +1,1155 @@
+{
+ "analysis": {
+  "hazards": [
+   {
+    "description": "The neutralized system reaches unsafe state 1.",
+    "hazard_id": "H-1",
+    "related_losses": [
+     "L-1"
+    ]
+   },
+   {
+    "description": "The neutralized system reaches unsafe state 2.",
+    "hazard_id": "H-2",
+    "related_losses": [
+     "L-2"
+    ]
+   },
+   {
+    "description": "The neutralized system reaches unsafe state 3.",
+    "hazard_id": "H-3",
+    "related_losses": [
+     "L-3"
+    ]
+   },
+   {
+    "description": "The neutralized system reaches unsafe state 4.",
+    "hazard_id": "H-4",
+    "related_losses": [
+     "L-4"
+    ]
+   },
+   {
+    "description": "The neutralized system reaches unsafe state 5.",
+    "hazard_id": "H-5",
+    "related_losses": [
+     "L-5"
+    ]
+   },
+   {
+    "description": "The neutralized system reaches unsafe state 6.",
+    "hazard_id": "H-6",
+    "related_losses": [
+     "L-6"
+    ]
+   },
+   {
+    "description": "The neutralized system reaches unsafe state 7.",
+    "hazard_id": "H-7",
+    "related_losses": [
+     "L-7"
+    ]
+   }
+  ],
+  "risk_card_losses": [
+   {
+    "description": "Neutralized stakeholder loss 1.",
+    "loss_id": "L-1",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "atlas-exposing-personal-information",
+     "credo-risk-026",
+     "mit-ai-risk-subdomain-7.4"
+    ]
+   },
+   {
+    "description": "Neutralized stakeholder loss 2.",
+    "loss_id": "L-2",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "credo-risk-010",
+     "credo-risk-036",
+     "mit-ai-risk-subdomain-2.1"
+    ]
+   },
+   {
+    "description": "Neutralized stakeholder loss 3.",
+    "loss_id": "L-3",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)",
+     "atlas-personal-information-in-data",
+     "credo-risk-004"
+    ]
+   },
+   {
+    "description": "Neutralized stakeholder loss 4.",
+    "loss_id": "L-4",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "ai-risk-taxonomy-unauthorized-disclosure---health-data",
+     "ai-risk-taxonomy-unauthorized-inference/synthesis---pii-(personal-identifiable-information)",
+     "credo-risk-037"
+    ]
+   },
+   {
+    "description": "Neutralized stakeholder loss 5.",
+    "loss_id": "L-5",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "ai-risk-taxonomy-unauthorized-disclosure---financial-records",
+     "ai-risk-taxonomy-unauthorized-inference/synthesis---biometric-data-(facial-recognition)",
+     "credo-risk-041"
+    ]
+   },
+   {
+    "description": "Neutralized stakeholder loss 6.",
+    "loss_id": "L-6",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "ai-risk-taxonomy-unauthorized-inference/synthesis---financial-records",
+     "credo-risk-008",
+     "mit-ai-risk-subdomain-6.6"
+    ]
+   },
+   {
+    "description": "Neutralized stakeholder loss 7.",
+    "loss_id": "L-7",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "atlas-impact-on-the-environment",
+     "credo-risk-021",
+     "mit-ai-risk-subdomain-2.2"
+    ]
+   }
+  ],
+  "risk_dispositions": [
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-7.4"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-036"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-004"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-037"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-041"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-6.6"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-impact-on-the-environment"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-026"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-010"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---financial-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-008"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-2.2"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-exposing-personal-information"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-2.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-personal-information-in-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-inference/synthesis---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-inference/synthesis---biometric-data-(facial-recognition)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-inference/synthesis---financial-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-021"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-040"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-007"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-collection/gathering/stealing---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-collection/gathering/stealing---financial-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-collection/gathering/stealing---biometric-data-(facial-recognition)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-collection/gathering/stealing---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-revealing-confidential-information"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---biometric-data-(facial-recognition)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-023"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-046"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---financial-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---biometric-data-(facial-recognition)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-011"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-1.3"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-non-consensual-tracking/monitoring/stalking/spyware---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-non-consensual-tracking/monitoring/stalking/spyware---biometric-data-(facial-recognition)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-non-consensual-tracking/monitoring/stalking/spyware---financial-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-hallucination"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-038"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-6.5"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-generation---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-generation---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-generation---financial-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-legal-accountability"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-data-privacy-rights"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-017"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-1.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-distribution---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-distribution---financial-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-data-usage"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-spreading-disinformation"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-034"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-attribute-inference-attack"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-decision-bias"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-009"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-discrimination-in-employment,-benefits,-or-services---geographic-region"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-discrimination-in-employment,-benefits,-or-services---social-behaviors"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-025"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-output-bias"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-plagiarism"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-data-acquisition"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-027"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-016"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-013"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-031"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-4.3"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-prompt-injection"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-plagiarism"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-personal-information-in-prompt"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-4.2"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-nonconsensual-use"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-048"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-4.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-014"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-035"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-non-consensual-tracking/monitoring/stalking/spyware---health-data"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-non-consensual-tracking/monitoring/stalking/spyware---communication-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-data-bias"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-promoting-academic-dishonesty"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-039"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-024"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-5.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-membership-inference-attack"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-029"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-028"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-005"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-data-transfer"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-jailbreaking"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-evasion-attack"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-model-usage-rights"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-data-transparency"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-over-or-under-reliance"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-harmful-output"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-harmful-code-generation"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-dangerous-use"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-non-disclosure"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-unexplainable-output"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-7.3"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-7.2"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-prompt-priming"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-social-hacking-attack"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "Neutralized reason: the card does not ground here.",
+    "risk_ref": "atlas-confidential-data-in-prompt"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "Neutralized reason: the card does not ground here.",
+    "risk_ref": "atlas-confidential-information-in-data"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "Neutralized reason: the card does not ground here.",
+    "risk_ref": "atlas-ip-information-in-prompt"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "Neutralized reason: the card does not ground here.",
+    "risk_ref": "atlas-data-usage-rights"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "Neutralized reason: the card does not ground here.",
+    "risk_ref": "atlas-copyright-infringement"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "Neutralized reason: the card does not ground here.",
+    "risk_ref": "atlas-incomplete-usage-definition"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "Neutralized reason: the card does not ground here.",
+    "risk_ref": "ai-risk-taxonomy-characterization-of-identity---social-behaviors"
+   }
+  ],
+  "security_constraints": [
+   {
+    "applies_when": [
+     "a neutralized condition holds"
+    ],
+    "constraint_id": "SC-1",
+    "description": "The system must ensure that no sensitive health data is included in model outputs. Applies when: a neutralized condition holds.",
+    "obligations": [
+     {
+      "behavior": "including sensitive health data in a reply",
+      "completion": null,
+      "kind": "forbidden",
+      "note": null,
+      "obligation_id": "O1",
+      "observation_role": null,
+      "projection": null,
+      "realized_by": null,
+      "residual": null,
+      "rule_span": "no sensitive health data is included in model outputs",
+      "source_outcome": null,
+      "violated_via": "reply"
+     }
+    ],
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The system must ensure that no sensitive health data is included in model outputs."
+   },
+   {
+    "applies_when": [
+     "a neutralized condition holds"
+    ],
+    "constraint_id": "SC-2",
+    "description": "The neutralized system must uphold control SC-2. Applies when: a neutralized condition holds.",
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The neutralized system must uphold control SC-2."
+   },
+   {
+    "applies_when": [
+     "a neutralized condition holds"
+    ],
+    "constraint_id": "SC-3",
+    "description": "The neutralized system must uphold control SC-3. Applies when: a neutralized condition holds.",
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The neutralized system must uphold control SC-3."
+   },
+   {
+    "applies_when": [
+     "a neutralized condition holds"
+    ],
+    "constraint_id": "SC-4",
+    "description": "The neutralized system must uphold control SC-4. Applies when: a neutralized condition holds.",
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The neutralized system must uphold control SC-4."
+   },
+   {
+    "applies_when": [
+     "a neutralized condition holds"
+    ],
+    "constraint_id": "SC-5",
+    "description": "The neutralized system must uphold control SC-5. Applies when: a neutralized condition holds.",
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The neutralized system must uphold control SC-5."
+   },
+   {
+    "applies_when": [
+     "a neutralized condition holds"
+    ],
+    "constraint_id": "SC-6",
+    "description": "The neutralized system must uphold control SC-6. Applies when: a neutralized condition holds.",
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The neutralized system must uphold control SC-6."
+   },
+   {
+    "applies_when": [
+     "a neutralized condition holds"
+    ],
+    "constraint_id": "SC-7",
+    "description": "The neutralized system must uphold control SC-7. Applies when: a neutralized condition holds.",
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The neutralized system must uphold control SC-7."
+   }
+  ],
+  "use_case_losses": []
+ },
+ "records": [
+  {
+   "applied": {
+    "dropped_entries": [
+     "O1"
+    ]
+   },
+   "attempt": "first",
+   "identity": "SC-1/O1",
+   "kind": "salvage",
+   "outcome": "removed",
+   "proposed": {
+    "dropped_entries": [
+     "O1"
+    ]
+   },
+   "raw_step": "risk_derivation",
+   "reason": "row: Value error, obligation 'O1' is forbidden but carries realized_by; forbidden entries name violated_via",
+   "stage": "risk_derivation"
+  },
+  {
+   "applied": {
+    "entries": [
+     "SC-1/O1"
+    ]
+   },
+   "attempt": "repair",
+   "identity": "SC-1/O1",
+   "kind": "repair",
+   "outcome": "repaired",
+   "proposed": {
+    "entries": [
+     "SC-1/O1"
+    ]
+   },
+   "raw_step": "risk_derivation_repair",
+   "reason": "row: Value error, obligation 'O1' is forbidden but carries realized_by; forbidden entries name violated_via; permitted correction: move `realized_by: reply` to `violated_via` unchanged",
+   "stage": "risk_derivation"
+  }
+ ],
+ "steps": [
+  "risk_derivation",
+  "risk_derivation_repair",
+  "gap_analysis"
+ ],
+ "warnings": [
+  "salvaged constraint 'SC-1' with its valid obligation entries retained; 1 malformed entry dropped from the working draft and retained verbatim for the targeted repair: O1: row: Value error, obligation 'O1' is forbidden but carries realized_by; forbidden entries name violated_via"
+ ]
+}

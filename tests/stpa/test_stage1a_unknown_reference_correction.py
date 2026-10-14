@@ -140,18 +140,18 @@ class TestUnknownReferenceCorrection:
             "IDs: merchant_policy_constraint"
         ) in user_prompt
         assert (
-            "### SC-2.related_hazards\n"
+            "### merchant_policy_constraint.related_hazards\n"
             "- **Security constraint text:** The assistant must only process "
             "refunds or provide policy details that align with the merchant "
             "associated with the specific `order_id`.\n"
             '- **Original list, verbatim:** ["merchant_policy_constraint"]\n'
             "- **Validation error:** security_constraints.related_hazards "
-            "unknown IDs: SC-2 -> merchant_policy_constraint\n"
+            "unknown IDs: merchant_policy_constraint -> merchant_policy_constraint\n"
             "- **Unknown IDs:** merchant_policy_constraint\n"
             "- **IDs to keep:** none\n"
             "- **Replacement IDs** (an unknown entry may become one of these):\n"
             "  - **H-1**: The agent executes an unintended payment.\n"
-            f"  - **H-2**: {GAP_HAZARD_TEXT}\n"
+            f"  - **merchant_policy_hazard**: {GAP_HAZARD_TEXT}\n"
             "- **Permitted correction:** for each unknown entry, remove it or "
             "replace it with one listed replacement ID; the list has no other "
             "ID to keep; name no ID outside the replacement IDs and return at "
@@ -178,7 +178,7 @@ class TestUnknownReferenceCorrection:
             system_prompt
         )
         assert "each names an\nID that no declared record has." in user_prompt
-        assert "only. Replace each unknown entry" in user_prompt
+        assert "shows it. Replace each unknown entry" in user_prompt
         for repeated_wording in (
             "more than once",
             "repeated entry",
@@ -479,7 +479,7 @@ class TestRepairNeedsAnUnknownIdInEveryList:
                 "recorded gap",
                 [valid_risk_draft_dict(), RECORDED_GAP_RESPONSE],
                 _constraint_repair("SC-2", ["H-2"]),
-                "1af517d3e5e720925eecc1d6519f0fab72288ee37e1100c326cb5f667d6b3ea1",
+                "5192646f777dca25b693a29639d7bae44f92c2f65f9afec1d373393e8f6d3424",
                 id="recorded-gap",
             ),
             pytest.param(
@@ -491,7 +491,7 @@ class TestRepairNeedsAnUnknownIdInEveryList:
                     _empty_gap(),
                 ],
                 _constraint_repair("SC-1", ["H-1", "H-2"]),
-                "ce1c3f198d2afa382cd61a862a834a0788fe4cdeab1febe64597845c84b31380",
+                "8d87587a173bff2ee94ec6e32fd96b2d8ca5f3100f73cc342c0d6a90ea6e6513",
                 id="kept-and-unknown",
             ),
         ],

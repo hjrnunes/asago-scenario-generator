@@ -1,0 +1,21 @@
+template: stage1a_reference_repair_system.j2
+cases:
+  reference-repair:
+    required:
+      - >-
+        Every ID in the user message and in your response is written exactly
+        as the user message shows it.
+      - '"related_losses": ["<loss-id>", "<loss-id>"]'
+      - '"related_hazards": ["<hazard-id>"]'
+    forbidden:
+      - canonical form
+      - Do not write the local handles
+      - '"L-1"'
+      - '"H-1"'
+  reference-repair-dispositions:
+    required:
+      - its `loss_ids` name losses exactly as the user message shows them.
+      - '"loss_ids": ["<loss-id>"]'
+    forbidden:
+      - canonical form
+      - '"L-1"'
