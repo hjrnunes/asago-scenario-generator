@@ -24,6 +24,10 @@ property, and no findings. For an unsafe-control result use `is_na=false`,
 legacy `responsibility`, `control_action`, `uca_type`, or `icas` fields. Do not return
 final ICA IDs, EXEC identities, or replacement controller/action text. Each finding
 must select exactly one supplied governing constraint that governs its selected hazard.
+In `process_model_refs` and `feedback_refs` cite only the slot owner's process-model parts
+and feedback channels; a coordination slot cites only its path's `shared_process_model`
+and no feedback channel. An ID that appears only in a description or under
+`referenced_records` explains context and is not citable.
 
 For every item under `Required routed consideration pairs`, put exactly one result in
 the matching slot's `consideration_results` array:

@@ -12,7 +12,7 @@ from functools import lru_cache, partial
 from pathlib import Path
 from typing import Annotated, Any, Literal, Mapping, Sequence, Union
 
-from pydantic import Field, create_model, model_validator
+from pydantic import Field, WithJsonSchema, create_model, model_validator
 
 from asago_scenario_generator.models.artifact_pin import ObligationId
 from asago_scenario_generator.models.obligation_consideration import (
@@ -77,6 +77,10 @@ from asago_scenario_generator.stpa.obligation_aware.context_coverage import (
     context_coverage_gaps,
     merge_supplement,
     validate_supplement_entries,
+)
+from asago_scenario_generator.stpa.obligation_aware.fill_reply import (
+    FillScope,
+    fill_scope,
 )
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationRequest,
@@ -1112,7 +1116,7 @@ def _slot_provider_payload_type(
     slot_count: int,
     required_pair_count: int,
     *,
-    constraint_ids: tuple[str, ...] = (),
+    scope: FillScope | None = None,
 ) -> type[_Model]:
     """Build a provider payload constrained to one request's exact counts."""
     require_positive_count(slot_count, "slot_count")
@@ -1121,32 +1125,60 @@ def _slot_provider_payload_type(
         f"_SlotProviderPayload{slot_count}Pairs{required_pair_count}",
         _SlotProviderPayload,
         "filled_slots",
-        _slot_exact_constraint_type(constraint_ids),
+        _slot_scope_type(scope),
         slot_count,
         module=__name__,
     )
 
 
-def _slot_exact_constraint_type(constraint_ids: tuple[str, ...]) -> type[_Model]:
-    """Constrain one governing-constraint choice to actual supplied identities."""
-    if not constraint_ids:
+def _slot_scope_type(scope: FillScope | None) -> type[_Model]:
+    """Constrain every cited identity to the ones the request supplies."""
+    if scope is None:
         return _SlotProviderDraft
     finding = create_model(
         _SlotProviderFindingDraft.__name__,
         __base__=_SlotProviderFindingDraft,
-        related_constraint_ids=(
-            Annotated[
-                tuple[Literal.__getitem__(constraint_ids), ...],
-                Field(min_length=1, max_length=1),
-            ],
-            ...,
-        ),
+        related_constraint_ids=_constraint_choice(scope.constraint_ids),
+        process_model_refs=_id_list(scope.process_model_ids),
+        feedback_refs=_id_list(scope.feedback_ids),
+        context_row=_optional_id(scope.context_row_ids),
     )
     return create_model(
         _SlotProviderDraft.__name__,
         __base__=_SlotProviderDraft,
+        slot_id=(_choice(scope.slot_ids), ...),
         findings=(tuple[finding, ...], ()),
     )
+
+
+def _choice(ids: tuple[str, ...]) -> Any:
+    """One of *ids*; the schema lists them as an enum, even a single one."""
+    return Annotated[
+        Literal.__getitem__(ids),
+        WithJsonSchema({"enum": list(ids), "type": "string"}),
+    ]
+
+
+def _constraint_choice(constraint_ids: tuple[str, ...]) -> tuple[Any, Any]:
+    item = _choice(constraint_ids) if constraint_ids else str
+    return (
+        Annotated[tuple[item, ...], Field(min_length=1, max_length=1)],
+        ...,
+    )
+
+
+def _id_list(ids: tuple[str, ...]) -> tuple[Any, Any]:
+    """An array of the supplied ids, or an array that must stay empty."""
+    if not ids:
+        return Annotated[tuple[str, ...], Field(max_length=0)], ()
+    return tuple[_choice(ids), ...], ()
+
+
+def _optional_id(ids: tuple[str, ...]) -> tuple[Any, Any]:
+    """One of the supplied ids or null; only null when none is supplied."""
+    if not ids:
+        return None, None
+    return _choice(ids) | None, None
 
 
 def _required_pair_keys(
@@ -1754,10 +1786,7 @@ class ObligationAwareLLMAdapter:
         response_format = _slot_provider_payload_type(
             len(request.slots),
             len(expected_pair_keys),
-            constraint_ids=tuple(
-                item.constraint_id
-                for item in request.loss_analysis.security_constraints
-            ),
+            scope=fill_scope(request),
         )
         by_local = {
             handle: obligation_id

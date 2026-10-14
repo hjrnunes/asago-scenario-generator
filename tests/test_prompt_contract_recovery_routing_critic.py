@@ -17,6 +17,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     ObligationRoute,
     StructuralRoutingResponse,
 )
+from asago_scenario_generator.stpa.obligation_aware.fill_reply import FillScope
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_structural_routing_prompts,
 )
@@ -76,7 +77,17 @@ def test_routing_schema_cannot_retype_an_obligation_digest():
 
 
 def test_slot_schema_requires_one_exact_constraint_not_concatenated_ids():
-    wire = _slot_provider_payload_type(1, 0, constraint_ids=("SC-2", "SC-4", "SC-5"))
+    wire = _slot_provider_payload_type(
+        1,
+        0,
+        scope=FillScope(
+            slot_ids=("RESP-1:CA-1-1:WRONG_TIMING",),
+            constraint_ids=("SC-2", "SC-4", "SC-5"),
+            context_row_ids=(),
+            process_model_ids=(),
+            feedback_ids=(),
+        ),
+    )
     finding = {
         "deviation": "sanitization occurs after downstream processing",
         "hazardous_context": "unprocessed input reaches downstream components",

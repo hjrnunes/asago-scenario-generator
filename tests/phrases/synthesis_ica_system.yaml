@@ -36,6 +36,9 @@ cases:
       - susceptibility claim
       - not a hazardous state
       - asserted consequence
+      - cite only the slot owner's process-model parts and feedback channels
+      - "a coordination slot cites only its path's `shared_process_model` and no feedback channel"
+      - explains context and is not citable
     forbidden:
       - For a NOT_PROVIDED slot marked N/A
       - absence cannot be hazardous

@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.obligation_aware import governance_provider
 from asago_scenario_generator.stpa.obligation_aware import provider
+from asago_scenario_generator.stpa.obligation_aware.fill_reply import FillScope
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     RevisionDraft,
     StructuralRevisionResponse,
@@ -56,7 +57,15 @@ FACTORY_CASES = {
     "slot-1-0": lambda: provider._slot_provider_payload_type(1, 0),
     "slot-3-2": lambda: provider._slot_provider_payload_type(3, 2),
     "slot-exact": lambda: provider._slot_provider_payload_type(
-        2, 1, constraint_ids=("SC-1", "SC-2")
+        2,
+        1,
+        scope=FillScope(
+            slot_ids=("RESP-1:CA-1-1:INCORRECT", "RESP-1:CA-1-1:NOT_PROVIDED"),
+            constraint_ids=("SC-1", "SC-2"),
+            context_row_ids=("CA-1-1:ctx-1", "CA-1-1:ctx-2"),
+            process_model_ids=("PM-1-1",),
+            feedback_ids=(),
+        ),
     ),
     "governance-1": lambda: governance_provider.governance_payload_type(("risk-a",)),
     "governance-2": lambda: governance_provider.governance_payload_type(
@@ -129,7 +138,7 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "slot-exact": (
         "_SlotProviderPayload2Pairs1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "ee79ae9a36a85ca80c3f7f7b2b5f3e57e2bebaa0258145a4b75651e0311ef863",
+        "4cce3aa195b665afeb76b4c7b02700f7b6f5573b26009dcc1311006d2b2b0a1e",
     ),
 }
 

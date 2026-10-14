@@ -423,11 +423,19 @@ an ID always names the same combination. `synthesis-manifest.yaml` records,
 under `context_tables`, the budget and, per action, the number of
 combinations, the rows shown, and the values no row shows. The Stage 3
 prompt does not say that a table is a sample.
-Stage 3 receives the rows of its target's actions, and a finding may cite one
-row of its own slot's action as its `context_row`; any other row fails
-provider validation and spends the existing retry, so a row of a sibling
-action reaches the correction request instead of leaving the slot
-unresolved. A slot that slot filling leaves unresolved keeps its own reason
+A Stage 3 fill request receives only the rows of its slots' own actions, and
+a finding may cite one of them as its `context_row`. The request schema
+enumerates what a reply may cite (`fill_reply.fill_scope`): `slot_id` is one
+of the request's slots, `context_row` is one of those rows or null,
+`process_model_refs` and `feedback_refs` hold the slot owner's process-model
+parts and feedback channels, and a coordination slot cites only its link's
+shared part and no feedback channel. An empty list is an array with
+`maxItems: 0`. The prompt says that an ID shown only in a description or under
+`referenced_records` is not citable. In pp-s11, half of the context rows shown
+belonged to sibling actions, and citing them, or a coordination path's
+non-shared part, decided 5 of the 10 unresolved fill records. Any other value
+fails the request schema and spends the existing retry. A slot that slot
+filling leaves unresolved keeps its own reason
 through ICA verification. The cited assignments become the ICA's
 `process_model_context`. The table does not limit which deviations are
 unsafe: a finding whose unsafe context no row expresses uses
