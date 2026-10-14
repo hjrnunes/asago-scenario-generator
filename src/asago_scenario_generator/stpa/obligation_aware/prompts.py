@@ -77,9 +77,6 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import SlotPlacehol
 
 PROMPT_TEMPLATES_DIR = Path(__file__).with_name("prompt_templates")
 _TEMPLATE_LOADER = TemplateLoader(PROMPT_TEMPLATES_DIR)
-# The prose templates sit in a subfolder because every provider call records
-# ``prompt_template_hashes`` over the top-level ``*.j2`` files only; a new
-# top-level file would add a key to each recorded call and fail strict replay.
 _QUESTION_PROSE = "prose/obligation_question.j2"
 _ROUTING_PROSE = "prose/routing.j2"
 _REVISION_PROSE = "prose/revision.j2"
@@ -124,7 +121,7 @@ def render_prose(template: str, section: str, **context: object) -> str:
 
 
 def obligation_prompt_template_hashes() -> dict[str, str]:
-    """Hash every top-level prompt and included partial in the search root."""
+    """Hash every prompt, included partial and ``prose/`` template in the root."""
     return _TEMPLATE_LOADER.hash_prompt_templates()
 
 
