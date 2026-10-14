@@ -169,12 +169,9 @@ def _artifact_paths(
     ica_merges_path: Path | None = None,
 ) -> dict[str, Path]:
     """Add each optional published artifact to the always-written ones."""
-    if hazard_offers_path is not None:
-        artifact_paths[hazard_offers_path.name] = hazard_offers_path
-    if ica_merges_path is not None:
-        artifact_paths[ica_merges_path.name] = ica_merges_path
-    if policy_coverage_path is not None:
-        artifact_paths[policy_coverage_path.name] = policy_coverage_path
+    for sidecar in (hazard_offers_path, ica_merges_path, policy_coverage_path):
+        if sidecar is not None:
+            artifact_paths[sidecar.name] = sidecar
     if target_realization_path is not None:
         artifact_paths[TARGET_REALIZATION_FILENAME] = target_realization_path
     if operation_enrichment is not None:
