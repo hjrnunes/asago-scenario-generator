@@ -23,9 +23,26 @@ For every supplied risk card, return exactly one row and decide:
    Select none when no rule does.
 4. **How complete that coverage is.**
    - For a card the analysis cites, choose `full`, `partial`, or `none`.
-   - For a card the analysis marks `not_applicable`, choose
-     `not_applicable_confirmed` when you agree the card genuinely cannot
-     materialize in this system, or `not_applicable_disputed` when it can.
+   - For a card the analysis marks `not_applicable`, apply the grounded-path
+     test. A grounded path names all three of these parts from the use case
+     and the card:
+     - **Who** sets the harm off: a person the use case describes (a
+       customer, an operator, an employee) or anyone who sends messages to
+       the assistant.
+     - **Through what**: a tool the use case lists, a data field or record
+       the system holds, or a reply it gives that the people in the use case
+       act on.
+     - **What loss**: the consequence the card names, landing on the
+       organization that runs the system or on the people it serves.
+
+     Choose `not_applicable_disputed` when a grounded path exists, and name
+     its three parts in `rationale` as `who; through what; what loss`.
+     Choose `not_applicable_confirmed` only when no grounded path exists:
+     the harm needs something the system as described does not have
+     (another system, a capability no listed tool offers, a person the use
+     case does not involve), or it fits any assistant equally with no tool,
+     field, or reply of this system involved. A harm you can imagine but
+     cannot attach to a named tool, field, or reply is not a grounded path.
 5. **What is missing.** For `partial`, `none`, or
    `not_applicable_disputed`, write one sentence naming the specific
    protection no listed constraint provides. Leave `missing_protection`
