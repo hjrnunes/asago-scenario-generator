@@ -39,7 +39,7 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.scripted_client import ScriptedClient
-from tests.helpers.obligation_aware import _controls, _loss_analysis
+from tests.helpers.obligation_aware import _controls, _loss_analysis, wire_pair
 
 _PROCESS = ElementRef(type=ReferenceType.controlled_process, id="CP-1")
 APPLICABLE = "the source supplies an applicable answer"
@@ -131,11 +131,24 @@ def _payload(slot_id: str, *findings: dict) -> dict:
                 "slot_id": slot_id,
                 "is_na": False,
                 "na_rationale": None,
-                "findings": list(findings),
+                "findings": [_fill_finding(item) for item in findings],
                 "consideration_results": [],
             }
         ]
     }
+
+
+def _fill_finding(finding: dict) -> dict:
+    """Recast a supplement-shaped finding in the fill wire's pair form."""
+    wire = {
+        key: value
+        for key, value in finding.items()
+        if key not in {"related_constraint_ids", "related_hazard_ids"}
+    }
+    wire["governing_pair"] = wire_pair(
+        finding["related_constraint_ids"], finding["related_hazard_ids"]
+    )
+    return wire
 
 
 def _draft_slots(slot_id: str, *findings: dict):

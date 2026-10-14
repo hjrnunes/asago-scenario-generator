@@ -939,8 +939,7 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
                                     "loss_consequence": (
                                         "the protected operation is harmed"
                                     ),
-                                    "related_hazard_ids": ["H-1"],
-                                    "related_constraint_ids": ["SC-1"],
+                                    "governing_pair": "SC-1/H-1",
                                     "process_model_refs": [],
                                     "feedback_refs": [],
                                 }
@@ -965,13 +964,12 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
     assert expected_behavior in result.filled_slots[0].icas[0].ica_text
     assert deviation in result.filled_slots[0].icas[0].ica_text
     schema = response_formats[0].model_json_schema()
-    finding_schema = schema["$defs"]["_SlotProviderFindingDraft"]
+    finding_schema = schema["$defs"]["_FillFindingWire"]
     deviation_schema = finding_schema["properties"]["deviation"]
     assert deviation_schema["type"] == "string"
     assert deviation_schema["minLength"] == 1
-    constraint_schema = finding_schema["properties"]["related_constraint_ids"]
-    assert constraint_schema["minItems"] == 1
-    assert constraint_schema["maxItems"] == 1
+    assert finding_schema["properties"]["governing_pair"]["enum"] == ["SC-1/H-1"]
+    assert "related_constraint_ids" not in finding_schema["properties"]
     assert "not_provided_context" not in finding_schema["properties"]
     assert "incorrect_value_or_effect" not in finding_schema["properties"]
     assert "timing_deviation" not in finding_schema["properties"]

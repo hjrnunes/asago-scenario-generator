@@ -43,9 +43,10 @@ from tests.helpers.obligation_aware import (
 # with a short request-local handle. The system digest is the text recorded
 # before the NOT_PROVIDED N/A sentence existed; the sentence was removed again
 # because it raised the NOT_PROVIDED N/A share. The system digest was
-# recaptured when the prompt began naming the identities a slot may cite.
-# The other digests are unchanged.
-_GOLDEN_SLOT_SYSTEM = "1ab3eaf46375926464be7e57c7918703644f00ccd95a39212cbdaf590bdc4ee1"
+# recaptured when the prompt began naming the identities a slot may cite, and
+# again when a finding began naming one `governing_pair`. The other digests
+# are unchanged.
+_GOLDEN_SLOT_SYSTEM = "e6b30aebf2ab14a90f14ec0abee9d4428919674ee27967eefc0c346e4273e6f3"
 _GOLDEN_SLOT_USER = "51f6875173344befda32d0a1fdbe879b7487e072808b8dafd2d89f9679c6f37a"
 _GOLDEN_SLOT_USER_EMPTY = (
     "6a174dc144a7788395f2e38a60457edd891714dbd795c06411dad9616a4f9667"

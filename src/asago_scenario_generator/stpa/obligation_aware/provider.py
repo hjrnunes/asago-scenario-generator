@@ -81,6 +81,7 @@ from asago_scenario_generator.stpa.obligation_aware.context_coverage import (
 from asago_scenario_generator.stpa.obligation_aware.fill_reply import (
     FillScope,
     fill_scope,
+    split_pair,
 )
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     IcaHazardVerificationRequest,
@@ -1062,13 +1063,37 @@ class _SlotProviderFindingDraft(_Model):
     context_row: str | None = None
 
 
+class _FillFindingWire(_Model):
+    """A fill finding that names its governing constraint-and-hazard pair.
+
+    The model picks one ``"SC-x/H-y"`` pair; code splits it into the
+    constraint and hazard lists every later stage reads.
+    """
+
+    deviation: str = Field(min_length=1)
+    hazardous_context: str = Field(min_length=1)
+    loss_consequence: str = Field(min_length=1)
+    governing_pair: str = Field(pattern=r"^[^/\s]+/[^/\s]+$")
+    process_model_refs: tuple[str, ...] = ()
+    feedback_refs: tuple[str, ...] = ()
+    context_row: str | None = None
+
+    @property
+    def related_constraint_ids(self) -> tuple[str, ...]:
+        return (split_pair(self.governing_pair)[0],)
+
+    @property
+    def related_hazard_ids(self) -> tuple[str, ...]:
+        return (split_pair(self.governing_pair)[1],)
+
+
 class _SlotProviderDraft(_Model):
     """One request-local slot whose exact UCA type comes from the request."""
 
     slot_id: str = Field(min_length=1)
     is_na: bool
     na_rationale: str | None = None
-    findings: tuple[_SlotProviderFindingDraft, ...] = ()
+    findings: tuple[_FillFindingWire, ...] = ()
     consideration_results: tuple[ObligationIcaDraft, ...] = ()
 
     @model_validator(mode="after")
@@ -1136,9 +1161,9 @@ def _slot_scope_type(scope: FillScope | None) -> type[_Model]:
     if scope is None:
         return _SlotProviderDraft
     finding = create_model(
-        _SlotProviderFindingDraft.__name__,
-        __base__=_SlotProviderFindingDraft,
-        related_constraint_ids=_constraint_choice(scope.constraint_ids),
+        _FillFindingWire.__name__,
+        __base__=_FillFindingWire,
+        governing_pair=(_choice(scope.pair_ids), ...),
         process_model_refs=_id_list(scope.process_model_ids),
         feedback_refs=_id_list(scope.feedback_ids),
         context_row=_optional_id(scope.context_row_ids),
@@ -1157,14 +1182,6 @@ def _choice(ids: tuple[str, ...]) -> Any:
         Literal.__getitem__(ids),
         WithJsonSchema({"enum": list(ids), "type": "string"}),
     ]
-
-
-def _constraint_choice(constraint_ids: tuple[str, ...]) -> tuple[Any, Any]:
-    item = _choice(constraint_ids) if constraint_ids else str
-    return (
-        Annotated[tuple[item, ...], Field(min_length=1, max_length=1)],
-        ...,
-    )
 
 
 def _id_list(ids: tuple[str, ...]) -> tuple[Any, Any]:

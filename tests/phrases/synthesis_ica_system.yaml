@@ -39,6 +39,8 @@ cases:
       - cite only the slot owner's process-model parts and feedback channels
       - "a coordination slot cites only its path's `shared_process_model` and no feedback channel"
       - explains context and is not citable
+      - "names one `governing_pair` of the form `\"<constraint_id>/<hazard_id>\"`"
+      - "one hazard listed in that constraint's `related_hazards`"
     forbidden:
       - For a NOT_PROVIDED slot marked N/A
       - absence cannot be hazardous

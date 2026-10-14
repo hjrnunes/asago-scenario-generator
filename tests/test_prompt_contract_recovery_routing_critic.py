@@ -82,7 +82,7 @@ def test_slot_schema_requires_one_exact_constraint_not_concatenated_ids():
         0,
         scope=FillScope(
             slot_ids=("RESP-1:CA-1-1:WRONG_TIMING",),
-            constraint_ids=("SC-2", "SC-4", "SC-5"),
+            pair_ids=("SC-2/H-2", "SC-4/H-2", "SC-5/H-2"),
             context_row_ids=(),
             process_model_ids=(),
             feedback_ids=(),
@@ -92,8 +92,7 @@ def test_slot_schema_requires_one_exact_constraint_not_concatenated_ids():
         "deviation": "sanitization occurs after downstream processing",
         "hazardous_context": "unprocessed input reaches downstream components",
         "loss_consequence": "unauthorized action",
-        "related_hazard_ids": ["H-2"],
-        "related_constraint_ids": ['SC-2", "SC-4", "SC-5'],
+        "governing_pair": 'SC-2", "SC-4", "SC-5/H-2',
     }
     payload = {
         "filled_slots": [
@@ -104,9 +103,9 @@ def test_slot_schema_requires_one_exact_constraint_not_concatenated_ids():
             }
         ]
     }
-    with pytest.raises(ValidationError, match="related_constraint_ids"):
+    with pytest.raises(ValidationError, match="governing_pair"):
         wire.model_validate(payload)
-    finding["related_constraint_ids"] = ["SC-2"]
+    finding["governing_pair"] = "SC-2/H-2"
     assert wire.model_validate(payload).filled_slots[0].findings[
         0
     ].related_constraint_ids == ("SC-2",)

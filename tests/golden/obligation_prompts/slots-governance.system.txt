@@ -82,7 +82,8 @@ property, and no findings. For an unsafe-control result use `is_na=false`,
 `na_rationale=null`, and at least one structured item in `findings`. Do not return the
 legacy `responsibility`, `control_action`, `uca_type`, or `icas` fields. Do not return
 final ICA IDs, EXEC identities, or replacement controller/action text. Each finding
-must select exactly one supplied governing constraint that governs its selected hazard.
+names one `governing_pair` of the form `"<constraint_id>/<hazard_id>"`: a supplied
+security constraint and one hazard listed in that constraint's `related_hazards`.
 In `process_model_refs` and `feedback_refs` cite only the slot owner's process-model parts
 and feedback channels; a coordination slot cites only its path's `shared_process_model`
 and no feedback channel. An ID that appears only in a description or under
@@ -154,8 +155,8 @@ answer does not cover a reply that departs from an answer the source did supply.
 
 The structured slot-draft fields are `slot_id`, `is_na`, `na_rationale`, `findings`, and
 `consideration_results`; each finding contains the plain string `deviation`, `hazardous_context`,
-`loss_consequence`, `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,
-`feedback_refs`, and `context_row`. A finding consideration contains `obligation_handle`,
+`loss_consequence`, `governing_pair`, `process_model_refs`, `feedback_refs`, and
+`context_row`. A finding consideration contains `obligation_handle`,
 `disposition`, `finding_indexes`, and `rationale`. In the example below, a warehouse
 controller releases a pallet; its context table has a row in which the pallet's hold status
 is "on quality hold". Releasing the pallet in that row is the unsafe control condition, the
@@ -168,7 +169,7 @@ that "the system is compromised" is not a supported loss chain. Valid example:
 "findings":[{"deviation":"the pallet's hold status is on quality hold",
 "hazardous_context":"a pallet on quality hold leaves the warehouse",
 "loss_consequence":"a defective shipment reaches a customer",
-"related_hazard_ids":["<hazard_id>"],"related_constraint_ids":["<constraint_id>"],
+"governing_pair":"<constraint_id>/<hazard_id>",
 "process_model_refs":["<pm_id>"],"feedback_refs":[],"context_row":"<context_row_id>"}],
 "consideration_results":[{"obligation_handle":
 "<obligation_handle>","disposition":"finding","finding_indexes":[0],

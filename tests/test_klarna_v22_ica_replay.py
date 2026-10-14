@@ -1,4 +1,8 @@
-"""Replay the three captured Klarna CA-3-1 ICA deviations at the public seam."""
+"""Replay the three captured Klarna CA-3-1 ICA deviations at the public seam.
+
+The recorded replies predate the fill wire's ``governing_pair``; the replay
+recasts each one with ``current_fill_reply`` and changes no other value.
+"""
 
 from __future__ import annotations
 
@@ -23,6 +27,7 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
 from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     is_wrong_duration_eligible,
 )
+from tests.helpers.obligation_aware import current_fill_reply
 
 
 _REPLAY_FIXTURE = Path(__file__).parent / "fixtures" / "klarna-v22-ca3-1-replay.yaml"
@@ -94,7 +99,7 @@ def test_captured_klarna_ca3_1_deviations_survive_public_fill(tmp_path) -> None:
     records = fixture["records"]
     captured_payloads: dict[str, dict] = {}
     for record in records:
-        captured_payloads[record["slot_id"]] = record["response"]
+        captured_payloads[record["slot_id"]] = current_fill_reply(record["response"])
 
     # The ignored run is an optional audit source.  The committed fixture above
     # is authoritative for deterministic/offline execution, while a checkout

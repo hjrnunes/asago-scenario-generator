@@ -204,7 +204,8 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
     assert result.filled_slots[0].is_na is False
     entries = read_calls_jsonl(tmp_path)
     assert entries[0]["success"] is False
-    assert "unknown hazards: H-404" in entries[0]["error"]
+    assert "governing_pair" in entries[0]["error"]
+    assert "SC-1/H-404" in entries[0]["error"]
     assert entries[1]["success"] is True
 
 

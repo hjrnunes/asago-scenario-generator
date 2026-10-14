@@ -61,7 +61,7 @@ FACTORY_CASES = {
         1,
         scope=FillScope(
             slot_ids=("RESP-1:CA-1-1:INCORRECT", "RESP-1:CA-1-1:NOT_PROVIDED"),
-            constraint_ids=("SC-1", "SC-2"),
+            pair_ids=("SC-1/H-1", "SC-2/H-1"),
             context_row_ids=("CA-1-1:ctx-1", "CA-1-1:ctx-2"),
             process_model_ids=("PM-1-1",),
             feedback_ids=(),
@@ -128,17 +128,17 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "slot-1-0": (
         "_SlotProviderPayload1Pairs0",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "0dc0fd41cf6d49bf45eec18d85f2828bf9f77e28a68d9e860eeba6beb57167fe",
+        "ec8b0b08a4036d868e944d787c2571c4460ac747c7c87b865dde18421d56df33",
     ),
     "slot-3-2": (
         "_SlotProviderPayload3Pairs2",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "abf7c619edb6cbe05618cd1027b82dea4a8cfafc0930a11c6896a17764cac0d2",
+        "b16378f9b292f578a95c6448bf421f9ea7a66312a7445c65e79539f75653bc30",
     ),
     "slot-exact": (
         "_SlotProviderPayload2Pairs1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "4cce3aa195b665afeb76b4c7b02700f7b6f5573b26009dcc1311006d2b2b0a1e",
+        "e4a6db570efdbad807134321b294e0a75b7dde5c969b7c8e2ebda7f2a0189545",
     ),
 }
 

@@ -434,7 +434,16 @@ shared part and no feedback channel. An empty list is an array with
 `referenced_records` is not citable. In pp-s11, half of the context rows shown
 belonged to sibling actions, and citing them, or a coordination path's
 non-shared part, decided 5 of the 10 unresolved fill records. Any other value
-fails the request schema and spends the existing retry. A slot that slot
+fails the request schema and spends the existing retry.
+
+A fill finding names its constraint and hazard as one `governing_pair`,
+`"<constraint_id>/<hazard_id>"`. The schema enumerates every pair of a
+supplied constraint and a hazard in its `related_hazards`
+(`fill_reply.governing_pairs`), and code splits the chosen pair into the
+finding's one constraint and one hazard. Separate hazard and constraint lists
+let a reply pair a constraint with a hazard it does not govern, which decided
+3 of the 10 unresolved pp-s11 records. The context-coverage supplement keeps
+the separate `related_hazard_ids` and `related_constraint_ids`. A slot that slot
 filling leaves unresolved keeps its own reason
 through ICA verification. The cited assignments become the ICA's
 `process_model_context`. The table does not limit which deviations are

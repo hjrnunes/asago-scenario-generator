@@ -119,13 +119,47 @@ def _controls() -> AnalysisControls:
 def provider_slot_payload(draft: SlotIcaDraft) -> dict:
     """Dump a typed slot draft as the provider wire carries it.
 
-    The wire schema gives each finding's ``deviation`` as one string; the typed
-    draft nests it in a type-specific object.
+    The wire schema gives each finding's ``deviation`` as one string and its
+    constraint and hazard as one ``governing_pair``; the typed draft nests the
+    deviation in a type-specific object and keeps the two ID lists.
     """
     payload = draft.model_dump(mode="json")
     for wire, typed in zip(payload["findings"], draft.findings, strict=True):
         wire["deviation"] = typed.deviation.text
+        wire["governing_pair"] = wire_pair(
+            typed.related_constraint_ids, typed.related_hazard_ids
+        )
+        del wire["related_constraint_ids"], wire["related_hazard_ids"]
     return payload
+
+
+def wire_pair(constraint_ids, hazard_ids) -> str:
+    """Join one constraint and one hazard as the fill wire's governing pair."""
+    (constraint_id,), (hazard_id,) = constraint_ids, hazard_ids
+    return f"{constraint_id}/{hazard_id}"
+
+
+def current_fill_reply(recorded: dict) -> dict:
+    """Recast a fill reply recorded before the pair form in today's wire.
+
+    Each finding's single constraint and hazard become one ``governing_pair``;
+    every other value is copied unchanged.
+    """
+    slots = []
+    for slot in recorded["filled_slots"]:
+        findings = []
+        for finding in slot.get("findings", []):
+            wire = {
+                key: value
+                for key, value in finding.items()
+                if key not in {"related_constraint_ids", "related_hazard_ids"}
+            }
+            wire["governing_pair"] = wire_pair(
+                finding["related_constraint_ids"], finding["related_hazard_ids"]
+            )
+            findings.append(wire)
+        slots.append({**slot, "findings": findings})
+    return {**recorded, "filled_slots": slots}
 
 
 TARGETING_FIELDS = (
