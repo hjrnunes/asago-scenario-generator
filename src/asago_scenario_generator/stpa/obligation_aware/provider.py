@@ -114,8 +114,9 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _draft_considerations,
     _finding_context,
     _slot_authority,
-    _validate_finding_semantics,
+    _validate_finding_type,
     compile_slot_provider_entry,
+    finding_reference_errors,
 )
 from asago_scenario_generator.stpa.obligation_aware.payload_types import (
     exact_length_payload_type,
@@ -1268,20 +1269,21 @@ def _validate_slot_provider_payload(
     compiler-owned prefix could be mistaken for model-authored safeguard
     prose on a later legacy pass.  Validate the model's fields and references
     here; the successful response is compiled exactly once below.
+
+    Every failed rule is reported at once, so one correction can fix them all.
     """
     actual_slot_ids = frozenset(slot.slot_id for slot in payload.filled_slots)
-    _require_exact_id_set(
-        actual_slot_ids,
-        expected_slot_ids,
-        "slot response must contain exactly the supplied slot IDs",
+    _raise_itemized(
+        [
+            *_id_set_errors(
+                actual_slot_ids,
+                expected_slot_ids,
+                "slot response must contain exactly the supplied slot IDs",
+            ),
+            *_pair_errors(payload, expected_pair_keys),
+            *_slot_payload_errors(payload, request),
+        ]
     )
-    actual_pair_keys = _provider_pair_keys(payload, expected_pair_keys)
-    _require_exact_id_set(
-        actual_pair_keys,
-        expected_pair_keys,
-        "slot response must contain exactly the required routed pair keys",
-    )
-    _validate_slot_payload_semantics(payload, request)
 
 
 def _validate_slot_payload_semantics(
@@ -1295,6 +1297,21 @@ def _validate_slot_payload_semantics(
     ``compile_ica_slot_draft`` while leaving canonical text/IDs to the one
     compilation performed after the provider call succeeds.
     """
+    _raise_itemized(_slot_payload_errors(payload, request))
+
+
+def _raise_itemized(errors: Sequence[str]) -> None:
+    """Raise one correction that lists every failed rule on its own line."""
+    if len(errors) == 1:
+        raise ExactFeedbackError(errors[0])
+    if errors:
+        raise ExactFeedbackError(
+            f"{len(errors)} failed rules:\n" + "\n".join(f"- {item}" for item in errors)
+        )
+
+
+def _slot_payload_errors(payload: _Model, request: SynthesisSlotRequest) -> list[str]:
+    """List every semantic rule each slot, finding, and result breaks."""
     expected_by_id = {slot.slot_id: slot for slot in request.slots}
     route_by_pair = {
         (route.obligation_id, slot_id): route
@@ -1302,10 +1319,12 @@ def _validate_slot_payload_semantics(
         for slot_id in route.slot_ids
     }
     index = build_stpa_index(request.control_structure)
+    errors: list[str] = []
     for value in payload.filled_slots:
         expected = expected_by_id.get(value.slot_id)
         if expected is None:
-            raise ValueError(f"slot response references unknown slot {value.slot_id}")
+            errors.append(f"slot response references unknown slot {value.slot_id}")
+            continue
         draft = _materialize_slot_draft(value, expected)
         # Resolve owner/action authority before validating findings.  This is
         # the same deterministic source used by the compiler, but does not
@@ -1313,46 +1332,83 @@ def _validate_slot_payload_semantics(
         _owner, action, _target_process, process_models, feedback = _slot_authority(
             expected, index
         )
-        for finding in draft.findings:
-            _validate_finding_semantics(
-                finding,
-                slot=expected,
-                action_description=action,
-                valid_process_models=process_models,
-                valid_feedback=feedback,
-                loss_analysis=request.loss_analysis,
-            )
-            _finding_context(
-                finding, slot=expected, control_structure=request.control_structure
+        for position, finding in enumerate(draft.findings):
+            errors.extend(
+                f"{value.slot_id} finding {position}: {message}"
+                for message in _finding_errors(
+                    finding,
+                    slot=expected,
+                    action_description=action,
+                    valid_process_models=process_models,
+                    valid_feedback=feedback,
+                    request=request,
+                )
             )
         for result in draft.consideration_results:
-            _validate_consideration_result(result, draft, route_by_pair)
+            message = _consideration_error(result, draft, route_by_pair)
+            if message is not None:
+                errors.append(f"{value.slot_id} {result.obligation_handle}: {message}")
+    return errors
 
 
-def _validate_consideration_result(
+def _finding_errors(
+    finding: IcaFindingDraft,
+    *,
+    slot: SlotPlaceholder,
+    action_description: str,
+    valid_process_models: set[str],
+    valid_feedback: set[str],
+    request: SynthesisSlotRequest,
+) -> list[str]:
+    """List the deviation, reference, and context-row errors of one finding."""
+    errors: list[str] = []
+    try:
+        _validate_finding_type(finding, slot, action_description)
+    except ValueError as exc:
+        errors.append(str(exc))
+    errors.extend(
+        finding_reference_errors(
+            finding,
+            valid_process_models=valid_process_models,
+            valid_feedback=valid_feedback,
+            loss_analysis=request.loss_analysis,
+        )
+    )
+    try:
+        _finding_context(
+            finding, slot=slot, control_structure=request.control_structure
+        )
+    except ValueError as exc:
+        errors.append(str(exc))
+    return errors
+
+
+def _consideration_error(
     result: Any, draft: SlotIcaDraft, route_by_pair: dict[tuple[str, str], Any]
-) -> None:
+) -> str | None:
     if route_by_pair.get((result.obligation_handle, draft.slot_id)) is None:
-        raise ValueError(
+        return (
             "structured consideration references an obligation/slot "
             "that is not routed to this target"
         )
     if result.disposition == "finding":
         if draft.is_na:
-            raise ValueError("finding consideration requires a non-N/A slot draft")
+            return "finding consideration requires a non-N/A slot draft"
         if any(index >= len(draft.findings) for index in result.finding_indexes):
-            raise ValueError(
-                "structured consideration finding index is outside its slot"
+            return (
+                "structured consideration finding index is outside its slot "
+                f"(the slot has {len(draft.findings)} findings, indexes from 0)"
             )
     elif result.disposition == "proposed_not_applicable" and not draft.is_na:
-        raise ValueError("proposed non-applicability requires an N/A slot draft")
+        return "proposed non-applicability requires an N/A slot draft"
+    return None
 
 
-def _provider_pair_keys(
+def _pair_errors(
     payload: _Model,
     expected_pair_keys: frozenset[tuple[str, str, str]],
-) -> frozenset[tuple[str, str, str]]:
-    """Resolve provider-local obligation handles to supplied route identities."""
+) -> list[str]:
+    """Name each routed pair given more than once, then any missing or extra."""
     route_by_pair = {
         (obligation_id, slot_id): route_id
         for route_id, obligation_id, slot_id in expected_pair_keys
@@ -1368,19 +1424,25 @@ def _provider_pair_keys(
         for (_route, obligation_id, slot_id), count in sorted(counts.items())
         if count > 1
     ]
-    if repeated:
-        raise ValueError(
-            "slot response gives a routed pair more than once: " + "; ".join(repeated)
-        )
-    return frozenset(counts)
+    errors = (
+        ["slot response gives a routed pair more than once: " + "; ".join(repeated)]
+        if repeated
+        else []
+    )
+    return errors + _id_set_errors(
+        frozenset(counts),
+        expected_pair_keys,
+        "slot response must contain exactly the required routed pair keys",
+    )
 
 
-def _require_exact_id_set(actual: frozenset, expected: frozenset, message: str) -> None:
-    """Raise one stable diagnostic for a closed identity-set mismatch."""
-    if actual != expected:
-        missing = sorted(expected - actual)
-        unexpected = sorted(actual - expected)
-        raise ValueError(f"{message} (missing={missing}, unexpected={unexpected})")
+def _id_set_errors(actual: frozenset, expected: frozenset, message: str) -> list[str]:
+    """Return one stable diagnostic for a closed identity-set mismatch."""
+    if actual == expected:
+        return []
+    missing = sorted(expected - actual)
+    unexpected = sorted(actual - expected)
+    return [f"{message} (missing={missing}, unexpected={unexpected})"]
 
 
 def _materialize_slot_draft(
@@ -1874,7 +1936,12 @@ class ObligationAwareLLMAdapter:
                     request=request,
                 )
             except ValueError as exc:
-                raise ValueError(_localized_slot_error(str(exc), request)) from None
+                error = (
+                    ExactFeedbackError
+                    if isinstance(exc, ExactFeedbackError)
+                    else ValueError
+                )
+                raise error(_localized_slot_error(str(exc), request)) from None
 
         outcome = call_with_policy(
             llm_client=self.llm_client,
@@ -1892,9 +1959,10 @@ class ObligationAwareLLMAdapter:
                     "is_na=false only with a non-empty findings array and no "
                     "na_rationale; set is_na=true only with an empty findings array "
                     "and a non-empty na_rationale. Return one plain deviation string "
-                    "for each finding, and correct the exact semantic "
-                    "validation error reported above."
+                    "for each finding, and correct every failed rule the exact "
+                    "validation error lists below."
                 ),
+                include_response=True,
             ),
             temperature=request.controls.temperature,
             max_completion_tokens=_SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS,

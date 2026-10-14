@@ -423,6 +423,7 @@ an ID always names the same combination. `synthesis-manifest.yaml` records,
 under `context_tables`, the budget and, per action, the number of
 combinations, the rows shown, and the values no row shows. The Stage 3
 prompt does not say that a table is a sample.
+
 A Stage 3 fill request receives only the rows of its slots' own actions, and
 a finding may cite one of them as its `context_row`. The request schema
 enumerates what a reply may cite (`fill_reply.fill_scope`): `slot_id` is one
@@ -434,7 +435,12 @@ shared part and no feedback channel. An empty list is an array with
 `referenced_records` is not citable. In pp-s11, half of the context rows shown
 belonged to sibling actions, and citing them, or a coordination path's
 non-shared part, decided 5 of the 10 unresolved fill records. Any other value
-fails the request schema and spends the existing retry.
+fails the request schema and spends the existing retry. A slot that slot
+filling leaves unresolved keeps its own reason
+through ICA verification. The cited assignments become the ICA's
+`process_model_context`. The table does not limit which deviations are
+unsafe: a finding whose unsafe context no row expresses uses
+`context_row: null`.
 
 A fill finding names its constraint and hazard as one `governing_pair`,
 `"<constraint_id>/<hazard_id>"`. The schema enumerates every pair of a
@@ -455,12 +461,20 @@ turns it into one `ObligationIcaDraft` per handle for validation and
 compilation. The provider check also counts routed pairs instead of comparing
 sets: a pp-s11 klarna-r2 reply listed each of six handles three times, with
 conflicting results for one, and passed the set comparison until the contract
-rejected it after the request had ended. A slot that slot
-filling leaves unresolved keeps its own reason
-through ICA verification. The cited assignments become the ICA's
-`process_model_context`. The table does not limit which deviations are
-unsafe: a finding whose unsafe context no row expresses uses
-`context_row: null`.
+rejected it after the request had ended.
+
+A rejected fill reply earns one correction that lists every failed rule, not
+only the first. The provider collects the identity, pair, finding, and
+consideration errors of the whole reply, prefixes each finding and result error
+with its slot and finding position or handle, and raises them as one
+`ExactFeedbackError`, so the correction keeps one line per rule. A reference error names what the slot may
+cite: a constraint that does not govern the finding's hazard names the hazards
+it governs (`SC-1 governs H-1`), and an out-of-scope process-model part,
+feedback channel, or context row lists the valid IDs. The correction also
+quotes the rejected reply (`include_response=True`) so the model corrects it in
+place. In pp-s11, the correction named one error and omitted the reply, and
+in 5 of the 9 failed chains the corrected reply failed a rule the first reply
+had passed. Compilation keeps the first-error checks.
 
 When a reply slot's findings for one constraint cite a variable that a
 `retrieved_content` channel updates but leave some of its values without a
