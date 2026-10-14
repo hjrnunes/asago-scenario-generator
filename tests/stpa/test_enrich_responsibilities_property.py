@@ -63,7 +63,7 @@ def _make_control_element_set(
     ]
     return ControlElementSet(
         control_actions=control_actions,
-        feedback_channels=feedback_channels,
+        feedback=feedback_channels,
     )
 
 
@@ -161,7 +161,7 @@ class TestEnrichResponsibilitiesProperties:
                     description="Orphan CA",
                 )
             ],
-            feedback_channels=[
+            feedback=[
                 FeedbackChannel(
                     fb_id=f"FB-{n_resps + 1}-1",
                     description="Orphan FB",

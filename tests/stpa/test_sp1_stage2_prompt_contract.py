@@ -314,7 +314,7 @@ def test_normalized_assembly_rejects_unmatched_owner_instead_of_order_recovery()
     responsibilities = _responsibilities()
     elements = ControlElementSet(
         control_actions=[],
-        feedback_channels=[],
+        feedback=[],
         controlled_processes=[
             ControlledProcess(cp_id="CP-1", description="Transaction processor")
         ],
@@ -364,27 +364,17 @@ def _has_error(errors: list[tuple[str, str]], location: str, fragment: str) -> b
             "feedback",
             "Field required",
         ),
-        (
-            _payload_with(feedback_channels=[]),
-            "",
-            "must use one feedback collection, not both feedback and feedback_channels",
-        ),
         (_payload_with(control_actions={}), "control_actions", "valid list"),
         (_payload_with(controlled_processes="CP-1"), "controlled_processes", "list"),
-        (
-            _payload_with(feedback=None, feedback_channels={}),
-            "feedback_channels",
-            "list",
-        ),
+        (_payload_with(feedback={}), "feedback", "list"),
         (_payload_with(feedback=[]), "feedback", "at least 1 item"),
         (_payload_with(extra=[]), "extra", "Extra inputs are not permitted"),
     ],
     ids=[
         "missing-feedback",
-        "both-feedback-spellings",
         "actions-not-list",
         "processes-not-list",
-        "feedback-channels-not-list",
+        "feedback-not-list",
         "empty-feedback",
         "unknown-collection",
     ],
@@ -408,17 +398,6 @@ def test_call2b_parser_reads_absent_processes_as_none_declared() -> None:
 
 def test_call2b_parser_rejects_a_non_object_response() -> None:
     assert _wire_errors(["not", "an", "object"])
-
-
-def test_call2b_parser_accepts_historical_feedback_channels_spelling() -> None:
-    payload = _valid_payload()
-    payload["feedback_channels"] = payload.pop("feedback")
-
-    parsed = parse_control_element_set_response(
-        payload, responsibilities=_responsibilities().responsibilities
-    )
-
-    assert [item.fb_id for item in parsed.feedback_channels] == ["FB-1-1", "FB-2-1"]
 
 
 def _action_errors(action: object) -> list[tuple[str, str]]:

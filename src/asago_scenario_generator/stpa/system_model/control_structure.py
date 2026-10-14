@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import (
-    AliasChoices,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -172,19 +171,18 @@ class ResponsibilitySet(BaseModel):
 class ControlElementSet(BaseModel):
     """Call 2b output: control actions, feedback channels, and controlled processes."""
 
-    # This is an internal response envelope, not the durable control-structure
-    # model.  The provider-facing contract calls this collection ``feedback``
-    # (the canonical domain attribute remains ``feedback_channels``), while
-    # accepting the historical name on input for compatibility with existing
-    # fixtures and callers.
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    # This is the provider-facing envelope: the request schema, the decoded
+    # reply, and the correction prompt all call the collection ``feedback``.
+    # Domain readers keep the ``feedback_channels`` name through the property.
+    model_config = ConfigDict(extra="forbid")
 
     control_actions: list[ControlAction] = []
-    feedback_channels: list[FeedbackChannel] = Field(
-        default_factory=list,
-        validation_alias="feedback",
-    )
+    feedback: list[FeedbackChannel] = Field(default_factory=list)
     controlled_processes: list[ControlledProcess] = []
+
+    @property
+    def feedback_channels(self) -> list[FeedbackChannel]:
+        return self.feedback
 
 
 class _ResponsibilityTarget(ElementRef):
@@ -223,7 +221,7 @@ class _ControlElementProviderSet(ControlElementSet):
     # No default on either collection, so the request schema lists both in
     # ``required``.  A docstring note here would reach the model as the
     # schema description.
-    feedback_channels: list[FeedbackChannel] = Field(validation_alias="feedback")
+    feedback: list[FeedbackChannel]
     controlled_processes: list[ControlledProcess]
 
 
@@ -1004,9 +1002,6 @@ class _Call2bProcess(_Call2bWire):
 class _Call2bResponse(_Call2bWire):
     """The Call 2b response as the model must write it.
 
-    ``feedback`` is the provider-facing collection name; the historical
-    ``feedback_channels`` spelling is accepted on input, never both.
-
     The request schema requires ``controlled_processes``, but a server that
     does not enforce it can still return a reply without the key.  Such a
     reply declares no controlled process: its ``CP-*`` references then fail
@@ -1015,21 +1010,8 @@ class _Call2bResponse(_Call2bWire):
     """
 
     control_actions: list[_Call2bAction] = Field(min_length=1)
-    feedback: list[_Call2bFeedback] = Field(
-        min_length=1,
-        validation_alias=AliasChoices("feedback", "feedback_channels"),
-    )
+    feedback: list[_Call2bFeedback] = Field(min_length=1)
     controlled_processes: list[_Call2bProcess] = Field(default_factory=list)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _one_feedback_spelling(cls, value: Any) -> Any:
-        if isinstance(value, dict) and {"feedback", "feedback_channels"} <= set(value):
-            raise ValueError(
-                "Call 2b response must use one feedback collection, not both "
-                "feedback and feedback_channels"
-            )
-        return value
 
 
 class _Call2bMissingActions(_Call2bWire):
@@ -1085,7 +1067,7 @@ def parse_control_element_set_response(
         )
     return ControlElementSet.model_construct(
         control_actions=actions,
-        feedback_channels=feedback_channels,
+        feedback=feedback_channels,
         controlled_processes=controlled_processes,
     )
 

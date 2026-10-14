@@ -106,7 +106,7 @@ def _valid_control_element_set_dict() -> dict:
                 "target": {"type": "responsibility", "id": "RESP-2"},
             },
         ],
-        "feedback_channels": [
+        "feedback": [
             {
                 "fb_id": "FB-1-1",
                 "description": "Transaction result",

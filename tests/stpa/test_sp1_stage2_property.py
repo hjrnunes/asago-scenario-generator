@@ -133,7 +133,7 @@ def _make_control_element_set(
 
     return ControlElementSet(
         control_actions=control_actions,
-        feedback_channels=feedback_channels,
+        feedback=feedback_channels,
         controlled_processes=controlled_processes,
     )
 
@@ -454,7 +454,7 @@ class TestCallLogOrdering:
                         "target": {"type": "responsibility", "id": "RESP-1"},
                     }
                 ],
-                "feedback_channels": [
+                "feedback": [
                     {
                         "fb_id": "FB-1-1",
                         "description": "F",
@@ -540,7 +540,7 @@ class TestCallLogOrdering:
                         "target": {"type": "responsibility", "id": "RESP-1"},
                     }
                 ],
-                "feedback_channels": [
+                "feedback": [
                     {
                         "fb_id": "FB-1-1",
                         "description": "F",
