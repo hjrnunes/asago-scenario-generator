@@ -1,4 +1,4 @@
-{% set unknown_ids = selected_lists | selectattr("unknown") | list %}## Use-Case Description
+{% set unknown_ids = selected_lists | selectattr("unknown") | list %}{% set disposition_lists = selected_lists | selectattr("collection", "equalto", "risk_dispositions") | list %}## Use-Case Description
 
 {{ use_case_text }}
 
@@ -10,7 +10,7 @@
 
 {% endif %}The prior response failed validation for exactly these lists: each names an
 ID {% if unknown_ids %}that no declared record has{% endif %}. Everything else about each record (its description or
-rule, its conditions, and its obligations) is retained by deterministic code
+rule, its conditions, and its obligations{% if disposition_lists %}; a disposition's kind and reason{% endif %}) is retained by deterministic code
 and cannot change.
 
 {% for selected in selected_lists %}
@@ -32,7 +32,7 @@ and cannot change.
 
 ## Your Task
 
-Return the corrected `related_losses` or `related_hazards` list for each
+Return the corrected `related_losses`{% if disposition_lists %}, `related_hazards`, or `loss_ids`{% else %} or `related_hazards`{% endif %} list for each
 selected record, using canonical IDs only. {% if unknown_ids %}Replace each unknown entry with the listed replacement ID
 of the record it was meant to name, or remove it when no listed record has
 that meaning. {% endif %}Keep the other IDs once each in their original order. A

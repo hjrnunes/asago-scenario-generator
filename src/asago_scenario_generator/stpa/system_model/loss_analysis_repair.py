@@ -271,6 +271,15 @@ class RepairConstraintReferences(BaseModel):
     related_hazards: list[str] = Field(min_length=1)
 
 
+class RepairDispositionReferences(BaseModel):
+    """One selected disposition row's corrected ``loss_ids``; nothing else."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    risk_ref: str = Field(min_length=1)
+    loss_ids: list[str] = Field(min_length=1)
+
+
 class ReferenceRepairResponse(BaseModel):
     """The complete reference-list repair wire.
 
@@ -282,6 +291,17 @@ class ReferenceRepairResponse(BaseModel):
 
     hazards: list[RepairHazardReferences] = Field(default_factory=list)
     security_constraints: list[RepairConstraintReferences] = Field(default_factory=list)
+
+
+class DispositionReferenceRepairResponse(ReferenceRepairResponse):
+    """The reference-list repair wire when disposition rows are selected.
+
+    A disposition's kind and reason are absent; only its ``loss_ids`` can
+    change.  A repair that selects no disposition row keeps the narrower
+    parent wire.
+    """
+
+    risk_dispositions: list[RepairDispositionReferences] = Field(default_factory=list)
 
 
 # ---------------------------------------------------------------------------
@@ -1693,6 +1713,13 @@ class DroppedObligation:
 _REFERENCE_LIST_FIELDS = {
     "hazards": ("related_losses", "hazard_id"),
     "security_constraints": ("related_hazards", "constraint_id"),
+    "risk_dispositions": ("loss_ids", "risk_ref"),
+}
+
+_OWNER_KINDS = {
+    "hazards": "hazard",
+    "security_constraints": "security constraint",
+    "risk_dispositions": "risk disposition",
 }
 
 
@@ -1773,11 +1800,12 @@ class SelectedReferenceList:
 
 @dataclass(frozen=True)
 class ReferenceRepairPlan:
-    """One targeted repair of unknown hazard or constraint references.
+    """One targeted repair of unknown hazard, constraint, or disposition references.
 
     ``meanings`` maps every loss and hazard ID the request names to its
     description, including IDs an earlier call established.  ``feedback``
     is the reference validator's finding the request carries.
+    ``card_texts`` maps each selected disposition's risk card to its text.
     """
 
     prior: LossAnalysisDraft
@@ -1785,6 +1813,7 @@ class ReferenceRepairPlan:
     meanings: tuple[tuple[str, str], ...] = ()
     salvage_warnings: tuple[str, ...] = ()
     feedback: str = ""
+    card_texts: tuple[tuple[str, str], ...] = ()
 
 
 RepairPlan = Union[DispositionRepairPlan, ObligationRepairPlan, ReferenceRepairPlan]
@@ -1838,14 +1867,37 @@ def _reference_lists(
         for constraint in draft.security_constraints
     )
     return tuple(
-        SelectedReferenceList(
-            collection=collection,
-            owner_id=owner_id,
-            original=tuple(references),
-            replacement_ids=tuple(sorted(valid_ids - set(references))),
-            unknown=tuple(dict.fromkeys(r for r in references if r not in valid_ids)),
-        )
+        _reference_list(collection, owner_id, references, valid_ids)
         for collection, owner_id, references, valid_ids in (*rows, *constraint_rows)
+    )
+
+
+def _reference_list(
+    collection: str, owner_id: str, references: list[str], valid_ids: set[str]
+) -> SelectedReferenceList:
+    return SelectedReferenceList(
+        collection=collection,
+        owner_id=owner_id,
+        original=tuple(references),
+        replacement_ids=tuple(sorted(valid_ids - set(references))),
+        unknown=tuple(dict.fromkeys(r for r in references if r not in valid_ids)),
+    )
+
+
+def select_disposition_reference_lists(
+    draft: LossAnalysisDraft, *, valid_loss_ids: set[str]
+) -> tuple[SelectedReferenceList, ...]:
+    """Select each disposition row whose ``loss_ids`` name an undeclared loss.
+
+    A risk card with more than one row has no single list to correct; the
+    accounting gate reports it.
+    """
+    rows_per_card = Counter(row.risk_ref for row in draft.risk_dispositions)
+    return tuple(
+        _reference_list("risk_dispositions", row.risk_ref, row.loss_ids, valid_loss_ids)
+        for row in draft.risk_dispositions
+        if rows_per_card[row.risk_ref] == 1
+        and any(ref not in valid_loss_ids for ref in row.loss_ids)
     )
 
 
@@ -2211,6 +2263,38 @@ def salvage_corrected_reply(
     if not (report.obligation_salvage or report.dropped_dispositions):
         return UnsupportedRepair("salvage found no record-level row to remove")
     return salvaged
+
+
+def salvage_reference_repair_input(
+    reply: LLMResult,
+    *,
+    constraint_wire_model: type[SecurityConstraint],
+    response_format: type[LossAnalysisDraft],
+    gap_wire: bool,
+) -> tuple[LossAnalysisDraft, SalvageReport] | None:
+    """Salvage a first reply whose wire failures are obligation entries only.
+
+    The removed entries get no repair of their own: the attempt's one repair
+    goes to the reply's unknown references.  A dropped disposition row would
+    leave a card unaccounted for that the reference repair cannot restore, so
+    such a reply returns None, as does any reply salvage cannot settle.
+    """
+    salvaged = salvage_corrected_reply(
+        reply,
+        constraint_wire_model=constraint_wire_model,
+        response_format=response_format,
+        gap_wire=gap_wire,
+    )
+    if isinstance(salvaged, UnsupportedRepair) or salvaged[1].dropped_dispositions:
+        return None
+    return salvaged
+
+
+def record_first_reply_salvage(
+    report: SalvageReport, *, step: str, repair_record: RepairRecord | None
+) -> None:
+    """Record each obligation entry salvage removed from a first reply."""
+    _record_salvage_drops(report, step=step, repair_record=repair_record)
 
 
 def _out_of_scope_salvage(report: SalvageReport) -> UnsupportedRepair | None:
@@ -3104,17 +3188,27 @@ def reference_repair_proposals(
     response: ReferenceRepairResponse,
 ) -> dict[str, list[str]]:
     """Return each returned list keyed by its repair identity."""
-    proposals = {
-        f"{item.hazard_id}.related_losses": list(item.related_losses)
-        for item in response.hazards
-    }
-    proposals.update(
-        {
-            f"{item.constraint_id}.related_hazards": list(item.related_hazards)
+    return dict(_returned_reference_lists(response))
+
+
+def _returned_reference_lists(
+    response: ReferenceRepairResponse,
+) -> list[tuple[str, list[str]]]:
+    """Each returned list with its repair identity, in response order."""
+    return [
+        *(
+            (f"{item.hazard_id}.related_losses", list(item.related_losses))
+            for item in response.hazards
+        ),
+        *(
+            (f"{item.constraint_id}.related_hazards", list(item.related_hazards))
             for item in response.security_constraints
-        }
-    )
-    return proposals
+        ),
+        *(
+            (f"{item.risk_ref}.loss_ids", list(item.loss_ids))
+            for item in getattr(response, "risk_dispositions", ())
+        ),
+    ]
 
 
 def _index_returned_reference_lists(
@@ -3122,13 +3216,7 @@ def _index_returned_reference_lists(
     response: ReferenceRepairResponse,
 ) -> dict[str, list[str]]:
     """Index the returned lists; reject unknown, repeated, or missing ones."""
-    returned = [
-        (f"{item.hazard_id}.related_losses", list(item.related_losses))
-        for item in response.hazards
-    ] + [
-        (f"{item.constraint_id}.related_hazards", list(item.related_hazards))
-        for item in response.security_constraints
-    ]
+    returned = _returned_reference_lists(response)
     selected = {item.identity for item in plan.selected}
     by_identity: dict[str, list[str]] = {}
     for identity, references in returned:
@@ -3713,10 +3801,19 @@ def _reference_request(
     loader: TemplateLoader,
     use_case_text: str,
 ) -> _RepairRequest:
+    disposition_lists = any(
+        selected.collection == "risk_dispositions" for selected in plan.selected
+    )
+    wire: type[ReferenceRepairResponse] = (
+        DispositionReferenceRepairResponse
+        if disposition_lists
+        else ReferenceRepairResponse
+    )
     return _RepairRequest(
         system_prompt=loader.render_prompt(
             REFERENCE_REPAIR_SYSTEM_TEMPLATE,
             unknown_ids=any(selected.unknown for selected in plan.selected),
+            disposition_lists=disposition_lists,
         ),
         user_prompt=loader.render_prompt(
             REFERENCE_REPAIR_USER_TEMPLATE,
@@ -3724,8 +3821,8 @@ def _reference_request(
             selected_lists=_selected_reference_views(plan),
             feedback=plan.feedback,
         ),
-        response_format=ReferenceRepairResponse,
-        wire_model=ReferenceRepairResponse,
+        response_format=wire,
+        wire_model=wire,
         merge=lambda response: merge_reference_repair(plan, response),
         proposals=reference_repair_proposals,
     )
@@ -3956,6 +4053,9 @@ def _selected_reference_views(plan: ReferenceRepairPlan) -> list[dict]:
             for constraint in plan.prior.security_constraints
         }
     )
+    owners.update(
+        {("risk_dispositions", risk_ref): text for risk_ref, text in plan.card_texts}
+    )
 
     def described(ids: Iterable[str]) -> list[dict]:
         return [{"id": ref, "meaning": meanings.get(ref, "")} for ref in ids]
@@ -3964,9 +4064,8 @@ def _selected_reference_views(plan: ReferenceRepairPlan) -> list[dict]:
         {
             "identity": selected.identity,
             "owner_id": selected.owner_id,
-            "owner_kind": (
-                "hazard" if selected.collection == "hazards" else "security constraint"
-            ),
+            "owner_kind": _OWNER_KINDS[selected.collection],
+            "collection": selected.collection,
             "owner_text": owners[(selected.collection, selected.owner_id)],
             "field_name": selected.field_name,
             "original": list(selected.original),

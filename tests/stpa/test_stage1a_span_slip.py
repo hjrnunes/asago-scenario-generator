@@ -18,8 +18,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DispositionRepairResponse,
     ObligationRepairResponse,
+    ReferenceRepairResponse,
 )
-from tests.stpa.sp1_helpers import MockLLMClient
+from tests.stpa.sp1_helpers import MockLLMClient, valid_gap_draft_dict
 from tests.helpers.stage1a_targeted_repair import (
     _USE_CASE,
     _VALID_OBLIGATION,
@@ -308,38 +309,46 @@ def test_gap_analysis_drops_an_obligation_whose_span_stays_unmapped(tmp_path) ->
     assert dropped["proposed"]["rule"] == GAP_RULE
 
 
-def test_an_unknown_hazard_beside_an_unmapped_span_stops_without_a_call(
+def test_an_unknown_hazard_beside_an_unmapped_span_gets_a_reference_repair(
     tmp_path,
 ) -> None:
-    risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN)])
+    kept = _VALID_OBLIGATION | {"obligation_id": "O2"}
+    risk = _risk_with_obligations([_entry("O1", UNMAPPABLE_SPAN), kept])
+    known_hazards = list(risk["security_constraints"][0]["related_hazards"])
     risk["security_constraints"][0]["related_hazards"].append("H-99")
     client = MockLLMClient()
-    client.set_response_for(LossAnalysisDraft, [risk])
-
-    with pytest.raises(StageError) as exc_info:
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text=_USE_CASE,
-            risk_cards=_occiai_cards(),
-            run_dir=tmp_path,
-        )
-
-    message = str(exc_info.value)
-    assert message.startswith(
-        "stage_1a/risk_derivation: targeted repair unsupported (graph "
-        "validation is outside the approved repair scope: "
+    client.set_response_for(LossAnalysisDraft, [risk, valid_gap_draft_dict()])
+    client.set_response_for(
+        ReferenceRepairResponse,
+        {
+            "hazards": [],
+            "security_constraints": [
+                {"constraint_id": "SC-1", "related_hazards": known_hazards}
+            ],
+        },
     )
-    assert "unknown IDs: H-99" in message
-    assert "no repair call was made; wire_schema failure class" in message
+
+    result = derive_loss_analysis(
+        llm_client=client,
+        use_case_text=_USE_CASE,
+        risk_cards=_occiai_cards(),
+        run_dir=tmp_path,
+    )
+
     assert [entry["step"] for entry in _stage1a_entries(tmp_path)] == [
-        "risk_derivation"
+        "risk_derivation",
+        "risk_derivation_repair",
+        "gap_analysis",
     ]
-    (unsupported,) = [
-        entry
+    constraint = result.security_constraints[0]
+    assert constraint.related_hazards == known_hazards
+    assert [o.obligation_id for o in constraint.obligations] == ["O2"]
+    kinds = {
+        (entry["kind"], entry["identity"], entry["outcome"])
         for entry in _repair_record(tmp_path)["records"]
-        if entry["kind"] == "unsupported"
-    ]
-    assert unsupported["identity"] == "response"
+    }
+    assert ("salvage", "SC-1/O1", "removed") in kinds
+    assert ("repair", "SC-1.related_hazards", "repaired") in kinds
 
 
 def test_a_slipping_span_beside_an_unrelated_edit_still_stops(tmp_path) -> None:

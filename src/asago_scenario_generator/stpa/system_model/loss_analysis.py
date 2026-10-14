@@ -98,6 +98,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     drop_hazardless_constraints,
     record_cleanup_rows,
     record_corrected_reply_salvage,
+    record_first_reply_salvage,
     record_hazardless_constraint_drop,
     record_loss_presence_repair,
     record_missing_hazard_chain_repair,
@@ -107,6 +108,8 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     revalidate_provider_object,
     run_targeted_repair,
     salvage_corrected_reply,
+    salvage_reference_repair_input,
+    select_disposition_reference_lists,
     select_disposition_repairs,
     select_reference_repairs,
 )
@@ -2266,14 +2269,17 @@ def _reference_plan(
 ) -> ReferenceRepairPlan | None:
     """Plan the reference-list repair, or None when it does not apply.
 
-    The repair applies when the reference gate failed (a wire failure has
-    its own class) on lists that each name an unknown ID.  A list that only
-    repeats an ID gets no repair call; the stop reports the gate's duplicate
-    finding.  A gap list that is empty from the start is another defect and
-    gets no repair call either.
+    The repair applies when the reference gate failed on hazard or
+    constraint lists that each name an unknown ID, and the reply either
+    parsed or failed the wire only on obligation entries.  Salvage removes
+    those entries first; the attempt's one repair goes to the references.
+    Disposition rows that cite an undeclared loss join the same repair.  A
+    list that only repeats an ID gets no repair call; the stop reports the
+    gate's duplicate finding.  A gap list that is empty from the start is
+    another defect and gets no repair call either.
     """
-    if call.failure_class != "draft_references" or not _relationships_present(
-        call, graph
+    if call.failure_class not in _REFERENCE_REPAIR_CLASSES or not (
+        _relationships_present(call, graph)
     ):
         return None
     valid_loss_ids = call.allowed_loss_ids | {
@@ -2287,12 +2293,57 @@ def _reference_plan(
     )
     if not selected:
         return None
-    prior = parse_llm_result(repair_first_result, repair_response_format)
+    salvaged = _reference_repair_prior(
+        call, repair_first_result, repair_response_format
+    )
+    if salvaged is None:
+        return None
+    prior, report = salvaged
+    cards = {card.risk_id: card for card in call.accounting_cards}
+    dispositions = tuple(
+        item
+        for item in select_disposition_reference_lists(
+            prior, valid_loss_ids=valid_loss_ids
+        )
+        if item.owner_id in cards
+    )
+    if report is not None:
+        record_first_reply_salvage(
+            report, step=call.step, repair_record=call.repair_record
+        )
     return ReferenceRepairPlan(
         prior=prior,
-        selected=selected,
+        selected=(*selected, *dispositions),
         meanings=_reference_meanings(prior, call.authoritative_draft),
+        salvage_warnings=report.warnings if report is not None else (),
         feedback=finding,
+        card_texts=tuple(
+            (
+                item.owner_id,
+                f"{cards[item.owner_id].risk_name}: "
+                f"{cards[item.owner_id].risk_description}",
+            )
+            for item in dispositions
+        ),
+    )
+
+
+_REFERENCE_REPAIR_CLASSES = frozenset({"draft_references", "wire_schema"})
+
+
+def _reference_repair_prior(
+    call: _Stage1aCall,
+    repair_first_result: LLMResult,
+    repair_response_format: type[LossAnalysisDraft],
+) -> tuple[LossAnalysisDraft, SalvageReport | None] | None:
+    """Return the draft the reference repair corrects, with its salvage."""
+    if call.failure_class == "draft_references":
+        return parse_llm_result(repair_first_result, repair_response_format), None
+    return salvage_reference_repair_input(
+        repair_first_result,
+        constraint_wire_model=_ProviderSecurityConstraint,
+        response_format=repair_response_format,
+        gap_wire=not issubclass(call.response_format, _Stage1aRiskProviderDraft),
     )
 
 
