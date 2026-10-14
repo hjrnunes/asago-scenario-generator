@@ -175,6 +175,7 @@ def _responses() -> list[dict]:
 
 def _rendered_prompts(baseline: SystemicStpaBaseline, run_dir) -> list[dict]:
     """Run the realization and return each call's step and rendered prompts."""
+    run_dir.mkdir(parents=True, exist_ok=True)
     client = MockLLMClient()
     client.set_response_queue(_responses())
     interpreter = TargetRealizationLlmInterpreter(client, run_dir, temperature=0.4)
@@ -213,3 +214,22 @@ def test_no_target_realization_prompt_renders_the_baseline_digest(tmp_path):
         assert "baseline_digest" not in rendered, prompt["step"]
     extension = next(p for p in prompts if p["step"] == "extend_uncovered_operations")
     assert "baseline_id: baseline:prompts" in extension["user"]
+
+
+def test_a_cited_context_row_changes_the_snapshot_but_no_prompt(tmp_path):
+    plain = _baseline()
+    cited = _baseline(context_row="CA-1-1:ROW-2")
+    assert cited.ica_enumeration.slots[0].icas[0].context_row == "CA-1-1:ROW-2"
+    assert cited.baseline_digest != plain.baseline_digest
+
+    plain_prompts = _rendered_prompts(plain, tmp_path / "plain")
+    cited_prompts = _rendered_prompts(cited, tmp_path / "cited")
+
+    assert [p["step"] for p in plain_prompts] == [
+        "target_realization:map_control_action",
+        "extend_uncovered_operations",
+        "target_realization:verify_control_action_mapping",
+        "enumerate_target_derived_icas",
+        "verify_target_derived_icas",
+    ]
+    assert cited_prompts == plain_prompts
