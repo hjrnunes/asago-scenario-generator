@@ -474,6 +474,37 @@ records. An array, not one pair, keeps a finding with several hazards
 expressible: 19 of the 299 accepted pp-s11 chains had one. The context-coverage supplement keeps
 the separate `related_hazard_ids` and `related_constraint_ids`.
 
+Code, not the prompt, folds the copies a reply writes. The fill prompt asks for
+one finding per unsafe context row, and Gemma follows it: pp-s12 klarna-r2
+filled 39 slots with 103 findings that carry 42 distinct deviations, and five
+slots copied each deviation once per row (9 rows per action), so the unit
+compiled 85 ICAs where pp-s11 compiled 22. After validation and the
+context-coverage supplement have judged the findings as written,
+`_compile_slot_payload` merges the findings of one slot that have equal
+`deviation`, `hazardous_context`, and `loss_consequence`, each compared after
+`.strip()`. The merged finding keeps the first finding's text and `context_row`
+(and so that row's `process_model_context`) and takes, in written order, the
+union of `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,
+and `feedback_refs`; each `finding_indexes` entry in `consideration_results`
+moves to its merged index, repeats dropped. Code builds the merged finding and
+slot draft through validation, and `compile_slot_provider_entry` checks the
+merged references as it checks any finding. A correction message still numbers
+findings as the model wrote them, and the fill request, schema, and correction
+feedback are unchanged: the reply is not told about the merge, and the call log
+keeps the raw reply. On the pp-s12 klarna-r2 recording, the merge turns 85
+ICAs into 57 before ICA verification and the 26 redundant Stage 5 prompts into
+none.
+
+Each merged group (two or more findings) is recorded in `ica-merges.yaml`, next
+to `slot-hazard-offers.yaml`, and only when a merge happened. An entry holds
+the fill request's `target_id`, the `slot_id`, the resulting `ica_id`, and the
+as-written `finding_index`, `context_row`, `related_hazard_ids`, and
+`related_constraint_ids` of every folded finding, the kept one first. The
+record never enters a model request, including ICA hazard verification, hazard
+correction, and Stage 5; it comes from the reply alone, so a replayed run
+writes the same entries as a live one. The `ica_id` is the ID at compile time:
+ICA hazard verification may later drop or correct that ICA.
+
 A fill slot's `consideration_results` is an object keyed by the local handle
 (`R1`..`Rn`) of each obligation routed to the slot, with
 `additionalProperties: false`; each value holds `disposition`,

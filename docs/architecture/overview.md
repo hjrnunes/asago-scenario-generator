@@ -253,8 +253,11 @@ and the run distinguishes a requested revision from one actually applied.
 
 The root atomically publishes `taxonomy-obligation-plan.yaml`,
 `obligation-consideration.yaml`, `obligation-accounting.yaml`,
-`scenario-realization.yaml`, `synthesis-manifest.yaml`, and, when slot
-filling sent requests, `slot-hazard-offers.yaml`. Accounting joins
+`scenario-realization.yaml`, `synthesis-manifest.yaml`, when slot
+filling sent requests, `slot-hazard-offers.yaml`, and, when slot compilation
+merged findings that differ only by context row or pair, `ica-merges.yaml`
+(one entry per merged ICA, with the as-written findings it stands for; see
+`model-facing-interfaces.md`). Accounting joins
 exact obligation/slot, ICA,
 `EXEC:*`, hazard, and constraint evidence but makes no correspondence
 or coverage claim. Scenario realization separately records whether that exact
