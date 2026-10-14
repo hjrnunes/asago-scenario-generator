@@ -359,7 +359,7 @@ def _risk_provider_draft_type(
 
 
 class _Stage1aGapRepairDraft(LossAnalysisDraft):
-    """Canonical domain-shaped view used only by the repair adapter.
+    """Row-level view of a failed reply, each row named by its handle.
 
     Every shape rule a repaired draft can break belongs to the domain models;
     the repair views add only the closed key set and, on the risk wire, the
@@ -566,36 +566,30 @@ def _resolve_provider_reference(
     mapping: dict[str, str],
     existing_ids: set[str],
     kind: str,
-    strict: bool = True,
     field: str | None = None,
 ) -> str:
     """Resolve one existing canonical ID or request-local handle.
 
-    In the normal materialization path an unknown value is rejected before a
-    newly allocated canonical ID can make it look declared.  The named repair
-    adapter may request ``strict=False`` so it can preserve malformed rows for
-    the existing row-level repair classifier without silently resolving them.
+    An unknown value is rejected before a newly allocated canonical ID can
+    make it look declared.
     """
     if value in mapping:
         return mapping[value]
     if value in existing_ids:
         return value
-    if strict:
-        known = sorted(existing_ids | set(mapping.values()))
-        prefix = f"{field}: " if field else ""
-        raise ValueError(
-            f"{prefix}unknown {kind} reference '{value}' in provider graph; "
-            f"Missing {kind} declarations: {value}. Known {kind} IDs: "
-            f"{', '.join(known) or 'none'}"
-        )
-    return value
+    known = sorted(existing_ids | set(mapping.values()))
+    prefix = f"{field}: " if field else ""
+    raise ValueError(
+        f"{prefix}unknown {kind} reference '{value}' in provider graph; "
+        f"Missing {kind} declarations: {value}. Known {kind} IDs: "
+        f"{', '.join(known) or 'none'}"
+    )
 
 
 def _materialize_provider_draft(
     provider_draft: _Stage1aGapProviderDraft,
     *,
     prior: LossAnalysisDraft | None = None,
-    strict_references: bool = True,
 ) -> LossAnalysisDraft:
     """Compile the request-local Stage 1a provider wire into a domain draft.
 
@@ -645,20 +639,17 @@ def _materialize_provider_draft(
         hazard_map=hazard_map,
         loss_map=loss_map,
         valid_loss_ids=valid_loss_ids,
-        strict=strict_references,
     )
     materialized_constraints = _materialize_provider_constraints(
         provider_draft,
         constraint_map=constraint_map,
         hazard_map=hazard_map,
         valid_hazard_ids=prior_hazards,
-        strict=strict_references,
     )
     dispositions = _materialize_provider_dispositions(
         provider_draft,
         loss_map=loss_map,
         valid_loss_ids=valid_loss_ids,
-        strict=strict_references,
     )
     # Keep this assertion close to the adapter: it catches accidental changes
     # to the collection split without hiding records in a later merge.
@@ -681,7 +672,6 @@ def _materialize_provider_hazards(
     hazard_map: dict[str, str],
     loss_map: dict[str, str],
     valid_loss_ids: set[str],
-    strict: bool,
 ) -> list[Hazard]:
     """Compile provider hazards with canonical IDs and resolved loss references."""
     return [
@@ -694,7 +684,6 @@ def _materialize_provider_hazards(
                     mapping=loss_map,
                     existing_ids=valid_loss_ids,
                     kind="loss",
-                    strict=strict,
                     field="related_losses",
                 )
                 for reference in item.related_losses
@@ -710,7 +699,6 @@ def _materialize_provider_constraints(
     constraint_map: dict[str, str],
     hazard_map: dict[str, str],
     valid_hazard_ids: set[str],
-    strict: bool,
 ) -> list[SecurityConstraint]:
     """Compile provider constraints with canonical IDs and resolved hazards."""
     return [
@@ -725,7 +713,6 @@ def _materialize_provider_constraints(
                     mapping=hazard_map,
                     existing_ids=valid_hazard_ids,
                     kind="hazard",
-                    strict=strict,
                     field="related_hazards",
                 )
                 for reference in item.related_hazards
@@ -741,7 +728,6 @@ def _materialize_provider_dispositions(
     *,
     loss_map: dict[str, str],
     valid_loss_ids: set[str],
-    strict: bool,
 ) -> list[RiskDisposition]:
     """Copy provider dispositions with their loss references resolved."""
     return [
@@ -753,7 +739,6 @@ def _materialize_provider_dispositions(
                         mapping=loss_map,
                         existing_ids=valid_loss_ids,
                         kind="loss",
-                        strict=strict,
                         field="loss_ids",
                     )
                     for reference in disposition.loss_ids
@@ -770,64 +755,6 @@ _PROVIDER_GRAPH_COLLECTIONS = (
     "hazards",
     "security_constraints",
 )
-
-
-def _prepare_current_provider_repair_input(
-    result: LLMResult | None,
-    *,
-    response_format: type[BaseModel],
-    prior: LossAnalysisDraft | None,
-) -> tuple[LLMResult, type[LossAnalysisDraft]] | None:
-    """Adapt one current local-handle response for the legacy repair engine.
-
-    The targeted-repair module intentionally works on domain rows because its
-    approved scope is limited to dispositions and obligation entries.  Keep
-    the live provider boundary strict, then translate only the failed first
-    response into canonical domain rows for that engine.  A response without
-    any current local handles is rejected here rather than being interpreted
-    as a historical canonical wire.
-    """
-    if result is None:
-        return None
-    raw = _decode_repair_content(result)
-    if raw is None or not _is_current_local_wire(raw, response_format):
-        return None
-    provider = _validate_provider_structure(raw, response_format)
-    if provider is None:
-        return None
-    # Preserve unresolved references for the approved repair classifier; the
-    # normal first-attempt compiler remains strict and rejects them before any
-    # new canonical ID can be mistaken for a declaration.
-    domain = _materialize_provider_draft(
-        provider,
-        prior=prior,
-        strict_references=False,
-    )
-    provider_losses = [*provider.risk_card_losses, *provider.use_case_losses]
-    domain_losses = [*domain.risk_card_losses, *domain.use_case_losses]
-    if len(provider_losses) != len(domain_losses):
-        return None
-    loss_map = _handle_id_map(provider_losses, domain_losses, "loss_id")
-    hazard_map = _handle_id_map(provider.hazards, domain.hazards, "hazard_id")
-    constraint_map = _handle_id_map(
-        provider.security_constraints, domain.security_constraints, "constraint_id"
-    )
-    _adapt_handle_rows(raw, "risk_card_losses", "loss_id", loss_map)
-    _adapt_handle_rows(raw, "use_case_losses", "loss_id", loss_map)
-    _adapt_handle_rows(
-        raw, "hazards", "hazard_id", hazard_map, ("related_losses", loss_map)
-    )
-    _adapt_handle_rows(
-        raw,
-        "security_constraints",
-        "constraint_id",
-        constraint_map,
-        ("related_hazards", hazard_map),
-    )
-    is_risk_wire = issubclass(response_format, _Stage1aRiskProviderDraft)
-    _adapt_disposition_loss_ids(raw, loss_map, is_risk_wire=is_risk_wire)
-    repair_model = _Stage1aRiskRepairDraft if is_risk_wire else _Stage1aGapRepairDraft
-    return result.model_copy(update={"content": raw}), repair_model
 
 
 @dataclass(frozen=True)
@@ -886,15 +813,6 @@ def _handle_repair_input(
         ),
         ids=_provider_id_space(provider, prior),
     )
-
-
-def _handle_id_map(
-    provider_rows: Iterable[Any], domain_rows: Iterable[Any], id_attr: str
-) -> dict[str, str]:
-    return {
-        provider_row.handle: getattr(domain_row, id_attr)
-        for provider_row, domain_row in zip(provider_rows, domain_rows)
-    }
 
 
 def _decode_repair_content(result: LLMResult) -> dict | None:
@@ -959,49 +877,6 @@ def _validate_provider_structure(
     ):
         return None
     return provider
-
-
-def _adapt_handle_rows(
-    raw: dict,
-    name: str,
-    identity: str,
-    mapping: dict[str, str],
-    references: tuple[str, dict[str, str]] | None = None,
-) -> None:
-    """Replace each row's local handle, and its references, with canonical IDs."""
-    rows = raw.get(name)
-    if not isinstance(rows, list):
-        return
-    for row in rows:
-        if not isinstance(row, dict):
-            continue
-        handle = row.get("handle")
-        if isinstance(handle, str) and handle in mapping:
-            row[identity] = mapping[handle]
-            row.pop("handle", None)
-        if references is not None:
-            reference_field, reference_map = references
-            refs = row.get(reference_field)
-            if isinstance(refs, list):
-                row[reference_field] = [
-                    reference_map.get(reference, reference) for reference in refs
-                ]
-
-
-def _adapt_disposition_loss_ids(
-    raw: dict, loss_map: dict[str, str], *, is_risk_wire: bool
-) -> None:
-    """Map disposition loss handles; give a gap body an empty collection."""
-    dispositions = raw.get("risk_dispositions")
-    if isinstance(dispositions, list):
-        for row in dispositions:
-            if not isinstance(row, dict):
-                continue
-            loss_ids = row.get("loss_ids")
-            if isinstance(loss_ids, list):
-                row["loss_ids"] = [loss_map.get(value, value) for value in loss_ids]
-    elif not is_risk_wire:
-        raw["risk_dispositions"] = []
 
 
 class _DraftReferenceValidationError(ValueError):
@@ -2190,8 +2065,8 @@ def _correct_references(
 def _reject_unsupported_wire_error(call: _Stage1aCall, error_msg: str) -> None:
     """Stop with a typed reason when the wire damage is outside repair scope."""
     # Classify container and top-level wire damage before attempting the
-    # narrow repair adapter.  The adapter intentionally accepts only a
-    # complete current local-handle graph; without this early classification a
+    # repair input.  The repair input is only ever a complete current
+    # local-handle graph; without this early classification a
     # malformed collection would be reported as a generic "no repair wire"
     # error and lose its typed terminal reason.
     if call.first_wire_error is None:

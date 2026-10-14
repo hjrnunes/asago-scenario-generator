@@ -20,8 +20,8 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _Stage1aRevisionPatch,
     _Stage1aRiskProviderDraft,
     _materialize_provider_draft,
+    _handle_repair_input,
     _merge_drafts,
-    _prepare_current_provider_repair_input,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     _draft_from_analysis,
@@ -408,7 +408,7 @@ def test_provider_resolves_prior_canonical_references_only() -> None:
     assert materialized.hazards[0].related_losses == ["L-2"]
 
 
-def test_repair_adapter_translates_current_wire_without_accepting_old_ids() -> None:
+def test_repair_input_keeps_the_reply_handles_and_allocates_canonical_ids() -> None:
     result = LLMResult(
         content={
             "risk_card_losses": [
@@ -449,20 +449,19 @@ def test_repair_adapter_translates_current_wire_without_accepting_old_ids() -> N
         completion_tokens=1,
         duration_ms=1,
     )
-    adapted = _prepare_current_provider_repair_input(
+    adapted = _handle_repair_input(
         result,
         response_format=_Stage1aRiskProviderDraft,
         prior=None,
     )
     assert adapted is not None
-    translated, repair_model = adapted
-    assert repair_model is _Stage1aRiskRepairDraft
-    assert translated.content["risk_card_losses"][0]["loss_id"] == "L-1"
-    assert translated.content["hazards"][0]["related_losses"] == ["L-1"]
-    assert translated.content["risk_dispositions"][0]["loss_ids"] == ["L-1"]
-    assert translated.content["risk_dispositions"][0]["reason"] == (
-        "malformed cited row"
-    )
+    assert adapted.response_format is _Stage1aRiskRepairDraft
+    content = adapted.result.content
+    assert content["risk_card_losses"][0]["loss_id"] == "loss"
+    assert content["hazards"][0]["related_losses"] == ["loss"]
+    assert content["risk_dispositions"][0]["loss_ids"] == ["loss"]
+    assert content["risk_dispositions"][0]["reason"] == "malformed cited row"
+    assert dict(adapted.ids.losses) == {"loss": "L-1"}
 
 
 def test_merge_preserves_existing_canonical_ids() -> None:
