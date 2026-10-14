@@ -976,9 +976,13 @@ def _evaluate_value(
     state: StateIndex,
     errors: list[str],
 ) -> ComparisonCheck | None:
+    label = f"comparisons[{index}]"
+    record_error = _record_operand_error(label, comparison, universe, state)
+    if record_error is not None:
+        errors.append(record_error)
+        return None
     left_ok, left, left_text = _resolve_operand(comparison.left, universe, selected)
     right_ok, right, right_text = _resolve_operand(comparison.right, universe, selected)
-    label = f"comparisons[{index}]"
     if not (left_ok and right_ok):
         unresolved = [
             text
@@ -1013,6 +1017,40 @@ def _evaluate_value(
         index=index,
         result=result,
         reason=f"{left_text} {comparison.op} {right_text} {verb}",
+    )
+
+
+def _record_operand_error(
+    label: str,
+    comparison: ValueComparison,
+    universe: ConditionUniverse,
+    state: StateIndex,
+) -> str | None:
+    """Reject a call argument compared with a fact that is a whole record.
+
+    The argument may still be request-dependent, so the type check after
+    resolution would never see the pair and the comparison would publish a
+    record literal that no call can equal.
+    """
+
+    sides = (comparison.left, comparison.right)
+    argument = next((s for s in sides if isinstance(s, ArgumentOperand)), None)
+    fact = next((s for s in sides if isinstance(s, FactOperand)), None)
+    if argument is None or fact is None:
+        return None
+    if not isinstance(universe.fact_values.get(fact.path), Mapping):
+        return None
+    located = state.record_of(fact.path)
+    key_hint = (
+        f"the record's key as a literal ({_render(located[1])}) or "
+        if located is not None and record_path(*located) == fact.path
+        else ""
+    )
+    return (
+        f"{label} compares argument {argument.operation}.{argument.argument} "
+        f"{comparison.op} fact {fact.path}, a whole record, which no call "
+        f"argument can equal. Compare the argument with {key_hint}one of the "
+        f"record's fields ({fact.path}.<field>)"
     )
 
 
