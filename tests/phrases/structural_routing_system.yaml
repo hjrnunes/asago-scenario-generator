@@ -11,7 +11,7 @@ cases:
         `targeting` holds the route's structural placement: non-empty
         `slot_ids`, `hazard_ids`, and `constraint_ids`
       - each an empty list when the path has none
-      - '"disposition":"targeted","targeting":{"slot_ids":["RESP-1:CA-1-1:NOT_PROVIDED"]'
+      - '"disposition":"targeted","targeting":{"slot_ids":["RESP-1:CA-1-1:INCORRECT"]'
       - '"disposition":"unresolved","targeting":null'
       - '"missing_concepts":null'
       - whether the system has the surface

@@ -57,7 +57,7 @@ including a duplicated or parenthetical hazard ID; the typed relationship contro
 For a responsibility slot, use the slot's exact RESP owner in `controller_ids` and
 `responsibility_ids`, its exact CA in `control_action_ids`, and that action's exact CP in
 `controlled_process_ids`. For a coordination slot such as
-`CL-1:CM-1:NOT_PROVIDED`, resolve the exact CL record: use its source responsibility as
+`CL-1:CM-1:<UCA type>`, resolve the exact CL record: use its source responsibility as
 the `controller_ids` value, include both its source and target responsibilities in
 `responsibility_ids`, use the exact CM in `control_action_ids`, the exact CL in
 `coordination_link_ids`, and the link's shared PM in `process_model_part_ids`. Never put
