@@ -11,6 +11,8 @@ from asago_scenario_generator.models.target_realization import (
     SystemicControlAction,
     SystemicControlledProcess,
     SystemicElementReference,
+    SystemicICA,
+    SystemicICASlot,
     TargetDerivedICARequest,
     TargetDerivedICASlot,
     TargetDerivedICAFinding,
@@ -2335,3 +2337,86 @@ def test_typed_structure_rejects_a_target_process_that_collides_with_the_baselin
                 ControlledProcess(cp_id="CP-1", description="target-derived copy"),
             ],
         )
+
+
+def _baseline_citing_context_row(context_row):
+    _, loss_analysis, control_structure, ica_enumeration = _union_authorities()
+    slot = ica_enumeration.slots[0]
+    cited = ICAEnumeration(
+        slots=[
+            slot.model_copy(
+                update={
+                    "icas": [
+                        slot.icas[0].model_copy(update={"context_row": context_row})
+                    ]
+                }
+            )
+        ]
+    )
+    return SystemicStpaBaseline.from_stpa(
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        ica_enumeration=cited,
+        baseline_id="baseline:union",
+    )
+
+
+def test_baseline_snapshot_and_persisted_yaml_keep_the_cited_context_row(tmp_path):
+    baseline = _baseline_citing_context_row("CA-1-1:ROW-2")
+
+    assert baseline.ica_enumeration.slots[0].icas[0].context_row == "CA-1-1:ROW-2"
+    realization = realize_target_derived_icas(
+        baseline,
+        _realize(baseline, _profile(), lambda: _Interpreter()),
+        _DerivedFindingInterpreter(),
+    )
+    path = write_target_realization(tmp_path, realization)
+    text = path.read_text(encoding="utf-8")
+    assert "context_row: CA-1-1:ROW-2" in text
+    loaded = TargetRealizationResult.from_yaml(text)
+    loaded.assert_integrity()
+    view = loaded.effective_view
+    assert view is not None
+    assert view.effective_ica_enumeration.slots[0].icas[0].context_row == (
+        "CA-1-1:ROW-2"
+    )
+
+
+def test_an_ica_without_a_cited_row_serializes_and_digests_as_before():
+    cited = _baseline_citing_context_row(None)
+    plain, *_ = _union_authorities()
+
+    assert cited == plain
+    assert cited.baseline_digest == plain.baseline_digest
+    assert "context_row" not in str(plain.baseline_payload())
+    realization = realize_target_derived_icas(
+        plain,
+        _realize(plain, _profile(), lambda: _Interpreter()),
+        _DerivedFindingInterpreter(),
+    )
+    text = realization.to_yaml()
+    assert "context_row" not in text
+    TargetRealizationResult.from_yaml(text).assert_integrity()
+
+
+def test_projection_carries_a_cited_context_row_into_the_stpa_ica():
+    slot = SystemicICASlot(
+        slot_id="RESP-1:CA-1-2:INCORRECT",
+        responsibility="RESP-1",
+        control_action="CA-1-2",
+        uca_type="INCORRECT",
+        is_na=False,
+        icas=(
+            SystemicICA(
+                ica_id="RESP-1:CA-1-2:INCORRECT:1",
+                ica_text="Derived unsafe action.",
+                hazardous_context="Derived context.",
+                loss_scenario="Derived loss scenario.",
+                context_row="CA-1-2:ROW-1",
+            ),
+        ),
+    )
+
+    projected = target_realization_module._ica_slot_to_stpa(slot)
+
+    assert projected.icas[0].context_row == "CA-1-2:ROW-1"
