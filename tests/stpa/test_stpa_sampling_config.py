@@ -239,8 +239,8 @@ def test_stpa_client_has_a_default_deadline_and_no_hidden_sdk_retries(
     with patch("asago_scenario_generator.stpa.infra.llm.OpenAI") as factory:
         client = resolve_llm_client_from_env()
 
-    assert client.timeout == 300.0
-    assert factory.call_args.kwargs["timeout"] == 300.0
+    assert client.timeout == 600.0
+    assert factory.call_args.kwargs["timeout"] == 600.0
     assert factory.call_args.kwargs["max_retries"] == 0
 
 

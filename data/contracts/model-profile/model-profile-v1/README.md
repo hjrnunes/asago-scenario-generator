@@ -43,9 +43,9 @@ A reader accepts every field in the table and uses only the fields in its
 - **Required.** `required_by` lists the readers that reject an absent field.
   `orch-gateway` and `orch-client` default an absent `api_key` to `unused`.
 - **Defaults.** `default` gives the loaded value of an absent field per reader:
-  `*` is the default, any other key overrides it for that reader. Two overrides
-  are deferred drift, not design: `timeout` (producer 300 seconds; consumer and
-  orch use the SDK default) and `strict_json_schema` (consumer null, orch false).
+  `*` is the default, any other key overrides it for that reader. No field has
+  an override today. An absent `timeout` is 600 seconds and an absent
+  `strict_json_schema` is false in every reader that uses them.
 - **Numbers** are finite. Booleans, strings and floats never stand in for an
   integer.
 - **File shape.** The producer reads a flat mapping of profile names. The

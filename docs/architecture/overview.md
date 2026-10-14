@@ -599,7 +599,7 @@ remain in `stage_warnings`. STPA sampling resolves explicit arguments before
 profile/environment values and defaults, and manifests persist the effective
 non-secret settings.
 
-Both workflows apply a 300-second request deadline by default, configurable via
+Both workflows apply a 600-second request deadline by default, configurable via
 the named-profile `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`. Hidden
 OpenAI SDK retries are disabled; all retry policy therefore remains explicit,
 bounded, and observable in pipeline evidence. The model client makes one
