@@ -476,8 +476,8 @@ the separate `related_hazard_ids` and `related_constraint_ids`.
 
 Code, not the prompt, folds the copies a reply writes. The fill prompt asks for
 one finding per unsafe context row, and Gemma follows it: pp-s12 klarna-r2
-filled 39 slots with 103 findings that carry 42 distinct deviations, and five
-slots copied each deviation once per row (9 rows per action), so the unit
+filled 39 slots with 103 findings that carry 42 distinct deviations, and slots
+copied a deviation once per context row (up to 9 rows per action), so the unit
 compiled 85 ICAs where pp-s11 compiled 22. After validation and the
 context-coverage supplement have judged the findings as written,
 `_compile_slot_payload` merges the findings of one slot that have equal
@@ -492,8 +492,8 @@ merged references as it checks any finding. A correction message still numbers
 findings as the model wrote them, and the fill request, schema, and correction
 feedback are unchanged: the reply is not told about the merge, and the call log
 keeps the raw reply. On the pp-s12 klarna-r2 recording, the merge turns 85
-ICAs into 57 before ICA verification and the 26 redundant Stage 5 prompts into
-none.
+ICAs into 57 before ICA verification: 16 merged ICAs in eight slots stand for
+62 as-written findings.
 
 Each merged group (two or more findings) is recorded in `ica-merges.yaml`, next
 to `slot-hazard-offers.yaml`, and only when a merge happened. An entry holds
