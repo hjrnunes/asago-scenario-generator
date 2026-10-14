@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -11,9 +12,8 @@ from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra.llm import (
     LLMClient,
     LLMResult,
-    _apply_legacy_json_fallback,
-    _guided_json_enabled,
     _json_schema_response_format,
+    _openrouter_json_object_mode,
     _prompt_messages,
     _resolve_api_key,
     _resolve_base_url,
@@ -164,20 +164,11 @@ class TestInfraLLMComplete:
 
         assert not client._client.method_calls
 
-    def test_complete_allow_unvalidated_uses_raw_content(self):
-        """Unvalidated structured calls return raw JSON for post-processing."""
-        client = self._make_mock_client(content='{"key": "value"}')
-        result = client.complete(
-            "system",
-            "user",
-            response_format=dict,
-            allow_unvalidated=True,
-        )
-        assert result.content == '{"key": "value"}'
-        assert client._client.chat.completions.create.called
-        assert client._client.chat.completions.create.call_args.kwargs[
-            "response_format"
-        ] == {"type": "json_object"}
+    def test_complete_takes_no_compatibility_flag(self):
+        """Every structured request has a schema; no caller can opt out."""
+        parameters = inspect.signature(LLMClient.complete).parameters
+
+        assert "allow_unvalidated" not in parameters
 
     def test_qwen_controls_use_supported_request_body(self):
         """Thinking and strict output use the vLLM-supported request fields."""
@@ -185,12 +176,7 @@ class TestInfraLLMComplete:
         client.enable_thinking = False
         client.use_guided_decoding = True
 
-        client.complete(
-            "system",
-            "user",
-            response_format=_OpenRouterPayload,
-            allow_unvalidated=True,
-        )
+        client.complete("system", "user", response_format=_OpenRouterPayload)
 
         sent = client._client.chat.completions.create.call_args.kwargs
         assert sent["extra_body"] == {
@@ -210,7 +196,7 @@ class TestInfraLLMComplete:
         assert sent["extra_body"] == {"top_k": 64}
         assert "chat_template_kwargs" not in sent["extra_body"]
 
-    def test_openrouter_structured_completion_uses_json_object_compatibility(self):
+    def test_openrouter_structured_completion_uses_json_object_mode(self):
         """OpenRouter structured output uses JSON-object mode."""
         client = self._make_mock_client(content='{"key": "value"}')
         client.base_url = "https://openrouter.ai/api/v1"
@@ -221,6 +207,29 @@ class TestInfraLLMComplete:
         assert client._client.chat.completions.create.call_args.kwargs[
             "response_format"
         ] == {"type": "json_object"}
+
+    def test_openrouter_json_object_mode_ignores_guided_decoding(self):
+        """The profile's guided-decoding switch does not turn the mode into a schema."""
+        client = self._make_mock_client(content='{"exact_field": "value"}')
+        client.base_url = "https://openrouter.ai/api/v1"
+        client.use_guided_decoding = True
+
+        result = client.complete("system", "user", response_format=_OpenRouterPayload)
+
+        sent = client._client.chat.completions.create.call_args.kwargs
+        assert sent["response_format"] == {"type": "json_object"}
+        assert isinstance(result.content, str)
+
+    def test_a_structured_request_off_openrouter_always_sends_the_schema(self):
+        """Without JSON-object mode, a structured call sends its model's schema."""
+        client = self._make_mock_client(content='{"exact_field": "value"}')
+
+        client.complete("system", "user", response_format=_OpenRouterPayload)
+
+        sent = client._client.chat.completions.create.call_args.kwargs
+        assert sent["response_format"] == _json_schema_response_format(
+            _OpenRouterPayload
+        )
 
     def test_openrouter_structured_prompt_carries_exact_schema(self):
         """Portable JSON mode still gives the model the exact field contract."""
@@ -294,56 +303,18 @@ class TestInfraLLMHelpers:
         ]
 
     @pytest.mark.parametrize(
-        ("use_guided", "allow_unvalidated", "schema", "expected"),
+        ("base_url", "schema", "expected"),
         [
-            (True, True, _OpenRouterPayload, True),
-            (True, True, None, False),
-            (False, True, _OpenRouterPayload, False),
-            (True, False, _OpenRouterPayload, False),
-            (False, False, None, False),
+            ("https://openrouter.ai/api/v1", _OpenRouterPayload, True),
+            ("https://openrouter.ai/api/v1", None, False),
+            ("https://models.example.test/v1", _OpenRouterPayload, False),
+            (None, _OpenRouterPayload, False),
         ],
-        ids=["all_three", "no_schema", "no_decoding", "validated", "none"],
+        ids=["openrouter", "no_schema", "other_host", "no_host"],
     )
-    def test_guided_json_enabled_requires_all_three(
-        self, use_guided, allow_unvalidated, schema, expected
-    ):
-        """_guided_json_enabled needs decoding, unvalidated, and a schema."""
-        assert _guided_json_enabled(use_guided, allow_unvalidated, schema) is expected
-
-    @pytest.mark.parametrize(
-        ("allow_unvalidated", "schema", "use_guided", "expected"),
-        [
-            (
-                True,
-                _OpenRouterPayload,
-                False,
-                {"response_format": {"type": "json_object"}},
-            ),
-            (
-                True,
-                _OpenRouterPayload,
-                True,
-                {"response_format": _json_schema_response_format(_OpenRouterPayload)},
-            ),
-            (True, None, False, {}),
-            (False, _OpenRouterPayload, False, {}),
-            (False, None, True, {}),
-        ],
-        ids=[
-            "json_object",
-            "json_schema_when_guided",
-            "no_schema",
-            "validated",
-            "none",
-        ],
-    )
-    def test_apply_legacy_json_fallback(
-        self, allow_unvalidated, schema, use_guided, expected
-    ):
-        """The fallback adds a response format only for unvalidated structured calls."""
-        kwargs: dict = {}
-        _apply_legacy_json_fallback(kwargs, allow_unvalidated, schema, use_guided)
-        assert kwargs == expected
+    def test_openrouter_json_object_mode(self, base_url, schema, expected):
+        """JSON-object mode applies to a structured call on an OpenRouter host."""
+        assert _openrouter_json_object_mode(base_url, schema) is expected
 
     def test_token_usage_normalizes_missing_usage(self):
         """_token_usage falls back to an unavailable token record."""
@@ -464,13 +435,6 @@ def _create_response(content: str) -> MagicMock:
         ({}, (None, 0.7), {}, {"temperature": 0.7}, ()),
         ({"top_k": 10}, (None, 0.5), {}, {"extra_body": {"top_k": 10}}, ()),
         ({}, (None, 0.5), {}, {}, ("extra_body",)),
-        (
-            {},
-            (None, 0.5),
-            {"response_format": _Schema, "use_guided_json": True},
-            {},
-            ("extra_body",),
-        ),
     ],
     ids=[
         "max_tokens_set",
@@ -480,7 +444,6 @@ def _create_response(content: str) -> MagicMock:
         "temperature_always_set",
         "top_k_in_extra_body",
         "no_extra_body_when_empty",
-        "guided_schema_not_in_extra_body",
     ],
 )
 def test_build_extra_kwargs(client_args, call_args, call_kwargs, present, absent):
@@ -493,17 +456,16 @@ def test_build_extra_kwargs(client_args, call_args, call_kwargs, present, absent
 
 
 @pytest.mark.parametrize(
-    ("response_format", "allow_unvalidated", "content", "strict_schema"),
+    ("response_format", "json_object_mode", "content", "strict_schema"),
     [
         (_Schema, False, '{"value":"parsed-content"}', True),
         (_Schema, True, "raw-text", False),
         (None, False, "raw-text", False),
-        (None, True, "raw-text", False),
     ],
-    ids=["strict_schema", "unvalidated", "no_format", "no_format_unvalidated"],
+    ids=["strict_schema", "json_object_mode", "no_format"],
 )
 def test_request_completion_always_uses_create_and_the_first_choice(
-    response_format, allow_unvalidated, content, strict_schema
+    response_format, json_object_mode, content, strict_schema
 ):
     """Every branch goes through chat.completions.create and returns choices[0]."""
     client = _make_client()
@@ -513,7 +475,7 @@ def test_request_completion_always_uses_create_and_the_first_choice(
         [{"role": "user", "content": "hi"}],
         response_format,
         {},
-        allow_unvalidated=allow_unvalidated,
+        json_object_mode=json_object_mode,
     )
 
     assert returned == content

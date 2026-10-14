@@ -268,14 +268,15 @@ class _RevisionLink(_RevisionWire):
     description: _Text
 
 
-class _RevisionDeltaWire(_RevisionWire):
-    """The revision response as the model must write it.
-
-    Every object is closed and every collection that is present must be a
-    list; an omitted collection is empty.  IDs, reference types, and action
-    kinds stay as written for normalization and assembly to settle.
-    """
-
+# The revision response as the model must write it, and the schema the request
+# sends.  It narrows ``RevisionDelta`` to the wire objects the way
+# ``_ControlElementProviderSet`` narrows Call 2b, so a reply the schema allows is
+# a reply the wire models accept.  Every object is closed and every collection
+# that is present must be a list; an omitted collection is empty.  IDs,
+# reference types, and action kinds stay as written for normalization and
+# assembly to settle.  A docstring here would reach the model as the schema
+# description.
+class _RevisionDeltaProviderSet(RevisionDelta):
     new_responsibilities: list[_RevisionResponsibility] = []
     new_controlled_processes: list[_RevisionControlledProcess] = []
     new_coordination_links: list[_RevisionLink] = []
@@ -285,7 +286,7 @@ class _RevisionDeltaWire(_RevisionWire):
 
 def _validate_revision_wire(value: Any) -> None:
     """Reject a revision response whose carrier breaks the wire models."""
-    _RevisionDeltaWire.model_validate(value)
+    _RevisionDeltaProviderSet.model_validate(value)
 
 
 def _revision_delta_from_wire(value: Any) -> RevisionDelta:
@@ -603,7 +604,7 @@ def run_revision(
         llm_client=llm_client,
         system_prompt=system_prompt,
         user_prompt=user_prompt,
-        response_format=RevisionDelta,
+        response_format=_RevisionDeltaProviderSet,
         run_dir=run_dir,
         stage=STAGE,
         step=STEP_REVISION,
@@ -614,9 +615,6 @@ def run_revision(
         ),
         temperature=temperature,
         max_completion_tokens=REVISION_MAX_COMPLETION_TOKENS,
-        # ``allow_unvalidated`` keeps the request a JSON object without a
-        # schema; the wire models below are the response contract.
-        allow_unvalidated=True,
         raw_result_validator=_validate_revision_wire,
         response_parser=_parse_revision_result,
     )

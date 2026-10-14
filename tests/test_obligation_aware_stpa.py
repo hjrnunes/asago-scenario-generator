@@ -561,7 +561,6 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
     briefs = build_neutral_briefs(plan, (pattern,))
     brief = briefs[0]
     prompts: list[str] = []
-    compatibility_modes: list[bool] = []
     completion_caps: list[int | None] = []
     response_formats: list[type] = []
 
@@ -571,8 +570,8 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
 
         def complete(self, **kwargs):
             self.calls += 1
+            assert "allow_unvalidated" not in kwargs
             prompts.append(kwargs["user_prompt"])
-            compatibility_modes.append(kwargs.get("allow_unvalidated", False))
             completion_caps.append(kwargs.get("max_completion_tokens"))
             response_formats.append(kwargs["response_format"])
             if self.calls == 1:
@@ -646,7 +645,6 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
     assert len(result.call_evidence) == 1
     assert result.call_evidence[0].attempt_count == 2
     assert "Validation correction" in prompts[1]
-    assert compatibility_modes == [False, False, False]
     assert completion_caps == [8192, 8192, 1024]
     schema = response_formats[0].model_json_schema()
     assert "routes" in schema["required"]

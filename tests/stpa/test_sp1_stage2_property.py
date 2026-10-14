@@ -482,7 +482,7 @@ class TestCallLogOrdering:
 
         # Verify ordering by response_format
         assert client.calls[0].response_format is RequirementSet
-        assert client.calls[1].response_format is ResponsibilitySet
+        assert issubclass(client.calls[1].response_format, ResponsibilitySet)
         assert issubclass(client.calls[2].response_format, ControlElementSet)
         assert issubclass(
             client.calls[3].response_format, _CoordinationProviderEnvelope

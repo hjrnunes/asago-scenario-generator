@@ -85,13 +85,11 @@ and replaces `response_format` with its `type`, `name` and `strict` entries.
 | I6 | `orch-gateway` uses only `base_url`, `model` and `api_key`. |
 | I7 | The consumer and orch read a nested `profiles` mapping; the producer does not. |
 | I8 | The producer fills an absent field from its `ASAGO_SCENARIO_GENERATOR_*` variables. The cases run with them unset. |
-| I10 | A tolerant call (`allow_unvalidated`) sends a `response_format` only from the producer; orch and the consumer send none. |
 
 ## Call parameters
 
 `call_defaults` in `request-cases.json` lists the parameters and their defaults:
 the texts `system` and `user`, the `role` (`author` or `review`, used by the
-consumer), `structured` (the call passes a `Reply` response model),
-`tolerant` (the call passes `allow_unvalidated`), the call-site
+consumer), `structured` (the call passes a `Reply` response model), the call-site
 `max_completion_tokens` and `temperature`, and `first_error` (a status code the
 fake client raises as the SDK's rate-limit error on the first request).

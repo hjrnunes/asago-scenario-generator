@@ -123,14 +123,15 @@ class TestParseLlmResult:
 
 
 class TestCallWithPolicyRequestShape:
-    """allow_unvalidated shapes the request only; a client TypeError is not retried."""
+    """The request names the response model only; a client TypeError is not retried."""
 
-    def test_json_object_mode_is_passed_and_still_validates(self, tmp_path):
+    def test_the_request_carries_no_compatibility_flag(self, tmp_path):
         client = ScriptedClient([{"item_id": "malformed"}])
 
-        outcome = _send(client, tmp_path, allow_unvalidated=True)
+        outcome = _send(client, tmp_path)
 
-        assert client.calls[0]["allow_unvalidated"] is True
+        assert "allow_unvalidated" not in client.calls[0]
+        assert client.calls[0]["response_format"] is _NestedModel
         assert outcome.value is None
         assert "malformed source ID" in outcome.error
 
@@ -142,13 +143,11 @@ class TestCallWithPolicyRequestShape:
             tmp_path,
             _OptionalDumpModel,
             max_completion_tokens=10,
-            allow_unvalidated=True,
         )
 
         assert outcome.error is None
         assert outcome.value.name == "ok"
         assert client.calls[0]["max_completion_tokens"] == 10
-        assert client.calls[0]["allow_unvalidated"] is True
 
     def test_default_validates_against_the_response_model(self, tmp_path):
         outcome = _send(ScriptedClient([{"item_id": "malformed"}]), tmp_path)
@@ -157,21 +156,17 @@ class TestCallWithPolicyRequestShape:
         assert outcome.error is not None
         assert "malformed source ID" in outcome.error
 
-    @pytest.mark.parametrize("allow_unvalidated", [True, False])
     @pytest.mark.parametrize(
         "error",
         [
-            "unexpected keyword argument 'allow_unvalidated'",
             "unexpected keyword argument 'response_format'",
             "response_format is the wrong type",
         ],
     )
-    def test_a_client_type_error_is_not_retried(
-        self, tmp_path, error, allow_unvalidated
-    ):
+    def test_a_client_type_error_is_not_retried(self, tmp_path, error):
         client = ScriptedClient([TypeError(error), {"item_id": "valid"}])
 
-        outcome = _send(client, tmp_path, allow_unvalidated=allow_unvalidated)
+        outcome = _send(client, tmp_path)
 
         assert len(client.calls) == 1
         assert outcome.value is None
@@ -658,10 +653,8 @@ class TestRetryAttemptLog:
             **extra,
         )
 
-    def test_json_object_mode_is_off_by_default(self) -> None:
-        parameter = inspect.signature(call_with_policy).parameters["allow_unvalidated"]
-
-        assert parameter.default is False
+    def test_call_with_policy_takes_no_compatibility_flag(self) -> None:
+        assert "allow_unvalidated" not in inspect.signature(call_with_policy).parameters
 
     def test_malformed_json_is_retried_once_and_both_attempts_are_logged(
         self, tmp_path: Path

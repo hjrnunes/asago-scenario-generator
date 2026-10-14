@@ -227,7 +227,6 @@ def send(
             response_format=Reply if call["structured"] else None,
             max_completion_tokens=call["max_completion_tokens"],
             temperature=call["temperature"],
-            allow_unvalidated=call["tolerant"],
         )
     except RateLimitError:
         error = "RateLimitError"

@@ -375,7 +375,6 @@ def _build_completion_kwargs(
     response_format: type[_T],
     temperature: float,
     max_completion_tokens: int | None,
-    allow_unvalidated: bool,
 ) -> dict[str, Any]:
     """Build the common keyword arguments for a structured completion."""
     completion_kwargs: dict[str, Any] = {
@@ -386,8 +385,6 @@ def _build_completion_kwargs(
     }
     if max_completion_tokens is not None:
         completion_kwargs["max_completion_tokens"] = max_completion_tokens
-    if allow_unvalidated:
-        completion_kwargs["allow_unvalidated"] = True
     return completion_kwargs
 
 
@@ -586,7 +583,6 @@ def _perform_safe_call(
     step: str,
     temperature: float,
     max_completion_tokens: int | None,
-    allow_unvalidated: bool,
     raw_result_validator: Callable[[Any], None] | None,
     result_validator: Callable[[_T], _T | None] | None,
     response_parser: Callable[[LLMResult, list[dict[str, Any]]], _T] | None,
@@ -611,7 +607,6 @@ def _perform_safe_call(
         response_format=response_format,
         temperature=temperature,
         max_completion_tokens=max_completion_tokens,
-        allow_unvalidated=allow_unvalidated,
     )
     state.attempt_number = attempt_number
     state.dispatched = True
@@ -1177,7 +1172,6 @@ def call_with_policy(
     scenario_id: str | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     max_completion_tokens: int | None = None,
-    allow_unvalidated: bool = False,
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[_T], _T | None] | None = None,
     response_parser: (Callable[[LLMResult, list[dict[str, Any]]], _T] | None) = None,
@@ -1204,9 +1198,6 @@ def call_with_policy(
         temperature: LLM temperature.
         max_completion_tokens: Optional cap on completion tokens. When
             provided, forwarded to ``llm_client.complete``.
-        allow_unvalidated: When true, ask the client for a JSON-object
-            response instead of a strict JSON Schema response.  Parsing is
-            unchanged: ``response_parser`` or the response model still decides.
         raw_result_validator: Optional validation to run on the decoded
             response before parsing.
         result_validator: Optional additional validation to run on the parsed
@@ -1251,7 +1242,6 @@ def call_with_policy(
                     step=step,
                     temperature=temperature,
                     max_completion_tokens=max_completion_tokens,
-                    allow_unvalidated=allow_unvalidated,
                     raw_result_validator=raw_result_validator,
                     result_validator=result_validator,
                     response_parser=response_parser,

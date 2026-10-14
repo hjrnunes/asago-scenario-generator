@@ -725,24 +725,23 @@ def _holds_nothing(value: Any) -> bool:
     return value in (None, "", [], {})
 
 
+# The Call 2a wire models below reach the model as the request schema, and a
+# docstring becomes a schema description.  Their notes are comments for that
+# reason.
+
+
+# A responsibility constraint whose omitted ID normalization supplies:
+# ``id_normalization`` numbers every RC by its position, so an RC whose ID key
+# the model misspelled still has a position and keeps its meaning.
 class _Call2aConstraint(ResponsibilityConstraint):
-    """A responsibility constraint whose omitted ID normalization supplies.
-
-    ``id_normalization`` numbers every RC by its position, so an RC whose ID
-    key the model misspelled still has a position and keeps its meaning.
-    """
-
     rc_id: str = ""
 
 
+# One Call 2a responsibility; a field it does not declare is an error.  A
+# generic ``id`` stands for ``resp_id``.  An undeclared field that holds nothing
+# carries no meaning to lose, so it is dropped instead of rejected; one that
+# holds content fails with the list of fields to keep.
 class _Call2aResponsibility(BaseModel):
-    """One Call 2a responsibility; a field it does not declare is an error.
-
-    A generic ``id`` stands for ``resp_id``.  An undeclared field that holds
-    nothing carries no meaning to lose, so it is dropped instead of rejected;
-    one that holds content fails with the list of fields to keep.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     resp_id: StrictStr
@@ -775,17 +774,17 @@ class _Call2aResponsibility(BaseModel):
         return record
 
 
-class _Call2aResponse(BaseModel):
-    """The Call 2a response as the model must write it."""
-
-    model_config = ConfigDict(extra="forbid")
-
+# The Call 2a response as the model must write it, and the schema the request
+# sends.  It narrows ``ResponsibilitySet`` to the closed wire objects the way
+# ``_ControlElementProviderSet`` narrows Call 2b, so a reply the schema allows
+# is a reply the wire models accept.
+class _ResponsibilityProviderSet(ResponsibilitySet):
     responsibilities: list[_Call2aResponsibility] = Field(min_length=1)
 
 
 def _validate_responsibility_wire(value: Any) -> None:
     """Check a decoded Call 2a response against its closed wire models."""
-    _Call2aResponse.model_validate(value, context=ASSEMBLY_DEFERRED)
+    _ResponsibilityProviderSet.model_validate(value, context=ASSEMBLY_DEFERRED)
 
 
 _TOP_LEVEL_RESPONSIBILITY_NOTE = (
@@ -815,7 +814,7 @@ def _top_level_responsibility_note(error: Exception) -> str:
 
 def parse_responsibility_set_response(value: Any) -> ResponsibilitySet:
     """Parse a Call 2a response; IDs stay as written for ``id_normalization``."""
-    wire = _Call2aResponse.model_validate(value, context=ASSEMBLY_DEFERRED)
+    wire = _ResponsibilityProviderSet.model_validate(value, context=ASSEMBLY_DEFERRED)
     return ResponsibilitySet.model_construct(
         responsibilities=[
             Responsibility.model_construct(
@@ -2024,7 +2023,6 @@ def _run_stage2_llm_call(
     user_prompt_kwargs: dict[str, Any],
     response_format: type[_Stage2ModelT],
     step: str,
-    allow_unvalidated: bool = False,
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[Any], None] | None = None,
     response_parser: (
@@ -2066,7 +2064,6 @@ def _run_stage2_llm_call(
             error_note=error_note,
         ),
         temperature=temperature,
-        allow_unvalidated=allow_unvalidated,
         raw_result_validator=raw_result_validator,
         response_parser=response_parser,
         result_validator=result_validator,
@@ -2157,9 +2154,8 @@ def _call_2a_responsibilities(
                 else {}
             ),
         },
-        response_format=ResponsibilitySet,
+        response_format=_ResponsibilityProviderSet,
         step="call_2a_responsibilities",
-        allow_unvalidated=True,
         raw_result_validator=_validate_responsibility_wire,
         response_parser=_parse_responsibility_result,
         error_note=_top_level_responsibility_note,
