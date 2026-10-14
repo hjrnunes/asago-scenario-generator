@@ -1,0 +1,8 @@
+template: stage1a_disposition_repair_system.j2
+cases:
+  no-variables:
+    required:
+      - '"loss_ids": ["<declared-loss-id>"]'
+      - a loss ID from the declared loss registry in the user message
+    forbidden:
+      - '"L-1"'

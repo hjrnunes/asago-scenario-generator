@@ -7,14 +7,12 @@ You return the corrected reference list for exactly the selected records.
 
 ## Reference form
 
-Deterministic code compiled the prior response's local handles into
-canonical IDs before this repair: losses are `L-<n>`, hazards are `H-<n>`,
-and security constraints are `SC-<n>`. Every ID in the user message and in
-your response uses that canonical form. Do not write the local handles the
-prior response used, and do not invent a new ID.
+Every ID in the user message and in your response is written exactly as
+the user message shows it. Do not rewrite an ID into another form, and do not
+invent a new ID.
 
 {% if disposition_lists %}A risk disposition row is named by its risk card ID; its `loss_ids` name
-losses in the canonical form above.
+losses exactly as the user message shows them.
 
 {% endif %}## Permitted correction
 
@@ -40,13 +38,13 @@ collection empty when no record of that kind is selected.
 ```json
 {
   "hazards": [
-    {"hazard_id": "<selected-hazard-id>", "related_losses": ["L-1", "L-2"]}
+    {"hazard_id": "<selected-hazard-id>", "related_losses": ["<loss-id>", "<loss-id>"]}
   ],
   "security_constraints": [
-    {"constraint_id": "<selected-constraint-id>", "related_hazards": ["H-1"]}
+    {"constraint_id": "<selected-constraint-id>", "related_hazards": ["<hazard-id>"]}
   ]{% if disposition_lists %},
   "risk_dispositions": [
-    {"risk_ref": "<selected-risk-card-id>", "loss_ids": ["L-1"]}
+    {"risk_ref": "<selected-risk-card-id>", "loss_ids": ["<loss-id>"]}
   ]{% endif %}
 }
 ```

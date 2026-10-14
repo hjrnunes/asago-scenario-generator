@@ -33,7 +33,7 @@ and cannot change.
 ## Your Task
 
 Return the corrected `related_losses`{% if disposition_lists %}, `related_hazards`, or `loss_ids`{% else %} or `related_hazards`{% endif %} list for each
-selected record, using canonical IDs only. {% if unknown_ids %}Replace each unknown entry with the listed replacement ID
+selected record, writing each ID exactly as this message shows it. {% if unknown_ids %}Replace each unknown entry with the listed replacement ID
 of the record it was meant to name, or remove it when no listed record has
 that meaning. {% endif %}Keep the other IDs once each in their original order. A
 list that still repeats an ID, drops or reorders a kept ID, or names an ID

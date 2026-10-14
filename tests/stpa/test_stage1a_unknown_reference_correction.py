@@ -178,7 +178,7 @@ class TestUnknownReferenceCorrection:
             system_prompt
         )
         assert "each names an\nID that no declared record has." in user_prompt
-        assert "only. Replace each unknown entry" in user_prompt
+        assert "shows it. Replace each unknown entry" in user_prompt
         for repeated_wording in (
             "more than once",
             "repeated entry",
@@ -479,7 +479,7 @@ class TestRepairNeedsAnUnknownIdInEveryList:
                 "recorded gap",
                 [valid_risk_draft_dict(), RECORDED_GAP_RESPONSE],
                 _constraint_repair("SC-2", ["H-2"]),
-                "1af517d3e5e720925eecc1d6519f0fab72288ee37e1100c326cb5f667d6b3ea1",
+                "e5f79e9a68f15f2e636cb70342b063212ebd5a06c0807d57be0737e340cfd426",
                 id="recorded-gap",
             ),
             pytest.param(
@@ -491,7 +491,7 @@ class TestRepairNeedsAnUnknownIdInEveryList:
                     _empty_gap(),
                 ],
                 _constraint_repair("SC-1", ["H-1", "H-2"]),
-                "ce1c3f198d2afa382cd61a862a834a0788fe4cdeab1febe64597845c84b31380",
+                "a84968be6cf591f853c747e8d5a743dde880d9aaea6bd52ec49961f2dbdcaefb",
                 id="kept-and-unknown",
             ),
         ],
