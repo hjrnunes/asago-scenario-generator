@@ -60,6 +60,7 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     SlotPlaceholder,
     create_slots,
     is_wrong_duration_eligible,
+    requires_provider_slot_analysis,
 )
 
 
@@ -268,20 +269,6 @@ def _routed_for_target(
     return tuple(item[0] for item in selected), tuple(item[1] for item in selected)
 
 
-def _requires_provider_slot_analysis(slot: SlotPlaceholder) -> bool:
-    """Return whether a slot needs a provider-produced ICA analysis.
-
-    ``WRONG_DURATION`` has a deterministic structural applicability rule.  A
-    missing, unknown, instantaneous, discrete, or coordination-link
-    temporality cannot express an unsafe duration, so those slots are
-    materialized as N/A locally and any provider result for them is ignored.
-    Every other UCA remains advisory and is compiled from the provider result.
-    """
-    return not (
-        slot.uca_type is UCAType.wrong_duration and not is_wrong_duration_eligible(slot)
-    )
-
-
 def _has_provider_slot(request: SynthesisSlotRequest) -> bool:
     """Return whether a request lists a slot only the provider can decide.
 
@@ -289,7 +276,7 @@ def _has_provider_slot(request: SynthesisSlotRequest) -> bool:
     provider never sees it.  Its call reference stays allocated, which keeps
     the references of the other parts of the target stable.
     """
-    return any(_requires_provider_slot_analysis(slot) for slot in request.slots)
+    return any(requires_provider_slot_analysis(slot) for slot in request.slots)
 
 
 def _duration_inapplicable_slot(slot: SlotPlaceholder) -> ICASlot:
@@ -931,7 +918,7 @@ def _record_unresolved_slot_fallbacks(
     """Materialize unresolved provider slots as typed unresolved values."""
     for slot in request.slots:
         slot_id = slot.slot_id
-        if not _requires_provider_slot_analysis(slot):
+        if not requires_provider_slot_analysis(slot):
             continue
         if successful_slots is not None and slot_id in successful_slots:
             continue
@@ -957,7 +944,7 @@ def _record_unresolved_pairs(
     for route in request.routed_routes:
         for slot_id in sorted(set(route.slot_ids).intersection(expected)):
             slot = expected[slot_id]
-            if not _requires_provider_slot_analysis(slot):
+            if not requires_provider_slot_analysis(slot):
                 continue
             all_pairs.append(_unresolved_pair(route, slot, detail, call_ref=call_ref))
 
@@ -1160,7 +1147,7 @@ def _duration_inapplicable_slots(
     return {
         slot.slot_id: _duration_inapplicable_slot(slot)
         for slot in slots
-        if not _requires_provider_slot_analysis(slot)
+        if not requires_provider_slot_analysis(slot)
     }
 
 
@@ -1175,7 +1162,7 @@ def _duration_inapplicable_pairs(
             continue
         for slot_id in sorted(set(route.slot_ids)):
             slot = slot_by_id[slot_id]
-            if not _requires_provider_slot_analysis(slot):
+            if not requires_provider_slot_analysis(slot):
                 all_pairs.append(_duration_inapplicable_pair(route, slot))
     return all_pairs
 
@@ -1257,7 +1244,7 @@ def _compile_response_entry(
             )
         )
         return None
-    if not _requires_provider_slot_analysis(expected_slot):
+    if not requires_provider_slot_analysis(expected_slot):
         return None
     if provider_compiled:
         if not isinstance(value, ICASlot):
@@ -1381,7 +1368,7 @@ def _fill_missing_request_slots(
     for slot in request.slots:
         if slot.slot_id in state.successful_slots:
             continue
-        if not _requires_provider_slot_analysis(slot):
+        if not requires_provider_slot_analysis(slot):
             continue
         returned = by_id.get(slot.slot_id)
         if returned is None:
@@ -1424,7 +1411,7 @@ def _routed_provider_slot_ids(
         sorted(
             slot_id
             for slot_id in set(route.slot_ids).intersection(expected)
-            if _requires_provider_slot_analysis(expected[slot_id])
+            if requires_provider_slot_analysis(expected[slot_id])
         )
     )
 
