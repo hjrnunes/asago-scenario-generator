@@ -33,14 +33,13 @@ def _na_answer(slot_id: str, handles) -> dict:
                 "is_na": True,
                 "na_rationale": "No routed concern applies.",
                 "findings": [],
-                "consideration_results": [
-                    {
-                        "obligation_handle": handle,
+                "consideration_results": {
+                    handle: {
                         "disposition": "proposed_not_applicable",
                         "rationale": "The structure excludes it.",
                     }
                     for handle in handles
-                ],
+                },
             }
         ]
     }

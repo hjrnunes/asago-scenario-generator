@@ -42,8 +42,13 @@ from tests.helpers.obligation_aware import (
 # digest was recaptured when slot prompts began naming each routed obligation
 # with a short request-local handle. The system digest is the text recorded
 # before the NOT_PROVIDED N/A sentence existed; the sentence was removed again
-# because it raised the NOT_PROVIDED N/A share. The other digests are unchanged.
-_GOLDEN_SLOT_SYSTEM = "30d13a94a2a9b46275ca3439ad5455c3393349556ea92539f9ea2657107fec26"
+# because it raised the NOT_PROVIDED N/A share. The system digest was
+# recaptured when the prompt began naming the identities a slot may cite, and
+# again when a finding began naming one `governing_pair` and when
+# `consideration_results` became an object keyed by obligation handle, and
+# again when the pair became the `governing_pairs` array. The
+# other digests are unchanged.
+_GOLDEN_SLOT_SYSTEM = "1ee393a7d9379f7eb15e1f9950b39da4e4bc2cdc27dfb3e3566e0cd6280bd047"
 _GOLDEN_SLOT_USER = "51f6875173344befda32d0a1fdbe879b7487e072808b8dafd2d89f9679c6f37a"
 _GOLDEN_SLOT_USER_EMPTY = (
     "6a174dc144a7788395f2e38a60457edd891714dbd795c06411dad9616a4f9667"

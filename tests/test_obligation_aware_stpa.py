@@ -937,13 +937,12 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
                                     "loss_consequence": (
                                         "the protected operation is harmed"
                                     ),
-                                    "related_hazard_ids": ["H-1"],
-                                    "related_constraint_ids": ["SC-1"],
+                                    "governing_pairs": ["SC-1/H-1"],
                                     "process_model_refs": [],
                                     "feedback_refs": [],
                                 }
                             ],
-                            "consideration_results": [],
+                            "consideration_results": {},
                         }
                     ]
                 },
@@ -963,13 +962,14 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
     assert expected_behavior in result.filled_slots[0].icas[0].ica_text
     assert deviation in result.filled_slots[0].icas[0].ica_text
     schema = response_formats[0].model_json_schema()
-    finding_schema = schema["$defs"]["_SlotProviderFindingDraft"]
+    finding_schema = schema["$defs"]["_FillFindingWire"]
     deviation_schema = finding_schema["properties"]["deviation"]
     assert deviation_schema["type"] == "string"
     assert deviation_schema["minLength"] == 1
-    constraint_schema = finding_schema["properties"]["related_constraint_ids"]
-    assert constraint_schema["minItems"] == 1
-    assert constraint_schema["maxItems"] == 1
+    assert finding_schema["properties"]["governing_pairs"]["items"]["enum"] == [
+        "SC-1/H-1"
+    ]
+    assert "related_constraint_ids" not in finding_schema["properties"]
     assert "not_provided_context" not in finding_schema["properties"]
     assert "incorrect_value_or_effect" not in finding_schema["properties"]
     assert "timing_deviation" not in finding_schema["properties"]
@@ -1223,7 +1223,7 @@ def test_provider_slot_payload_schema_matches_request_cardinality(tmp_path) -> N
                 ),
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1265,8 +1265,8 @@ def test_provider_slot_payload_zero_pairs_requires_empty_considerations(
                 na_rationale="No routed concern applies.",
             )
             return LLMResult(
-                # Omitted nested considerations exercise the zero-valued default.
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                # A target with no routed pair answers with an empty keyed object.
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1322,7 +1322,7 @@ def test_provider_slot_payload_retries_on_exact_pair_key_mismatch(tmp_path) -> N
                 ),
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1357,7 +1357,7 @@ def test_provider_slot_response_reports_one_call_without_a_retry(tmp_path) -> No
                 na_rationale="The slot is not applicable to this structure.",
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1443,7 +1443,7 @@ def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:
                 na_rationale="The slot is not applicable to this structure.",
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1478,7 +1478,7 @@ def test_provider_slot_schema_leads_with_normative_structured_draft(tmp_path) ->
                             "is_na": True,
                             "na_rationale": "The complete structure excludes it.",
                             "findings": [],
-                            "consideration_results": [],
+                            "consideration_results": {},
                         }
                     ]
                 },

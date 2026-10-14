@@ -1002,6 +1002,21 @@ def _context_row_views(
     )
 
 
+def _slot_actions(
+    action_views: Sequence[ProviderControlAction],
+    slots: Sequence[SlotPlaceholder],
+) -> Sequence[ProviderControlAction]:
+    """Keep the actions of the supplied slots; with no slot, every action.
+
+    A finding may cite only a row of its own slot's action, so a fill request
+    shows no row of a sibling action.
+    """
+    if not slots:
+        return action_views
+    wanted = {slot.control_action for slot in slots}
+    return [item for item in action_views if item.id in wanted]
+
+
 def project_control_structure_context(
     control_structure: ControlStructure,
     *,
@@ -1073,7 +1088,9 @@ def project_control_structure_context(
         hazards=tuple(sorted(hazard_views, key=lambda item: item.id)),
         constraints=tuple(sorted(constraint_views, key=lambda item: item.id)),
         context_rows=(
-            _context_row_views(control_structure, action_views)
+            _context_row_views(
+                control_structure, _slot_actions(action_views, selected_slots)
+            )
             if target_id is not None
             else ()
         ),

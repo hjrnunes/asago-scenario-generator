@@ -427,15 +427,65 @@ an ID always names the same combination. `synthesis-manifest.yaml` records,
 under `context_tables`, the budget and, per action, the number of
 combinations, the rows shown, and the values no row shows. The Stage 3
 prompt does not say that a table is a sample.
-Stage 3 receives the rows of its target's actions, and a finding may cite one
-row of its own slot's action as its `context_row`; any other row fails
-provider validation and spends the existing retry, so a row of a sibling
-action reaches the correction request instead of leaving the slot
-unresolved. A slot that slot filling leaves unresolved keeps its own reason
+
+A Stage 3 fill request receives only the rows of its slots' own actions, and
+a finding may cite one of them as its `context_row`. The request schema
+enumerates what a reply may cite (`fill_reply.fill_scope`): `slot_id` is one
+of the request's slots, `context_row` is one of those rows or null,
+`process_model_refs` and `feedback_refs` hold the slot owner's process-model
+parts and feedback channels, and a coordination slot cites only its link's
+shared part and no feedback channel. An empty list is an array with
+`maxItems: 0`. The prompt says that an ID shown only in a description or under
+`referenced_records` is not citable. In pp-s11, half of the context rows shown
+belonged to sibling actions, and citing them, or a coordination path's
+non-shared part, decided 5 of the 10 unresolved fill records. Any other value
+fails the request schema and spends the existing retry. A slot that slot
+filling leaves unresolved keeps its own reason
 through ICA verification. The cited assignments become the ICA's
 `process_model_context`. The table does not limit which deviations are
 unsafe: a finding whose unsafe context no row expresses uses
 `context_row: null`.
+
+A fill finding lists every constraint-and-hazard pair it rests on in
+`governing_pairs`, each `"<constraint_id>/<hazard_id>"`. The array has at
+least one item and no repeated item, and the schema enumerates every pair of a
+supplied constraint and a hazard in its `related_hazards`
+(`fill_reply.governing_pairs`). Code splits the pairs into the finding's
+distinct constraints and hazards, in the order the reply writes them.
+Separate hazard and constraint lists let a reply pair a constraint with a
+hazard it does not govern, which decided 3 of the 10 unresolved pp-s11
+records. An array, not one pair, keeps a finding with several hazards
+expressible: 19 of the 299 accepted pp-s11 chains had one. The context-coverage supplement keeps
+the separate `related_hazard_ids` and `related_constraint_ids`.
+
+A fill slot's `consideration_results` is an object keyed by the local handle
+(`R1`..`Rn`) of each obligation routed to the slot, with
+`additionalProperties: false`; each value holds `disposition`,
+`finding_indexes`, and `rationale`. A one-slot request, which is every
+production request, requires every key, so a reply can neither omit nor
+repeat a result. The call log keeps the keyed reply, and `_listed_results`
+turns it into one `ObligationIcaDraft` per handle for validation and
+compilation. The provider check also counts routed pairs instead of comparing
+sets: a pp-s11 klarna-r2 reply listed each of six handles three times, with
+conflicting results for one, and passed the set comparison until the contract
+rejected it after the request had ended. The fill schema also requires every
+slot field (`slot_id`, `is_na`, `na_rationale`, `findings`,
+`consideration_results`), and the provider drops `finding_indexes` from a
+result whose disposition is not `finding` instead of rejecting the reply: a
+pp-s11 klarna-r1 reply lost its slot for such indexes alone.
+
+A rejected fill reply earns one correction that lists every failed rule, not
+only the first. The provider collects the identity, pair, finding, and
+consideration errors of the whole reply, prefixes each finding and result error
+with its slot and finding position or handle, and raises them as one
+`ExactFeedbackError`, so the correction keeps one line per rule. A reference error names what the slot may
+cite: a constraint that does not govern the finding's hazard names the hazards
+it governs (`SC-1 governs H-1`), and an out-of-scope process-model part,
+feedback channel, or context row lists the valid IDs. The correction also
+quotes the rejected reply (`include_response=True`) so the model corrects it in
+place. In pp-s11, the correction named one error and omitted the reply, and
+in 5 of the 9 failed chains the corrected reply failed a rule the first reply
+had passed. Compilation keeps the first-error checks.
 
 When a reply slot's findings for one constraint cite a variable that a
 `retrieved_content` channel updates but leave some of its values without a

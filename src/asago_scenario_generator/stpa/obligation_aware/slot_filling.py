@@ -545,9 +545,10 @@ def _finding_context(
     }
     row = rows.get(finding.context_row)
     if row is None:
+        listed = ", ".join(rows) or "none"
         raise ValueError(
             f"finding cites context row {finding.context_row!r}, which is not a row "
-            f"of {slot.control_action}'s context table"
+            f"of {slot.control_action}'s context table (its rows: {listed})"
         )
     return dict(row.assignments)
 
@@ -642,41 +643,85 @@ def _validate_finding_references(
     loss_analysis: LossAnalysis,
 ) -> None:
     """Validate hazard, constraint, process-model, and feedback references."""
+    errors = finding_reference_errors(
+        finding,
+        valid_process_models=valid_process_models,
+        valid_feedback=valid_feedback,
+        loss_analysis=loss_analysis,
+    )
+    if errors:
+        raise ValueError(errors[0])
+
+
+def finding_reference_errors(
+    finding: IcaFindingDraft,
+    *,
+    valid_process_models: set[str],
+    valid_feedback: set[str],
+    loss_analysis: LossAnalysis,
+) -> list[str]:
+    """List every broken reference of *finding*, each with what it may cite."""
+    return [
+        *_governance_errors(finding, loss_analysis),
+        *_scope_errors(finding, valid_process_models, valid_feedback),
+    ]
+
+
+def _governance_errors(
+    finding: IcaFindingDraft, loss_analysis: LossAnalysis
+) -> list[str]:
+    """List unknown hazards and constraints and each non-governing constraint."""
     hazard_ids = {item.hazard_id for item in loss_analysis.hazards}
-    unknown_hazards = set(finding.related_hazard_ids) - hazard_ids
-    if unknown_hazards:
-        raise ValueError(
-            "finding references unknown hazards: " + ", ".join(sorted(unknown_hazards))
-        )
     constraints = {
         item.constraint_id: item for item in loss_analysis.security_constraints
     }
+    errors: list[str] = []
+    unknown_hazards = set(finding.related_hazard_ids) - hazard_ids
+    if unknown_hazards:
+        errors.append(
+            "finding references unknown hazards: " + ", ".join(sorted(unknown_hazards))
+        )
     unknown_constraints = set(finding.related_constraint_ids) - set(constraints)
     if unknown_constraints:
-        raise ValueError(
+        errors.append(
             "finding references unknown security constraints: "
             + ", ".join(sorted(unknown_constraints))
         )
     selected_hazards = set(finding.related_hazard_ids)
     for constraint_id in finding.related_constraint_ids:
-        if not selected_hazards.intersection(
-            constraints[constraint_id].related_hazards
+        governed = constraints.get(constraint_id)
+        if governed is not None and not selected_hazards.intersection(
+            governed.related_hazards
         ):
-            raise ValueError(
-                f"constraint {constraint_id} does not govern the finding hazards"
+            errors.append(
+                f"constraint {constraint_id} does not govern the finding hazards "
+                f"({constraint_id} governs {', '.join(governed.related_hazards)})"
             )
-    unknown_pm = set(finding.process_model_refs) - valid_process_models
-    if unknown_pm:
-        raise ValueError(
-            "finding references process-model parts outside the target: "
-            + ", ".join(sorted(unknown_pm))
-        )
-    unknown_fb = set(finding.feedback_refs) - valid_feedback
-    if unknown_fb:
-        raise ValueError(
-            "finding references feedback channels outside the target: "
-            + ", ".join(sorted(unknown_fb))
-        )
+    return errors
+
+
+def _scope_errors(
+    finding: IcaFindingDraft, valid_process_models: set[str], valid_feedback: set[str]
+) -> list[str]:
+    """List process-model parts and feedback channels outside the target."""
+    errors: list[str] = []
+    for kind, cited, valid in (
+        ("process-model parts", finding.process_model_refs, valid_process_models),
+        ("feedback channels", finding.feedback_refs, valid_feedback),
+    ):
+        outside = set(cited) - valid
+        if outside:
+            errors.append(
+                f"finding references {kind} outside the target: "
+                f"{', '.join(sorted(outside))} ({_citable(valid)})"
+            )
+    return errors
+
+
+def _citable(valid: set[str]) -> str:
+    if not valid:
+        return "the slot may cite none"
+    return "the slot may cite " + ", ".join(sorted(valid))
 
 
 def _finding_behavior(

@@ -181,7 +181,7 @@ def test_context_rows_pass_preflight_and_fill_the_ica_context(tmp_path) -> None:
 def test_a_finding_citing_another_actions_row_is_sent_back_for_correction(
     tmp_path,
 ) -> None:
-    """A row outside the slot's own action fails provider validation, so the
+    """A row outside the slot's own action fails the request schema, so the
     correction policy repairs it instead of the slot ending unresolved."""
     client = _ScriptedClient(
         _draft_citing("CA-1-2:ctx-2"), _draft_citing("CA-1-1:ctx-2")
@@ -192,5 +192,7 @@ def test_a_finding_citing_another_actions_row_is_sent_back_for_correction(
 
     entries = read_calls_jsonl(tmp_path)
     assert [entry["success"] for entry in entries] == [False, True]
-    assert "CA-1-2:ctx-2" in client.prompts[1]
+    correction = client.prompts[1].split("Exact validation error", 1)[1]
+    assert "context_row" in correction
+    assert "CA-1-1:ctx-2" in correction
     assert response.filled_slots[0].icas[0].context_row == "CA-1-1:ctx-2"

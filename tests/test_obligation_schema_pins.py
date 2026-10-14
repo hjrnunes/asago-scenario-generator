@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.obligation_aware import governance_provider
 from asago_scenario_generator.stpa.obligation_aware import provider
+from asago_scenario_generator.stpa.obligation_aware.fill_reply import FillScope
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     RevisionDraft,
     StructuralRevisionResponse,
@@ -56,7 +57,17 @@ FACTORY_CASES = {
     "slot-1-0": lambda: provider._slot_provider_payload_type(1, 0),
     "slot-3-2": lambda: provider._slot_provider_payload_type(3, 2),
     "slot-exact": lambda: provider._slot_provider_payload_type(
-        2, 1, constraint_ids=("SC-1", "SC-2")
+        2,
+        1,
+        scope=FillScope(
+            slot_ids=("RESP-1:CA-1-1:INCORRECT", "RESP-1:CA-1-1:NOT_PROVIDED"),
+            pair_ids=("SC-1/H-1", "SC-2/H-1"),
+            context_row_ids=("CA-1-1:ctx-1", "CA-1-1:ctx-2"),
+            process_model_ids=("PM-1-1",),
+            feedback_ids=(),
+            handles=("R1",),
+            every_handle_required=False,
+        ),
     ),
     "governance-1": lambda: governance_provider.governance_payload_type(("risk-a",)),
     "governance-2": lambda: governance_provider.governance_payload_type(
@@ -119,17 +130,17 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "slot-1-0": (
         "_SlotProviderPayload1Pairs0",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "0dc0fd41cf6d49bf45eec18d85f2828bf9f77e28a68d9e860eeba6beb57167fe",
+        "84a4d6edb815ff0ce2ab77e9f9d9c0994f94738afde32e9950e7fb6e44fd5b39",
     ),
     "slot-3-2": (
         "_SlotProviderPayload3Pairs2",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "abf7c619edb6cbe05618cd1027b82dea4a8cfafc0930a11c6896a17764cac0d2",
+        "e3bdebb1f3e6665cecd9d6dc65f90100a26c1b9b331c1f836f815ef7dd219ead",
     ),
     "slot-exact": (
         "_SlotProviderPayload2Pairs1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "ee79ae9a36a85ca80c3f7f7b2b5f3e57e2bebaa0258145a4b75651e0311ef863",
+        "4ed7b2fe2f799e26fe06760804cd12ad1cba11c6be4350b58922c4180e2be3f6",
     ),
 }
 

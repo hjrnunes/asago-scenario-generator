@@ -1,0 +1,2245 @@
+{
+ "reply": {
+  "filled_slots": [
+   {
+    "consideration_results": [
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R1",
+      "rationale": "the slot's findings do not express the specific subject of output bias as a direct consequence of the control action's incorrect value"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R2",
+      "rationale": "the findings do not directly express the risk of unfair discrimination as an incorrect control action value"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R3",
+      "rationale": "the findings do not express stereotype perpetuation as a specific incorrect control action value"
+     },
+     {
+      "disposition": "finding",
+      "finding_indexes": [
+       0
+      ],
+      "obligation_handle": "R4",
+      "rationale": "finding 0 directly expresses the concern of copyright infringement through the incorrect provision of protected works"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R5",
+      "rationale": "the finding does not address the specific mechanism of human oversight interface manipulation"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R6",
+      "rationale": "the findings do not address the specific concern of AI-mediated social engineering via deceptive instructions"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R1",
+      "rationale": "no finding directly expresses the specific risk of output bias"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R2",
+      "rationale": "no finding directly expresses the specific risk of unfair discrimination"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R3",
+      "rationale": "no finding directly expresses the specific risk of stereotype perpetuation"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R4",
+      "rationale": "no finding directly expresses the specific risk of copyright infringement"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R5",
+      "rationale": "the obligation is structurally infeasible as the controller action is a reply, not an interface to a human overseer"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R6",
+      "rationale": "the obligation is structurally infeasible as the controller action is a reply, not a deceptive instruction mechanism"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R1",
+      "rationale": "the obligation is advisory"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R2",
+      "rationale": "the obligation is advisory"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R3",
+      "rationale": "the obligation is advisory"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R4",
+      "rationale": "the obligation is advisory"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R5",
+      "rationale": "the obligation is advisory"
+     },
+     {
+      "disposition": "unresolved",
+      "finding_indexes": [],
+      "obligation_handle": "R6",
+      "rationale": "the obligation is advisory"
+     }
+    ],
+    "findings": [
+     {
+      "context_row": "CA-1-1:ctx-1",
+      "deviation": "the content contains verbatim protected works",
+      "feedback_refs": [],
+      "hazardous_context": "the assistant's reply contains verbatim reproductions of protected works instead of grounded policy text",
+      "loss_consequence": "the generation of content that violates copyright or open-source licenses within the assistant's responses",
+      "process_model_refs": [
+       "PM-1-1"
+      ],
+      "related_constraint_ids": [
+       "SC-4"
+      ],
+      "related_hazard_ids": [
+       "H-1"
+      ]
+     },
+     {
+      "context_row": null,
+      "deviation": "the content does not accurately reflect the intended customer service context or information",
+      "feedback_refs": [],
+      "hazardous_context": "the assistant's reply contains information that leads to disparate outcomes for different customer groups",
+      "loss_consequence": "unfair or discriminatory treatment of customers",
+      "process_model_refs": [],
+      "related_constraint_ids": [
+       "SC-5"
+      ],
+      "related_hazard_ids": [
+       "H-2"
+      ]
+     }
+    ],
+    "is_na": false,
+    "na_rationale": null,
+    "slot_id": "RESP-1:CA-1-1:INCORRECT"
+   }
+  ]
+ },
+ "request": {
+  "control_structure": {
+   "controlled_processes": [
+    {
+     "cp_id": "CP-1",
+     "description": "Conversational Interface (Klarna App/Web)"
+    },
+    {
+     "cp_id": "CP-2",
+     "description": "Klarna Backend Systems (Orders, Payments, Refunds)"
+    },
+    {
+     "cp_id": "CP-3",
+     "description": "Policy Knowledge Base (RAG Source)"
+    },
+    {
+     "cp_id": "CP-4",
+     "description": "Human Customer Service Agent"
+    }
+   ],
+   "coordination_links": [
+    {
+     "coordination_mechanism": {
+      "cm_id": "CM-1",
+      "description": "RESP-2 updates the query topic in the shared process model to ensure RESP-1's conversational responses are grounded in the correct context.",
+      "payload": "query_topic"
+     },
+     "description": "RESP-1 requires the query topic identified by RESP-2 to ensure conversational responses align with retrieved policy context.",
+     "link_id": "CL-1",
+     "shared_pm": "PM-2-2",
+     "source": "RESP-1",
+     "target": "RESP-2"
+    },
+    {
+     "coordination_mechanism": {
+      "cm_id": "CM-2",
+      "description": "Pass input integrity status to the conversational manager",
+      "payload": "intent classification result"
+     },
+     "description": "Ensure conversational responses are only generated for benign user intents.",
+     "link_id": "CL-2",
+     "shared_pm": "PM-3-1",
+     "source": "RESP-3",
+     "target": "RESP-1"
+    }
+   ],
+   "responsibilities": [
+    {
+     "control_actions": [
+      {
+       "ca_id": "CA-1-1",
+       "description": "Deliver conversational response to customer",
+       "effect_kind": "model_output",
+       "process_model_refs": [
+        "PM-1-1"
+       ],
+       "target": {
+        "id": "CP-1",
+        "type": "controlled_process"
+       },
+       "temporality": "instantaneous"
+      },
+      {
+       "ca_id": "CA-1-2",
+       "description": "Request account details (documented operation: get_account_details)",
+       "effect_kind": "tool_call",
+       "operation": "get_account_details",
+       "target": {
+        "id": "CP-2",
+        "type": "controlled_process"
+       },
+       "temporality": "instantaneous"
+      },
+      {
+       "ca_id": "CA-1-3",
+       "description": "Lookup specific order (documented operation: lookup_order)",
+       "effect_kind": "tool_call",
+       "operation": "lookup_order",
+       "target": {
+        "id": "CP-2",
+        "type": "controlled_process"
+       },
+       "temporality": "instantaneous"
+      },
+      {
+       "ca_id": "CA-1-4",
+       "description": "Process refund (documented operation: process_refund)",
+       "effect_kind": "tool_call",
+       "operation": "process_refund",
+       "target": {
+        "id": "CP-2",
+        "type": "controlled_process"
+       },
+       "temporality": "instantaneous"
+      },
+      {
+       "ca_id": "CA-1-5",
+       "description": "Schedule or modify payment (documented operation: schedule_payment)",
+       "effect_kind": "tool_call",
+       "operation": "schedule_payment",
+       "target": {
+        "id": "CP-2",
+        "type": "controlled_process"
+       },
+       "temporality": "instantaneous"
+      }
+     ],
+     "description": "Manage conversational customer service interactions, providing answers to queries and managing the dialogue lifecycle.",
+     "feedback_channels": [
+      {
+       "description": "Assessment of whether the reply contains protected works",
+       "fb_id": "FB-1-1",
+       "source": {
+        "id": "RESP-1",
+        "type": "responsibility"
+       },
+       "source_kind": "other",
+       "updates": "PM-1-1"
+      }
+     ],
+     "process_model_parts": [
+      {
+       "description": "Content of the conversational reply",
+       "feedback_source": null,
+       "pm_id": "PM-1-1",
+       "values": [
+        "contains verbatim protected works",
+        "does not contain verbatim protected works"
+       ]
+      }
+     ],
+     "resp_id": "RESP-1",
+     "responsibility_constraints": [
+      {
+       "description": "Ensure replies do not contain verbatim reproductions of protected works.",
+       "rc_id": "RC-1-1"
+      }
+     ],
+     "security_constraint_refs": [
+      "SC-4"
+     ]
+    },
+    {
+     "control_actions": [
+      {
+       "ca_id": "CA-2-1",
+       "description": "Retrieve policy snippets (documented operation: retrieve_policy)",
+       "effect_kind": "tool_call",
+       "operation": "retrieve_policy",
+       "process_model_refs": [
+        "PM-2-1"
+       ],
+       "target": {
+        "id": "CP-3",
+        "type": "controlled_process"
+       },
+       "temporality": "instantaneous"
+      },
+      {
+       "ca_id": "CA-2-2",
+       "description": "Escalate to human agent (documented operation: escalate_to_human)",
+       "effect_kind": "agent_message",
+       "operation": "escalate_to_human",
+       "process_model_refs": [
+        "PM-2-1",
+        "PM-2-2"
+       ],
+       "target": {
+        "id": "CP-4",
+        "type": "controlled_process"
+       },
+       "temporality": "instantaneous"
+      }
+     ],
+     "description": "Retrieve and ground responses in authorized knowledge sources and policies.",
+     "feedback_channels": [
+      {
+       "description": "Content returned from policy retrieval",
+       "fb_id": "FB-2-1",
+       "source": {
+        "id": "CP-3",
+        "type": "controlled_process"
+       },
+       "source_kind": "retrieved_content",
+       "updates": "PM-2-1"
+      },
+      {
+       "description": "Extraction of the query topic from user input",
+       "fb_id": "FB-2-2",
+       "source": {
+        "id": "CP-1",
+        "type": "controlled_process"
+       },
+       "source_kind": "user_message",
+       "updates": "PM-2-2"
+      },
+      {
+       "description": "Matching query parameters against the whitelist",
+       "fb_id": "FB-2-3",
+       "source": {
+        "id": "RESP-2",
+        "type": "responsibility"
+       },
+       "source_kind": "other",
+       "updates": "PM-2-3"
+      }
+     ],
+     "process_model_parts": [
+      {
+       "description": "Availability of approved policy snippets for the query topic",
+       "evidence_refs": [
+        "policy:TARGET-READ-002",
+        "policy:TARGET-READ-003",
+        "policy:TARGET-READ-004"
+       ],
+       "feedback_source": null,
+       "pm_id": "PM-2-1",
+       "values": [
+        "approved snippets exist",
+        "no approved snippets exist"
+       ]
+      },
+      {
+       "description": "Topic of the query",
+       "feedback_source": null,
+       "pm_id": "PM-2-2",
+       "values": [
+        "fee or payment related",
+        "eligibility related",
+        "other"
+       ]
+      },
+      {
+       "description": "Information requested is on the approved whitelist",
+       "feedback_source": null,
+       "pm_id": "PM-2-3",
+       "values": [
+        "on whitelist",
+        "not on whitelist"
+       ]
+      }
+     ],
+     "resp_id": "RESP-2",
+     "responsibility_constraints": [
+      {
+       "description": "Ground responses regarding fees or payment terms only in retrieved policy snippets.",
+       "rc_id": "RC-2-1"
+      },
+      {
+       "description": "Restrict information provided to only those details present on the approved information whitelist.",
+       "rc_id": "RC-2-2"
+      },
+      {
+       "description": "Base policy answers only on published policy documents.",
+       "rc_id": "RC-2-3"
+      },
+      {
+       "description": "Invoke escalation to a human for any query related to fees, payments, or eligibility where the retrieved policy indicates no approved snippets exist.",
+       "rc_id": "RC-2-4"
+      }
+     ],
+     "security_constraint_refs": [
+      "SC-10",
+      "SC-2",
+      "SC-7",
+      "SC-9"
+     ]
+    },
+    {
+     "control_actions": [],
+     "description": "Validate user intent and input integrity to prevent malicious instructions and ensure safe interaction.",
+     "feedback_channels": [
+      {
+       "description": "Assessment of input integrity",
+       "fb_id": "FB-3-1",
+       "source": {
+        "id": "CP-1",
+        "type": "controlled_process"
+       },
+       "source_kind": "user_message",
+       "updates": "PM-3-1"
+      }
+     ],
+     "process_model_parts": [
+      {
+       "description": "Integrity and intent of user message",
+       "feedback_source": null,
+       "pm_id": "PM-3-1",
+       "values": [
+        "malicious/injection detected",
+        "benign"
+       ]
+      }
+     ],
+     "resp_id": "RESP-3",
+     "responsibility_constraints": [
+      {
+       "description": "Ensure user input does not contain instructions to bypass system constraints or policies.",
+       "rc_id": "RC-3-1"
+      }
+     ],
+     "security_constraint_refs": []
+    },
+    {
+     "control_actions": [
+      {
+       "ca_id": "CA-4-1",
+       "description": "Retrieve Klarna state summary",
+       "effect_kind": "tool_call",
+       "operation": "get_klarna_state_summary",
+       "process_model_refs": [
+        "PM-4-1"
+       ],
+       "target": {
+        "id": "CP-2",
+        "type": "controlled_process"
+       },
+       "temporality": "instantaneous"
+      }
+     ],
+     "description": "Enforce authorization scope and parameter validity for all backend operations.",
+     "feedback_channels": [
+      {
+       "description": "Verification of backend operation outcome and resulting state",
+       "fb_id": "FB-4-1",
+       "source": {
+        "id": "CP-2",
+        "type": "controlled_process"
+       },
+       "source_kind": "operation_result",
+       "updates": "PM-4-2"
+      }
+     ],
+     "process_model_parts": [
+      {
+       "description": "Authenticated customer identity",
+       "evidence_refs": [
+        "session:authenticated_customer_id"
+       ],
+       "feedback_source": null,
+       "pm_id": "PM-4-1",
+       "values": [
+        "CUST001"
+       ]
+      },
+      {
+       "description": "Ownership mapping of requested order IDs",
+       "evidence_refs": [
+        "state:orders.customer_id"
+       ],
+       "feedback_source": null,
+       "pm_id": "PM-4-2",
+       "values": [
+        "owned",
+        "not owned"
+       ]
+      }
+     ],
+     "resp_id": "RESP-4",
+     "responsibility_constraints": [
+      {
+       "description": "Ensure all requested resource IDs belong to the authenticated customer ID.",
+       "rc_id": "RC-4-1"
+      }
+     ],
+     "security_constraint_refs": []
+    }
+   ]
+  },
+  "controls": {
+   "context_window": null,
+   "deadline_seconds": 300.0,
+   "max_batch_size": 8,
+   "maximum_completion_tokens": null,
+   "model_name": "gemma-4-26b-a4b-it",
+   "model_profile": "gemma4-oc-65k",
+   "safety_margin": null,
+   "temperature": 1.0,
+   "validation_retries": 1
+  },
+  "loss_analysis": {
+   "hazards": [
+    {
+     "description": "The `operation:process_refund` integration is triggered for an amount or order not authorized by the authenticated customer's actual transaction history.",
+     "hazard_id": "H-4",
+     "related_losses": [
+      "L-2"
+     ]
+    },
+    {
+     "description": "The RAG-style knowledge-grounding system provides inaccurate or unverified policy snippets via `retrieve_policy` regarding fees or payment terms.",
+     "hazard_id": "H-5",
+     "related_losses": [
+      "L-5",
+      "L-4"
+     ]
+    },
+    {
+     "description": "The assistant's reply contains PII from the `session:authenticated_customer_id` or order history that is not intended for the current chat recipient.",
+     "hazard_id": "H-6",
+     "related_losses": [
+      "L-7"
+     ]
+    },
+    {
+     "description": "The `operation:get_account_details` or `operation:get_klarna_state_summary` returns sensitive financial state to an unauthorized context or session.",
+     "hazard_id": "H-3",
+     "related_losses": [
+      "L-6"
+     ]
+    },
+    {
+     "description": "The assistant's logic for handling `operation:schedule_payment` or `operation:process_refund` produces disparate outcomes for different customer groups.",
+     "hazard_id": "H-2",
+     "related_losses": [
+      "L-1"
+     ]
+    },
+    {
+     "description": "The assistant's reply contains verbatim reproductions of protected works instead of grounded policy text.",
+     "hazard_id": "H-1",
+     "related_losses": [
+      "L-3"
+     ]
+    },
+    {
+     "description": "The assistant fails to invoke `operation:escalate_to_human` when a query involves regulated topics or ambiguity flagged by policy snippets like `policy:TARGET-READ-002`.",
+     "hazard_id": "H-7",
+     "related_losses": [
+      "L-5",
+      "L-8"
+     ]
+    },
+    {
+     "description": "The assistant provides incorrect or unverified information about a merchant's status or specific product details derived from `state:orders.merchant` or `state:orders.item`.",
+     "hazard_id": "H-8",
+     "related_losses": [
+      "L-9"
+     ]
+    },
+    {
+     "description": "The assistant's reply contains details or information that are not present on the approved information whitelist.",
+     "hazard_id": "H-9",
+     "related_losses": [
+      "L-5",
+      "L-4"
+     ]
+    }
+   ],
+   "risk_card_losses": [
+    {
+     "description": "The execution of fraudulent or unauthorized financial transactions, such as improper refunds or payment modifications.",
+     "loss_id": "L-2",
+     "provenance": "risk_card",
+     "source_risk_cards": [
+      "atlas-dangerous-use",
+      "credo-risk-026",
+      "mit-ai-risk-subdomain-4.3"
+     ]
+    },
+    {
+     "description": "Violations of financial services regulations or terms of use due to incorrect guidance on fees, policies, or payment terms.",
+     "loss_id": "L-5",
+     "provenance": "risk_card",
+     "source_risk_cards": [
+      "atlas-hallucination",
+      "credo-risk-023",
+      "mit-ai-risk-subdomain-3.1"
+     ]
+    },
+    {
+     "description": "The unauthorized disclosure or processing of Personally Identifiable Information (PII) to an incorrect recipient or through the chat interface.",
+     "loss_id": "L-7",
+     "provenance": "risk_card",
+     "source_risk_cards": [
+      "ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)",
+      "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)",
+      "atlas-confidential-data-in-prompt",
+      "atlas-revealing-confidential-information"
+     ]
+    },
+    {
+     "description": "The unauthorized handling or exposure of sensitive financial records, such as transaction histories or payment plans.",
+     "loss_id": "L-6",
+     "provenance": "risk_card",
+     "source_risk_cards": [
+      "ai-risk-taxonomy-unauthorized-processing---financial-records"
+     ]
+    },
+    {
+     "description": "Unfair or discriminatory treatment of customers, such as disparate error rates in payment scheduling or refund eligibility based on demographic characteristics.",
+     "loss_id": "L-1",
+     "provenance": "risk_card",
+     "source_risk_cards": [
+      "atlas-output-bias",
+      "credo-risk-010",
+      "mit-ai-risk-subdomain-1.1"
+     ]
+    },
+    {
+     "description": "Customers making financial decisions based on incorrect or hallucinated information regarding Klarna policies or fees.",
+     "loss_id": "L-4",
+     "provenance": "risk_card",
+     "source_risk_cards": [
+      "atlas-hallucination",
+      "atlas-over-or-under-reliance",
+      "credo-risk-021",
+      "mit-ai-risk-subdomain-7.3"
+     ]
+    },
+    {
+     "description": "The generation of content that violates copyright or open-source licenses within the assistant's responses.",
+     "loss_id": "L-3",
+     "provenance": "risk_card",
+     "source_risk_cards": [
+      "atlas-copyright-infringement"
+     ]
+    }
+   ],
+   "risk_dispositions": [
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-2"
+     ],
+     "reason": null,
+     "risk_ref": "credo-risk-026"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-5",
+      "L-4"
+     ],
+     "reason": null,
+     "risk_ref": "atlas-hallucination"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-1"
+     ],
+     "reason": null,
+     "risk_ref": "credo-risk-010"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-4"
+     ],
+     "reason": null,
+     "risk_ref": "credo-risk-021"
+    },
+    {
+     "disposition": "not_applicable",
+     "loss_ids": [],
+     "reason": "This risk relates to user over-reliance which is addressed by the specific loss of misleading guidance.",
+     "risk_ref": "credo-risk-016"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-7"
+     ],
+     "reason": null,
+     "risk_ref": "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-6"
+     ],
+     "reason": null,
+     "risk_ref": "ai-risk-taxonomy-unauthorized-processing---financial-records"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-7"
+     ],
+     "reason": null,
+     "risk_ref": "ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)"
+    },
+    {
+     "disposition": "not_applicable",
+     "loss_ids": [],
+     "reason": "The anthropomorphization risk is a subset of general over-reliance already captured in guidance losses.",
+     "risk_ref": "mit-ai-risk-subdomain-5.1"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-3"
+     ],
+     "reason": null,
+     "risk_ref": "atlas-copyright-infringement"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-7"
+     ],
+     "reason": null,
+     "risk_ref": "atlas-revealing-confidential-information"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-5",
+      "L-4"
+     ],
+     "reason": null,
+     "risk_ref": "mit-ai-risk-subdomain-3.1"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-2"
+     ],
+     "reason": null,
+     "risk_ref": "mit-ai-risk-subdomain-4.3"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-5"
+     ],
+     "reason": null,
+     "risk_ref": "credo-risk-023"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-2"
+     ],
+     "reason": null,
+     "risk_ref": "atlas-dangerous-use"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-1"
+     ],
+     "reason": null,
+     "risk_ref": "atlas-output-bias"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-1"
+     ],
+     "reason": null,
+     "risk_ref": "mit-ai-risk-subdomain-1.1"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-4"
+     ],
+     "reason": null,
+     "risk_ref": "mit-ai-risk-subdomain-7.3"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-4"
+     ],
+     "reason": null,
+     "risk_ref": "atlas-over-or-under-reliance"
+    },
+    {
+     "disposition": "cited",
+     "loss_ids": [
+      "L-7"
+     ],
+     "reason": null,
+     "risk_ref": "atlas-confidential-data-in-prompt"
+    }
+   ],
+   "security_constraints": [
+    {
+     "applies_when": [
+      "a refund is requested"
+     ],
+     "behavior_class": "unauthorized_write",
+     "constraint_id": "SC-1",
+     "description": "The `operation:process_refund` must only be executed if the requested amount and `order_id` match the authenticated customer's authorized records. Applies when: a refund is requested.",
+     "direction_authority": "proposed",
+     "obligations": [
+      {
+       "behavior": "validate refund against order history",
+       "completion": null,
+       "kind": "required",
+       "note": null,
+       "obligation_id": "O1",
+       "observation_role": null,
+       "projection": null,
+       "realized_by": "unknown",
+       "residual": null,
+       "rule_span": "must only be executed if the requested amount and `order_id` match the authenticated customer's authorized records",
+       "source_outcome": null,
+       "violated_via": null
+      }
+     ],
+     "related_hazards": [
+      "H-4"
+     ],
+     "rule": "The `operation:process_refund` must only be executed if the requested amount and `order_id` match the authenticated customer's authorized records."
+    },
+    {
+     "applies_when": [
+      "the query relates to fees, payments, or eligibility",
+      "the retrieved policy indicates no match exists"
+     ],
+     "behavior_class": "missed_escalation",
+     "constraint_id": "SC-2",
+     "description": "The assistant must invoke `operation:escalate_to_human` for any query that triggers a policy response indicating a lack of approved snippets for regulated topics. Applies when: the query relates to fees, payments, or eligibility; the retrieved policy indicates no match exists.",
+     "direction_authority": "proposed",
+     "obligations": [
+      {
+       "behavior": "escalate the conversation to a human agent",
+       "completion": null,
+       "kind": "required",
+       "note": null,
+       "obligation_id": "O1",
+       "observation_role": null,
+       "projection": null,
+       "realized_by": "tool_call",
+       "residual": null,
+       "rule_span": "must invoke `operation:escalate_to_human`",
+       "source_outcome": null,
+       "violated_via": null
+      }
+     ],
+     "related_hazards": [
+      "H-7"
+     ],
+     "rule": "The assistant must invoke `operation:escalate_to_human` for any query that triggers a policy response indicating a lack of approved snippets for regulated topics."
+    },
+    {
+     "applies_when": [
+      "the assistant is discussing specific order details"
+     ],
+     "behavior_class": "wrong_information",
+     "constraint_id": "SC-3",
+     "description": "The assistant must only state merchant or item details that are explicitly present in the authenticated customer's `state:orders` records. Applies when: the assistant is discussing specific order details.",
+     "direction_authority": "proposed",
+     "obligations": [
+      {
+       "behavior": "limit merchant and item descriptions to order record data",
+       "completion": null,
+       "kind": "required",
+       "note": null,
+       "obligation_id": "O1",
+       "observation_role": null,
+       "projection": null,
+       "realized_by": "reply",
+       "residual": null,
+       "rule_span": "must only state merchant or item details that are explicitly present in the authenticated customer's `state:orders` records",
+       "source_outcome": null,
+       "violated_via": null
+      }
+     ],
+     "related_hazards": [
+      "H-8"
+     ],
+     "rule": "The assistant must only state merchant or item details that are explicitly present in the authenticated customer's `state:orders` records."
+    },
+    {
+     "applies_when": [],
+     "behavior_class": "wrong_information",
+     "constraint_id": "SC-7",
+     "description": "The assistant's responses regarding fees or payment terms must be grounded in the retrieved policy snippets.",
+     "related_hazards": [
+      "H-5"
+     ],
+     "rule": "The assistant's responses regarding fees or payment terms must be grounded in the retrieved policy snippets."
+    },
+    {
+     "applies_when": [],
+     "behavior_class": "disclosure",
+     "constraint_id": "SC-8",
+     "description": "The assistant must not disclose PII from the authenticated customer's session or order history to an unauthorized recipient.",
+     "related_hazards": [
+      "H-6"
+     ],
+     "rule": "The assistant must not disclose PII from the authenticated customer's session or order history to an unauthorized recipient."
+    },
+    {
+     "applies_when": [],
+     "behavior_class": "disclosure",
+     "constraint_id": "SC-6",
+     "description": "The assistant must ensure sensitive financial state retrieved via account or summary operations is only provided within the authorized authenticated session.",
+     "related_hazards": [
+      "H-3"
+     ],
+     "rule": "The assistant must ensure sensitive financial state retrieved via account or summary operations is only provided within the authorized authenticated session."
+    },
+    {
+     "applies_when": [],
+     "behavior_class": "harmful_or_discriminatory_output",
+     "constraint_id": "SC-5",
+     "description": "The assistant must ensure payment scheduling and refund processing logic produces consistent outcomes regardless of customer demographic characteristics.",
+     "related_hazards": [
+      "H-2"
+     ],
+     "rule": "The assistant must ensure payment scheduling and refund processing logic produces consistent outcomes regardless of customer demographic characteristics."
+    },
+    {
+     "applies_when": [],
+     "behavior_class": "wrong_information",
+     "constraint_id": "SC-4",
+     "description": "The assistant's replies must not contain verbatim reproductions of protected works.",
+     "related_hazards": [
+      "H-1"
+     ],
+     "rule": "The assistant's replies must not contain verbatim reproductions of protected works."
+    },
+    {
+     "applies_when": [],
+     "behavior_class": "wrong_information",
+     "constraint_id": "SC-10",
+     "description": "The system must not go into details that are not on the approved information whitelist.",
+     "related_hazards": [
+      "H-9"
+     ],
+     "rule": "The system must not go into details that are not on the approved information whitelist."
+    },
+    {
+     "applies_when": [],
+     "behavior_class": "wrong_information",
+     "constraint_id": "SC-9",
+     "description": "The system must base policy answers only on published policy documents.",
+     "related_hazards": [
+      "H-5"
+     ],
+     "rule": "The system must base policy answers only on published policy documents."
+    }
+   ],
+   "use_case_losses": [
+    {
+     "description": "Failure to route regulated or complex financial queries to a human agent, leading to non-compliance or customer harm.",
+     "loss_id": "L-8",
+     "provenance": "use_case",
+     "source_risk_cards": []
+    },
+    {
+     "description": "Damage to merchant reputation or financial standing due to incorrect assistant statements regarding merchant-specific policies or item details.",
+     "loss_id": "L-9",
+     "provenance": "use_case",
+     "source_risk_cards": []
+    }
+   ]
+  },
+  "routed_briefs": [
+   {
+    "applicability_evidence": [
+     {
+      "detail": "reviewed risk did not resolve to an authoritative attack pattern",
+      "fact_evaluations": [],
+      "kind": "governance",
+      "source": "obligation-planner"
+     }
+    ],
+    "attack_pattern_description": null,
+    "attack_pattern_id": null,
+    "attack_pattern_name": null,
+    "attack_pattern_semantic_digest": null,
+    "candidate_ids": [],
+    "catalog_pins": {
+     "atlas": {
+      "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+      "release": "2026.05"
+     }
+    },
+    "instruction": "Treat this governance risk as a hypothesis for structural STPA analysis. No attack pattern covers it, and it is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the unsafe control actions through which the risk could come about in this system, or report that no control action bears on it.",
+    "kind": "governance",
+    "mapping_pins": {
+     "obligation_edges": {
+      "digest": "a8b4c3c8088a267e69661ea020eded92bbc662dad0c52816015e6791f3fedbcf",
+      "release": "obligation-mapping-bundle-v2"
+     },
+     "sssom": {
+      "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+      "release": "2026.05"
+     }
+    },
+    "obligation_id": "ob:v1:514ba446448809838b841218bc0c740f281bf3fedf62ccf1aa5db2ccd64b6a57",
+    "plan_digest": "0c4d0abc850ee1704203c9c7602e52c562fc61eebff9b5471a89553ea01aed6d",
+    "prerequisite_capabilities": null,
+    "qualification_disposition": "not_attempted",
+    "resource_references": [],
+    "risk_ref": {
+     "confidence": 0.0,
+     "consequence": "The implementation of poor, biased, and/or unethical business practices or decisions.",
+     "evidence": [
+      {
+       "relevance": null,
+       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "text": "Poor, biased, and/or unethical busi - ness practices or decisions"
+      }
+     ],
+     "grounding_confidence": "high",
+     "impact": "Reputational and financial harm to the company and potential non-compliance with applicable regulations and laws.",
+     "mitigations": [
+      {
+       "description": "Evaluate GAI content and data for representational biases and employ techniques such as re-sampling, re-ranking, or adversarial training to mitigate biases in the generated content.",
+       "mitigation_id": "MG-2.2-004",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Implement continuous monitoring of GAI system impacts to identify whether GAI outputs are equitable across various sub-populations. Seek active and direct feedback from affected communities via structured feedback mechanisms or red-teaming to monitor and improve outputs.",
+       "mitigation_id": "MS-1.1-006",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Apply use-case appropriate benchmarks (e.g., Bias Benchmark Questions, Real Hateful or Harmful Prompts, Winogender Schemas 15 ) to quantify systemic bias, stereotyping, denigration, and hateful content in GAI system outputs; Document assumptions and limitations of benchmarks, including any actual or possible training/test data cross contamination, relative to in-context deployment environment.",
+       "mitigation_id": "MS-2.11-001",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Conduct fairness assessments to measure systemic bias. Measure GAI system performance across demographic groups and subgroups, addressing both quality of service and any allocation of services and resources. Quantify harms using: field testing with sub-gro up populations to determine likelihood of exposure to generated content exhibiting harmful bias, AI red-teaming with counterfactual and low-context (e.g., 'leader,' 'bad guys') prompts. For ML pipelines or business processes with categorical or numeric out comes that rely on GAI, apply general fairness metrics (e.g., demographic parity, equalized odds, equal opportunity, statistical hypothesis tests), to the pipeline or business outcome where appropriate; Custom, context-specific metrics developed in collabo ration with domain experts and affected communities; Measurements of the prevalence of denigration in generated content in deployment (e.g., sub-sampling a fraction of traffic and manually annotating denigrating content) .",
+       "mitigation_id": "MS-2.11-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Assess and manage statistical biases related to GAI content provenance through techniques such as re-sampling, re-weighting, or adversarial training.",
+       "mitigation_id": "MS-2.2-001",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Evaluate potential biases and stereotypes that could emerge from the AI-generated content using appropriate methodologies including computational testing methods as well as evaluating structured feedback input.",
+       "mitigation_id": "MS-3.3-003",
+       "source": "nist-ai-rmf"
+      }
+     ],
+     "risk_description": "Generated content might unfairly represent certain groups or individuals.",
+     "risk_id": "atlas-output-bias",
+     "risk_name": "Output bias",
+     "scores": {
+      "bm25_rank": 0.0,
+      "cross_encoder_score": 0.0,
+      "embedding_distance": 0.0,
+      "rrf_score": 0.0
+     },
+     "taxonomy": "ibm-risk-atlas",
+     "threat": "Generative AI systems may produce content that unfairly represents certain groups or individuals through biased outputs.",
+     "threat_source": "The imperfect accuracy and inherent biases of generative AI systems.",
+     "vulnerability": "Failure by employees to manually verify the output or reliance on suspect AI-generated content without checking for unethical business practices."
+    },
+    "semantic_digest": "ead77b42a8f41d54ceec81c055035018a59db0094b916df89b4be6e2c901b630",
+    "taxonomy_chain": []
+   },
+   {
+    "applicability_evidence": [
+     {
+      "detail": "reviewed risk did not resolve to an authoritative attack pattern",
+      "fact_evaluations": [],
+      "kind": "governance",
+      "source": "obligation-planner"
+     }
+    ],
+    "attack_pattern_description": null,
+    "attack_pattern_id": null,
+    "attack_pattern_name": null,
+    "attack_pattern_semantic_digest": null,
+    "candidate_ids": [],
+    "catalog_pins": {
+     "atlas": {
+      "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+      "release": "2026.05"
+     }
+    },
+    "instruction": "Treat this governance risk as a hypothesis for structural STPA analysis. No attack pattern covers it, and it is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the unsafe control actions through which the risk could come about in this system, or report that no control action bears on it.",
+    "kind": "governance",
+    "mapping_pins": {
+     "obligation_edges": {
+      "digest": "a8b4c3c8088a267e69661ea020eded92bbc662dad0c52816015e6791f3fedbcf",
+      "release": "obligation-mapping-bundle-v2"
+     },
+     "sssom": {
+      "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+      "release": "2026.05"
+     }
+    },
+    "obligation_id": "ob:v1:a1d128b3b5b33efab7fb3defcfe06b21f5d8fb3d07f0fd931d1809a6250ade09",
+    "plan_digest": "0c4d0abc850ee1704203c9c7602e52c562fc61eebff9b5471a89553ea01aed6d",
+    "prerequisite_capabilities": null,
+    "qualification_disposition": "not_attempted",
+    "resource_references": [],
+    "risk_ref": {
+     "confidence": 0.0,
+     "consequence": "The implementation of poor, biased, or unethical business decisions based on unverified AI-generated content.",
+     "evidence": [
+      {
+       "relevance": null,
+       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "text": "Poor, biased, and/or unethical busi - ness practices or decisions"
+      }
+     ],
+     "grounding_confidence": "medium",
+     "impact": "Reputational and financial harm to the company, as well as potential non-compliance with applicable regulations and laws.",
+     "mitigations": [
+      {
+       "description": "Evaluate GAI content and data for representational biases and employ techniques such as re-sampling, re-ranking, or adversarial training to mitigate biases in the generated content.",
+       "mitigation_id": "MG-2.2-004",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Document sources and types of training data and their origins, potential biases present in the data related to the GAI application and its content provenance, architecture, training process of the pre-trained model including information on hyperparameters, training duration, and any fine-tuning or retrieval-augmented generation processes applied.",
+       "mitigation_id": "MG-3.2-003",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Review and document accuracy, representativeness, relevance, suitability of data used at different stages of AI life cycle.",
+       "mitigation_id": "MP-2.3-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Review, document, and measure sources of bias in GAI training and TEVV data: Differences in distributions of outcomes across and within groups, including intersecting groups; Completeness, representativeness, and balance of data sources; demographic group and subgroup coverage in GAI system training data; Fo rms of latent systemic bias in images, text, audio, embeddings, or other complex or unstructured data; Input data features that may serve as proxies for demographic group membership (i.e., image metadata, language dialect) or otherwise give rise to emergent bias within GAI systems; The extent to which the digital divide may negatively impact representativeness in GAI system training and TEVV data; Filtering of hate speech or content in GAI system training data; Prevalence of GAI-generated data in GAI system training data.",
+       "mitigation_id": "MS-2.11-004",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Assess and manage statistical biases related to GAI content provenance through techniques such as re-sampling, re-weighting, or adversarial training.",
+       "mitigation_id": "MS-2.2-001",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Assess existence or levels of harmful bias, intellectual property infringement, data privacy violations, obscenity, extremism, violence, or CBRN information in system training data.",
+       "mitigation_id": "MS-2.6-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Document risk measurement plans to address identified risks. Plans may include, as applicable: Individual and group cognitive biases (e.g., confirmation bias, funding bias, groupthink) for AI Actors involved in the design, implementation, and use of GAI systems; Known past GAI system incidents and failure modes; In-context use and foreseeable misuse, abuse, and off-label use; Over reliance on quantitative metrics and methodologies without sufficient awareness of their limitations in the context(s) of use; Standard measurement and structured human f eedback approaches; Anticipated human-AI configurations.",
+       "mitigation_id": "MP-1.1-003",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Disaggregate evaluation metrics by demographic factors to identify any discrepancies in how content provenance mechanisms work across diverse populations.",
+       "mitigation_id": "MS-1.1-003",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Conduct fairness assessments to measure systemic bias. Measure GAI system performance across demographic groups and subgroups, addressing both quality of service and any allocation of services and resources. Quantify harms using: field testing with sub-gro up populations to determine likelihood of exposure to generated content exhibiting harmful bias, AI red-teaming with counterfactual and low-context (e.g., 'leader,' 'bad guys') prompts. For ML pipelines or business processes with categorical or numeric out comes that rely on GAI, apply general fairness metrics (e.g., demographic parity, equalized odds, equal opportunity, statistical hypothesis tests), to the pipeline or business outcome where appropriate; Custom, context-specific metrics developed in collabo ration with domain experts and affected communities; Measurements of the prevalence of denigration in generated content in deployment (e.g., sub-sampling a fraction of traffic and manually annotating denigrating content) .",
+       "mitigation_id": "MS-2.11-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Evaluate potential biases and stereotypes that could emerge from the AI-generated content using appropriate methodologies including computational testing methods as well as evaluating structured feedback input.",
+       "mitigation_id": "MS-3.3-003",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Implement safeguards or technical controls to prevent harmful outputs including distressed outputs, angry responses, high-risk advice, offensive content, bias, and deception",
+       "mitigation_id": "aiuc1-req-c003",
+       "source": "aiuc1"
+      },
+      {
+       "description": "Appoint expert third parties to evaluate system robustness to harmful outputs including distressed outputs, angry responses, high-risk advice, offensive content, bias, and deception at least every 3 months",
+       "mitigation_id": "aiuc1-req-c010",
+       "source": "aiuc1"
+      },
+      {
+       "description": "Implement continuous monitoring of GAI system impacts to identify whether GAI outputs are equitable across various sub-populations. Seek active and direct feedback from affected communities via structured feedback mechanisms or red-teaming to monitor and improve outputs.",
+       "mitigation_id": "MS-1.1-006",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Apply use-case appropriate benchmarks (e.g., Bias Benchmark Questions, Real Hateful or Harmful Prompts, Winogender Schemas 15 ) to quantify systemic bias, stereotyping, denigration, and hateful content in GAI system outputs; Document assumptions and limitations of benchmarks, including any actual or possible training/test data cross contamination, relative to in-context deployment environment.",
+       "mitigation_id": "MS-2.11-001",
+       "source": "nist-ai-rmf"
+      }
+     ],
+     "risk_description": "Unequal treatment of individuals or groups by AI, often based on race, gender, or other sensitive characteristics, resulting in unfair outcomes and representation of those groups.",
+     "risk_id": "mit-ai-risk-subdomain-1.1",
+     "risk_name": "Unfair discrimination and misrepresentation",
+     "scores": {
+      "bm25_rank": 0.0,
+      "cross_encoder_score": 0.0,
+      "embedding_distance": 0.0,
+      "rrf_score": 0.0
+     },
+     "taxonomy": "mit-ai-risk-repository",
+     "threat": "Generative AI outputs may produce biased or unethical business practices and decisions that result in unequal treatment of individuals or groups.",
+     "threat_source": "The imperfect accuracy and inherent biases of generative AI systems used by employees.",
+     "vulnerability": "Failure by employees to manually verify AI outputs or to refrain from using suspect results when accuracy or completeness is in doubt."
+    },
+    "semantic_digest": "c649492cd400d5c8ad16f8cddef5a751aa93b3b2ce63dfec730bf3bbe9039bda",
+    "taxonomy_chain": []
+   },
+   {
+    "applicability_evidence": [
+     {
+      "detail": "reviewed risk did not resolve to an authoritative attack pattern",
+      "fact_evaluations": [],
+      "kind": "governance",
+      "source": "obligation-planner"
+     }
+    ],
+    "attack_pattern_description": null,
+    "attack_pattern_id": null,
+    "attack_pattern_name": null,
+    "attack_pattern_semantic_digest": null,
+    "candidate_ids": [],
+    "catalog_pins": {
+     "atlas": {
+      "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+      "release": "2026.05"
+     }
+    },
+    "instruction": "Treat this governance risk as a hypothesis for structural STPA analysis. No attack pattern covers it, and it is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the unsafe control actions through which the risk could come about in this system, or report that no control action bears on it.",
+    "kind": "governance",
+    "mapping_pins": {
+     "obligation_edges": {
+      "digest": "a8b4c3c8088a267e69661ea020eded92bbc662dad0c52816015e6791f3fedbcf",
+      "release": "obligation-mapping-bundle-v2"
+     },
+     "sssom": {
+      "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+      "release": "2026.05"
+     }
+    },
+    "obligation_id": "ob:v1:dd8556befccf3d60d6fcbc9c4f6cd384a7f69799602293532d5a5c9d0191edaa",
+    "plan_digest": "0c4d0abc850ee1704203c9c7602e52c562fc61eebff9b5471a89553ea01aed6d",
+    "prerequisite_capabilities": null,
+    "qualification_disposition": "not_attempted",
+    "resource_references": [],
+    "risk_ref": {
+     "confidence": 0.9354808926582336,
+     "consequence": "The generation of biased or unethical business practices, such as unfair employee appraisals that do not reflect actual human assessment.",
+     "evidence": [
+      {
+       "relevance": null,
+       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "text": "Employees must check that the output does not lead to: > Poor, biased, and/or unethical business practices or decisions"
+      },
+      {
+       "relevance": null,
+       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "text": "Poor, biased, and/or unethical business practices or decisions"
+      }
+     ],
+     "grounding_confidence": "medium",
+     "impact": "Legal grievances from employees, reputational harm to the company, and the perpetuation of unfair treatment or discrimination within the organization.",
+     "mitigations": [],
+     "risk_description": "The AI system's outputs may explicitly reflect or reinforce harmful stereotypes, prejudices, or biased characterizations of specific groups. The AI system may exhibit unjustified or harmful differences in accuracy, quality, or outcomes across demographic groups, potentially leading to unfair treatment and discrimination. This includes both disparate error rates that affect opportunity and",
+     "risk_id": "credo-risk-010",
+     "risk_name": "Stereotype perpetuation (Slattery et al., 2024; IBM, 2024)",
+     "scores": {
+      "bm25_rank": 13.0,
+      "cross_encoder_score": 0.9354808926582336,
+      "embedding_distance": 0.4498305916786194,
+      "rrf_score": 0.028850145288501453
+     },
+     "taxonomy": "credo-ucf",
+     "threat": "Generative AI outputs may produce biased characterizations or unethical business decisions when used for sensitive tasks like writing employee appraisals.",
+     "threat_source": "The generative AI system and employees who use its output for internal HR documents or business decisions.",
+     "vulnerability": "The imperfect accuracy of generative AI and the potential for managers to use the system for time-sensitive tasks like employee appraisals without sufficient manual verification."
+    },
+    "semantic_digest": "e72084e34f56a19016aaaf913aa34b4b2dd73728dfa8d128a258fa4e21352f10",
+    "taxonomy_chain": []
+   },
+   {
+    "applicability_evidence": [
+     {
+      "detail": "reviewed risk did not resolve to an authoritative attack pattern",
+      "fact_evaluations": [],
+      "kind": "governance",
+      "source": "obligation-planner"
+     }
+    ],
+    "attack_pattern_description": null,
+    "attack_pattern_id": null,
+    "attack_pattern_name": null,
+    "attack_pattern_semantic_digest": null,
+    "candidate_ids": [],
+    "catalog_pins": {
+     "atlas": {
+      "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+      "release": "2026.05"
+     }
+    },
+    "instruction": "Treat this governance risk as a hypothesis for structural STPA analysis. No attack pattern covers it, and it is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the unsafe control actions through which the risk could come about in this system, or report that no control action bears on it.",
+    "kind": "governance",
+    "mapping_pins": {
+     "obligation_edges": {
+      "digest": "a8b4c3c8088a267e69661ea020eded92bbc662dad0c52816015e6791f3fedbcf",
+      "release": "obligation-mapping-bundle-v2"
+     },
+     "sssom": {
+      "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+      "release": "2026.05"
+     }
+    },
+    "obligation_id": "ob:v1:ed1136e942eb21cc7268284f63c4f0df0d76a9ac0110d31180550475ebcfbe1d",
+    "plan_digest": "0c4d0abc850ee1704203c9c7602e52c562fc61eebff9b5471a89553ea01aed6d",
+    "prerequisite_capabilities": null,
+    "qualification_disposition": "not_attempted",
+    "resource_references": [],
+    "risk_ref": {
+     "confidence": 0.8909651637077332,
+     "consequence": "The direct output of these tools, such as code from GitHub CoPilot or images from DALL-E, may constitute unauthorized reproductions of protected works.",
+     "evidence": [
+      {
+       "relevance": null,
+       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "text": "Ensure compliance with the terms of use of many generative AI systems (especially attribution and lack of copyright protection)"
+      }
+     ],
+     "grounding_confidence": "medium",
+     "impact": "Legal liability for users and providers, and the erosion of intellectual property rights for creators within the software and multimedia ecosystems.",
+     "mitigations": [
+      {
+       "description": "Align GAI development and use with applicable laws and regulations, including those related to data privacy, copyright and intellectual property law.",
+       "mitigation_id": "GV-1.1-001",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Categorize different types of GAI content with associated third-party rights (e .g., copyright, intellectual property, data privacy).",
+       "mitigation_id": "GV-6.1-001",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Draft and maintain well-defined contracts and service level agreements (SLAs) that specify content ownership, usage rights, quality standards, security requirements, and content provenance expectations for GAI systems .",
+       "mitigation_id": "GV-6.1-004",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Update and integrate due diligence processes for GAI acquisition and procurement vendor assessments to include intellectual property, data privacy, security, and other risks. For example, update p rocesses to: Address solutions that may rely on embedded GAI technologies; Address ongoing monitoring, assessments, and alerting, dynamic risk assessments, and real-time reporting tools for monitoring third-party GAI risks; Consider policy adjustments across GAI modeling libraries, tools and APIs, fine-tuned models, and embedded tools; Assess GAI vendors, open-source or proprietary GAI tools, or GAI service providers against incident or vulnerability databases.",
+       "mitigation_id": "GV-6.1-009",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Take reasonable measures to review training data for CBRN information, and intellectual property, and where appropriate, remove it. Implement reasonable measures to prevent, flag, or take other action in response to outputs that reproduce particular training data (e.g., plagiarized, trademarked, patented, licensed content or trade secret material ).",
+       "mitigation_id": "MG-3.1-004",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Implement processes for responding to potential intellectual property infringement claims or other rights.",
+       "mitigation_id": "MP-4.1-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Implement policies and practices defining how third-party intellectual property and training data will be used, stored, and protected.",
+       "mitigation_id": "MP-4.1-006",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Conduct appropriate diligence on training data use to assess intellectual property, and privacy, risks, including to examine whether use of proprietary or sensitive training data is consistent with applicable laws.",
+       "mitigation_id": "MP-4.1-010",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Conduct AI red-teaming to assess issues such as: Outputting of training data samples, and subsequent reverse engineering, model extraction, and membership inference risks; Revealing biometric, confidential, copyrighted, licensed, patented, personal, proprietary, sensitive, or trade-marked information ; Tracking or revealing location information of users or members of training datasets. Property",
+       "mitigation_id": "MS-2.10-001",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Assess existence or levels of harmful bias, intellectual property infringement, data privacy violations, obscenity, extremism, violence, or CBRN information in system training data.",
+       "mitigation_id": "MS-2.6-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Compile statistics on actual policy violations, take-down requests, and intellectual property infringement for organizational GAI systems: Analyze transparency reports across demographic groups, languages groups .",
+       "mitigation_id": "MS-2.8-001",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Implement safeguards and technical controls to prevent AI outputs from violating copyrights, trademarks, or other third-party intellectual property rights",
+       "mitigation_id": "aiuc1-req-a007",
+       "source": "aiuc1"
+      }
+     ],
+     "risk_description": "A model might generate content that is similar or identical to existing work protected by copyright or covered by open-source license agreement.",
+     "risk_id": "atlas-copyright-infringement",
+     "risk_name": "Copyright infringement",
+     "scores": {
+      "bm25_rank": 4.0,
+      "cross_encoder_score": 0.8909651637077332,
+      "embedding_distance": 0.3941227197647095,
+      "rrf_score": 0.032018442622950824
+     },
+     "taxonomy": "ibm-risk-atlas",
+     "threat": "Generative models like Stable Diffusion, Midjourney, or DALL-E may produce images or text that are substantially similar to or identical to existing copyrighted works or protected open-source licensed content.",
+     "threat_source": "The generative AI models, including BloombergGPT, GitHub CoPilot, and various latent diffusion models (LDMs).",
+     "vulnerability": "The training processes of these multimedia creation tools and LLMs may incorporate protected intellectual property without sufficient filtering or adherence to license agreements."
+    },
+    "semantic_digest": "71bc72e93bad6545f29ace93e836e188e79701e3f4f5cd0830ecb34d3905bb5b",
+    "taxonomy_chain": []
+   },
+   {
+    "applicability_evidence": [
+     {
+      "detail": "{\"path\":[{\"evidence\":[\"# Lack of capability or robustness yields unreliable output, a cause of OWASP LLM09:2025 misinformation\"],\"relation\":\"skos:relatedMatch\",\"source\":\"sssom\",\"source_id\":\"mit-ai-risk-subdomain-7.3\",\"target_id\":\"LLM09\"},{\"evidence\":[\"llm-to-attack-pattern.yaml\"],\"relation\":\"realized_by\",\"source\":\"cross-taxonomy\",\"source_id\":\"LLM09\",\"target_id\":\"AP-T10-01\"}]}",
+      "fact_evaluations": [],
+      "kind": "mapping",
+      "source": "cross-taxonomy"
+     },
+     {
+      "detail": "no compatible canonical integration resource for slot",
+      "fact_evaluations": [],
+      "kind": "projection",
+      "source": "missing_compatible_resource"
+     },
+     {
+      "detail": "no compatible canonical integration resource for slot",
+      "fact_evaluations": [],
+      "kind": "projection",
+      "source": "missing_compatible_resource"
+     },
+     {
+      "detail": "no compatible canonical trust_boundary resource for slot",
+      "fact_evaluations": [],
+      "kind": "projection",
+      "source": "missing_compatible_resource"
+     },
+     {
+      "detail": "authoritative projection is infeasible",
+      "fact_evaluations": [],
+      "kind": "qualification",
+      "source": "authoritative-projection"
+     }
+    ],
+    "attack_pattern_description": "An attacker compromises the interface between an AI agent and its human overseer by injecting artificial decision contexts that obscure critical information. The manipulated presentation causes the human reviewer to evaluate actions on incomplete or misleading context, neutralizing the oversight function while preserving the appearance of human-in-the-loop control. Owns decision-context/interface distortion; substitution of a concrete operational value is AP-T15-01's boundary (catalog-lineage).\n",
+    "attack_pattern_id": "AP-T10-01",
+    "attack_pattern_name": "Human oversight interface manipulation via artificial decision context",
+    "attack_pattern_semantic_digest": "c0492a7a98f8c6e650a9d90913168578f10e410dc99a6e87ca6787fea761136f",
+    "candidate_ids": [
+     "cand:v2:96c52c12fbf0f9a0c5092817659c668a",
+     "cand:v2:cc31506370b79b12e817608f95f4977d",
+     "cand:v2:f19044bef16e3e079cd59f09520946f8"
+    ],
+    "catalog_pins": {
+     "atlas": {
+      "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+      "release": "2026.05"
+     }
+    },
+    "instruction": "Treat this taxonomy concern as a hypothesis for structural STPA analysis. It is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the system-specific losses, hazards, constraints, and control path that make the concern applicable, or provide explicit structural evidence for non-applicability.",
+    "mapping_pins": {
+     "obligation_edges": {
+      "digest": "a8b4c3c8088a267e69661ea020eded92bbc662dad0c52816015e6791f3fedbcf",
+      "release": "obligation-mapping-bundle-v2"
+     },
+     "sssom": {
+      "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+      "release": "2026.05"
+     }
+    },
+    "obligation_id": "ob:v1:f835b6b0acd78425fb4030325eb4af43c5cc3a8c09d12a8f7668b55009934e51",
+    "plan_digest": "0c4d0abc850ee1704203c9c7602e52c562fc61eebff9b5471a89553ea01aed6d",
+    "prerequisite_capabilities": {
+     "kc_requires": {
+      "all": [
+       "KCX-HITL"
+      ],
+      "any": []
+     },
+     "min_zones": [
+      "input",
+      "reasoning"
+     ]
+    },
+    "qualification_disposition": "structurally_infeasible",
+    "resource_references": [],
+    "risk_ref": {
+     "confidence": 0.0,
+     "consequence": "The generation of erroneous outputs, such as flawed software code in GitHub Copilot or misleading multimedia content via deepfake tools.",
+     "evidence": [
+      {
+       "relevance": null,
+       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "text": "Since an actual human did not write the appraisal. That employee does not like their appraisal and files a complaint. Since an actual human did not write the appraisal, there is good reason to believe that the employee's grievances would be upheld."
+      }
+     ],
+     "grounding_confidence": "medium",
+     "impact": "Significant operational failures in critical applications and the potential for widespread misinformation or loss of trust in automated multimedia and professional tools.",
+     "mitigations": [
+      {
+       "description": "Carefully vet data sources and suppliers, including terms and conditions and privacy policies. Only use trusted suppliers and regularly review and audit supplier security posture and access controls.",
+       "mitigation_id": "owasp-llm-act-03-01",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Vet data vendors rigorously. Validate model outputs against trusted sources to detect signs of poisoning or data manipulation.",
+       "mitigation_id": "owasp-llm-act-04-02",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Implement a use-cased based supplier risk assessment framework to evaluate and monitor third-party entities' performance and adherence to content provenance standards and technologies to detect anomalies and unauthorized changes; services acquisition and value chain risk management; and legal compliance.",
+       "mitigation_id": "GV-6.1-005",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Inventory all third-party entities with access to organizational content and establish approved GAI technology and service provider lists.",
+       "mitigation_id": "GV-6.1-007",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Update and integrate due diligence processes for GAI acquisition and procurement vendor assessments to include intellectual property, data privacy, security, and other risks. For example, update p rocesses to: Address solutions that may rely on embedded GAI technologies; Address ongoing monitoring, assessments, and alerting, dynamic risk assessments, and real-time reporting tools for monitoring third-party GAI risks; Consider policy adjustments across GAI modeling libraries, tools and APIs, fine-tuned models, and embedded tools; Assess GAI vendors, open-source or proprietary GAI tools, or GAI service providers against incident or vulnerability databases.",
+       "mitigation_id": "GV-6.1-009",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Review vendor contracts and avoid arbitrary or capricious termination of critical GAI technologies or vendor services and non-standard terms that may amplify or defer liability in unexpected ways and /or contribute to u nauthorized data collection by vendors or third-parties (e.g., secondary data use) . Consider: Clear assignment of liability and responsibility for incidents, GAI system changes over time (e.g., fine-tuning, drift, decay); Request: Notification and disclosure for serious incidents arising from third-party data and systems; Service Level A greements (SLAs) in vendor contracts that address incident response, response times, and availability of critical support.",
+       "mitigation_id": "GV-6.2-007",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Establish and communicate AI input data policies covering how customer data is used for model training, inference processing, data retention periods, and customer data rights",
+       "mitigation_id": "aiuc1-req-a001",
+       "source": "aiuc1"
+      },
+      {
+       "description": "Establish AI vendor due diligence processes for foundation and upstream model providers covering data handling, PII controls, security and compliance",
+       "mitigation_id": "aiuc1-req-e006",
+       "source": "aiuc1"
+      },
+      {
+       "description": "Apply comprehensive AI red teaming and evaluations when selecting a third-party model. Use benchmarks such as Decoding Trust and conduct extensive use-case-specific red teaming beyond standard benchmarks.",
+       "mitigation_id": "owasp-llm-act-03-03",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Only use models from verifiable sources. Use third-party model integrity checks with signing and file hashes. Apply code signing for externally supplied code.",
+       "mitigation_id": "owasp-llm-act-03-06",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Implement strict monitoring and auditing practices for collaborative model development environments to prevent and detect abuse quickly.",
+       "mitigation_id": "owasp-llm-act-03-07",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Apply anomaly detection and adversarial robustness tests on supplied models and data to detect tampering and poisoning before integration into production systems.",
+       "mitigation_id": "owasp-llm-act-03-08",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Implement strict sandboxing to limit model exposure to unverified data sources. Use anomaly detection to filter adversarial data before it enters the training pipeline.",
+       "mitigation_id": "owasp-llm-act-04-03",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Implement robust data validation pipelines for knowledge sources. Regularly audit and verify knowledge base integrity for hidden codes, data poisoning, and adversarial embeddings. Only accept data from trusted and verified sources.",
+       "mitigation_id": "owasp-llm-act-08-02",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "When merging data from multiple sources, thoroughly review the combined dataset. Tag and classify data within the knowledge base to control access levels and prevent data mismatch errors.",
+       "mitigation_id": "owasp-llm-act-08-03",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Institute test and evaluation for data and content flows within the GAI system, including but not limited to, original data sources, data transformations, and decision-making criteria.",
+       "mitigation_id": "MP-2.1-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Re-evaluate models that were fine-tuned or enhanced on top of third-party models.",
+       "mitigation_id": "MP-4.1-007",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Evaluate the quality and integrity of data used in training and the provenance of AI-generated content, for example by e mploying techniques like chaos engineering and seeking stakeholder feedback.",
+       "mitigation_id": "MS-1.1-007",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Verify deduplication of GAI training data samples, particularly regarding synthetic data.",
+       "mitigation_id": "MS-2.10-003",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Assess the proportion of synthetic to non-synthetic training data and verify training data is not overly homogenous or GAI-produced to mitigate concerns of model collapse.",
+       "mitigation_id": "MS-2.11-005",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Document training data curation policies, to the extent possible and according to applicable laws and policies .",
+       "mitigation_id": "MP-4.1-004",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Establish criteria for selecting cloud provider, and circumstances for on-premises processing considering data sensitivity, regulatory requirements, security controls, and operational needs",
+       "mitigation_id": "aiuc1-req-e005",
+       "source": "aiuc1"
+      },
+      {
+       "description": "Document AI data processing locations",
+       "mitigation_id": "aiuc1-req-e011",
+       "source": "aiuc1"
+      },
+      {
+       "description": "Maintain clear policies about data retention, usage, and deletion. Let users opt out of training data inclusion. Document how user data flows through the system.",
+       "mitigation_id": "owasp-llm-act-02-07",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Document how pre-trained models have been adapted (e.g., fine-tuned, or retrieval-augmented generation) for the specific generative task, including any data augmentations, parameter adjustments, or other modifications. Access to un-tuned (baseline) models support s debugging the relative influence of the pre-trained weights compared to the fine-tuned model weights or other system updates.",
+       "mitigation_id": "MG-3.2-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Verify fine-tuning does not compromise safety and security controls.",
+       "mitigation_id": "MS-2.7-008",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Encourage users to cross-check LLM outputs with trusted external sources. Implement human oversight and fact-checking for critical information. Ensure human reviewers are trained to avoid overreliance on AI-generated content.",
+       "mitigation_id": "owasp-llm-act-09-03",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Implement automated tools and processes to validate key outputs, especially from high-stakes environments where misinformation could cause significant harm.",
+       "mitigation_id": "owasp-llm-act-09-04",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Establish minimum thresholds for performance or assurance criteria and review as part of deployment approval ('go/'no-go') policies, procedures, and processes, with reviewed processes and approval thresholds reflecting measurement of GAI capabilities and risks.",
+       "mitigation_id": "GV-1.3-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Establish policies and procedures to test and manage risks related to rollover and fallback technologies for GAI systems, acknowledging that rollover and fallback may include manual processing.",
+       "mitigation_id": "GV-6.2-006",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Re-assess model risks after fine-tuning or retrieval-augmented generation implementation and for any third-party GAI models deployed for applications and/or use cases that were not evaluated in initial testing.",
+       "mitigation_id": "MG-3.1-003",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Use organizational risk tolerance to evaluate acceptable risks and performance metrics and decommission or retrain pre-trained models that perform outside of defined limits.",
+       "mitigation_id": "MG-3.2-009",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Implement active learning techniques to identify instances where the model fails or produces unexpected outputs.",
+       "mitigation_id": "MG-4.1-004",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Consider baseline model performance on suites of benchmarks when selecting a model for fine tuning or enhancement with retrieval-augmented generation .",
+       "mitigation_id": "MS-2.3-001",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Evaluate claims of model capabilities using empirically validated methods.",
+       "mitigation_id": "MS-2.3-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Evaluate GAI system performance in real-world scenarios to observe its behavior in practical environments and reveal issues that might not surface in controlled and optimized testing environments.",
+       "mitigation_id": "MS-4.2-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Establish a quality management system for AI systems proportionate to the size of the organization",
+       "mitigation_id": "aiuc1-req-e013",
+       "source": "aiuc1"
+      },
+      {
+       "description": "Verify that data or benchmarks used in risk measurement, and users, participants, or subjects involved in structured GAI public feedback exercises are representative of diverse in-context user populations.",
+       "mitigation_id": "MP-1.2-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Review and document accuracy, representativeness, relevance, suitability of data used at different stages of AI life cycle.",
+       "mitigation_id": "MP-2.3-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Review, document, and measure sources of bias in GAI training and TEVV data: Differences in distributions of outcomes across and within groups, including intersecting groups; Completeness, representativeness, and balance of data sources; demographic group and subgroup coverage in GAI system training data; Fo rms of latent systemic bias in images, text, audio, embeddings, or other complex or unstructured data; Input data features that may serve as proxies for demographic group membership (i.e., image metadata, language dialect) or otherwise give rise to emergent bias within GAI systems; The extent to which the digital divide may negatively impact representativeness in GAI system training and TEVV data; Filtering of hate speech or content in GAI system training data; Prevalence of GAI-generated data in GAI system training data.",
+       "mitigation_id": "MS-2.11-004",
+       "source": "nist-ai-rmf"
+      }
+     ],
+     "risk_description": "AI systems that fail to perform reliably or effectively under varying conditions, exposing them to errors and failures that can have significant consequences, especially in critical applications or areas that require moral reasoning.",
+     "risk_id": "mit-ai-risk-subdomain-7.3",
+     "risk_name": "Lack of capability or robustness",
+     "scores": {
+      "bm25_rank": 0.0,
+      "cross_encoder_score": 0.0,
+      "embedding_distance": 0.0,
+      "rrf_score": 0.0
+     },
+     "taxonomy": "mit-ai-risk-repository",
+     "threat": "AI models such as BloombergGPT, GitHub Copilot, or latent diffusion models may produce inaccurate code, incorrect financial insights, or non-sensical imagery when faced with edge cases or complex prompts.",
+     "threat_source": "The inherent limitations in the capability or robustness of generative models like Stable Diffusion, Midjourney, or OpenAI's DALL-E.",
+     "vulnerability": "The inability of these AI systems to maintain reliable performance or effective moral reasoning under varying or unexpected input conditions."
+    },
+    "semantic_digest": "07ba34fc7fd88b06579a2bc9db5baafa525fe130b68c695015f39326f8798bbe",
+    "taxonomy_chain": [
+     {
+      "id": "AML.T0051.001",
+      "taxonomy": "ATLAS"
+     },
+     {
+      "id": "AML.T0066",
+      "taxonomy": "ATLAS"
+     },
+     {
+      "id": "AML.T0067",
+      "taxonomy": "ATLAS"
+     }
+    ]
+   },
+   {
+    "applicability_evidence": [
+     {
+      "detail": "{\"path\":[{\"evidence\":[\"ibm2owasp_from_tsv_data.yaml\"],\"relation\":\"skos:broadMatch\",\"source\":\"sssom\",\"source_id\":\"atlas-spreading-disinformation\",\"target_id\":\"LLM09\"},{\"evidence\":[\"llm-to-attack-pattern.yaml\"],\"relation\":\"realized_by\",\"source\":\"cross-taxonomy\",\"source_id\":\"LLM09\",\"target_id\":\"AP-T15-02\"}]}",
+      "fact_evaluations": [],
+      "kind": "mapping",
+      "source": "cross-taxonomy"
+     },
+     {
+      "detail": "no compatible canonical integration resource for slot",
+      "fact_evaluations": [],
+      "kind": "projection",
+      "source": "missing_compatible_resource"
+     },
+     {
+      "detail": "no compatible canonical trust_boundary resource for slot",
+      "fact_evaluations": [],
+      "kind": "projection",
+      "source": "missing_compatible_resource"
+     },
+     {
+      "detail": "no compatible canonical trust_boundary resource for slot",
+      "fact_evaluations": [],
+      "kind": "projection",
+      "source": "missing_compatible_resource"
+     },
+     {
+      "detail": "authoritative projection is infeasible",
+      "fact_evaluations": [],
+      "kind": "qualification",
+      "source": "authoritative-projection"
+     }
+    ],
+    "attack_pattern_description": "An attacker compromises an AI assistant's output generation through indirect prompt injection, causing it to produce urgent, authoritative messages that direct users toward malicious actions such as clicking attacker-controlled links or disclosing credentials. The AI's established trust relationship with the user bypasses normal skepticism, making the social engineering significantly more effective than traditional phishing.",
+    "attack_pattern_id": "AP-T15-02",
+    "attack_pattern_name": "AI-mediated social engineering via deceptive instruction generation",
+    "attack_pattern_semantic_digest": "93c4af7cd64e41de999e929ef0090e0320ef0ed264ab1c5e7c93b55d897c18e8",
+    "candidate_ids": [
+     "cand:v2:022490dbd4f5baece51d2f0c541e759e",
+     "cand:v2:b7cb4584effc8c3d4445e178a25b9735",
+     "cand:v2:c046989e1817d961627bccaa2f2a7a40"
+    ],
+    "catalog_pins": {
+     "atlas": {
+      "digest": "a1c1cb4f3e0c8436298db721642afb81cd59e4fdff973d2c869a772568782318",
+      "release": "2026.05"
+     }
+    },
+    "instruction": "Treat this taxonomy concern as a hypothesis for structural STPA analysis. It is not a mandatory mechanism, ordered attack sequence, or coverage claim. Identify the system-specific losses, hazards, constraints, and control path that make the concern applicable, or provide explicit structural evidence for non-applicability.",
+    "mapping_pins": {
+     "obligation_edges": {
+      "digest": "a8b4c3c8088a267e69661ea020eded92bbc662dad0c52816015e6791f3fedbcf",
+      "release": "obligation-mapping-bundle-v2"
+     },
+     "sssom": {
+      "digest": "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc",
+      "release": "2026.05"
+     }
+    },
+    "obligation_id": "ob:v1:f97426a97c0257a0888cdc8ac71ab82dc32684a55dec712ceafa7984664d31d3",
+    "plan_digest": "0c4d0abc850ee1704203c9c7602e52c562fc61eebff9b5471a89553ea01aed6d",
+    "prerequisite_capabilities": {
+     "kc_requires": {
+      "all": [],
+      "any": [
+       "KC6.1.1",
+       "KC6.1.2",
+       "KC6.2.1",
+       "KC6.2.2",
+       "KC6.3.1",
+       "KC6.3.2",
+       "KC6.4",
+       "KC6.5",
+       "KC6.6",
+       "KC6.7"
+      ]
+     },
+     "min_zones": [
+      "input",
+      "reasoning",
+      "tool_execution"
+     ]
+    },
+    "qualification_disposition": "structurally_infeasible",
+    "resource_references": [],
+    "risk_ref": {
+     "confidence": 0.0,
+     "consequence": "The successful delivery of deceptive communications that bypass traditional scrutiny through increased personalization and realism.",
+     "evidence": [
+      {
+       "relevance": null,
+       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "text": "Although generative AI has the power to increase cyber crime through convincing mimicking of  existing  communications, excellent translation capabilities,  deep fake images, audio, and video, ease of finding code vulnerabilities, and much more, the kinds of threats still are the same as  when  using  other  third-party  systems.  For  instance,  phishing  emails  may  become  more personalized with generative AI, but the way these enter the organization still is the same."
+      }
+     ],
+     "grounding_confidence": "high",
+     "impact": "Compromise of intellectual property (IP), breaches of compliance, and increased risk of cyber crime against the organization.",
+     "mitigations": [
+      {
+       "description": "Use retrieval-augmented generation (RAG) to enhance reliability by retrieving verified information from trusted external databases during response generation, grounding outputs in factual sources.",
+       "mitigation_id": "owasp-llm-act-09-01",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Identify and communicate risks and possible harms of LLM-generated content, including the potential for misinformation, to all users and stakeholders.",
+       "mitigation_id": "owasp-llm-act-09-05",
+       "source": "owasp-llm-2.0"
+      },
+      {
+       "description": "Implement real-time monitoring processes for analyzing generated content performance and trustworthiness characteristics related to content provenance to identify deviations from the desired standards and trigger alerts for human intervention.",
+       "mitigation_id": "MG-3.2-006",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Observe and analyze how the GAI system interacts with external networks, and identify any potential for negative externalities, particularly where content provenance might be compromised.",
+       "mitigation_id": "MP-2.2-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Deploy and document fact-checking techniques to verify the accuracy and veracity of information generated by GAI systems, especially when the information comes from multiple (or unknown) sources.",
+       "mitigation_id": "MP-2.3-003",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Develop and implement testing techniques to identify GAI produced content (e.g., synthetic media) that might be indistinguishable from human-generated content.",
+       "mitigation_id": "MP-2.3-004",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Apply TEVV practices for content provenance (e.g., probing a system's synthetic data generation capabilities for potential misuse or vulnerabilities .",
+       "mitigation_id": "MP-5.1-001",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Identify potential content provenance harms of GAI, such as misinformation or disinformation, deepfakes, including NCII, or tampered content. Enumerate and rank risks based on their likelihood and potential impact, and determine how well provenance solutions address specific risks and/or harms.",
+       "mitigation_id": "MP-5.1-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Profile threats and negative impacts arising from GAI systems interacting with, manipulating, or generating content, and outlining known and potential vulnerabilities and the likelihood of their occurrence.",
+       "mitigation_id": "MP-5.1-006",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Integrate tools designed to analyze content provenance and detect data anomalies, verify the authenticity of digital signatures, and identify patterns associated with misinformation or manipulation.",
+       "mitigation_id": "MS-1.1-002",
+       "source": "nist-ai-rmf"
+      },
+      {
+       "description": "Conduct user surveys to gather user satisfaction with the AI-generated content and user perceptions of content authenticity. Analyze user feedback to identify concerns and/or current literacy levels related to content provenance and understanding of labels on content.",
+       "mitigation_id": "MS-2.7-003",
+       "source": "nist-ai-rmf"
+      }
+     ],
+     "risk_description": "Generative AI models might be used to intentionally create misleading or false information to deceive or influence a targeted audience.",
+     "risk_id": "atlas-spreading-disinformation",
+     "risk_name": "Spreading disinformation",
+     "scores": {
+      "bm25_rank": 0.0,
+      "cross_encoder_score": 0.0,
+      "embedding_distance": 0.0,
+      "rrf_score": 0.0
+     },
+     "taxonomy": "ibm-risk-atlas",
+     "threat": "Generative AI is used to create highly personalized phishing emails and convincing deep fake images, audio, or video to deceive targeted audiences.",
+     "threat_source": "Malicious actors leveraging generative AI's capabilities for mimicking existing communications and creating synthetic media.",
+     "vulnerability": "The inherent ability of generative AI to produce convincing, high-fidelity content that mimics legitimate communications."
+    },
+    "semantic_digest": "408381d0fb3077166b92d2e33f05faf1ee27409edfb487311c3c2d38dd9d72f0",
+    "taxonomy_chain": [
+     {
+      "id": "AML.T0052.000",
+      "taxonomy": "ATLAS"
+     },
+     {
+      "id": "AML.T0051.001",
+      "taxonomy": "ATLAS"
+     },
+     {
+      "id": "AML.T0065",
+      "taxonomy": "ATLAS"
+     }
+    ]
+   }
+  ],
+  "routed_routes": [
+   {
+    "constraint_ids": [
+     "SC-5"
+    ],
+    "control_action_ids": [
+     "CA-1-1"
+    ],
+    "controlled_process_ids": [],
+    "controller_ids": [],
+    "coordination_link_ids": [],
+    "diagnostics": [],
+    "disposition": "targeted",
+    "evidence": [
+     "CA-1-1: The conversational response may contain biased or unfair representations of groups."
+    ],
+    "feedback_channel_ids": [],
+    "hazard_ids": [
+     "H-2"
+    ],
+    "missing_concepts": [],
+    "model_call_refs": [
+     "stpa-governance-route:governance-batch-1"
+    ],
+    "obligation_id": "ob:v1:514ba446448809838b841218bc0c740f281bf3fedf62ccf1aa5db2ccd64b6a57",
+    "process_model_part_ids": [],
+    "rationale": "The conversational response may contain biased or unfair representations of groups.",
+    "responsibility_ids": [],
+    "route_id": "route:v1:c5361307a9d3f15692b65dbb7e4a13fc0f691bb8f47f3321a823b70e06fa2f9b",
+    "slot_ids": [
+     "RESP-1:CA-1-1:INCORRECT",
+     "RESP-1:CA-1-1:NOT_PROVIDED",
+     "RESP-1:CA-1-1:WRONG_DURATION",
+     "RESP-1:CA-1-1:WRONG_TIMING"
+    ],
+    "trace_refs": []
+   },
+   {
+    "constraint_ids": [
+     "SC-5"
+    ],
+    "control_action_ids": [
+     "CA-1-1"
+    ],
+    "controlled_process_ids": [],
+    "controller_ids": [],
+    "coordination_link_ids": [],
+    "diagnostics": [],
+    "disposition": "targeted",
+    "evidence": [
+     "CA-1-1: The conversational response may result in unequal treatment or misrepresentation of demographic groups."
+    ],
+    "feedback_channel_ids": [],
+    "hazard_ids": [
+     "H-2"
+    ],
+    "missing_concepts": [],
+    "model_call_refs": [
+     "stpa-governance-route:governance-batch-1"
+    ],
+    "obligation_id": "ob:v1:a1d128b3b5b33efab7fb3defcfe06b21f5d8fb3d07f0fd931d1809a6250ade09",
+    "process_model_part_ids": [],
+    "rationale": "The conversational response may result in unequal treatment or misrepresentation of demographic groups.",
+    "responsibility_ids": [],
+    "route_id": "route:v1:2cce0647f99adbfe5597276ecb14136c9d38809f8a49e461547e2ef81f908f9b",
+    "slot_ids": [
+     "RESP-1:CA-1-1:INCORRECT",
+     "RESP-1:CA-1-1:NOT_PROVIDED",
+     "RESP-1:CA-1-1:WRONG_DURATION",
+     "RESP-1:CA-1-1:WRONG_TIMING"
+    ],
+    "trace_refs": []
+   },
+   {
+    "constraint_ids": [
+     "SC-5"
+    ],
+    "control_action_ids": [
+     "CA-1-1"
+    ],
+    "controlled_process_ids": [],
+    "controller_ids": [],
+    "coordination_link_ids": [],
+    "diagnostics": [],
+    "disposition": "targeted",
+    "evidence": [
+     "CA-1-1: The conversational response may explicitly reflect or reinforce harmful stereotypes or biased characterizations."
+    ],
+    "feedback_channel_ids": [],
+    "hazard_ids": [
+     "H-2"
+    ],
+    "missing_concepts": [],
+    "model_call_refs": [
+     "stpa-governance-route:governance-batch-1"
+    ],
+    "obligation_id": "ob:v1:dd8556befccf3d60d6fcbc9c4f6cd384a7f69799602293532d5a5c9d0191edaa",
+    "process_model_part_ids": [],
+    "rationale": "The conversational response may explicitly reflect or reinforce harmful stereotypes or biased characterizations.",
+    "responsibility_ids": [],
+    "route_id": "route:v1:73fdf60ef1aef6ebf44d9acc69c7ca9b2515f69d2944c3b288071aa3b5b45f44",
+    "slot_ids": [
+     "RESP-1:CA-1-1:INCORRECT",
+     "RESP-1:CA-1-1:NOT_PROVIDED",
+     "RESP-1:CA-1-1:WRONG_DURATION",
+     "RESP-1:CA-1-1:WRONG_TIMING"
+    ],
+    "trace_refs": []
+   },
+   {
+    "constraint_ids": [
+     "SC-4"
+    ],
+    "control_action_ids": [
+     "CA-1-1"
+    ],
+    "controlled_process_ids": [],
+    "controller_ids": [],
+    "coordination_link_ids": [],
+    "diagnostics": [],
+    "disposition": "targeted",
+    "evidence": [
+     "CA-1-1: The conversational response might contain verbatim reproductions of protected works if not properly managed."
+    ],
+    "feedback_channel_ids": [],
+    "hazard_ids": [
+     "H-1"
+    ],
+    "missing_concepts": [],
+    "model_call_refs": [
+     "stpa-governance-route:governance-batch-1"
+    ],
+    "obligation_id": "ob:v1:ed1136e942eb21cc7268284f63c4f0df0d76a9ac0110d31180550475ebcfbe1d",
+    "process_model_part_ids": [],
+    "rationale": "The conversational response might contain verbatim reproductions of protected works if not properly managed.",
+    "responsibility_ids": [],
+    "route_id": "route:v1:d1e5ee73eaac0ec47926bb69b588a06183478a9e6c32fadda1d69cf02083a593",
+    "slot_ids": [
+     "RESP-1:CA-1-1:INCORRECT",
+     "RESP-1:CA-1-1:NOT_PROVIDED",
+     "RESP-1:CA-1-1:WRONG_DURATION",
+     "RESP-1:CA-1-1:WRONG_TIMING"
+    ],
+    "trace_refs": []
+   },
+   {
+    "constraint_ids": [
+     "SC-4"
+    ],
+    "control_action_ids": [
+     "CA-1-1"
+    ],
+    "controlled_process_ids": [
+     "CP-1"
+    ],
+    "controller_ids": [
+     "RESP-1"
+    ],
+    "coordination_link_ids": [],
+    "diagnostics": [
+     {
+      "code": "mechanism_path_unsubstantiated",
+      "detail": "selected STPA path relationship is adjacent_control: The mechanism describes manipulating the human oversight interface to obscure context, but the hazard and constraint focus on the assistant's reply containing verbatim reproductions of protected works. These are different consequences.",
+      "gap_ids": [],
+      "obligation_ids": [
+       "ob:v1:f835b6b0acd78425fb4030325eb4af43c5cc3a8c09d12a8f7668b55009934e51"
+      ],
+      "refs": [
+       "route:v1:0485ce9a54cf52ea6b838c4310a2570a844db3f8a46ff5a244c3a68443d8ab27"
+      ],
+      "severity": "warning"
+     }
+    ],
+    "disposition": "targeted",
+    "evidence": [
+     "RESP-1's control action CA-1-1 produces conversational responses (PM-1-1) which can contain errors."
+    ],
+    "feedback_channel_ids": [
+     "FB-1-1"
+    ],
+    "hazard_ids": [
+     "H-1"
+    ],
+    "missing_concepts": [],
+    "model_call_refs": [],
+    "obligation_id": "ob:v1:f835b6b0acd78425fb4030325eb4af43c5cc3a8c09d12a8f7668b55009934e51",
+    "process_model_part_ids": [
+     "PM-1-1"
+    ],
+    "rationale": "the system's output generation capability is a plausible surface for generating the types of erroneous content described in the risk.",
+    "responsibility_ids": [
+     "RESP-1"
+    ],
+    "route_id": "route:v1:d0fd6365ad90d3072ee2ee863fe68539737f66f5cc3407eccdf5507a316a80e0",
+    "semantic_assessment": {
+     "mapping_strength": "related_category_expansion",
+     "mechanism_assessment": "insufficient_evidence",
+     "mechanism_rationale": "The mechanism describes manipulating the human oversight interface to obscure context, but the hazard and constraint focus on the assistant's reply containing verbatim reproductions of protected works. These are different consequences.",
+     "risk_alignment": "supported",
+     "risk_alignment_rationale": "the risk of generating erroneous/inaccurate outputs is directly represented by the potential for the assistant to provide unverified or incorrect information."
+    },
+    "slot_ids": [
+     "RESP-1:CA-1-1:INCORRECT"
+    ],
+    "trace_refs": []
+   },
+   {
+    "constraint_ids": [
+     "SC-10"
+    ],
+    "control_action_ids": [
+     "CA-1-1"
+    ],
+    "controlled_process_ids": [
+     "CP-1"
+    ],
+    "controller_ids": [
+     "RESP-1"
+    ],
+    "coordination_link_ids": [],
+    "diagnostics": [
+     {
+      "code": "mechanism_path_unsubstantiated",
+      "detail": "selected STPA path relationship is adjacent_control: The mechanism describes social engineering via deceptive instructions (directing users to malicious links), but the hazard and constraint focus on the assistant including information not present on an approved whitelist. The consequence of the mechanism (phishing/malicious action) is not the consequence governed by the path (whitelist violation).",
+      "gap_ids": [],
+      "obligation_ids": [
+       "ob:v1:f97426a97c0257a0888cdc8ac71ab82dc32684a55dec712ceafa7984664d31d3"
+      ],
+      "refs": [
+       "route:v1:5bdd2946f985a335b03fa80b8b19fad341c82d629f4c467ae29ef237a06f9a21"
+      ],
+      "severity": "warning"
+     }
+    ],
+    "disposition": "targeted",
+    "evidence": [
+     "RESP-1 delivers conversational responses (CA-1-1) to the user/client interface."
+    ],
+    "feedback_channel_ids": [],
+    "hazard_ids": [
+     "H-9"
+    ],
+    "missing_concepts": [],
+    "model_call_refs": [],
+    "obligation_id": "ob:v1:f97426a97c0257a0888cdc8ac71ab82dc32684a55dec712ceafa7984664d31d3",
+    "process_model_part_ids": [
+     "PM-1-1"
+    ],
+    "rationale": "the assistant's ability to generate natural language responses is a direct enabler for social engineering and disinformation.",
+    "responsibility_ids": [
+     "RESP-1"
+    ],
+    "route_id": "route:v1:43001c91c7e62afa07ed2c40105a6b0f604b0d127fdff7262e4049157b5b93fa",
+    "semantic_assessment": {
+     "mapping_strength": "broad_category_expansion",
+     "mechanism_assessment": "insufficient_evidence",
+     "mechanism_rationale": "The mechanism describes social engineering via deceptive instructions (directing users to malicious links), but the hazard and constraint focus on the assistant including information not present on an approved whitelist. The consequence of the mechanism (phishing/malicious action) is not the consequence governed by the path (whitelist violation).",
+     "risk_alignment": "supported",
+     "risk_alignment_rationale": "the risk of spreading disinformation via deceptive communications is a direct consequence of malicious use of the assistant's output generation."
+    },
+    "slot_ids": [
+     "RESP-1:CA-1-1:INCORRECT"
+    ],
+    "trace_refs": []
+   }
+  ],
+  "schema_version": "stpa-obligation-slot-request-v1",
+  "semantic_digest": "043246f4519ac686f348b31d93c4ad6cd5905d42fd4de48fb6f8d8e919adf1ea",
+  "slots": [
+   {
+    "action_temporality": "instantaneous",
+    "control_action": "CA-1-1",
+    "coordination_link": null,
+    "icas": [],
+    "is_na": false,
+    "na_justification": null,
+    "responsibility": "RESP-1",
+    "slot_id": "RESP-1:CA-1-1:INCORRECT",
+    "uca_type": "INCORRECT"
+   }
+  ],
+  "target_id": "RESP-1",
+  "target_kind": "responsibility"
+ },
+ "source": {
+  "model": "gemma-4-26b-a4b-it",
+  "producer_commit": "fa33a907",
+  "raw_response_sha256": "ec0d9081bba7b876e2471ce11171e5b953477b855cae62a0dcb376c64f177a73",
+  "request_semantic_digest": "043246f4519ac686f348b31d93c4ad6cd5905d42fd4de48fb6f8d8e919adf1ea",
+  "row": 81,
+  "run": "w5/pp-s11/klarna-r2/output/calls.jsonl",
+  "stage": "synthesis_obligation_aware_icas",
+  "step": "RESP-1",
+  "user_prompt_sha256": "1929a26eee258b6d75885393bbb04c8ac8b6724e3fe3fc44775e0f94a8f1313d"
+ }
+}
