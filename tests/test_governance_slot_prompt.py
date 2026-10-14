@@ -50,9 +50,10 @@ _GOLDEN_SLOT_USER_EMPTY = (
 )
 # The routing system digest was recaptured when the routing prompt began
 # describing the flat route form (null for fields a disposition does not use),
-# and again when its examples stopped naming a NOT_PROVIDED slot.
+# and again when its examples stopped naming a NOT_PROVIDED slot and it began
+# defining the four UCA types.
 _GOLDEN_ROUTING_SYSTEM = (
-    "1d8531bbe16c2348e1b2c2c633299e7ae30b6c0fbbdceae1be2b5f4527ce805f"
+    "aee8911b4636b6ba4b33316ccfd5186a90257e47de1ddeba009320ed5a2c3111"
 )
 _GOLDEN_ROUTING_USER = (
     "cc9264807d70b8e674d7cb3de8def297c2f76104ae0c5c8558b34a1ca63f15a7"

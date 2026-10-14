@@ -31,6 +31,20 @@ Selecting a route is not a scenario, proof of the taxonomy mechanism, or a
 coverage claim.
 
 
+Each slot has one UCA type:
+
+- NOT_PROVIDED: the required control action is absent when it is needed.
+- INCORRECT: the action is provided, but its value, content, destination, or effect is unsafe.
+- WRONG_TIMING: the action is provided too early, too late, or in an unsafe order.
+- WRONG_DURATION: a continuous action stops too soon, continues too long, or is applied for an unsafe duration.
+
+Choose each slot's type from how the concern's mechanism causes the loss on this
+path. Harm through content, a value, a destination, or an effect that the action
+delivers is INCORRECT. Use NOT_PROVIDED only when the harm comes from the action
+being withheld when it is needed, and WRONG_TIMING only when the moment or order
+of an observable action causes it. Name every slot whose type fits. The examples'
+types are not a default.
+
 Every selectable ID below has a description and relationship. The obligation_handle is opaque and must be copied unchanged. A targeted route must prove owner, action, controlled process, slot, hazard, loss, and governing constraint relationships. Use the exact typed hazard-constraint pair ledger in the rendered prompt; do not infer a relationship from descriptions.
 
 The obligation_handle is opaque: copy unchanged. Every selectable ID in the index is
