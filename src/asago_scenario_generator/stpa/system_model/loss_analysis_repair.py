@@ -107,6 +107,12 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     account_for_risk_cards,
     span_quotes_rule,
 )
+from asago_scenario_generator.stpa.system_model.repair_ids import (
+    CONSTRAINT,
+    HAZARD,
+    LOSS,
+    IdSpace,
+)
 from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RuleSpanRepairRecord,
     record_rule_span_repairs,
@@ -969,10 +975,15 @@ def _row_identity(row: object, id_field: str) -> str | None:
     return None
 
 
-def _row_label(row: object, index: int, id_field: str) -> str:
-    """Name a dropped row by its identity when present, else by position."""
+def _row_label(
+    row: object,
+    index: int,
+    id_field: str,
+    name: Callable[[str], str] = str,
+) -> str:
+    """Name a dropped row by its named identity when present, else by position."""
     identity = _row_identity(row, id_field)
-    return identity if identity is not None else f"row {index}"
+    return name(identity) if identity is not None else f"row {index}"
 
 
 def _salvage_rows(
@@ -982,6 +993,7 @@ def _salvage_rows(
     dropped: list,
     *,
     label_pairs: bool = False,
+    name: Callable[[str], str] = str,
 ) -> list[BaseModel]:
     """Keep the rows that validate individually; record the others.
 
@@ -997,7 +1009,7 @@ def _salvage_rows(
             kept.append(model.model_validate(row))
         except ValidationError as exc:
             reason = "; ".join(_format_validation_errors(exc))
-            label = _row_label(row, index, id_field)
+            label = _row_label(row, index, id_field, name)
             if label_pairs:
                 dropped.append((label, reason, _row_identity(row, id_field)))
             else:
@@ -1017,6 +1029,7 @@ def salvage_provider_response(
     constraint_wire_model: type[SecurityConstraint],
     response_format: type[BaseModel],
     gap_wire: bool = False,
+    ids: IdSpace = IdSpace(),
 ) -> tuple[LossAnalysisDraft, SalvageReport]:
     """Recover the valid rows of a wire-invalid Stage 1a response.
 
@@ -1030,7 +1043,17 @@ def salvage_provider_response(
     repair, so the repair anchor is the original entry, not a description of
     it.  Duplicate obligation ids in one original collection cannot define a
     safe repair scope and are recorded as scope errors.
+
+    ``content`` names its records by the reply's handles; ``ids`` gives each
+    handle's canonical ID.  The salvaged draft is compiled to canonical IDs,
+    and the report names records by canonical ID.
     """
+
+    def loss_name(value: str) -> str:
+        return ids.name(LOSS, value)
+
+    def hazard_name(value: str) -> str:
+        return ids.name(HAZARD, value)
 
     dropped_losses: list[str] = []
     dropped_hazards: list[str] = []
@@ -1041,18 +1064,21 @@ def salvage_provider_response(
         Loss,
         "loss_id",
         dropped_losses,
+        name=loss_name,
     )
     use_case_losses = _salvage_rows(
         _fail_closed_rows(content, "use_case_losses", response_format),
         Loss,
         "loss_id",
         dropped_losses,
+        name=loss_name,
     )
     hazards = _salvage_rows(
         _fail_closed_rows(content, "hazards", response_format),
         Hazard,
         "hazard_id",
         dropped_hazards,
+        name=hazard_name,
     )
     # The gap provider contract has no risk-accounting collection.  If a
     # malformed gap response nevertheless carries one, preserve only its
@@ -1072,7 +1098,7 @@ def salvage_provider_response(
             label_pairs=True,
         )
 
-    salvage = _ConstraintSalvage(constraint_wire_model)
+    salvage = _ConstraintSalvage(constraint_wire_model, ids)
     for index, row in enumerate(
         _fail_closed_rows(content, "security_constraints", response_format)
     ):
@@ -1093,6 +1119,7 @@ def salvage_provider_response(
             ],
         }
     )
+    draft = ids.compile(draft)
     report = SalvageReport(
         dropped_losses=tuple(dropped_losses),
         dropped_hazards=tuple(dropped_hazards),
@@ -1152,6 +1179,7 @@ class _ConstraintSalvage:
     """The salvaged constraints and the drops, scope errors, and warnings."""
 
     constraint_wire_model: type[SecurityConstraint]
+    ids: IdSpace = field(default_factory=IdSpace)
     constraints: list[SecurityConstraint] = field(default_factory=list)
     dropped_constraint_fields: list[str] = field(default_factory=list)
     obligation_salvage: list[tuple[str, tuple[tuple[dict, tuple[str, ...]], ...]]] = (
@@ -1178,16 +1206,18 @@ class _ConstraintSalvage:
             bare_constraint = self.constraint_wire_model.model_validate(bare)
         except ValidationError as exc:
             reason = "; ".join(_format_validation_errors(exc))
-            self.dropped_constraint_fields.append(
-                f"{_row_label(row, index, 'constraint_id')}: {reason}"
-            )
+            label = _row_label(row, index, "constraint_id", self._name)
+            self.dropped_constraint_fields.append(f"{label}: {reason}")
             return
         self._add_obligation_salvage(bare_constraint, row.get("obligations"))
+
+    def _name(self, constraint_id: str) -> str:
+        return self.ids.name(CONSTRAINT, constraint_id)
 
     def _add_obligation_salvage(
         self, bare_constraint: SecurityConstraint, obligation_rows: object
     ) -> None:
-        constraint_id = bare_constraint.constraint_id
+        constraint_id = self._name(bare_constraint.constraint_id)
         scope_error = _obligation_collection_scope_error(constraint_id, obligation_rows)
         if scope_error is not None:
             self.scope_errors.append(scope_error)
@@ -2061,6 +2091,7 @@ def build_repair_plan(
     repair_record: RepairRecord | None = None,
     gap_wire: bool = False,
     validation_feedback: str | None = None,
+    ids: IdSpace = IdSpace(),
 ) -> RepairOutcome:
     """Classify one failed Stage 1a attempt and select its repair plan.
 
@@ -2073,6 +2104,7 @@ def build_repair_plan(
     produce a repair, and the wire path is further scoped by the initial
     error classification and row-level salvage.  The loss-presence and
     missing-hazard-chain corrections carry ``validation_feedback``.
+    ``first_result`` names its records by handle; ``ids`` compiles them.
     """
     if first_result is None:
         return UnsupportedRepair("no provider response is available to repair")
@@ -2088,6 +2120,7 @@ def build_repair_plan(
             first_wire_error=first_wire_error,
             repair_record=repair_record,
             gap_wire=gap_wire,
+            ids=ids,
         )
     if failure_class == "loss_presence":
         return LossPresenceRepairPlan(feedback=validation_feedback or "")
@@ -2099,6 +2132,7 @@ def build_repair_plan(
             response_format=response_format,
             risk_cards=risk_cards,
             require_risk_accounting=require_risk_accounting,
+            ids=ids,
         )
     return UnsupportedRepair(
         f"the {failure_class} failure class is outside the approved repair "
@@ -2128,6 +2162,7 @@ def _wire_repair_plan(
     first_wire_error: ValidationError | None,
     repair_record: RepairRecord | None,
     gap_wire: bool,
+    ids: IdSpace,
 ) -> RepairOutcome:
     """Select the repair for a first response that never parsed."""
     unsupported = _unsupported_initial_wire_error(first_wire_error)
@@ -2138,6 +2173,7 @@ def _wire_repair_plan(
         constraint_wire_model=constraint_wire_model,
         response_format=response_format,
         gap_wire=gap_wire,
+        ids=ids,
     )
     if isinstance(salvaged, UnsupportedRepair):
         return salvaged
@@ -2205,6 +2241,7 @@ def _salvage_first_response(
     constraint_wire_model: type[SecurityConstraint],
     response_format: type[LossAnalysisDraft],
     gap_wire: bool,
+    ids: IdSpace = IdSpace(),
 ) -> UnsupportedRepair | tuple[LossAnalysisDraft, SalvageReport]:
     """Decode the first response body and salvage its valid rows."""
     content = first_result.content
@@ -2225,6 +2262,7 @@ def _salvage_first_response(
             constraint_wire_model=constraint_wire_model,
             response_format=response_format,
             gap_wire=gap_wire,
+            ids=ids,
         )
     except _SalvageReadError as exc:
         return UnsupportedRepair(
@@ -2239,6 +2277,7 @@ def salvage_corrected_reply(
     constraint_wire_model: type[SecurityConstraint],
     response_format: type[LossAnalysisDraft],
     gap_wire: bool,
+    ids: IdSpace = IdSpace(),
 ) -> UnsupportedRepair | tuple[LossAnalysisDraft, SalvageReport]:
     """Salvage the record-level wire failures of a feedback correction's reply.
 
@@ -2253,6 +2292,7 @@ def salvage_corrected_reply(
         constraint_wire_model=constraint_wire_model,
         response_format=response_format,
         gap_wire=gap_wire,
+        ids=ids,
     )
     if isinstance(salvaged, UnsupportedRepair):
         return salvaged
@@ -2271,6 +2311,7 @@ def salvage_reference_repair_input(
     constraint_wire_model: type[SecurityConstraint],
     response_format: type[LossAnalysisDraft],
     gap_wire: bool,
+    ids: IdSpace = IdSpace(),
 ) -> tuple[LossAnalysisDraft, SalvageReport] | None:
     """Salvage a first reply whose wire failures are obligation entries only.
 
@@ -2284,6 +2325,7 @@ def salvage_reference_repair_input(
         constraint_wire_model=constraint_wire_model,
         response_format=response_format,
         gap_wire=gap_wire,
+        ids=ids,
     )
     if isinstance(salvaged, UnsupportedRepair) or salvaged[1].dropped_dispositions:
         return None
@@ -2541,11 +2583,12 @@ def _accounting_repair_plan(
     response_format: type[LossAnalysisDraft],
     risk_cards: list[RiskCard],
     require_risk_accounting: bool,
+    ids: IdSpace,
 ) -> RepairOutcome:
     """Select the disposition repair for a failed risk-accounting gate."""
     if not require_risk_accounting:
         return UnsupportedRepair("risk accounting is not required for this call")
-    prior = parse_llm_result(first_result, response_format)
+    prior = ids.compile(parse_llm_result(first_result, response_format))
     selected, reason_pairs, removed_unknown = select_disposition_repairs(
         prior, risk_cards
     )

@@ -13,6 +13,7 @@ import pytest
 
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.system_model import loss_analysis as la
+from asago_scenario_generator.stpa.system_model.repair_ids import IdSpace
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     UnsupportedRepair,
 )
@@ -52,7 +53,9 @@ def test_unsupported_repair_plan(monkeypatch, failure_class, shown) -> None:
     call = _call(failure_class)
     monkeypatch.setattr(la, "_reject_unsupported_wire_error", lambda *a: None)
     monkeypatch.setattr(
-        la, "_require_repair_input", lambda *a: (object(), la._Stage1aGapRepairDraft)
+        la,
+        "_require_repair_input",
+        lambda *a: la._RepairInput(object(), la._Stage1aGapRepairDraft, IdSpace()),
     )
     monkeypatch.setattr(la, "_check_repair_graph", lambda *a: None)
     monkeypatch.setattr(
@@ -98,9 +101,7 @@ def test_unsupported_wire_error(monkeypatch, failure_class, shown) -> None:
 )
 def test_missing_repair_input(monkeypatch, failure_class, shown) -> None:
     call = _call(failure_class)
-    monkeypatch.setattr(
-        la, "_prepare_current_provider_repair_input", lambda *a, **kw: None
-    )
+    monkeypatch.setattr(la, "_handle_repair_input", lambda *a, **kw: None)
     monkeypatch.setattr(la, "_missing_repair_input_reason", lambda *a: "no wire")
 
     error = _raised(lambda: la._require_repair_input(call, None, ERROR))

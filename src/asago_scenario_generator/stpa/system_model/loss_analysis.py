@@ -113,6 +113,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     select_disposition_repairs,
     select_reference_repairs,
 )
+from asago_scenario_generator.stpa.system_model.repair_ids import IdSpace
 from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RuleSpanRepairRecord,
     record_rule_span_repairs,
@@ -530,6 +531,35 @@ def _allocate_provider_scope(
     return allocate_canonical_ids(_CANONICAL_PREFIXES[kind], prior_ids, handles)
 
 
+def _provider_id_space(
+    provider_draft: _Stage1aGapProviderDraft, prior: LossAnalysisDraft | None
+) -> IdSpace:
+    """Allocate the canonical ID of every record the provider reply declares."""
+    prior = prior or LossAnalysisDraft()
+    return IdSpace(
+        losses=_allocate_provider_scope(
+            [*provider_draft.risk_card_losses, *provider_draft.use_case_losses],
+            prior_ids={
+                loss.loss_id
+                for loss in (*prior.risk_card_losses, *prior.use_case_losses)
+            },
+            kind="loss",
+        ),
+        hazards=_allocate_provider_scope(
+            provider_draft.hazards,
+            prior_ids={hazard.hazard_id for hazard in prior.hazards},
+            kind="hazard",
+        ),
+        constraints=_allocate_provider_scope(
+            provider_draft.security_constraints,
+            prior_ids={
+                constraint.constraint_id for constraint in prior.security_constraints
+            },
+            kind="constraint",
+        ),
+    )
+
+
 def _resolve_provider_reference(
     value: str,
     *,
@@ -581,29 +611,14 @@ def _materialize_provider_draft(
         loss.loss_id for loss in (*prior.risk_card_losses, *prior.use_case_losses)
     }
     prior_hazards = {hazard.hazard_id for hazard in prior.hazards}
-    prior_constraints = {
-        constraint.constraint_id for constraint in prior.security_constraints
-    }
-
     all_provider_losses = [
         *provider_draft.risk_card_losses,
         *provider_draft.use_case_losses,
     ]
-    loss_map = _allocate_provider_scope(
-        all_provider_losses,
-        prior_ids=prior_losses,
-        kind="loss",
-    )
-    hazard_map = _allocate_provider_scope(
-        provider_draft.hazards,
-        prior_ids=prior_hazards,
-        kind="hazard",
-    )
-    constraint_map = _allocate_provider_scope(
-        provider_draft.security_constraints,
-        prior_ids=prior_constraints,
-        kind="constraint",
-    )
+    ids = _provider_id_space(provider_draft, prior)
+    loss_map = dict(ids.losses)
+    hazard_map = dict(ids.hazards)
+    constraint_map = dict(ids.constraints)
 
     def materialize_loss(item: _ProviderLoss) -> Loss:
         return Loss(
@@ -813,6 +828,64 @@ def _prepare_current_provider_repair_input(
     _adapt_disposition_loss_ids(raw, loss_map, is_risk_wire=is_risk_wire)
     repair_model = _Stage1aRiskRepairDraft if is_risk_wire else _Stage1aGapRepairDraft
     return result.model_copy(update={"content": raw}), repair_model
+
+
+@dataclass(frozen=True)
+class _RepairInput:
+    """A failed reply in its own handles, and the canonical ID of each handle.
+
+    Every row of ``result`` names itself by its handle in its ID field
+    (``loss_id``, ``hazard_id``, ``constraint_id``), so the row-level repair
+    wire ``response_format`` reads it; references keep the reply's values.
+    """
+
+    result: LLMResult
+    response_format: type[LossAnalysisDraft]
+    ids: IdSpace
+
+
+_HANDLE_ID_FIELDS = (
+    ("risk_card_losses", "loss_id"),
+    ("use_case_losses", "loss_id"),
+    ("hazards", "hazard_id"),
+    ("security_constraints", "constraint_id"),
+)
+
+
+def _handle_repair_input(
+    result: LLMResult | None,
+    *,
+    response_format: type[BaseModel],
+    prior: LossAnalysisDraft | None,
+) -> _RepairInput | None:
+    """Return the failed reply in handles with its allocation, or None.
+
+    The allocation is the one the first-reply compiler makes, so a record
+    keeps its canonical ID whichever path compiles it.  A reply whose graph
+    is not a current local-handle wire has no repair input.
+    """
+    if result is None:
+        return None
+    raw = _decode_repair_content(result)
+    if raw is None or not _is_current_local_wire(raw, response_format):
+        return None
+    provider = _validate_provider_structure(raw, response_format)
+    if provider is None:
+        return None
+    for collection, id_field in _HANDLE_ID_FIELDS:
+        for row in raw.get(collection, []):
+            if isinstance(row, dict) and "handle" in row:
+                row[id_field] = row.pop("handle")
+    is_risk_wire = issubclass(response_format, _Stage1aRiskProviderDraft)
+    if not is_risk_wire and not isinstance(raw.get("risk_dispositions"), list):
+        raw["risk_dispositions"] = []
+    return _RepairInput(
+        result=result.model_copy(update={"content": raw}),
+        response_format=(
+            _Stage1aRiskRepairDraft if is_risk_wire else _Stage1aGapRepairDraft
+        ),
+        ids=_provider_id_space(provider, prior),
+    )
 
 
 def _handle_id_map(
@@ -1881,12 +1954,9 @@ def _repair_stage1a_failure(
     if call.validation_feedback is None:
         raise StageError(stage=STAGE, step=call.step, message=error_msg)
     _reject_unsupported_wire_error(call, error_msg)
-    repair_first_result, repair_response_format = _require_repair_input(
-        call, first_result, error_msg
-    )
-    reference_plan = _check_repair_graph(
-        call, repair_first_result, repair_response_format, error_msg
-    )
+    repair_input = _require_repair_input(call, first_result, error_msg)
+    repair_response_format = repair_input.response_format
+    reference_plan = _check_repair_graph(call, repair_input, error_msg)
     if reference_plan is not None:
         return _correct_references(
             call, reference_plan, repair_response_format, error_msg
@@ -1894,7 +1964,7 @@ def _repair_stage1a_failure(
     outcome = build_repair_plan(
         step=call.step,
         response_format=repair_response_format,
-        first_result=repair_first_result,
+        first_result=repair_input.result,
         first_parse_failed=call.first_parse_failed,
         failure_class=call.failure_class or "unknown",
         risk_cards=list(call.accounting_cards),
@@ -1907,6 +1977,7 @@ def _repair_stage1a_failure(
             and not issubclass(call.response_format, _Stage1aRiskProviderDraft)
         ),
         validation_feedback=call.validation_feedback,
+        ids=repair_input.ids,
     )
     if isinstance(outcome, (LossPresenceRepairPlan, MissingHazardChainRepairPlan)):
         return _send_feedback_correction(call, outcome, first_result, error_msg)
@@ -2044,17 +2115,18 @@ def _salvage_corrected_reply(
     """
     if classify_wire_validation_errors(wire_error).unsupported_reason is not None:
         raise wire_error
-    prepared = _prepare_current_provider_repair_input(
+    prepared = _handle_repair_input(
         result, response_format=call.response_format, prior=call.authoritative_draft
     )
     if prepared is None:
         raise wire_error
-    adapted, repair_format = prepared
+    repair_format = prepared.response_format
     salvaged = salvage_corrected_reply(
-        adapted,
+        prepared.result,
         constraint_wire_model=_ProviderSecurityConstraint,
         response_format=repair_format,
         gap_wire=not issubclass(call.response_format, _Stage1aRiskProviderDraft),
+        ids=prepared.ids,
     )
     if isinstance(salvaged, UnsupportedRepair):
         raise ValueError(
@@ -2150,9 +2222,9 @@ def _require_repair_input(
     call: _Stage1aCall,
     first_result: LLMResult | None,
     error_msg: str,
-) -> tuple[LLMResult, type[LossAnalysisDraft]]:
-    """Adapt the failed response to the repair wire, or stop with a reason."""
-    repair_input = _prepare_current_provider_repair_input(
+) -> _RepairInput:
+    """Return the failed response in handles for repair, or stop with a reason."""
+    repair_input = _handle_repair_input(
         first_result,
         response_format=call.response_format,
         prior=call.authoritative_draft,
@@ -2188,8 +2260,7 @@ def _missing_repair_input_reason(
 
 def _check_repair_graph(
     call: _Stage1aCall,
-    repair_first_result: LLMResult,
-    repair_response_format: type[LossAnalysisDraft],
+    repair_input: _RepairInput,
     error_msg: str,
 ) -> ReferenceRepairPlan | None:
     """Reject a repair input whose independent graph edges do not resolve.
@@ -2203,7 +2274,7 @@ def _check_repair_graph(
     # be smuggled through an otherwise repairable obligation and trigger a
     # second model call.
     try:
-        graph = _repair_graph_draft(repair_first_result)
+        graph = repair_input.ids.compile(_repair_graph_draft(repair_input.result))
     except (ValidationError, ValueError) as exc:
         _stop_outside_graph_scope(call, exc, error_msg)
     try:
@@ -2214,9 +2285,7 @@ def _check_repair_graph(
             allowed_hazard_ids=call.allowed_hazard_ids,
         )
     except _DraftReferenceValidationError as exc:
-        plan = _reference_plan(
-            call, graph, repair_first_result, repair_response_format, str(exc)
-        )
+        plan = _reference_plan(call, graph, repair_input, str(exc))
         if plan is None:
             _stop_outside_graph_scope(call, exc, error_msg)
         return plan
@@ -2263,8 +2332,7 @@ def _unsupported_stop(
 def _reference_plan(
     call: _Stage1aCall,
     graph: LossAnalysisDraft,
-    repair_first_result: LLMResult,
-    repair_response_format: type[LossAnalysisDraft],
+    repair_input: _RepairInput,
     finding: str,
 ) -> ReferenceRepairPlan | None:
     """Plan the reference-list repair, or None when it does not apply.
@@ -2293,9 +2361,7 @@ def _reference_plan(
     )
     if not selected:
         return None
-    salvaged = _reference_repair_prior(
-        call, repair_first_result, repair_response_format
-    )
+    salvaged = _reference_repair_prior(call, repair_input)
     if salvaged is None:
         return None
     prior, report = salvaged
@@ -2332,18 +2398,18 @@ _REFERENCE_REPAIR_CLASSES = frozenset({"draft_references", "wire_schema"})
 
 
 def _reference_repair_prior(
-    call: _Stage1aCall,
-    repair_first_result: LLMResult,
-    repair_response_format: type[LossAnalysisDraft],
+    call: _Stage1aCall, repair_input: _RepairInput
 ) -> tuple[LossAnalysisDraft, SalvageReport | None] | None:
-    """Return the draft the reference repair corrects, with its salvage."""
+    """Return the compiled draft the reference repair corrects, with its salvage."""
     if call.failure_class == "draft_references":
-        return parse_llm_result(repair_first_result, repair_response_format), None
+        parsed = parse_llm_result(repair_input.result, repair_input.response_format)
+        return repair_input.ids.compile(parsed), None
     return salvage_reference_repair_input(
-        repair_first_result,
+        repair_input.result,
         constraint_wire_model=_ProviderSecurityConstraint,
-        response_format=repair_response_format,
+        response_format=repair_input.response_format,
         gap_wire=not issubclass(call.response_format, _Stage1aRiskProviderDraft),
+        ids=repair_input.ids,
     )
 
 
