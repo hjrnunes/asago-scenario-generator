@@ -1092,20 +1092,43 @@ def _responsibility_owner_numbers(
     return owner_numbers
 
 
-def _check_every_responsibility_is_served(
+class MissingControlActionsError(ValueError):
+    """A Call 2b response leaves responsibilities without a control action.
+
+    ``owners`` holds their numbers in ascending order.  ``controlled_processes``
+    holds the processes the response declared, so a repair can offer them as
+    targets.
+    """
+
+    def __init__(
+        self,
+        owners: Sequence[int],
+        controlled_processes: Sequence[ControlledProcess] = (),
+    ) -> None:
+        self.owners = tuple(sorted(owners))
+        self.controlled_processes = tuple(controlled_processes)
+        super().__init__(
+            "every responsibility requires a control action; missing owners: "
+            + ", ".join(f"RESP-{number}" for number in self.owners)
+        )
+
+
+def _check_every_responsibility_has_an_action(
     owner_numbers: set[int],
-    known_pm_ids: set[str],
     actions: Sequence[ControlAction],
-    feedback_channels: Sequence[FeedbackChannel],
+    controlled_processes: Sequence[ControlledProcess],
 ) -> None:
-    """Require an action per responsibility and a feedback update per PM part."""
+    """Require a control action for every responsibility."""
     action_owners = {_owner_number(action.ca_id, prefix="CA") for action in actions}
     missing_action_owners = owner_numbers - action_owners
     if missing_action_owners:
-        raise ValueError(
-            "every responsibility requires a control action; missing owners: "
-            + ", ".join(f"RESP-{number}" for number in sorted(missing_action_owners))
-        )
+        raise MissingControlActionsError(missing_action_owners, controlled_processes)
+
+
+def _check_every_process_model_part_has_feedback(
+    known_pm_ids: set[str], feedback_channels: Sequence[FeedbackChannel]
+) -> None:
+    """Require a feedback update for every process model part."""
     updated_pm_ids = {channel.updates for channel in feedback_channels}
     missing_pm_ids = known_pm_ids - updated_pm_ids
     if missing_pm_ids:
@@ -1167,9 +1190,10 @@ def _check_control_elements_against_responsibilities(
         for responsibility in responsibilities
         for pm in responsibility.process_model_parts
     }
-    _check_every_responsibility_is_served(
-        owner_numbers, known_pm_ids, actions, feedback_channels
+    _check_every_responsibility_has_an_action(
+        owner_numbers, actions, controlled_processes
     )
+    _check_every_process_model_part_has_feedback(known_pm_ids, feedback_channels)
     unknown = _unknown_element_refs(
         actions,
         feedback_channels,
