@@ -90,6 +90,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     RepairPlan,
     RepairRecord,
     SalvageReport,
+    SelectedReferenceList,
     TruncatedDispositionRecovery,
     TruncatedLossRecovery,
     UnsupportedRepair,
@@ -799,13 +800,8 @@ def _handle_repair_input(
     provider = _validate_provider_structure(raw, response_format)
     if provider is None:
         return None
-    for collection, id_field in _HANDLE_ID_FIELDS:
-        for row in raw.get(collection, []):
-            if isinstance(row, dict) and "handle" in row:
-                row[id_field] = row.pop("handle")
     is_risk_wire = issubclass(response_format, _Stage1aRiskProviderDraft)
-    if not is_risk_wire and not isinstance(raw.get("risk_dispositions"), list):
-        raw["risk_dispositions"] = []
+    _name_rows_by_handle(raw, is_risk_wire=is_risk_wire)
     return _RepairInput(
         result=result.model_copy(update={"content": raw}),
         response_format=(
@@ -813,6 +809,20 @@ def _handle_repair_input(
         ),
         ids=_provider_id_space(provider, prior),
     )
+
+
+def _name_rows_by_handle(raw: dict, *, is_risk_wire: bool) -> None:
+    """Move each row's handle into its ID field, in place.
+
+    A gap body gets an empty disposition collection, which the row-level
+    repair view requires.
+    """
+    for collection, id_field in _HANDLE_ID_FIELDS:
+        for row in raw.get(collection, []):
+            if isinstance(row, dict) and "handle" in row:
+                row[id_field] = row.pop("handle")
+    if not is_risk_wire and not isinstance(raw.get("risk_dispositions"), list):
+        raw["risk_dispositions"] = []
 
 
 def _decode_repair_content(result: LLMResult) -> dict | None:
@@ -2240,6 +2250,31 @@ def _reference_plan(
     if salvaged is None:
         return None
     prior, report = salvaged
+    dispositions, card_texts = _disposition_reference_lists(call, prior, valid_loss_ids)
+    salvage_warnings: tuple[str, ...] = ()
+    if report is not None:
+        record_first_reply_salvage(
+            report, step=call.step, repair_record=call.repair_record
+        )
+        salvage_warnings = report.warnings
+    return ReferenceRepairPlan(
+        prior=prior,
+        selected=(*selected, *dispositions),
+        meanings=_reference_meanings(prior, call.authoritative_draft),
+        salvage_warnings=salvage_warnings,
+        feedback=_finding_in_handles(call, graph, repair_input.ids, finding),
+        card_texts=card_texts,
+        ids=repair_input.ids,
+    )
+
+
+def _disposition_reference_lists(
+    call: _Stage1aCall, prior: LossAnalysisDraft, valid_loss_ids: set[str]
+) -> tuple[tuple[SelectedReferenceList, ...], tuple[tuple[str, str], ...]]:
+    """The supplied cards' disposition lists that cite an undeclared loss.
+
+    Each list comes with its card's text, which the repair request shows.
+    """
     cards = {card.risk_id: card for card in call.accounting_cards}
     dispositions = tuple(
         item
@@ -2248,26 +2283,15 @@ def _reference_plan(
         )
         if item.owner_id in cards
     )
-    if report is not None:
-        record_first_reply_salvage(
-            report, step=call.step, repair_record=call.repair_record
+    card_texts = tuple(
+        (
+            item.owner_id,
+            f"{cards[item.owner_id].risk_name}: "
+            f"{cards[item.owner_id].risk_description}",
         )
-    return ReferenceRepairPlan(
-        prior=prior,
-        selected=(*selected, *dispositions),
-        meanings=_reference_meanings(prior, call.authoritative_draft),
-        salvage_warnings=report.warnings if report is not None else (),
-        feedback=_finding_in_handles(call, graph, repair_input.ids, finding),
-        card_texts=tuple(
-            (
-                item.owner_id,
-                f"{cards[item.owner_id].risk_name}: "
-                f"{cards[item.owner_id].risk_description}",
-            )
-            for item in dispositions
-        ),
-        ids=repair_input.ids,
+        for item in dispositions
     )
+    return dispositions, card_texts
 
 
 def _finding_in_handles(
