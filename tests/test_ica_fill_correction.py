@@ -194,3 +194,65 @@ def test_semantic_errors_of_two_findings_are_reported_together() -> None:
     message = str(caught.value)
     assert f"{slot.slot_id} finding 0: finding describes a safeguard" in message
     assert f"{slot.slot_id} finding 1: finding describes a safeguard" in message
+
+
+def _unrouted_reply(*deviations: str) -> dict[str, Any]:
+    slot = create_slots(_control_structure())[0]
+    return {
+        "filled_slots": [
+            {
+                "slot_id": slot.slot_id,
+                "is_na": False,
+                "na_rationale": None,
+                "findings": [_finding(text) for text in deviations],
+                "consideration_results": {},
+            }
+        ]
+    }
+
+
+def _copies_then_a_safeguard() -> dict[str, Any]:
+    copy = "the request is accepted before it is reviewed"
+    return _unrouted_reply(copy, copy, _SAFEGUARD)
+
+
+def test_the_validation_numbers_findings_as_written_not_as_merged() -> None:
+    slot = create_slots(_control_structure())[0]
+    payload = _SlotProviderPayload.model_validate(
+        {
+            "filled_slots": [
+                {
+                    **_copies_then_a_safeguard()["filled_slots"][0],
+                    "consideration_results": [],
+                }
+            ]
+        }
+    )
+
+    with pytest.raises(ValueError) as caught:
+        _validate_slot_payload_semantics(payload, _provider_slot_request())
+
+    assert f"{slot.slot_id} finding 2: finding describes a safeguard" in str(
+        caught.value
+    )
+    assert "finding 1:" not in str(caught.value)
+
+
+def test_the_correction_numbers_findings_as_written(tmp_path) -> None:
+    client = ScriptedClient(
+        [
+            _copies_then_a_safeguard(),
+            _unrouted_reply("the request is accepted before it is reviewed"),
+        ],
+        model="fill-correction",
+    )
+    request = _provider_slot_request(validation_retries=1)
+
+    response = ObligationAwareLLMAdapter(
+        client, run_dir=tmp_path, controls=_controls()
+    ).fill(request)
+
+    correction = client.prompts[1].split("Exact validation error", 1)[1]
+    assert "finding 2: finding describes a safeguard" in correction
+    assert "finding 1:" not in correction
+    assert response.ica_merges == ()
