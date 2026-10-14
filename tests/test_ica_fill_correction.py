@@ -116,14 +116,14 @@ def test_the_correction_quotes_the_rejected_reply(tmp_path) -> None:
 
 
 def _sc1_with_h2(**changes: Any) -> IcaFindingDraft:
-    return IcaFindingDraft(
-        deviation=IcaDeviationDraft(incorrect_value_or_effect="a wrong value"),
-        hazardous_context="an unsafe request is delayed",
-        loss_consequence="the protected operation is harmed",
-        related_hazard_ids=("H-2",),
-        related_constraint_ids=("SC-1",),
-        **changes,
-    )
+    fields: dict[str, Any] = {
+        "deviation": IcaDeviationDraft(incorrect_value_or_effect="a wrong value"),
+        "hazardous_context": "an unsafe request is delayed",
+        "loss_consequence": "the protected operation is harmed",
+        "related_hazard_ids": ("H-2",),
+        "related_constraint_ids": ("SC-1",),
+    }
+    return IcaFindingDraft(**{**fields, **changes})
 
 
 def test_reference_errors_name_the_valid_alternatives() -> None:
@@ -138,6 +138,28 @@ def test_reference_errors_name_the_valid_alternatives() -> None:
         "constraint SC-1 does not govern the finding hazards (SC-1 governs H-1)",
         "finding references process-model parts outside the target: PM-9 "
         "(the slot may cite PM-1-1, PM-1-2)",
+    ]
+
+
+def test_reference_errors_name_unknown_ids_and_an_empty_scope() -> None:
+    finding = _sc1_with_h2(
+        related_hazard_ids=("H-9",),
+        related_constraint_ids=("SC-9",),
+        feedback_refs=("FB-9",),
+    )
+
+    errors = slot_filling.finding_reference_errors(
+        finding,
+        valid_process_models=set(),
+        valid_feedback=set(),
+        loss_analysis=_two_constraint_analysis(),
+    )
+
+    assert errors == [
+        "finding references unknown hazards: H-9",
+        "finding references unknown security constraints: SC-9",
+        "finding references feedback channels outside the target: FB-9 "
+        "(the slot may cite none)",
     ]
 
 

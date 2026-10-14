@@ -674,6 +674,16 @@ def finding_reference_errors(
     loss_analysis: LossAnalysis,
 ) -> list[str]:
     """List every broken reference of *finding*, each with what it may cite."""
+    return [
+        *_governance_errors(finding, loss_analysis),
+        *_scope_errors(finding, valid_process_models, valid_feedback),
+    ]
+
+
+def _governance_errors(
+    finding: IcaFindingDraft, loss_analysis: LossAnalysis
+) -> list[str]:
+    """List unknown hazards and constraints and each non-governing constraint."""
     hazard_ids = {item.hazard_id for item in loss_analysis.hazards}
     constraints = {
         item.constraint_id: item for item in loss_analysis.security_constraints
@@ -700,6 +710,14 @@ def finding_reference_errors(
                 f"constraint {constraint_id} does not govern the finding hazards "
                 f"({constraint_id} governs {', '.join(governed.related_hazards)})"
             )
+    return errors
+
+
+def _scope_errors(
+    finding: IcaFindingDraft, valid_process_models: set[str], valid_feedback: set[str]
+) -> list[str]:
+    """List process-model parts and feedback channels outside the target."""
+    errors: list[str] = []
     for kind, cited, valid in (
         ("process-model parts", finding.process_model_refs, valid_process_models),
         ("feedback channels", finding.feedback_refs, valid_feedback),
