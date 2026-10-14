@@ -106,6 +106,22 @@ selected variant does not use is `null`, and the routing examples show it.
 The OpenRouter JSON-object path still embeds the original schema in the
 prompt.
 
+No request schema holds a keyword that vLLM's xgrammar backend rejects:
+`uniqueItems`, `contains`, `minContains`, `maxContains`, `format`,
+`multipleOf`, `minProperties`, `maxProperties`, `propertyNames` or
+`patternProperties`. The backend answers a request with such a schema with
+HTTP 400 (`The provided JSON schema contains features not supported by
+xgrammar.`), so no reply is ever decoded. `_json_schema_response_format`
+raises a `ValueError` that names the schema and the JSON pointer of every
+such keyword
+(`request_schema.find_xgrammar_rejected_keywords`), the same way it rejects a
+union. A property, definition or literal that only shares a keyword's name
+is not a keyword. Code checks the rule instead: `governing_pairs` in an ICA
+fill finding carries no `uniqueItems`, and `_unique_pairs` rejects a
+repeated pair after decoding and returns the usual correction; the system
+prompt tells the model to list each pair once. A date field is a `format`:
+declare such a field as a string and validate it in code.
+
 Under guided decoding, Stage 1b requires `kc_subcodes` with at least one
 known KC or KCX code and requires `tool_inventory` (it may be empty). The
 Stage 1a risk-derivation schema
