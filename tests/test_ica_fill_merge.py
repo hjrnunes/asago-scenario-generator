@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -13,6 +14,11 @@ from asago_scenario_generator.models.ica_merge import (
     IcaMergedFinding,
     IcaMergeReport,
 )
+from asago_scenario_generator.pipeline.synthesis_persist import (
+    _artifact_paths,
+    _persist_ica_merges,
+)
+from asago_scenario_generator.pipeline.synthesis_scenarios import _ica_merge_report
 from asago_scenario_generator.stpa.obligation_aware import slot_filling
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     IcaDeviationDraft,
@@ -27,7 +33,6 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
-    build_synthesis_slot_requests,
     fill_synthesis_slots,
     ica_merge_entries,
     merge_equal_findings,
@@ -294,9 +299,7 @@ class TestMergeEntries:
         draft = _slot_draft((_draft_finding("a"), _draft_finding("b")))
         _merged, groups = merge_equal_findings(draft)
 
-        assert (
-            ica_merge_entries("RESP-1", SLOT_ID, draft, groups, ("i:1", "i:2")) == ()
-        )
+        assert ica_merge_entries("RESP-1", SLOT_ID, draft, groups, ("i:1", "i:2")) == ()
 
     def test_report_orders_entries_and_round_trips(self) -> None:
         draft, groups, _merged = self._merged()
@@ -358,9 +361,7 @@ class TestProviderMerge:
                 }
             ]
         }
-        client = _Client(
-            _reply(slot.slot_id, _row_finding("CA-1-1:ctx-3")), same_text
-        )
+        client = _Client(_reply(slot.slot_id, _row_finding("CA-1-1:ctx-3")), same_text)
 
         icas = _fill_icas(tmp_path, client, structure, slot)
 
@@ -501,45 +502,20 @@ class TestProviderMerge:
         assert "merge" not in system.lower()
 
 
-def _provider_adapter_over(tmp_path, replies):
-    client = ScriptedClient(replies, model="fill-merge-run")
-    inner = ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=_controls())
+class _CopyingModel:
+    """Answer each request through the provider adapter, one copy-laden slot.
 
-    class Adapter:
-        def fill(self, request):
-            return inner.fill(request)
+    Every slot but the INCORRECT one is N/A; the INCORRECT slot repeats one
+    finding *copies* times.
+    """
 
-    return Adapter(), client
+    def __init__(self, tmp_path, copies: int) -> None:
+        self.tmp_path = tmp_path
+        self.copies = copies
+        self.requests = 0
 
-
-def _whole_reply(request, findings_by_slot: dict[str, list[dict[str, Any]]]):
-    slots = []
-    for slot in request.slots:
-        findings = findings_by_slot.get(slot.slot_id, [])
-        slots.append(
-            {
-                "slot_id": slot.slot_id,
-                "is_na": not findings,
-                "na_rationale": None if findings else "No finding applies.",
-                "findings": findings,
-                "consideration_results": {},
-            }
-        )
-    return {"filled_slots": slots}
-
-
-class TestFillRecord:
-    def _run(self, tmp_path, copies: int):
-        structure = _control_structure()
-        analysis = _two_constraint_analysis()
-        [request] = build_synthesis_slot_requests(
-            briefs=(),
-            routes=(),
-            loss_analysis=analysis,
-            control_structure=structure,
-            controls=_controls(),
-        )
-        slot = next(s for s in request.slots if s.uca_type.value == "INCORRECT")
+    def fill(self, request):
+        self.requests += 1
         finding = {
             "deviation": "the request is accepted before it is reviewed",
             "hazardous_context": "an unreviewed request reaches the process",
@@ -549,17 +525,37 @@ class TestFillRecord:
             "feedback_refs": [],
             "context_row": None,
         }
-        reply = _whole_reply(request, {slot.slot_id: [finding] * copies})
-        adapter, _client = _provider_adapter_over(tmp_path, [reply])
+        slots = [
+            {
+                "slot_id": slot.slot_id,
+                "is_na": slot.uca_type.value != "INCORRECT",
+                "na_rationale": None
+                if slot.uca_type.value == "INCORRECT"
+                else "No finding applies.",
+                "findings": [finding] * self.copies
+                if slot.uca_type.value == "INCORRECT"
+                else [],
+                "consideration_results": {},
+            }
+            for slot in request.slots
+        ]
+        client = ScriptedClient([{"filled_slots": slots}], model="fill-merge-run")
+        return ObligationAwareLLMAdapter(
+            client, run_dir=self.tmp_path / str(self.requests), controls=_controls()
+        ).fill(request)
+
+
+class TestFillRecord:
+    def _run(self, tmp_path, copies: int):
         result = fill_synthesis_slots(
-            adapter,
+            _CopyingModel(tmp_path, copies),
             briefs=(),
             routes=(),
-            loss_analysis=analysis,
-            control_structure=structure,
+            loss_analysis=_two_constraint_analysis(),
+            control_structure=_control_structure(),
             controls=_controls(),
         )
-        return result, slot
+        return result, SLOT_ID
 
     def test_an_accepted_response_carries_its_merges_to_the_result(
         self, tmp_path
@@ -567,12 +563,55 @@ class TestFillRecord:
         result, slot = self._run(tmp_path, copies=3)
 
         [merge] = result.ica_merges
-        assert merge.slot_id == slot.slot_id
-        assert merge.ica_id == f"{slot.slot_id}:1"
+        assert merge.slot_id == slot
+        assert merge.ica_id == f"{slot}:1"
         assert [item.finding_index for item in merge.findings] == [0, 1, 2]
         assert result.result.ica_merges == result.ica_merges
+        [filled] = [s for s in result.ica_enumeration.slots if s.slot_id == slot]
+        assert [ica.ica_id for ica in filled.icas] == [merge.ica_id]
 
     def test_a_slot_without_copies_leaves_the_result_empty(self, tmp_path) -> None:
         result, _slot = self._run(tmp_path, copies=1)
 
         assert result.ica_merges == ()
+
+
+class TestPublication:
+    def test_merges_publish_as_a_sidecar_next_to_the_other_ica_evidence(
+        self, tmp_path
+    ) -> None:
+        result, _slot = TestFillRecord()._run(tmp_path / "fill", copies=3)
+        report = _ica_merge_report(result)
+
+        path = _persist_ica_merges(tmp_path, report)
+
+        assert path == tmp_path / ICA_MERGES_FILENAME
+        assert report is not None
+        assert IcaMergeReport.from_yaml(path.read_text(encoding="utf-8")) == report
+        assert [m.ica_id for m in report.merges] == list(
+            m.ica_id for m in result.ica_merges
+        )
+
+    def test_nothing_merged_publishes_no_sidecar(self, tmp_path) -> None:
+        result, _slot = TestFillRecord()._run(tmp_path / "fill", copies=1)
+
+        report = _ica_merge_report(result)
+
+        assert report is None
+        assert _persist_ica_merges(tmp_path, report) is None
+        assert not (tmp_path / ICA_MERGES_FILENAME).exists()
+
+    def test_the_run_lists_the_sidecar_among_its_artifacts(self, tmp_path) -> None:
+        path = tmp_path / ICA_MERGES_FILENAME
+
+        paths = _artifact_paths(
+            tmp_path,
+            SimpleNamespace(target_observations=None),
+            {},
+            target_realization_path=None,
+            operation_enrichment=None,
+            report_path=None,
+            ica_merges_path=path,
+        )
+
+        assert paths == {ICA_MERGES_FILENAME: path}

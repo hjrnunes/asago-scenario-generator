@@ -22,6 +22,7 @@ from pydantic import (
 )
 
 from asago_scenario_generator.models.artifact_pin import ObligationId
+from asago_scenario_generator.models.ica_merge import IcaMerge
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
     ObligationIcaConsideration,
@@ -123,6 +124,8 @@ from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _validate_finding_type,
     compile_slot_provider_entry,
     finding_reference_errors,
+    ica_merge_entries,
+    merge_equal_findings,
 )
 from asago_scenario_generator.stpa.obligation_aware.payload_types import (
     exact_length_payload_type,
@@ -1518,10 +1521,20 @@ def _materialize_slot_draft(
 def _compile_slot_payload(
     payload: _Model,
     request: SynthesisSlotRequest,
-) -> tuple[dict[str, ICASlot], tuple[ObligationIcaConsideration, ...]]:
-    """Compile one validated provider payload at the retry boundary."""
+) -> tuple[
+    dict[str, ICASlot],
+    tuple[ObligationIcaConsideration, ...],
+    tuple[IcaMerge, ...],
+]:
+    """Compile one validated provider payload at the retry boundary.
+
+    Validation and the context-coverage supplement have already judged the
+    findings as written.  Findings that differ only by row or pair merge here,
+    so a correction message never numbers a finding the model did not write.
+    """
     slots: dict[str, ICASlot] = {}
     drafts: list[SlotIcaDraft] = []
+    merges: list[IcaMerge] = []
     for value in payload.filled_slots:
         expected = next(
             (item for item in request.slots if item.slot_id == value.slot_id),
@@ -1529,7 +1542,8 @@ def _compile_slot_payload(
         )
         if expected is None:
             raise ValueError(f"slot response references unknown slot {value.slot_id}")
-        draft = _materialize_slot_draft(value, expected)
+        written = _materialize_slot_draft(value, expected)
+        draft, groups = merge_equal_findings(written)
         drafts.append(draft)
         slots[value.slot_id] = compile_slot_provider_entry(
             draft,
@@ -1537,12 +1551,21 @@ def _compile_slot_payload(
             loss_analysis=request.loss_analysis,
             control_structure=request.control_structure,
         )
+        merges.extend(
+            ica_merge_entries(
+                request.target_id,
+                value.slot_id,
+                written,
+                groups,
+                [ica.ica_id for ica in slots[value.slot_id].icas],
+            )
+        )
     considerations = _draft_considerations(
         sorted(drafts, key=lambda item: item.slot_id),
         request,
         slots,
     )
-    return slots, considerations
+    return slots, considerations, tuple(merges)
 
 
 def _routing_response(
@@ -2019,13 +2042,14 @@ class ObligationAwareLLMAdapter:
         # The payload is provider-local and deliberately permits no arbitrary
         # object: pair values are validated into the authoritative model here,
         # after derived identities are attached from the exact supplied slots.
-        slots, considerations = _compile_slot_payload(payload, request)
+        slots, considerations, merges = _compile_slot_payload(payload, request)
         response = SynthesisSlotResponse(
             request_digest=request.semantic_digest,
             filled_slots=tuple(slots.values()),
             considerations=considerations,
             adapter_kind="provider",
             provider_calls=outcome.calls + supplement_calls,
+            ica_merges=merges,
         )
         mark_call_published(
             self.run_dir,

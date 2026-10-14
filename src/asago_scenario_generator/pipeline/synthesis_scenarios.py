@@ -80,6 +80,16 @@ def _slot_hazard_offers(slot_fill: Any) -> Any | None:
     return build_slot_hazard_offer_report(requests)
 
 
+def _ica_merge_report(slot_fill: Any) -> Any | None:
+    """Report each finding merge the slot filler made; none merged, no report."""
+    merges = getattr(slot_fill, "ica_merges", ())
+    if not merges:
+        return None
+    from asago_scenario_generator.models.ica_merge import IcaMergeReport
+
+    return IcaMergeReport(merges=merges)
+
+
 def _run_ica_verification(
     result: Any,
     *,
