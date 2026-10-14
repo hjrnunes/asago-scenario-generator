@@ -106,7 +106,9 @@ def _fill(tmp_path, *replies: dict[str, Any]):
     return client, response
 
 
-def test_the_schema_offers_an_array_of_unique_governing_pairs(tmp_path) -> None:
+def test_the_schema_offers_an_array_of_governing_pairs_without_uniqueitems(
+    tmp_path,
+) -> None:
     client, _ = _fill(tmp_path, _reply("SC-1/H-1"))
 
     finding = _finding_schema(client)
@@ -114,7 +116,7 @@ def test_the_schema_offers_an_array_of_unique_governing_pairs(tmp_path) -> None:
     assert pairs["type"] == "array"
     assert pairs["items"]["enum"] == ["SC-1/H-1", "SC-2/H-2", "SC-2/H-1"]
     assert pairs["minItems"] == 1
-    assert pairs["uniqueItems"] is True
+    assert "uniqueItems" not in pairs
     assert "governing_pair" not in finding["properties"]
     assert "related_hazard_ids" not in finding["properties"]
     assert "related_constraint_ids" not in finding["properties"]

@@ -1063,10 +1063,14 @@ def _unique_pairs(pairs: tuple[str, ...]) -> tuple[str, ...]:
 
 
 def _pair_list(item: Any) -> Any:
-    """A non-empty array of distinct governing pairs, each an *item*."""
+    """A non-empty array of distinct governing pairs, each an *item*.
+
+    The schema omits ``uniqueItems``, which vLLM's xgrammar backend rejects;
+    ``_unique_pairs`` rejects a repeated pair after decoding.
+    """
     return Annotated[
         tuple[item, ...],
-        Field(min_length=1, json_schema_extra={"uniqueItems": True}),
+        Field(min_length=1),
         AfterValidator(_unique_pairs),
     ]
 

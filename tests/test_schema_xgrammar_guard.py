@@ -132,10 +132,6 @@ def test_a_property_named_like_a_keyword_or_a_default_holding_one_passes() -> No
     assert sorted(schema["properties"]) == ["contains", "format", "notes"]
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason="governing_pairs carries uniqueItems until the next commit removes it",
-)
 def test_the_ica_fill_request_schema_holds_no_rejected_keyword() -> None:
     request = _provider_slot_request(routed_routes=(_route(),))
     wire: Any = _slot_provider_payload_type(
