@@ -40,6 +40,20 @@ class TestInfraTemplates:
         expected = hashlib.sha256((prompts_dir / "a.j2").read_bytes()).hexdigest()
         assert hashes["a.j2"] == expected
 
+    def test_templates_02b_hash_covers_templates_in_subfolders(self, tmp_path):
+        """A template in a subfolder is hashed under its path from the root."""
+        prompts_dir = tmp_path / "prompts"
+        (prompts_dir / "prose").mkdir(parents=True)
+        (prompts_dir / "a.j2").write_text("template A")
+        (prompts_dir / "prose" / "b.j2").write_text("template B")
+        (prompts_dir / "prose" / "notes.txt").write_text("not a template")
+
+        hashes = hash_prompt_templates(prompts_dir)
+
+        assert list(hashes) == ["a.j2", "prose/b.j2"]
+        expected = hashlib.sha256(b"template B").hexdigest()
+        assert hashes["prose/b.j2"] == expected
+
     def test_templates_03_undefined_variable_raises(self, tmp_path):
         """InfraTemplates-03: undefined template variable raises error."""
         prompts_dir = tmp_path / "prompts"

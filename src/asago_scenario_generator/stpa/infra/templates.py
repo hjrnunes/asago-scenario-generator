@@ -41,25 +41,34 @@ class TemplateLoader:
         return template.render(**kwargs)
 
     def hash_prompt_templates(self) -> dict[str, str]:
-        """Return SHA-256 hashes for every ``.j2`` file in the prompts directory.
+        """Return SHA-256 hashes for every ``.j2`` file under the prompts directory.
+
+        Templates in subfolders count too, so a change to any template a
+        prompt can include or render shows in the recorded hashes.
 
         Returns:
-            Dict mapping template filename to its 64-character hex digest.
+            Dict mapping each template's ``/``-separated path from the prompts
+            directory (``a.j2``, ``prose/b.j2``) to its 64-character hex digest,
+            in path order.
         """
-        hashes: dict[str, str] = {}
-        for path in sorted(self.prompts_dir.glob("*.j2")):
-            digest = hashlib.sha256(path.read_bytes()).hexdigest()
-            hashes[path.name] = digest
-        return hashes
+        paths = {
+            path.relative_to(self.prompts_dir).as_posix(): path
+            for path in self.prompts_dir.rglob("*.j2")
+            if path.is_file()
+        }
+        return {
+            name: hashlib.sha256(paths[name].read_bytes()).hexdigest()
+            for name in sorted(paths)
+        }
 
 
 def hash_prompt_templates(prompts_dir: Path) -> dict[str, str]:
-    """Return SHA-256 hashes for every ``.j2`` file in *prompts_dir*.
+    """Return SHA-256 hashes for every ``.j2`` file under *prompts_dir*.
 
     Args:
         prompts_dir: Directory containing ``.j2`` template files.
 
     Returns:
-        Dict mapping template filename to its 64-character hex digest.
+        Dict mapping each template's path from *prompts_dir* to its digest.
     """
     return TemplateLoader(prompts_dir).hash_prompt_templates()
