@@ -6,6 +6,17 @@ targeted, proposed_not_applicable, upstream_gap, or unresolved.
 
 {% include "_control_path_method.j2" %}
 
+Each slot has one UCA type:
+
+{% include "_uca_types.j2" %}
+
+Choose each slot's type from how the concern's mechanism causes the loss on this
+path. Harm through content, a value, a destination, or an effect that the action
+delivers is INCORRECT. Use NOT_PROVIDED only when the harm comes from the action
+being withheld when it is needed, and WRONG_TIMING only when the moment or order
+of an observable action causes it. Name every slot whose type fits. The examples'
+types are not a default.
+
 {{ instructions }}
 
 The obligation_handle is opaque: copy unchanged. Every selectable ID in the index is
@@ -57,7 +68,7 @@ including a duplicated or parenthetical hazard ID; the typed relationship contro
 For a responsibility slot, use the slot's exact RESP owner in `controller_ids` and
 `responsibility_ids`, its exact CA in `control_action_ids`, and that action's exact CP in
 `controlled_process_ids`. For a coordination slot such as
-`CL-1:CM-1:NOT_PROVIDED`, resolve the exact CL record: use its source responsibility as
+`CL-1:CM-1:<UCA type>`, resolve the exact CL record: use its source responsibility as
 the `controller_ids` value, include both its source and target responsibilities in
 `responsibility_ids`, use the exact CM in `control_action_ids`, the exact CL in
 `coordination_link_ids`, and the link's shared PM in `process_model_part_ids`. Never put
@@ -91,6 +102,9 @@ actual supplied handle unchanged):
 ```json
 {{ routing_targeted_example }}
 ```
+
+The example's IDs only show their form; name the slots from the index's `slots`
+rows whose action and type fit the obligation.
 
 Complete unresolved example:
 

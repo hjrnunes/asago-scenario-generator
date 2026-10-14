@@ -11,7 +11,19 @@ cases:
         `targeting` holds the route's structural placement: non-empty
         `slot_ids`, `hazard_ids`, and `constraint_ids`
       - each an empty list when the path has none
-      - '"disposition":"targeted","targeting":{"slot_ids":["RESP-1:CA-1-1:NOT_PROVIDED"]'
+      - '"disposition":"targeted","targeting":{"slot_ids":["RESP-90:CA-90-1:INCORRECT"]'
+      - >-
+        The example's IDs only show their form; name the slots from the index's
+        `slots` rows whose action and type fit the obligation.
+      - Each slot has one UCA type
+      - >-
+        Choose each slot's type from how the concern's mechanism causes the loss
+        on this path. Harm through content, a value, a destination, or an effect
+        that the action delivers is INCORRECT. Use NOT_PROVIDED only when the
+        harm comes from the action being withheld when it is needed, and
+        WRONG_TIMING only when the moment or order of an observable action
+        causes it. Name every slot whose type fits. The examples' types are not
+        a default.
       - '"disposition":"unresolved","targeting":null'
       - '"missing_concepts":null'
       - whether the system has the surface
@@ -26,3 +38,4 @@ cases:
       - capability flags, or integration IDs cannot substitute
     forbidden:
       - Common empty collections belong only to the inward compiled route
+      - '"slot_ids":["RESP-1:CA-1-1:INCORRECT"]'

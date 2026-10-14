@@ -68,6 +68,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     PromptContractAudit,
 )
 from asago_scenario_generator.stpa.obligation_aware.hazard_offer import slot_offer
+from asago_scenario_generator.stpa.obligation_aware.routing_slots import routing_slots
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
     StpaIndex,
     build_stpa_index,
@@ -226,7 +227,9 @@ def _routing_wire_examples() -> tuple[str, str]:
                     "disposition": "targeted",
                     "semantic_assessment": semantic_assessment,
                     "targeting": {
-                        "slot_ids": ["RESP-1:CA-1-1:NOT_PROVIDED"],
+                        # A slot no real index is expected to offer: a copied
+                        # example then fails validation instead of passing unseen.
+                        "slot_ids": ["RESP-90:CA-90-1:INCORRECT"],
                         "hazard_ids": ["H-1"],
                         "constraint_ids": ["SC-1"],
                     },
@@ -1102,7 +1105,7 @@ def project_obligation_routing_context(
         obligation_questions=questions,
         target_index=project_control_structure_context(
             control_structure,
-            slots=slots,
+            slots=routing_slots(slots, control_structure),
             loss_analysis=loss_analysis,
         ),
         instructions=render_prose(_ROUTING_PROSE, "instructions"),
@@ -1283,7 +1286,18 @@ def _temporality_value(item: Any) -> str | None:
     )
 
 
-def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any]:
+def _uca_type_legend() -> list[dict[str, str]]:
+    """Return the UCA type definitions shared with the routing and ICA prompts."""
+    rows = []
+    for line in _TEMPLATE_LOADER.render_prompt("_uca_types.j2").splitlines():
+        uca_type, meaning = line.removeprefix("- ").split(": ", 1)
+        rows.append({"uca_type": uca_type, "meaning": meaning})
+    return rows
+
+
+def _compact_routing_target_payload(
+    index: ProviderTargetIndex, *, slot_legend: bool = False
+) -> dict[str, Any]:
     """Render one glossary plus ID-only graph relationships for routing.
 
     The typed index deliberately carries local descriptions on every edge so
@@ -1291,18 +1305,23 @@ def _compact_routing_target_payload(index: ProviderTargetIndex) -> dict[str, Any
     directly for a whole-structure routing call repeats the same prose once
     per slot and edge.  This projection keeps every meaning exactly once and
     preserves the relationships as explicit IDs.
+
+    With ``slot_legend`` the slot IDs stay out of the glossary, where each
+    carried the same text, and a ``uca_types`` legend defines the slot types.
     """
     glossary = _RoutingGlossary()
     ref_id = glossary.ref_id
     # The glossary rejects conflicting descriptions in first-seen order, so
     # the sections are projected in a fixed order.
     structure = _compact_routing_structure(index, glossary)
-    slots = _compact_routing_slots(index, glossary)
+    slots = _compact_routing_slots(index, glossary, in_glossary=not slot_legend)
     hazards, constraints = _compact_routing_loss_graph(index, glossary)
     controlled_process_ids = tuple(ref_id(item) for item in index.controlled_processes)
     loss_ids = tuple(ref_id(item) for item in index.losses)
     referenced_records = [{"id": ref_id(item)} for item in index.referenced_records]
+    legend = {"uca_types": _uca_type_legend()} if slot_legend else {}
     return {
+        **legend,
         "target_id": index.target_id,
         "target_kind": index.target_kind,
         "responsibilities": structure["responsibilities"],
@@ -1377,15 +1396,14 @@ def _compact_routing_structure(
 
 
 def _compact_routing_slots(
-    index: ProviderTargetIndex, glossary: _RoutingGlossary
+    index: ProviderTargetIndex, glossary: _RoutingGlossary, *, in_glossary: bool
 ) -> list[dict[str, Any]]:
     """Project the unsafe-control slots as ID-only rows."""
     ref_id = glossary.ref_id
+    meaning = render_prose(_ROUTING_PROSE, "slot_glossary")
     return [
         {
-            "id": glossary.remember(
-                item.id, render_prose(_ROUTING_PROSE, "slot_glossary")
-            ),
+            "id": glossary.remember(item.id, meaning) if in_glossary else item.id,
             "uca_type": item.uca_type.value,
             "action_temporality": _temporality_value(item),
             "owner_id": ref_id(item.owner),
@@ -1461,7 +1479,9 @@ def render_structural_routing_prompts(
             [_routing_question_payload(item) for item in context.obligation_questions]
         ),
         hazard_constraint_pair_ledger=_hazard_constraint_pair_ledger(loss_analysis),
-        target_index_yaml=_yaml(_compact_routing_target_payload(context.target_index)),
+        target_index_yaml=_yaml(
+            _compact_routing_target_payload(context.target_index, slot_legend=True)
+        ),
     )
     return system, user
 
