@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Literal, cast
 
+from asago_scenario_generator.models.ica_merge import IcaMerge, IcaMergedFinding
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
@@ -527,6 +528,136 @@ def _compile_finding(
         quality_warnings=_deviation_quality_warnings(
             finding.deviation.text, action_description
         ),
+    )
+
+
+def _merge_key(finding: IcaFindingDraft) -> tuple[str, str, str]:
+    """Return the text a finding shares with its copies, as compiled."""
+    return (
+        finding.deviation.text.strip(),
+        finding.hazardous_context.strip(),
+        finding.loss_consequence.strip(),
+    )
+
+
+def _finding_groups(
+    findings: Sequence[IcaFindingDraft],
+) -> tuple[tuple[int, ...], ...]:
+    """Group as-written finding indexes by shared key, in first-written order."""
+    grouped: dict[tuple[str, str, str], list[int]] = {}
+    for index, finding in enumerate(findings):
+        grouped.setdefault(_merge_key(finding), []).append(index)
+    return tuple(tuple(indexes) for indexes in grouped.values())
+
+
+def _ordered_union(groups: Iterable[Iterable[str]]) -> tuple[str, ...]:
+    """Join reference lists without repeats, in written order."""
+    return tuple(dict.fromkeys(item for group in groups for item in group))
+
+
+def _merged_finding(group: Sequence[IcaFindingDraft]) -> IcaFindingDraft:
+    """Fold copies into the first finding with the union of their references."""
+    first = group[0]
+    if len(group) == 1:
+        return first
+    return IcaFindingDraft(
+        deviation=first.deviation,
+        hazardous_context=first.hazardous_context,
+        loss_consequence=first.loss_consequence,
+        related_hazard_ids=_ordered_union(f.related_hazard_ids for f in group),
+        related_constraint_ids=_ordered_union(f.related_constraint_ids for f in group),
+        process_model_refs=_ordered_union(f.process_model_refs for f in group),
+        feedback_refs=_ordered_union(f.feedback_refs for f in group),
+        context_row=first.context_row,
+    )
+
+
+def _remapped_result(
+    result: ObligationIcaDraft, merged_index: Mapping[int, int]
+) -> ObligationIcaDraft:
+    """Point a result's finding indexes at the merged findings, once each."""
+    if not result.finding_indexes:
+        return result
+    return ObligationIcaDraft(
+        obligation_handle=result.obligation_handle,
+        disposition=result.disposition,
+        finding_indexes=tuple(
+            dict.fromkeys(merged_index[index] for index in result.finding_indexes)
+        ),
+        rationale=result.rationale,
+    )
+
+
+def merge_equal_findings(
+    draft: SlotIcaDraft,
+) -> tuple[SlotIcaDraft, tuple[tuple[int, ...], ...]]:
+    """Merge findings of one slot that share deviation, context, and consequence.
+
+    A model may write one finding per unsafe context row, or one per pair, that
+    differ in nothing else; each would compile to its own ICA and its own
+    downstream requests.  The merged finding keeps the first finding's text and
+    row and the union of the references, and each consideration result moves to
+    the merged indexes.  Return the merged draft and, for each merged finding,
+    the as-written indexes it stands for.  A draft with nothing to merge comes
+    back unchanged.  Every merged object is built through validation.
+    """
+    if draft.is_na:
+        return draft, ()
+    groups = _finding_groups(draft.findings)
+    if len(groups) == len(draft.findings):
+        return draft, groups
+    merged_index = {index: m for m, group in enumerate(groups) for index in group}
+    return (
+        SlotIcaDraft(
+            slot_id=draft.slot_id,
+            is_na=draft.is_na,
+            na_rationale=draft.na_rationale,
+            findings=tuple(
+                _merged_finding([draft.findings[index] for index in group])
+                for group in groups
+            ),
+            consideration_results=tuple(
+                _remapped_result(result, merged_index)
+                for result in draft.consideration_results
+            ),
+        ),
+        groups,
+    )
+
+
+def ica_merge_entries(
+    target_id: str,
+    slot_id: str,
+    written: SlotIcaDraft,
+    groups: Sequence[Sequence[int]],
+    ica_ids: Sequence[str],
+) -> tuple[IcaMerge, ...]:
+    """Record each merged group of a slot with the ICA it became.
+
+    *groups* are the as-written indexes of each merged finding and *ica_ids*
+    the ICA each compiled from; *written* is the draft before the merge.
+    """
+    return tuple(
+        IcaMerge(
+            target_id=target_id,
+            slot_id=slot_id,
+            ica_id=ica_id,
+            findings=tuple(
+                _merged_finding_record(index, written.findings[index])
+                for index in group
+            ),
+        )
+        for group, ica_id in zip(groups, ica_ids, strict=True)
+        if len(group) > 1
+    )
+
+
+def _merged_finding_record(index: int, finding: IcaFindingDraft) -> IcaMergedFinding:
+    return IcaMergedFinding(
+        finding_index=index,
+        context_row=finding.context_row,
+        related_hazard_ids=finding.related_hazard_ids,
+        related_constraint_ids=finding.related_constraint_ids,
     )
 
 
@@ -1139,6 +1270,11 @@ class SlotFillRunResult:
         return self.result.lost_slots
 
     @property
+    def ica_merges(self) -> tuple[IcaMerge, ...]:
+        """Expose the findings merged into one ICA while slots compiled."""
+        return self.result.ica_merges
+
+    @property
     def call_evidence(self) -> tuple[Any, ...]:
         """Expose slot and independent-verifier call evidence together."""
         values = list(self.result.call_evidence)
@@ -1166,6 +1302,7 @@ class _SlotFillState:
     diagnostics: list[ConsiderationDiagnostic]
     requests_sent: int = 0  # for the target request being processed
     lost: dict[str, SlotLoss] = field(default_factory=dict)
+    ica_merges: list[IcaMerge] = field(default_factory=list)
 
 
 def _initial_slot_fill_state(
@@ -1626,6 +1763,13 @@ def _process_valid_response(
             error=validation_error,
         )
         return
+    # A later part's fill of a slot never replaces the first accepted fill, so
+    # only a slot's first accepted fill brings its merges.
+    state.ica_merges.extend(
+        merge
+        for merge in response.ica_merges
+        if merge.slot_id not in state.successful_slots
+    )
     state.successful_slots.update(by_id)
     _record_accepted_request(
         response,
@@ -1762,6 +1906,7 @@ def fill_synthesis_slots(
         call_evidence=tuple(state.evidence),
         diagnostics=tuple(state.diagnostics),
         lost_slots=tuple(state.lost.values()),
+        ica_merges=tuple(state.ica_merges),
     )
     return SlotFillRunResult(result=final)
 
@@ -1773,4 +1918,6 @@ __all__ = [
     "compile_slot_provider_entry",
     "fill_synthesis_slots",
     "final_slot_universe",
+    "ica_merge_entries",
+    "merge_equal_findings",
 ]

@@ -348,7 +348,11 @@ class TestSupplement:
         structure = _structure()
         slot = _slot(structure)
         client = _Client(
-            _payload(slot.slot_id, _finding("CA-1-1:ctx-3"), _finding("CA-1-1:ctx-1"))
+            _payload(
+                slot.slot_id,
+                _finding("CA-1-1:ctx-3"),
+                _finding("CA-1-1:ctx-1", deviation="the reply names a person"),
+            )
         )
 
         icas = _fill(tmp_path, client, structure, slot)

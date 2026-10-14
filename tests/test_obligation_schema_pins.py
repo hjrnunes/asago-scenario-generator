@@ -293,6 +293,7 @@ EXPECTED_ENVELOPES: dict[str, dict] = {
             "response_ref",
             "provider_calls",
             "response_digest",
+            "ica_merges",
         ],
         "provider_without_calls": "Value error, provider adapter must report at "
         "least one provider call",
