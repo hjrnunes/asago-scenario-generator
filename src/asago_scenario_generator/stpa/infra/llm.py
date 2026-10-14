@@ -24,6 +24,7 @@ from asago_scenario_generator.stpa.infra.provider_record import (
 from asago_scenario_generator.stpa.infra.transport_retry import retry_once
 from asago_scenario_generator.request_schema import (
     find_unions,
+    find_xgrammar_rejected_keywords,
     portable_request_schema,
     restore_flat_reply_for,
 )
@@ -413,7 +414,12 @@ def _json_schema_response_format(
     """Build the OpenAI-compatible JSON Schema request shape.
 
     Raises ``ValueError`` when the request schema still holds a union: GLM's
-    endpoint decodes a union by always taking its last branch.
+    endpoint decodes a union by always taking its last branch.  It also raises
+    when the schema holds a keyword that vLLM's xgrammar backend rejects with
+    HTTP 400 (``uniqueItems``, ``contains``, ``minContains``, ``maxContains``,
+    ``format``, ``multipleOf``, ``minProperties``, ``maxProperties``,
+    ``propertyNames`` or ``patternProperties``); enforce such a rule in a
+    validator instead.
     """
     schema = portable_request_schema(response_format.model_json_schema())
     unions = find_unions(schema)
@@ -421,6 +427,12 @@ def _json_schema_response_format(
         raise ValueError(
             f"request schema {response_format.__name__} still holds a union at "
             + ", ".join(unions)
+        )
+    rejected = find_xgrammar_rejected_keywords(schema)
+    if rejected:
+        raise ValueError(
+            f"request schema {response_format.__name__} holds a keyword that "
+            "vLLM's xgrammar backend rejects with HTTP 400 at " + ", ".join(rejected)
         )
     return {
         "type": "json_schema",
