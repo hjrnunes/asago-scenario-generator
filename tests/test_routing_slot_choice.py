@@ -11,8 +11,12 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.stpa.obligation_aware.governance_prompts import (
+    build_governance_routing_prompts,
+)
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_structural_routing_prompts,
 )
@@ -20,6 +24,7 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
     build_neutral_briefs,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
+from tests.helpers.governance import _setup as governance_setup
 from tests.helpers.obligation_aware import _control_structure, _loss_analysis
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
@@ -92,3 +97,49 @@ def test_ica_slot_prompts_keep_their_golden_bytes(case: str) -> None:
     for part, text in CASES[case]().items():
         golden = _GOLDENS / f"{case}.{part}.txt"
         assert text.encode("utf-8") == golden.read_bytes()
+
+
+def _target_index(user: str) -> dict:
+    # The index YAML is key-sorted, so it starts at its ``constraints`` key.
+    start = user.index("\nconstraints:", user.index("Compact STPA target index:")) + 1
+    end = user.index("Return typed route dispositions")
+    return yaml.safe_load(user[start:end])
+
+
+def _definition_rows() -> list[dict[str, str]]:
+    rows = []
+    for line in _ica_type_definitions().splitlines():
+        uca_type, meaning = line.removeprefix("- ").split(": ", 1)
+        rows.append({"uca_type": uca_type, "meaning": meaning})
+    return rows
+
+
+def test_routing_glossary_lists_no_slot_id() -> None:
+    _, user = _routing_prompts()
+    index = _target_index(user)
+
+    slot_ids = {row["id"] for row in index["slots"]}
+    assert slot_ids
+    assert not slot_ids & {entry["id"] for entry in index["id_glossary"]}
+
+
+def test_routing_index_defines_each_uca_type_once_in_a_legend() -> None:
+    _, user = _routing_prompts()
+
+    assert _target_index(user)["uca_types"] == _definition_rows()
+
+
+def test_governance_routing_index_keeps_its_slot_glossary_entries() -> None:
+    briefs, _, losses, structure = governance_setup("risk-b")
+    _, user = build_governance_routing_prompts(
+        briefs=briefs,
+        loss_analysis=losses,
+        control_structure=structure,
+        slots=create_slots(structure),
+    )
+
+    glossary_ids = {
+        line.split("id: ", 1)[1] for line in user.splitlines() if "- id: " in line
+    }
+    assert {slot.slot_id for slot in create_slots(structure)} <= glossary_ids
+    assert "uca_types" not in user

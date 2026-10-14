@@ -55,8 +55,10 @@ _GOLDEN_SLOT_USER_EMPTY = (
 _GOLDEN_ROUTING_SYSTEM = (
     "aee8911b4636b6ba4b33316ccfd5186a90257e47de1ddeba009320ed5a2c3111"
 )
+# The routing user digest was recaptured when slot IDs left the ID glossary for
+# a UCA type legend.
 _GOLDEN_ROUTING_USER = (
-    "cc9264807d70b8e674d7cb3de8def297c2f76104ae0c5c8558b34a1ca63f15a7"
+    "fe04db8e76c6e9e089664706fd71402b14d75bf7f7bf99495fbb5976f37c1603"
 )
 
 
