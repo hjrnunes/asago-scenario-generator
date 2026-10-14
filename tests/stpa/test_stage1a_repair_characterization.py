@@ -31,7 +31,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     ObligationRepairResponse,
     ReferenceRepairResponse,
 )
-from tests.helpers.calls_log import stage1a_steps
+from tests.helpers.calls_log import read_calls_jsonl, stage1a_steps
 from tests.helpers.stage1a_targeted_repair import (
     _USE_CASE,
     _attempt_two_response,
@@ -88,12 +88,20 @@ def _klarna_rejected_reply() -> dict:
     return reply
 
 
+def _disposition_rows_in_handles() -> list[dict]:
+    return [
+        row
+        | {"loss_ids": [f"loss_{ref.removeprefix('L-')}" for ref in row["loss_ids"]]}
+        for row in _disposition_repair_rows()
+    ]
+
+
 def _disposition(client: MockLLMClient) -> dict:
     client.set_response_for(
         LossAnalysisDraft, [_attempt_two_response(), _empty_gap_response()]
     )
     client.set_response_for(
-        DispositionRepairResponse, {"risk_dispositions": _disposition_repair_rows()}
+        DispositionRepairResponse, {"risk_dispositions": _disposition_rows_in_handles()}
     )
     return {"use_case_text": _USE_CASE, "risk_cards": _occiai_cards()}
 
@@ -103,7 +111,8 @@ def _obligation_risk(client: MockLLMClient) -> dict:
         LossAnalysisDraft, [_risk_obligation_defect(), _empty_gap_response()]
     )
     client.set_response_for(
-        ObligationRepairResponse, _obligation_reply("SC-1", _CORRECTED_CHANNEL)
+        ObligationRepairResponse,
+        _obligation_reply("constraint_1", _CORRECTED_CHANNEL),
     )
     return {"use_case_text": _USE_CASE, "risk_cards": _occiai_cards()}
 
@@ -119,7 +128,7 @@ def _obligation_gap(client: MockLLMClient) -> dict:
     corrected = {k: v for k, v in entry.items() if k != "realized_by"}
     client.set_response_for(
         ObligationRepairResponse,
-        _obligation_reply("SC-8", corrected | {"violated_via": "reply"}),
+        _obligation_reply("constraint_1", corrected | {"violated_via": "reply"}),
     )
     return {"use_case_text": _USE_CASE, "risk_cards": _occiai_cards()}
 
@@ -155,7 +164,10 @@ def _reference_gap(client: MockLLMClient) -> dict:
         {
             "hazards": [],
             "security_constraints": [
-                {"constraint_id": "SC-2", "related_hazards": ["H-2"]}
+                {
+                    "constraint_id": "merchant_policy_constraint",
+                    "related_hazards": ["merchant_policy_hazard"],
+                }
             ],
         },
     )
@@ -236,3 +248,34 @@ def test_every_case_reaches_its_repair(tmp_path) -> None:
         "reference_gap": ["gap_analysis_repair"],
         "feedback_correction": ["risk_derivation_repair"],
     }
+
+
+# Per case: the handles the repair request shows, and the canonical IDs the
+# allocation gave them, which the request must not show.
+REQUEST_IDS: dict[str, tuple[tuple[str, ...], tuple[str, ...]]] = {
+    "disposition": (("loss_1", "loss_4"), ('"L-1"', "L-4")),
+    "obligation_risk": (("constraint_1", "hazard_1"), ("SC-1", "H-1")),
+    # The fixture's rule text names "control SC-8"; only the heading is an ID.
+    "obligation_gap": (("### constraint_1",), ("### SC-8",)),
+    "reference_risk": (
+        ("h_ungrounded_policy_answer", "loss_customer_financial_harm"),
+        ("H-8", "L-2"),
+    ),
+    "reference_gap": (
+        ("merchant_policy_constraint", "merchant_policy_hazard"),
+        ("SC-2", "H-2"),
+    ),
+}
+
+
+@pytest.mark.parametrize("case", sorted(REQUEST_IDS))
+def test_the_repair_request_shows_the_reply_handles(case: str, tmp_path) -> None:
+    _observed(case, tmp_path)
+    [entry] = [
+        item for item in read_calls_jsonl(tmp_path) if item["step"].endswith("_repair")
+    ]
+    request = entry["system_prompt_text"] + entry["user_prompt_text"]
+    shown, hidden = REQUEST_IDS[case]
+
+    assert [handle for handle in shown if handle not in request] == []
+    assert [canonical for canonical in hidden if canonical in request] == []

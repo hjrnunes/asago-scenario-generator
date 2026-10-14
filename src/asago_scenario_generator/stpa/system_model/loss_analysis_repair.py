@@ -68,7 +68,7 @@ import json
 import re
 from collections import Counter
 from collections.abc import Callable, Container, Iterable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Union
 
@@ -1623,6 +1623,7 @@ class DispositionRepairPlan:
     reasons: tuple[tuple[str, str], ...]
     removed_unknown: tuple[tuple[str, str], ...]
     salvage_warnings: tuple[str, ...] = ()
+    ids: IdSpace = field(default_factory=IdSpace)
 
 
 @dataclass(frozen=True)
@@ -1639,6 +1640,7 @@ class ObligationRepairPlan:
     prior: LossAnalysisDraft
     selected: tuple[SelectedObligation, ...]
     salvage_warnings: tuple[str, ...] = ()
+    ids: IdSpace = field(default_factory=IdSpace)
 
 
 LOSS_PRESENCE_REPAIR_IDENTITY = "risk_card_losses"
@@ -1746,6 +1748,14 @@ _REFERENCE_LIST_FIELDS = {
     "risk_dispositions": ("loss_ids", "risk_ref"),
 }
 
+# The ID kind of each collection's owner and of the references it lists; a
+# disposition row is owned by a risk card, which has no handle.
+_REFERENCE_KINDS = {
+    "hazards": (HAZARD, LOSS),
+    "security_constraints": (CONSTRAINT, HAZARD),
+    "risk_dispositions": (None, LOSS),
+}
+
 _OWNER_KINDS = {
     "hazards": "hazard",
     "security_constraints": "security constraint",
@@ -1778,6 +1788,23 @@ class SelectedReferenceList:
     @property
     def field_name(self) -> str:
         return _REFERENCE_LIST_FIELDS[self.collection][0]
+
+    def shown(self, ids: IdSpace) -> SelectedReferenceList:
+        """This list with each ID written as the repair request shows it."""
+        owner_kind, reference_kind = _REFERENCE_KINDS[self.collection]
+
+        def show(values: Iterable[str]) -> tuple[str, ...]:
+            return tuple(ids.handle(reference_kind, value) for value in values)
+
+        return replace(
+            self,
+            owner_id=(
+                ids.handle(owner_kind, self.owner_id) if owner_kind else self.owner_id
+            ),
+            original=show(self.original),
+            replacement_ids=show(self.replacement_ids),
+            unknown=show(self.unknown),
+        )
 
     @property
     def identity(self) -> str:
@@ -1844,8 +1871,13 @@ class ReferenceRepairPlan:
     salvage_warnings: tuple[str, ...] = ()
     feedback: str = ""
     card_texts: tuple[tuple[str, str], ...] = ()
+    ids: IdSpace = field(default_factory=IdSpace)
 
 
+# A plan's draft, selection, and records name records by canonical ID.  Its
+# ``ids`` map the failed reply's handles to those IDs: the repair request
+# shows each record by its handle, and the reply is read back to canonical IDs
+# before the merge.
 RepairPlan = Union[DispositionRepairPlan, ObligationRepairPlan, ReferenceRepairPlan]
 RepairOutcome = Union[
     RepairPlan,
@@ -2109,35 +2141,50 @@ def build_repair_plan(
     if first_result is None:
         return UnsupportedRepair("no provider response is available to repair")
     if first_parse_failed:
-        return _wire_repair_plan(
-            step=step,
-            response_format=response_format,
-            first_result=first_result,
-            failure_class=failure_class,
-            risk_cards=risk_cards,
-            require_risk_accounting=require_risk_accounting,
-            constraint_wire_model=constraint_wire_model,
-            first_wire_error=first_wire_error,
-            repair_record=repair_record,
-            gap_wire=gap_wire,
-            ids=ids,
+        return _with_ids(
+            _wire_repair_plan(
+                step=step,
+                response_format=response_format,
+                first_result=first_result,
+                failure_class=failure_class,
+                risk_cards=risk_cards,
+                require_risk_accounting=require_risk_accounting,
+                constraint_wire_model=constraint_wire_model,
+                first_wire_error=first_wire_error,
+                repair_record=repair_record,
+                gap_wire=gap_wire,
+                ids=ids,
+            ),
+            ids,
         )
     if failure_class == "loss_presence":
         return LossPresenceRepairPlan(feedback=validation_feedback or "")
     if failure_class == "missing_hazard_chain":
         return MissingHazardChainRepairPlan(feedback=validation_feedback or "")
     if failure_class == "risk_accounting":
-        return _accounting_repair_plan(
-            first_result,
-            response_format=response_format,
-            risk_cards=risk_cards,
-            require_risk_accounting=require_risk_accounting,
-            ids=ids,
+        return _with_ids(
+            _accounting_repair_plan(
+                first_result,
+                response_format=response_format,
+                risk_cards=risk_cards,
+                require_risk_accounting=require_risk_accounting,
+                ids=ids,
+            ),
+            ids,
         )
     return UnsupportedRepair(
         f"the {failure_class} failure class is outside the approved repair "
         "scope; no repair call is made"
     )
+
+
+def _with_ids(outcome: RepairOutcome, ids: IdSpace) -> RepairOutcome:
+    """Give a repair plan the handles its request shows."""
+    if isinstance(
+        outcome, (DispositionRepairPlan, ObligationRepairPlan, ReferenceRepairPlan)
+    ):
+        return replace(outcome, ids=ids)
+    return outcome
 
 
 def _absent_reference_rows(
@@ -3769,6 +3816,8 @@ class _RepairRequest:
     response_format: type[BaseModel]
     wire_model: type[BaseModel]
     merge: Callable[[Any], LossAnalysisDraft]
+    # Reads the parsed reply's handles back to canonical IDs.
+    read: Callable[[Any], Any]
     proposals: Callable[[Any], dict[str, list[str]]] | None = None
     on_repaired: Callable[[], None] | None = None
     # Filled by ``merge`` with the obligations it dropped and the corrected
@@ -3801,7 +3850,7 @@ def _disposition_request(
             DISPOSITION_REPAIR_USER_TEMPLATE,
             use_case_text=use_case_text,
             selected_cards=_selected_card_views(plan, risk_cards),
-            declared_losses=_declared_loss_views(plan.prior),
+            declared_losses=_declared_loss_views(plan.prior, plan.ids),
             reasons=plan.reasons,
         ),
         response_format=response_format,
@@ -3809,6 +3858,7 @@ def _disposition_request(
         merge=lambda response: merge_disposition_repair(
             plan, list(response.risk_dispositions), risk_cards=risk_cards
         ),
+        read=lambda response: _read_reply(response, plan.ids),
         on_repaired=on_repaired,
     )
 
@@ -3833,6 +3883,7 @@ def _obligation_request(
         merge=lambda response: merge_obligation_repair(
             plan, list(response.constraints), dropped, span_repairs
         ),
+        read=lambda response: _read_reply(response, plan.ids),
         dropped=dropped,
         span_repairs=span_repairs,
     )
@@ -3867,8 +3918,64 @@ def _reference_request(
         response_format=wire,
         wire_model=wire,
         merge=lambda response: merge_reference_repair(plan, response),
+        read=lambda response: _read_reply(response, plan.ids),
         proposals=reference_repair_proposals,
     )
+
+
+def _read_reply(response: BaseModel, ids: IdSpace) -> BaseModel:
+    """Rename each handle a repair reply names to its canonical ID.
+
+    A value that is not one of the failed reply's handles (an earlier
+    call's canonical ID, a risk card ID, or an unknown ID) is kept, so the
+    merge judges it as before.  ``model_copy`` keeps what each parsed row
+    recorded about its input, such as the channels an obligation omitted.
+    """
+
+    def names(kind: str, values: Iterable[str]) -> list[str]:
+        return [ids.name(kind, value) for value in values]
+
+    if isinstance(response, DispositionRepairResponse):
+        rows = [
+            row.model_copy(update={"loss_ids": names(LOSS, row.loss_ids)})
+            for row in response.risk_dispositions
+        ]
+        return response.model_copy(update={"risk_dispositions": rows})
+    if isinstance(response, ObligationRepairResponse):
+        constraints = [
+            item.model_copy(
+                update={"constraint_id": ids.name(CONSTRAINT, item.constraint_id)}
+            )
+            for item in response.constraints
+        ]
+        return response.model_copy(update={"constraints": constraints})
+    assert isinstance(response, ReferenceRepairResponse)
+    update: dict[str, list[Any]] = {
+        "hazards": [
+            item.model_copy(
+                update={
+                    "hazard_id": ids.name(HAZARD, item.hazard_id),
+                    "related_losses": names(LOSS, item.related_losses),
+                }
+            )
+            for item in response.hazards
+        ],
+        "security_constraints": [
+            item.model_copy(
+                update={
+                    "constraint_id": ids.name(CONSTRAINT, item.constraint_id),
+                    "related_hazards": names(HAZARD, item.related_hazards),
+                }
+            )
+            for item in response.security_constraints
+        ],
+    }
+    if isinstance(response, DispositionReferenceRepairResponse):
+        update["risk_dispositions"] = [
+            row.model_copy(update={"loss_ids": names(LOSS, row.loss_ids)})
+            for row in response.risk_dispositions
+        ]
+    return response.model_copy(update=update)
 
 
 def _disposition_cleanup_recorder(
@@ -3957,7 +4064,7 @@ def run_targeted_repair(
     def parse_repair(
         result: LLMResult, _cleanup: list[dict[str, Any]]
     ) -> LossAnalysisDraft:
-        response = parse_llm_result(result, request.wire_model)
+        response = request.read(parse_llm_result(result, request.wire_model))
         proposals = request.proposals(response) if request.proposals else None
         try:
             merged = _finish_merged_draft(
@@ -4100,33 +4207,40 @@ def _selected_reference_views(plan: ReferenceRepairPlan) -> list[dict]:
         {("risk_dispositions", risk_ref): text for risk_ref, text in plan.card_texts}
     )
 
-    def described(ids: Iterable[str]) -> list[dict]:
-        return [{"id": ref, "meaning": meanings.get(ref, "")} for ref in ids]
+    def described(selected: SelectedReferenceList, refs: Iterable[str]) -> list[dict]:
+        kind = _REFERENCE_KINDS[selected.collection][1]
+        return [
+            {"id": plan.ids.handle(kind, ref), "meaning": meanings.get(ref, "")}
+            for ref in refs
+        ]
 
+    views = []
+    for selected in plan.selected:
+        shown = selected.shown(plan.ids)
+        views.append(
+            {
+                "identity": shown.identity,
+                "owner_id": shown.owner_id,
+                "owner_kind": _OWNER_KINDS[selected.collection],
+                "collection": selected.collection,
+                "owner_text": owners[(selected.collection, selected.owner_id)],
+                "field_name": selected.field_name,
+                "original": list(shown.original),
+                "validation_error": shown.defect_reason,
+                "kept": described(selected, selected.kept),
+                "unknown": list(shown.unknown),
+                "replacements": described(selected, selected.replacement_ids),
+                "permitted_change": shown.correction_instruction,
+            }
+        )
+    return views
+
+
+def _declared_loss_views(draft: LossAnalysisDraft, ids: IdSpace) -> list[dict]:
+    """The declared loss registry with its meanings, each loss by its handle."""
     return [
         {
-            "identity": selected.identity,
-            "owner_id": selected.owner_id,
-            "owner_kind": _OWNER_KINDS[selected.collection],
-            "collection": selected.collection,
-            "owner_text": owners[(selected.collection, selected.owner_id)],
-            "field_name": selected.field_name,
-            "original": list(selected.original),
-            "validation_error": selected.defect_reason,
-            "kept": described(selected.kept),
-            "unknown": list(selected.unknown),
-            "replacements": described(selected.replacement_ids),
-            "permitted_change": selected.correction_instruction,
-        }
-        for selected in plan.selected
-    ]
-
-
-def _declared_loss_views(draft: LossAnalysisDraft) -> list[dict]:
-    """The declared loss registry with its meanings."""
-    return [
-        {
-            "loss_id": loss.loss_id,
+            "loss_id": ids.handle(LOSS, loss.loss_id),
             "description": loss.description,
             "provenance": loss.provenance.value,
             "source_risk_cards": loss.source_risk_cards,
@@ -4150,7 +4264,10 @@ def _selected_constraint_views(plan: ObligationRepairPlan) -> list[dict]:
     }
     hazards_by_id = {hazard.hazard_id: hazard for hazard in plan.prior.hazards}
     return [
-        _selected_constraint_view(plan, constraint, hazards_by_id, losses_by_id)
+        _shown_constraint_view(
+            _selected_constraint_view(plan, constraint, hazards_by_id, losses_by_id),
+            plan.ids,
+        )
         for constraint in plan.prior.security_constraints
         if constraint.constraint_id in selected_constraints
     ]
@@ -4191,6 +4308,25 @@ def _selected_constraint_view(
             for entry in constraint.obligations
         ],
         "repair_entries": repair_entries,
+    }
+
+
+def _shown_constraint_view(view: dict, ids: IdSpace) -> dict:
+    """The constraint view with each graph ID written as its handle."""
+    return view | {
+        "constraint_id": ids.handle(CONSTRAINT, view["constraint_id"]),
+        "related_hazards": [
+            hazard | {"hazard_id": ids.handle(HAZARD, hazard["hazard_id"])}
+            for hazard in view["related_hazards"]
+        ],
+        "related_loss_meanings": [
+            meaning
+            | {
+                "loss_id": ids.handle(LOSS, meaning["loss_id"]),
+                "via_hazard": ids.handle(HAZARD, meaning["via_hazard"]),
+            }
+            for meaning in view["related_loss_meanings"]
+        ],
     }
 
 

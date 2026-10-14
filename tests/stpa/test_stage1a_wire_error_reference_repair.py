@@ -51,6 +51,15 @@ UNGROUNDED_ANSWER = "H-8"
 OVERRELIANCE = "H-5"
 CITING_CARDS = ("atlas-hallucination", "credo-risk-021")
 
+# The first reply's handles, which the repair request shows and its reply names.
+HANDLES = {
+    FINANCIAL_HARM: "loss_customer_financial_harm",
+    SERVICE_QUALITY: "loss_customer_service_quality",
+    REGULATORY_PENALTY: "loss_regulatory_penalty",
+    UNGROUNDED_ANSWER: "h_ungrounded_policy_answer",
+    OVERRELIANCE: "h_overreliance_no_human_option",
+}
+
 
 def _cards(reply: dict) -> list[RiskCard]:
     return [
@@ -84,14 +93,19 @@ def _derive(
 
 
 def _repair(hazards: dict[str, list[str]], dispositions: dict[str, list[str]]) -> dict:
+    """A repair reply that names each record by the handle the request shows."""
+
+    def shown(ids: list[str]) -> list[str]:
+        return [HANDLES.get(value, value) for value in ids]
+
     return {
         "hazards": [
-            {"hazard_id": hazard_id, "related_losses": losses}
+            {"hazard_id": HANDLES[hazard_id], "related_losses": shown(losses)}
             for hazard_id, losses in hazards.items()
         ],
         "security_constraints": [],
         "risk_dispositions": [
-            {"risk_ref": risk_ref, "loss_ids": losses}
+            {"risk_ref": risk_ref, "loss_ids": shown(losses)}
             for risk_ref, losses in dispositions.items()
         ],
     }
@@ -159,8 +173,8 @@ class TestWireErrorWithDanglingReference:
 
         prompt = _repair_request(tmp_path)["user_prompt_text"]
         for identity in (
-            f"{UNGROUNDED_ANSWER}.related_losses",
-            f"{OVERRELIANCE}.related_losses",
+            f"{HANDLES[UNGROUNDED_ANSWER]}.related_losses",
+            f"{HANDLES[OVERRELIANCE]}.related_losses",
             *(f"{card}.loss_ids" for card in CITING_CARDS),
         ):
             assert f"### {identity}\n" in prompt

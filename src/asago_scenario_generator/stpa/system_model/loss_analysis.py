@@ -2382,7 +2382,7 @@ def _reference_plan(
         selected=(*selected, *dispositions),
         meanings=_reference_meanings(prior, call.authoritative_draft),
         salvage_warnings=report.warnings if report is not None else (),
-        feedback=finding,
+        feedback=_finding_in_handles(call, graph, repair_input.ids, finding),
         card_texts=tuple(
             (
                 item.owner_id,
@@ -2391,7 +2391,24 @@ def _reference_plan(
             )
             for item in dispositions
         ),
+        ids=repair_input.ids,
     )
+
+
+def _finding_in_handles(
+    call: _Stage1aCall, graph: LossAnalysisDraft, ids: IdSpace, finding: str
+) -> str:
+    """The reference gate's finding on the graph as the reply wrote it."""
+    try:
+        _validate_draft_references(
+            ids.to_handles(graph),
+            context=call.step,
+            allowed_loss_ids=call.allowed_loss_ids,
+            allowed_hazard_ids=call.allowed_hazard_ids,
+        )
+    except _DraftReferenceValidationError as exc:
+        return str(exc)
+    return finding
 
 
 _REFERENCE_REPAIR_CLASSES = frozenset({"draft_references", "wire_schema"})
@@ -2605,6 +2622,7 @@ def _run_stage1a_repairs(
                 (reference, "risk reference absent from the supplied set")
                 for reference in removed_unknown
             ),
+            ids=plan.ids,
         ),
         call.run_validators,
         cards,
