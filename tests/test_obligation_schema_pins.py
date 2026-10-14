@@ -140,7 +140,7 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "slot-exact": (
         "_SlotProviderPayload2Pairs1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "87ccc838731284a1cd3f6cddb5bf945a37f1a80a040d666b1c084c83e172edb8",
+        "932b9feb919e25ba3363007b2549f3d26c742f192137c1890a2976ed26e845c6",
     ),
 }
 

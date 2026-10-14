@@ -1098,6 +1098,19 @@ class _ConsiderationResultWire(_Model):
     finding_indexes: tuple[int, ...] = ()
     rationale: str = Field(min_length=1)
 
+    @model_validator(mode="before")
+    @classmethod
+    def drop_stray_indexes(cls, value: Any) -> Any:
+        """Ignore indexes on a result that names no finding instead of failing.
+
+        Only a finding result points at findings, so the indexes carry no
+        meaning; rejecting them cost pp-s11 a slot whose reply was otherwise
+        valid.
+        """
+        if isinstance(value, dict) and value.get("disposition") != "finding":
+            return {**value, "finding_indexes": ()}
+        return value
+
     @model_validator(mode="after")
     def validate_indexes(self) -> "_ConsiderationResultWire":
         check_finding_indexes(self.disposition, self.finding_indexes)
@@ -1201,7 +1214,8 @@ def _slot_scope_type(scope: FillScope | None) -> type[_Model]:
         _SlotProviderDraft.__name__,
         __base__=_SlotProviderDraft,
         slot_id=(_choice(scope.slot_ids), ...),
-        findings=(tuple[finding, ...], ()),
+        na_rationale=(str | None, ...),
+        findings=(tuple[finding, ...], ...),
         consideration_results=(_keyed_results_type(scope), ...),
     )
 

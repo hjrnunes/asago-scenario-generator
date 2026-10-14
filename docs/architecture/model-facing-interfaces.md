@@ -461,7 +461,11 @@ turns it into one `ObligationIcaDraft` per handle for validation and
 compilation. The provider check also counts routed pairs instead of comparing
 sets: a pp-s11 klarna-r2 reply listed each of six handles three times, with
 conflicting results for one, and passed the set comparison until the contract
-rejected it after the request had ended.
+rejected it after the request had ended. The fill schema also requires every
+slot field (`slot_id`, `is_na`, `na_rationale`, `findings`,
+`consideration_results`), and the provider drops `finding_indexes` from a
+result whose disposition is not `finding` instead of rejecting the reply: a
+pp-s11 klarna-r1 reply lost its slot for such indexes alone.
 
 A rejected fill reply earns one correction that lists every failed rule, not
 only the first. The provider collects the identity, pair, finding, and

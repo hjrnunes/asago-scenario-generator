@@ -99,6 +99,7 @@ def test_slot_schema_requires_one_exact_constraint_not_concatenated_ids():
             {
                 "slot_id": "RESP-1:CA-1-1:WRONG_TIMING",
                 "is_na": False,
+                "na_rationale": None,
                 "findings": [finding],
                 "consideration_results": {},
             }
