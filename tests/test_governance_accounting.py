@@ -34,9 +34,9 @@ _GOVERNANCE_ID = "ob:v1:" + "b" * 64
 
 # Digest and bytes of the accounting built below without a governance route,
 # recorded from 04a926bd before the credit existed.
-_PRE_CREDIT_DIGEST = "0c2db171b128a1b204faf704e7aea0a2b9ee7d0fa17d43b3f4a47eda03ff00ba"
+_PRE_CREDIT_DIGEST = "83c22f08e72669479c47041219c013349ae3ab6170c5637d87187d8226ee5537"
 _PRE_CREDIT_JSON_SHA256 = (
-    "aee332e6c02993c729857e6c514dd67175b26394e0d9bd7eb41dbd7ba99707a0"
+    "22490eaf9bf36283cb866dd8d7116cfadc5161682e543f29d2e33c2533a84b71"
 )
 _PRE_CREDIT_JSON_LEN = 2059
 

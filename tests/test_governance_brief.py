@@ -19,10 +19,10 @@ from tests.helpers.governance import _pattern
 
 # Captured from the brief builder at 04a926bd, before the kind field existed.
 PATTERN_BRIEF_DIGEST = (
-    "a1e686a54926c3b5c9a92c506e94ea2708240415b4f3b25f9f0785977be02620"
+    "b7d0c5163e7b0308d81d6d8c67d7161054e1dfd59ec2df26d65b27fde4da165d"
 )
 PATTERN_BRIEF_JSON_SHA256 = (
-    "48171f83240f65d2f3eb13b17f45a9a08e6070e57aef42ea44b1e13d4db85857"
+    "baec4310ea72be5ed43cf67cc8049bb4fea30d46411eaf097a8d7b4e6167a89c"
 )
 PATTERN_BRIEF_JSON_LENGTH = 2949
 

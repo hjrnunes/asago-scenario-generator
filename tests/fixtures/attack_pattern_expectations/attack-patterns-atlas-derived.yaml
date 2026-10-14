@@ -13,7 +13,7 @@ observation_kind_counts: {persistent_state: 24, tool_invocation: 9, model_contex
 ids: [AP-T1-06, AP-T3-04, AP-T3-05, AP-T3-06, AP-T6-06, AP-T6-07, AP-T11-05, AP-T17-03, AP-T17-04]
 records:
   AP-T1-06:
-    digest: 38383364034db7e3271fd90a08e92a0b7c1db4d9555072142af2414b06e8878e
+    digest: e5541cfc97717eb1577c2240bc27646fb5bb2614a5c909d5443d248f4757638f
     chain_exact: [AML.T0070, AML.T0077]
     step_exact:
       zero_click_activation: [AML.T0051.001]
@@ -67,7 +67,7 @@ records:
         produced:
         - [effect, effect.sensitive_data_exfiltrated]
   AP-T3-04:
-    digest: 93a03a7a305d7058009822af515e730b07e4d5dc29326daaa08b84842d44e3a6
+    digest: aea3065c46b3bcce6239aa73f5d7efff76ce2dc3e41ffa412f76662b5356dacf
     chain_exact: [AML.T0049]
     step_exact:
       reconnaissance: [AML.T0006]
@@ -89,7 +89,7 @@ records:
         produced:
         - [effect, effect.unauthorized_interface_access]
   AP-T3-05:
-    digest: ca9217bdba75680d1cb83639176d7a8fa17ee43e1dd63b7b15d557bb285ee379
+    digest: 345d50d37470ef0c294498e16adfc71352684572142419cbc280642309b040ba
     chain_exact: [AML.T0083]
     step_exact:
       config_credential_harvest: [AML.T0083]
@@ -121,7 +121,7 @@ records:
         - [effect, effect.connected_service_access]
     preconditions: {config_credential_harvest: control_interface_accessible}
   AP-T3-06:
-    digest: 08cf33bd33a7b81ce60e42af6ce9bc1c878d75931c3b88ae0fa78437cb35d57c
+    digest: 73c61557e53ec58900b733d8a737de1a5c3b3970daa7a71463e1472ff30e2668
     chain_exact: [AML.T0051.000, AML.T0053]
     step_exact:
       arbitrary_prompting: [AML.T0051.000]
@@ -151,7 +151,7 @@ records:
         - [effect, effect.agent_machine_compromise]
     preconditions: {arbitrary_prompting: control_interface_accessible}
   AP-T6-06:
-    digest: fb35ac820b8057257c5d205075b58e27706f0a58086110dbf169a2622ec4b5ef
+    digest: 0e239a5c94fa90b272912ad26ede8c52768a2ff6536fa7a18694340210b70e86
     chain_exact: [AML.T0051.001, AML.T0054]
     step_exact:
       discover_control_sequences: [AML.T0069.000]
@@ -215,7 +215,7 @@ records:
         - [effect, effect.injected_command_executed]
         - [state, state.attacker_script_executed]
   AP-T6-07:
-    digest: 58d830501c2ae7a774287876ac1241cf765182c85ef78082dc11527c95ca3f22
+    digest: 01afe50c367714f215cd634d208e26b427d25350e4faf79de9a0b077db81f7b7
     chain_exact: [AML.T0081, AML.T0108]
     step_exact:
       config_modification: [AML.T0081]
@@ -261,7 +261,7 @@ records:
     step_tiers:
       thread_context_persistence: {tier: observed, confidence: 85}
   AP-T11-05:
-    digest: 744ad30257f059d601dd516a10eb444dccc02b9b3aa24e42dd49fcc7ffb1d16a
+    digest: 18c5971224ae521aee9fbfae86038361ffee831760d49f3955e3ae72251f5ca6
     chain_exact: [AML.T0051.001, AML.T0100]
     step_exact:
       delivery: [AML.T0078]
@@ -308,7 +308,7 @@ records:
         produced:
         - [effect, effect.host_code_executed]
   AP-T17-03:
-    digest: 545456368fee4cda0dd91625b9a33bdfaccc8ef711296eb5b488497ec0fdc5cb
+    digest: 4c63cea3bf68f2ccfd9bfc4376c763ad4429a25e950c5b1b7863a6ae436161c7
     chain_exact: [AML.T0073, AML.T0104]
     step_exact:
       namesquatting: [AML.T0073]
@@ -368,7 +368,7 @@ records:
       develop_poisoned_tool: {tier: variant, confidence: 75}
       publish_poisoned_tool: {tier: variant, confidence: 80}
   AP-T17-04:
-    digest: 8a3cc6fced543a69a60ab87c71c214d05f2bf09db6d20d0802efd025cf73a4d4
+    digest: 0de6156a6fa9b00c1ae38d784d42dfc65deed0ad8a7d9a2bc9e05333de6bb028
     chain_exact: [AML.T0109]
     step_exact:
       rug_pull_timing: [AML.T0111]

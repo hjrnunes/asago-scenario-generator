@@ -6,10 +6,9 @@ organized by parent OWASP Agentic AI threat.
 Attack patterns are **domain-agnostic mechanism descriptions** derived from OWASP
 Agentic AI sub-scenarios. Each pattern describes an abstract attack mechanism
 rather than targeting a specific application. Patterns are mapped to
-[MITRE ATLAS](https://atlas.mitre.org/) techniques and
-[LAAF](https://github.com/laaf-ai/laaf/) technique identifiers via
-[SSSOM](https://mapping-commons.github.io/sssom/) provenance mappings and the
-catalog's canonical chains.
+[MITRE ATLAS](https://atlas.mitre.org/) techniques through the catalog's
+canonical chains, and [SSSOM](https://mapping-commons.github.io/sssom/)
+provenance files record candidate ATLAS correspondences.
 
 **53 attack patterns** across **15 threats** (T1-T17; T7, T14 currently have no pattern).
 
@@ -57,7 +56,6 @@ Repeatedly reinforce a false operational rule in the agent's persistent memory u
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0070` -- RAG Poisoning
 - ATLAS `AML.T0080.000` -- Memory
-- LAAF: `L2`, `S3`
 
 ---
 
@@ -78,7 +76,6 @@ Fragment a privilege-escalation attempt across multiple turns within a session s
 - ATLAS `AML.T0031` -- Erode AI Model Integrity
 - ATLAS `AML.T0043` -- Craft Adversarial Data
 - ATLAS `AML.T0051.000` -- Direct
-- LAAF: `L1`, `S3`
 
 ---
 
@@ -99,7 +96,6 @@ Incrementally alter the agent's stored threat definitions or classification crit
 - ATLAS `AML.T0031` -- Erode AI Model Integrity
 - ATLAS `AML.T0070` -- RAG Poisoning
 - ATLAS `AML.T0080.000` -- Memory
-- LAAF: `L2`, `T5`
 
 ---
 
@@ -120,7 +116,6 @@ Write false operational data into a RAG-indexed retrieval store shared among mul
 - ATLAS `AML.T0020` -- Poison Training Data
 - ATLAS `AML.T0070` -- RAG Poisoning
 - ATLAS `AML.T0071` -- False RAG Entry Injection
-- LAAF: `L5`, `T8`
 
 ---
 
@@ -166,7 +161,6 @@ Craft input that causes the agent to invoke a tool with inflated, malformed, or 
 
 - ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `S4`, `S8`
 
 ---
 
@@ -187,7 +181,6 @@ Manipulate the agent into chaining two or more authorized tools in a designer-un
 - ATLAS `AML.T0048` -- External Harms
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0086` -- Exfiltration via AI Agent Tool Invocation
-- LAAF: `L1`, `L3`
 
 ---
 
@@ -207,7 +200,6 @@ Trick the agent into using its document-generation, distribution, or batch-proce
 
 - ATLAS `AML.T0048` -- External Harms
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `M3`, `T3`
 
 ---
 
@@ -229,7 +221,6 @@ Inject false directives into the agent's persistent memory in a prior session so
 - ATLAS `AML.T0070` -- RAG Poisoning
 - ATLAS `AML.T0071` -- False RAG Entry Injection
 - ATLAS `AML.T0080.000` -- Memory
-- LAAF: `S3`, `T2`
 
 ---
 
@@ -250,7 +241,6 @@ Insert adversarially crafted content into the agent's vector store so that when 
 - ATLAS `AML.T0066` -- Retrieval Content Crafting
 - ATLAS `AML.T0070` -- RAG Poisoning
 - ATLAS `AML.T0071` -- False RAG Entry Injection
-- LAAF: `L4`, `S3`
 
 ---
 
@@ -271,7 +261,6 @@ Inject adversarial instructions directly so the agent invokes its command/script
 - ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `M3`, `S8`
 
 ---
 
@@ -293,7 +282,6 @@ Leverage the agent's authorized access to one system to escalate privileges in a
 **Mapped Techniques:**
 
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
-- LAAF: `L1`, `S6`
 
 ---
 
@@ -313,7 +301,6 @@ Exploit weak provisioning controls to instantiate an unauthorized agent that inh
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0073` -- Impersonation
 - ATLAS `AML.T0103` -- Deploy AI Agent
-- LAAF: `M1`, `M2`
 
 ---
 
@@ -393,7 +380,6 @@ Submit specially crafted inputs that force the agent into resource-intensive pro
 
 - ATLAS `AML.T0029` -- Denial of AI Service
 - ATLAS `AML.T0034` -- Cost Harvesting
-- LAAF: `S3`, `S4`
 
 ---
 
@@ -413,7 +399,6 @@ Craft requests that cause the agent to make excessive calls to rate-limited or q
 - ATLAS `AML.T0029` -- Denial of AI Service
 - ATLAS `AML.T0034` -- Cost Harvesting
 - ATLAS `AML.T0034.002` -- Agentic Resource Consumption
-- LAAF: `S4`, `T3`
 
 ---
 
@@ -438,7 +423,6 @@ Inject subtly false factual information that the agent stores in long-term memor
 - ATLAS `AML.T0031` -- Erode AI Model Integrity
 - ATLAS `AML.T0060` -- Publish Hallucinated Entities
 - ATLAS `AML.T0080.000` -- Memory
-- LAAF: `S3`, `T8`
 
 ---
 
@@ -459,7 +443,6 @@ Introduce references to fictitious attacker-controlled endpoints into content th
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0060` -- Publish Hallucinated Entities
 - ATLAS `AML.T0070` -- RAG Poisoning
-- LAAF: `M8`, `S8`
 
 ---
 
@@ -479,7 +462,6 @@ Inject false quantitative reference data into the agent's retrieval context so t
 
 - ATLAS `AML.T0043` -- Craft Adversarial Data
 - ATLAS `AML.T0070` -- RAG Poisoning
-- LAAF: `M8`, `T5`
 
 ---
 
@@ -521,7 +503,6 @@ Inject auxiliary sub-goals incrementally over multiple interactions so each appe
 
 - ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0054` -- LLM Jailbreak
-- LAAF: `L2`, `M3`
 
 ---
 
@@ -541,7 +522,6 @@ Issue an explicit instruction commanding the agent to discard its original direc
 
 - ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0054` -- LLM Jailbreak
-- LAAF: `M3`, `S1`
 
 ---
 
@@ -561,7 +541,6 @@ Return poisoned output from a compromised or malicious data source so the agent 
 
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0054` -- LLM Jailbreak
-- LAAF: `L3`, `S8`
 
 ---
 
@@ -582,7 +561,6 @@ Craft input that triggers the agent's self-evaluation/reflection mechanism into 
 - ATLAS `AML.T0029` -- Denial of AI Service
 - ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0051.001` -- Indirect
-- LAAF: `L4`, `T3`
 
 ---
 
@@ -603,7 +581,6 @@ Introduce adversarial feedback patterns into the agent's meta-learning/self-impr
 - ATLAS `AML.T0020` -- Poison Training Data
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0054` -- LLM Jailbreak
-- LAAF: `L1`, `M3`
 
 ---
 
@@ -733,7 +710,6 @@ An attacker obtains the victim's authentication tokens for an AI agent's agent-v
 
 - ATLAS `AML.T0081` -- Modify AI Agent Configuration
 - ATLAS `AML.T0092` -- Manipulate User LLM Chat History
-- LAAF: `S6`, `T5`
 
 ---
 
@@ -757,7 +733,6 @@ An attacker injects instructions into an agent that has delegated action capabil
 
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0073` -- Impersonation
-- LAAF: `M1`, `M2`
 
 ---
 
@@ -778,7 +753,6 @@ An attacker compromises the host running an AI agent, extracts the agent's servi
 - ATLAS `AML.T0016` -- Obtain Capabilities
 - ATLAS `AML.T0021` -- Establish Accounts
 - ATLAS `AML.T0091.000` -- Application Access Token
-- LAAF: `M1`, `S6`
 
 ---
 
@@ -800,7 +774,6 @@ An attacker defeats weak identity proofing with spoofed or proxied victim identi
 - ATLAS `AML.T0015` -- Evade AI Model
 - ATLAS `AML.T0073` -- Impersonation
 - ATLAS `AML.T0088` -- Generate Deepfakes
-- LAAF: `EX1`, `M2`
 
 ---
 
@@ -822,7 +795,6 @@ An attacker obtains a long-lived authentication token or API key tied to an ente
 - ATLAS `AML.T0024` -- Exfiltration via AI Inference API
 - ATLAS `AML.T0080.000` -- Memory
 - ATLAS `AML.T0091.000` -- Application Access Token
-- LAAF: `L1`, `T2`
 
 ---
 
@@ -865,7 +837,6 @@ An attacker compromises the interface between an AI agent and its human overseer
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0060` -- Publish Hallucinated Entities
 - ATLAS `AML.T0067` -- LLM Trusted Output Components Manipulation
-- LAAF: `M5`, `S3`
 
 ---
 
@@ -891,7 +862,6 @@ Manipulate a code-generating agent into producing infrastructure configuration s
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0067` -- LLM Trusted Output Components Manipulation
-- LAAF: `L3`, `S8`
 
 ---
 
@@ -913,7 +883,6 @@ Deliver a backdoor-inducing prompt directly to an agent that generates or modifi
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0053` -- AI Agent Tool Invocation
 - ATLAS `AML.T0067` -- LLM Trusted Output Components Manipulation
-- LAAF: `L3`, `T2`
 
 ---
 
@@ -933,7 +902,6 @@ Craft natural-language input with deliberate ambiguities that the agent resolves
 
 - ATLAS `AML.T0051.000` -- Direct
 - ATLAS `AML.T0067` -- LLM Trusted Output Components Manipulation
-- LAAF: `S4`, `S6`
 
 ---
 
@@ -980,7 +948,6 @@ An attacker injects crafted messages into inter-agent communication channels, in
 - ATLAS `AML.T0031` -- Erode AI Model Integrity
 - ATLAS `AML.T0043` -- Craft Adversarial Data
 - ATLAS `AML.T0051.001` -- Indirect
-- LAAF: `L4`, `M8`
 
 ---
 
@@ -1001,7 +968,6 @@ An attacker plants false data into a shared knowledge store or message channel u
 - ATLAS `AML.T0020` -- Poison Training Data
 - ATLAS `AML.T0031` -- Erode AI Model Integrity
 - ATLAS `AML.T0070` -- RAG Poisoning
-- LAAF: `S3`, `T8`
 
 ---
 
@@ -1025,7 +991,6 @@ Embed malicious, self-propagating logic within a compromised agent's reasoning-c
 - ATLAS `AML.T0043` -- Craft Adversarial Data
 - ATLAS `AML.T0061` -- LLM Prompt Self-Replication
 - ATLAS `AML.T0070` -- RAG Poisoning
-- LAAF: `L4`, `T8`
 
 ---
 
@@ -1057,7 +1022,6 @@ An attacker uses indirect prompt injection to manipulate an AI assistant into su
 
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0067` -- LLM Trusted Output Components Manipulation
-- LAAF: `M2`, `M5`
 
 ---
 
@@ -1077,7 +1041,6 @@ An attacker compromises an AI assistant's output generation through indirect pro
 
 - ATLAS `AML.T0051.001` -- Indirect
 - ATLAS `AML.T0052.000` -- Spearphishing via Social Engineering LLM
-- LAAF: `EX1`, `M5`
 
 ---
 
@@ -1101,7 +1064,6 @@ An attacker crafts a server-side response within an inter-agent protocol impleme
 
 - ATLAS `AML.T0043` -- Craft Adversarial Data
 - ATLAS `AML.T0051.001` -- Indirect
-- LAAF: `L4`, `S8`
 
 ---
 
@@ -1122,7 +1084,6 @@ An attacker embeds misleading or adversarially crafted tool descriptions in a sh
 - ATLAS `AML.T0043` -- Craft Adversarial Data
 - ATLAS `AML.T0070` -- RAG Poisoning
 - ATLAS `AML.T0110` -- AI Agent Tool Poisoning
-- LAAF: `M3`, `S8`
 
 ---
 
@@ -1147,7 +1108,6 @@ An attacker injects malicious instructions or code into a public or shared repos
 - ATLAS `AML.T0010` -- AI Supply Chain Compromise
 - ATLAS `AML.T0010.001` -- AI Software
 - ATLAS `AML.T0048` -- External Harms
-- LAAF: `L1`, `S8`
 
 ---
 

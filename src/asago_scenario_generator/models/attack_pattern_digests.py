@@ -94,14 +94,6 @@ def _semantic_digest(value: Any, digest_field: str, domain: str) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _frame_laaf_axis(payload: dict[str, Any]) -> dict[str, Any]:
-    """Frame the optional LAAF axis: omitted laaf equals explicit null."""
-    context = payload.get("taxonomy_context")
-    if isinstance(context, dict) and "laaf" not in context:
-        payload["taxonomy_context"] = {**context, "laaf": None}
-    return payload
-
-
 _SLOT_CONSTRAINT_FIELDS = frozenset(
     {
         "allowed_integration_types",
@@ -205,11 +197,6 @@ def compute_chain_semantic_digest(chain: CanonicalAttackChain | dict[str, Any]) 
     payload = (
         chain.model_dump(mode="python") if isinstance(chain, BaseModel) else dict(chain)
     )
-    # Canonicalize the optional LAAF axis: an omitted ``laaf`` key in
-    # ``taxonomy_context`` frames exactly like the explicit ``None`` that
-    # model validation materializes, so a caller may sign a raw dict that
-    # omits the key and still pass validation.  Never mutates ``chain``.
-    _frame_laaf_axis(payload)
     # Empty resource constraints are unconstrained and were absent from
     # chains signed before these generic constraints existed. Keep omitted
     # and explicitly empty constraints byte-equivalent while signing every

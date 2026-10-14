@@ -61,16 +61,9 @@ class TaxonomyPin(ContractModel):
 
 
 class TaxonomyContext(ContractModel):
-    """Pinned taxonomy releases; LAAF is optional and non-authoritative for v1.
-
-    An absent ``laaf`` pin means the context is ATLAS-only: any LAAF mapping
-    decision in the chain then fails closed.  An explicit pin is meaningful
-    only when the qualifying resolver pins the identical context and carries
-    authoritative LAAF membership for every exact id.
-    """
+    """Pinned taxonomy release: ATLAS is the sole mapping authority."""
 
     atlas: TaxonomyPin
-    laaf: TaxonomyPin | None = None
     mapping_set_digest: Digest
 
 
@@ -80,7 +73,7 @@ class TaxonomyResolver(Protocol):
     @property
     def taxonomy_context(self) -> TaxonomyContext: ...
 
-    def contains(self, taxonomy: Literal["ATLAS", "LAAF"], identifier: str) -> bool: ...
+    def contains(self, taxonomy: Literal["ATLAS"], identifier: str) -> bool: ...
 
 
 class CapabilitySnapshotResolver(Protocol):
@@ -291,7 +284,7 @@ class StepProvenance(ContractModel):
 
 class ExactMapping(ContractModel):
     decision: Literal["exact"]
-    taxonomy: Literal["ATLAS", "LAAF"]
+    taxonomy: Literal["ATLAS"]
     ids: tuple[Annotated[str, Field(min_length=1)], ...] = Field(min_length=1)
 
     @model_validator(mode="after")
@@ -303,12 +296,12 @@ class ExactMapping(ContractModel):
 
 class NotApplicableMapping(ContractModel):
     decision: Literal["not_applicable"]
-    taxonomy: Literal["ATLAS", "LAAF"]
+    taxonomy: Literal["ATLAS"]
 
 
 class UnmappedMapping(ContractModel):
     decision: Literal["unmapped"]
-    taxonomy: Literal["ATLAS", "LAAF"]
+    taxonomy: Literal["ATLAS"]
     rationale: str = Field(min_length=1)
 
 
