@@ -1,0 +1,88 @@
+{
+ "analysis": {
+  "hazards": [
+   {
+    "description": "The assistant returns a record to a non-party.",
+    "hazard_id": "H-1",
+    "related_losses": [
+     "L-1"
+    ]
+   }
+  ],
+  "risk_card_losses": [
+   {
+    "description": "Reservation data reaches a non-party.",
+    "loss_id": "L-1",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "credo-risk-037",
+     "mit-ai-risk-subdomain-2.2"
+    ]
+   }
+  ],
+  "risk_dispositions": [
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-2.2"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-037"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "Neutralized reason: no declared loss here.",
+    "risk_ref": "credo-risk-050"
+   }
+  ],
+  "security_constraints": [
+   {
+    "applies_when": [],
+    "behavior_class": "disclosure",
+    "constraint_id": "SC-1",
+    "description": "The assistant must return a record only to a party.",
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The assistant must return a record only to a party."
+   }
+  ],
+  "use_case_losses": []
+ },
+ "records": [
+  {
+   "applied": {
+    "entries": [
+     "risk_card_losses"
+    ]
+   },
+   "attempt": "repair",
+   "identity": "risk_card_losses",
+   "kind": "repair",
+   "outcome": "repaired",
+   "proposed": {
+    "entries": [
+     "risk_card_losses"
+    ]
+   },
+   "raw_step": "risk_derivation_repair",
+   "reason": "risk_derivation must return a complete loss -> hazard -> security constraint chain anchor: no grounded losses were declared",
+   "stage": "risk_derivation"
+  }
+ ],
+ "steps": [
+  "risk_derivation",
+  "risk_derivation_repair",
+  "gap_analysis"
+ ],
+ "warnings": []
+}
