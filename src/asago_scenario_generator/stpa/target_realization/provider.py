@@ -1283,10 +1283,15 @@ def _derived_verification_slot_views(
 
 
 def _systemic_baseline_prompt_view(baseline: Any) -> dict[str, Any]:
-    """Return the compact authoritative systemic context needed by target analysis."""
+    """Return the compact authoritative systemic context needed by target analysis.
+
+    The view leaves out ``baseline_digest``: the model gains nothing from an
+    integrity hash, and rendering it would let any snapshot-only change
+    (for example a field the prompt never shows) change the request.  Code
+    checks the digest against the baseline outside the request.
+    """
     return {
         "baseline_id": baseline.baseline_id,
-        "baseline_digest": baseline.baseline_digest,
         "losses": [
             item.model_dump(mode="json")
             for item in (
