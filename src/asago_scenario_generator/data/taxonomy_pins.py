@@ -46,7 +46,6 @@ _DEFAULT_MAPPING_SET_DIR = DATA_ROOT / "taxonomies" / "attack-patterns"
 _MAPPING_SET_GLOB = "attack-patterns*.sssom.tsv"
 _EXPECTED_MAPPING_SET_FILES = frozenset(
     {
-        "attack-patterns.sssom.tsv",
         "attack-patterns-agentic-only.sssom.tsv",
         "attack-patterns-atlas-derived.sssom.tsv",
         "attack-patterns-comms-human-supply.sssom.tsv",
@@ -401,7 +400,7 @@ def compute_mapping_set_digest(paths: Iterable[str | Path] | None = None) -> str
 
     Strict v1 canonical profile:
 
-    - Default discovery requires exactly the six pinned bundled files
+    - Default discovery requires exactly the five pinned bundled files
       (:data:`_EXPECTED_MAPPING_SET_FILES`); a missing or unexpected file
       fails rather than pinning a subset.  Explicit ``paths`` pin a custom
       set but must name at least one file.

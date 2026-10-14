@@ -18,7 +18,7 @@ taxonomy_context:
   atlas:
     release: '2026.05'
     digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-  mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
+  mapping_set_digest: 29ff3a15a86a194812e029ba407a97a757c98a2d887fb922ea4f0e0a8fd40ea6
 source_catalog_context:
   source_git_revision: 3af41929698c40f06ad4a286668167ef5bf084f0
   canonicalization: asago-scenario-generator:attack-pattern-records:v1

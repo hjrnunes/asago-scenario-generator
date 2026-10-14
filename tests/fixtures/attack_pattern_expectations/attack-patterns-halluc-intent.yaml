@@ -15,7 +15,7 @@ ids: [AP-T11-01, AP-T11-02, AP-T11-03, AP-T13-04, AP-T5-01, AP-T5-02, AP-T5-04, 
 absent_ids: [AP-T13-01, AP-T13-02, AP-T13-03, AP-T5-03]
 records:
   AP-T11-01:
-    digest: 135809dcb03543dc76c1a481ec0b61f82e196d1b73a16e72408073ca3f9124a0
+    digest: 8d890a406e190195bdae45eeb423532ab30d0c30eef3ccb0e88b7eabab108266
     chain_exact: [AML.T0051.000, AML.T0053]
     step_exact:
       execute_embedded_payload: [AML.T0050]
@@ -26,7 +26,7 @@ records:
       access_public_application, submit_crafted_prompt, bypass_guardrails, invoke_tools_with_attacker_args,
       generate_backdoored_configuration, deploy_configuration, execute_embedded_payload]
   AP-T11-02:
-    digest: 8736ea915b0d35a65520c5c67d6c83f2cdcae38f1d20c5768d3b7f2e3dea6fc9
+    digest: b82b93768cf65021c11a1bf541d8522b23ce8534f8b15bb4a419a1a70d5cef4f
     chain_exact: [AML.T0051.000]
     step_exact:
       deliver_backdoor_prompt: [AML.T0051.000]
@@ -38,7 +38,7 @@ records:
     steps: [develop_backdoor_prompt, deliver_backdoor_prompt, generate_backdoored_workflow,
       persist_backdoored_workflow, execute_hidden_logic]
   AP-T11-03:
-    digest: 63f15c784d75c9d7f637b5a80a31487803a477850a5245c5f7f59eb7fbd0aad2
+    digest: 554e86d793018e19814641f539127530801bf62248cd5ea2ab75e0c6f1c3ac74
     chain_exact: [AML.T0051.000]
     step_exact:
       craft_ambiguous_input: [AML.T0065]
@@ -47,7 +47,7 @@ records:
       step: execute_unintended_command
       keywords: [command-injection]
   AP-T13-04:
-    digest: e32d4231fa8412ad052bb17d8cba5d9e96afdd98ccd82d7e6e173b8681bc7fa2
+    digest: f952e96ad190379d4010393a654ed5ab0cd7fada663580bc22421571f40ffdd0
     chain_exact: [AML.T0061]
     step_exact:
       inject_initial_payload: [AML.T0051.001]
@@ -58,7 +58,7 @@ records:
     steps: [craft_self_propagating_payload, inject_initial_payload, replicate_in_agent_outputs,
       propagate_to_peer_agents]
   AP-T5-01:
-    digest: e0ad87c5336a0784310af932e1038df5f75f05a22cdcb5685106abf7c6a17967
+    digest: a5662fffc7b50671ba92375a17d74164d616b5cea1a5edbfd6e05d20006c187e
     chain_exact: [AML.T0080.000]
     step_exact:
       conceal_payload: [AML.T0068]
@@ -70,7 +70,7 @@ records:
       establish_memory_persistence, reuse_stored_fabrication, feedback_reinforces_memory,
       compound_distortion]
   AP-T5-02:
-    digest: 84f8f2d082226ebc02eb07056e016adecb67bc4b2cd71b4887c783b139f73090
+    digest: c8e2a44283f0cb5599f69d6c33edb5639970472be63514aca9879702727cfa12
     chain_exact: [AML.T0070]
     step_exact:
       activate_injection: [AML.T0051.002]
@@ -81,7 +81,7 @@ records:
     steps: [develop_endpoint_injection, stage_injection_content, trigger_retrieval, activate_injection,
       exfiltrate_via_endpoints]
   AP-T5-04:
-    digest: cf3dad947747a61e828383c25ad976f2f296c62a0a40567f26d328ac211606d8
+    digest: 243d1281db5f45b863ba149bbeef676084c63902e509fff880735c1620005115
     chain_exact: [AML.T0070]
     step_exact:
       craft_false_reference_data: [AML.T0066]
@@ -93,7 +93,7 @@ records:
       obfuscate_injection, deliver_fabricated_values, persist_in_rag, activate_via_retrieval,
       manipulate_tool_invocations, value_biased_decisions]
   AP-T6-01:
-    digest: bf5b608a3155053f2cbadd15f313bc5f9cb9db029b5fa36daa6303c69089c496
+    digest: 45366fa233169328bd1c43082c2f8517d67e380dcef5d20814845e541d38dac3
     chain_exact: [AML.T0051.000]
     step_exact:
       setup: [AML.T0065]
@@ -101,7 +101,7 @@ records:
       step: impact
       keywords: [drift]
   AP-T6-02:
-    digest: 4a0a55ced35592ec537484d3f8a8221de1d553a30303e236bab81218769c6208
+    digest: a32bc1d887a5a9af244fff1739a6ec4f2c98cea846ee3af2c5a945ffcaba8d17
     chain_exact: [AML.T0051.000]
     step_exact:
       execute_code_via_interpreter: [AML.T0050]
@@ -111,7 +111,7 @@ records:
     steps: [research_injection_patterns, access_agent_interface, test_prompt_injections, validate_exploit_reliability,
       deliver_refined_injection, execute_code_via_interpreter]
   AP-T6-03:
-    digest: 57f666f9a101320b46f50acec7af2999ac102f883024ae0091e77854c1aef070
+    digest: 9e960c940518164d7028183882883d2d7b5cb5e16c9ec9543087fae115628ade
     chain_exact: [AML.T0051.001]
     step_exact:
       conceal_injection: [AML.T0068]
@@ -120,7 +120,7 @@ records:
       step: execute_unintended_actions
       keywords: [goal-redirected]
   AP-T6-04:
-    digest: 4c3b050b71e48151101d89383a1dd464c6c0fa7607faca894cec875a73eb8ff6
+    digest: 0955d21d8a4262cdcefa04dd2eefc39e9849b388d778f5bbdd53b79747ad0e82
     chain_exact: [AML.T0029]
     step_exact:
       delivery: [AML.T0051.000]
@@ -128,7 +128,7 @@ records:
       step: impact
       keywords: [denial]
   AP-T6-05:
-    digest: 8e0ca8589cb822c9ecea7897f73af3fa61439a370b4fe633dba90961458aaa70
+    digest: 40f7f8fc3d36add7708aeaffaea4ca08d067bd346cbf1b47e3f18e109d781bdd
     chain_exact: [AML.T0020]
     step_exact:
       access_learning_interface: [AML.T0040]

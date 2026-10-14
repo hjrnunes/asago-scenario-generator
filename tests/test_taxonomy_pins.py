@@ -60,7 +60,7 @@ _ROW_B = (
     "asago-scenario-generator",
     "skos:relatedMatch",
     "S1",
-    "laaf",
+    "example",
     "semapv:ManualMappingCuration",
 )
 _ROW_C = (
@@ -68,7 +68,7 @@ _ROW_C = (
     "asago-scenario-generator",
     "skos:relatedMatch",
     "M3",
-    "laaf",
+    "example",
     "semapv:ManualMappingCuration",
 )
 
@@ -93,7 +93,7 @@ _METADATA_COMMENTS = [
     " mapping_set_version: 2026-08-04",
     " curie_map:",
     "   asago-scenario-generator: https://github.com/asago-ai/asago-scenario-generator/",
-    "   laaf: https://github.com/laaf-ai/laaf/",
+    "   example: https://example.org/vocab/",
 ]
 
 
@@ -201,7 +201,7 @@ def test_bundled_mapping_set_digest_golden() -> None:
     """Golden pin: any change to the v1 framing or bundled content is explicit."""
     assert (
         compute_mapping_set_digest()
-        == "15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc"
+        == "29ff3a15a86a194812e029ba407a97a757c98a2d887fb922ea4f0e0a8fd40ea6"
     )
 
 
@@ -247,13 +247,15 @@ def test_bundled_discovery_requires_exactly_the_pinned_files(
     with pytest.raises(ValueError, match="missing="):
         compute_mapping_set_digest()
     names = sorted(_EXPECTED_MAPPING_SET_FILES)
-    assert len(names) == 6
-    for name in names[:5]:
+    assert len(names) == 5
+    for name in names[:4]:
         _write_sssom(tmp_path / name, [_ROW_A])
     # A single missing bundled file fails; the error names it.
-    with pytest.raises(ValueError, match=r"missing=\['attack-patterns.sssom.tsv'\]"):
+    with pytest.raises(
+        ValueError, match=r"missing=\['attack-patterns-memory-tool.sssom.tsv'\]"
+    ):
         compute_mapping_set_digest()
-    _write_sssom(tmp_path / names[5], [_ROW_B])
+    _write_sssom(tmp_path / names[4], [_ROW_B])
     # An unexpected extra file fails as well: no glob subset or superset pins.
     _write_sssom(tmp_path / "attack-patterns-extra.sssom.tsv", [_ROW_C])
     with pytest.raises(
@@ -304,7 +306,8 @@ def test_supported_semantic_metadata_is_pinned_and_content_sensitive(
         tmp_path / "curie.sssom.tsv",
         [_ROW_A, _ROW_B],
         comments=[
-            c.replace("laaf-ai/laaf/", "laaf-ai/laaf-v2/") for c in _METADATA_COMMENTS
+            c.replace("example.org/vocab/", "example.org/vocab-v2/")
+            for c in _METADATA_COMMENTS
         ],
     )
     assert compute_mapping_set_digest([edited_curie]) != baseline
@@ -360,15 +363,15 @@ def test_cross_file_conflicting_curie_map_is_rejected(tmp_path: Path) -> None:
     first = _write_sssom(
         tmp_path / "first.sssom.tsv",
         [_ROW_A],
-        comments=[" curie_map:", "   laaf: https://github.com/laaf-ai/laaf/"],
+        comments=[" curie_map:", "   example: https://example.org/vocab/"],
     )
     second = _write_sssom(
         tmp_path / "second.sssom.tsv",
         [_ROW_B],
-        comments=[" curie_map:", "   laaf: https://github.com/laaf-ai/laaf-v2/"],
+        comments=[" curie_map:", "   example: https://example.org/vocab-v2/"],
     )
     with pytest.raises(
-        ValueError, match="conflicting curie_map prefix 'laaf'"
+        ValueError, match="conflicting curie_map prefix 'example'"
     ) as excinfo:
         compute_mapping_set_digest([first, second])
     assert "first.sssom.tsv" in str(excinfo.value)
@@ -377,7 +380,7 @@ def test_cross_file_conflicting_curie_map_is_rejected(tmp_path: Path) -> None:
     identical = _write_sssom(
         tmp_path / "identical.sssom.tsv",
         [_ROW_B],
-        comments=[" curie_map:", "   laaf: https://github.com/laaf-ai/laaf/"],
+        comments=[" curie_map:", "   example: https://example.org/vocab/"],
     )
     assert compute_mapping_set_digest([first, identical])
 
@@ -432,7 +435,7 @@ def test_mapping_set_digest_is_content_sensitive(tmp_path: Path) -> None:
                 "asago-scenario-generator",
                 "skos:relatedMatch",
                 "S2",
-                "laaf",
+                "example",
                 "semapv:ManualMappingCuration",
             ),
         ],
@@ -870,10 +873,12 @@ class TestPinningHelperBranches:
         with pytest.raises(ValueError, match="conflicting mapping-set metadata"):
             _merge_scalar_metadata(scalars, [(2, "mapping_set_id", "y")], path)
         curies: dict = {}
-        _merge_curie_entries(curies, [(1, "laaf", "https://laaf/")], path)
-        assert curies["laaf"][0] == "https://laaf/"
+        _merge_curie_entries(
+            curies, [(1, "example", "https://example.org/vocab/")], path
+        )
+        assert curies["example"][0] == "https://example.org/vocab/"
         with pytest.raises(ValueError, match="conflicting curie_map prefix"):
-            _merge_curie_entries(curies, [(2, "laaf", "https://other/")], path)
+            _merge_curie_entries(curies, [(2, "example", "https://other/")], path)
         rows: set = set()
         origins: dict = {}
         assert _merge_mapping_rows(rows, origins, [(3, _ROW_A)], path) == 1
