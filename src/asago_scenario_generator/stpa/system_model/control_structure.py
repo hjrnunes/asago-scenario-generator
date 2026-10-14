@@ -227,6 +227,18 @@ class _ControlElementProviderSet(ControlElementSet):
     controlled_processes: list[ControlledProcess]
 
 
+class _MissingActionProviderSet(BaseModel):
+    """The repair reply: control actions only, for the owners that had none.
+
+    It offers the same two action forms as ``_ControlElementProviderSet``, so
+    constrained generation sees the target and effect invariant.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    control_actions: list[_ResponsibilityAction | _ProcessAction] = Field(min_length=1)
+
+
 class CoordinationAnalysis(BaseModel):
     """Call 3 output: coordination links and integrity findings."""
 
@@ -1018,6 +1030,12 @@ class _Call2bResponse(_Call2bWire):
                 "feedback and feedback_channels"
             )
         return value
+
+
+class _Call2bMissingActions(_Call2bWire):
+    """The reply to the repair request: control actions and nothing else."""
+
+    control_actions: list[_Call2bAction] = Field(min_length=1)
 
 
 def _decode_control_element_payload(value: Any) -> Any:
@@ -2192,20 +2210,22 @@ def _call_2b_control_elements(
             result.content, responsibilities=responsibility_set.responsibilities
         )
 
-    def correct_references(
+    def recover(
         outcome: CallOutcome[ControlElementSet], system_prompt: str, user_prompt: str
     ) -> ControlElementSet | None:
-        return _correct_call_2b_references(
-            outcome,
-            llm_client=llm_client,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            responsibilities=responsibility_set.responsibilities,
-            parse=parse,
-            run_dir=run_dir,
-            loader=loader,
-            temperature=temperature,
-        )
+        request = {
+            "llm_client": llm_client,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "responsibilities": responsibility_set.responsibilities,
+            "run_dir": run_dir,
+            "loader": loader,
+            "temperature": temperature,
+        }
+        repaired = _repair_call_2b_missing_actions(outcome, **request)
+        if repaired is not None:
+            return repaired
+        return _correct_call_2b_references(outcome, parse=parse, **request)
 
     return _run_stage2_llm_call(
         llm_client=llm_client,
@@ -2224,8 +2244,118 @@ def _call_2b_control_elements(
         # Call 2b is semantic output.  Its stage-local parser rejects unknown
         # carriers and missing meaning before canonical IDs are repaired.
         response_parser=parse,
-        recover=correct_references,
+        recover=recover,
     )
+
+
+def _repair_call_2b_missing_actions(
+    outcome: CallOutcome[ControlElementSet],
+    *,
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    responsibilities: Sequence[Responsibility],
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+) -> ControlElementSet | None:
+    """Send the one repair request for responsibilities without a control action.
+
+    It runs only when the generic correction is spent and the last response
+    still leaves a responsibility without an action.  The request names those
+    owners and the rule, shows the last response, and asks for control actions
+    for exactly those owners.  The reply is merged into the last response and
+    the stage post-check runs again.  There is no second request: a failed
+    repair stops the step, and every other failure is declined.
+    """
+    failure = outcome.failure
+    if not isinstance(failure, MissingControlActionsError) or outcome.result is None:
+        return None
+    prior_content = outcome.result.content
+
+    def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
+        merged = _merge_missing_actions(
+            prior_content,
+            result.content,
+            owners=failure.owners,
+            responsibilities=responsibilities,
+        )
+        return parse_control_element_set_response(
+            merged, responsibilities=responsibilities
+        )
+
+    feedback = "\n\n" + loader.render_prompt(
+        "stage2_call2b_missing_actions_correction.j2",
+        missing_owners=[
+            responsibility
+            for responsibility in responsibilities
+            if _extract_resp_num(responsibility.resp_id) in failure.owners
+        ],
+        controlled_processes=failure.controlled_processes,
+    )
+    repaired = call_with_policy(
+        llm_client=llm_client,
+        system_prompt=system_prompt,
+        user_prompt=correction_prompt(
+            original_prompt=user_prompt,
+            feedback=feedback,
+            # The generic correction names the failure as a ValueError; keep
+            # the class name out of this request too.
+            error=ValueError(str(failure)),
+            response_format=_MissingActionProviderSet,
+            include_schema=False,
+            prior_result=outcome.result,
+            include_prior_response=True,
+        ),
+        response_format=_MissingActionProviderSet,
+        run_dir=run_dir,
+        stage=STAGE,
+        step="call_2b_control_elements",
+        policy=CorrectionPolicy(),
+        temperature=temperature,
+        response_parser=parse,
+        first_attempt_number=outcome.attempt_number + 1,
+    )
+    if repaired.error is not None:
+        raise StageError(
+            stage=STAGE,
+            step="call_2b_control_elements",
+            message=f"missing control action repair failed: {repaired.error}",
+        )
+    return repaired.value
+
+
+def _merge_missing_actions(
+    prior_content: Any,
+    reply_content: Any,
+    *,
+    owners: Sequence[int],
+    responsibilities: Sequence[Responsibility],
+) -> dict[str, Any]:
+    """Add a repair reply's control actions to the response it repairs.
+
+    The reply holds only ``control_actions``, each with a well-formed ID, and
+    every action belongs to an owner that was missing.  The merged response
+    still goes through the full Call 2b parser.
+    """
+    reply = _decode_control_element_payload(reply_content)
+    wire = _Call2bMissingActions.model_validate(
+        reply,
+        context={_OWNER_CONTEXT_KEY: _responsibility_owner_numbers(responsibilities)},
+    )
+    strangers = {
+        _owner_number(action.ca_id, prefix="CA") for action in wire.control_actions
+    } - set(owners)
+    if strangers:
+        raise ValueError(
+            "the repair covers only the owners without a control action; "
+            "not requested: " + ", ".join(f"RESP-{n}" for n in sorted(strangers))
+        )
+    prior = _decode_control_element_payload(prior_content)
+    return {
+        **prior,
+        "control_actions": [*prior["control_actions"], *reply["control_actions"]],
+    }
 
 
 def _correct_call_2b_references(

@@ -172,6 +172,13 @@ UNDECLARED_CONTROLLED_PROCESSES = {
     "undeclared_controlled_processes": ["CP-1", "CP-3"],
 }
 
+MISSING_CONTROL_ACTIONS = {
+    "missing_owners": ONE_RESPONSIBILITY["responsibilities"],
+    "controlled_processes": [
+        ControlledProcess(cp_id="CP-1", description="Request processor")
+    ],
+}
+
 EMPTY_STRUCTURE = {
     "control_structure": SimpleNamespace(
         responsibilities=[], controlled_processes=[], coordination_links=[]
@@ -380,6 +387,10 @@ CASES: dict[str, Callable[[str], str]] = {
     "empty-structure": _system_model(**EMPTY_STRUCTURE),
     "unknown-references": _system_model(**UNKNOWN_REFERENCES),
     "undeclared-controlled-processes": _system_model(**UNDECLARED_CONTROLLED_PROCESSES),
+    "missing-control-actions": _system_model(**MISSING_CONTROL_ACTIONS),
+    "no-declared-processes": _system_model(
+        **{**MISSING_CONTROL_ACTIONS, "controlled_processes": []}
+    ),
     "target-blind": _stage5(dict),
     "operation": _stage5(lambda: {"target_operation": _target_operation()}),
     "observations": _stage5(lambda: {"target_observations": _record_observations()}),

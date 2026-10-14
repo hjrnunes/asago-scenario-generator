@@ -1092,7 +1092,7 @@ def test_call2b_reference_correction_without_an_omission_keeps_its_bytes(
 
 def test_call2b_other_failures_get_no_reference_correction(tmp_path) -> None:
     unserved = _valid_payload()
-    unserved["control_actions"] = unserved["control_actions"][:1]
+    unserved["feedback"] = unserved["feedback"][:1]
     client = MockLLMClient()
     client.set_response_for(ControlElementSet, [unserved, unserved, _valid_payload()])
 

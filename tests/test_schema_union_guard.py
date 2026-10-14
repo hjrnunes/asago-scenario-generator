@@ -24,6 +24,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.schema import (
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
     _ControlElementProviderSet,
+    _MissingActionProviderSet,
 )
 
 _PRODUCTION_TYPES = {
@@ -42,6 +43,7 @@ _PRODUCTION_TYPES = {
         2, obligation_ids=("ob:v1:" + "a" * 64, "ob:v1:" + "b" * 64)
     ),
     "stage2-control-elements": _ControlElementProviderSet,
+    "stage2-missing-actions": _MissingActionProviderSet,
 }
 
 
