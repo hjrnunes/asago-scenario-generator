@@ -230,7 +230,9 @@ def _routing_wire_examples() -> tuple[str, str]:
                     "disposition": "targeted",
                     "semantic_assessment": semantic_assessment,
                     "targeting": {
-                        "slot_ids": ["RESP-1:CA-1-1:INCORRECT"],
+                        # A slot no real index is expected to offer: a copied
+                        # example then fails validation instead of passing unseen.
+                        "slot_ids": ["RESP-90:CA-90-1:INCORRECT"],
                         "hazard_ids": ["H-1"],
                         "constraint_ids": ["SC-1"],
                     },

@@ -11,7 +11,10 @@ cases:
         `targeting` holds the route's structural placement: non-empty
         `slot_ids`, `hazard_ids`, and `constraint_ids`
       - each an empty list when the path has none
-      - '"disposition":"targeted","targeting":{"slot_ids":["RESP-1:CA-1-1:INCORRECT"]'
+      - '"disposition":"targeted","targeting":{"slot_ids":["RESP-90:CA-90-1:INCORRECT"]'
+      - >-
+        The example's IDs only show their form; name the slots from the index's
+        `slots` rows whose action and type fit the obligation.
       - Each slot has one UCA type
       - >-
         Choose each slot's type from how the concern's mechanism causes the loss
@@ -35,3 +38,4 @@ cases:
       - capability flags, or integration IDs cannot substitute
     forbidden:
       - Common empty collections belong only to the inward compiled route
+      - '"slot_ids":["RESP-1:CA-1-1:INCORRECT"]'

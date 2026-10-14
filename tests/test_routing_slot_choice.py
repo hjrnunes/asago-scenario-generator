@@ -74,10 +74,33 @@ def test_routing_system_prompt_names_no_not_provided_outside_the_type_section() 
     assert "NOT_PROVIDED" not in _outside_type_section(system)
 
 
+_EXAMPLE_SLOT = "RESP-90:CA-90-1:INCORRECT"
+
+
 def test_routing_targeted_example_names_an_incorrect_slot() -> None:
     system, _ = _routing_prompts()
 
-    assert '"slot_ids":["RESP-1:CA-1-1:INCORRECT"]' in system
+    assert f'"slot_ids":["{_EXAMPLE_SLOT}"]' in system
+
+
+def test_routing_targeted_example_slot_matches_no_offered_slot() -> None:
+    structure = _control_structure()
+    system, user = _routing_prompts(structure)
+    offered = {slot.slot_id for slot in create_slots(structure)}
+
+    assert "RESP-1:CA-1-1:INCORRECT" in offered
+    assert _EXAMPLE_SLOT not in offered
+    assert _EXAMPLE_SLOT not in user
+    assert '"slot_ids":["RESP-1:CA-1-1:INCORRECT"]' not in system
+
+
+def test_routing_example_says_its_ids_only_show_the_form() -> None:
+    system, _ = _routing_prompts()
+
+    assert (
+        "The example's IDs only show their form; name the slots from the index's "
+        "`slots` rows whose action and type fit the obligation."
+    ) in " ".join(system.split())
 
 
 def test_coordination_sentence_names_no_uca_type() -> None:
