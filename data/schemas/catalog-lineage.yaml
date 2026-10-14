@@ -16,9 +16,8 @@
 #     proposed exact mapping is checked against the production resolver
 #     (membership) and must carry a nonblank operational-identity rationale
 #     plus an evidence citation (semantic gate).
-#   - LAAF is not a taxonomy axis.  Legacy LAAF strings and every SSSOM
-#     skos:relatedMatch row are migration provenance only and live
-#     exclusively under provenance blocks, never in mapping fields.
+#   - Every SSSOM skos:relatedMatch row is migration provenance only and
+#     lives exclusively under provenance blocks, never in mapping fields.
 #
 # Digest: release.semantic_digest is the deterministic semantic digest over
 # the artifact's normalized content (NFC, order-insensitive, excluding only
@@ -364,11 +363,6 @@ $defs:
         type: array
         items:
           $ref: '#/$defs/atlas_id'
-      sssom_laaf_hints:
-        type: array
-        items:
-          type: string
-          minLength: 1
       staging:
         type: array
         items:
@@ -376,7 +370,7 @@ $defs:
           minLength: 1
     description: >-
       Migration provenance only: evidence records, SSSOM skos:relatedMatch
-      candidates, LAAF hint strings, and staging documents consulted.  Nothing
+      candidates and staging documents consulted.  Nothing
       here confers mapping authority.
 
   overlap_group:

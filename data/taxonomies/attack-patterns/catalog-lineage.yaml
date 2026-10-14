@@ -2,7 +2,7 @@
 # Closed schema: data/schemas/catalog-lineage.yaml. No code validates this
 # record against the schema or recomputes its digest; one test checks only its
 # source and resulting-pattern counts. Provenance fields are migration hints
-# only; ATLAS is the sole v1 authority (LAAF absent).
+# only; ATLAS is the sole v1 authority.
 # source_catalog_context pins the canonicalized production loader
 # records the decisions were made against.
 schema_version: '1'
@@ -174,9 +174,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0043
     - AML.T0070
-    sssom_laaf_hints:
-    - L2
-    - S3
     staging: &id001
     - qa-audit-t1-t5.md
     - review-t1-t5.md
@@ -248,9 +245,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0031
     - AML.T0043
-    sssom_laaf_hints:
-    - L1
-    - S3
     staging:
     - qa-audit-t1-t5.md
     - review-t1-t5.md
@@ -315,9 +309,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0031
     - AML.T0070
-    sssom_laaf_hints:
-    - L2
-    - T5
     staging:
     - qa-audit-t1-t5.md
     - review-t1-t5.md
@@ -387,9 +378,6 @@ sources:
     - AML.T0020
     - AML.T0070
     - AML.T0071
-    sssom_laaf_hints:
-    - L5
-    - T8
     staging:
     - qa-audit-t1-t5.md
     - review-t1-t5.md
@@ -462,7 +450,6 @@ sources:
     - AML.T0077
     - AML.T0085
     - AML.T0093
-    sssom_laaf_hints: []
     staging: *id001
   overlap_group: null
   resulting_patterns:
@@ -543,9 +530,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0060
     - AML.T0067
-    sssom_laaf_hints:
-    - M5
-    - S3
     staging:
     - qa-audit-t10-t15-t12-t13-t16.md
     - review-t10-t15-t12-t13-t16.md
@@ -616,9 +600,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0029
     - AML.T0046
-    sssom_laaf_hints:
-    - M5
-    - T3
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -646,9 +627,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0029
     - AML.T0046
-    sssom_laaf_hints:
-    - M5
-    - T5
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -677,9 +655,6 @@ sources:
     - AML.T0051.001
     - AML.T0053
     - AML.T0067
-    sssom_laaf_hints:
-    - L3
-    - S8
     staging:
     - qa-audit-t11-t17.md
     - review-t11-t17.md
@@ -753,9 +728,6 @@ sources:
     - AML.T0051.001
     - AML.T0053
     - AML.T0067
-    sssom_laaf_hints:
-    - L3
-    - T2
     staging:
     - qa-audit-t11-t17.md
     - review-t11-t17.md
@@ -833,9 +805,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.000
     - AML.T0067
-    sssom_laaf_hints:
-    - S4
-    - S6
     staging:
     - qa-audit-t11-t17.md
     - review-t11-t17.md
@@ -907,7 +876,6 @@ sources:
     - AML.T0017
     - AML.T0053
     - AML.T0100
-    sssom_laaf_hints: []
     staging:
     - qa-audit-t11-t17.md
     - review-t11-t17.md
@@ -992,9 +960,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0031
     - AML.T0043
-    sssom_laaf_hints:
-    - L4
-    - M8
     staging:
     - qa-audit-t10-t15-t12-t13-t16.md
     - review-t10-t15-t12-t13-t16.md
@@ -1063,9 +1028,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0043
     - AML.T0066
-    sssom_laaf_hints:
-    - M2
-    - T8
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-10
@@ -1096,9 +1058,6 @@ sources:
     - AML.T0020
     - AML.T0031
     - AML.T0070
-    sssom_laaf_hints:
-    - S3
-    - T8
     staging:
     - qa-audit-t10-t15-t12-t13-t16.md
     - review-t10-t15-t12-t13-t16.md
@@ -1159,9 +1118,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0029
     - AML.T0043
-    sssom_laaf_hints:
-    - L5
-    - S8
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -1187,9 +1143,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0031
     - AML.T0043
-    sssom_laaf_hints:
-    - M8
-    - T3
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -1218,9 +1171,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.001
     - AML.T0053
-    sssom_laaf_hints:
-    - M2
-    - M5
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -1246,9 +1196,6 @@ sources:
     case_studies: []
     sssom_atlas_candidates:
     - AML.T0053
-    sssom_laaf_hints:
-    - L5
-    - M3
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-11
@@ -1275,9 +1222,6 @@ sources:
     - AML.CS0009
     sssom_atlas_candidates:
     - AML.T0029
-    sssom_laaf_hints:
-    - L5
-    - T1
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-05
@@ -1306,9 +1250,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0043
     - AML.T0070
-    sssom_laaf_hints:
-    - L4
-    - T8
     staging:
     - qa-audit-t10-t15-t12-t13-t16.md
     - review-t10-t15-t12-t13-t16.md
@@ -1377,9 +1318,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0053
     - AML.T0073
-    sssom_laaf_hints:
-    - L1
-    - M2
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-10
@@ -1406,9 +1344,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0029
     - AML.T0053
-    sssom_laaf_hints:
-    - L1
-    - L4
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-11
@@ -1434,9 +1369,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0029
     - AML.T0053
-    sssom_laaf_hints:
-    - T3
-    - T8
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-05
@@ -1463,9 +1395,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0053
     - AML.T0073
-    sssom_laaf_hints:
-    - L3
-    - S6
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-10
@@ -1492,9 +1421,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.001
     - AML.T0067
-    sssom_laaf_hints:
-    - M2
-    - M5
     staging:
     - qa-audit-t10-t15-t12-t13-t16.md
     - review-t10-t15-t12-t13-t16.md
@@ -1567,9 +1493,6 @@ sources:
     - AML.CS0055
     sssom_atlas_candidates:
     - AML.T0051.001
-    sssom_laaf_hints:
-    - EX1
-    - M5
     staging:
     - qa-audit-t10-t15-t12-t13-t16.md
     - review-t10-t15-t12-t13-t16.md
@@ -1641,9 +1564,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.001
     - AML.T0073
-    sssom_laaf_hints:
-    - M3
-    - S1
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -1673,9 +1593,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0043
     - AML.T0051.001
-    sssom_laaf_hints:
-    - L4
-    - S8
     staging:
     - qa-audit-t10-t15-t12-t13-t16.md
     - review-t10-t15-t12-t13-t16.md
@@ -1747,9 +1664,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0043
     - AML.T0070
-    sssom_laaf_hints:
-    - M3
-    - S8
     staging:
     - qa-audit-t10-t15-t12-t13-t16.md
     - review-t10-t15-t12-t13-t16.md
@@ -1820,9 +1734,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0010
     - AML.T0048
-    sssom_laaf_hints:
-    - L1
-    - S8
     staging:
     - qa-audit-t11-t17.md
     - review-t11-t17.md
@@ -1895,9 +1806,6 @@ sources:
     - AML.T0010
     - AML.T0048
     - AML.T0053
-    sssom_laaf_hints:
-    - S1
-    - T1
     staging: &id002
     - qa-audit-t11-t17.md
     - review-t11-t17.md
@@ -1936,7 +1844,6 @@ sources:
     - AML.T0086
     - AML.T0104
     - AML.T0109
-    sssom_laaf_hints: []
     staging: *id002
   overlap_group: null
   resulting_patterns:
@@ -2068,9 +1975,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.000
     - AML.T0053
-    sssom_laaf_hints:
-    - S4
-    - S8
     staging:
     - qa-audit-t2.md
     - review-t2.md
@@ -2138,9 +2042,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0048
     - AML.T0053
-    sssom_laaf_hints:
-    - L1
-    - L3
     staging:
     - qa-audit-t2.md
     - review-t2.md
@@ -2228,9 +2129,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0048
     - AML.T0053
-    sssom_laaf_hints:
-    - M3
-    - T3
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -2290,9 +2188,6 @@ sources:
     - AML.T0053
     - AML.T0070
     - AML.T0071
-    sssom_laaf_hints:
-    - S3
-    - T2
     staging:
     - qa-audit-t2.md
     - review-t2.md
@@ -2368,9 +2263,6 @@ sources:
     - AML.T0066
     - AML.T0070
     - AML.T0071
-    sssom_laaf_hints:
-    - L4
-    - S3
     staging:
     - qa-audit-t2.md
     - review-t2.md
@@ -2444,9 +2336,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.001
     - AML.T0053
-    sssom_laaf_hints:
-    - M3
-    - S8
     staging:
     - qa-audit-t2.md
     - review-t2.md
@@ -2520,9 +2409,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0012
     - AML.T0053
-    sssom_laaf_hints:
-    - L1
-    - M2
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -2552,9 +2438,6 @@ sources:
     - AML.CS0026
     sssom_atlas_candidates:
     - AML.T0053
-    sssom_laaf_hints:
-    - L1
-    - S6
     staging:
     - qa-audit-t3-t9.md
     - review-t3-t9.md
@@ -2619,9 +2502,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0053
     - AML.T0073
-    sssom_laaf_hints:
-    - M1
-    - M2
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -2689,7 +2569,6 @@ sources:
     - AML.T0000
     - AML.T0049
     - AML.T0083
-    sssom_laaf_hints: []
     staging:
     - qa-audit-t3-t9.md
     - review-t3-t9.md
@@ -2882,9 +2761,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0029
     - AML.T0034
-    sssom_laaf_hints:
-    - S3
-    - S4
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -2943,9 +2819,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0029
     - AML.T0034
-    sssom_laaf_hints:
-    - L5
-    - T8
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-05
@@ -2975,9 +2848,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0029
     - AML.T0034
-    sssom_laaf_hints:
-    - S4
-    - T3
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -3042,9 +2912,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0029
     - AML.T0034
-    sssom_laaf_hints:
-    - S3
-    - T8
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -3074,9 +2941,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0031
     - AML.T0060
-    sssom_laaf_hints:
-    - S3
-    - T8
     staging:
     - qa-audit-t1-t5.md
     - review-t1-t5.md
@@ -3145,9 +3009,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0053
     - AML.T0060
-    sssom_laaf_hints:
-    - M8
-    - S8
     staging:
     - qa-audit-t1-t5.md
     - review-t1-t5.md
@@ -3224,9 +3085,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0031
     - AML.T0043
-    sssom_laaf_hints:
-    - L1
-    - T8
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -3257,9 +3115,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0043
     - AML.T0070
-    sssom_laaf_hints:
-    - M8
-    - T5
     staging:
     - qa-audit-t1-t5.md
     - review-t1-t5.md
@@ -3331,9 +3186,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.000
     - AML.T0054
-    sssom_laaf_hints:
-    - L2
-    - M3
     staging:
     - owasp-atlas-matching.md
     - pattern-actor-analysis.md
@@ -3395,9 +3247,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.000
     - AML.T0054
-    sssom_laaf_hints:
-    - M3
-    - S1
     staging:
     - qa-audit-t6-t7.md
     - review-t6-t7.md
@@ -3470,9 +3319,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.001
     - AML.T0054
-    sssom_laaf_hints:
-    - L3
-    - S8
     staging:
     - qa-audit-t6-t7.md
     - review-t6-t7.md
@@ -3551,9 +3397,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.000
     - AML.T0051.001
-    sssom_laaf_hints:
-    - L4
-    - T3
     staging:
     - owasp-atlas-matching.md
     - pattern-actor-analysis.md
@@ -3611,9 +3454,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0051.001
     - AML.T0054
-    sssom_laaf_hints:
-    - L1
-    - M3
     staging:
     - qa-audit-t6-t7.md
     - review-t6-t7.md
@@ -3690,7 +3530,6 @@ sources:
     - AML.T0081
     - AML.T0095
     - AML.T0108
-    sssom_laaf_hints: []
     staging:
     - qa-audit-t6-t7.md
     - review-t6-t7.md
@@ -3857,9 +3696,6 @@ sources:
     - AML.CS0026
     - AML.CS0046
     sssom_atlas_candidates: []
-    sssom_laaf_hints:
-    - M3
-    - S1
     staging:
     - qa-audit-t6-t7.md
     - review-t6-t7.md
@@ -3893,9 +3729,6 @@ sources:
     case_studies:
     - AML.CS0009
     sssom_atlas_candidates: []
-    sssom_laaf_hints:
-    - M1
-    - T1
     staging:
     - owasp-atlas-matching.md
     - pattern-actor-analysis.md
@@ -3926,9 +3759,6 @@ sources:
     - AML.CS0004
     - AML.CS0055
     sssom_atlas_candidates: []
-    sssom_laaf_hints:
-    - M5
-    - S3
     staging:
     - qa-audit-t6-t7.md
     - review-t6-t7.md
@@ -3960,9 +3790,6 @@ sources:
     case_studies:
     - AML.CS0046
     sssom_atlas_candidates: []
-    sssom_laaf_hints:
-    - M2
-    - S1
     staging:
     - owasp-atlas-matching.md
     - pattern-actor-analysis.md
@@ -3989,9 +3816,6 @@ sources:
   provenance:
     case_studies: []
     sssom_atlas_candidates: []
-    sssom_laaf_hints:
-    - L1
-    - M4
     staging:
     - qa-audit-t6-t7.md
     - review-t6-t7.md
@@ -4026,9 +3850,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0081
     - AML.T0092
-    sssom_laaf_hints:
-    - S6
-    - T5
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-08
@@ -4089,9 +3910,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0068
     - AML.T0092
-    sssom_laaf_hints:
-    - S2
-    - T1
     staging:
     - owasp-atlas-matching.md
     - format-comparison-and-synthesis.md
@@ -4120,9 +3938,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0081
     - AML.T0092
-    sssom_laaf_hints:
-    - M7
-    - S6
     staging:
     - owasp-atlas-matching.md
   overlap_group: OG-08
@@ -4152,9 +3967,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0053
     - AML.T0073
-    sssom_laaf_hints:
-    - M1
-    - M2
     staging:
     - qa-audit-t3-t9.md
     - review-t3-t9.md
@@ -4218,9 +4030,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0016
     - AML.T0021
-    sssom_laaf_hints:
-    - M1
-    - S6
     staging:
     - qa-audit-t3-t9.md
     - review-t3-t9.md
@@ -4331,9 +4140,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0016
     - AML.T0021
-    sssom_laaf_hints:
-    - M1
-    - M5
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -4362,9 +4168,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0021
     - AML.T0024
-    sssom_laaf_hints:
-    - L5
-    - S6
     staging:
     - owasp-atlas-matching.md
   overlap_group: null
@@ -4396,9 +4199,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0012
     - AML.T0073
-    sssom_laaf_hints:
-    - EX1
-    - M2
     staging:
     - qa-audit-t3-t9.md
     - review-t3-t9.md
@@ -4477,9 +4277,6 @@ sources:
     sssom_atlas_candidates:
     - AML.T0016
     - AML.T0024
-    sssom_laaf_hints:
-    - L1
-    - T2
     staging:
     - qa-audit-t3-t9.md
     - review-t3-t9.md
