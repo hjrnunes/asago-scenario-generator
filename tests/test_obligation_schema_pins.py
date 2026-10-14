@@ -130,17 +130,17 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "slot-1-0": (
         "_SlotProviderPayload1Pairs0",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "84a4d6edb815ff0ce2ab77e9f9d9c0994f94738afde32e9950e7fb6e44fd5b39",
+        "1e9fbb8695af0649882cce4c57b4e63295fae665275602d15d166483175ed11b",
     ),
     "slot-3-2": (
         "_SlotProviderPayload3Pairs2",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "e3bdebb1f3e6665cecd9d6dc65f90100a26c1b9b331c1f836f815ef7dd219ead",
+        "cf8b25fe03da3c8245fc9a9d18a694f9e7fe705e35764c69dfafcc8a28fa1f8d",
     ),
     "slot-exact": (
         "_SlotProviderPayload2Pairs1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "4ed7b2fe2f799e26fe06760804cd12ad1cba11c6be4350b58922c4180e2be3f6",
+        "37ad03d3a9758853010f4b36df5b17b418122456130a38d61ed01491c2418569",
     ),
 }
 
