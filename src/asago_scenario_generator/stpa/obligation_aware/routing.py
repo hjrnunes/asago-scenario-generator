@@ -147,7 +147,7 @@ def _reference_sets(
     """Build exact namespaces accepted by structural routing."""
     index = build_stpa_index(control_structure, loss_analysis)
     return {
-        "slot": {item.slot_id for item in routing_slots(slots)},
+        "slot": {item.slot_id for item in routing_slots(slots, control_structure)},
         "hazard": set(index.hazards),
         "constraint": set(index.security_constraints)
         | set(index.responsibility_constraints),

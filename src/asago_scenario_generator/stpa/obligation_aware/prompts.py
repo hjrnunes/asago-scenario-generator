@@ -1106,7 +1106,7 @@ def project_obligation_routing_context(
         obligation_questions=questions,
         target_index=project_control_structure_context(
             control_structure,
-            slots=routing_slots(slots),
+            slots=routing_slots(slots, control_structure),
             loss_analysis=loss_analysis,
         ),
         instructions=render_prose(_ROUTING_PROSE, "instructions"),

@@ -183,7 +183,9 @@ def _temporal_structure() -> ControlStructure:
     )
     return base.model_copy(
         update={
-            "responsibilities": (owner.model_copy(update={"control_actions": actions}),)
+            "responsibilities": [
+                owner.model_copy(update={"control_actions": list(actions)})
+            ]
         }
     )
 
@@ -248,3 +250,42 @@ def test_a_route_naming_an_unanalysed_wrong_duration_slot_names_an_unknown_slot(
 
     assert feedbacks[0] is None
     assert "unknown slot IDs: RESP-1:CA-1-1:WRONG_DURATION" in feedbacks[1]
+
+
+def _untargeted_structure() -> ControlStructure:
+    """CA-1-1 reaches CP-1; CA-1-2 targets a responsibility, CA-1-3 nothing."""
+    base = _control_structure()
+    owner = base.responsibilities[0]
+    actions = (
+        owner.control_actions[0],
+        ControlAction(
+            ca_id="CA-1-2",
+            description="Notify the reviewer.",
+            target=ElementRef(type=ReferenceType.responsibility, id="RESP-1"),
+        ),
+        ControlAction(ca_id="CA-1-3", description="Log the request."),
+    )
+    return base.model_copy(
+        update={
+            "responsibilities": [
+                owner.model_copy(update={"control_actions": list(actions)})
+            ]
+        }
+    )
+
+
+def test_routing_index_leaves_out_slots_of_actions_without_a_controlled_process() -> (
+    None
+):
+    _, user = _routing_prompts(_untargeted_structure())
+
+    actions = {row["control_action_id"] for row in _target_index(user)["slots"]}
+    assert actions == {"CA-1-1"}
+
+
+def test_a_route_naming_a_slot_without_a_controlled_process_names_an_unknown_slot() -> (
+    None
+):
+    feedbacks = _route_twice("RESP-1:CA-1-2:INCORRECT", _untargeted_structure())
+
+    assert "unknown slot IDs: RESP-1:CA-1-2:INCORRECT" in feedbacks[1]

@@ -2177,6 +2177,15 @@ def _targeted_route_for(slot_id: str) -> ObligationRoute:
     )
 
 
+def _path_check_references(structure: ControlStructure) -> dict[str, set[str]]:
+    """Namespaces that admit ``SLOT-X``, which routing itself would not offer.
+
+    The slot-path checks stay behind the slot namespace as a backstop; these
+    tests reach them by admitting the slot directly.
+    """
+    return {**_reference_sets(structure, _loss_analysis(), ()), "slot": {"SLOT-X"}}
+
+
 @pytest.mark.parametrize(
     ("slot_fields", "message"),
     (
@@ -2203,7 +2212,7 @@ def test_targeted_route_requires_a_slot_path_proven_by_the_structure(
         slot_id="SLOT-X", uca_type=UCAType.not_provided, **slot_fields
     )
     route = _targeted_route_for("SLOT-X")
-    references = _reference_sets(_control_structure(), _loss_analysis(), (slot,))
+    references = _path_check_references(_control_structure())
 
     with pytest.raises(ValueError, match=message):
         _validate_route(
@@ -2241,7 +2250,7 @@ def test_targeted_route_rejects_an_action_without_a_process_target() -> None:
         uca_type=UCAType.not_provided,
     )
     route = _targeted_route_for("SLOT-X")
-    references = _reference_sets(structure, _loss_analysis(), (slot,))
+    references = _path_check_references(structure)
 
     with pytest.raises(ValueError, match="has no controlled-process target"):
         _validate_route(
