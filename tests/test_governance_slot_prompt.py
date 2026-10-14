@@ -56,9 +56,10 @@ _GOLDEN_ROUTING_SYSTEM = (
     "aee8911b4636b6ba4b33316ccfd5186a90257e47de1ddeba009320ed5a2c3111"
 )
 # The routing user digest was recaptured when slot IDs left the ID glossary for
-# a UCA type legend.
+# a UCA type legend, and when routing stopped offering WRONG_DURATION slots that
+# slot filling never analyses.
 _GOLDEN_ROUTING_USER = (
-    "fe04db8e76c6e9e089664706fd71402b14d75bf7f7bf99495fbb5976f37c1603"
+    "e2183bcc3491b3ac12d7d492a0a833e6548ab68f54eae35af705a5b7ddc29874"
 )
 
 

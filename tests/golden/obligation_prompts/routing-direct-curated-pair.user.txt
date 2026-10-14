@@ -128,13 +128,6 @@ slots:
 - action_temporality: null
   control_action_id: CA-1-1
   coordination_path_id: null
-  id: RESP-1:CA-1-1:WRONG_DURATION
-  owner_id: RESP-1
-  target_process_id: CP-1
-  uca_type: WRONG_DURATION
-- action_temporality: null
-  control_action_id: CA-1-1
-  coordination_path_id: null
   id: RESP-1:CA-1-1:WRONG_TIMING
   owner_id: RESP-1
   target_process_id: CP-1

@@ -14,6 +14,17 @@ import pytest
 import yaml
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.models.obligation_consideration import ObligationRoute
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlActionTemporality,
+    ControlStructure,
+    ElementRef,
+    ReferenceType,
+)
+from asago_scenario_generator.stpa.obligation_aware.contracts import (
+    StructuralRoutingResponse,
+)
 from asago_scenario_generator.stpa.obligation_aware.governance_prompts import (
     build_governance_routing_prompts,
 )
@@ -22,10 +33,16 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.routing import (
     build_neutral_briefs,
+    route_obligations,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.governance import _setup as governance_setup
-from tests.helpers.obligation_aware import _control_structure, _loss_analysis
+from tests.helpers.obligation_aware import (
+    _control_structure,
+    _controls,
+    _loss_analysis,
+    route_assessment,
+)
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.test_obligation_prompt_goldens import CASES
@@ -143,3 +160,91 @@ def test_governance_routing_index_keeps_its_slot_glossary_entries() -> None:
     }
     assert {slot.slot_id for slot in create_slots(structure)} <= glossary_ids
     assert "uca_types" not in user
+
+
+def _temporal_structure() -> ControlStructure:
+    """One owner whose four actions carry each kind of temporality."""
+    base = _control_structure()
+    owner = base.responsibilities[0]
+    temporalities = (
+        ControlActionTemporality.instantaneous,
+        ControlActionTemporality.discrete,
+        None,
+        ControlActionTemporality.continuous,
+    )
+    actions = tuple(
+        ControlAction(
+            ca_id=f"CA-1-{number}",
+            description=f"Action {number}.",
+            target=ElementRef(type=ReferenceType.controlled_process, id="CP-1"),
+            temporality=temporality,
+        )
+        for number, temporality in enumerate(temporalities, start=1)
+    )
+    return base.model_copy(
+        update={
+            "responsibilities": (owner.model_copy(update={"control_actions": actions}),)
+        }
+    )
+
+
+def test_routing_index_offers_wrong_duration_only_for_a_continuous_action() -> None:
+    _, user = _routing_prompts(_temporal_structure())
+
+    offered = {row["id"] for row in _target_index(user)["slots"]}
+    assert {item for item in offered if item.endswith(":WRONG_DURATION")} == {
+        "RESP-1:CA-1-4:WRONG_DURATION"
+    }
+    assert {f"RESP-1:CA-1-{n}:INCORRECT" for n in range(1, 5)} <= offered
+
+
+def _targeted(brief, slot_id: str) -> ObligationRoute:
+    return ObligationRoute(
+        obligation_id=brief.obligation_id,
+        disposition="targeted",
+        semantic_assessment=route_assessment(brief),
+        slot_ids=(slot_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("provider-route",),
+    )
+
+
+def _route_twice(first_slot: str, structure: ControlStructure) -> list[str | None]:
+    """Route one brief: name ``first_slot``, then a valid slot on the retry."""
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    brief = build_neutral_briefs(make_plan(), (pattern,))[0]
+    feedbacks: list[str | None] = []
+
+    class Adapter:
+        def route(self, request, *, correction_feedback=None):
+            feedbacks.append(correction_feedback)
+            slot_id = first_slot if correction_feedback is None else _VALID_SLOT
+            return StructuralRoutingResponse(
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=(_targeted(brief, slot_id),),
+            )
+
+    result = route_obligations(
+        Adapter(),
+        briefs=(brief,),
+        loss_analysis=_loss_analysis(),
+        control_structure=structure,
+        slots=create_slots(structure),
+        controls=_controls(),
+    )
+    assert result.routes[0].slot_ids == (_VALID_SLOT,)
+    return feedbacks
+
+
+_VALID_SLOT = "RESP-1:CA-1-1:INCORRECT"
+
+
+def test_a_route_naming_an_unanalysed_wrong_duration_slot_names_an_unknown_slot() -> (
+    None
+):
+    feedbacks = _route_twice("RESP-1:CA-1-1:WRONG_DURATION", _control_structure())
+
+    assert feedbacks[0] is None
+    assert "unknown slot IDs: RESP-1:CA-1-1:WRONG_DURATION" in feedbacks[1]

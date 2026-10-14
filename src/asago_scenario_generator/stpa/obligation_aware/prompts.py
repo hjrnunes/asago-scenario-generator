@@ -68,6 +68,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     PromptContractAudit,
 )
 from asago_scenario_generator.stpa.obligation_aware.hazard_offer import slot_offer
+from asago_scenario_generator.stpa.obligation_aware.routing_slots import routing_slots
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
     StpaIndex,
     build_stpa_index,
@@ -1105,7 +1106,7 @@ def project_obligation_routing_context(
         obligation_questions=questions,
         target_index=project_control_structure_context(
             control_structure,
-            slots=slots,
+            slots=routing_slots(slots),
             loss_analysis=loss_analysis,
         ),
         instructions=render_prose(_ROUTING_PROSE, "instructions"),
