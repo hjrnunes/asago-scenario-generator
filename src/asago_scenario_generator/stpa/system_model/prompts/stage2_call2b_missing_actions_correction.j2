@@ -1,0 +1,33 @@
+The prior response leaves these responsibilities without a control action:
+{%- for resp in missing_owners %}
+- {{ resp.resp_id }}: {{ resp.description }}
+{%- endfor %}
+
+Every responsibility requires at least one control action, and the prior
+response gives each responsibility above none. Return only the missing control
+actions. The prior response stays as written and your actions are added to it.
+
+Return one JSON object with the single key `control_actions`: at least one
+action for each responsibility above and no action for any other
+responsibility. Do not return `feedback`, `controlled_processes`, or any other
+key.
+
+Write each action with the fields the original request defines. Its `ca_id` is
+`CA-X-Y`, where X is the number of the responsibility that owns the action: the
+first action of RESP-N is `CA-N-1`, the next `CA-N-2`. An action's
+`process_model_refs` name only process model parts of the action's own
+responsibility:
+{%- for resp in missing_owners %}
+- {{ resp.resp_id }}: {% if resp.process_model_parts %}{{ resp.process_model_parts | map(attribute="pm_id") | join(", ") }}{% else %}no process model parts{% endif %}
+{%- endfor %}
+
+A `target` is a responsibility named in the prior response or a controlled
+process the prior response declares; do not declare a new controlled process.
+An action that targets a responsibility must use `effect_kind: "agent_message"`.
+{%- if controlled_processes %}
+
+Controlled processes the prior response declares:
+{%- for process in controlled_processes %}
+- {{ process.cp_id }}: {{ process.description }}
+{%- endfor %}
+{%- endif %}

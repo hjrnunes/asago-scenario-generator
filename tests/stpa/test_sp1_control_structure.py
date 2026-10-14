@@ -41,6 +41,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     run_revision,
     RevisionDelta,
+    _RevisionDeltaProviderSet,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.calls_log import read_calls_jsonl
@@ -555,5 +556,5 @@ class TestConnSet11RevisionUsesRevisionDelta:
             run_dir=tmp_path,
         )
         assert isinstance(revised, ControlStructure)
-        # The revision call used response_format=RevisionDelta
-        assert client.calls[0].response_format is RevisionDelta
+        # The revision call used the RevisionDelta provider class
+        assert client.calls[0].response_format is _RevisionDeltaProviderSet

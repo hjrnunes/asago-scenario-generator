@@ -191,7 +191,7 @@ def _valid_control_element_set_dict() -> dict:
                 "target": {"type": "responsibility", "id": "RESP-2"},
             },
         ],
-        "feedback_channels": [
+        "feedback": [
             {
                 "fb_id": "FB-1-1",
                 "description": "Transaction result",
@@ -452,7 +452,7 @@ class TestAssemblyFailureStopsStage2:
             "id": "RESP-9",
         }
         elements["control_actions"][0]["process_model_refs"] = ["PM-2-1"]
-        elements["feedback_channels"][1]["updates"] = "PM-5-1"
+        elements["feedback"][1]["updates"] = "PM-5-1"
 
         with pytest.raises(StageError) as exc_info:
             _assemble_stage2_structure(

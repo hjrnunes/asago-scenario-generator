@@ -11,7 +11,7 @@ with_controlled_process:
     target:
       type: responsibility
       id: RESP-2
-  feedback_channels:
+  feedback:
   - fb_id: FB-1-1
     description: Action result
     updates: PM-1-1
@@ -34,7 +34,7 @@ responsibility_only:
     target:
       type: responsibility
       id: RESP-1
-  feedback_channels:
+  feedback:
   - fb_id: FB-1-1
     description: Action result
     updates: PM-1-1

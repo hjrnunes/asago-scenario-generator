@@ -210,19 +210,14 @@ def _prompt_messages(system_prompt: str, user_prompt: str) -> list[dict[str, str
     ]
 
 
-def _guided_json_enabled(
-    use_guided_decoding: bool,
-    allow_unvalidated: bool,
-    response_format: type[BaseModel] | None,
-) -> bool:
-    """Whether vLLM guided_json applies for this request."""
-    return use_guided_decoding and allow_unvalidated and response_format is not None
-
-
-def _json_object_compatibility(
+def _openrouter_json_object_mode(
     base_url: str | None, response_format: type[BaseModel] | None
 ) -> bool:
-    """Use portable JSON-object requests for OpenRouter structured output."""
+    """Whether a structured call asks OpenRouter for a plain JSON object.
+
+    OpenRouter routes to providers that differ in JSON Schema support, so the
+    request names no schema and the prompt carries it instead.
+    """
     return bool(
         response_format is not None and base_url and "openrouter.ai" in base_url
     )
@@ -234,7 +229,7 @@ def _openrouter_schema_prompt(
     response_format: type[BaseModel] | None,
 ) -> str:
     """Carry the exact Pydantic schema when OpenRouter uses JSON-object mode."""
-    if not _json_object_compatibility(base_url, response_format):
+    if not _openrouter_json_object_mode(base_url, response_format):
         return user_prompt
     if response_format is None or not issubclass(response_format, BaseModel):
         return user_prompt
@@ -247,39 +242,6 @@ def _openrouter_schema_prompt(
     return (
         f"{user_prompt}\n\nReturn exactly one JSON object matching this JSON Schema. "
         f"Use the property names exactly as written:\n{schema}"
-    )
-
-
-def _apply_legacy_json_fallback(
-    extra_kwargs: dict[str, Any],
-    allow_unvalidated: bool,
-    response_format: type[BaseModel] | None,
-    use_guided_json: bool,
-    *,
-    json_schema_strict: bool = True,
-    openrouter_compatibility: bool = False,
-) -> None:
-    """Select JSON Schema or portable JSON-object structured output.
-
-    OpenRouter keeps its JSON-object compatibility request. Guided decoding
-    keeps the strict JSON Schema request. Other tolerant structured calls can
-    opt into the original, non-strict Pydantic schema.
-    """
-    if not allow_unvalidated or response_format is None:
-        return
-    extra_kwargs["response_format"] = (
-        _json_schema_response_format(
-            response_format,
-            json_schema_strict=json_schema_strict if not use_guided_json else True,
-        )
-        if (
-            _is_pydantic_model_type(response_format)
-            and (
-                use_guided_json
-                or (not openrouter_compatibility and not json_schema_strict)
-            )
-        )
-        else {"type": "json_object"}
     )
 
 
@@ -391,12 +353,16 @@ def _locally_parse_response_content(
 def _parse_strict_response_content(
     content: Any,
     response_format: type[BaseModel] | None,
-    request_unvalidated: bool,
+    json_object_mode: bool,
 ) -> Any:
-    """Apply local strict validation only after raw provider evidence exists."""
+    """Apply local strict validation only after raw provider evidence exists.
+
+    A JSON-object reply carries no schema guarantee, so it stays raw text for
+    the caller's parser.
+    """
     if (
         response_format is None
-        or request_unvalidated
+        or json_object_mode
         or not _is_pydantic_model_type(response_format)
     ):
         return content
@@ -597,8 +563,6 @@ class LLMClient:
         self,
         effective_max: int | None,
         effective_temp: float,
-        response_format: type[BaseModel] | None = None,
-        use_guided_json: bool = False,
     ) -> dict[str, Any]:
         """Build the extra kwargs dict for the OpenAI completion call.
 
@@ -642,10 +606,13 @@ class LLMClient:
         messages: list[dict[str, str]],
         response_format: type[BaseModel] | None,
         extra_kwargs: dict[str, Any],
-        allow_unvalidated: bool,
+        *,
+        json_object_mode: bool,
     ) -> tuple[Any, Any]:
         """Request a completion and return its response plus extracted content."""
-        if response_format is not None and not allow_unvalidated:
+        if json_object_mode:
+            extra_kwargs = {**extra_kwargs, "response_format": {"type": "json_object"}}
+        elif response_format is not None:
             if not _is_pydantic_model_type(response_format):
                 raise TypeError(
                     "a strict structured completion needs a Pydantic model class "
@@ -699,7 +666,6 @@ class LLMClient:
         response_format: type[BaseModel] | None = None,
         max_completion_tokens: int | None = None,
         temperature: float | None = None,
-        allow_unvalidated: bool = False,
     ) -> LLMResult:
         if self.session is None:
             return self._complete(
@@ -708,7 +674,6 @@ class LLMClient:
                 response_format,
                 max_completion_tokens,
                 temperature,
-                allow_unvalidated,
             )
         with self.session.scope():
             return self._complete(
@@ -717,7 +682,6 @@ class LLMClient:
                 response_format,
                 max_completion_tokens,
                 temperature,
-                allow_unvalidated,
             )
 
     def _complete(
@@ -727,7 +691,6 @@ class LLMClient:
         response_format: type[BaseModel] | None,
         max_completion_tokens: int | None,
         temperature: float | None,
-        allow_unvalidated: bool,
     ) -> LLMResult:
         effective_max = reasoning_completion_cap(
             max_completion_tokens or self.max_completion_tokens,
@@ -736,32 +699,11 @@ class LLMClient:
         )
         effective_temp = temperature if temperature is not None else self.temperature
 
-        request_unvalidated = allow_unvalidated or _json_object_compatibility(
-            self.base_url, response_format
-        )
+        json_object_mode = _openrouter_json_object_mode(self.base_url, response_format)
         effective_user_prompt = _openrouter_schema_prompt(
             user_prompt, self.base_url, response_format
         )
-
-        # Use vLLM guided_json for strict schema enforcement when enabled via profile
-        # This enables guided decoding which masks invalid tokens during generation
-        # Only enabled when use_guided_decoding=True in model profile
-        use_guided_json = _guided_json_enabled(
-            self.use_guided_decoding, request_unvalidated, response_format
-        )
-        extra_kwargs = self._build_extra_kwargs(
-            effective_max, effective_temp, response_format, use_guided_json
-        )
-        _apply_legacy_json_fallback(
-            extra_kwargs,
-            request_unvalidated,
-            response_format,
-            use_guided_json,
-            json_schema_strict=self.json_schema_strict,
-            openrouter_compatibility=_json_object_compatibility(
-                self.base_url, response_format
-            ),
-        )
+        extra_kwargs = self._build_extra_kwargs(effective_max, effective_temp)
 
         t0 = time.perf_counter_ns()
         messages = _prompt_messages(system_prompt, effective_user_prompt)
@@ -771,7 +713,7 @@ class LLMClient:
                 messages,
                 response_format,
                 extra_kwargs,
-                request_unvalidated,
+                json_object_mode=json_object_mode,
             )
         except RateLimitError as error:
             if (
@@ -788,14 +730,14 @@ class LLMClient:
                 messages,
                 response_format,
                 retry_kwargs,
-                request_unvalidated,
+                json_object_mode=json_object_mode,
             )
             service_tier_fallback_used = True
 
         duration_ms = (time.perf_counter_ns() - t0) // 1_000_000
         usage = _token_usage(response)
         content = _parse_strict_response_content(
-            content, response_format, request_unvalidated
+            content, response_format, json_object_mode
         )
 
         return LLMResult(

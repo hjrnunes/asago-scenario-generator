@@ -42,8 +42,12 @@ penalty, seed, and chat-template thinking controls. The client accepts `strict_j
 as `false` (or absent); `true` fails at client construction, and run records
 do not carry the key. Set `json_schema_strict: false` to send the
 Pydantic schema with `"strict": false`; local Pydantic validation remains
-authoritative. OpenRouter JSON-object and vLLM guided decoding compatibility
-paths are unchanged.
+authoritative. Every structured call sends its response model's schema; the
+Call 2a and Stage 2 revision requests send provider classes
+(`_ResponsibilityProviderSet`, `_RevisionDeltaProviderSet`) built from their wire
+models, so a reply the schema allows is a reply the wire models accept. An
+OpenRouter host is the exception: a structured call there asks for a plain
+JSON object and carries the schema in the prompt.
 
 The transport sends a strict call's JSON Schema as `response_format` whether
 or not the profile sets `use_guided_decoding`. A guided vLLM endpoint decodes

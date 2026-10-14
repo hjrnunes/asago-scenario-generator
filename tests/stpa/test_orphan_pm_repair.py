@@ -356,7 +356,7 @@ class TestRepairCalledInDeriveControlStructure:
                         "target": {"type": "responsibility", "id": "RESP-1"},
                     }
                 ],
-                "feedback_channels": [
+                "feedback": [
                     {
                         "fb_id": "FB-1-1",
                         "description": "FB 1",

@@ -133,7 +133,7 @@ def _make_control_element_set(
 
     return ControlElementSet(
         control_actions=control_actions,
-        feedback_channels=feedback_channels,
+        feedback=feedback_channels,
         controlled_processes=controlled_processes,
     )
 
@@ -454,7 +454,7 @@ class TestCallLogOrdering:
                         "target": {"type": "responsibility", "id": "RESP-1"},
                     }
                 ],
-                "feedback_channels": [
+                "feedback": [
                     {
                         "fb_id": "FB-1-1",
                         "description": "F",
@@ -482,7 +482,7 @@ class TestCallLogOrdering:
 
         # Verify ordering by response_format
         assert client.calls[0].response_format is RequirementSet
-        assert client.calls[1].response_format is ResponsibilitySet
+        assert issubclass(client.calls[1].response_format, ResponsibilitySet)
         assert issubclass(client.calls[2].response_format, ControlElementSet)
         assert issubclass(
             client.calls[3].response_format, _CoordinationProviderEnvelope
@@ -540,7 +540,7 @@ class TestCallLogOrdering:
                         "target": {"type": "responsibility", "id": "RESP-1"},
                     }
                 ],
-                "feedback_channels": [
+                "feedback": [
                     {
                         "fb_id": "FB-1-1",
                         "description": "F",

@@ -1,0 +1,52 @@
+template: stage2_call2b_missing_actions_correction.j2
+cases:
+  missing-control-actions:
+    once:
+      - "The prior response leaves these responsibilities without a control action:"
+      - "Controlled processes the prior response declares:"
+    required:
+      - "- RESP-1: Authorizes requests"
+      - >-
+        Every responsibility requires at least one control action, and the prior
+        response gives each responsibility above none.
+      - >-
+        Return only the missing control actions. The prior response stays as
+        written and your actions are added to it.
+      - >-
+        Return one JSON object with the single key `control_actions`: at least
+        one action for each responsibility above and no action for any other
+        responsibility.
+      - Do not return `feedback`, `controlled_processes`, or any other key.
+      - >-
+        Its `ca_id` is `CA-X-Y`, where X is the number of the responsibility
+        that owns the action: the first action of RESP-N is `CA-N-1`, the next
+        `CA-N-2`.
+      - >-
+        An action's `process_model_refs` name only process model parts of the
+        action's own responsibility:
+      - "- RESP-1: PM-1-1"
+      - >-
+        A `target` is a responsibility named in the prior response or a
+        controlled process the prior response declares; do not declare a new
+        controlled process.
+      - >-
+        An action that targets a responsibility must use
+        `effect_kind: "agent_message"`.
+      - "- CP-1: Request processor"
+    forbidden:
+      - no process model parts
+    ordered:
+      - - "The prior response leaves these responsibilities without a control action:"
+        - Return only the missing control actions.
+        - "Return one JSON object with the single key `control_actions`"
+        - "Its `ca_id` is `CA-X-Y`"
+        - "A `target` is a responsibility named in the prior response"
+        - "Controlled processes the prior response declares:"
+  no-declared-processes:
+    required:
+      - "- RESP-1: Authorizes requests"
+      - >-
+        An action that targets a responsibility must use
+        `effect_kind: "agent_message"`.
+    forbidden:
+      - "Controlled processes the prior response declares:"

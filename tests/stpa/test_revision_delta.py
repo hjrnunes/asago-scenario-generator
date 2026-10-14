@@ -31,6 +31,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     CriticGap,
     RevisionDelta,
+    _RevisionDeltaProviderSet,
     _compute_next_ids,
     _extract_num,
     _is_responsibility_empty,
@@ -159,8 +160,8 @@ class TestRevisionDelta02UsesRevisionDelta:
             use_case_text="Test",
             run_dir=tmp_path,
         )
-        # The LLM call used RevisionDelta as response_format
-        assert client.calls[0].response_format == RevisionDelta
+        # The LLM call used the RevisionDelta provider class as response_format
+        assert client.calls[0].response_format is _RevisionDeltaProviderSet
         # A revised ControlStructure was produced
         assert isinstance(cs, ControlStructure)
 
