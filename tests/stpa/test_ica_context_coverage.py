@@ -132,7 +132,7 @@ def _payload(slot_id: str, *findings: dict) -> dict:
                 "is_na": False,
                 "na_rationale": None,
                 "findings": [_fill_finding(item) for item in findings],
-                "consideration_results": [],
+                "consideration_results": {},
             }
         ]
     }
@@ -152,9 +152,10 @@ def _fill_finding(finding: dict) -> dict:
 
 
 def _draft_slots(slot_id: str, *findings: dict):
-    return _SlotProviderPayload.model_validate(
-        _payload(slot_id, *findings)
-    ).filled_slots
+    payload = _payload(slot_id, *findings)
+    # The adapter's internal slot lists its results; only the wire keys them.
+    payload["filled_slots"][0]["consideration_results"] = []
+    return _SlotProviderPayload.model_validate(payload).filled_slots
 
 
 def _request(structure: ControlStructure, slot) -> SynthesisSlotRequest:

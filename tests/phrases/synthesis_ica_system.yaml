@@ -41,6 +41,8 @@ cases:
       - explains context and is not citable
       - "names one `governing_pair` of the form `\"<constraint_id>/<hazard_id>\"`"
       - "one hazard listed in that constraint's `related_hazards`"
+      - "The slot's `consideration_results` is an object with one key for each item"
+      - "With no required pair it is the empty object `{}`."
     forbidden:
       - For a NOT_PROVIDED slot marked N/A
       - absence cannot be hazardous

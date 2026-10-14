@@ -80,7 +80,7 @@ def _reply(pair: str) -> dict[str, Any]:
                         "context_row": None,
                     }
                 ],
-                "consideration_results": [],
+                "consideration_results": {},
             }
         ]
     }

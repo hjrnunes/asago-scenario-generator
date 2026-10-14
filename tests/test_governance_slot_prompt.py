@@ -44,9 +44,10 @@ from tests.helpers.obligation_aware import (
 # before the NOT_PROVIDED N/A sentence existed; the sentence was removed again
 # because it raised the NOT_PROVIDED N/A share. The system digest was
 # recaptured when the prompt began naming the identities a slot may cite, and
-# again when a finding began naming one `governing_pair`. The other digests
-# are unchanged.
-_GOLDEN_SLOT_SYSTEM = "e6b30aebf2ab14a90f14ec0abee9d4428919674ee27967eefc0c346e4273e6f3"
+# again when a finding began naming one `governing_pair` and when
+# `consideration_results` became an object keyed by obligation handle. The
+# other digests are unchanged.
+_GOLDEN_SLOT_SYSTEM = "0cb6be9b69ee581c52d5fb2722d155637c02212c1767624df538a24713c046d9"
 _GOLDEN_SLOT_USER = "51f6875173344befda32d0a1fdbe879b7487e072808b8dafd2d89f9679c6f37a"
 _GOLDEN_SLOT_USER_EMPTY = (
     "6a174dc144a7788395f2e38a60457edd891714dbd795c06411dad9616a4f9667"

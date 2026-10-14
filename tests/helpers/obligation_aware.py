@@ -120,8 +120,10 @@ def provider_slot_payload(draft: SlotIcaDraft) -> dict:
     """Dump a typed slot draft as the provider wire carries it.
 
     The wire schema gives each finding's ``deviation`` as one string and its
-    constraint and hazard as one ``governing_pair``; the typed draft nests the
-    deviation in a type-specific object and keeps the two ID lists.
+    constraint and hazard as one ``governing_pair``, and keys
+    ``consideration_results`` by obligation handle; the typed draft nests the
+    deviation in a type-specific object, keeps the two ID lists, and lists the
+    results.
     """
     payload = draft.model_dump(mode="json")
     for wire, typed in zip(payload["findings"], draft.findings, strict=True):
@@ -130,6 +132,7 @@ def provider_slot_payload(draft: SlotIcaDraft) -> dict:
             typed.related_constraint_ids, typed.related_hazard_ids
         )
         del wire["related_constraint_ids"], wire["related_hazard_ids"]
+    payload["consideration_results"] = keyed_results(payload["consideration_results"])
     return payload
 
 
@@ -140,10 +143,12 @@ def wire_pair(constraint_ids, hazard_ids) -> str:
 
 
 def current_fill_reply(recorded: dict) -> dict:
-    """Recast a fill reply recorded before the pair form in today's wire.
+    """Recast a fill reply recorded in the earlier wire in today's wire.
 
-    Each finding's single constraint and hazard become one ``governing_pair``;
-    every other value is copied unchanged.
+    Each finding's single constraint and hazard become one ``governing_pair``,
+    and the ``consideration_results`` list becomes an object keyed by
+    ``obligation_handle``; every other value is copied unchanged. A list that
+    names one handle twice has no keyed form and raises ``ValueError``.
     """
     slots = []
     for slot in recorded["filled_slots"]:
@@ -158,8 +163,29 @@ def current_fill_reply(recorded: dict) -> dict:
                 finding["related_constraint_ids"], finding["related_hazard_ids"]
             )
             findings.append(wire)
-        slots.append({**slot, "findings": findings})
+        slots.append(
+            {
+                **slot,
+                "findings": findings,
+                "consideration_results": keyed_results(
+                    slot.get("consideration_results", [])
+                ),
+            }
+        )
     return {**recorded, "filled_slots": slots}
+
+
+def keyed_results(results) -> dict:
+    """Key a consideration-result list by its ``obligation_handle``."""
+    keyed: dict = {}
+    for item in results:
+        handle = item["obligation_handle"]
+        if handle in keyed:
+            raise ValueError(f"consideration_results names {handle} twice")
+        keyed[handle] = {
+            key: value for key, value in item.items() if key != "obligation_handle"
+        }
+    return keyed
 
 
 TARGETING_FIELDS = (

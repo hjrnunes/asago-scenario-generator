@@ -16,6 +16,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotRequest,
 )
+from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    local_obligation_handles,
+)
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _slot_authority,
 )
@@ -33,6 +36,11 @@ class FillScope:
     context_row_ids: tuple[str, ...]
     process_model_ids: tuple[str, ...]
     feedback_ids: tuple[str, ...]
+    # The local handles (R1..Rn) of the obligations routed to these slots,
+    # which key ``consideration_results``. With one slot every handle is
+    # required; with several, each slot answers its own subset, so none is.
+    handles: tuple[str, ...] = ()
+    every_handle_required: bool = True
 
 
 def fill_scope(request: SynthesisSlotRequest) -> FillScope:
@@ -64,6 +72,25 @@ def fill_scope(request: SynthesisSlotRequest) -> FillScope:
         context_row_ids=tuple(dict.fromkeys(rows)),
         process_model_ids=tuple(sorted(process_models)),
         feedback_ids=tuple(sorted(feedback)),
+        handles=routed_handles(request),
+        every_handle_required=len(request.slots) == 1,
+    )
+
+
+def routed_handles(request: SynthesisSlotRequest) -> tuple[str, ...]:
+    """Return the handles of the obligations routed to the request's slots."""
+    slot_ids = {slot.slot_id for slot in request.slots}
+    routed = {
+        route.obligation_id
+        for route in request.routed_routes
+        if slot_ids.intersection(route.slot_ids)
+    }
+    return tuple(
+        handle
+        for obligation_id, handle in local_obligation_handles(
+            request.routed_routes
+        ).items()
+        if obligation_id in routed
     )
 
 
@@ -84,4 +111,10 @@ def split_pair(pair: str) -> tuple[str, str]:
     return constraint_id, hazard_id
 
 
-__all__ = ["FillScope", "fill_scope", "governing_pairs", "split_pair"]
+__all__ = [
+    "FillScope",
+    "fill_scope",
+    "governing_pairs",
+    "routed_handles",
+    "split_pair",
+]

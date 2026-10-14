@@ -7,6 +7,7 @@ revision compilation, and slot/reference validation remain local pure seams.
 
 from __future__ import annotations
 
+from collections import Counter
 from collections.abc import Iterable
 from functools import lru_cache, partial
 from pathlib import Path
@@ -70,6 +71,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotResponse,
     SlotIcaDraft,
     _Model,
+    check_finding_indexes,
 )
 from asago_scenario_generator.stpa.obligation_aware.context_coverage import (
     CONTEXT_COVERAGE_STAGE_SUFFIX,
@@ -219,23 +221,6 @@ def _resolve_slot_handles(payload: _Model, by_local: Mapping[str, str]) -> _Mode
             )
         }
     )
-
-
-def _require_known_slot_handles(payload: _Model, by_local: Mapping[str, str]) -> None:
-    """Name every obligation handle the prompt never showed, and the valid ones."""
-    unknown = sorted(
-        {
-            result.obligation_handle
-            for value in payload.filled_slots
-            for result in value.consideration_results
-            if result.obligation_handle not in by_local
-        }
-    )
-    if unknown:
-        raise ExactFeedbackError(
-            f"unknown obligation_handle: {', '.join(unknown)}; copy one of the "
-            f"supplied handles: {', '.join(sorted(by_local, key=_handle_order))}"
-        )
 
 
 def _localized_slot_error(message: str, request: SynthesisSlotRequest) -> str:
@@ -1105,6 +1090,49 @@ class _SlotProviderDraft(_Model):
         return self
 
 
+class _ConsiderationResultWire(_Model):
+    """One routed obligation's result; its handle is the key it sits under."""
+
+    disposition: Literal["finding", "proposed_not_applicable", "unresolved"]
+    finding_indexes: tuple[int, ...] = ()
+    rationale: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_indexes(self) -> "_ConsiderationResultWire":
+        check_finding_indexes(self.disposition, self.finding_indexes)
+        return self
+
+
+def _listed_results(payload: _Model) -> _SlotProviderPayload:
+    """Return a fill reply with its keyed results listed, as later steps read it.
+
+    The fill wire keys ``consideration_results`` by obligation handle, so a
+    reply cannot repeat or contradict a result; the call log keeps that keyed
+    form, and validation, supplement and compilation read one
+    ``ObligationIcaDraft`` per handle.
+    """
+    return _SlotProviderPayload(
+        filled_slots=tuple(_listed_slot(slot) for slot in payload.filled_slots)
+    )
+
+
+def _listed_slot(slot: _Model) -> _SlotProviderDraft:
+    results = slot.consideration_results
+    if isinstance(results, tuple):
+        return slot
+    return _SlotProviderDraft(
+        slot_id=slot.slot_id,
+        is_na=slot.is_na,
+        na_rationale=slot.na_rationale,
+        findings=slot.findings,
+        consideration_results=tuple(
+            ObligationIcaDraft(obligation_handle=handle, **result.model_dump())
+            for handle, result in results
+            if result is not None
+        ),
+    )
+
+
 def _validate_na_slot_draft(value: _SlotProviderDraft) -> None:
     """Require the closed N/A shape."""
     if value.findings:
@@ -1173,6 +1201,21 @@ def _slot_scope_type(scope: FillScope | None) -> type[_Model]:
         __base__=_SlotProviderDraft,
         slot_id=(_choice(scope.slot_ids), ...),
         findings=(tuple[finding, ...], ()),
+        consideration_results=(_keyed_results_type(scope), ...),
+    )
+
+
+def _keyed_results_type(scope: FillScope) -> type[_Model]:
+    """One property per routed handle; required when one slot answers them all."""
+    field: Any = (
+        (_ConsiderationResultWire, ...)
+        if scope.every_handle_required
+        else (_ConsiderationResultWire | None, None)
+    )
+    return create_model(
+        "_ConsiderationResults",
+        __base__=_Model,
+        **{handle: field for handle in scope.handles},
     )
 
 
@@ -1314,13 +1357,22 @@ def _provider_pair_keys(
         (obligation_id, slot_id): route_id
         for route_id, obligation_id, slot_id in expected_pair_keys
     }
-    actual: set[tuple[str, str, str]] = set()
+    counts: Counter[tuple[str, str, str]] = Counter()
     for entry in payload.filled_slots:
         for result in entry.consideration_results:
             route_id = route_by_pair.get((result.obligation_handle, entry.slot_id))
             if route_id is not None:
-                actual.add((route_id, result.obligation_handle, entry.slot_id))
-    return frozenset(actual)
+                counts[(route_id, result.obligation_handle, entry.slot_id)] += 1
+    repeated = [
+        f"{obligation_id} on {slot_id} ({count} results)"
+        for (_route, obligation_id, slot_id), count in sorted(counts.items())
+        if count > 1
+    ]
+    if repeated:
+        raise ValueError(
+            "slot response gives a routed pair more than once: " + "; ".join(repeated)
+        )
+    return frozenset(counts)
 
 
 def _require_exact_id_set(actual: frozenset, expected: frozenset, message: str) -> None:
@@ -1792,7 +1844,7 @@ class ObligationAwareLLMAdapter:
                         "is_na": True,
                         "na_rationale": "No complete structural property applies.",
                         "findings": [],
-                        "consideration_results": [],
+                        "consideration_results": {},
                     }
                 ],
             },
@@ -1813,10 +1865,10 @@ class ObligationAwareLLMAdapter:
         }
 
         def validate(value: _Model) -> None:
-            _require_known_slot_handles(value, by_local)
+            listed = _listed_results(value)
             try:
                 _validate_slot_provider_payload(
-                    _resolve_slot_handles(value, by_local),
+                    _resolve_slot_handles(listed, by_local),
                     expected_slot_ids=expected_slot_ids,
                     expected_pair_keys=expected_pair_keys,
                     request=request,
@@ -1852,7 +1904,7 @@ class ObligationAwareLLMAdapter:
         if outcome.error is not None or outcome.value is None:
             raise ValueError(outcome.error or "slot provider returned no payload")
         payload, supplement_calls = self._supplement_context_coverage(
-            _resolve_slot_handles(outcome.value, by_local), request
+            _resolve_slot_handles(_listed_results(outcome.value), by_local), request
         )
         # The payload is provider-local and deliberately permits no arbitrary
         # object: pair values are validated into the authoritative model here,

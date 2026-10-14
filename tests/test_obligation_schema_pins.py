@@ -65,6 +65,8 @@ FACTORY_CASES = {
             context_row_ids=("CA-1-1:ctx-1", "CA-1-1:ctx-2"),
             process_model_ids=("PM-1-1",),
             feedback_ids=(),
+            handles=("R1",),
+            every_handle_required=False,
         ),
     ),
     "governance-1": lambda: governance_provider.governance_payload_type(("risk-a",)),
@@ -138,7 +140,7 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "slot-exact": (
         "_SlotProviderPayload2Pairs1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "e4a6db570efdbad807134321b294e0a75b7dde5c969b7c8e2ebda7f2a0189545",
+        "87ccc838731284a1cd3f6cddb5bf945a37f1a80a040d666b1c084c83e172edb8",
     ),
 }
 

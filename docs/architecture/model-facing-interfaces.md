@@ -443,7 +443,19 @@ supplied constraint and a hazard in its `related_hazards`
 finding's one constraint and one hazard. Separate hazard and constraint lists
 let a reply pair a constraint with a hazard it does not govern, which decided
 3 of the 10 unresolved pp-s11 records. The context-coverage supplement keeps
-the separate `related_hazard_ids` and `related_constraint_ids`. A slot that slot
+the separate `related_hazard_ids` and `related_constraint_ids`.
+
+A fill slot's `consideration_results` is an object keyed by the local handle
+(`R1`..`Rn`) of each obligation routed to the slot, with
+`additionalProperties: false`; each value holds `disposition`,
+`finding_indexes`, and `rationale`. A one-slot request, which is every
+production request, requires every key, so a reply can neither omit nor
+repeat a result. The call log keeps the keyed reply, and `_listed_results`
+turns it into one `ObligationIcaDraft` per handle for validation and
+compilation. The provider check also counts routed pairs instead of comparing
+sets: a pp-s11 klarna-r2 reply listed each of six handles three times, with
+conflicting results for one, and passed the set comparison until the contract
+rejected it after the request had ended. A slot that slot
 filling leaves unresolved keeps its own reason
 through ICA verification. The cited assignments become the ICA's
 `process_model_context`. The table does not limit which deviations are

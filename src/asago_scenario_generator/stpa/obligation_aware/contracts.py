@@ -377,15 +377,20 @@ class ObligationIcaDraft(_Model):
 
     @model_validator(mode="after")
     def validate_indexes(self) -> "ObligationIcaDraft":
-        if any(index < 0 for index in self.finding_indexes):
-            raise ValueError("finding_indexes must be non-negative")
-        if len(self.finding_indexes) != len(set(self.finding_indexes)):
-            raise ValueError("finding_indexes must be unique")
-        if self.disposition == "finding" and not self.finding_indexes:
-            raise ValueError("finding consideration requires finding_indexes")
-        if self.disposition != "finding" and self.finding_indexes:
-            raise ValueError("only a finding consideration may retain finding_indexes")
+        check_finding_indexes(self.disposition, self.finding_indexes)
         return self
+
+
+def check_finding_indexes(disposition: str, finding_indexes: tuple[int, ...]) -> None:
+    """Require unique non-negative indexes, present only on a finding result."""
+    if any(index < 0 for index in finding_indexes):
+        raise ValueError("finding_indexes must be non-negative")
+    if len(finding_indexes) != len(set(finding_indexes)):
+        raise ValueError("finding_indexes must be unique")
+    if disposition == "finding" and not finding_indexes:
+        raise ValueError("finding consideration requires finding_indexes")
+    if disposition != "finding" and finding_indexes:
+        raise ValueError("only a finding consideration may retain finding_indexes")
 
 
 class SlotIcaDraft(_Model):

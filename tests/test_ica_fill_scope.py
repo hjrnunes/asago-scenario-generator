@@ -140,7 +140,7 @@ def _na_reply(slot_id: str) -> dict[str, Any]:
                 "is_na": True,
                 "na_rationale": "No complete structural property applies.",
                 "findings": [],
-                "consideration_results": [],
+                "consideration_results": {},
             }
         ]
     }

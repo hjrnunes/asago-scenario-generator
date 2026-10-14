@@ -944,7 +944,7 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
                                     "feedback_refs": [],
                                 }
                             ],
-                            "consideration_results": [],
+                            "consideration_results": {},
                         }
                     ]
                 },
@@ -1223,7 +1223,7 @@ def test_provider_slot_payload_schema_matches_request_cardinality(tmp_path) -> N
                 ),
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1265,8 +1265,8 @@ def test_provider_slot_payload_zero_pairs_requires_empty_considerations(
                 na_rationale="No routed concern applies.",
             )
             return LLMResult(
-                # Omitted nested considerations exercise the zero-valued default.
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                # A target with no routed pair answers with an empty keyed object.
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1322,7 +1322,7 @@ def test_provider_slot_payload_retries_on_exact_pair_key_mismatch(tmp_path) -> N
                 ),
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1357,7 +1357,7 @@ def test_provider_slot_response_reports_one_call_without_a_retry(tmp_path) -> No
                 na_rationale="The slot is not applicable to this structure.",
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1443,7 +1443,7 @@ def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:
                 na_rationale="The slot is not applicable to this structure.",
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1478,7 +1478,7 @@ def test_provider_slot_schema_leads_with_normative_structured_draft(tmp_path) ->
                             "is_na": True,
                             "na_rationale": "The complete structure excludes it.",
                             "findings": [],
-                            "consideration_results": [],
+                            "consideration_results": {},
                         }
                     ]
                 },

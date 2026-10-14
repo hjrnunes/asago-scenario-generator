@@ -30,8 +30,9 @@ and feedback channels; a coordination slot cites only its path's `shared_process
 and no feedback channel. An ID that appears only in a description or under
 `referenced_records` explains context and is not citable.
 
-For every item under `Required routed consideration pairs`, put exactly one result in
-the matching slot's `consideration_results` array:
+The slot's `consideration_results` is an object with one key for each item under
+`Required routed consideration pairs`: the item's `obligation_handle`, whose value is
+that obligation's one result. With no required pair it is the empty object `{}`.
 
 - Use `finding` only when one or more findings in that same slot directly express the
   routed concern through the route's supplied hazard and governing constraint. Put the
@@ -43,8 +44,8 @@ the matching slot's `consideration_results` array:
   route is advisory or does not force a finding. Leave `finding_indexes` empty.
 
 Do not attach an obligation to an unrelated finding merely because both appear in the
-same target. Copy each `obligation_handle` unchanged; route handles are input evidence
-and are resolved locally, so they are not output fields.
+same target. Copy each `obligation_handle` unchanged as its key; route handles are input
+evidence and are resolved locally, so they are not output fields.
 
 An ICA finding is a system-specific scenario hypothesis about unsafe control behavior;
 it is not proof that the current control already recognizes or names the taxonomy attack
@@ -86,7 +87,7 @@ channel as the source of a wrong process-model value.
 The structured slot-draft fields are `slot_id`, `is_na`, `na_rationale`, `findings`, and
 `consideration_results`; each finding contains the plain string `deviation`, `hazardous_context`,
 `loss_consequence`, `governing_pair`, `process_model_refs`, `feedback_refs`, and
-`context_row`. A finding consideration contains `obligation_handle`,
+`context_row`. Each consideration result, under its `obligation_handle` key, contains
 `disposition`, `finding_indexes`, and `rationale`. In the example below, a warehouse
 controller releases a pallet; its context table has a row in which the pallet's hold status
 is "on quality hold". Releasing the pallet in that row is the unsafe control condition, the
@@ -101,9 +102,9 @@ that "the system is compromised" is not a supported loss chain. Valid example:
 "loss_consequence":"a defective shipment reaches a customer",
 "governing_pair":"<constraint_id>/<hazard_id>",
 "process_model_refs":["<pm_id>"],"feedback_refs":[],"context_row":"<context_row_id>"}],
-"consideration_results":[{"obligation_handle":
-"<obligation_handle>","disposition":"finding","finding_indexes":[0],
-"rationale":"finding 0 directly expresses the routed concern"}]}]}.
+"consideration_results":{"<obligation_handle>":
+{"disposition":"finding","finding_indexes":[0],
+"rationale":"finding 0 directly expresses the routed concern"}}}]}.
 Return one JSON object matching the structured slot-draft schema.
 {%- if has_governance_question is defined and has_governance_question %}
 

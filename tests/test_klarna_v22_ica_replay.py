@@ -67,7 +67,7 @@ class _CapturedKlarnaClient:
                             "No routed obligation was supplied for this replay target."
                         ),
                         "findings": [],
-                        "consideration_results": [],
+                        "consideration_results": {},
                     }
                 ]
             },

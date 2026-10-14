@@ -245,7 +245,7 @@ def test_provider_compiles_strict_slot_draft_once_before_outer_fill(
                             "is_na": True,
                             "na_rationale": "No finding applies to this slot.",
                             "findings": [],
-                            "consideration_results": [],
+                            "consideration_results": {},
                         }
                     ]
                 },
