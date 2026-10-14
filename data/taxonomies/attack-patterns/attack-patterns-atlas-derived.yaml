@@ -12,7 +12,7 @@
 # stale "8 steps" header wording of the legacy record). Legacy kill_chain
 # and evidence fields are removed from every converted record.
 #
-# ATLAS is the sole authoritative external taxonomy (LAAF absent, unpinned).
+# ATLAS is the sole authoritative external taxonomy.
 # The companion SSSOM file carries skos:relatedMatch candidates only;
 # candidate provenance never confers ExactMapping authority. Every exact
 # mapping below restates its operational identity and evidence: chain-scope

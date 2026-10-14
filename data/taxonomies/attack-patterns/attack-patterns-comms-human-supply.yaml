@@ -20,7 +20,7 @@
 # (retrieval of false data is not a triggered prompt injection) and requires
 # a lineage amendment; the chain-scope AML.T0070 identity is retained.
 #
-# ATLAS is the sole v1 taxonomy authority (LAAF absent). Every chain embeds
+# ATLAS is the sole v1 taxonomy authority. Every chain embeds
 # the production taxonomy pins and a semantic digest computed with
 # compute_chain_semantic_digest; each record is one pure branch-free
 # total-order chain (all steps required, no conditions). SSSOM

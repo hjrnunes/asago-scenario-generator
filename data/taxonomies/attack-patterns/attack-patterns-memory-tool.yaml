@@ -5,7 +5,7 @@
 # Canonical-chain migration (catalog-lineage.yaml v1, final authoritative
 # dispositions): each record carries one branch-free total-order canonical
 # chain with typed actions, typed references, provenance, and ATLAS mapping
-# decisions. ATLAS is the sole v1 mapping authority (LAAF absent); SSSOM
+# decisions. ATLAS is the sole v1 mapping authority; SSSOM
 # skos:relatedMatch rows remain unqualified migration provenance in the
 # sibling .sssom.tsv file and never confer exact authority. The legacy
 # kill_chain and evidence fields are removed; case-study grounding now lives

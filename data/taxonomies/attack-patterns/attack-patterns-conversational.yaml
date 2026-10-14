@@ -12,7 +12,7 @@
 # These records have no legacy source and no entry in catalog-lineage.yaml.
 # Chains are branch-free and carry designed-tier provenance: each chain's
 # exact ATLAS identity is the operation that the pinned technique definition
-# describes. ATLAS is the sole taxonomy authority (LAAF absent), and the
+# describes. ATLAS is the sole taxonomy authority, and the
 # SSSOM mapping set carries no row for these records.
 
 source:

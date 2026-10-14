@@ -12,8 +12,8 @@
 #          AP-T10-02, AP-T10-03, AP-T14-01, AP-T14-02, AP-T14-03, AP-T14-04,
 #          AP-T16-01
 #
-# Authority: MITRE ATLAS 2026.05 is the sole v1 mapping authority (LAAF
-# absent). SSSOM skos:relatedMatch rows in
+# Authority: MITRE ATLAS 2026.05 is the sole v1 mapping authority. SSSOM
+# skos:relatedMatch rows in
 # attack-patterns-agentic-only.sssom.tsv are candidate-only migration
 # provenance and never confer exact-mapping authority. Each record carries
 # one pure branch-free total-order canonical chain with typed

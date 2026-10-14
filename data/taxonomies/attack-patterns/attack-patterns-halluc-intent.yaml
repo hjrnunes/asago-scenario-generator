@@ -10,8 +10,8 @@
 # per-step provenance tiers, and ATLAS-only mapping decisions with the lineage's
 # exact operational identities.  Legacy kill_chain/evidence fields are removed.
 #
-# Authority: ATLAS is the sole v1 taxonomy authority (LAAF absent: laaf pin is
-# null and any LAAF decision would fail closed).  SSSOM skos:relatedMatch rows
+# Authority: ATLAS is the sole v1 taxonomy authority; a mapping decision for any
+# other taxonomy fails closed.  SSSOM skos:relatedMatch rows
 # in attack-patterns-halluc-intent.sssom.tsv remain migration candidate
 # provenance only and confer no mapping authority.
 

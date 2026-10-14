@@ -4,8 +4,7 @@
 # Final lineage outcome (catalog-lineage.yaml v1): the five historical base T7
 # records (AP-T7-01..05) are removed from the live catalog. No T7 source has a
 # defensible exact ATLAS operational identity; ATLAS is the sole v1 authority,
-# LAAF is absent, and legacy SSSOM skos:relatedMatch rows are non-authoritative
-# provenance that cannot qualify a record. Final dispositions: AP-T7-01 defer;
+# and the SSSOM mapping set carries no row for these records. Final dispositions: AP-T7-01 defer;
 # AP-T7-02..05 retire; the authoritative resulting-ID set is empty. Historical
 # lineage, rationales, and re-entry conditions live solely in
 # catalog-lineage.yaml.
