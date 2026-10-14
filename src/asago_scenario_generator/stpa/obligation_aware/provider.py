@@ -13,7 +13,13 @@ from functools import lru_cache, partial
 from pathlib import Path
 from typing import Annotated, Any, Literal, Mapping, Sequence, Union
 
-from pydantic import Field, WithJsonSchema, create_model, model_validator
+from pydantic import (
+    AfterValidator,
+    Field,
+    WithJsonSchema,
+    create_model,
+    model_validator,
+)
 
 from asago_scenario_generator.models.artifact_pin import ObligationId
 from asago_scenario_generator.models.obligation_consideration import (
@@ -1049,28 +1055,46 @@ class _SlotProviderFindingDraft(_Model):
     context_row: str | None = None
 
 
-class _FillFindingWire(_Model):
-    """A fill finding that names its governing constraint-and-hazard pair.
+def _unique_pairs(pairs: tuple[str, ...]) -> tuple[str, ...]:
+    repeated = sorted(pair for pair, n in Counter(pairs).items() if n > 1)
+    if repeated:
+        raise ValueError("governing_pairs repeats " + ", ".join(repeated))
+    return pairs
 
-    The model picks one ``"SC-x/H-y"`` pair; code splits it into the
-    constraint and hazard lists every later stage reads.
+
+def _pair_list(item: Any) -> Any:
+    """A non-empty array of distinct governing pairs, each an *item*."""
+    return Annotated[
+        tuple[item, ...],
+        Field(min_length=1, json_schema_extra={"uniqueItems": True}),
+        AfterValidator(_unique_pairs),
+    ]
+
+
+class _FillFindingWire(_Model):
+    """A fill finding that lists every governing constraint-and-hazard pair.
+
+    The model picks ``"SC-x/H-y"`` pairs; code splits them into the distinct
+    constraints and hazards, in written order, that every later stage reads.
     """
 
     deviation: str = Field(min_length=1)
     hazardous_context: str = Field(min_length=1)
     loss_consequence: str = Field(min_length=1)
-    governing_pair: str = Field(pattern=r"^[^/\s]+/[^/\s]+$")
+    governing_pairs: _pair_list(  # type: ignore[valid-type]
+        Annotated[str, Field(pattern=r"^[^/\s]+/[^/\s]+$")]
+    )
     process_model_refs: tuple[str, ...] = ()
     feedback_refs: tuple[str, ...] = ()
     context_row: str | None = None
 
     @property
     def related_constraint_ids(self) -> tuple[str, ...]:
-        return (split_pair(self.governing_pair)[0],)
+        return tuple(dict.fromkeys(split_pair(p)[0] for p in self.governing_pairs))
 
     @property
     def related_hazard_ids(self) -> tuple[str, ...]:
-        return (split_pair(self.governing_pair)[1],)
+        return tuple(dict.fromkeys(split_pair(p)[1] for p in self.governing_pairs))
 
 
 class _SlotProviderDraft(_Model):
@@ -1205,7 +1229,7 @@ def _slot_scope_type(scope: FillScope | None) -> type[_Model]:
     finding = create_model(
         _FillFindingWire.__name__,
         __base__=_FillFindingWire,
-        governing_pair=(_choice(scope.pair_ids), ...),
+        governing_pairs=(_pair_list(_choice(scope.pair_ids)), ...),
         process_model_refs=_id_list(scope.process_model_ids),
         feedback_refs=_id_list(scope.feedback_ids),
         context_row=_optional_id(scope.context_row_ids),

@@ -47,7 +47,7 @@ def _finding(deviation: str) -> dict[str, Any]:
         "deviation": deviation,
         "hazardous_context": "an unreviewed request reaches the process",
         "loss_consequence": "the protected operation is harmed",
-        "governing_pair": "SC-1/H-1",
+        "governing_pairs": ["SC-1/H-1"],
         "process_model_refs": [],
         "feedback_refs": [],
         "context_row": None,

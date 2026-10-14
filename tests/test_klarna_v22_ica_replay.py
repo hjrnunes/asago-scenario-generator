@@ -1,6 +1,6 @@
 """Replay the three captured Klarna CA-3-1 ICA deviations at the public seam.
 
-The recorded replies predate the fill wire's ``governing_pair``; the replay
+The recorded replies predate the fill wire's ``governing_pairs``; the replay
 recasts each one with ``current_fill_reply`` and changes no other value.
 """
 

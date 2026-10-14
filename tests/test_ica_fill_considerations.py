@@ -30,7 +30,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
     _SlotProviderPayload,
     _validate_slot_provider_payload,
 )
-from tests.helpers.obligation_aware import current_fill_reply, wire_pair
+from tests.helpers.obligation_aware import current_fill_reply, wire_pairs
 
 _FIXTURE = Path(__file__).parent / "fixtures" / "ica_fill" / "klarna-r2-row81.json"
 
@@ -53,7 +53,7 @@ def _pair_form(reply: dict[str, Any]) -> dict[str, Any]:
                 for key, value in finding.items()
                 if key not in {"related_constraint_ids", "related_hazard_ids"}
             }
-            wire["governing_pair"] = wire_pair(
+            wire["governing_pairs"] = wire_pairs(
                 finding["related_constraint_ids"], finding["related_hazard_ids"]
             )
             findings.append(wire)

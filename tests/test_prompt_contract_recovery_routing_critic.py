@@ -76,7 +76,7 @@ def test_routing_schema_cannot_retype_an_obligation_digest():
     assert wire.model_validate({"routes": [route]}).routes[0].obligation_id == expected
 
 
-def test_slot_schema_requires_one_exact_constraint_not_concatenated_ids():
+def test_slot_schema_requires_exact_pairs_not_concatenated_ids():
     wire = _slot_provider_payload_type(
         1,
         0,
@@ -92,7 +92,7 @@ def test_slot_schema_requires_one_exact_constraint_not_concatenated_ids():
         "deviation": "sanitization occurs after downstream processing",
         "hazardous_context": "unprocessed input reaches downstream components",
         "loss_consequence": "unauthorized action",
-        "governing_pair": 'SC-2", "SC-4", "SC-5/H-2',
+        "governing_pairs": ['SC-2", "SC-4", "SC-5/H-2'],
     }
     payload = {
         "filled_slots": [
@@ -105,12 +105,12 @@ def test_slot_schema_requires_one_exact_constraint_not_concatenated_ids():
             }
         ]
     }
-    with pytest.raises(ValidationError, match="governing_pair"):
+    with pytest.raises(ValidationError, match="governing_pairs"):
         wire.model_validate(payload)
-    finding["governing_pair"] = "SC-2/H-2"
+    finding["governing_pairs"] = ["SC-2/H-2", "SC-4/H-2"]
     assert wire.model_validate(payload).filled_slots[0].findings[
         0
-    ].related_constraint_ids == ("SC-2",)
+    ].related_constraint_ids == ("SC-2", "SC-4")
 
 
 def test_routing_wire_schema_requires_disposition_specific_fields() -> None:

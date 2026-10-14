@@ -39,7 +39,7 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.scripted_client import ScriptedClient
-from tests.helpers.obligation_aware import _controls, _loss_analysis, wire_pair
+from tests.helpers.obligation_aware import _controls, _loss_analysis, wire_pairs
 
 _PROCESS = ElementRef(type=ReferenceType.controlled_process, id="CP-1")
 APPLICABLE = "the source supplies an applicable answer"
@@ -145,7 +145,7 @@ def _fill_finding(finding: dict) -> dict:
         for key, value in finding.items()
         if key not in {"related_constraint_ids", "related_hazard_ids"}
     }
-    wire["governing_pair"] = wire_pair(
+    wire["governing_pairs"] = wire_pairs(
         finding["related_constraint_ids"], finding["related_hazard_ids"]
     )
     return wire

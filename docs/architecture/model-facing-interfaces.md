@@ -442,13 +442,16 @@ through ICA verification. The cited assignments become the ICA's
 unsafe: a finding whose unsafe context no row expresses uses
 `context_row: null`.
 
-A fill finding names its constraint and hazard as one `governing_pair`,
-`"<constraint_id>/<hazard_id>"`. The schema enumerates every pair of a
+A fill finding lists every constraint-and-hazard pair it rests on in
+`governing_pairs`, each `"<constraint_id>/<hazard_id>"`. The array has at
+least one item and no repeated item, and the schema enumerates every pair of a
 supplied constraint and a hazard in its `related_hazards`
-(`fill_reply.governing_pairs`), and code splits the chosen pair into the
-finding's one constraint and one hazard. Separate hazard and constraint lists
-let a reply pair a constraint with a hazard it does not govern, which decided
-3 of the 10 unresolved pp-s11 records. The context-coverage supplement keeps
+(`fill_reply.governing_pairs`). Code splits the pairs into the finding's
+distinct constraints and hazards, in the order the reply writes them.
+Separate hazard and constraint lists let a reply pair a constraint with a
+hazard it does not govern, which decided 3 of the 10 unresolved pp-s11
+records. An array, not one pair, keeps a finding with several hazards
+expressible: 19 of the 299 accepted pp-s11 chains had one. The context-coverage supplement keeps
 the separate `related_hazard_ids` and `related_constraint_ids`.
 
 A fill slot's `consideration_results` is an object keyed by the local handle

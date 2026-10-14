@@ -45,9 +45,10 @@ from tests.helpers.obligation_aware import (
 # because it raised the NOT_PROVIDED N/A share. The system digest was
 # recaptured when the prompt began naming the identities a slot may cite, and
 # again when a finding began naming one `governing_pair` and when
-# `consideration_results` became an object keyed by obligation handle. The
+# `consideration_results` became an object keyed by obligation handle, and
+# again when the pair became the `governing_pairs` array. The
 # other digests are unchanged.
-_GOLDEN_SLOT_SYSTEM = "0cb6be9b69ee581c52d5fb2722d155637c02212c1767624df538a24713c046d9"
+_GOLDEN_SLOT_SYSTEM = "1ee393a7d9379f7eb15e1f9950b39da4e4bc2cdc27dfb3e3566e0cd6280bd047"
 _GOLDEN_SLOT_USER = "51f6875173344befda32d0a1fdbe879b7487e072808b8dafd2d89f9679c6f37a"
 _GOLDEN_SLOT_USER_EMPTY = (
     "6a174dc144a7788395f2e38a60457edd891714dbd795c06411dad9616a4f9667"

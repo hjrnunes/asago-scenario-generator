@@ -939,7 +939,7 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
                                     "loss_consequence": (
                                         "the protected operation is harmed"
                                     ),
-                                    "governing_pair": "SC-1/H-1",
+                                    "governing_pairs": ["SC-1/H-1"],
                                     "process_model_refs": [],
                                     "feedback_refs": [],
                                 }
@@ -968,7 +968,9 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
     deviation_schema = finding_schema["properties"]["deviation"]
     assert deviation_schema["type"] == "string"
     assert deviation_schema["minLength"] == 1
-    assert finding_schema["properties"]["governing_pair"]["enum"] == ["SC-1/H-1"]
+    assert finding_schema["properties"]["governing_pairs"]["items"]["enum"] == [
+        "SC-1/H-1"
+    ]
     assert "related_constraint_ids" not in finding_schema["properties"]
     assert "not_provided_context" not in finding_schema["properties"]
     assert "incorrect_value_or_effect" not in finding_schema["properties"]
