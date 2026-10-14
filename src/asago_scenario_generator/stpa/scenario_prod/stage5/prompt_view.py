@@ -157,9 +157,9 @@ def _observation_contract_prompt_values(
 ) -> tuple[str, tuple[str, ...], tuple[str, ...]]:
     if observation_contract is None:
         return "No observation contract was supplied.", (), ()
-    contract_yaml = _yaml_dump(
-        observation_contract.model_dump(mode="json", exclude_none=True),
-    )
+    # The digest is for code checks; rendering it would move every Stage 5
+    # request on any contract byte change the prompt does not otherwise show.
+    contract_yaml = _yaml_dump(observation_contract.canonical_payload())
     available_kinds = tuple(
         item.kind for item in observation_contract.capture if item.available
     )
