@@ -187,7 +187,7 @@ precedence: an explicit Python argument, then the selected profile or
 environment value, then the client default; `generate` has no sampling override.
 Invalid numeric or
 boolean environment values fail before the first model call.
-Requests have a 300-second application default deadline. Named-profile
+Requests have a 600-second application default deadline. Named-profile
 `timeout` and `ASAGO_SCENARIO_GENERATOR_TIMEOUT` values override that default.
 The SDK's implicit retries are disabled so retry decisions remain bounded and
 visible in pipeline evidence. The client itself retries a request once, after
