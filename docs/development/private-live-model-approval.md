@@ -131,6 +131,38 @@ a schema-bound request with the strict JSON response schema decoded at effort
 medium, and effort `low` returned no reasoning tokens. No pipeline batch has
 measured GLM yet.
 
+## Forge material on Gemma OC for policy extraction and generation
+
+Approval recorded: 2026-10-15 (Europe/Zurich).
+
+The project owner approved sending the following Forge material to the private
+Gemma OC endpoint selected by the `gemma4-oc` and `gemma4-oc-65k` model
+profiles (model `gemma-4-26b-a4b-it`):
+
+- the Forge technical briefing (`Forge Technical Briefing 2026 09 25.md`);
+- the five Red Hat policy PDFs: Code of Business Conduct and Ethics, Global
+  Privacy Policy, Global Records Management Plan, Policy on Copyright
+  Compliance, and Policy on the Use of AI Technology;
+- material derived from them: the risk extractions and the qualification
+  facts.
+
+Two tools use this material:
+
+- `asago-policy-mapper` sends the briefing, the policy PDFs, and their text
+  chunks to the endpoint during risk extraction.
+- `asago-scenario-generator` sends the derived risk extractions and
+  qualification facts to the endpoint during `generate`.
+
+The mapper also sends text to the owner's private embeddings and reranker
+servers, which serve `qwen3-embedding-8b` and `qwen3-reranker-4b`. The mapper
+sends policy chunks and retrieval queries derived from the briefing and the
+policies to these servers. This approval covers that use. Keep the Gemma OC endpoint URL and credentials
+in the local model profile; do not print or commit them.
+
+This approval does not cover other providers or profiles, real customer data,
+or publication of the material. The Carry the approval forward section below
+applies.
+
 ## Thinking-mode limits
 
 Run Gemma and Qwen pipeline roles with thinking off. Qwen fails with thinking
