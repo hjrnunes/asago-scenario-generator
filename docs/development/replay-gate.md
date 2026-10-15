@@ -80,9 +80,12 @@ sequence number, so concurrent runs compare equal.
 | `calls.jsonl` | `timestamp`, `duration_ms` | wall-clock time of each call |
 | `run-manifest.yaml` | `created_at` | wall-clock time of the run |
 | `synthesis-manifest.yaml` | `created_at`, `prompt_call_evidence[].duration_ms`, `semantic_digest` | wall-clock times; the digest covers them, so the gate checks each side's digest against its own payload instead of comparing digests |
+| `report/index.html` | the effort section's total seconds and each step's Seconds cell | the summed `duration_ms` of the step's calls, rounded to seconds; a replayed call's duration is the local lookup time, so a step near 500 ms shows 0 or 1 |
 
 The list lives in `ALLOWED_DIFFERENCES` in
-`scripts/replay_gate.py`. Add an entry only for a value
+`scripts/replay_gate.py`, and in `ALLOWED_TEXT_DIFFERENCES` for a file the gate
+compares as text: each entry masks its pattern's capture groups on both sides,
+and the rest of the file still compares byte for byte. Add an entry only for a value
 that legitimately varies between two executions of the same code on the same
 responses; fix nondeterminism in the code instead of normalising it.
 
