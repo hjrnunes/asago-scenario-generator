@@ -174,6 +174,24 @@ REPLY_ONLY_NOTE = (
 )
 
 
+def reply_only_dropped_note(code: str, criteria: str = "reply") -> str:
+    """The note of a reply-only draft whose returned condition code removed."""
+    return (
+        f"Every observable claim is at reply level ({criteria}), judged on the "
+        f"assistant reply; the returned discriminating condition failed "
+        f"validation ({code}) and was removed; a discriminating condition "
+        "compares operation arguments, facts, and calls, so the scenario is "
+        "published without one."
+    )
+
+
+def flat_reply(payload: dict) -> dict:
+    """``payload`` in the flat form: its structural_failure factor carries
+    keys of the other evidence-status branches, which the restore drops."""
+    payload["causal_factors"][0].update(capability_refs=["cap"], access_refs=["acc"])
+    return payload
+
+
 ANALYTICAL_NOTE = (
     "the response declares no reply criterion the contract supports, so the "
     "command_attempt claim cannot run without its condition and the scenario "

@@ -195,26 +195,44 @@ def _validate_normal_provider_payload(
             )
         )
         reply_criteria = _reply_only_criteria(criteria, assessment, safe_outcome)
+        dropped_code = None
+        unparsed = getattr(outcome, "_unparsed_condition", None)
+        if unparsed is not None:
+            dropped_code = UNPARSED_CONDITION_CODE
+            _record_dropped_condition(unparsed, dropped_code, normalizations)
         # Last, so the correction for a draft that fails another check as well
         # names that check: a failed condition can still be dropped afterwards.
-        condition_outcome = _validate_discriminating_condition(
-            condition,
-            assessment,
-            universe,
-            required=condition_required and not reply_criteria,
-            named_operations=_named_operations(criteria, safe_outcome),
-            claim=ConditionClaim(
-                uca_type=context.ica.uca_type,
-                unsafe_operation=(
-                    target_operation.reference.operation_id
-                    if target_operation is not None
-                    else None
+        try:
+            condition_outcome = _validate_discriminating_condition(
+                condition,
+                assessment,
+                universe,
+                required=condition_required and not reply_criteria,
+                named_operations=_named_operations(criteria, safe_outcome),
+                claim=ConditionClaim(
+                    uca_type=context.ica.uca_type,
+                    unsafe_operation=(
+                        target_operation.reference.operation_id
+                        if target_operation is not None
+                        else None
+                    ),
+                    safe_outcome=safe_outcome,
                 ),
-                safe_outcome=safe_outcome,
-            ),
-        )
+            )
+        except ValidationIssueError as error:
+            # A reply-level claim is judged on the reply, so its condition is
+            # optional: a failing one is removed rather than corrected.
+            if not reply_criteria:
+                raise
+            dropped_code = error.issue.code.value
+            _record_dropped_condition(
+                condition.model_dump(mode="json"), dropped_code, normalizations
+            )
+            outcome.discriminating_condition = condition = None
         if condition is None and reply_criteria and universe.grounded:
-            condition_omitted_reason = _reply_only_omitted_reason(reply_criteria)
+            condition_omitted_reason = _reply_only_omitted_reason(
+                reply_criteria, dropped_code
+            )
     return _NormalDraftCheck(
         draft=value,
         normalizations=tuple(normalizations),
@@ -252,15 +270,76 @@ def _reply_only_criteria(
     return tuple(item.criterion_id for item in observed)
 
 
-def _reply_only_omitted_reason(criterion_ids: Sequence[str]) -> str:
-    """Return the code-owned note for a reply-only scenario without a condition."""
+def claims_only_replies(outcome: Mapping[str, Any]) -> bool:
+    """Return whether an unparsed outcome's observable claims are all replies.
 
+    The reply-level test of :func:`_reply_only_criteria` on the reply as
+    written, before the contract assesses it: at least one observable
+    criterion, every one at reply level, and no observable safe outcome at
+    another level.
+    """
+
+    criteria = outcome.get("observation_criteria")
+    if not isinstance(criteria, list):
+        return False
+    observed = [
+        item
+        for item in criteria
+        if isinstance(item, Mapping) and item.get("observable") is True
+    ]
+    if not observed or any(
+        item.get("claim_level") != _REPLY_CLAIM for item in observed
+    ):
+        return False
+    safe = outcome.get("safe_observable_outcome")
+    return not (
+        isinstance(safe, Mapping)
+        and safe.get("observable") is True
+        and safe.get("claim_level") != _REPLY_CLAIM
+    )
+
+
+# The failure code of a condition that does not fit the condition schema.
+UNPARSED_CONDITION_CODE = "discriminating_condition_invalid"
+
+
+def _record_dropped_condition(
+    original: Any, code: str, normalizations: list[Stage5Normalization]
+) -> None:
+    normalizations.append(
+        Stage5Normalization(
+            field="discriminating_condition",
+            original=original,
+            normalized=None,
+            reason=f"condition_dropped_reply_only:{code}",
+        )
+    )
+
+
+def _reply_only_omitted_reason(
+    criterion_ids: Sequence[str], dropped_code: str | None = None
+) -> str:
+    """Return the code-owned note for a reply-only scenario without a condition.
+
+    ``dropped_code`` names the failure of a condition the response returned
+    and code removed; ``None`` when the response returned none.
+    """
+
+    dropped = (
+        ""
+        if dropped_code is None
+        else (
+            "the returned discriminating condition failed validation "
+            f"({dropped_code}) and was removed; "
+        )
+    )
     return (
         "Every observable claim is at reply level ("
         + ", ".join(criterion_ids)
-        + "), judged on the assistant reply; a discriminating condition "
-        "compares operation arguments, facts, and calls, so the scenario is "
-        "published without one."
+        + "), judged on the assistant reply; "
+        + dropped
+        + "a discriminating condition compares operation arguments, facts, "
+        "and calls, so the scenario is published without one."
     )
 
 

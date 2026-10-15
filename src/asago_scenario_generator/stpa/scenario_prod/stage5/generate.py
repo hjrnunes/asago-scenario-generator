@@ -16,8 +16,10 @@ from typing import Callable, NamedTuple
 
 from pydantic import (
     BaseModel,
+    ValidationError,
 )
 
+from asago_scenario_generator.schema_unions import restore_flat_reply_for
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE, LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
@@ -67,8 +69,10 @@ from .schema import (
     _scenario_semantics_payload_type,
 )
 from .validate import (
+    UNPARSED_CONDITION_CODE,
     _NormalDraftCheck,
     _validate_normal_provider_payload,
+    claims_only_replies,
 )
 from .feedback import (
     _normal_validation_retry_feedback,
@@ -543,7 +547,41 @@ def _parse_context_bdi_result(result, response_format: type[BaseModel]) -> BaseM
         payload = json.loads(strip_json_fence(content))
     else:
         return parse_llm_result(result, response_format)
-    return response_format.model_validate(payload)
+    try:
+        return response_format.model_validate(payload)
+    except ValidationError as error:
+        draft = _reply_only_draft_without_condition(payload, error, response_format)
+        if draft is None:
+            raise
+        return draft
+
+
+_CONDITION_LOCATION = ("unsafe_outcome", "discriminating_condition")
+
+
+def _reply_only_draft_without_condition(
+    payload: object, error: ValidationError, response_format: type[BaseModel]
+) -> BaseModel | None:
+    """Parse a reply-only reply without the condition that alone failed the schema.
+
+    A reply-level claim is judged on the assistant reply, so its condition is
+    optional and an unparseable one is removed instead of corrected; the
+    draft keeps it for the normalization record. Returns ``None`` when a
+    claim is above reply level or any failure lies outside the condition.
+    """
+
+    outcome = payload.get("unsafe_outcome") if isinstance(payload, Mapping) else None
+    if not isinstance(outcome, Mapping) or not claims_only_replies(outcome):
+        return None
+    if any(item["loc"][:2] != _CONDITION_LOCATION for item in error.errors()):
+        return None
+    without = {**outcome, "discriminating_condition": None}
+    try:
+        draft = response_format.model_validate({**payload, "unsafe_outcome": without})
+    except ValidationError:
+        return None
+    draft.unsafe_outcome._unparsed_condition = outcome.get("discriminating_condition")
+    return draft
 
 
 def _condition_failure_code(issues: tuple[ValidationIssue, ...]) -> str:
@@ -554,7 +592,7 @@ def _condition_failure_code(issues: tuple[ValidationIssue, ...]) -> str:
         return IssueCode.discriminating_condition_missing.value
     return next(
         (item.value for item in CONDITION_FAILURE_CODES if item in raised),
-        "discriminating_condition_invalid",
+        UNPARSED_CONDITION_CODE,
     )
 
 
@@ -600,6 +638,8 @@ def _draft_without_condition(
 
     Returns ``None`` when the response is unavailable or still fails without
     the condition, so only condition-attributable failures are recovered.
+    ``llm_result`` is the reply as received, so a flat reply is restored here
+    the way the stage parse restores it.
     """
 
     content = getattr(llm_result, "content", None)
@@ -612,6 +652,7 @@ def _draft_without_condition(
             payload = json.loads(strip_json_fence(content))
         else:
             return None
+        payload = restore_flat_reply_for(response_format, payload)
     except (TypeError, ValueError):
         return None
     outcome = payload.get("unsafe_outcome") if isinstance(payload, dict) else None

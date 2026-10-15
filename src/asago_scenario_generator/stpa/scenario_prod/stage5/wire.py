@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 from pydantic import (
     BaseModel,
     ConfigDict,
     Field,
+    PrivateAttr,
     StrictBool,
     StrictStr,
     StringConstraints,
@@ -234,6 +235,9 @@ class _ContextSemanticOutcomeDraft(BaseModel):
     semantic_proposition: StrictStr = Field(min_length=1, max_length=600)
     observation_criteria: list[_ObservationCriterionDraft] = Field(default_factory=list)
     safe_observable_outcome: SafeObservableOutcome | None = None
+    # The condition the parse removed from a reply-only reply because it did
+    # not fit the condition schema; validation records it, it never publishes.
+    _unparsed_condition: Any = PrivateAttr(default=None)
 
 
 class _ContextSemanticFactorWireBase(BaseModel):

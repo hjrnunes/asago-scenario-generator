@@ -233,6 +233,18 @@ and `literal_unsupported` corrections give this same way out in the same
 words, so the two never pull a draft in opposite directions. The condition
 schema has no statement-only form (`comparisons` requires at least one entry).
 
+A reply-only draft never spends a correction on its condition. When every
+observable criterion, and an observable safe outcome, is at `reply` level, a
+returned condition that fails the condition schema (for example two literals)
+or a condition check is removed by code, with no model request. The scenario
+publishes with `discriminating_condition: null` and a `condition_omitted_reason`
+naming the failure code (`discriminating_condition_invalid` for a schema
+failure). The Stage 5 normalization record keeps the removed condition under
+`discriminating_condition` with the reason
+`condition_dropped_reply_only:<code>`. A returned condition that passes is
+kept. A schema failure outside the condition still earns its correction, and
+the correction text names every failure, the condition's included.
+
 The same request tells the model that a precondition is not an observation
 requirement: a claim about what a reply states is observable through
 `assistant_message` when the supplied facts establish the precondition and
@@ -297,7 +309,9 @@ because of its condition (missing, unresolved, violated, or structurally
 invalid), code removes the condition and publishes the scenario with
 `discriminating_condition: null`, `condition_check: null`, and a code-owned
 `condition_omitted_reason` naming the failure code; the exact failure stays
-in the call log. A `command_attempt` claim is scored by a tool-call condition,
+in the call log. Code reads that last response the way the stage parse does,
+restoring a flat reply first, so a flat reply is recovered too. A
+`command_attempt` claim is scored by a tool-call condition,
 so code does not publish that claim without one. When the omitted-condition
 scenario's safe outcome is a `command_attempt` claim, code moves it, with no
 new model request, to the `reply` claim if the response declares a reply
