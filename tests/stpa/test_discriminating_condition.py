@@ -84,6 +84,7 @@ from tests.helpers.normal_authoring_wire import (
 from tests.helpers.scenario_deduplication import _scenario
 from tests.helpers.discriminating_condition import (
     ANALYTICAL_NOTE,
+    REPLY_ONLY_NOTE,
     STAGE5_PROMPT_TOKEN_BUDGET,
     _bad_condition_payload,
     _check,
@@ -98,6 +99,9 @@ from tests.helpers.discriminating_condition import (
     _placeholder_payload,
     _universe,
     _value,
+    flat_reply,
+    reply_only_dropped_note,
+    reply_only_payload,
 )
 
 
@@ -635,6 +639,133 @@ def test_ungrounded_request_has_no_condition_key(tmp_path) -> None:
     assert "discriminating_condition" not in json.dumps(schema)
     rendered = client.calls[0].system_prompt + client.calls[0].user_prompt
     assert "discriminating_condition" not in rendered
+
+
+def test_reply_only_scenario_publishes_without_a_condition_on_the_first_request(
+    tmp_path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue([reply_only_payload()])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 1
+    assert result.discriminating_condition is None
+    assert result.condition_check is None
+    assert result.condition_omitted_reason == REPLY_ONLY_NOTE
+    assert result.observation_assessment.disposition == "executable"
+    assert result.tool_call_condition_status.status == "not_executable"
+    assert REPLY_ONLY_NOTE in result.tool_call_condition_status.detail
+
+
+def test_reply_only_scenario_keeps_a_condition_it_returns(tmp_path) -> None:
+    client = MockLLMClient()
+    client.set_response_queue([reply_only_payload(_ownership_condition("ORD-2"))])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 1
+    assert result.discriminating_condition is not None
+    assert result.condition_check is not None
+    assert result.condition_omitted_reason is None
+
+
+def test_a_command_attempt_beside_a_reply_still_requires_a_condition(
+    tmp_path,
+) -> None:
+    payload = reply_only_payload()
+    payload["unsafe_outcome"]["observation_criteria"].append(
+        _payload_with(None)["unsafe_outcome"]["observation_criteria"][0]
+    )
+    client = MockLLMClient()
+    client.set_response_queue([copy.deepcopy(payload), copy.deepcopy(payload)])
+
+    _generate(client, tmp_path)
+
+    assert client.call_count == 2
+    assert "discriminating_condition_missing" in client.calls[1].user_prompt
+
+
+def _reply_only_failing_conditions() -> dict[str, tuple[dict, str]]:
+    return {
+        "check-failed": (
+            _kind_mismatch_condition(),
+            "discriminating_condition_check_failed",
+        ),
+        "placeholder-literal": (
+            _placeholder_payload()["unsafe_outcome"]["discriminating_condition"],
+            LITERAL_UNSUPPORTED,
+        ),
+        "two-literals": (
+            _literal_only_payload()["unsafe_outcome"]["discriminating_condition"],
+            "discriminating_condition_invalid",
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    "name", ["check-failed", "placeholder-literal", "two-literals"]
+)
+def test_reply_only_scenario_drops_a_failing_condition_without_a_correction(
+    tmp_path, name
+) -> None:
+    condition, code = _reply_only_failing_conditions()[name]
+    client = MockLLMClient()
+    client.set_response_queue([flat_reply(reply_only_payload(condition))])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None, error
+    assert result is not None
+    assert client.call_count == 1
+    assert result.discriminating_condition is None
+    assert result.condition_check is None
+    assert result.condition_omitted_reason == reply_only_dropped_note(code)
+    assert result.observation_assessment.disposition == "executable"
+    [path] = (tmp_path / "stage5-normalizations").glob("*.yaml")
+    record = yaml.safe_load(path.read_text(encoding="utf-8"))
+    [dropped] = [
+        item
+        for item in record["normalizations"]
+        if item["field"] == "discriminating_condition"
+    ]
+    assert dropped["normalized"] is None
+    assert dropped["reason"] == f"condition_dropped_reply_only:{code}"
+    assert dropped["original"]["statement"] == condition["statement"]
+
+
+def test_two_literals_beside_another_schema_error_still_earn_a_correction(
+    tmp_path,
+) -> None:
+    payload = reply_only_payload(
+        _literal_only_payload()["unsafe_outcome"]["discriminating_condition"]
+    )
+    payload["causal_factors"][0]["evidence_status"] = "not_a_status"
+    client = MockLLMClient()
+    client.set_response_queue([copy.deepcopy(payload), copy.deepcopy(payload)])
+
+    _generate(client, tmp_path)
+
+    assert client.call_count == 2
+    correction = client.calls[1].user_prompt
+    assert "two literals" in correction
+    assert "evidence_status" in correction
+
+
+def test_two_literals_on_a_command_attempt_still_earn_a_correction(
+    tmp_path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue([_literal_only_payload(), _literal_only_payload()])
+
+    _generate(client, tmp_path)
+
+    assert client.call_count == 2
+    assert "two literals" in client.calls[1].user_prompt
 
 
 def test_analytical_only_condition_is_discarded_with_a_note(tmp_path) -> None:
@@ -2095,3 +2226,32 @@ def test_stage5_sends_its_corrections_then_publishes_without_the_condition(
     )
     assert result.observation_assessment is not None
     assert result.observation_assessment.disposition == "analytical_only"
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        pytest.param(case, id=name)
+        for name, case in _OMIT_AFTER_FAILED_CORRECTION.items()
+    ],
+)
+def test_stage5_publishes_a_flat_final_reply_without_the_condition(
+    tmp_path, case
+) -> None:
+    corrections = 2 if case.code in _SECOND_CORRECTION_CODES else 1
+    client = MockLLMClient()
+    client.set_response_queue(
+        [flat_reply(case.payload()) for _ in range(corrections + 1)]
+    )
+
+    result, error = case.generate(client, tmp_path)
+
+    assert error is None, error
+    assert result is not None
+    assert client.call_count == corrections + 1
+    assert result.discriminating_condition is None
+    spent = "two corrections" if corrections == 2 else "one correction"
+    assert result.condition_omitted_reason == (
+        f"The discriminating condition failed validation after {spent} "
+        f"({case.code}); {ANALYTICAL_NOTE}"
+    )

@@ -266,18 +266,6 @@ def test_a_length_finish_on_the_third_request_sends_no_fourth(tmp_path) -> None:
     assert "after two corrections" in result.condition_omitted_reason
 
 
-def _reply_only() -> dict:
-    payload = _failing_check()
-    payload["unsafe_outcome"]["observation_criteria"] = [dict(REPLY_CRITERION)]
-    payload["unsafe_outcome"]["safe_observable_outcome"] = {
-        "observable": True,
-        "statement": "The assistant refuses the refund in its reply.",
-        "claim_level": "reply",
-        "evidence": "assistant_message",
-    }
-    return payload
-
-
 def _command_attempt_with_a_reply_criterion() -> dict:
     payload = _failing_check()
     payload["unsafe_outcome"]["observation_criteria"].append(dict(REPLY_CRITERION))
@@ -287,7 +275,6 @@ def _command_attempt_with_a_reply_criterion() -> dict:
 @pytest.mark.parametrize(
     ("first", "second"),
     [
-        pytest.param(_reply_only(), _reply_only(), id="reply-claim"),
         pytest.param(
             _command_attempt_with_a_reply_criterion(),
             _command_attempt_with_a_reply_criterion(),
