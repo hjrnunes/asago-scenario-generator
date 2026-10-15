@@ -181,21 +181,27 @@ def _validate_normal_provider_payload(
         value.causal_factors, choices, context
     )
     condition_outcome = None
+    condition_omitted_reason = None
     if observation_contract is not None:
         safe_outcome = getattr(outcome, "safe_observable_outcome", None)
-        # Last, so the correction for a draft that fails another check as well
-        # names that check: a failed condition can still be dropped afterwards.
-        condition_outcome = _validate_discriminating_condition(
-            getattr(outcome, "discriminating_condition", None),
-            assessment,
+        condition = getattr(outcome, "discriminating_condition", None)
+        universe = (
             condition_universe
             if condition_universe is not None
             else build_condition_universe(
                 execution_target_profile=execution_target_profile,
                 target_operation=target_operation,
                 target_observations=target_observations,
-            ),
-            required=condition_required,
+            )
+        )
+        reply_criteria = _reply_only_criteria(criteria, assessment, safe_outcome)
+        # Last, so the correction for a draft that fails another check as well
+        # names that check: a failed condition can still be dropped afterwards.
+        condition_outcome = _validate_discriminating_condition(
+            condition,
+            assessment,
+            universe,
+            required=condition_required and not reply_criteria,
             named_operations=_named_operations(criteria, safe_outcome),
             claim=ConditionClaim(
                 uca_type=context.ica.uca_type,
@@ -207,10 +213,54 @@ def _validate_normal_provider_payload(
                 safe_outcome=safe_outcome,
             ),
         )
+        if condition is None and reply_criteria and universe.grounded:
+            condition_omitted_reason = _reply_only_omitted_reason(reply_criteria)
     return _NormalDraftCheck(
         draft=value,
         normalizations=tuple(normalizations),
         condition_outcome=condition_outcome,
+        condition_omitted_reason=condition_omitted_reason,
+    )
+
+
+_REPLY_CLAIM = "reply"
+
+
+def _reply_only_criteria(
+    criteria: Sequence[ObservationCriterion],
+    assessment: ObservationAssessment,
+    safe_outcome: SafeObservableOutcome | None,
+) -> tuple[str, ...]:
+    """Return the supported criterion IDs when every observable claim is a reply.
+
+    A reply-level claim is judged on the assistant reply, and no condition
+    operand reaches reply text, so such a scenario may publish without a
+    condition. Returns ``()`` when any supported criterion or an observable
+    safe outcome claims another level, or when nothing is supported.
+    """
+
+    supported = set(assessment.supported_criteria)
+    observed = [item for item in criteria if item.criterion_id in supported]
+    if not observed or any(item.claim_level != _REPLY_CLAIM for item in observed):
+        return ()
+    if (
+        safe_outcome is not None
+        and safe_outcome.observable
+        and safe_outcome.claim_level != _REPLY_CLAIM
+    ):
+        return ()
+    return tuple(item.criterion_id for item in observed)
+
+
+def _reply_only_omitted_reason(criterion_ids: Sequence[str]) -> str:
+    """Return the code-owned note for a reply-only scenario without a condition."""
+
+    return (
+        "Every observable claim is at reply level ("
+        + ", ".join(criterion_ids)
+        + "), judged on the assistant reply; a discriminating condition "
+        "compares operation arguments, facts, and calls, so the scenario is "
+        "published without one."
     )
 
 
@@ -224,6 +274,8 @@ class _NormalDraftCheck:
     route: str | None = None
     # The check of the draft's condition; None when no condition was checked.
     condition_outcome: ConditionCheckOutcome | None = None
+    # Why a reply-only draft publishes without a condition; None otherwise.
+    condition_omitted_reason: str | None = None
 
 
 def _normal_adversary_and_outcome(
@@ -652,10 +704,10 @@ def _require_condition(required: bool) -> None:
     if required:
         raise ValidationIssueError(
             IssueCode.discriminating_condition_missing,
-            "executable scenarios require a discriminating_condition when "
-            "target operations or observations are supplied. Change only "
-            "discriminating_condition; keep observation_criteria and "
-            "safe_observable_outcome unchanged.",
+            "a scenario with an observable claim above reply level requires a "
+            "discriminating_condition when target operations or observations "
+            "are supplied; only a scenario whose observable claims are all at "
+            "reply level may set it to null.",
         )
 
 

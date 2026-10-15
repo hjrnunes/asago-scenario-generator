@@ -329,6 +329,8 @@ def _generate_semantics(
                 issues, route, corrections
             )
         published = next((check for check in checks if check.draft is draft), None)
+        if condition_omitted_reason is None and published is not None:
+            condition_omitted_reason = published.condition_omitted_reason
         try:
             result, error = _finish_normal_context_bdi(
                 draft,

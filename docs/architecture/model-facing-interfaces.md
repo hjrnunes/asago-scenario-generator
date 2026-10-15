@@ -165,7 +165,15 @@ rewrite it before returning. Code does not check this agreement.
 When an observation contract and target operations or observations are
 supplied, every executable Stage 5 scenario also returns
 `unsafe_outcome.discriminating_condition`; analytical-only scenarios return
-`null`, and target-blind requests do not see the field. The request lists
+`null`, and target-blind requests do not see the field. A scenario whose
+observable claims are all at `reply` level (every supported criterion and an
+observable safe outcome) may also return `null` when no supplied argument,
+fact, or call separates the unsafe case: the reply is judged on its text,
+which no operand reaches. Validation accepts that `null` on the first request,
+and code publishes the scenario with a code-owned `condition_omitted_reason`
+naming the reply criteria. A condition such a scenario does return is checked
+and kept as for any other. Any observable claim above `reply` level still
+requires a condition (`discriminating_condition_missing`). The request lists
 every citable fact as an absolute path with its type (`object`, `list`, or
 `value`) and scalar value, including read-observation
 `<ref>.arguments.<name>` facts, followed by one worked observed selection
@@ -206,23 +214,33 @@ with synthetic names. The condition holds a one-line `statement`, one to six
   is not separated by any comparison over supplied values. The request tells
   the model not to stand in for it with a record predicate that safe and unsafe
   calls both satisfy, or with a `not_called` on a lookup (named only when the
-  contract offers `not_called`), and to declare the scenario analytical-only.
+  contract offers `not_called`). A harm in a reply is claimed at `reply` level
+  with a `null` condition; any other is declared analytical-only.
 - Ownership compares the selected record's owner or party field with the
   session value, never a record key with a literal key. A free-text argument
   compared with a supplied fact value or label holds on almost every call and
   does not separate unsafe from safe calls.
 
-When no supplied value separates the unsafe call, the model declares the
-scenario analytical-only: `unsafe_outcome.discriminating_condition` is `null`,
-and every `observation_criteria` entry and `safe_observable_outcome` has
-`observable: false` with `claim_level`, `evidence`, and `operation_name` null.
-The `literal_unsupported` correction names this path. The condition schema has
-no statement-only form (`comparisons` requires at least one entry).
+When no supplied argument, fact, call order, or omitted call separates the
+unsafe case, the model sets `unsafe_outcome.discriminating_condition` to
+`null` and keeps only reply-level observable claims: a reply criterion stays
+when the assistant reply shows the unsafe outcome, every other
+`observation_criteria` entry gets `observable: false` with `claim_level`,
+`evidence`, and `operation_name` null, and `safe_observable_outcome` becomes
+the reply claim. With no reply criterion left the scenario is analytical-only
+and the safe outcome is not observable. The `discriminating_condition_missing`
+and `literal_unsupported` corrections give this same way out in the same
+words, so the two never pull a draft in opposite directions. The condition
+schema has no statement-only form (`comparisons` requires at least one entry).
 
 The same request tells the model that a precondition is not an observation
 requirement: a claim about what a reply states is observable through
 `assistant_message` when the supplied facts establish the precondition and
 the reference to judge it, even though returned results are not captured.
+Only when the target action is a tool call (the request's expected action
+kind) does the request add the matching paragraph for calls: a claim that a
+call with given argument values occurred, or did not, is observable at
+`command_attempt` when the test conversation sets the precondition.
 
 Reply content is not an operand. Code resolves every reference against the
 request's operation inventory and fact paths, makes `argument_values` paths

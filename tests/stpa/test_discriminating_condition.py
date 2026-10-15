@@ -84,6 +84,7 @@ from tests.helpers.normal_authoring_wire import (
 from tests.helpers.scenario_deduplication import _scenario
 from tests.helpers.discriminating_condition import (
     ANALYTICAL_NOTE,
+    REPLY_ONLY_NOTE,
     STAGE5_PROMPT_TOKEN_BUDGET,
     _bad_condition_payload,
     _check,
@@ -98,6 +99,7 @@ from tests.helpers.discriminating_condition import (
     _placeholder_payload,
     _universe,
     _value,
+    reply_only_payload,
 )
 
 
@@ -635,6 +637,55 @@ def test_ungrounded_request_has_no_condition_key(tmp_path) -> None:
     assert "discriminating_condition" not in json.dumps(schema)
     rendered = client.calls[0].system_prompt + client.calls[0].user_prompt
     assert "discriminating_condition" not in rendered
+
+
+def test_reply_only_scenario_publishes_without_a_condition_on_the_first_request(
+    tmp_path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue([reply_only_payload()])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 1
+    assert result.discriminating_condition is None
+    assert result.condition_check is None
+    assert result.condition_omitted_reason == REPLY_ONLY_NOTE
+    assert result.observation_assessment.disposition == "executable"
+    assert result.tool_call_condition_status.status == "not_executable"
+    assert REPLY_ONLY_NOTE in result.tool_call_condition_status.detail
+
+
+def test_reply_only_scenario_keeps_a_condition_it_returns(tmp_path) -> None:
+    client = MockLLMClient()
+    client.set_response_queue([reply_only_payload(_ownership_condition("ORD-2"))])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 1
+    assert result.discriminating_condition is not None
+    assert result.condition_check is not None
+    assert result.condition_omitted_reason is None
+
+
+def test_a_command_attempt_beside_a_reply_still_requires_a_condition(
+    tmp_path,
+) -> None:
+    payload = reply_only_payload()
+    payload["unsafe_outcome"]["observation_criteria"].append(
+        _payload_with(None)["unsafe_outcome"]["observation_criteria"][0]
+    )
+    client = MockLLMClient()
+    client.set_response_queue([copy.deepcopy(payload), copy.deepcopy(payload)])
+
+    _generate(client, tmp_path)
+
+    assert client.call_count == 2
+    assert "discriminating_condition_missing" in client.calls[1].user_prompt
 
 
 def test_analytical_only_condition_is_discarded_with_a_note(tmp_path) -> None:
