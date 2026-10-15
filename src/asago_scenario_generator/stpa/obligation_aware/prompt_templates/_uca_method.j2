@@ -10,10 +10,7 @@ may explain the ICA later, but is not the real hazardous context itself.
 
 Four ICA types:
 
-- NOT_PROVIDED: the required control action is absent when it is needed.
-- INCORRECT: the action is provided, but its value, content, destination, or effect is unsafe.
-- WRONG_TIMING: the action is provided too early, too late, or in an unsafe order.
-- WRONG_DURATION: a continuous action stops too soon, continues too long, or is applied for an unsafe duration.
+{% include "_uca_types.j2" %}
 
 Apply the category to the exact named action, not a neighbouring safeguard.
 For `release a laboratory sample`, missing approval is not NOT_PROVIDED release:

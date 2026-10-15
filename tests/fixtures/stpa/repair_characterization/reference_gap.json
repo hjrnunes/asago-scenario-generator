@@ -1,0 +1,108 @@
+{
+ "analysis": {
+  "hazards": [
+   {
+    "description": "The agent executes an unintended payment.",
+    "hazard_id": "H-1",
+    "related_losses": [
+     "L-1"
+    ]
+   },
+   {
+    "description": "The assistant misrepresents merchant-specific policies or processes refunds against the wrong merchant via `process_refund` or `retrieve_policy` operations.",
+    "hazard_id": "H-2",
+    "related_losses": [
+     "L-2",
+     "L-1"
+    ]
+   }
+  ],
+  "risk_card_losses": [
+   {
+    "description": "Unauthorized transaction",
+    "loss_id": "L-1",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "atlas-001"
+    ]
+   }
+  ],
+  "risk_dispositions": [
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-001"
+   }
+  ],
+  "security_constraints": [
+   {
+    "applies_when": [
+     "before execution"
+    ],
+    "constraint_id": "SC-1",
+    "description": "The agent must confirm every unintended payment. Applies when: before execution.",
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The agent must confirm every unintended payment."
+   },
+   {
+    "applies_when": [
+     "a refund is requested via `process_refund`",
+     "a policy is retrieved via `retrieve_policy`"
+    ],
+    "behavior_class": "wrong_information",
+    "constraint_id": "SC-2",
+    "description": "The assistant must only process refunds or provide policy details that align with the merchant associated with the specific `order_id`. Applies when: a refund is requested via `process_refund`; a policy is retrieved via `retrieve_policy`.",
+    "related_hazards": [
+     "H-2"
+    ],
+    "rule": "The assistant must only process refunds or provide policy details that align with the merchant associated with the specific `order_id`."
+   }
+  ],
+  "use_case_losses": [
+   {
+    "description": "Financial or reputational harm to merchants due to incorrect refund processing or inaccurate representation of their policies.",
+    "loss_id": "L-2",
+    "provenance": "use_case",
+    "source_risk_cards": []
+   }
+  ]
+ },
+ "records": [
+  {
+   "applied": {
+    "entries": [
+     "SC-2.related_hazards"
+    ],
+    "references": [
+     "H-2"
+    ]
+   },
+   "attempt": "repair",
+   "identity": "SC-2.related_hazards",
+   "kind": "repair",
+   "outcome": "repaired",
+   "proposed": {
+    "entries": [
+     "SC-2.related_hazards"
+    ],
+    "references": [
+     "H-2"
+    ]
+   },
+   "raw_step": "gap_analysis_repair",
+   "reason": "security_constraints.related_hazards unknown IDs: SC-2 -> merchant_policy_constraint; permitted correction: for each unknown entry, remove it or replace it with one listed replacement ID; the list has no other ID to keep; name no ID outside the replacement IDs and return at least one ID",
+   "stage": "gap_analysis"
+  }
+ ],
+ "steps": [
+  "risk_derivation",
+  "gap_analysis",
+  "gap_analysis_repair"
+ ],
+ "warnings": []
+}

@@ -1,79 +1,44 @@
 # SSSOM TSV for asago-scenario-generator abstract attack patterns (Batch A: T1/T2/T3/T4)
-# Provenance mappings: OWASP origin, LAAF technique, and MITRE ATLAS correspondences
+# Provenance mappings: MITRE ATLAS technique correspondences
 # curie_map:
 #   asago-scenario-generator: https://github.com/asago-ai/asago-scenario-generator/
-#   laaf: https://github.com/laaf-ai/laaf/
 #   mitre-atlas: https://atlas.mitre.org/
 #   skos: http://www.w3.org/2004/02/skos/core#
 #   semapv: https://w3id.org/semapv/vocab/
 subject_id	subject_source	predicate_id	object_id	object_source	mapping_justification
-AP-T1-01	asago-scenario-generator	skos:relatedMatch	S3	laaf	semapv:ManualMappingCuration
-AP-T1-01	asago-scenario-generator	skos:relatedMatch	L2	laaf	semapv:ManualMappingCuration
 AP-T1-01	asago-scenario-generator	skos:relatedMatch	AML.T0070	mitre-atlas	semapv:ManualMappingCuration
 AP-T1-01	asago-scenario-generator	skos:relatedMatch	AML.T0043	mitre-atlas	semapv:ManualMappingCuration
-AP-T1-02	asago-scenario-generator	skos:relatedMatch	S3	laaf	semapv:ManualMappingCuration
-AP-T1-02	asago-scenario-generator	skos:relatedMatch	L1	laaf	semapv:ManualMappingCuration
 AP-T1-02	asago-scenario-generator	skos:relatedMatch	AML.T0043	mitre-atlas	semapv:ManualMappingCuration
 AP-T1-02	asago-scenario-generator	skos:relatedMatch	AML.T0031	mitre-atlas	semapv:ManualMappingCuration
-AP-T1-03	asago-scenario-generator	skos:relatedMatch	L2	laaf	semapv:ManualMappingCuration
-AP-T1-03	asago-scenario-generator	skos:relatedMatch	T5	laaf	semapv:ManualMappingCuration
 AP-T1-03	asago-scenario-generator	skos:relatedMatch	AML.T0070	mitre-atlas	semapv:ManualMappingCuration
 AP-T1-03	asago-scenario-generator	skos:relatedMatch	AML.T0031	mitre-atlas	semapv:ManualMappingCuration
-AP-T1-04	asago-scenario-generator	skos:relatedMatch	L5	laaf	semapv:ManualMappingCuration
-AP-T1-04	asago-scenario-generator	skos:relatedMatch	T8	laaf	semapv:ManualMappingCuration
 AP-T1-04	asago-scenario-generator	skos:relatedMatch	AML.T0020	mitre-atlas	semapv:ManualMappingCuration
 AP-T1-04	asago-scenario-generator	skos:relatedMatch	AML.T0070	mitre-atlas	semapv:ManualMappingCuration
 AP-T1-04	asago-scenario-generator	skos:relatedMatch	AML.T0071	mitre-atlas	semapv:ManualMappingCuration
-AP-T2-01	asago-scenario-generator	skos:relatedMatch	S4	laaf	semapv:ManualMappingCuration
-AP-T2-01	asago-scenario-generator	skos:relatedMatch	S8	laaf	semapv:ManualMappingCuration
 AP-T2-01	asago-scenario-generator	skos:relatedMatch	AML.T0053	mitre-atlas	semapv:ManualMappingCuration
 AP-T2-01	asago-scenario-generator	skos:relatedMatch	AML.T0051.000	mitre-atlas	semapv:ManualMappingCuration
-AP-T2-02	asago-scenario-generator	skos:relatedMatch	L1	laaf	semapv:ManualMappingCuration
-AP-T2-02	asago-scenario-generator	skos:relatedMatch	L3	laaf	semapv:ManualMappingCuration
 AP-T2-02	asago-scenario-generator	skos:relatedMatch	AML.T0053	mitre-atlas	semapv:ManualMappingCuration
 AP-T2-02	asago-scenario-generator	skos:relatedMatch	AML.T0048	mitre-atlas	semapv:ManualMappingCuration
-AP-T2-03	asago-scenario-generator	skos:relatedMatch	M3	laaf	semapv:ManualMappingCuration
-AP-T2-03	asago-scenario-generator	skos:relatedMatch	T3	laaf	semapv:ManualMappingCuration
 AP-T2-03	asago-scenario-generator	skos:relatedMatch	AML.T0053	mitre-atlas	semapv:ManualMappingCuration
 AP-T2-03	asago-scenario-generator	skos:relatedMatch	AML.T0048	mitre-atlas	semapv:ManualMappingCuration
-AP-T2-04	asago-scenario-generator	skos:relatedMatch	S3	laaf	semapv:ManualMappingCuration
-AP-T2-04	asago-scenario-generator	skos:relatedMatch	T2	laaf	semapv:ManualMappingCuration
 AP-T2-04	asago-scenario-generator	skos:relatedMatch	AML.T0053	mitre-atlas	semapv:ManualMappingCuration
 AP-T2-04	asago-scenario-generator	skos:relatedMatch	AML.T0070	mitre-atlas	semapv:ManualMappingCuration
 AP-T2-04	asago-scenario-generator	skos:relatedMatch	AML.T0071	mitre-atlas	semapv:ManualMappingCuration
-AP-T2-05	asago-scenario-generator	skos:relatedMatch	S3	laaf	semapv:ManualMappingCuration
-AP-T2-05	asago-scenario-generator	skos:relatedMatch	L4	laaf	semapv:ManualMappingCuration
 AP-T2-05	asago-scenario-generator	skos:relatedMatch	AML.T0070	mitre-atlas	semapv:ManualMappingCuration
 AP-T2-05	asago-scenario-generator	skos:relatedMatch	AML.T0066	mitre-atlas	semapv:ManualMappingCuration
 AP-T2-05	asago-scenario-generator	skos:relatedMatch	AML.T0071	mitre-atlas	semapv:ManualMappingCuration
-AP-T2-06	asago-scenario-generator	skos:relatedMatch	S8	laaf	semapv:ManualMappingCuration
-AP-T2-06	asago-scenario-generator	skos:relatedMatch	M3	laaf	semapv:ManualMappingCuration
 AP-T2-06	asago-scenario-generator	skos:relatedMatch	AML.T0053	mitre-atlas	semapv:ManualMappingCuration
 AP-T2-06	asago-scenario-generator	skos:relatedMatch	AML.T0051.001	mitre-atlas	semapv:ManualMappingCuration
-AP-T3-01	asago-scenario-generator	skos:relatedMatch	L1	laaf	semapv:ManualMappingCuration
-AP-T3-01	asago-scenario-generator	skos:relatedMatch	M2	laaf	semapv:ManualMappingCuration
 AP-T3-01	asago-scenario-generator	skos:relatedMatch	AML.T0012	mitre-atlas	semapv:ManualMappingCuration
 AP-T3-01	asago-scenario-generator	skos:relatedMatch	AML.T0053	mitre-atlas	semapv:ManualMappingCuration
-AP-T3-02	asago-scenario-generator	skos:relatedMatch	S6	laaf	semapv:ManualMappingCuration
-AP-T3-02	asago-scenario-generator	skos:relatedMatch	L1	laaf	semapv:ManualMappingCuration
 AP-T3-02	asago-scenario-generator	skos:relatedMatch	AML.T0053	mitre-atlas	semapv:ManualMappingCuration
-AP-T3-03	asago-scenario-generator	skos:relatedMatch	M1	laaf	semapv:ManualMappingCuration
-AP-T3-03	asago-scenario-generator	skos:relatedMatch	M2	laaf	semapv:ManualMappingCuration
 AP-T3-03	asago-scenario-generator	skos:relatedMatch	AML.T0073	mitre-atlas	semapv:ManualMappingCuration
 AP-T3-03	asago-scenario-generator	skos:relatedMatch	AML.T0053	mitre-atlas	semapv:ManualMappingCuration
-AP-T4-01	asago-scenario-generator	skos:relatedMatch	S4	laaf	semapv:ManualMappingCuration
-AP-T4-01	asago-scenario-generator	skos:relatedMatch	S3	laaf	semapv:ManualMappingCuration
 AP-T4-01	asago-scenario-generator	skos:relatedMatch	AML.T0029	mitre-atlas	semapv:ManualMappingCuration
 AP-T4-01	asago-scenario-generator	skos:relatedMatch	AML.T0034	mitre-atlas	semapv:ManualMappingCuration
-AP-T4-02	asago-scenario-generator	skos:relatedMatch	T8	laaf	semapv:ManualMappingCuration
-AP-T4-02	asago-scenario-generator	skos:relatedMatch	L5	laaf	semapv:ManualMappingCuration
 AP-T4-02	asago-scenario-generator	skos:relatedMatch	AML.T0029	mitre-atlas	semapv:ManualMappingCuration
 AP-T4-02	asago-scenario-generator	skos:relatedMatch	AML.T0034	mitre-atlas	semapv:ManualMappingCuration
-AP-T4-03	asago-scenario-generator	skos:relatedMatch	S4	laaf	semapv:ManualMappingCuration
-AP-T4-03	asago-scenario-generator	skos:relatedMatch	T3	laaf	semapv:ManualMappingCuration
 AP-T4-03	asago-scenario-generator	skos:relatedMatch	AML.T0029	mitre-atlas	semapv:ManualMappingCuration
 AP-T4-03	asago-scenario-generator	skos:relatedMatch	AML.T0034	mitre-atlas	semapv:ManualMappingCuration
-AP-T4-04	asago-scenario-generator	skos:relatedMatch	T8	laaf	semapv:ManualMappingCuration
-AP-T4-04	asago-scenario-generator	skos:relatedMatch	S3	laaf	semapv:ManualMappingCuration
 AP-T4-04	asago-scenario-generator	skos:relatedMatch	AML.T0029	mitre-atlas	semapv:ManualMappingCuration
 AP-T4-04	asago-scenario-generator	skos:relatedMatch	AML.T0034	mitre-atlas	semapv:ManualMappingCuration

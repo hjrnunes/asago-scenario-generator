@@ -11,6 +11,7 @@ import yaml
 
 from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.ica_merge import ICA_MERGES_FILENAME
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.models.slot_hazard_offer import (
     SLOT_HAZARD_OFFERS_FILENAME,
@@ -80,6 +81,13 @@ def _persist_slot_hazard_offers(output_dir: Path, report: Any | None) -> Path | 
     if report is None:
         return None
     return _persist_sidecar(output_dir, SLOT_HAZARD_OFFERS_FILENAME, report)
+
+
+def _persist_ica_merges(output_dir: Path, report: Any | None) -> Path | None:
+    """Publish the ICA merge record when slot filling merged any findings."""
+    if report is None:
+        return None
+    return _persist_sidecar(output_dir, ICA_MERGES_FILENAME, report)
 
 
 def _persist_target_realization(
@@ -158,12 +166,12 @@ def _artifact_paths(
     report_path: Path | None,
     hazard_offers_path: Path | None = None,
     policy_coverage_path: Path | None = None,
+    ica_merges_path: Path | None = None,
 ) -> dict[str, Path]:
     """Add each optional published artifact to the always-written ones."""
-    if hazard_offers_path is not None:
-        artifact_paths[hazard_offers_path.name] = hazard_offers_path
-    if policy_coverage_path is not None:
-        artifact_paths[policy_coverage_path.name] = policy_coverage_path
+    for sidecar in (hazard_offers_path, ica_merges_path, policy_coverage_path):
+        if sidecar is not None:
+            artifact_paths[sidecar.name] = sidecar
     if target_realization_path is not None:
         artifact_paths[TARGET_REALIZATION_FILENAME] = target_realization_path
     if operation_enrichment is not None:

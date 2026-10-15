@@ -18,7 +18,6 @@ from pathlib import Path
 from typing import Annotated, Any, Literal, TypeVar
 
 from pydantic import (
-    AliasChoices,
     BaseModel,
     BeforeValidator,
     ConfigDict,
@@ -172,19 +171,18 @@ class ResponsibilitySet(BaseModel):
 class ControlElementSet(BaseModel):
     """Call 2b output: control actions, feedback channels, and controlled processes."""
 
-    # This is an internal response envelope, not the durable control-structure
-    # model.  The provider-facing contract calls this collection ``feedback``
-    # (the canonical domain attribute remains ``feedback_channels``), while
-    # accepting the historical name on input for compatibility with existing
-    # fixtures and callers.
-    model_config = ConfigDict(populate_by_name=True, extra="forbid")
+    # This is the provider-facing envelope: the request schema, the decoded
+    # reply, and the correction prompt all call the collection ``feedback``.
+    # Domain readers keep the ``feedback_channels`` name through the property.
+    model_config = ConfigDict(extra="forbid")
 
     control_actions: list[ControlAction] = []
-    feedback_channels: list[FeedbackChannel] = Field(
-        default_factory=list,
-        validation_alias="feedback",
-    )
+    feedback: list[FeedbackChannel] = Field(default_factory=list)
     controlled_processes: list[ControlledProcess] = []
+
+    @property
+    def feedback_channels(self) -> list[FeedbackChannel]:
+        return self.feedback
 
 
 class _ResponsibilityTarget(ElementRef):
@@ -223,8 +221,20 @@ class _ControlElementProviderSet(ControlElementSet):
     # No default on either collection, so the request schema lists both in
     # ``required``.  A docstring note here would reach the model as the
     # schema description.
-    feedback_channels: list[FeedbackChannel] = Field(validation_alias="feedback")
+    feedback: list[FeedbackChannel]
     controlled_processes: list[ControlledProcess]
+
+
+class _MissingActionProviderSet(BaseModel):
+    """The repair reply: control actions only, for the owners that had none.
+
+    It offers the same two action forms as ``_ControlElementProviderSet``, so
+    constrained generation sees the target and effect invariant.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    control_actions: list[_ResponsibilityAction | _ProcessAction] = Field(min_length=1)
 
 
 class CoordinationAnalysis(BaseModel):
@@ -715,24 +725,23 @@ def _holds_nothing(value: Any) -> bool:
     return value in (None, "", [], {})
 
 
+# The Call 2a wire models below reach the model as the request schema, and a
+# docstring becomes a schema description.  Their notes are comments for that
+# reason.
+
+
+# A responsibility constraint whose omitted ID normalization supplies:
+# ``id_normalization`` numbers every RC by its position, so an RC whose ID key
+# the model misspelled still has a position and keeps its meaning.
 class _Call2aConstraint(ResponsibilityConstraint):
-    """A responsibility constraint whose omitted ID normalization supplies.
-
-    ``id_normalization`` numbers every RC by its position, so an RC whose ID
-    key the model misspelled still has a position and keeps its meaning.
-    """
-
     rc_id: str = ""
 
 
+# One Call 2a responsibility; a field it does not declare is an error.  A
+# generic ``id`` stands for ``resp_id``.  An undeclared field that holds nothing
+# carries no meaning to lose, so it is dropped instead of rejected; one that
+# holds content fails with the list of fields to keep.
 class _Call2aResponsibility(BaseModel):
-    """One Call 2a responsibility; a field it does not declare is an error.
-
-    A generic ``id`` stands for ``resp_id``.  An undeclared field that holds
-    nothing carries no meaning to lose, so it is dropped instead of rejected;
-    one that holds content fails with the list of fields to keep.
-    """
-
     model_config = ConfigDict(extra="forbid")
 
     resp_id: StrictStr
@@ -765,17 +774,17 @@ class _Call2aResponsibility(BaseModel):
         return record
 
 
-class _Call2aResponse(BaseModel):
-    """The Call 2a response as the model must write it."""
-
-    model_config = ConfigDict(extra="forbid")
-
+# The Call 2a response as the model must write it, and the schema the request
+# sends.  It narrows ``ResponsibilitySet`` to the closed wire objects the way
+# ``_ControlElementProviderSet`` narrows Call 2b, so a reply the schema allows
+# is a reply the wire models accept.
+class _ResponsibilityProviderSet(ResponsibilitySet):
     responsibilities: list[_Call2aResponsibility] = Field(min_length=1)
 
 
 def _validate_responsibility_wire(value: Any) -> None:
     """Check a decoded Call 2a response against its closed wire models."""
-    _Call2aResponse.model_validate(value, context=ASSEMBLY_DEFERRED)
+    _ResponsibilityProviderSet.model_validate(value, context=ASSEMBLY_DEFERRED)
 
 
 _TOP_LEVEL_RESPONSIBILITY_NOTE = (
@@ -805,7 +814,7 @@ def _top_level_responsibility_note(error: Exception) -> str:
 
 def parse_responsibility_set_response(value: Any) -> ResponsibilitySet:
     """Parse a Call 2a response; IDs stay as written for ``id_normalization``."""
-    wire = _Call2aResponse.model_validate(value, context=ASSEMBLY_DEFERRED)
+    wire = _ResponsibilityProviderSet.model_validate(value, context=ASSEMBLY_DEFERRED)
     return ResponsibilitySet.model_construct(
         responsibilities=[
             Responsibility.model_construct(
@@ -992,9 +1001,6 @@ class _Call2bProcess(_Call2bWire):
 class _Call2bResponse(_Call2bWire):
     """The Call 2b response as the model must write it.
 
-    ``feedback`` is the provider-facing collection name; the historical
-    ``feedback_channels`` spelling is accepted on input, never both.
-
     The request schema requires ``controlled_processes``, but a server that
     does not enforce it can still return a reply without the key.  Such a
     reply declares no controlled process: its ``CP-*`` references then fail
@@ -1003,21 +1009,14 @@ class _Call2bResponse(_Call2bWire):
     """
 
     control_actions: list[_Call2bAction] = Field(min_length=1)
-    feedback: list[_Call2bFeedback] = Field(
-        min_length=1,
-        validation_alias=AliasChoices("feedback", "feedback_channels"),
-    )
+    feedback: list[_Call2bFeedback] = Field(min_length=1)
     controlled_processes: list[_Call2bProcess] = Field(default_factory=list)
 
-    @model_validator(mode="before")
-    @classmethod
-    def _one_feedback_spelling(cls, value: Any) -> Any:
-        if isinstance(value, dict) and {"feedback", "feedback_channels"} <= set(value):
-            raise ValueError(
-                "Call 2b response must use one feedback collection, not both "
-                "feedback and feedback_channels"
-            )
-        return value
+
+class _Call2bMissingActions(_Call2bWire):
+    """The reply to the repair request: control actions and nothing else."""
+
+    control_actions: list[_Call2bAction] = Field(min_length=1)
 
 
 def _decode_control_element_payload(value: Any) -> Any:
@@ -1067,7 +1066,7 @@ def parse_control_element_set_response(
         )
     return ControlElementSet.model_construct(
         control_actions=actions,
-        feedback_channels=feedback_channels,
+        feedback=feedback_channels,
         controlled_processes=controlled_processes,
     )
 
@@ -1092,20 +1091,43 @@ def _responsibility_owner_numbers(
     return owner_numbers
 
 
-def _check_every_responsibility_is_served(
+class MissingControlActionsError(ValueError):
+    """A Call 2b response leaves responsibilities without a control action.
+
+    ``owners`` holds their numbers in ascending order.  ``controlled_processes``
+    holds the processes the response declared, so a repair can offer them as
+    targets.
+    """
+
+    def __init__(
+        self,
+        owners: Sequence[int],
+        controlled_processes: Sequence[ControlledProcess] = (),
+    ) -> None:
+        self.owners = tuple(sorted(owners))
+        self.controlled_processes = tuple(controlled_processes)
+        super().__init__(
+            "every responsibility requires a control action; missing owners: "
+            + ", ".join(f"RESP-{number}" for number in self.owners)
+        )
+
+
+def _check_every_responsibility_has_an_action(
     owner_numbers: set[int],
-    known_pm_ids: set[str],
     actions: Sequence[ControlAction],
-    feedback_channels: Sequence[FeedbackChannel],
+    controlled_processes: Sequence[ControlledProcess],
 ) -> None:
-    """Require an action per responsibility and a feedback update per PM part."""
+    """Require a control action for every responsibility."""
     action_owners = {_owner_number(action.ca_id, prefix="CA") for action in actions}
     missing_action_owners = owner_numbers - action_owners
     if missing_action_owners:
-        raise ValueError(
-            "every responsibility requires a control action; missing owners: "
-            + ", ".join(f"RESP-{number}" for number in sorted(missing_action_owners))
-        )
+        raise MissingControlActionsError(missing_action_owners, controlled_processes)
+
+
+def _check_every_process_model_part_has_feedback(
+    known_pm_ids: set[str], feedback_channels: Sequence[FeedbackChannel]
+) -> None:
+    """Require a feedback update for every process model part."""
     updated_pm_ids = {channel.updates for channel in feedback_channels}
     missing_pm_ids = known_pm_ids - updated_pm_ids
     if missing_pm_ids:
@@ -1167,9 +1189,10 @@ def _check_control_elements_against_responsibilities(
         for responsibility in responsibilities
         for pm in responsibility.process_model_parts
     }
-    _check_every_responsibility_is_served(
-        owner_numbers, known_pm_ids, actions, feedback_channels
+    _check_every_responsibility_has_an_action(
+        owner_numbers, actions, controlled_processes
     )
+    _check_every_process_model_part_has_feedback(known_pm_ids, feedback_channels)
     unknown = _unknown_element_refs(
         actions,
         feedback_channels,
@@ -2000,7 +2023,6 @@ def _run_stage2_llm_call(
     user_prompt_kwargs: dict[str, Any],
     response_format: type[_Stage2ModelT],
     step: str,
-    allow_unvalidated: bool = False,
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[Any], None] | None = None,
     response_parser: (
@@ -2042,7 +2064,6 @@ def _run_stage2_llm_call(
             error_note=error_note,
         ),
         temperature=temperature,
-        allow_unvalidated=allow_unvalidated,
         raw_result_validator=raw_result_validator,
         response_parser=response_parser,
         result_validator=result_validator,
@@ -2133,9 +2154,8 @@ def _call_2a_responsibilities(
                 else {}
             ),
         },
-        response_format=ResponsibilitySet,
+        response_format=_ResponsibilityProviderSet,
         step="call_2a_responsibilities",
-        allow_unvalidated=True,
         raw_result_validator=_validate_responsibility_wire,
         response_parser=_parse_responsibility_result,
         error_note=_top_level_responsibility_note,
@@ -2168,20 +2188,22 @@ def _call_2b_control_elements(
             result.content, responsibilities=responsibility_set.responsibilities
         )
 
-    def correct_references(
+    def recover(
         outcome: CallOutcome[ControlElementSet], system_prompt: str, user_prompt: str
     ) -> ControlElementSet | None:
-        return _correct_call_2b_references(
-            outcome,
-            llm_client=llm_client,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-            responsibilities=responsibility_set.responsibilities,
-            parse=parse,
-            run_dir=run_dir,
-            loader=loader,
-            temperature=temperature,
-        )
+        request = {
+            "llm_client": llm_client,
+            "system_prompt": system_prompt,
+            "user_prompt": user_prompt,
+            "responsibilities": responsibility_set.responsibilities,
+            "run_dir": run_dir,
+            "loader": loader,
+            "temperature": temperature,
+        }
+        repaired = _repair_call_2b_missing_actions(outcome, **request)
+        if repaired is not None:
+            return repaired
+        return _correct_call_2b_references(outcome, parse=parse, **request)
 
     return _run_stage2_llm_call(
         llm_client=llm_client,
@@ -2200,8 +2222,118 @@ def _call_2b_control_elements(
         # Call 2b is semantic output.  Its stage-local parser rejects unknown
         # carriers and missing meaning before canonical IDs are repaired.
         response_parser=parse,
-        recover=correct_references,
+        recover=recover,
     )
+
+
+def _repair_call_2b_missing_actions(
+    outcome: CallOutcome[ControlElementSet],
+    *,
+    llm_client: LLMClient,
+    system_prompt: str,
+    user_prompt: str,
+    responsibilities: Sequence[Responsibility],
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+) -> ControlElementSet | None:
+    """Send the one repair request for responsibilities without a control action.
+
+    It runs only when the generic correction is spent and the last response
+    still leaves a responsibility without an action.  The request names those
+    owners and the rule, shows the last response, and asks for control actions
+    for exactly those owners.  The reply is merged into the last response and
+    the stage post-check runs again.  There is no second request: a failed
+    repair stops the step, and every other failure is declined.
+    """
+    failure = outcome.failure
+    if not isinstance(failure, MissingControlActionsError) or outcome.result is None:
+        return None
+    prior_content = outcome.result.content
+
+    def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
+        merged = _merge_missing_actions(
+            prior_content,
+            result.content,
+            owners=failure.owners,
+            responsibilities=responsibilities,
+        )
+        return parse_control_element_set_response(
+            merged, responsibilities=responsibilities
+        )
+
+    feedback = "\n\n" + loader.render_prompt(
+        "stage2_call2b_missing_actions_correction.j2",
+        missing_owners=[
+            responsibility
+            for responsibility in responsibilities
+            if _extract_resp_num(responsibility.resp_id) in failure.owners
+        ],
+        controlled_processes=failure.controlled_processes,
+    )
+    repaired = call_with_policy(
+        llm_client=llm_client,
+        system_prompt=system_prompt,
+        user_prompt=correction_prompt(
+            original_prompt=user_prompt,
+            feedback=feedback,
+            # The generic correction names the failure as a ValueError; keep
+            # the class name out of this request too.
+            error=ValueError(str(failure)),
+            response_format=_MissingActionProviderSet,
+            include_schema=False,
+            prior_result=outcome.result,
+            include_prior_response=True,
+        ),
+        response_format=_MissingActionProviderSet,
+        run_dir=run_dir,
+        stage=STAGE,
+        step="call_2b_control_elements",
+        policy=CorrectionPolicy(),
+        temperature=temperature,
+        response_parser=parse,
+        first_attempt_number=outcome.attempt_number + 1,
+    )
+    if repaired.error is not None:
+        raise StageError(
+            stage=STAGE,
+            step="call_2b_control_elements",
+            message=f"missing control action repair failed: {repaired.error}",
+        )
+    return repaired.value
+
+
+def _merge_missing_actions(
+    prior_content: Any,
+    reply_content: Any,
+    *,
+    owners: Sequence[int],
+    responsibilities: Sequence[Responsibility],
+) -> dict[str, Any]:
+    """Add a repair reply's control actions to the response it repairs.
+
+    The reply holds only ``control_actions``, each with a well-formed ID, and
+    every action belongs to an owner that was missing.  The merged response
+    still goes through the full Call 2b parser.
+    """
+    reply = _decode_control_element_payload(reply_content)
+    wire = _Call2bMissingActions.model_validate(
+        reply,
+        context={_OWNER_CONTEXT_KEY: _responsibility_owner_numbers(responsibilities)},
+    )
+    strangers = {
+        _owner_number(action.ca_id, prefix="CA") for action in wire.control_actions
+    } - set(owners)
+    if strangers:
+        raise ValueError(
+            "the repair covers only the owners without a control action; "
+            "not requested: " + ", ".join(f"RESP-{n}" for n in sorted(strangers))
+        )
+    prior = _decode_control_element_payload(prior_content)
+    return {
+        **prior,
+        "control_actions": [*prior["control_actions"], *reply["control_actions"]],
+    }
 
 
 def _correct_call_2b_references(

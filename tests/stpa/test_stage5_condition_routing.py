@@ -16,6 +16,7 @@ from tests.helpers.discriminating_condition import (
     _generate,
     _ownership_condition,
     _payload_with,
+    reply_only_dropped_note,
 )
 
 CHECK_FAILED = "discriminating_condition_check_failed"
@@ -195,7 +196,7 @@ def test_a_scenario_with_a_valid_condition_keeps_its_command_attempt_claim(
     assert not (tmp_path / "stage5-normalizations").exists()
 
 
-def test_a_condition_less_reply_scenario_keeps_its_claim_and_its_note(
+def test_a_reply_scenario_drops_its_failing_condition_and_keeps_its_claim(
     tmp_path,
 ) -> None:
     payload = _payload_with(_ownership_condition("ORD-1"))
@@ -206,18 +207,19 @@ def test_a_condition_less_reply_scenario_keeps_its_claim_and_its_note(
         "claim_level": "reply",
         "evidence": "assistant_message",
     }
+    client = _failed_every_attempt(payload)
 
-    result, error = _generate(_failed_every_attempt(payload), tmp_path)
+    result, error = _generate(client, tmp_path)
 
     assert error is None
     assert result is not None
+    assert client.call_count == 1
     assert result.safe_observable_outcome.claim_level == "reply"
     assert result.observation_assessment.disposition == "executable"
-    assert result.condition_omitted_reason == (
-        f"The discriminating condition failed validation after one correction "
-        f"({CHECK_FAILED}); the scenario is published without a condition."
+    assert result.condition_omitted_reason == reply_only_dropped_note(
+        CHECK_FAILED, "said"
     )
-    assert not (tmp_path / "stage5-normalizations").exists()
+    assert _claim_changes(tmp_path) == []
 
 
 def test_a_routed_draft_that_fails_validation_publishes_unrouted(

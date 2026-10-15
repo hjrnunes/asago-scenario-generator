@@ -42,8 +42,12 @@ penalty, seed, and chat-template thinking controls. The client accepts `strict_j
 as `false` (or absent); `true` fails at client construction, and run records
 do not carry the key. Set `json_schema_strict: false` to send the
 Pydantic schema with `"strict": false`; local Pydantic validation remains
-authoritative. OpenRouter JSON-object and vLLM guided decoding compatibility
-paths are unchanged.
+authoritative. Every structured call sends its response model's schema; the
+Call 2a and Stage 2 revision requests send provider classes
+(`_ResponsibilityProviderSet`, `_RevisionDeltaProviderSet`) built from their wire
+models, so a reply the schema allows is a reply the wire models accept. An
+OpenRouter host is the exception: a structured call there asks for a plain
+JSON object and carries the schema in the prompt.
 
 The transport sends a strict call's JSON Schema as `response_format` whether
 or not the profile sets `use_guided_decoding`. A guided vLLM endpoint decodes
@@ -102,6 +106,22 @@ selected variant does not use is `null`, and the routing examples show it.
 The OpenRouter JSON-object path still embeds the original schema in the
 prompt.
 
+No request schema holds a keyword that vLLM's xgrammar backend rejects:
+`uniqueItems`, `contains`, `minContains`, `maxContains`, `format`,
+`multipleOf`, `minProperties`, `maxProperties`, `propertyNames` or
+`patternProperties`. The backend answers a request with such a schema with
+HTTP 400 (`The provided JSON schema contains features not supported by
+xgrammar.`), so no reply is ever decoded. `_json_schema_response_format`
+raises a `ValueError` that names the schema and the JSON pointer of every
+such keyword
+(`request_schema.find_xgrammar_rejected_keywords`), the same way it rejects a
+union. A property, definition or literal that only shares a keyword's name
+is not a keyword. Code checks the rule instead: `governing_pairs` in an ICA
+fill finding carries no `uniqueItems`, and `_unique_pairs` rejects a
+repeated pair after decoding and returns the usual correction; the system
+prompt tells the model to list each pair once. A date field is a `format`:
+declare such a field as a string and validate it in code.
+
 Under guided decoding, Stage 1b requires `kc_subcodes` with at least one
 known KC or KCX code and requires `tool_inventory` (it may be empty). The
 Stage 1a risk-derivation schema
@@ -145,7 +165,15 @@ rewrite it before returning. Code does not check this agreement.
 When an observation contract and target operations or observations are
 supplied, every executable Stage 5 scenario also returns
 `unsafe_outcome.discriminating_condition`; analytical-only scenarios return
-`null`, and target-blind requests do not see the field. The request lists
+`null`, and target-blind requests do not see the field. A scenario whose
+observable claims are all at `reply` level (every supported criterion and an
+observable safe outcome) may also return `null` when no supplied argument,
+fact, or call separates the unsafe case: the reply is judged on its text,
+which no operand reaches. Validation accepts that `null` on the first request,
+and code publishes the scenario with a code-owned `condition_omitted_reason`
+naming the reply criteria. A condition such a scenario does return is checked
+and kept as for any other. Any observable claim above `reply` level still
+requires a condition (`discriminating_condition_missing`). The request lists
 every citable fact as an absolute path with its type (`object`, `list`, or
 `value`) and scalar value, including read-observation
 `<ref>.arguments.<name>` facts, followed by one worked observed selection
@@ -186,23 +214,45 @@ with synthetic names. The condition holds a one-line `statement`, one to six
   is not separated by any comparison over supplied values. The request tells
   the model not to stand in for it with a record predicate that safe and unsafe
   calls both satisfy, or with a `not_called` on a lookup (named only when the
-  contract offers `not_called`), and to declare the scenario analytical-only.
+  contract offers `not_called`). A harm in a reply is claimed at `reply` level
+  with a `null` condition; any other is declared analytical-only.
 - Ownership compares the selected record's owner or party field with the
   session value, never a record key with a literal key. A free-text argument
   compared with a supplied fact value or label holds on almost every call and
   does not separate unsafe from safe calls.
 
-When no supplied value separates the unsafe call, the model declares the
-scenario analytical-only: `unsafe_outcome.discriminating_condition` is `null`,
-and every `observation_criteria` entry and `safe_observable_outcome` has
-`observable: false` with `claim_level`, `evidence`, and `operation_name` null.
-The `literal_unsupported` correction names this path. The condition schema has
-no statement-only form (`comparisons` requires at least one entry).
+When no supplied argument, fact, call order, or omitted call separates the
+unsafe case, the model sets `unsafe_outcome.discriminating_condition` to
+`null` and keeps only reply-level observable claims: a reply criterion stays
+when the assistant reply shows the unsafe outcome, every other
+`observation_criteria` entry gets `observable: false` with `claim_level`,
+`evidence`, and `operation_name` null, and `safe_observable_outcome` becomes
+the reply claim. With no reply criterion left the scenario is analytical-only
+and the safe outcome is not observable. The `discriminating_condition_missing`
+and `literal_unsupported` corrections give this same way out in the same
+words, so the two never pull a draft in opposite directions. The condition
+schema has no statement-only form (`comparisons` requires at least one entry).
+
+A reply-only draft never spends a correction on its condition. When every
+observable criterion, and an observable safe outcome, is at `reply` level, a
+returned condition that fails the condition schema (for example two literals)
+or a condition check is removed by code, with no model request. The scenario
+publishes with `discriminating_condition: null` and a `condition_omitted_reason`
+naming the failure code (`discriminating_condition_invalid` for a schema
+failure). The Stage 5 normalization record keeps the removed condition under
+`discriminating_condition` with the reason
+`condition_dropped_reply_only:<code>`. A returned condition that passes is
+kept. A schema failure outside the condition still earns its correction, and
+the correction text names every failure, the condition's included.
 
 The same request tells the model that a precondition is not an observation
 requirement: a claim about what a reply states is observable through
 `assistant_message` when the supplied facts establish the precondition and
 the reference to judge it, even though returned results are not captured.
+Only when the target action is a tool call (the request's expected action
+kind) does the request add the matching paragraph for calls: a claim that a
+call with given argument values occurred, or did not, is observable at
+`command_attempt` when the test conversation sets the precondition.
 
 Reply content is not an operand. Code resolves every reference against the
 request's operation inventory and fact paths, makes `argument_values` paths
@@ -259,7 +309,9 @@ because of its condition (missing, unresolved, violated, or structurally
 invalid), code removes the condition and publishes the scenario with
 `discriminating_condition: null`, `condition_check: null`, and a code-owned
 `condition_omitted_reason` naming the failure code; the exact failure stays
-in the call log. A `command_attempt` claim is scored by a tool-call condition,
+in the call log. Code reads that last response the way the stage parse does,
+restoring a flat reply first, so a flat reply is recovered too. A
+`command_attempt` claim is scored by a tool-call condition,
 so code does not publish that claim without one. When the omitted-condition
 scenario's safe outcome is a `command_attempt` claim, code moves it, with no
 new model request, to the `reply` claim if the response declares a reply
@@ -423,15 +475,96 @@ an ID always names the same combination. `synthesis-manifest.yaml` records,
 under `context_tables`, the budget and, per action, the number of
 combinations, the rows shown, and the values no row shows. The Stage 3
 prompt does not say that a table is a sample.
-Stage 3 receives the rows of its target's actions, and a finding may cite one
-row of its own slot's action as its `context_row`; any other row fails
-provider validation and spends the existing retry, so a row of a sibling
-action reaches the correction request instead of leaving the slot
-unresolved. A slot that slot filling leaves unresolved keeps its own reason
+
+A Stage 3 fill request receives only the rows of its slots' own actions, and
+a finding may cite one of them as its `context_row`. The request schema
+enumerates what a reply may cite (`fill_reply.fill_scope`): `slot_id` is one
+of the request's slots, `context_row` is one of those rows or null,
+`process_model_refs` and `feedback_refs` hold the slot owner's process-model
+parts and feedback channels, and a coordination slot cites only its link's
+shared part and no feedback channel. An empty list is an array with
+`maxItems: 0`. The prompt says that an ID shown only in a description or under
+`referenced_records` is not citable. In pp-s11, half of the context rows shown
+belonged to sibling actions, and citing them, or a coordination path's
+non-shared part, decided 5 of the 10 unresolved fill records. Any other value
+fails the request schema and spends the existing retry. A slot that slot
+filling leaves unresolved keeps its own reason
 through ICA verification. The cited assignments become the ICA's
 `process_model_context`. The table does not limit which deviations are
 unsafe: a finding whose unsafe context no row expresses uses
 `context_row: null`.
+
+A fill finding lists every constraint-and-hazard pair it rests on in
+`governing_pairs`, each `"<constraint_id>/<hazard_id>"`. The array has at
+least one item and no repeated item, and the schema enumerates every pair of a
+supplied constraint and a hazard in its `related_hazards`
+(`fill_reply.governing_pairs`). Code splits the pairs into the finding's
+distinct constraints and hazards, in the order the reply writes them.
+Separate hazard and constraint lists let a reply pair a constraint with a
+hazard it does not govern, which decided 3 of the 10 unresolved pp-s11
+records. An array, not one pair, keeps a finding with several hazards
+expressible: 19 of the 299 accepted pp-s11 chains had one. The context-coverage supplement keeps
+the separate `related_hazard_ids` and `related_constraint_ids`.
+
+Code, not the prompt, folds the copies a reply writes. The fill prompt asks for
+one finding per unsafe context row, and Gemma follows it: pp-s12 klarna-r2
+filled 39 slots with 103 findings that carry 42 distinct deviations, and slots
+copied a deviation once per context row (up to 9 rows per action), so the unit
+compiled 85 ICAs where pp-s11 compiled 22. After validation and the
+context-coverage supplement have judged the findings as written,
+`_compile_slot_payload` merges the findings of one slot that have equal
+`deviation`, `hazardous_context`, and `loss_consequence`, each compared after
+`.strip()`. The merged finding keeps the first finding's text and `context_row`
+(and so that row's `process_model_context`) and takes, in written order, the
+union of `related_hazard_ids`, `related_constraint_ids`, `process_model_refs`,
+and `feedback_refs`; each `finding_indexes` entry in `consideration_results`
+moves to its merged index, repeats dropped. Code builds the merged finding and
+slot draft through validation, and `compile_slot_provider_entry` checks the
+merged references as it checks any finding. A correction message still numbers
+findings as the model wrote them, and the fill request, schema, and correction
+feedback are unchanged: the reply is not told about the merge, and the call log
+keeps the raw reply. On the pp-s12 klarna-r2 recording, the merge turns 85
+ICAs into 57 before ICA verification: 16 merged ICAs in eight slots stand for
+62 as-written findings.
+
+Each merged group (two or more findings) is recorded in `ica-merges.yaml`, next
+to `slot-hazard-offers.yaml`, and only when a merge happened. An entry holds
+the fill request's `target_id`, the `slot_id`, the resulting `ica_id`, and the
+as-written `finding_index`, `context_row`, `related_hazard_ids`, and
+`related_constraint_ids` of every folded finding, the kept one first. The
+record never enters a model request, including ICA hazard verification, hazard
+correction, and Stage 5; it comes from the reply alone, so a replayed run
+writes the same entries as a live one. The `ica_id` is the ID at compile time:
+ICA hazard verification may later drop or correct that ICA.
+
+A fill slot's `consideration_results` is an object keyed by the local handle
+(`R1`..`Rn`) of each obligation routed to the slot, with
+`additionalProperties: false`; each value holds `disposition`,
+`finding_indexes`, and `rationale`. A one-slot request, which is every
+production request, requires every key, so a reply can neither omit nor
+repeat a result. The call log keeps the keyed reply, and `_listed_results`
+turns it into one `ObligationIcaDraft` per handle for validation and
+compilation. The provider check also counts routed pairs instead of comparing
+sets: a pp-s11 klarna-r2 reply listed each of six handles three times, with
+conflicting results for one, and passed the set comparison until the contract
+rejected it after the request had ended. The fill schema also requires every
+slot field (`slot_id`, `is_na`, `na_rationale`, `findings`,
+`consideration_results`), and the provider drops `finding_indexes` from a
+result whose disposition is not `finding` instead of rejecting the reply: a
+pp-s11 klarna-r1 reply lost its slot for such indexes alone.
+
+A rejected fill reply earns one correction that lists every failed rule, not
+only the first. The provider collects the identity, pair, finding, and
+consideration errors of the whole reply, prefixes each finding and result error
+with its slot and finding position or handle, and raises them as one
+`ExactFeedbackError`, so the correction keeps one line per rule. A reference error names what the slot may
+cite: a constraint that does not govern the finding's hazard names the hazards
+it governs (`SC-1 governs H-1`), and an out-of-scope process-model part,
+feedback channel, or context row lists the valid IDs. The correction also
+quotes the rejected reply (`include_response=True`) so the model corrects it in
+place. In pp-s11, the correction named one error and omitted the reply, and
+in 5 of the 9 failed chains the corrected reply failed a rule the first reply
+had passed. Compilation keeps the first-error checks.
 
 When a reply slot's findings for one constraint cite a variable that a
 `retrieved_content` channel updates but leave some of its values without a

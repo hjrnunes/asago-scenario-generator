@@ -33,6 +33,7 @@ __all__ = [
     "SlotPlaceholder",
     "create_slots",
     "is_wrong_duration_eligible",
+    "requires_provider_slot_analysis",
 ]
 
 
@@ -138,3 +139,17 @@ def is_wrong_duration_eligible(
         ControlActionTemporality.continuous,
         ControlActionTemporality.bounded_duration,
     }
+
+
+def requires_provider_slot_analysis(slot: SlotPlaceholder) -> bool:
+    """Return whether a slot needs a provider-produced ICA analysis.
+
+    ``WRONG_DURATION`` has a deterministic structural applicability rule.  A
+    missing, unknown, instantaneous, discrete, or coordination-link
+    temporality cannot express an unsafe duration, so those slots are
+    materialized as N/A locally and any provider result for them is ignored.
+    Every other UCA remains advisory and is compiled from the provider result.
+    """
+    return not (
+        slot.uca_type is UCAType.wrong_duration and not is_wrong_duration_eligible(slot)
+    )

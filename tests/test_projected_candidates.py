@@ -147,10 +147,7 @@ class TaxonomyResolver:
         self.taxonomy_context = context
 
     def contains(self, taxonomy: str, identifier: str) -> bool:
-        return (taxonomy, identifier) in {
-            ("ATLAS", "AML.T0001"),
-            ("LAAF", "LAAF.1"),
-        }
+        return (taxonomy, identifier) == ("ATLAS", "AML.T0001")
 
 
 def _step(step_id: str, order: int, *, conditional: bool = False) -> dict[str, Any]:
@@ -235,9 +232,6 @@ def _pattern(*, conditional: bool = True) -> dict[str, Any]:
         "semantic_digest": ZERO,
         "taxonomy_context": {
             "atlas": {"release": "v1", "digest": ZERO},
-            # ATLAS-only: no LAAF pin exists; the canonical framing of an
-            # absent pin is JSON null, so digests cover ``"laaf": None``.
-            "laaf": None,
             "mapping_set_digest": ZERO,
         },
         "mappings": [{"decision": "exact", "taxonomy": "ATLAS", "ids": ["AML.T0001"]}],
@@ -745,37 +739,9 @@ def test_kc_all_and_any_prerequisites_are_authoritative_profile_gates() -> None:
     assert "requires any KC code" in result.infeasibilities[0].detail
 
 
-@pytest.mark.parametrize("decision", ["exact", "unmapped", "not_applicable"])
-def test_laaf_decisions_fail_closed_without_an_explicit_laaf_pin(
-    decision: str,
-) -> None:
-    raw = _pattern()
-    mapping = {"decision": decision, "taxonomy": "LAAF"}
-    if decision == "exact":
-        mapping["ids"] = ["LAAF.1"]
-    elif decision == "unmapped":
-        mapping["rationale"] = "No authoritative taxonomy is available."
-    if decision == "not_applicable":
-        raw["canonical_chain"]["steps"][-1]["mappings"] = [mapping]
-    else:
-        raw["canonical_chain"]["mappings"].append(mapping)
-    raw["canonical_chain"]["semantic_digest"] = compute_chain_semantic_digest(
-        raw["canonical_chain"]
-    )
-    with pytest.raises(ValueError, match="LAAF taxonomy pin"):
-        _project(pattern=raw)
-
-    # Normal qualification rejects the same record through the projection
-    # boundary even when the resolver itself is valid and ATLAS-only.
-    snapshot = capture_capability_snapshot(_profile(), (_evidence(),))
-    with pytest.raises(ValueError, match="qualification failed"):
-        _project_batch([raw], _atlas_only_resolver(), snapshot)
-
-
 def _atlas_only_resolver() -> TaxonomyResolver:
-    """Resolver pinned to the default fixture's ATLAS-only taxonomy context."""
+    """Resolver pinned to the default fixture's taxonomy context."""
     context = AttackPattern.model_validate(_pattern()).canonical_chain.taxonomy_context
-    assert context.laaf is None
     return TaxonomyResolver(context)
 
 

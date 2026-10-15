@@ -42,19 +42,31 @@ from tests.helpers.obligation_aware import (
 # digest was recaptured when slot prompts began naming each routed obligation
 # with a short request-local handle. The system digest is the text recorded
 # before the NOT_PROVIDED N/A sentence existed; the sentence was removed again
-# because it raised the NOT_PROVIDED N/A share. The other digests are unchanged.
-_GOLDEN_SLOT_SYSTEM = "30d13a94a2a9b46275ca3439ad5455c3393349556ea92539f9ea2657107fec26"
+# because it raised the NOT_PROVIDED N/A share. The system digest was
+# recaptured when the prompt began naming the identities a slot may cite, and
+# again when a finding began naming one `governing_pair` and when
+# `consideration_results` became an object keyed by obligation handle, and
+# again when the pair became the `governing_pairs` array. The
+# other digests are unchanged.
+_GOLDEN_SLOT_SYSTEM = "1ee393a7d9379f7eb15e1f9950b39da4e4bc2cdc27dfb3e3566e0cd6280bd047"
 _GOLDEN_SLOT_USER = "51f6875173344befda32d0a1fdbe879b7487e072808b8dafd2d89f9679c6f37a"
 _GOLDEN_SLOT_USER_EMPTY = (
     "6a174dc144a7788395f2e38a60457edd891714dbd795c06411dad9616a4f9667"
 )
 # The routing system digest was recaptured when the routing prompt began
-# describing the flat route form (null for fields a disposition does not use).
+# describing the flat route form (null for fields a disposition does not use),
+# and again when its examples stopped naming a NOT_PROVIDED slot and it began
+# defining the four UCA types, and again when its example slot stopped
+# matching a real slot.
 _GOLDEN_ROUTING_SYSTEM = (
-    "1a45fad7621ece34bff03a81dd7b4445a5178f02f6eee847536ad0d518032e79"
+    "3cb0838594298426f080ac7bba9e1623b96e2e24eb6074fa8a1a88af60470b5c"
 )
+# The routing user digest was recaptured when slot IDs left the ID glossary for
+# a UCA type legend, when routing stopped offering WRONG_DURATION slots that
+# slot filling never analyses, and when the LAAF axis left the mapping set and
+# so changed the obligation handles.
 _GOLDEN_ROUTING_USER = (
-    "cc9264807d70b8e674d7cb3de8def297c2f76104ae0c5c8558b34a1ca63f15a7"
+    "d6f0b864a5e228ddee93a98c0a35313fb58cecd5f953f17826a7c5cf836ac6b8"
 )
 
 

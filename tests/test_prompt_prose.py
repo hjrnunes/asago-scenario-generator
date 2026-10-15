@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import hashlib
+
 import pytest
 
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    PROMPT_TEMPLATES_DIR,
     obligation_prompt_template_hashes,
     render_prose,
 )
@@ -31,5 +34,13 @@ def test_an_unknown_section_is_rejected() -> None:
         render_prose("prose/routing.j2", "missing")
 
 
-def test_prose_templates_stay_out_of_the_recorded_template_hashes() -> None:
-    assert not [name for name in obligation_prompt_template_hashes() if "prose" in name]
+def test_the_recorded_template_hashes_cover_every_prose_template() -> None:
+    prose_dir = PROMPT_TEMPLATES_DIR / "prose"
+    hashes = obligation_prompt_template_hashes()
+
+    prose = sorted(path.name for path in prose_dir.glob("*.j2"))
+    assert prose
+    for name in prose:
+        expected = hashlib.sha256((prose_dir / name).read_bytes()).hexdigest()
+        assert hashes[f"prose/{name}"] == expected
+    assert "_uca_method.j2" in hashes

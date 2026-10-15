@@ -47,6 +47,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     ObligationRepairPlan,
     ObligationRepairResponse,
     PermittedChange,
+    ReferenceRepairResponse,
     RepairRecord,
     SelectedObligation,
     build_repair_plan,
@@ -1914,7 +1915,9 @@ class TestGapObligationRepair:
 class TestRepairScopeBoundaries:
     """Graph and closed-wire defects cannot enter the bounded repair call."""
 
-    def test_unknown_graph_reference_blocks_obligation_repair(self, tmp_path):
+    def test_unknown_graph_reference_takes_the_one_repair(self, tmp_path):
+        # Salvage removes the malformed obligation entry; the attempt's one
+        # repair goes to the unknown reference, never to the obligation.
         risk = _complete_risk_response()
         gap = _gap_constraint_defect_response()
         gap["hazards"][0]["related_losses"] = ["L-99"]
@@ -1925,7 +1928,7 @@ class TestRepairScopeBoundaries:
             _gap_obligation_repair_response(constraint_id="SC-8"),
         )
 
-        with pytest.raises(StageError, match="graph validation is outside"):
+        with pytest.raises(StageError, match="targeted repair failed"):
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text=_USE_CASE,
@@ -1933,7 +1936,8 @@ class TestRepairScopeBoundaries:
                 run_dir=tmp_path,
             )
 
-        assert len(client.calls) == 2
+        assert len(client.calls) == 3
+        assert client.calls[2].response_format is ReferenceRepairResponse
         assert not any(
             call.response_format is ObligationRepairResponse for call in client.calls
         )

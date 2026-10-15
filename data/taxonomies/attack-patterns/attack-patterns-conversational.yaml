@@ -12,7 +12,7 @@
 # These records have no legacy source and no entry in catalog-lineage.yaml.
 # Chains are branch-free and carry designed-tier provenance: each chain's
 # exact ATLAS identity is the operation that the pinned technique definition
-# describes. ATLAS is the sole taxonomy authority (LAAF absent), and the
+# describes. ATLAS is the sole taxonomy authority, and the
 # SSSOM mapping set carries no row for these records.
 
 source:
@@ -54,13 +54,12 @@ patterns:
       pattern_id: AP-T6-08
       chain_id: AP-T6-08.chain.1
       semantic_revision: 1
-      semantic_digest: ba37cfefbbb3ca6680ba383879dc3d29f5fd31de1684a9c44e7f5086517dd401
+      semantic_digest: 04b4df0e12dc1c55c6371f0fe508e88937a4387ce96172055fe2d11689e8bba9
       taxonomy_context:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
-        mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
+        mapping_set_digest: 29ff3a15a86a194812e029ba407a97a757c98a2d887fb922ea4f0e0a8fd40ea6
       mappings:
       - decision: exact
         taxonomy: ATLAS
@@ -230,13 +229,12 @@ patterns:
       pattern_id: AP-T6-09
       chain_id: AP-T6-09.chain.1
       semantic_revision: 1
-      semantic_digest: b44973f679664d48640b7883e37f2f8aa6db4fa121d2078bcece9a02119b0fd9
+      semantic_digest: 3b7f3c759d4ecdb389918f158c1fd757784c8e0685754a347af256ba5b9d865b
       taxonomy_context:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
-        mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
+        mapping_set_digest: 29ff3a15a86a194812e029ba407a97a757c98a2d887fb922ea4f0e0a8fd40ea6
       mappings:
       - decision: exact
         taxonomy: ATLAS
@@ -407,13 +405,12 @@ patterns:
       pattern_id: AP-T6-10
       chain_id: AP-T6-10.chain.1
       semantic_revision: 1
-      semantic_digest: 52de635056595df30efbd702f7b7f4dac30004991c061577f4feff7ed6d4b1a6
+      semantic_digest: 23148c023488290d0769a0bb994bd6fdc02dafaa116bd9a0757c74b3047c44d7
       taxonomy_context:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
-        mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
+        mapping_set_digest: 29ff3a15a86a194812e029ba407a97a757c98a2d887fb922ea4f0e0a8fd40ea6
       mappings:
       - decision: exact
         taxonomy: ATLAS
@@ -585,13 +582,12 @@ patterns:
       pattern_id: AP-T5-05
       chain_id: AP-T5-05.chain.1
       semantic_revision: 1
-      semantic_digest: 4a81e9092594a82b8a4df7a7e53fc0261e25dcd2232df100b3c496166015e1ba
+      semantic_digest: cd6349ff10f7031add7bfc494f348d8318afcb0c27ec53f363880bd38c626e6b
       taxonomy_context:
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
-        mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
+        mapping_set_digest: 29ff3a15a86a194812e029ba407a97a757c98a2d887fb922ea4f0e0a8fd40ea6
       mappings:
       - decision: exact
         taxonomy: ATLAS

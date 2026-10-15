@@ -336,7 +336,6 @@ class TargetDiscoveryLlmInterpreter:
                 policy=CorrectionPolicy(),
                 temperature=self._temperature,
                 max_completion_tokens=self._max_completion_tokens,
-                allow_unvalidated=False,
                 prompt_template_hashes={
                     "target_discovery_prompt": prompt_hash(system_prompt, user_prompt)
                 },

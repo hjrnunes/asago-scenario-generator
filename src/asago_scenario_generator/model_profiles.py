@@ -15,7 +15,7 @@ from typing import Any
 
 import yaml
 
-DEFAULT_REQUEST_TIMEOUT_SECONDS: float = 300.0
+DEFAULT_REQUEST_TIMEOUT_SECONDS: float = 600.0
 
 REQUIRED_FIELDS: tuple[str, ...] = ("base_url", "model", "api_key")
 OPTIONAL_FIELDS: tuple[str, ...] = (

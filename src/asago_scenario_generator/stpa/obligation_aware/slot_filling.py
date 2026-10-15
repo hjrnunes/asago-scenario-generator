@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 import re
 from typing import Any, Literal, cast
 
+from asago_scenario_generator.models.ica_merge import IcaMerge, IcaMergedFinding
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
@@ -60,6 +61,7 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     SlotPlaceholder,
     create_slots,
     is_wrong_duration_eligible,
+    requires_provider_slot_analysis,
 )
 
 
@@ -268,20 +270,6 @@ def _routed_for_target(
     return tuple(item[0] for item in selected), tuple(item[1] for item in selected)
 
 
-def _requires_provider_slot_analysis(slot: SlotPlaceholder) -> bool:
-    """Return whether a slot needs a provider-produced ICA analysis.
-
-    ``WRONG_DURATION`` has a deterministic structural applicability rule.  A
-    missing, unknown, instantaneous, discrete, or coordination-link
-    temporality cannot express an unsafe duration, so those slots are
-    materialized as N/A locally and any provider result for them is ignored.
-    Every other UCA remains advisory and is compiled from the provider result.
-    """
-    return not (
-        slot.uca_type is UCAType.wrong_duration and not is_wrong_duration_eligible(slot)
-    )
-
-
 def _has_provider_slot(request: SynthesisSlotRequest) -> bool:
     """Return whether a request lists a slot only the provider can decide.
 
@@ -289,7 +277,7 @@ def _has_provider_slot(request: SynthesisSlotRequest) -> bool:
     provider never sees it.  Its call reference stays allocated, which keeps
     the references of the other parts of the target stable.
     """
-    return any(_requires_provider_slot_analysis(slot) for slot in request.slots)
+    return any(requires_provider_slot_analysis(slot) for slot in request.slots)
 
 
 def _duration_inapplicable_slot(slot: SlotPlaceholder) -> ICASlot:
@@ -543,6 +531,136 @@ def _compile_finding(
     )
 
 
+def _merge_key(finding: IcaFindingDraft) -> tuple[str, str, str]:
+    """Return the text a finding shares with its copies, as compiled."""
+    return (
+        finding.deviation.text.strip(),
+        finding.hazardous_context.strip(),
+        finding.loss_consequence.strip(),
+    )
+
+
+def _finding_groups(
+    findings: Sequence[IcaFindingDraft],
+) -> tuple[tuple[int, ...], ...]:
+    """Group as-written finding indexes by shared key, in first-written order."""
+    grouped: dict[tuple[str, str, str], list[int]] = {}
+    for index, finding in enumerate(findings):
+        grouped.setdefault(_merge_key(finding), []).append(index)
+    return tuple(tuple(indexes) for indexes in grouped.values())
+
+
+def _ordered_union(groups: Iterable[Iterable[str]]) -> tuple[str, ...]:
+    """Join reference lists without repeats, in written order."""
+    return tuple(dict.fromkeys(item for group in groups for item in group))
+
+
+def _merged_finding(group: Sequence[IcaFindingDraft]) -> IcaFindingDraft:
+    """Fold copies into the first finding with the union of their references."""
+    first = group[0]
+    if len(group) == 1:
+        return first
+    return IcaFindingDraft(
+        deviation=first.deviation,
+        hazardous_context=first.hazardous_context,
+        loss_consequence=first.loss_consequence,
+        related_hazard_ids=_ordered_union(f.related_hazard_ids for f in group),
+        related_constraint_ids=_ordered_union(f.related_constraint_ids for f in group),
+        process_model_refs=_ordered_union(f.process_model_refs for f in group),
+        feedback_refs=_ordered_union(f.feedback_refs for f in group),
+        context_row=first.context_row,
+    )
+
+
+def _remapped_result(
+    result: ObligationIcaDraft, merged_index: Mapping[int, int]
+) -> ObligationIcaDraft:
+    """Point a result's finding indexes at the merged findings, once each."""
+    if not result.finding_indexes:
+        return result
+    return ObligationIcaDraft(
+        obligation_handle=result.obligation_handle,
+        disposition=result.disposition,
+        finding_indexes=tuple(
+            dict.fromkeys(merged_index[index] for index in result.finding_indexes)
+        ),
+        rationale=result.rationale,
+    )
+
+
+def merge_equal_findings(
+    draft: SlotIcaDraft,
+) -> tuple[SlotIcaDraft, tuple[tuple[int, ...], ...]]:
+    """Merge findings of one slot that share deviation, context, and consequence.
+
+    A model may write one finding per unsafe context row, or one per pair, that
+    differ in nothing else; each would compile to its own ICA and its own
+    downstream requests.  The merged finding keeps the first finding's text and
+    row and the union of the references, and each consideration result moves to
+    the merged indexes.  Return the merged draft and, for each merged finding,
+    the as-written indexes it stands for.  A draft with nothing to merge comes
+    back unchanged.  Every merged object is built through validation.
+    """
+    if draft.is_na:
+        return draft, ()
+    groups = _finding_groups(draft.findings)
+    if len(groups) == len(draft.findings):
+        return draft, groups
+    merged_index = {index: m for m, group in enumerate(groups) for index in group}
+    return (
+        SlotIcaDraft(
+            slot_id=draft.slot_id,
+            is_na=draft.is_na,
+            na_rationale=draft.na_rationale,
+            findings=tuple(
+                _merged_finding([draft.findings[index] for index in group])
+                for group in groups
+            ),
+            consideration_results=tuple(
+                _remapped_result(result, merged_index)
+                for result in draft.consideration_results
+            ),
+        ),
+        groups,
+    )
+
+
+def ica_merge_entries(
+    target_id: str,
+    slot_id: str,
+    written: SlotIcaDraft,
+    groups: Sequence[Sequence[int]],
+    ica_ids: Sequence[str],
+) -> tuple[IcaMerge, ...]:
+    """Record each merged group of a slot with the ICA it became.
+
+    *groups* are the as-written indexes of each merged finding and *ica_ids*
+    the ICA each compiled from; *written* is the draft before the merge.
+    """
+    return tuple(
+        IcaMerge(
+            target_id=target_id,
+            slot_id=slot_id,
+            ica_id=ica_id,
+            findings=tuple(
+                _merged_finding_record(index, written.findings[index])
+                for index in group
+            ),
+        )
+        for group, ica_id in zip(groups, ica_ids, strict=True)
+        if len(group) > 1
+    )
+
+
+def _merged_finding_record(index: int, finding: IcaFindingDraft) -> IcaMergedFinding:
+    return IcaMergedFinding(
+        finding_index=index,
+        context_row=finding.context_row,
+        related_hazard_ids=finding.related_hazard_ids,
+        related_constraint_ids=finding.related_constraint_ids,
+    )
+
+
 def _finding_context(
     finding: IcaFindingDraft,
     *,
@@ -558,9 +676,10 @@ def _finding_context(
     }
     row = rows.get(finding.context_row)
     if row is None:
+        listed = ", ".join(rows) or "none"
         raise ValueError(
             f"finding cites context row {finding.context_row!r}, which is not a row "
-            f"of {slot.control_action}'s context table"
+            f"of {slot.control_action}'s context table (its rows: {listed})"
         )
     return dict(row.assignments)
 
@@ -655,41 +774,85 @@ def _validate_finding_references(
     loss_analysis: LossAnalysis,
 ) -> None:
     """Validate hazard, constraint, process-model, and feedback references."""
+    errors = finding_reference_errors(
+        finding,
+        valid_process_models=valid_process_models,
+        valid_feedback=valid_feedback,
+        loss_analysis=loss_analysis,
+    )
+    if errors:
+        raise ValueError(errors[0])
+
+
+def finding_reference_errors(
+    finding: IcaFindingDraft,
+    *,
+    valid_process_models: set[str],
+    valid_feedback: set[str],
+    loss_analysis: LossAnalysis,
+) -> list[str]:
+    """List every broken reference of *finding*, each with what it may cite."""
+    return [
+        *_governance_errors(finding, loss_analysis),
+        *_scope_errors(finding, valid_process_models, valid_feedback),
+    ]
+
+
+def _governance_errors(
+    finding: IcaFindingDraft, loss_analysis: LossAnalysis
+) -> list[str]:
+    """List unknown hazards and constraints and each non-governing constraint."""
     hazard_ids = {item.hazard_id for item in loss_analysis.hazards}
-    unknown_hazards = set(finding.related_hazard_ids) - hazard_ids
-    if unknown_hazards:
-        raise ValueError(
-            "finding references unknown hazards: " + ", ".join(sorted(unknown_hazards))
-        )
     constraints = {
         item.constraint_id: item for item in loss_analysis.security_constraints
     }
+    errors: list[str] = []
+    unknown_hazards = set(finding.related_hazard_ids) - hazard_ids
+    if unknown_hazards:
+        errors.append(
+            "finding references unknown hazards: " + ", ".join(sorted(unknown_hazards))
+        )
     unknown_constraints = set(finding.related_constraint_ids) - set(constraints)
     if unknown_constraints:
-        raise ValueError(
+        errors.append(
             "finding references unknown security constraints: "
             + ", ".join(sorted(unknown_constraints))
         )
     selected_hazards = set(finding.related_hazard_ids)
     for constraint_id in finding.related_constraint_ids:
-        if not selected_hazards.intersection(
-            constraints[constraint_id].related_hazards
+        governed = constraints.get(constraint_id)
+        if governed is not None and not selected_hazards.intersection(
+            governed.related_hazards
         ):
-            raise ValueError(
-                f"constraint {constraint_id} does not govern the finding hazards"
+            errors.append(
+                f"constraint {constraint_id} does not govern the finding hazards "
+                f"({constraint_id} governs {', '.join(governed.related_hazards)})"
             )
-    unknown_pm = set(finding.process_model_refs) - valid_process_models
-    if unknown_pm:
-        raise ValueError(
-            "finding references process-model parts outside the target: "
-            + ", ".join(sorted(unknown_pm))
-        )
-    unknown_fb = set(finding.feedback_refs) - valid_feedback
-    if unknown_fb:
-        raise ValueError(
-            "finding references feedback channels outside the target: "
-            + ", ".join(sorted(unknown_fb))
-        )
+    return errors
+
+
+def _scope_errors(
+    finding: IcaFindingDraft, valid_process_models: set[str], valid_feedback: set[str]
+) -> list[str]:
+    """List process-model parts and feedback channels outside the target."""
+    errors: list[str] = []
+    for kind, cited, valid in (
+        ("process-model parts", finding.process_model_refs, valid_process_models),
+        ("feedback channels", finding.feedback_refs, valid_feedback),
+    ):
+        outside = set(cited) - valid
+        if outside:
+            errors.append(
+                f"finding references {kind} outside the target: "
+                f"{', '.join(sorted(outside))} ({_citable(valid)})"
+            )
+    return errors
+
+
+def _citable(valid: set[str]) -> str:
+    if not valid:
+        return "the slot may cite none"
+    return "the slot may cite " + ", ".join(sorted(valid))
 
 
 def _finding_behavior(
@@ -931,7 +1094,7 @@ def _record_unresolved_slot_fallbacks(
     """Materialize unresolved provider slots as typed unresolved values."""
     for slot in request.slots:
         slot_id = slot.slot_id
-        if not _requires_provider_slot_analysis(slot):
+        if not requires_provider_slot_analysis(slot):
             continue
         if successful_slots is not None and slot_id in successful_slots:
             continue
@@ -957,7 +1120,7 @@ def _record_unresolved_pairs(
     for route in request.routed_routes:
         for slot_id in sorted(set(route.slot_ids).intersection(expected)):
             slot = expected[slot_id]
-            if not _requires_provider_slot_analysis(slot):
+            if not requires_provider_slot_analysis(slot):
                 continue
             all_pairs.append(_unresolved_pair(route, slot, detail, call_ref=call_ref))
 
@@ -1107,6 +1270,11 @@ class SlotFillRunResult:
         return self.result.lost_slots
 
     @property
+    def ica_merges(self) -> tuple[IcaMerge, ...]:
+        """Expose the findings merged into one ICA while slots compiled."""
+        return self.result.ica_merges
+
+    @property
     def call_evidence(self) -> tuple[Any, ...]:
         """Expose slot and independent-verifier call evidence together."""
         values = list(self.result.call_evidence)
@@ -1134,6 +1302,7 @@ class _SlotFillState:
     diagnostics: list[ConsiderationDiagnostic]
     requests_sent: int = 0  # for the target request being processed
     lost: dict[str, SlotLoss] = field(default_factory=dict)
+    ica_merges: list[IcaMerge] = field(default_factory=list)
 
 
 def _initial_slot_fill_state(
@@ -1160,7 +1329,7 @@ def _duration_inapplicable_slots(
     return {
         slot.slot_id: _duration_inapplicable_slot(slot)
         for slot in slots
-        if not _requires_provider_slot_analysis(slot)
+        if not requires_provider_slot_analysis(slot)
     }
 
 
@@ -1175,7 +1344,7 @@ def _duration_inapplicable_pairs(
             continue
         for slot_id in sorted(set(route.slot_ids)):
             slot = slot_by_id[slot_id]
-            if not _requires_provider_slot_analysis(slot):
+            if not requires_provider_slot_analysis(slot):
                 all_pairs.append(_duration_inapplicable_pair(route, slot))
     return all_pairs
 
@@ -1257,7 +1426,7 @@ def _compile_response_entry(
             )
         )
         return None
-    if not _requires_provider_slot_analysis(expected_slot):
+    if not requires_provider_slot_analysis(expected_slot):
         return None
     if provider_compiled:
         if not isinstance(value, ICASlot):
@@ -1381,7 +1550,7 @@ def _fill_missing_request_slots(
     for slot in request.slots:
         if slot.slot_id in state.successful_slots:
             continue
-        if not _requires_provider_slot_analysis(slot):
+        if not requires_provider_slot_analysis(slot):
             continue
         returned = by_id.get(slot.slot_id)
         if returned is None:
@@ -1424,7 +1593,7 @@ def _routed_provider_slot_ids(
         sorted(
             slot_id
             for slot_id in set(route.slot_ids).intersection(expected)
-            if _requires_provider_slot_analysis(expected[slot_id])
+            if requires_provider_slot_analysis(expected[slot_id])
         )
     )
 
@@ -1594,6 +1763,13 @@ def _process_valid_response(
             error=validation_error,
         )
         return
+    # A later part's fill of a slot never replaces the first accepted fill, so
+    # only a slot's first accepted fill brings its merges.
+    state.ica_merges.extend(
+        merge
+        for merge in response.ica_merges
+        if merge.slot_id not in state.successful_slots
+    )
     state.successful_slots.update(by_id)
     _record_accepted_request(
         response,
@@ -1730,6 +1906,7 @@ def fill_synthesis_slots(
         call_evidence=tuple(state.evidence),
         diagnostics=tuple(state.diagnostics),
         lost_slots=tuple(state.lost.values()),
+        ica_merges=tuple(state.ica_merges),
     )
     return SlotFillRunResult(result=final)
 
@@ -1741,4 +1918,6 @@ __all__ = [
     "compile_slot_provider_entry",
     "fill_synthesis_slots",
     "final_slot_universe",
+    "ica_merge_entries",
+    "merge_equal_findings",
 ]

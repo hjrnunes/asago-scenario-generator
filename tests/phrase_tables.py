@@ -84,6 +84,7 @@ from asago_scenario_generator.stpa.target_realization.provider import (
 from tests.helpers.normal_authoring_wire import (
     _record_observations,
     _target_operation,
+    _tool_call_action_context,
     _wrong_timing_context,
 )
 from tests.stpa.condition_prompt_fixture import (
@@ -170,6 +171,13 @@ UNDECLARED_CONTROLLED_PROCESSES = {
     "controlled_processes": [],
     "process_model_owners": [],
     "undeclared_controlled_processes": ["CP-1", "CP-3"],
+}
+
+MISSING_CONTROL_ACTIONS = {
+    "missing_owners": ONE_RESPONSIBILITY["responsibilities"],
+    "controlled_processes": [
+        ControlledProcess(cp_id="CP-1", description="Request processor")
+    ],
 }
 
 EMPTY_STRUCTURE = {
@@ -355,10 +363,13 @@ def _target_realization(**variables: object) -> Callable[[str], str]:
     return render
 
 
-def _stage5(facts: Callable[[], dict[str, object]]) -> Callable[[str], str]:
+def _stage5(
+    facts: Callable[[], dict[str, object]],
+    context: Callable[[], object] = _wrong_timing_context,
+) -> Callable[[str], str]:
     def render(template: str) -> str:
         system, user = build_context_bdi_prompts(
-            _wrong_timing_context(), TemplateLoader(STAGE5_PROMPTS_DIR), **facts()
+            context(), TemplateLoader(STAGE5_PROMPTS_DIR), **facts()
         )
         return dict(zip(_STAGE5_TEMPLATES, (system, user)))[template]
 
@@ -377,9 +388,27 @@ CASES: dict[str, Callable[[str], str]] = {
         use_case_text="Test use case", selected_constraints=[]
     ),
     "no-probes": _system_model(taxonomy_probes=[]),
+    "reference-repair": _system_model(
+        use_case_text="Test use case",
+        selected_lists=[],
+        feedback="",
+        unknown_ids=True,
+        disposition_lists=False,
+    ),
+    "reference-repair-dispositions": _system_model(
+        use_case_text="Test use case",
+        selected_lists=[],
+        feedback="",
+        unknown_ids=True,
+        disposition_lists=True,
+    ),
     "empty-structure": _system_model(**EMPTY_STRUCTURE),
     "unknown-references": _system_model(**UNKNOWN_REFERENCES),
     "undeclared-controlled-processes": _system_model(**UNDECLARED_CONTROLLED_PROCESSES),
+    "missing-control-actions": _system_model(**MISSING_CONTROL_ACTIONS),
+    "no-declared-processes": _system_model(
+        **{**MISSING_CONTROL_ACTIONS, "controlled_processes": []}
+    ),
     "target-blind": _stage5(dict),
     "operation": _stage5(lambda: {"target_operation": _target_operation()}),
     "observations": _stage5(lambda: {"target_observations": _record_observations()}),
@@ -393,6 +422,9 @@ CASES: dict[str, Callable[[str], str]] = {
     "commit-operation": _stage5(_commit_operation_facts),
     "realistic-request": _stage5(_realistic_request_facts),
     "realistic-no-tool-call": _stage5(lambda: _realistic_request_facts(False)),
+    "realistic-tool-call-action": _stage5(
+        _realistic_request_facts, _tool_call_action_context
+    ),
     "stated-rules": _system_model(stated_rules=True),
     "no-findings": _system_model(**NO_FINDINGS),
     "blank-hazard-records": _system_model(

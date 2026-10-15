@@ -49,6 +49,7 @@ from asago_scenario_generator.pipeline.synthesis_manifest import _build_manifest
 from asago_scenario_generator.pipeline.synthesis_persist import (
     _artifact_paths,
     _persist_manifest,
+    _persist_ica_merges,
     _persist_plan,
     _persist_prepared_profile,
     _persist_sidecar,
@@ -60,6 +61,7 @@ from asago_scenario_generator.pipeline.synthesis_persist import (
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _accounting_source_pins,
+    _ica_merge_report,
     _run_accounting,
     _run_ica,
     _run_operation_enrichment,
@@ -359,6 +361,9 @@ def _run_synthesis(
         output_dir, SCENARIO_REALIZATION_FILENAME, realization
     )
     hazard_offers_path = _persist_slot_hazard_offers(output_dir, hazard_offers)
+    ica_merges_path = _persist_ica_merges(
+        output_dir, _ica_merge_report(ica_enumeration)
+    )
     target_realization_path = _persist_target_realization(
         output_dir,
         target_realization,
@@ -422,6 +427,7 @@ def _run_synthesis(
         report_path=report_path,
         hazard_offers_path=hazard_offers_path,
         policy_coverage_path=policy_coverage_path,
+        ica_merges_path=ica_merges_path,
     )
 
     return SynthesisResult(

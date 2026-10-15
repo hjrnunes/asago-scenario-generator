@@ -182,6 +182,56 @@ def portable_request_schema(schema: Mapping[str, Any]) -> dict[str, Any]:
     return flatten_unions(portable(schema))
 
 
+_XGRAMMAR_REJECTED_KEYWORDS = frozenset(
+    {
+        "uniqueItems",
+        "contains",
+        "minContains",
+        "maxContains",
+        "format",
+        "multipleOf",
+        "minProperties",
+        "maxProperties",
+        "propertyNames",
+        "patternProperties",
+    }
+)
+_NAME_MAP_KEYS = frozenset({"properties", "$defs", "definitions"})
+_LITERAL_VALUE_KEYS = frozenset({"enum", "const", "default", "examples"})
+
+
+def find_xgrammar_rejected_keywords(schema: Mapping[str, Any]) -> list[str]:
+    """Return the JSON pointer of every keyword vLLM's xgrammar backend rejects.
+
+    A property or definition that shares a keyword's name, and a literal under
+    ``enum``, ``const``, ``default`` or ``examples``, is data and not a keyword.
+    """
+    found: list[str] = []
+    _collect_rejected(schema, "", found)
+    return found
+
+
+def _collect_rejected(node: Any, path: str, found: list[str]) -> None:
+    if isinstance(node, Mapping):
+        for key, value in node.items():
+            if key in _XGRAMMAR_REJECTED_KEYWORDS:
+                found.append(f"{path}/{key}")
+            _collect_rejected_under(key, value, f"{path}/{key}", found)
+    elif isinstance(node, list):
+        for index, value in enumerate(node):
+            _collect_rejected(value, f"{path}/{index}", found)
+
+
+def _collect_rejected_under(key: str, value: Any, path: str, found: list[str]) -> None:
+    if key in _LITERAL_VALUE_KEYS:
+        return
+    if key in _NAME_MAP_KEYS and isinstance(value, Mapping):
+        for name, subschema in value.items():
+            _collect_rejected(subschema, f"{path}/{name}", found)
+        return
+    _collect_rejected(value, path, found)
+
+
 def flat_example_for(model: type[BaseModel], value: Any) -> Any:
     """Write ``value`` as a reply to ``model``'s request schema.
 
@@ -201,6 +251,7 @@ def _pattern_rejects_empty(pattern: str) -> bool:
 __all__ = [
     "flat_example_for",
     "find_unions",
+    "find_xgrammar_rejected_keywords",
     "flat_restore_drops",
     "portable_request_schema",
     "restore_flat_reply_for",

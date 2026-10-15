@@ -561,7 +561,6 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
     briefs = build_neutral_briefs(plan, (pattern,))
     brief = briefs[0]
     prompts: list[str] = []
-    compatibility_modes: list[bool] = []
     completion_caps: list[int | None] = []
     response_formats: list[type] = []
 
@@ -571,8 +570,8 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
 
         def complete(self, **kwargs):
             self.calls += 1
+            assert "allow_unvalidated" not in kwargs
             prompts.append(kwargs["user_prompt"])
-            compatibility_modes.append(kwargs.get("allow_unvalidated", False))
             completion_caps.append(kwargs.get("max_completion_tokens"))
             response_formats.append(kwargs["response_format"])
             if self.calls == 1:
@@ -646,7 +645,6 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
     assert len(result.call_evidence) == 1
     assert result.call_evidence[0].attempt_count == 2
     assert "Validation correction" in prompts[1]
-    assert compatibility_modes == [False, False, False]
     assert completion_caps == [8192, 8192, 1024]
     schema = response_formats[0].model_json_schema()
     assert "routes" in schema["required"]
@@ -939,13 +937,12 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
                                     "loss_consequence": (
                                         "the protected operation is harmed"
                                     ),
-                                    "related_hazard_ids": ["H-1"],
-                                    "related_constraint_ids": ["SC-1"],
+                                    "governing_pairs": ["SC-1/H-1"],
                                     "process_model_refs": [],
                                     "feedback_refs": [],
                                 }
                             ],
-                            "consideration_results": [],
+                            "consideration_results": {},
                         }
                     ]
                 },
@@ -965,13 +962,14 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
     assert expected_behavior in result.filled_slots[0].icas[0].ica_text
     assert deviation in result.filled_slots[0].icas[0].ica_text
     schema = response_formats[0].model_json_schema()
-    finding_schema = schema["$defs"]["_SlotProviderFindingDraft"]
+    finding_schema = schema["$defs"]["_FillFindingWire"]
     deviation_schema = finding_schema["properties"]["deviation"]
     assert deviation_schema["type"] == "string"
     assert deviation_schema["minLength"] == 1
-    constraint_schema = finding_schema["properties"]["related_constraint_ids"]
-    assert constraint_schema["minItems"] == 1
-    assert constraint_schema["maxItems"] == 1
+    assert finding_schema["properties"]["governing_pairs"]["items"]["enum"] == [
+        "SC-1/H-1"
+    ]
+    assert "related_constraint_ids" not in finding_schema["properties"]
     assert "not_provided_context" not in finding_schema["properties"]
     assert "incorrect_value_or_effect" not in finding_schema["properties"]
     assert "timing_deviation" not in finding_schema["properties"]
@@ -1225,7 +1223,7 @@ def test_provider_slot_payload_schema_matches_request_cardinality(tmp_path) -> N
                 ),
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1267,8 +1265,8 @@ def test_provider_slot_payload_zero_pairs_requires_empty_considerations(
                 na_rationale="No routed concern applies.",
             )
             return LLMResult(
-                # Omitted nested considerations exercise the zero-valued default.
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                # A target with no routed pair answers with an empty keyed object.
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1324,7 +1322,7 @@ def test_provider_slot_payload_retries_on_exact_pair_key_mismatch(tmp_path) -> N
                 ),
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1359,7 +1357,7 @@ def test_provider_slot_response_reports_one_call_without_a_retry(tmp_path) -> No
                 na_rationale="The slot is not applicable to this structure.",
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1445,7 +1443,7 @@ def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:
                 na_rationale="The slot is not applicable to this structure.",
             )
             return LLMResult(
-                content={"filled_slots": [filled_slot.model_dump(mode="json")]},
+                content={"filled_slots": [provider_slot_payload(filled_slot)]},
                 prompt_tokens=1,
                 completion_tokens=1,
                 duration_ms=1,
@@ -1480,7 +1478,7 @@ def test_provider_slot_schema_leads_with_normative_structured_draft(tmp_path) ->
                             "is_na": True,
                             "na_rationale": "The complete structure excludes it.",
                             "findings": [],
-                            "consideration_results": [],
+                            "consideration_results": {},
                         }
                     ]
                 },
@@ -2177,6 +2175,15 @@ def _targeted_route_for(slot_id: str) -> ObligationRoute:
     )
 
 
+def _path_check_references(structure: ControlStructure) -> dict[str, set[str]]:
+    """Namespaces that admit ``SLOT-X``, which routing itself would not offer.
+
+    The slot-path checks stay behind the slot namespace as a backstop; these
+    tests reach them by admitting the slot directly.
+    """
+    return {**_reference_sets(structure, _loss_analysis(), ()), "slot": {"SLOT-X"}}
+
+
 @pytest.mark.parametrize(
     ("slot_fields", "message"),
     (
@@ -2203,7 +2210,7 @@ def test_targeted_route_requires_a_slot_path_proven_by_the_structure(
         slot_id="SLOT-X", uca_type=UCAType.not_provided, **slot_fields
     )
     route = _targeted_route_for("SLOT-X")
-    references = _reference_sets(_control_structure(), _loss_analysis(), (slot,))
+    references = _path_check_references(_control_structure())
 
     with pytest.raises(ValueError, match=message):
         _validate_route(
@@ -2241,7 +2248,7 @@ def test_targeted_route_rejects_an_action_without_a_process_target() -> None:
         uca_type=UCAType.not_provided,
     )
     route = _targeted_route_for("SLOT-X")
-    references = _reference_sets(structure, _loss_analysis(), (slot,))
+    references = _path_check_references(structure)
 
     with pytest.raises(ValueError, match="has no controlled-process target"):
         _validate_route(

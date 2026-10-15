@@ -106,6 +106,25 @@ target_kind: responsibility
 
 Obligation considerations for this target (hypotheses only):
 - analyst_instruction: 'The obligation_handle is an opaque handle: copy unchanged
+    and do not interpret its syntax. Treat the reviewed risk as a hypothesis. No attack
+    pattern covers it; find a system-specific unsafe control action through which
+    it could come about, or report that none does. Do not prescribe an attack sequence
+    or coverage.'
+  applicability:
+    conclusion: The reviewed risk is qualified for consideration; qualification status
+      is not_attempted.
+    missing_or_conflicting_facts: []
+    relevant_facts: []
+  kind: governance_risk
+  obligation_handle: R1
+  reviewed_risk:
+    consequence: null
+    description: A reviewed risk used by planner tests.
+    impact: null
+    name: Risk risk-b
+    risk_id: risk-b
+    threat: null
+- analyst_instruction: 'The obligation_handle is an opaque handle: copy unchanged
     and do not interpret its syntax. Treat the known concern as a hypothesis. Find
     a system-specific STPA control path or explicitly reject it; the reviewed risk
     and resource references are context, not proof, and do not prescribe an attack
@@ -154,31 +173,12 @@ Obligation considerations for this target (hypotheses only):
     label: direct_curated_pair
     meaning: The reviewed risk was linked directly to this attack pattern. This is
       discovery evidence, not proof that the mechanism exists in this system.
-  obligation_handle: R1
+  obligation_handle: R2
   reviewed_risk:
     consequence: null
     impact: null
     name: Risk risk-a
     risk_id: risk-a
-    threat: null
-- analyst_instruction: 'The obligation_handle is an opaque handle: copy unchanged
-    and do not interpret its syntax. Treat the reviewed risk as a hypothesis. No attack
-    pattern covers it; find a system-specific unsafe control action through which
-    it could come about, or report that none does. Do not prescribe an attack sequence
-    or coverage.'
-  applicability:
-    conclusion: The reviewed risk is qualified for consideration; qualification status
-      is not_attempted.
-    missing_or_conflicting_facts: []
-    relevant_facts: []
-  kind: governance_risk
-  obligation_handle: R2
-  reviewed_risk:
-    consequence: null
-    description: A reviewed risk used by planner tests.
-    impact: null
-    name: Risk risk-b
-    risk_id: risk-b
     threat: null
 
 Routed route evidence (opaque handles; copy unchanged):

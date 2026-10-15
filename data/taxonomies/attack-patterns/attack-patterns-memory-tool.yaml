@@ -5,7 +5,7 @@
 # Canonical-chain migration (catalog-lineage.yaml v1, final authoritative
 # dispositions): each record carries one branch-free total-order canonical
 # chain with typed actions, typed references, provenance, and ATLAS mapping
-# decisions. ATLAS is the sole v1 mapping authority (LAAF absent); SSSOM
+# decisions. ATLAS is the sole v1 mapping authority; SSSOM
 # skos:relatedMatch rows remain unqualified migration provenance in the
 # sibling .sssom.tsv file and never confer exact authority. The legacy
 # kill_chain and evidence fields are removed; case-study grounding now lives
@@ -78,13 +78,12 @@ patterns:
       pattern_id: AP-T1-01
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: bb5615a68a857be2ba4bd334a174813c6012358ee30309ee43280a0831a99b80
+      semantic_digest: 04d8d471e7dd3f1ed44e9a122e339d18b42324f44aea4090bb8899e43f0df0e2
       taxonomy_context: &id001
         atlas:
           release: '2026.05'
           digest: defd9014c6d5f5954460ef438faea583fcb1830ff81e85709628efb43037cc3a
-        laaf: null
-        mapping_set_digest: 15680b8778f51f30b1daf3ca2551437caebc3b8293c4b5e2ecf4d1b90756bfdc
+        mapping_set_digest: 29ff3a15a86a194812e029ba407a97a757c98a2d887fb922ea4f0e0a8fd40ea6
       mappings:
       - decision: exact
         taxonomy: ATLAS
@@ -374,7 +373,7 @@ patterns:
       pattern_id: AP-T1-02
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: ae755d0153f5212f982bd3cea34c4b926e381dfcc63a760521680f9030c5d05d
+      semantic_digest: 69ee8bd89d63381bfcf02c7b2a957b3a8fa197880852250ca8b3c74fb6efb09a
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -590,7 +589,7 @@ patterns:
       pattern_id: AP-T1-03
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: d4cbdadd1aa1d648c6ad0919e55be87b845a1fa164d6f8c2ca5f1353066b8be3
+      semantic_digest: c6bac76481782968e97b2adbd6368cd92f6e074358413e7b11d914fcb1939e8e
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -809,7 +808,7 @@ patterns:
       pattern_id: AP-T1-04
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: acf4a5fd28769ba0785b8535b1e4cb151440937a1cf239b4d9aef3cc6810a724
+      semantic_digest: 3842933b24893f6a88b76a7c83e0805908a80443cd67cbc967f89097eb5c7a11
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -1075,7 +1074,7 @@ patterns:
       pattern_id: AP-T2-01
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: a6bd76b9560e8f521a7078dcf8c48d81a315024722b6e7c35a2a077418750a0d
+      semantic_digest: 84deddec001300d45e467c393a1ec6f38344b399e63650e967c263700ef15856
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -1374,7 +1373,7 @@ patterns:
       pattern_id: AP-T2-02
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: 75bf8e5b099e78e0faac293db601fb2fe6f663456d261542763d0993c9e9ea07
+      semantic_digest: 144d0589af654a478cf0bdebd1d205775ac773963fc3d554fe02acf341bb16d3
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -1724,7 +1723,7 @@ patterns:
       pattern_id: AP-T2-03
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: 4bbbd08d34e84a99c05cbb32ad9ba1214585718520bceb46a3e15cefbb39b040
+      semantic_digest: 65e915010506c803c61096eaf5b28f717716c3f9e7b7486ede19e04f2483d313
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -1945,7 +1944,7 @@ patterns:
       pattern_id: AP-T2-04
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: 7dabb19e3eccaf3bd381e01b30c683a1ded831cbf9d9048a8a5350c73da984b3
+      semantic_digest: e969ec673b95bd8dfee8110654e6b928ecc1ef17907bd46128edad87bbda145c
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -2242,7 +2241,7 @@ patterns:
       pattern_id: AP-T2-05
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: 13e66aa7a23ee8f189fc458c48ee2534ab16755204f5261a750e1ebd09a3c9c7
+      semantic_digest: c3b19d82202c29076fb2d2f589ab9461c751a7151e209f574f6d6e0ed4b1ca1a
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -2509,7 +2508,7 @@ patterns:
       pattern_id: AP-T2-06
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: ec8d4f7f7a9ec52c90ebad0a99c671f3cb76a7dfc3cc14d9d37d0a249393f59f
+      semantic_digest: 2d067c88882656600ad2c5582ae9a22ab48553b57ee8d2426b6c803d3f9ec958
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -2864,7 +2863,7 @@ patterns:
       pattern_id: AP-T3-02
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: f95bc0f2659245d0899a6041c141e62735c33a44a5388cf100f1d2fcadc92f43
+      semantic_digest: 2b0fa767166095799bab342dd8142b969e28e933b2a9226d757ef445099978e1
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -3252,7 +3251,7 @@ patterns:
       pattern_id: AP-T3-03
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: ea2e1b10fbaa29c8a7ab583a28769e8463e755a3aaa85d9b0b1c4eb87e067217
+      semantic_digest: 1d4bd0e6ab2af3a5cc7be9af6ae270397d47f98edd781ea6116b50722e680648
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -3468,7 +3467,7 @@ patterns:
       pattern_id: AP-T4-01
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: 75cec45d81bb8ef0309536205c7008901036e08e1e25450781ceaff33ae872ae
+      semantic_digest: 8baebc85a749490a0f65971283a0c6076958ecf4ce387931b316acc9b22fea13
       taxonomy_context: *id001
       mappings:
       - decision: exact
@@ -3672,7 +3671,7 @@ patterns:
       pattern_id: AP-T4-03
       chain_id: chain.1
       semantic_revision: 1
-      semantic_digest: a67ba8d075efd5fdb3625a84c16303c9f760fbb031c41adc77146c416204cfb9
+      semantic_digest: 3752fe2ef2d323917d43ced0798adfed7276ae5108f2787bd2fb521f46375726
       taxonomy_context: *id001
       mappings:
       - decision: exact

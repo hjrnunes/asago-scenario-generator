@@ -339,34 +339,13 @@ def _chain_has_exact_mapping(chain: CanonicalAttackChain) -> bool:
     return any(isinstance(mapping, ExactMapping) for mapping in chain.mappings)
 
 
-def _chain_all_mappings(
-    chain: CanonicalAttackChain,
-) -> list[MappingDecision | ChainMappingDecision]:
-    """Every mapping decision at chain and step scope."""
-    return [
-        mapping
-        for scope in (chain.mappings, *(step.mappings for step in chain.steps))
-        for mapping in scope
-    ]
-
-
-def _check_chain_laaf_pin(chain: CanonicalAttackChain) -> None:
-    """LAAF decisions require an explicit LAAF taxonomy pin."""
-    if chain.taxonomy_context.laaf is None:
-        if any(mapping.taxonomy == "LAAF" for mapping in _chain_all_mappings(chain)):
-            raise ValueError(
-                "LAAF mapping decisions require an explicit LAAF taxonomy pin"
-            )
-
-
 def _check_chain_taxonomy_scope(chain: CanonicalAttackChain) -> None:
-    """Chain mapping scope: unique taxonomies, an exact mapping, LAAF pin."""
+    """Chain mapping scope: unique taxonomies and an exact mapping."""
     taxonomies = _chain_taxonomies(chain)
     if len(taxonomies) != len(set(taxonomies)):
         raise ValueError("duplicate taxonomy decisions in chain scope")
     if not _chain_has_exact_mapping(chain):
-        raise ValueError("chain requires an exact ATLAS or LAAF mapping")
-    _check_chain_laaf_pin(chain)
+        raise ValueError("chain requires an exact ATLAS mapping")
 
 
 def _check_step_ids_and_order(chain: CanonicalAttackChain) -> None:

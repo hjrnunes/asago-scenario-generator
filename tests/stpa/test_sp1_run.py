@@ -240,11 +240,11 @@ def _observed_gemma_control_element_set_dict() -> dict:
     payload["control_actions"][0]["target"] = {
         "type": "CP-5",
     }
-    payload["feedback_channels"][0]["updates"] = {
+    payload["feedback"][0]["updates"] = {
         "type": "process_model_part",
         "id": "PM-1-1",
     }
-    payload["feedback_channels"][0]["source"] = {
+    payload["feedback"][0]["source"] = {
         "type": "RESP-1",
     }
     payload["controlled_processes"] = [
@@ -256,7 +256,7 @@ def _observed_gemma_control_element_set_dict() -> dict:
 def _observed_gemma_invalid_feedback_update_dict() -> dict:
     """Return the responsibility-shaped ``updates`` seen in live run 2."""
     payload = valid_control_element_set_dict()
-    payload["feedback_channels"][0]["updates"] = {
+    payload["feedback"][0]["updates"] = {
         "type": "responsibility",
         "id": "RESP-1",
     }
@@ -520,7 +520,7 @@ class TestRunOrchestration:
         assert result.stage_warnings == []
         assert any(
             "call_2b_control_elements" in error
-            and "feedback_channels.0.updates\n  Input should be a valid string" in error
+            and "feedback.0.updates\n  Input should be a valid string" in error
             for error in result.stage_errors
         )
 

@@ -21,6 +21,7 @@ from asago_scenario_generator.pipeline.synthesis_manifest import (
 from replay_gate import (
     ALLOWED_DIFFERENCES,
     ALLOWED_FILE_CHANGES,
+    ALLOWED_TEXT_DIFFERENCES,
     Difference,
     GateResult,
     _drop_field,
@@ -289,6 +290,8 @@ def test_the_report_names_the_removed_templates(trees, tmp_path: Path) -> None:
 def test_every_allowed_difference_states_a_reason() -> None:
     for allowed in ALLOWED_DIFFERENCES:
         assert allowed.file and allowed.fields and allowed.reason
+    for text in ALLOWED_TEXT_DIFFERENCES:
+        assert text.file and text.pattern.groups and text.reason
     for change in ALLOWED_FILE_CHANGES:
         assert change.file and change.side in {"recording", "replay"}
         assert change.reason
@@ -627,6 +630,77 @@ def test_compare_file_reports_binary_and_length_differences(
     left.write_bytes(recorded)
     right.write_bytes(replayed)
     assert compare_file(left, right, "left.txt", {}) == expected
+
+
+def _effort_report(
+    *, lead_seconds: int, row_seconds: int, requests: int = 84, tail: str = ""
+) -> str:
+    """The generate report's effort section as `report/effort_section.py` renders it."""
+    return (
+        '<section id="effort"><p><b data-metric="effort.requests" data-value="326">326</b>'
+        ' requests, used <b data-metric="effort.tokens" data-value="3281448">3,281,448</b>'
+        f' tokens and <b data-metric="effort.seconds" data-value="{lead_seconds}">'
+        f"{lead_seconds:,}</b> seconds.</p>"
+        '<table id="effort-table"><tbody><tr id="effort-scenario-writing">'
+        f'<td>Scenario writing</td><td class="n" data-v="{requests}">{requests}</td>'
+        '<td class="n" data-v="31">31</td><td class="n" data-v="1538316">1,538,316</td>'
+        f'<td>47%</td><td class="n" data-v="{row_seconds}">{row_seconds:,}</td></tr>'
+        '<tr id="effort-other"><td>Other</td><td class="n" data-v="1">1</td>'
+        '<td class="n" data-v="0">0</td><td class="n" data-v="15405">15,405</td>'
+        '<td>0%</td><td class="n" data-v="0">0</td></tr></tbody></table></section>'
+        f"{tail}\n"
+    )
+
+
+def _compare_report(
+    tmp_path: Path, recorded: str, replayed: str, name: str
+) -> str | None:
+    left, right = tmp_path / "recorded.html", tmp_path / "replayed.html"
+    left.write_text(recorded, encoding="utf-8")
+    right.write_text(replayed, encoding="utf-8")
+    return compare_file(left, right, name, {})
+
+
+def test_replay_seconds_in_the_report_effort_section_are_an_allowed_difference(
+    tmp_path: Path,
+) -> None:
+    # A replayed call's duration is the local lookup time, so a step's summed
+    # seconds round to 0 or 1 depending on machine load.
+    recorded = _effort_report(lead_seconds=1, row_seconds=1)
+    replayed = _effort_report(lead_seconds=0, row_seconds=0)
+    assert _compare_report(tmp_path, recorded, replayed, "report/index.html") is None
+    large = _effort_report(lead_seconds=1234, row_seconds=1001)
+    assert _compare_report(tmp_path, large, replayed, "report/index.html") is None
+
+
+_OTHER_ROW = '<tr id="other-row"><td class="n" data-v="{0}">{0}</td></tr>'
+
+
+@pytest.mark.parametrize(
+    ("recorded", "replayed", "name"),
+    [
+        (
+            _effort_report(lead_seconds=1, row_seconds=1),
+            _effort_report(lead_seconds=1, row_seconds=1, requests=85),
+            "report/index.html",
+        ),
+        (
+            _effort_report(lead_seconds=1, row_seconds=1, tail=_OTHER_ROW.format(1)),
+            _effort_report(lead_seconds=1, row_seconds=1, tail=_OTHER_ROW.format(2)),
+            "report/index.html",
+        ),
+        (
+            _effort_report(lead_seconds=1, row_seconds=1),
+            _effort_report(lead_seconds=0, row_seconds=0),
+            "other/index.html",
+        ),
+    ],
+    ids=["effort-requests", "last-cell-of-another-table", "another-file"],
+)
+def test_report_differences_outside_the_effort_seconds_still_fail(
+    tmp_path: Path, recorded: str, replayed: str, name: str
+) -> None:
+    assert _compare_report(tmp_path, recorded, replayed, name) is not None
 
 
 def test_the_report_lists_network_attempts_and_differences(tmp_path: Path) -> None:

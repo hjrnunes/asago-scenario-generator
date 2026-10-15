@@ -49,6 +49,16 @@ def _wrong_timing_context(
     )
 
 
+def _tool_call_action_context():
+    """The ``_wrong_timing_context`` context with a tool-call target action."""
+    return build_scenario_generation_context(
+        _threat_of_type(UCAType.wrong_timing),
+        _structure_with_effect(ControlActionEffectKind.tool_call),
+        _loss_analysis(),
+        scenario_id="SCN-001",
+    )
+
+
 def _wrong_timing_assembly(context):
     """The assembly authority of a ``_wrong_timing_context`` context."""
     return stage5_assembly(

@@ -119,13 +119,97 @@ def _controls() -> AnalysisControls:
 def provider_slot_payload(draft: SlotIcaDraft) -> dict:
     """Dump a typed slot draft as the provider wire carries it.
 
-    The wire schema gives each finding's ``deviation`` as one string; the typed
-    draft nests it in a type-specific object.
+    The wire schema gives each finding's ``deviation`` as one string and its
+    constraints and hazards as ``governing_pairs``, and keys
+    ``consideration_results`` by obligation handle; the typed draft nests the
+    deviation in a type-specific object, keeps the two ID lists, and lists the
+    results.
     """
     payload = draft.model_dump(mode="json")
     for wire, typed in zip(payload["findings"], draft.findings, strict=True):
         wire["deviation"] = typed.deviation.text
+        wire["governing_pairs"] = wire_pairs(
+            typed.related_constraint_ids, typed.related_hazard_ids
+        )
+        del wire["related_constraint_ids"], wire["related_hazard_ids"]
+    payload["consideration_results"] = keyed_results(payload["consideration_results"])
     return payload
+
+
+def wire_pairs(constraint_ids, hazard_ids, loss_analysis=None) -> list[str]:
+    """Join constraints and hazards as the fill wire's governing pairs.
+
+    With *loss_analysis*, keep each constraint with the hazards it governs, in
+    written order. When those pairs leave a written ID out, or without
+    *loss_analysis*, keep every constraint with every hazard, so the reply
+    still names each ID and the fill validator judges the ungoverned pairs.
+    """
+    every = [f"{c}/{h}" for c in constraint_ids for h in hazard_ids]
+    if loss_analysis is None:
+        return every
+    governs = {
+        item.constraint_id: set(item.related_hazards)
+        for item in loss_analysis.security_constraints
+    }
+    governed = [
+        f"{c}/{h}"
+        for c in constraint_ids
+        for h in hazard_ids
+        if h in governs.get(c, ())
+    ]
+    covered = {part for pair in governed for part in pair.split("/")}
+    if covered != {*constraint_ids, *hazard_ids}:
+        return every
+    return governed
+
+
+def current_fill_reply(recorded: dict, loss_analysis=None) -> dict:
+    """Recast a fill reply recorded in the earlier wire in today's wire.
+
+    Each finding's constraints and hazards become ``governing_pairs``
+    (``wire_pairs``),
+    and the ``consideration_results`` list becomes an object keyed by
+    ``obligation_handle``; every other value is copied unchanged. A list that
+    names one handle twice has no keyed form and raises ``ValueError``.
+    """
+    slots = []
+    for slot in recorded["filled_slots"]:
+        findings = []
+        for finding in slot.get("findings", []):
+            wire = {
+                key: value
+                for key, value in finding.items()
+                if key not in {"related_constraint_ids", "related_hazard_ids"}
+            }
+            wire["governing_pairs"] = wire_pairs(
+                finding["related_constraint_ids"],
+                finding["related_hazard_ids"],
+                loss_analysis,
+            )
+            findings.append(wire)
+        slots.append(
+            {
+                **slot,
+                "findings": findings,
+                "consideration_results": keyed_results(
+                    slot.get("consideration_results", [])
+                ),
+            }
+        )
+    return {**recorded, "filled_slots": slots}
+
+
+def keyed_results(results) -> dict:
+    """Key a consideration-result list by its ``obligation_handle``."""
+    keyed: dict = {}
+    for item in results:
+        handle = item["obligation_handle"]
+        if handle in keyed:
+            raise ValueError(f"consideration_results names {handle} twice")
+        keyed[handle] = {
+            key: value for key, value in item.items() if key != "obligation_handle"
+        }
+    return keyed
 
 
 TARGETING_FIELDS = (

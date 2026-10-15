@@ -1,0 +1,773 @@
+{
+ "analysis": {
+  "hazards": [
+   {
+    "description": "The assistant's conversational interface returns policy, fee, payment term, or refund eligibility information (e.g., fee amounts, payment deadlines, refund windows) that is not grounded in an approved retrieve_policy snippet, i.e., the RAG knowledge-grounding whitelist is bypassed and the model improvises an answer.",
+    "hazard_id": "H-8",
+    "related_losses": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ]
+   },
+   {
+    "description": "The assistant, when queried on a topic with no approved policy snippet (fees, payments, eligibility per TARGET-READ-002/003/004), fails to invoke escalate_to_human and instead continues answering, leaving the conversation in the AI-only path instead of routing to a human agent as the routing logic requires.",
+    "hazard_id": "H-4",
+    "related_losses": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ]
+   },
+   {
+    "description": "The account-details or lookup_order integration returns order, transaction, or payment-plan data (state:orders, state:payment_plans, session:authenticated_customer_id) for a customer other than the authenticated customer, or the assistant discloses such cross-customer financial data in its reply.",
+    "hazard_id": "H-2",
+    "related_losses": [
+     "L-3",
+     "L-7"
+    ]
+   },
+   {
+    "description": "Authenticated-context data about one customer's purchases, payment status, or account history (session:authenticated_customer_id, session:session_id, get_account_details results) is sent to or exposed outside the intended recipient boundary \u2014 e.g., into the OpenAI model-provider prompt channel, into a different customer's conversation, or via logged/replayed queries \u2014 without a supported recipient.",
+    "hazard_id": "H-6",
+    "related_losses": [
+     "L-3",
+     "L-7"
+    ]
+   },
+   {
+    "description": "The process_refund or schedule_payment integration executes an action whose parameters do not correspond to the customer's authenticated request and account state \u2014 e.g., a refund amount exceeding the remaining_to_pay balance on the order, a refund processed on a non-refund-eligible order, or a refund/schedule change applied to a plan_id or order_id belonging to another customer.",
+    "hazard_id": "H-7",
+    "related_losses": [
+     "L-6",
+     "L-2",
+     "L-7"
+    ]
+   },
+   {
+    "description": "The assistant, leveraging its trusted-conversational position and injected authenticated context, is steered by a manipulative request into performing a refund, reschedule, or disclosure that the actual customer did not intend or authorize (social-engineering-induced misuse of the refund/payment write integrations).",
+    "hazard_id": "H-1",
+    "related_losses": [
+     "L-2",
+     "L-6"
+    ]
+   },
+   {
+    "description": "The assistant's responses across its global customer base systematically differ in accuracy, tone, or outcome quality across demographic/language groups (e.g., non-English speakers or lower-financial-literacy customers receive less accurate policy or refund guidance), producing disparate treatment in a regulated credit context.",
+    "hazard_id": "H-3",
+    "related_losses": [
+     "L-7",
+     "L-4"
+    ]
+   },
+   {
+    "description": "Conversations requiring nuanced judgment, disputed orders, or complex cases (e.g., state:orders.status='disputed') remain fully handled by the AI agent because no escalation trigger fires, so customers receive generic answers where the walk-back evidence shows human handling was required.",
+    "hazard_id": "H-5",
+    "related_losses": [
+     "L-4"
+    ]
+   },
+   {
+    "description": "The agent erodes user trust.",
+    "hazard_id": "H-9",
+    "related_losses": [
+     "L-8"
+    ]
+   }
+  ],
+  "risk_card_losses": [
+   {
+    "description": "Customers suffer direct financial harm: incorrect refunds, wrongly scheduled or modified payments, or confidently wrong policy/fee/payment-term answers that lead customers to make poor financial decisions with real monetary consequences in their buy-now-pay-later plans.",
+    "loss_id": "L-2",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "atlas-dangerous-use",
+     "atlas-hallucination",
+     "credo-risk-021",
+     "credo-risk-026",
+     "mit-ai-risk-subdomain-3.1",
+     "mit-ai-risk-subdomain-4.3",
+     "mit-ai-risk-subdomain-7.3"
+    ]
+   },
+   {
+    "description": "Klarna incurs direct financial loss from fraudulent or erroneous refunds processed through the assistant's refund integration, or from unauthorized payment rescheduling affecting plan revenue.",
+    "loss_id": "L-6",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "atlas-dangerous-use",
+     "credo-risk-016",
+     "credo-risk-026",
+     "mit-ai-risk-subdomain-4.3"
+    ]
+   },
+   {
+    "description": "Customer Personally Identifiable Information (PII) and financial records (transaction histories, payment statuses, purchase details) are exposed to parties not entitled to receive them, breaching customer privacy.",
+    "loss_id": "L-3",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "ai-risk-taxonomy-unauthorized-disclosure---financial-records",
+     "ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)",
+     "ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)",
+     "atlas-confidential-data-in-prompt",
+     "atlas-revealing-confidential-information",
+     "credo-risk-038"
+    ]
+   },
+   {
+    "description": "Klarna faces regulatory penalties, fines, or operational restrictions from financial-services regulators across multiple jurisdictions due to non-compliant disclosures, unfair outcomes, or privacy violations in the assistant's responses and data handling.",
+    "loss_id": "L-7",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "ai-risk-taxonomy-unauthorized-disclosure---financial-records",
+     "ai-risk-taxonomy-unauthorized-processing---financial-records",
+     "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)",
+     "atlas-hallucination",
+     "atlas-output-bias",
+     "credo-risk-010",
+     "credo-risk-021",
+     "credo-risk-023",
+     "mit-ai-risk-subdomain-1.1"
+    ]
+   },
+   {
+    "description": "Customer trust and service quality degrade \u2014 customers abandon the channel, complain publicly, or receive unsatisfactory resolution for complex cases, driving reputational damage and forcing costly rehiring of human agents (the realized May 2025 walk-back).",
+    "loss_id": "L-4",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "atlas-over-or-under-reliance",
+     "credo-risk-016",
+     "credo-risk-021",
+     "credo-risk-034",
+     "mit-ai-risk-subdomain-5.1",
+     "mit-ai-risk-subdomain-7.3"
+    ]
+   },
+   {
+    "description": "Klarna loses exclusive control over confidential business information (policies, prompts, partnership details with OpenAI) that leaks through the model-provider channel or generated output.",
+    "loss_id": "L-5",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "atlas-confidential-data-in-prompt",
+     "atlas-revealing-confidential-information",
+     "credo-risk-038"
+    ]
+   },
+   {
+    "description": "Klarna faces civil lawsuits from individuals or organizations harmed by the assistant's outputs (negligence, privacy violations, defamation, or copyright infringement in generated content).",
+    "loss_id": "L-1",
+    "provenance": "risk_card",
+    "source_risk_cards": [
+     "atlas-copyright-infringement",
+     "atlas-non-disclosure",
+     "credo-risk-023",
+     "credo-risk-024"
+    ]
+   }
+  ],
+  "risk_dispositions": [
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2",
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-026"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-hallucination"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-7",
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-010"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3",
+     "L-7"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-disclosure---financial-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-021"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4",
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-016"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-7"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-7"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-processing---financial-records"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3"
+    ],
+    "reason": null,
+    "risk_ref": "ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-5.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-copyright-infringement"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3",
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-revealing-confidential-information"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-024"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2",
+     "L-7"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-3.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2",
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-4.3"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-7",
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-023"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-1"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-non-disclosure"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2",
+     "L-6"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-dangerous-use"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3",
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-038"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-7",
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-output-bias"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-7"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-1.1"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "credo-risk-034"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-2",
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "mit-ai-risk-subdomain-7.3"
+   },
+   {
+    "disposition": "not_applicable",
+    "loss_ids": [],
+    "reason": "Intentional mass disinformation campaigns are not a grounded loss for a one-to-one authenticated customer-support channel serving individual account queries.",
+    "risk_ref": "atlas-spreading-disinformation"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-4"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-over-or-under-reliance"
+   },
+   {
+    "disposition": "cited",
+    "loss_ids": [
+     "L-3",
+     "L-5"
+    ],
+    "reason": null,
+    "risk_ref": "atlas-confidential-data-in-prompt"
+   }
+  ],
+  "security_constraints": [
+   {
+    "applies_when": [
+     "a customer asks about policy, fees, payment terms, or refund eligibility"
+    ],
+    "behavior_class": "wrong_information",
+    "constraint_id": "SC-5",
+    "description": "The assistant must state only what approved retrieve_policy snippets support, and must not improvise policy, fee, payment-term, or refund-eligibility details beyond the approved information whitelist. Applies when: a customer asks about policy, fees, payment terms, or refund eligibility.",
+    "obligations": [
+     {
+      "behavior": "improvising policy answers not grounded in approved snippets",
+      "completion": null,
+      "kind": "forbidden",
+      "note": null,
+      "obligation_id": "O1",
+      "observation_role": null,
+      "projection": null,
+      "realized_by": null,
+      "residual": null,
+      "rule_span": "must state only what approved retrieve_policy snippets support",
+      "source_outcome": null,
+      "violated_via": "reply"
+     }
+    ],
+    "related_hazards": [
+     "H-8"
+    ],
+    "rule": "The assistant must state only what approved retrieve_policy snippets support, and must not improvise policy, fee, payment-term, or refund-eligibility details beyond the approved information whitelist."
+   },
+   {
+    "applies_when": [
+     "a retrieve_policy query returns no approved matching snippet",
+     "the customer raises a regulated topic such as fees, payments, or eligibility"
+    ],
+    "behavior_class": "missed_escalation",
+    "constraint_id": "SC-4",
+    "description": "When no approved policy snippet matches a regulated-topic query, the assistant must hand the conversation to a human agent via escalate_to_human rather than continuing to answer. Applies when: a retrieve_policy query returns no approved matching snippet; the customer raises a regulated topic such as fees, payments, or eligibility.",
+    "obligations": [
+     {
+      "behavior": "handing the conversation to a human agent when no approved policy snippet matches",
+      "completion": null,
+      "kind": "required",
+      "note": null,
+      "obligation_id": "O1",
+      "observation_role": null,
+      "projection": null,
+      "realized_by": "tool_call",
+      "residual": null,
+      "rule_span": "must hand the conversation to a human agent via escalate_to_human",
+      "source_outcome": null,
+      "violated_via": null
+     }
+    ],
+    "related_hazards": [
+     "H-4"
+    ],
+    "rule": "When no approved policy snippet matches a regulated-topic query, the assistant must hand the conversation to a human agent via escalate_to_human rather than continuing to answer."
+   },
+   {
+    "applies_when": [
+     "any account or order lookup or disclosure of account data occurs in a conversation"
+    ],
+    "behavior_class": "disclosure",
+    "constraint_id": "SC-8",
+    "description": "The assistant must never disclose order, transaction, or payment-plan records belonging to a customer other than session:authenticated_customer_id, regardless of what identifiers a requester supplies. Applies when: any account or order lookup or disclosure of account data occurs in a conversation.",
+    "obligations": [
+     {
+      "behavior": "disclosing order or plan data whose customer_id differs from the session's authenticated customer",
+      "completion": null,
+      "kind": "forbidden",
+      "note": null,
+      "obligation_id": "O1",
+      "observation_role": null,
+      "projection": null,
+      "realized_by": null,
+      "residual": null,
+      "rule_span": "must never disclose order, transaction, or payment-plan records belonging to a customer other than session:authenticated_customer_id",
+      "source_outcome": null,
+      "violated_via": "reply"
+     }
+    ],
+    "related_hazards": [
+     "H-2"
+    ],
+    "rule": "The assistant must never disclose order, transaction, or payment-plan records belonging to a customer other than session:authenticated_customer_id, regardless of what identifiers a requester supplies."
+   },
+   {
+    "applies_when": [
+     "account context, purchase history, or payment-status data is included in a request to the model provider or any output channel"
+    ],
+    "behavior_class": "disclosure",
+    "constraint_id": "SC-1",
+    "description": "Customer PII and financial records must remain within the authorized Klarna\u2013OpenAI processing boundary and never be routed to any other recipient or output channel. Applies when: account context, purchase history, or payment-status data is included in a request to the model provider or any output channel.",
+    "obligations": [
+     {
+      "behavior": "transmitting customer PII to recipients outside the authorized Klarna/OpenAI processing boundary",
+      "completion": null,
+      "kind": "forbidden",
+      "note": null,
+      "obligation_id": "O1",
+      "observation_role": null,
+      "projection": null,
+      "realized_by": null,
+      "residual": null,
+      "rule_span": "must remain within the authorized Klarna\u2013OpenAI processing boundary and never be routed to any other recipient",
+      "source_outcome": null,
+      "violated_via": "provider_request"
+     }
+    ],
+    "related_hazards": [
+     "H-6"
+    ],
+    "rule": "Customer PII and financial records must remain within the authorized Klarna\u2013OpenAI processing boundary and never be routed to any other recipient or output channel."
+   },
+   {
+    "applies_when": [
+     "the assistant invokes process_refund or schedule_payment"
+    ],
+    "behavior_class": "unauthorized_write",
+    "constraint_id": "SC-7",
+    "description": "Every process_refund or schedule_payment execution must act only on order and plan records whose customer_id equals session:authenticated_customer_id, and a refund must only be processed on orders whose refund_eligible field is true and must not exceed the order's remaining_to_pay balance. Applies when: the assistant invokes process_refund or schedule_payment.",
+    "obligations": [
+     {
+      "behavior": "processing a refund exceeding the order's remaining_to_pay",
+      "completion": null,
+      "kind": "forbidden",
+      "note": null,
+      "obligation_id": "O1",
+      "observation_role": null,
+      "projection": null,
+      "realized_by": null,
+      "residual": null,
+      "rule_span": "must not exceed the order's remaining_to_pay balance",
+      "source_outcome": null,
+      "violated_via": "tool_call"
+     },
+     {
+      "behavior": "acting on records whose customer_id differs from the session's authenticated customer",
+      "completion": null,
+      "kind": "forbidden",
+      "note": null,
+      "obligation_id": "O3",
+      "observation_role": null,
+      "projection": null,
+      "realized_by": null,
+      "residual": null,
+      "rule_span": "only on order and plan records whose customer_id equals session:authenticated_customer_id",
+      "source_outcome": null,
+      "violated_via": "tool_call"
+     }
+    ],
+    "related_hazards": [
+     "H-7"
+    ],
+    "rule": "Every process_refund or schedule_payment execution must act only on order and plan records whose customer_id equals session:authenticated_customer_id, and a refund must only be processed on orders whose refund_eligible field is true and must not exceed the order's remaining_to_pay balance."
+   },
+   {
+    "applies_when": [
+     "a customer request seeks to change payment plans, request refunds, or disclose account data and shows signs of third-party steering or manipulation"
+    ],
+    "behavior_class": "manipulation",
+    "constraint_id": "SC-6",
+    "description": "The assistant must execute financial writes only when the request plausibly originates from the authenticated customer's own intent, and must not be induced by conversational pressure or claimed authority into performing refunds, reschedules, or disclosures the customer did not request. Applies when: a customer request seeks to change payment plans, request refunds, or disclose account data and shows signs of third-party steering or manipulation.",
+    "related_hazards": [
+     "H-1"
+    ],
+    "rule": "The assistant must execute financial writes only when the request plausibly originates from the authenticated customer's own intent, and must not be induced by conversational pressure or claimed authority into performing refunds, reschedules, or disclosures the customer did not request."
+   },
+   {
+    "applies_when": [
+     "the assistant serves customers across languages, regions, or demographic segments"
+    ],
+    "behavior_class": "harmful_or_discriminatory_output",
+    "constraint_id": "SC-2",
+    "description": "The assistant must provide policy, refund, and payment guidance of substantially equal accuracy and quality across the customer base regardless of language, region, or customer demographic characteristics. Applies when: the assistant serves customers across languages, regions, or demographic segments.",
+    "related_hazards": [
+     "H-3"
+    ],
+    "rule": "The assistant must provide policy, refund, and payment guidance of substantially equal accuracy and quality across the customer base regardless of language, region, or customer demographic characteristics."
+   },
+   {
+    "applies_when": [
+     "a conversation involves a disputed order, unusual complexity, or repeated customer dissatisfaction with the AI's resolution"
+    ],
+    "behavior_class": "missed_escalation",
+    "constraint_id": "SC-3",
+    "description": "When a conversation involves a disputed order (state:orders.status='disputed'), unusual complexity, or repeated failure to resolve, the assistant must route the conversation to a human agent via escalate_to_human instead of continuing to resolve it autonomously. Applies when: a conversation involves a disputed order, unusual complexity, or repeated customer dissatisfaction with the AI's resolution.",
+    "obligations": [
+     {
+      "behavior": "handing disputes and complex cases to a human agent",
+      "completion": null,
+      "kind": "required",
+      "note": null,
+      "obligation_id": "O1",
+      "observation_role": null,
+      "projection": null,
+      "realized_by": "tool_call",
+      "residual": null,
+      "rule_span": "must route the conversation to a human agent via escalate_to_human",
+      "source_outcome": null,
+      "violated_via": null
+     }
+    ],
+    "related_hazards": [
+     "H-5"
+    ],
+    "rule": "When a conversation involves a disputed order (state:orders.status='disputed'), unusual complexity, or repeated failure to resolve, the assistant must route the conversation to a human agent via escalate_to_human instead of continuing to resolve it autonomously."
+   },
+   {
+    "applies_when": [
+     "through transparency"
+    ],
+    "constraint_id": "SC-9",
+    "description": "The agent must preserve user trust. Applies when: through transparency.",
+    "related_hazards": [
+     "H-9"
+    ],
+    "rule": "The agent must preserve user trust."
+   }
+  ],
+  "use_case_losses": [
+   {
+    "description": "Loss of trust",
+    "loss_id": "L-8",
+    "provenance": "use_case",
+    "source_risk_cards": []
+   }
+  ]
+ },
+ "records": [
+  {
+   "applied": {
+    "dropped_entries": [
+     "O2"
+    ]
+   },
+   "attempt": "first",
+   "identity": "SC-7/O2",
+   "kind": "salvage",
+   "outcome": "removed",
+   "proposed": {
+    "dropped_entries": [
+     "O2"
+    ]
+   },
+   "raw_step": "risk_derivation",
+   "reason": "rule_span must be a contiguous substring of the constraint rule, compared case-insensitively",
+   "stage": "risk_derivation"
+  },
+  {
+   "applied": {
+    "entries": [
+     "H-8.related_losses"
+    ],
+    "references": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ]
+   },
+   "attempt": "repair",
+   "identity": "H-8.related_losses",
+   "kind": "repair",
+   "outcome": "repaired",
+   "proposed": {
+    "entries": [
+     "H-8.related_losses"
+    ],
+    "references": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ]
+   },
+   "raw_step": "risk_derivation_repair",
+   "reason": "hazards.related_losses unknown IDs: H-8 -> loss_customer_trust; permitted correction: for each unknown entry, remove it or replace it with one listed replacement ID; keep L-2, L-7 once each in this order; name no ID outside the kept and replacement IDs",
+   "stage": "risk_derivation"
+  },
+  {
+   "applied": {
+    "entries": [
+     "H-5.related_losses"
+    ],
+    "references": [
+     "L-4"
+    ]
+   },
+   "attempt": "repair",
+   "identity": "H-5.related_losses",
+   "kind": "repair",
+   "outcome": "repaired",
+   "proposed": {
+    "entries": [
+     "H-5.related_losses"
+    ],
+    "references": [
+     "L-4"
+    ]
+   },
+   "raw_step": "risk_derivation_repair",
+   "reason": "hazards.related_losses unknown IDs: H-5 -> loss_customer_trust; permitted correction: for each unknown entry, remove it or replace it with one listed replacement ID; keep L-4 once each in this order; name no ID outside the kept and replacement IDs",
+   "stage": "risk_derivation"
+  },
+  {
+   "applied": {
+    "entries": [
+     "atlas-hallucination.loss_ids"
+    ],
+    "references": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ]
+   },
+   "attempt": "repair",
+   "identity": "atlas-hallucination.loss_ids",
+   "kind": "repair",
+   "outcome": "repaired",
+   "proposed": {
+    "entries": [
+     "atlas-hallucination.loss_ids"
+    ],
+    "references": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ]
+   },
+   "raw_step": "risk_derivation_repair",
+   "reason": "risk_dispositions.loss_ids unknown IDs: atlas-hallucination -> loss_customer_trust; permitted correction: for each unknown entry, remove it or replace it with one listed replacement ID; keep L-2, L-7 once each in this order; name no ID outside the kept and replacement IDs",
+   "stage": "risk_derivation"
+  },
+  {
+   "applied": {
+    "entries": [
+     "credo-risk-021.loss_ids"
+    ],
+    "references": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ]
+   },
+   "attempt": "repair",
+   "identity": "credo-risk-021.loss_ids",
+   "kind": "repair",
+   "outcome": "repaired",
+   "proposed": {
+    "entries": [
+     "credo-risk-021.loss_ids"
+    ],
+    "references": [
+     "L-2",
+     "L-7",
+     "L-4"
+    ]
+   },
+   "raw_step": "risk_derivation_repair",
+   "reason": "risk_dispositions.loss_ids unknown IDs: credo-risk-021 -> loss_customer_trust; permitted correction: for each unknown entry, remove it or replace it with one listed replacement ID; keep L-2, L-7 once each in this order; name no ID outside the kept and replacement IDs",
+   "stage": "risk_derivation"
+  }
+ ],
+ "steps": [
+  "risk_derivation",
+  "risk_derivation_repair",
+  "gap_analysis"
+ ],
+ "warnings": [
+  "salvaged constraint 'SC-7' with its valid obligation entries retained; 1 malformed entry dropped from the working draft and retained verbatim for the targeted repair: O2: rule_span must be a contiguous substring of the constraint rule, compared case-insensitively",
+  "risk accounting normalized: 'atlas-copyright-infringement' was not_applicable but is cited by L-1; the model's dropped reason was: The assistant answers customer-service queries grounded in approved Klarna policy snippets and does not generate creative works such as code or images where copyright reproduction is a credible loss.; flipped to cited from the response's own citation evidence",
+  "risk accounting normalized: 'atlas-non-disclosure' was not_applicable but is cited by L-1; the model's dropped reason was: Non-disclosure of AI-generated status is not a grounded loss here because the assistant operates as an openly branded AI customer-service channel and no risk-card evidence ties undisclosed AI status to a concrete harm in this system.; flipped to cited from the response's own citation evidence"
+ ]
+}

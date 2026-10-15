@@ -46,7 +46,7 @@ Compact obligation questions:
     label: direct_curated_pair
     meaning: The reviewed risk was linked directly to this attack pattern. This is
       discovery evidence, not proof that the mechanism exists in this system.
-  obligation_handle: ob:v1:00de7835aa424ddd0eb2ecf07096df75664b46fa438a3ef11c37d4cc597b7624
+  obligation_handle: ob:v1:eda1366f17a5631363e6e587e33e2f9fa369eefb46610a43189a7429cb04ddca
   reviewed_risk:
     consequence: null
     impact: null
@@ -59,7 +59,9 @@ AUTHORITATIVE HAZARD-CONSTRAINT PAIR LEDGER (typed IDs only):
 Use only the exact constraint_id -> hazard_id pairs listed here. Descriptions, including parenthetical IDs, are not relationship evidence. This ledger validates structural references only; it does not make a taxonomy concern applicable or force a targeted route.
 - <none>
 
-Compact STPA target index: relationships use IDs; the ID glossary explains each ID exactly once.
+Compact STPA target index: relationships use IDs; the ID glossary explains each ID exactly once,
+except slot IDs: each slots row states its owner, action, target process, and UCA type, and the
+uca_types legend defines each type.
 constraints: []
 control_actions:
 - action_temporality: null
@@ -93,18 +95,6 @@ id_glossary:
   meaning: Request state.
 - id: RESP-1
   meaning: Validate incoming requests.
-- id: RESP-1:CA-1-1:INCORRECT
-  meaning: Unsafe-control slot; its exact action, owner, target, and UCA type are
-    stated in the slots relationship table.
-- id: RESP-1:CA-1-1:NOT_PROVIDED
-  meaning: Unsafe-control slot; its exact action, owner, target, and UCA type are
-    stated in the slots relationship table.
-- id: RESP-1:CA-1-1:WRONG_DURATION
-  meaning: Unsafe-control slot; its exact action, owner, target, and UCA type are
-    stated in the slots relationship table.
-- id: RESP-1:CA-1-1:WRONG_TIMING
-  meaning: Unsafe-control slot; its exact action, owner, target, and UCA type are
-    stated in the slots relationship table.
 loss_ids:
 - L-1
 process_model_parts:
@@ -133,18 +123,22 @@ slots:
 - action_temporality: null
   control_action_id: CA-1-1
   coordination_path_id: null
-  id: RESP-1:CA-1-1:WRONG_DURATION
-  owner_id: RESP-1
-  target_process_id: CP-1
-  uca_type: WRONG_DURATION
-- action_temporality: null
-  control_action_id: CA-1-1
-  coordination_path_id: null
   id: RESP-1:CA-1-1:WRONG_TIMING
   owner_id: RESP-1
   target_process_id: CP-1
   uca_type: WRONG_TIMING
 target_id: null
 target_kind: all
+uca_types:
+- meaning: the required control action is absent when it is needed.
+  uca_type: NOT_PROVIDED
+- meaning: the action is provided, but its value, content, destination, or effect
+    is unsafe.
+  uca_type: INCORRECT
+- meaning: the action is provided too early, too late, or in an unsafe order.
+  uca_type: WRONG_TIMING
+- meaning: a continuous action stops too soon, continues too long, or is applied for
+    an unsafe duration.
+  uca_type: WRONG_DURATION
 
 Return typed route dispositions with exact references and evidence.

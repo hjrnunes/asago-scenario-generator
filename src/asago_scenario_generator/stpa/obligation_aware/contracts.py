@@ -18,6 +18,7 @@ from asago_scenario_generator.models.canonical import (
     SemanticDigestMixin,
 )
 from asago_scenario_generator.models.artifact_pin import ArtifactPin, Digest
+from asago_scenario_generator.models.ica_merge import IcaMerge
 from asago_scenario_generator.models.obligation_consideration import (
     BoundedStructuralRevision,
     ConsiderationCallEvidence,
@@ -377,15 +378,20 @@ class ObligationIcaDraft(_Model):
 
     @model_validator(mode="after")
     def validate_indexes(self) -> "ObligationIcaDraft":
-        if any(index < 0 for index in self.finding_indexes):
-            raise ValueError("finding_indexes must be non-negative")
-        if len(self.finding_indexes) != len(set(self.finding_indexes)):
-            raise ValueError("finding_indexes must be unique")
-        if self.disposition == "finding" and not self.finding_indexes:
-            raise ValueError("finding consideration requires finding_indexes")
-        if self.disposition != "finding" and self.finding_indexes:
-            raise ValueError("only a finding consideration may retain finding_indexes")
+        check_finding_indexes(self.disposition, self.finding_indexes)
         return self
+
+
+def check_finding_indexes(disposition: str, finding_indexes: tuple[int, ...]) -> None:
+    """Require unique non-negative indexes, present only on a finding result."""
+    if any(index < 0 for index in finding_indexes):
+        raise ValueError("finding_indexes must be non-negative")
+    if len(finding_indexes) != len(set(finding_indexes)):
+        raise ValueError("finding_indexes must be unique")
+    if disposition == "finding" and not finding_indexes:
+        raise ValueError("finding consideration requires finding_indexes")
+    if disposition != "finding" and finding_indexes:
+        raise ValueError("only a finding consideration may retain finding_indexes")
 
 
 class SlotIcaDraft(_Model):
@@ -797,6 +803,11 @@ class SynthesisSlotResponse(_ProviderCallCounts):
     # follow-up requests included; a fake adapter sends none.
     provider_calls: int = Field(default=0, ge=0, strict=True)
     response_digest: Digest | None = None
+    # Run evidence of the findings the compiler folded into one ICA; no
+    # request or schema carries it.
+    ica_merges: tuple[IcaMerge, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def validate_response(self) -> "SynthesisSlotResponse":
@@ -849,6 +860,9 @@ class SynthesisSlotFillResult(_Model):
     lost_slots: tuple[SlotLoss, ...] = Field(
         default=(), exclude_if=lambda value: not value
     )
+    ica_merges: tuple[IcaMerge, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
 
     @model_validator(mode="after")
     def canonicalize(self) -> "SynthesisSlotFillResult":
@@ -886,6 +900,16 @@ class SynthesisSlotFillResult(_Model):
             self,
             "lost_slots",
             tuple(sorted(self.lost_slots, key=lambda item: item.slot_id)),
+        )
+        object.__setattr__(
+            self,
+            "ica_merges",
+            tuple(
+                sorted(
+                    self.ica_merges,
+                    key=lambda item: (item.target_id, item.slot_id, item.ica_id),
+                )
+            ),
         )
         return self
 

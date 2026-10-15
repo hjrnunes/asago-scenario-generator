@@ -44,7 +44,7 @@ apply it only when that availability tradeoff is acceptable.
 
 ## Application safety bounds
 
-The generator uses a 300-second request deadline by default and disables hidden
+The generator uses a 600-second request deadline by default and disables hidden
 SDK retries. Configure another positive deadline with the named-profile
 `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`.
 

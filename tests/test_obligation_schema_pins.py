@@ -17,6 +17,7 @@ from pydantic import ValidationError
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.stpa.obligation_aware import governance_provider
 from asago_scenario_generator.stpa.obligation_aware import provider
+from asago_scenario_generator.stpa.obligation_aware.fill_reply import FillScope
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     RevisionDraft,
     StructuralRevisionResponse,
@@ -56,7 +57,17 @@ FACTORY_CASES = {
     "slot-1-0": lambda: provider._slot_provider_payload_type(1, 0),
     "slot-3-2": lambda: provider._slot_provider_payload_type(3, 2),
     "slot-exact": lambda: provider._slot_provider_payload_type(
-        2, 1, constraint_ids=("SC-1", "SC-2")
+        2,
+        1,
+        scope=FillScope(
+            slot_ids=("RESP-1:CA-1-1:INCORRECT", "RESP-1:CA-1-1:NOT_PROVIDED"),
+            pair_ids=("SC-1/H-1", "SC-2/H-1"),
+            context_row_ids=("CA-1-1:ctx-1", "CA-1-1:ctx-2"),
+            process_model_ids=("PM-1-1",),
+            feedback_ids=(),
+            handles=("R1",),
+            every_handle_required=False,
+        ),
     ),
     "governance-1": lambda: governance_provider.governance_payload_type(("risk-a",)),
     "governance-2": lambda: governance_provider.governance_payload_type(
@@ -119,17 +130,17 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "slot-1-0": (
         "_SlotProviderPayload1Pairs0",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "0dc0fd41cf6d49bf45eec18d85f2828bf9f77e28a68d9e860eeba6beb57167fe",
+        "1e9fbb8695af0649882cce4c57b4e63295fae665275602d15d166483175ed11b",
     ),
     "slot-3-2": (
         "_SlotProviderPayload3Pairs2",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "abf7c619edb6cbe05618cd1027b82dea4a8cfafc0930a11c6896a17764cac0d2",
+        "cf8b25fe03da3c8245fc9a9d18a694f9e7fe705e35764c69dfafcc8a28fa1f8d",
     ),
     "slot-exact": (
         "_SlotProviderPayload2Pairs1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "ee79ae9a36a85ca80c3f7f7b2b5f3e57e2bebaa0258145a4b75651e0311ef863",
+        "37ad03d3a9758853010f4b36df5b17b418122456130a38d61ed01491c2418569",
     ),
 }
 
@@ -282,6 +293,7 @@ EXPECTED_ENVELOPES: dict[str, dict] = {
             "response_ref",
             "provider_calls",
             "response_digest",
+            "ica_merges",
         ],
         "provider_without_calls": "Value error, provider adapter must report at "
         "least one provider call",

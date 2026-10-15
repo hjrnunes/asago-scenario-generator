@@ -20,8 +20,8 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    _handle_repair_input,
     _missing_repair_input_reason,
-    _prepare_current_provider_repair_input,
     _Stage1aRiskProviderDraft,
     _Stage1aRiskRepairDraft,
 )
@@ -76,7 +76,7 @@ def _result(content: Any) -> LLMResult:
 
 
 def _adapt(content: Any) -> Any:
-    return _prepare_current_provider_repair_input(
+    return _handle_repair_input(
         _result(content), response_format=_Stage1aRiskProviderDraft, prior=None
     )
 
@@ -95,10 +95,10 @@ def _trailing_comma() -> str:
 
 def _assert_adapted(adapted: Any) -> None:
     assert adapted is not None
-    translated, repair_model = adapted
-    assert repair_model is _Stage1aRiskRepairDraft
-    assert translated.content["risk_card_losses"][0]["loss_id"] == "L-1"
-    assert translated.content["risk_dispositions"][0]["loss_ids"] == ["L-1"]
+    assert adapted.response_format is _Stage1aRiskRepairDraft
+    assert adapted.result.content["risk_card_losses"][0]["loss_id"] == "loss"
+    assert adapted.result.content["risk_dispositions"][0]["loss_ids"] == ["loss"]
+    assert dict(adapted.ids.losses) == {"loss": "L-1"}
 
 
 def test_plain_json_text_is_adapted() -> None:

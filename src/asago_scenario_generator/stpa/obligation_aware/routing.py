@@ -52,6 +52,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     mapping_strength_for_brief,
     render_prose,
 )
+from asago_scenario_generator.stpa.obligation_aware.routing_slots import routing_slots
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
     StpaIndex,
     build_stpa_index,
@@ -146,7 +147,7 @@ def _reference_sets(
     """Build exact namespaces accepted by structural routing."""
     index = build_stpa_index(control_structure, loss_analysis)
     return {
-        "slot": {item.slot_id for item in slots},
+        "slot": {item.slot_id for item in routing_slots(slots, control_structure)},
         "hazard": set(index.hazards),
         "constraint": set(index.security_constraints)
         | set(index.responsibility_constraints),

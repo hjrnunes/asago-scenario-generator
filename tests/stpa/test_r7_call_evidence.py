@@ -67,7 +67,6 @@ def _call(
     *,
     json_decode_retries: int = 0,
     result_validator: Any = None,
-    allow_unvalidated: bool = False,
 ) -> tuple[_Payload | None, str | None]:
     outcome = call_with_policy(
         llm_client=client,
@@ -78,7 +77,6 @@ def _call(
         stage="stage_test",
         step="evidence",
         result_validator=result_validator,
-        allow_unvalidated=allow_unvalidated,
         policy=CorrectionPolicy(json_retries=json_decode_retries),
     )
     parsed, error = outcome.value, outcome.error

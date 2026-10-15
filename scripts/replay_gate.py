@@ -9,8 +9,9 @@ every output file with the recording::
 The gate re-runs ``generate`` with the recorded arguments, inputs copied into a
 scratch directory, ``--replay-calls`` pointing at a copy of the record, model
 settings stripped from the environment, and outbound sockets refused.  It then
-compares the trees.  Only the differences in :data:`ALLOWED_DIFFERENCES` are
-normalised; the first other difference fails the gate.
+compares the trees.  Only the differences in :data:`ALLOWED_DIFFERENCES` and
+:data:`ALLOWED_TEXT_DIFFERENCES` are normalised; the first other difference
+fails the gate.
 
 A change that deletes a prompt template also drops that template's entry from
 the prompt-hash tables a run records.  A recorded entry whose ``.j2`` key the
@@ -24,6 +25,7 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import shutil
 import socket
 import subprocess
@@ -94,6 +96,41 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
         ("created_at", "prompt_call_evidence.[].duration_ms", "semantic_digest"),
         "wall-clock time of the run and of each call; the digest covers them, "
         "so the gate recomputes it on both sides instead of comparing it",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class AllowedTextDifference:
+    """One documented difference in a text file the gate cannot parse.
+
+    Each capture group of *pattern* is masked on both sides before the text
+    comparison; the rest of every match must still be equal.
+    """
+
+    file: str
+    pattern: re.Pattern[str]
+    reason: str
+
+
+_REPLAY_SECONDS_REASON = (
+    "the summed duration_ms of replayed calls, rounded to seconds; a replayed "
+    "call's duration is the local lookup time, so a step near 500 ms shows 0 or 1"
+)
+ALLOWED_TEXT_DIFFERENCES: tuple[AllowedTextDifference, ...] = (
+    AllowedTextDifference(
+        "report/index.html",
+        re.compile(r'<b data-metric="effort\.seconds" data-value="(\d+)">([\d,]+)</b>'),
+        _REPLAY_SECONDS_REASON,
+    ),
+    AllowedTextDifference(
+        "report/index.html",
+        # The Seconds cell closes each effort row.
+        re.compile(
+            r'<tr id="effort-[^"]+">(?:(?!</tr>).)*?'
+            r'<td class="n" data-v="(\d+)">([\d,]+)</td></tr>'
+        ),
+        _REPLAY_SECONDS_REASON,
     ),
 )
 
@@ -530,6 +567,10 @@ def compare_file(
         return None
     suffix = recorded.suffix
     if suffix not in {".json", ".jsonl", ".yaml", ".yml"}:
+        left_text = _mask_text(left_text, relative)
+        right_text = _mask_text(right_text, relative)
+        if left_text == right_text:
+            return None
         return _text_difference(left_text, right_text)
     left_data = _parse(left_text, suffix)
     right_data = _parse(right_text, suffix)
@@ -551,6 +592,22 @@ def compare_file(
     if difference is None and removed_templates is not None:
         removed_templates |= removed
     return difference
+
+
+def _mask_text(text: str, relative: str) -> str:
+    """Mask the capture groups of every :data:`ALLOWED_TEXT_DIFFERENCES` match."""
+    for allowed in ALLOWED_TEXT_DIFFERENCES:
+        if allowed.file == relative:
+            text = allowed.pattern.sub(_masked_match, text)
+    return text
+
+
+def _masked_match(match: re.Match[str]) -> str:
+    whole, start = match.group(0), match.start()
+    for index in range(match.re.groups, 0, -1):
+        left, right = match.span(index)
+        whole = whole[: left - start] + "*" + whole[right - start :]
+    return whole
 
 
 def _text_difference(left_text: str, right_text: str) -> str:

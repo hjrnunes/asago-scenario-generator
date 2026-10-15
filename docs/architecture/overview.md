@@ -191,8 +191,8 @@ then checks it against the selected model profile's context window, reserved
 completion, and safety margin. Oversized routing batches split canonically;
 one oversized item becomes a typed local failure and is never silently
 truncated. `calls.jsonl` and the synthesis manifest retain the prompt audit,
-provider-reported usage, and the hashes of every obligation-aware top-level
-template and included partial.
+provider-reported usage, and the hashes of every obligation-aware template,
+included partial, and `prose/` template.
 
 Each structural route carries independent typed mechanism-plausibility and
 reviewed-risk-alignment decisions plus a plain mapping-strength label derived
@@ -253,8 +253,11 @@ and the run distinguishes a requested revision from one actually applied.
 
 The root atomically publishes `taxonomy-obligation-plan.yaml`,
 `obligation-consideration.yaml`, `obligation-accounting.yaml`,
-`scenario-realization.yaml`, `synthesis-manifest.yaml`, and, when slot
-filling sent requests, `slot-hazard-offers.yaml`. Accounting joins
+`scenario-realization.yaml`, `synthesis-manifest.yaml`, when slot
+filling sent requests, `slot-hazard-offers.yaml`, and, when slot compilation
+merged findings that differ only by context row or pair, `ica-merges.yaml`
+(one entry per merged ICA, with the as-written findings it stands for; see
+`model-facing-interfaces.md`). Accounting joins
 exact obligation/slot, ICA,
 `EXEC:*`, hazard, and constraint evidence but makes no correspondence
 or coverage claim. Scenario realization separately records whether that exact
@@ -599,7 +602,7 @@ remain in `stage_warnings`. STPA sampling resolves explicit arguments before
 profile/environment values and defaults, and manifests persist the effective
 non-secret settings.
 
-Both workflows apply a 300-second request deadline by default, configurable via
+Both workflows apply a 600-second request deadline by default, configurable via
 the named-profile `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`. Hidden
 OpenAI SDK retries are disabled; all retry policy therefore remains explicit,
 bounded, and observable in pipeline evidence. The model client makes one
