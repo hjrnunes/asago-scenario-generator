@@ -56,9 +56,9 @@ attack sequence or force scenario creation.
 ```mermaid
 flowchart TB
     CLI[asago-scenario-generator]
-    CLI --> RUN[run: normal product workflow]
+    CLI --> GEN[generate: normal product workflow]
 
-    RUN --> SYN[pipeline.synthesis]
+    GEN --> SYN[pipeline.synthesis]
     SYN --> STPA[STPA SP1 / SP2 / SP3]
     SYN --> PHASES[obligations, accounting, realization]
 

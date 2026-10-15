@@ -26,6 +26,12 @@ _SAMPLING_FIELDS = (
 )
 
 
+@pytest.fixture(autouse=True)
+def _model_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every client a model name unless a test sets or removes it."""
+    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "test-model")
+
+
 def _write_gemma_profile(path: Path) -> Path:
     path.write_text(
         yaml.safe_dump(
@@ -107,6 +113,19 @@ def test_environment_resolution_log_keeps_model_identity_but_not_endpoint(
     assert "env-model" in messages
     assert "private.svc.example" not in messages
     assert "base_url=" not in messages
+
+
+def test_environment_route_without_a_model_name_raises_instead_of_defaulting(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without a profile or a model variable no model is guessed."""
+    monkeypatch.setenv(
+        "ASAGO_SCENARIO_GENERATOR_MODEL_BASE_URL", "http://fixture.invalid/v1"
+    )
+    monkeypatch.delenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", raising=False)
+
+    with pytest.raises(ValueError, match="No model configured"):
+        resolve_llm_client_from_env()
 
 
 def test_effective_model_config_keeps_controls_without_private_endpoint() -> None:

@@ -24,6 +24,12 @@ from asago_scenario_generator.stpa.infra.llm import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _model_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every client a model name unless a test sets or removes it."""
+    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "test-model")
+
+
 class _OpenRouterPayload(BaseModel):
     exact_field: str
 
@@ -377,7 +383,6 @@ _MODEL_ENV = "ASAGO_SCENARIO_GENERATOR_MODEL_NAME"
         (_resolve_api_key, _API_KEY_ENV, None, None, "unused"),
         (_resolve_model, _MODEL_ENV, "mymodel", "envmodel", "mymodel"),
         (_resolve_model, _MODEL_ENV, None, "envmodel", "envmodel"),
-        (_resolve_model, _MODEL_ENV, None, None, "gemma-3n-e4b-it"),
     ],
     ids=[
         "base_url_explicit",
@@ -388,7 +393,6 @@ _MODEL_ENV = "ASAGO_SCENARIO_GENERATOR_MODEL_NAME"
         "api_key_default",
         "model_explicit",
         "model_env",
-        "model_default",
     ],
 )
 def test_setting_resolution_order(
@@ -400,6 +404,17 @@ def test_setting_resolution_order(
     else:
         monkeypatch.setenv(env_var, env_value)
     assert resolver(explicit) == expected
+
+
+@pytest.mark.parametrize("env_value", [None, ""])
+def test_model_without_an_argument_or_environment_raises(monkeypatch, env_value):
+    """No model is guessed: a missing or empty model name stops the client."""
+    if env_value is None:
+        monkeypatch.delenv(_MODEL_ENV, raising=False)
+    else:
+        monkeypatch.setenv(_MODEL_ENV, env_value)
+    with pytest.raises(ValueError, match=f"No model configured.*{_MODEL_ENV}"):
+        _resolve_model(None)
 
 
 class _Schema(BaseModel):

@@ -138,6 +138,11 @@ class TestLoadProfile:
 class TestLLMClientTopPTopK:
     """MP-13, MP-14 — LLMClient top_p and top_k support."""
 
+    @pytest.fixture(autouse=True)
+    def _model_name(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        """Give every client a model name unless a test sets or removes it."""
+        monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "test-model")
+
     def test_mp13_llmclient_accepts_top_p_and_top_k(self, monkeypatch):
         """MP-13: LLMClient accepts and stores top_p and top_k."""
         monkeypatch.setenv(

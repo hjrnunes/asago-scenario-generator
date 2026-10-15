@@ -163,6 +163,15 @@ class TestBundledTaxonomyData:
             (item["target"], item["target_name"]) for item in cross["t_to_llm"]
         } <= set(_OWASP_LLM_2025_NAMES.items())
 
+    def test_llm_to_asi_names_use_the_2025_owasp_names(self):
+        cross = yaml.safe_load(
+            (_MAPPINGS / "cross-taxonomy-mappings.yaml").read_text(encoding="utf-8")
+        )
+
+        assert {
+            (item["source"], item["source_name"]) for item in cross["llm_to_asi"]
+        } == set(_OWASP_LLM_2025_NAMES.items())
+
     def test_t_to_atlas_names_match_the_atlas_release(self):
         cross = yaml.safe_load(
             (_MAPPINGS / "cross-taxonomy-mappings.yaml").read_text(encoding="utf-8")

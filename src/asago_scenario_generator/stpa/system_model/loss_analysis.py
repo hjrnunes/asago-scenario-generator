@@ -231,6 +231,14 @@ class _ProviderHazard(BaseModel):
         _provider_handle(self.handle, kind="hazard")
         return self
 
+    @model_validator(mode="after")
+    def validate_description(self) -> _ProviderHazard:
+        # A validator, not min_length, so the schema sent to the model stays
+        # unchanged; synthesis drops a hazard without text from every prompt.
+        if not self.description.strip():
+            raise ValueError(f"hazard {self.handle} description is blank")
+        return self
+
 
 class _ProviderConstraint(BaseModel):
     """Model-facing constraint with references to canonical IDs or handles."""

@@ -18,6 +18,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _merge_loss_analysis_correction,
     _Stage1aGapProviderDraft,
+    _Stage1aRiskProviderDraft,
     derive_loss_analysis,
 )
 from tests.helpers.calls_log import read_calls_jsonl
@@ -308,3 +309,56 @@ def test_reserved_canonical_handle_fails_closed_without_repair(tmp_path: Path) -
     raw = entries[-1]["response_content"]
     assert "H-1" in raw
     assert "authoritative request state has changed semantics" in raw
+
+
+def _gap_response_with_hazard(description: str) -> dict[str, Any]:
+    draft = _empty_gap_response()
+    draft["hazards"] = [
+        {
+            "handle": "gap_hazard",
+            "description": description,
+            "related_losses": ["risk_base_loss"],
+        }
+    ]
+    return draft
+
+
+@pytest.mark.parametrize("description", ["", " ", "\n\t"])
+def test_blank_hazard_description_is_rejected_on_both_first_reply_wires(
+    description: str,
+) -> None:
+    risk = _risk_response()
+    risk["hazards"][0]["description"] = description
+
+    with pytest.raises(
+        ValueError, match="hazard risk_base_hazard description is blank"
+    ):
+        _Stage1aRiskProviderDraft.model_validate(risk)
+    with pytest.raises(ValueError, match="hazard gap_hazard description is blank"):
+        _Stage1aGapProviderDraft.model_validate(_gap_response_with_hazard(description))
+
+
+def test_blank_hazard_description_check_leaves_the_wire_schema_unchanged() -> None:
+    hazard_schema = _Stage1aGapProviderDraft.model_json_schema()["$defs"][
+        "_ProviderHazard"
+    ]
+
+    assert hazard_schema["properties"]["description"] == {
+        "title": "Description",
+        "type": "string",
+    }
+
+
+def test_blank_risk_hazard_description_fails_closed_without_repair(
+    tmp_path: Path,
+) -> None:
+    risk = _risk_response()
+    risk["hazards"][0]["description"] = "  "
+
+    with pytest.raises(
+        Exception,
+        match=r"(?s)no repair call was made.*hazard risk_base_hazard description is blank",
+    ):
+        _derive(tmp_path, [risk, _empty_gap_response()])
+
+    assert _steps(tmp_path) == [("risk_derivation", False)]
