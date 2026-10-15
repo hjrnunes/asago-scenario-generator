@@ -29,6 +29,12 @@ def _client(**kwargs) -> LLMClient:
     return LLMClient(api_key="k", **kwargs)
 
 
+@pytest.fixture(autouse=True)
+def _model_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every client a model name unless a test sets or removes it."""
+    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "test-model")
+
+
 class TestExtraHeadersSources:
     """Constructor and environment headers merge, constructor winning."""
 

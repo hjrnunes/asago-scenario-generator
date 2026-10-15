@@ -19,6 +19,12 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _model_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every client a model name unless a test sets or removes it."""
+    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "test-model")
+
+
 class _NestedModel(BaseModel):
     name: str
     count: int = 3

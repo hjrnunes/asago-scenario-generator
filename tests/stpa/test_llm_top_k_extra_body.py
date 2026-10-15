@@ -17,6 +17,12 @@ from pydantic import BaseModel
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 
 
+@pytest.fixture(autouse=True)
+def _model_name(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Give every client a model name unless a test sets or removes it."""
+    monkeypatch.setenv("ASAGO_SCENARIO_GENERATOR_MODEL_NAME", "test-model")
+
+
 class _DummyResponse:
     """Minimal mock response object for the OpenAI SDK.
 
