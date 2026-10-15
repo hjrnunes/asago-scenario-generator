@@ -421,7 +421,7 @@ llm_to_asi:
     targets: [ASI03, ASI06, ASI01, ASI02]
 
   - source: LLM03
-    source_name: "Supply Chain Vulnerabilities"
+    source_name: "Supply Chain"
     targets: [ASI04, ASI07, ASI10]
 
   - source: LLM04
@@ -429,7 +429,7 @@ llm_to_asi:
     targets: [ASI06]
 
   - source: LLM05
-    source_name: "Insecure Output Handling"
+    source_name: "Improper Output Handling"
     targets: [ASI02, ASI05]
 
   - source: LLM06
