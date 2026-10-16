@@ -11,34 +11,20 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
 )
+from tests.helpers.scripted_client import ScriptedClient
 
 
 class _Reply(BaseModel):
     ok: bool = True
 
 
-class _Client:
-    model = "dispatch-test"
-
-    def complete(self, **kwargs):
-        return LLMResult(
-            content={"ok": True},
-            prompt_tokens=1,
-            completion_tokens=1,
-            duration_ms=1,
-            system_prompt=kwargs["system_prompt"],
-            user_prompt=kwargs["user_prompt"],
-        )
-
-
 def dispatch_requests(run_dir: Path, count: int) -> None:
     """Send *count* independent requests, each logged under its own step."""
-    client = _Client()
+    client = ScriptedClient([{"ok": True}] * count, model="dispatch-test")
     for index in range(count):
         outcome = call_with_policy(
             llm_client=client,

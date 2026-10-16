@@ -53,7 +53,15 @@ def _fact() -> dict[str, Any]:
     }
 
 
-def _step(step_id: str, order: int, *, conditional: bool = False) -> dict[str, Any]:
+def _step(
+    step_id: str,
+    order: int,
+    *,
+    conditional: bool = False,
+    consumed: bool = True,
+    tool_fixture: bool = True,
+) -> dict[str, Any]:
+    """Build one step; *consumed* and *tool_fixture* only affect step 2."""
     final = order == 3
     attacker = order == 1
     return {
@@ -74,7 +82,7 @@ def _step(step_id: str, order: int, *, conditional: bool = False) -> dict[str, A
         "action_kind": "prepare" if attacker else "impact" if final else "observe",
         "consumed": (
             [{"kind": "state", "ref_id": "state.1", "value_type": "boolean"}]
-            if order == 2
+            if order == 2 and consumed
             else []
         ),
         "produced": [
@@ -99,7 +107,7 @@ def _step(step_id: str, order: int, *, conditional: bool = False) -> dict[str, A
                     "trust_boundary_slot_id": None,
                 }
             ]
-            if order == 2
+            if order == 2 and tool_fixture
             else []
         ),
         "observable_outcome_links": (
@@ -131,7 +139,9 @@ def _step(step_id: str, order: int, *, conditional: bool = False) -> dict[str, A
     }
 
 
-def _pattern() -> dict[str, Any]:
+def _pattern(
+    *, conditional: bool = True, consumed: bool = True, tool_fixture: bool = True
+) -> dict[str, Any]:
     chain = {
         "schema_version": "v1",
         "pattern_id": "AP-T1-01",
@@ -145,7 +155,13 @@ def _pattern() -> dict[str, Any]:
         "mappings": [{"decision": "exact", "taxonomy": "ATLAS", "ids": ["AML.T0001"]}],
         "steps": [
             _step("step.1", 1),
-            _step("step.2", 2, conditional=True),
+            _step(
+                "step.2",
+                2,
+                conditional=conditional,
+                consumed=consumed,
+                tool_fixture=tool_fixture,
+            ),
             _step("step.3", 3),
         ],
         "earliest_attacker_controlled_step_id": "step.1",
@@ -172,7 +188,26 @@ def _pattern() -> dict[str, Any]:
     }
 
 
-def _profile() -> CapabilityProfile:
+def _profile(*, duplicate_resources: bool = False) -> CapabilityProfile:
+    tools = [{"name": "writer", "description": "changes state"}]
+    integrations = [
+        {
+            "name": "CRM",
+            "integration_type": "api",
+            "auth_method": "oauth",
+            "data_sensitivity": "high",
+        }
+    ]
+    if duplicate_resources:
+        tools.append({"name": "sender", "description": "changes state"})
+        integrations.append(
+            {
+                "name": "Queue",
+                "integration_type": "message_queue",
+                "auth_method": "service_account",
+                "data_sensitivity": "medium",
+            }
+        )
     return CapabilityProfile(
         zones_active=["input", "reasoning", "tool_execution"],
         entry_points=[
@@ -185,24 +220,18 @@ def _profile() -> CapabilityProfile:
         ],
         confidence=ConfidenceLevel.high,
         kc_subcodes=["KC1.1", "KC5.1"],
-        tool_inventory=[{"name": "writer", "description": "changes state"}],
+        tool_inventory=tools,
         tool_types=[
             {
-                "name": "writer",
+                "name": item["name"],
                 "zone": "tool_execution",
                 "can_modify_state": True,
                 "data_sensitivity": "medium",
                 "code_execution": False,
             }
+            for item in tools
         ],
-        external_integrations=[
-            {
-                "name": "CRM",
-                "integration_type": "api",
-                "auth_method": "oauth",
-                "data_sensitivity": "high",
-            }
-        ],
+        external_integrations=integrations,
         trust_boundaries=[
             {
                 "name": "user-to-agent",

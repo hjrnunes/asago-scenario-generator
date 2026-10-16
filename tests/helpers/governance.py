@@ -11,6 +11,7 @@ from asago_scenario_generator.models.obligation_accounting import (
 )
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
+    ObligationRoute,
 )
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactor
 from asago_scenario_generator.stpa.models.ica_enumeration import (
@@ -103,6 +104,25 @@ def _controls(batch: int = 8) -> AnalysisControls:
         deadline_seconds=10.0,
         temperature=0.0,
         max_batch_size=batch,
+    )
+
+
+def _pattern_route(brief, slot) -> ObligationRoute:
+    return ObligationRoute(
+        obligation_id=brief.obligation_id,
+        disposition="targeted",
+        semantic_assessment={
+            "mechanism_assessment": "plausible_in_system",
+            "risk_alignment": "supported",
+            "mapping_strength": "direct_curated_pair",
+            "mechanism_rationale": "m",
+            "risk_alignment_rationale": "r",
+        },
+        slot_ids=(slot.slot_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        rationale="r",
+        evidence=("e",),
     )
 
 

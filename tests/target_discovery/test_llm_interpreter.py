@@ -14,6 +14,7 @@ from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from tests.discovery_call_log import logged
+from tests.helpers.scripted_client import ScriptedClient
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.models.execution_classification import (
     InterpreterVerifierAgreement,
@@ -362,24 +363,12 @@ def test_from_profile_uses_existing_named_profile_resolver(tmp_path: Path):
     assert adapter.model_name == "resolved-model"
 
 
-class _ScriptedClient:
-    """Answer the interpreter's real request path without a network."""
-
-    model = "fixture-model"
-
-    def __init__(self, content: str) -> None:
-        self._content = content
-
-    def complete(self, system_prompt, user_prompt, **kwargs):
-        del kwargs
-        return LLMResult(
-            content=self._content,
-            prompt_tokens=5,
-            completion_tokens=2,
-            duration_ms=4,
-            system_prompt=system_prompt,
-            user_prompt=user_prompt,
-        )
+def _scripted_client(content: str, calls: int = 1) -> ScriptedClient:
+    """Answer *calls* requests with *content* and fixed token counts."""
+    reply = LLMResult(
+        content=content, prompt_tokens=5, completion_tokens=2, duration_ms=4
+    )
+    return ScriptedClient([reply] * calls, model="fixture-model")
 
 
 def _wire_answer() -> str:
@@ -403,7 +392,7 @@ def _wire_answer() -> str:
 
 def test_the_shared_call_log_in_the_run_directory_holds_each_request(tmp_path: Path):
     answer = _wire_answer()
-    adapter = TargetDiscoveryLlmInterpreter(_ScriptedClient(answer), run_dir=tmp_path)
+    adapter = TargetDiscoveryLlmInterpreter(_scripted_client(answer), run_dir=tmp_path)
 
     adapter.interpret(_request())
 
@@ -421,7 +410,9 @@ def test_the_shared_call_log_in_the_run_directory_holds_each_request(tmp_path: P
 def test_a_later_call_collects_only_its_own_entries(tmp_path: Path):
     (tmp_path / "calls.jsonl").write_text('{"stale": true}\n', encoding="utf-8")
     answer = _wire_answer()
-    adapter = TargetDiscoveryLlmInterpreter(_ScriptedClient(answer), run_dir=tmp_path)
+    adapter = TargetDiscoveryLlmInterpreter(
+        _scripted_client(answer, calls=2), run_dir=tmp_path
+    )
 
     adapter.interpret(_request())
     adapter.interpret(_request())
@@ -433,7 +424,7 @@ def test_a_later_call_collects_only_its_own_entries(tmp_path: Path):
 
 def test_a_failed_real_call_withholds_the_provider_error_text(tmp_path: Path):
     adapter = TargetDiscoveryLlmInterpreter(
-        _ScriptedClient("<html>secret body</html>"), run_dir=tmp_path
+        _scripted_client("<html>secret body</html>"), run_dir=tmp_path
     )
 
     with pytest.raises(TargetDiscoveryLlmError) as raised:

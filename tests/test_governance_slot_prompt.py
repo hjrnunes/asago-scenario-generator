@@ -12,7 +12,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioObligationConsideration,
 )
 from asago_scenario_generator.models.obligation_consideration import ObligationRoute
-from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     IcaDeviationDraft,
     IcaFindingDraft,
@@ -31,7 +30,8 @@ from asago_scenario_generator.stpa.obligation_aware.routing import build_neutral
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
-from tests.helpers.governance import _controls, _setup
+from tests.helpers.scripted_client import ScriptedClient
+from tests.helpers.governance import _controls, _pattern_route, _setup
 from tests.helpers.obligation_aware import (
     _control_structure,
     _loss_analysis,
@@ -72,25 +72,6 @@ _GOLDEN_ROUTING_USER = (
 
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
-
-
-def _pattern_route(brief, slot) -> ObligationRoute:
-    return ObligationRoute(
-        obligation_id=brief.obligation_id,
-        disposition="targeted",
-        semantic_assessment={
-            "mechanism_assessment": "plausible_in_system",
-            "risk_alignment": "supported",
-            "mapping_strength": "direct_curated_pair",
-            "mechanism_rationale": "m",
-            "risk_alignment_rationale": "r",
-        },
-        slot_ids=(slot.slot_id,),
-        hazard_ids=("H-1",),
-        constraint_ids=("SC-1",),
-        rationale="r",
-        evidence=("e",),
-    )
 
 
 def test_pattern_prompts_keep_their_bytes() -> None:
@@ -225,31 +206,19 @@ def test_the_provider_fills_a_slot_for_a_governance_route(tmp_path) -> None:
             ),
         ),
     )
-    prompts: list[str] = []
-
-    class Client:
-        model = "governance-slot-test"
-
-        def complete(self, **kwargs):
-            prompts.append(kwargs["user_prompt"])
-            return LLMResult(
-                content={"filled_slots": [provider_slot_payload(draft)]},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient(
+        [{"filled_slots": [provider_slot_payload(draft)]}], model="governance-slot-test"
+    )
 
     response = ObligationAwareLLMAdapter(
-        Client(), run_dir=tmp_path, controls=_controls()
+        client, run_dir=tmp_path, controls=_controls()
     ).fill(request)
 
     (pair,) = response.considerations
     assert pair.obligation_id == brief.obligation_id
     assert pair.disposition == "finding"
     assert pair.route_id == request.routed_routes[0].route_id
-    assert len(prompts) == 1
+    assert len(client.prompts) == 1
 
 
 def test_a_governance_finding_projects_to_a_governance_scenario_consideration() -> None:

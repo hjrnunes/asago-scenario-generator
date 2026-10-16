@@ -124,9 +124,12 @@ from asago_scenario_generator.pipeline.projection_resources import (
     _offset_variants,
     _variant_combinations,
 )
-from tests.helpers.projection_factory import _fact, _evidence
-
-ZERO = "0" * 64
+from tests.helpers.projection_factory import (
+    _evidence,
+    _fact,
+    _pattern as _factory_pattern,
+    _profile,
+)
 
 
 def _project_batch(
@@ -150,174 +153,9 @@ class TaxonomyResolver:
         return (taxonomy, identifier) == ("ATLAS", "AML.T0001")
 
 
-def _step(step_id: str, order: int, *, conditional: bool = False) -> dict[str, Any]:
-    final = order == 3
-    attacker = order == 1
-    return {
-        "step_id": step_id,
-        "requirement": "conditional" if conditional else "required",
-        "condition": {
-            "op": "equality",
-            "schema_version": "1",
-            "fact": _fact(),
-            "value": "active",
-        }
-        if conditional
-        else None,
-        "executor_role": "attacker" if attacker else "system",
-        "boundary_position": "crossing" if attacker else "inside",
-        "action_kind": "prepare" if attacker else "impact" if final else "observe",
-        "consumed": [],
-        "produced": [
-            {"kind": "effect", "ref_id": f"effect.{order}", "value_type": "boolean"}
-        ],
-        "preconditions": [],
-        "observable_postconditions": [
-            {
-                "postcondition_id": f"post.{order}",
-                "description": "observable",
-                "security_relevant": final,
-                "terminal": final,
-            }
-        ],
-        "resource_links": (
-            [
-                {
-                    "slot_id": "ingress",
-                    "role": "ingress",
-                    "trust_boundary_slot_id": None,
-                }
-            ]
-            if attacker
-            else []
-        ),
-        "observable_outcome_links": (
-            # The terminal step is security-relevant; it must carry an
-            # explicit outcome link so the security assertion is derived
-            # from the link, not from the security_relevant flag alone.
-            [
-                {
-                    "postcondition_id": f"post.{order}",
-                    "observation": "model_context",
-                    "binding_slot_id": "ingress",
-                }
-            ]
-            if final
-            else []
-        ),
-        "order": order,
-        "attacker_controlled": attacker,
-        "provenance": {
-            "tier": "observed",
-            "references": [
-                {"reference_type": "catalog", "reference_id": f"case-{order}"}
-            ],
-            "confidence": 90,
-            "adaptation_rationale": "represented",
-        },
-        "mappings": (
-            [{"decision": "exact", "taxonomy": "ATLAS", "ids": ["AML.T0001"]}]
-            if attacker
-            else [{"decision": "not_applicable", "taxonomy": "ATLAS"}]
-        ),
-    }
-
-
 def _pattern(*, conditional: bool = True) -> dict[str, Any]:
-    chain = {
-        "schema_version": "v1",
-        "pattern_id": "AP-T1-01",
-        "chain_id": "chain.1",
-        "semantic_revision": 1,
-        "semantic_digest": ZERO,
-        "taxonomy_context": {
-            "atlas": {"release": "v1", "digest": ZERO},
-            "mapping_set_digest": ZERO,
-        },
-        "mappings": [{"decision": "exact", "taxonomy": "ATLAS", "ids": ["AML.T0001"]}],
-        "steps": [
-            _step("step.1", 1),
-            _step("step.2", 2, conditional=conditional),
-            _step("step.3", 3),
-        ],
-        "earliest_attacker_controlled_step_id": "step.1",
-        "resource_slots": [
-            {"slot_id": "ingress", "kind": "entry_point", "purpose": "initial_ingress"},
-            {"slot_id": "tool", "kind": "tool", "purpose": "supporting"},
-            {"slot_id": "source", "kind": "integration", "purpose": "supporting"},
-            {
-                "slot_id": "boundary",
-                "kind": "trust_boundary",
-                "purpose": "intermediate",
-            },
-        ],
-        "initial_ingress_slot_id": "ingress",
-    }
-    chain["semantic_digest"] = compute_chain_semantic_digest(chain)
-    return {
-        "id": "AP-T1-01",
-        "threat_id": "T1",
-        "name": "Pattern",
-        "description": "Canonical",
-        "prerequisite_capabilities": {"min_zones": ["input"]},
-        "canonical_chain": chain,
-    }
-
-
-def _profile(*, duplicate_resources: bool = False) -> CapabilityProfile:
-    tools = [{"name": "writer", "description": "changes state"}]
-    integrations = [
-        {
-            "name": "CRM",
-            "integration_type": "api",
-            "auth_method": "oauth",
-            "data_sensitivity": "high",
-        }
-    ]
-    boundaries = [
-        {
-            "name": "user-to-agent",
-            "from_zone": "input",
-            "to_zone": "reasoning",
-            "confidence": "explicit",
-        }
-    ]
-    if duplicate_resources:
-        tools.append({"name": "sender", "description": "changes state"})
-        integrations.append(
-            {
-                "name": "Queue",
-                "integration_type": "message_queue",
-                "auth_method": "service_account",
-                "data_sensitivity": "medium",
-            }
-        )
-    return CapabilityProfile(
-        zones_active=["input", "reasoning", "tool_execution"],
-        entry_points=[
-            {"name": "chat", "direction": "input", "controllability": "direct"},
-            {
-                "name": "RAG documents",
-                "direction": "input",
-                "controllability": "indirect",
-            },
-        ],
-        confidence=ConfidenceLevel.high,
-        kc_subcodes=["KC1.1", "KC5.1"],
-        tool_inventory=tools,
-        tool_types=[
-            {
-                "name": item["name"],
-                "zone": "tool_execution",
-                "can_modify_state": True,
-                "data_sensitivity": "medium",
-                "code_execution": False,
-            }
-            for item in tools
-        ],
-        external_integrations=integrations,
-        trust_boundaries=boundaries,
-    )
+    """Build the factory pattern without step 2's consumed state and tool fixture."""
+    return _factory_pattern(conditional=conditional, consumed=False, tool_fixture=False)
 
 
 def _project(

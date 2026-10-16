@@ -7,13 +7,17 @@ from pathlib import Path
 
 from asago_scenario_generator.report.run_data import load_run
 from asago_scenario_generator.report.target_section import target_section
-from asago_scenario_generator.report_kit import read_metrics
-from tests.helpers.generate_report_fixture import copy_run, edit_yaml
+from tests.helpers.generate_report_fixture import (
+    body_rows,
+    copy_run,
+    edit_yaml,
+    metrics,
+)
 
 
 def shown(output: Path) -> tuple[str, dict]:
     html = str(target_section(load_run(output)))
-    return html, {k: int(v["value"]) for k, v in read_metrics(html).items()}
+    return html, metrics(html)
 
 
 def test_actions_operations_and_capabilities_are_three_separate_counts(
@@ -24,11 +28,6 @@ def test_actions_operations_and_capabilities_are_three_separate_counts(
     assert n["target.actions"] == 8
     assert n["target.operations"] == 7
     assert n["target.capabilities"] == 8
-
-
-def body_rows(html: str, table_id: str) -> int:
-    table = re.search(rf'<table[^>]*id="{table_id}".*?</table>', html, re.S).group(0)
-    return len(re.findall(r"<tr[^>]*>\s*<td", table))
 
 
 def test_the_action_and_operation_tables_list_one_row_for_each(tmp_path: Path) -> None:

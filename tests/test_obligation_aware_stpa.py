@@ -96,6 +96,7 @@ from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
 from tests.helpers.request_dispatch import dispatch_requests
+from tests.helpers.scripted_client import ScriptedClient
 from pydantic import BaseModel
 from types import SimpleNamespace
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
@@ -720,21 +721,8 @@ def test_routing_retry_includes_exact_local_validation_error() -> None:
 def test_provider_slot_payload_requires_filled_slots(tmp_path) -> None:
     """A schema-success response cannot silently omit every supplied slot."""
 
-    class EmptySlotProvider:
-        model = "fake-stpa"
-
-        def complete(self, **kwargs):
-            return LLMResult(
-                content={"filled_slots": []},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
-
     provider = ObligationAwareLLMAdapter(
-        EmptySlotProvider(),
+        ScriptedClient([{"filled_slots": []}], model="fake-stpa"),
         run_dir=tmp_path,
         controls=_controls(),
     )
@@ -746,36 +734,25 @@ def test_provider_slot_payload_requires_filled_slots(tmp_path) -> None:
 def test_provider_slot_payload_uses_nested_typed_considerations(tmp_path) -> None:
     """Provider considerations are parsed beside their slot findings."""
     slot = create_slots(_control_structure())[0]
-    response_formats: list[type] = []
 
-    class ArbitraryConsiderationProvider:
-        model = "fake-stpa"
-
-        def complete(self, **kwargs):
-            response_formats.append(kwargs["response_format"])
-            return LLMResult(
-                content={
-                    "filled_slots": [
-                        {
-                            "slot_id": slot.slot_id,
-                            "is_na": True,
-                            "na_rationale": "No provider finding was returned for this slot.",
-                            "findings": [],
-                            "consideration_results": [
-                                {"freeform": "not typed evidence"}
-                            ],
-                        }
-                    ],
-                },
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
-
+    client = ScriptedClient(
+        [
+            {
+                "filled_slots": [
+                    {
+                        "slot_id": slot.slot_id,
+                        "is_na": True,
+                        "na_rationale": "No provider finding was returned for this slot.",
+                        "findings": [],
+                        "consideration_results": [{"freeform": "not typed evidence"}],
+                    }
+                ],
+            }
+        ],
+        model="fake-stpa",
+    )
     provider = ObligationAwareLLMAdapter(
-        ArbitraryConsiderationProvider(),
+        client,
         run_dir=tmp_path,
         controls=_controls(),
     )
@@ -783,7 +760,7 @@ def test_provider_slot_payload_uses_nested_typed_considerations(tmp_path) -> Non
     with pytest.raises(ValueError, match="consideration_results"):
         provider.fill(_provider_slot_request())
 
-    schema = response_formats[0].model_json_schema()
+    schema = client.calls[0]["response_format"].model_json_schema()
     assert "considerations" not in schema["properties"]
     assert (
         "consideration_results" in schema["$defs"]["_SlotProviderDraft"]["properties"]
@@ -816,7 +793,6 @@ def test_provider_slot_payload_materializes_canonical_exec_identity(tmp_path) ->
             ),
         ),
     )
-    response_formats: list[type] = []
     obligation_id = "ob:v1:" + "a" * 64
     route = ObligationRoute(
         obligation_id=obligation_id,
@@ -827,22 +803,12 @@ def test_provider_slot_payload_materializes_canonical_exec_identity(tmp_path) ->
         evidence=("provider-route",),
     )
 
-    class FindingProvider:
-        model = "fake-stpa"
-
-        def complete(self, **kwargs):
-            response_formats.append(kwargs["response_format"])
-            return LLMResult(
-                content={"filled_slots": [provider_slot_payload(filled_slot)]},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient(
+        [{"filled_slots": [provider_slot_payload(filled_slot)]}], model="fake-stpa"
+    )
 
     provider = ObligationAwareLLMAdapter(
-        FindingProvider(),
+        client,
         run_dir=tmp_path,
         controls=_controls(),
     )
@@ -866,7 +832,7 @@ def test_provider_slot_payload_materializes_canonical_exec_identity(tmp_path) ->
     assert pair.hazard_ids == ("H-1",)
     assert pair.constraint_ids == ("SC-1",)
     assert pair.pair_id is not None
-    schema = response_formats[0].model_json_schema()
+    schema = client.calls[0]["response_format"].model_json_schema()
     assert schema["properties"]["filled_slots"]["items"]["$ref"].endswith(
         "/_SlotProviderDraft"
     )
@@ -914,54 +880,43 @@ def test_provider_slot_payload_compiles_one_deviation_for_exact_slot_type(
         control_structure=base_request.control_structure,
         controls=base_request.controls,
     )
-    response_formats: list[type] = []
-
-    class FindingProvider:
-        model = "fake-stpa"
-
-        def complete(self, **kwargs):
-            response_formats.append(kwargs["response_format"])
-            return LLMResult(
-                content={
-                    "filled_slots": [
-                        {
-                            "slot_id": slot.slot_id,
-                            "is_na": False,
-                            "na_rationale": None,
-                            "findings": [
-                                {
-                                    "deviation": deviation,
-                                    "hazardous_context": (
-                                        "the unreviewed request reaches the process"
-                                    ),
-                                    "loss_consequence": (
-                                        "the protected operation is harmed"
-                                    ),
-                                    "governing_pairs": ["SC-1/H-1"],
-                                    "process_model_refs": [],
-                                    "feedback_refs": [],
-                                }
-                            ],
-                            "consideration_results": {},
-                        }
-                    ]
-                },
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient(
+        [
+            {
+                "filled_slots": [
+                    {
+                        "slot_id": slot.slot_id,
+                        "is_na": False,
+                        "na_rationale": None,
+                        "findings": [
+                            {
+                                "deviation": deviation,
+                                "hazardous_context": (
+                                    "the unreviewed request reaches the process"
+                                ),
+                                "loss_consequence": "the protected operation is harmed",
+                                "governing_pairs": ["SC-1/H-1"],
+                                "process_model_refs": [],
+                                "feedback_refs": [],
+                            }
+                        ],
+                        "consideration_results": {},
+                    }
+                ]
+            }
+        ],
+        model="fake-stpa",
+    )
 
     result = ObligationAwareLLMAdapter(
-        FindingProvider(),
+        client,
         run_dir=tmp_path,
         controls=_controls(),
     ).fill(request)
 
     assert expected_behavior in result.filled_slots[0].icas[0].ica_text
     assert deviation in result.filled_slots[0].icas[0].ica_text
-    schema = response_formats[0].model_json_schema()
+    schema = client.calls[0]["response_format"].model_json_schema()
     finding_schema = schema["$defs"]["_FillFindingWire"]
     deviation_schema = finding_schema["properties"]["deviation"]
     assert deviation_schema["type"] == "string"
@@ -1203,42 +1158,30 @@ def test_provider_slot_payload_schema_matches_request_cardinality(tmp_path) -> N
         constraint_ids=("SC-1",),
         evidence=("provider-route",),
     )
-    response_formats: list[type] = []
-
-    class CardinalityProvider:
-        model = "fake-stpa"
-
-        def complete(self, **kwargs):
-            response_formats.append(kwargs["response_format"])
-            filled_slot = SlotIcaDraft(
-                slot_id=slot.slot_id,
-                is_na=True,
-                na_rationale="No finding applies.",
-                consideration_results=(
-                    ObligationIcaDraft(
-                        obligation_handle="R1",
-                        disposition="proposed_not_applicable",
-                        rationale="The complete structure excludes it.",
-                    ),
-                ),
-            )
-            return LLMResult(
-                content={"filled_slots": [provider_slot_payload(filled_slot)]},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    filled_slot = SlotIcaDraft(
+        slot_id=slot.slot_id,
+        is_na=True,
+        na_rationale="No finding applies.",
+        consideration_results=(
+            ObligationIcaDraft(
+                obligation_handle="R1",
+                disposition="proposed_not_applicable",
+                rationale="The complete structure excludes it.",
+            ),
+        ),
+    )
+    client = ScriptedClient(
+        [{"filled_slots": [provider_slot_payload(filled_slot)]}], model="fake-stpa"
+    )
 
     provider = ObligationAwareLLMAdapter(
-        CardinalityProvider(),
+        client,
         run_dir=tmp_path,
         controls=_controls(),
     )
     provider.fill(_provider_slot_request(routed_routes=(route,)))
 
-    schema = response_formats[0].model_json_schema()
+    schema = client.calls[0]["response_format"].model_json_schema()
     assert schema["properties"]["filled_slots"]["minItems"] == 1
     assert schema["properties"]["filled_slots"]["maxItems"] == 1
     assert "considerations" not in schema["properties"]
@@ -1251,37 +1194,25 @@ def test_provider_slot_payload_zero_pairs_requires_empty_considerations(
     tmp_path,
 ) -> None:
     """A target with no routed pairs accepts exactly zero considerations."""
-    response_formats: list[type] = []
-
-    class ZeroPairProvider:
-        model = "fake-stpa"
-
-        def complete(self, **kwargs):
-            response_formats.append(kwargs["response_format"])
-            slot = create_slots(_control_structure())[0]
-            filled_slot = SlotIcaDraft(
-                slot_id=slot.slot_id,
-                is_na=True,
-                na_rationale="No routed concern applies.",
-            )
-            return LLMResult(
-                # A target with no routed pair answers with an empty keyed object.
-                content={"filled_slots": [provider_slot_payload(filled_slot)]},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    slot = create_slots(_control_structure())[0]
+    filled_slot = SlotIcaDraft(
+        slot_id=slot.slot_id,
+        is_na=True,
+        na_rationale="No routed concern applies.",
+    )
+    # A target with no routed pair answers with an empty keyed object.
+    client = ScriptedClient(
+        [{"filled_slots": [provider_slot_payload(filled_slot)]}], model="fake-stpa"
+    )
 
     provider = ObligationAwareLLMAdapter(
-        ZeroPairProvider(),
+        client,
         run_dir=tmp_path,
         controls=_controls(),
     )
     result = provider.fill(_provider_slot_request())
 
-    schema = response_formats[0].model_json_schema()
+    schema = client.calls[0]["response_format"].model_json_schema()
     assert "considerations" not in schema["properties"]
     assert (
         "consideration_results" in schema["$defs"]["_SlotProviderDraft"]["properties"]
@@ -1347,27 +1278,16 @@ def test_provider_slot_payload_retries_on_exact_pair_key_mismatch(tmp_path) -> N
 def test_provider_slot_response_reports_one_call_without_a_retry(tmp_path) -> None:
     slot = create_slots(_control_structure())[0]
 
-    class OneCallProvider:
-        model = "fake-stpa"
-
-        def complete(self, **kwargs):
-            filled_slot = SlotIcaDraft(
-                slot_id=slot.slot_id,
-                is_na=True,
-                na_rationale="The slot is not applicable to this structure.",
-            )
-            return LLMResult(
-                content={"filled_slots": [provider_slot_payload(filled_slot)]},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
-
-    provider = ObligationAwareLLMAdapter(
-        OneCallProvider(), run_dir=tmp_path, controls=_controls()
+    filled_slot = SlotIcaDraft(
+        slot_id=slot.slot_id,
+        is_na=True,
+        na_rationale="The slot is not applicable to this structure.",
     )
+    client = ScriptedClient(
+        [{"filled_slots": [provider_slot_payload(filled_slot)]}], model="fake-stpa"
+    )
+
+    provider = ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=_controls())
 
     assert provider.fill(_provider_slot_request()).provider_calls == 1
 
@@ -1409,74 +1329,53 @@ def test_provider_responses_require_an_explicit_adapter_kind(
 
 def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:
     """Slot filling reserves enough bounded output for all target/pair rows."""
-    caps: list[int | None] = []
-
-    class NAPprovider:
-        model = "fake-stpa"
-
-        def complete(self, **kwargs):
-            caps.append(kwargs.get("max_completion_tokens"))
-            slot = create_slots(_control_structure())[0]
-            filled_slot = SlotIcaDraft(
-                slot_id=slot.slot_id,
-                is_na=True,
-                na_rationale="The slot is not applicable to this structure.",
-            )
-            return LLMResult(
-                content={"filled_slots": [provider_slot_payload(filled_slot)]},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    slot = create_slots(_control_structure())[0]
+    filled_slot = SlotIcaDraft(
+        slot_id=slot.slot_id,
+        is_na=True,
+        na_rationale="The slot is not applicable to this structure.",
+    )
+    client = ScriptedClient(
+        [{"filled_slots": [provider_slot_payload(filled_slot)]}], model="fake-stpa"
+    )
 
     provider = ObligationAwareLLMAdapter(
-        NAPprovider(),
+        client,
         run_dir=tmp_path,
         controls=_controls(),
     )
     provider.fill(_provider_slot_request())
-    assert caps == [8192]
+    assert [call.get("max_completion_tokens") for call in client.calls] == [8192]
 
 
 def test_provider_slot_schema_leads_with_normative_structured_draft(tmp_path) -> None:
     """The model-facing schema exposes only the request-local slot draft."""
-    response_formats: list[type] = []
-
-    class DraftProvider:
-        model = "fake-stpa"
-
-        def complete(self, **kwargs):
-            response_formats.append(kwargs["response_format"])
-            slot = create_slots(_control_structure())[0]
-            return LLMResult(
-                content={
-                    "filled_slots": [
-                        {
-                            "slot_id": slot.slot_id,
-                            "is_na": True,
-                            "na_rationale": "The complete structure excludes it.",
-                            "findings": [],
-                            "consideration_results": {},
-                        }
-                    ]
-                },
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    slot = create_slots(_control_structure())[0]
+    client = ScriptedClient(
+        [
+            {
+                "filled_slots": [
+                    {
+                        "slot_id": slot.slot_id,
+                        "is_na": True,
+                        "na_rationale": "The complete structure excludes it.",
+                        "findings": [],
+                        "consideration_results": {},
+                    }
+                ]
+            }
+        ],
+        model="fake-stpa",
+    )
 
     provider = ObligationAwareLLMAdapter(
-        DraftProvider(),
+        client,
         run_dir=tmp_path,
         controls=_controls(),
     )
     provider.fill(_provider_slot_request())
 
-    schema = response_formats[0].model_json_schema()
+    schema = client.calls[0]["response_format"].model_json_schema()
     assert schema["properties"]["filled_slots"]["items"]["$ref"].endswith(
         "/_SlotProviderDraft"
     )
