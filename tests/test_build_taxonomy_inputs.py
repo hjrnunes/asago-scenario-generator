@@ -69,8 +69,16 @@ def _build(tmp_path: Path, *, profile=None, llm_pattern_path=None):
     )
 
 
-def test_only_reviewed_owasp_llm_rows_with_a_pattern_path_are_kept(tmp_path) -> None:
-    value, _ = _build(tmp_path)
+@pytest.fixture(scope="module")
+def default_build(tmp_path_factory: pytest.TempPathFactory):
+    """The all-KC build shared by the tests that read it without changing it."""
+    return _build(tmp_path_factory.mktemp("taxonomy_inputs"))
+
+
+def test_only_reviewed_owasp_llm_rows_with_a_pattern_path_are_kept(
+    default_build,
+) -> None:
+    value, _ = default_build
 
     assert [
         (row.subject_id, row.object_id, row.object_source)
@@ -81,8 +89,8 @@ def test_only_reviewed_owasp_llm_rows_with_a_pattern_path_are_kept(tmp_path) -> 
     ]
 
 
-def test_llm_pattern_edges_close_over_risk_llm_pattern_paths(tmp_path) -> None:
-    value, profile = _build(tmp_path)
+def test_llm_pattern_edges_close_over_risk_llm_pattern_paths(default_build) -> None:
+    value, profile = default_build
     edges = value.cross_taxonomy_mappings
     in_scope = set(in_scope_attack_pattern_ids(profile))
 
@@ -93,8 +101,10 @@ def test_llm_pattern_edges_close_over_risk_llm_pattern_paths(tmp_path) -> None:
     assert {tuple(edge.evidence) for edge in edges} == {("llm-to-attack-pattern.yaml",)}
 
 
-def test_pins_identify_the_catalog_and_the_closed_mapping_bundle(tmp_path) -> None:
-    value, _ = _build(tmp_path)
+def test_pins_identify_the_catalog_and_the_closed_mapping_bundle(
+    default_build,
+) -> None:
+    value, _ = default_build
     release = value.attack_pattern_catalog[0].canonical_chain.taxonomy_context
     dumped = value.model_dump(mode="json")
 
