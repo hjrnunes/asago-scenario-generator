@@ -7,7 +7,6 @@ sensible defaults so tests only need to specify the fields they vary.
 
 from __future__ import annotations
 
-from asago_scenario_generator.stpa.models.scenario_envelope import GherkinSpec
 from asago_scenario_generator.stpa.models.scenario_spec import (
     AttackerBDI,
     DefenderBDI,
@@ -146,16 +145,4 @@ def make_scenario_spec(scenario_id: str = "SCN-001") -> ScenarioSpec:
         ),
         attacker_bdi=AttackerBDI(beliefs=["b"], desires=["d"], intentions=["i"]),
         loss_scenario="Scenario",
-    )
-
-
-def make_gherkin_spec() -> GherkinSpec:
-    """Build a minimal valid GherkinSpec."""
-    return GherkinSpec(
-        feature="Test",
-        scenario="Test",
-        given=["Given PM-1-1 is valid"],
-        when=["When x"],
-        then_expected=["Then should reject"],
-        then_actual=["But approves"],
     )

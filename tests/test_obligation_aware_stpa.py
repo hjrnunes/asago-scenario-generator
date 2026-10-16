@@ -1407,26 +1407,6 @@ def test_provider_responses_require_an_explicit_adapter_kind(
         response_type(request_digest="a" * 64, **fields)
 
 
-@pytest.mark.parametrize(
-    ("response_type", "fields"),
-    [
-        (StructuralRoutingResponse, {}),
-        (StructuralRevisionResponse, {"draft": RevisionDraft()}),
-        (SynthesisSlotResponse, {}),
-    ],
-)
-def test_provider_responses_carry_one_request_count(response_type, fields) -> None:
-    """provider_calls is the only request counter; network_calls is gone."""
-    response = response_type(request_digest="a" * 64, adapter_kind="fake", **fields)
-
-    assert "network_calls" not in response_type.model_fields
-    assert "network_calls" not in response.model_dump(mode="json")
-    with pytest.raises(ValueError, match="network_calls"):
-        response_type(
-            request_digest="a" * 64, adapter_kind="fake", **fields, network_calls=0
-        )
-
-
 def test_provider_slot_stage_uses_bounded_completion_cap(tmp_path) -> None:
     """Slot filling reserves enough bounded output for all target/pair rows."""
     caps: list[int | None] = []

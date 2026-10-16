@@ -1,6 +1,6 @@
 # Expectations for data/taxonomies/attack-patterns/attack-patterns-atlas-derived.yaml.
 # Read by tests/test_attack_pattern_catalog_invariants.py. Keys:
-#   ids / ordered / absent_ids   exact live record set (catalog order when ordered)
+#   ids / ordered                exact live record set (catalog order when ordered)
 #   checks                       opt-in invariants beyond the shared ones
 #   observation_kind_counts      outcome-link observation kinds across the catalog
 #   records.<id>                 per-record pins: digest, chain_exact, step_exact,

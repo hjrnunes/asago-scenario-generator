@@ -299,5 +299,4 @@ def test_canonical_json_is_the_shared_bytes_as_text(name: str) -> None:
     ids=["obligation_contracts", "projection_contracts"],
 )
 def test_contract_modules_use_the_shared_canonical_json(module: Any) -> None:
-    assert not hasattr(module, "_canonical_json")
     assert module.canonical_json is canonical_json

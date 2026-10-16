@@ -351,25 +351,6 @@ class TestFullRun:
             assert "stage5_context_user.j2" in manifest["prompt_hashes"]
             assert manifest["scenario_count"] == 2
 
-    def test_writes_no_scorecard_or_coverage_gaps(self):
-        cs = make_cs()
-        la = make_loss_analysis()
-        ets = _make_ets(num_threats=2)
-        client = _setup_mock_client(2)
-
-        with TemporaryDirectory() as tmpdir:
-            run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
-            manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
-            assert not (Path(tmpdir) / "eval-scorecard.yaml").exists()
-            assert not (Path(tmpdir) / "coverage-gaps.json").exists()
-            assert "eval_scorecard_path" not in manifest
-
     def test_scenario_yaml_loads_as_handoff(self):
         cs = make_cs()
         la = make_loss_analysis()

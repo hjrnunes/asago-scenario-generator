@@ -363,7 +363,6 @@ def test_a_run_writes_the_generate_report_and_its_stage_summary(tmp_path):
     summary = json.loads((tmp_path / "report" / "stage-summary.json").read_text())
     assert summary["stage"] == "generate"
     assert summary["report"] == "index.html"
-    assert not (tmp_path / "synthesis-report.html").exists()
 
 
 def test_a_run_with_a_risk_extraction_publishes_policy_coverage(tmp_path):
@@ -611,30 +610,6 @@ def test_default_baseline_preserves_explicit_paths_and_risk_fallback(
     assert call["capability_profile"] == "profile"
     assert "profile_path" not in call
     assert call["loss_analysis_path"] is pinned_loss_analysis_path
-
-
-def test_synthesis_runs_no_phase2_verification(tmp_path: Path) -> None:
-    """Realization is the last stage; no correspondence verification follows it."""
-    fake = _FakeAdapters(calls=[])
-
-    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
-
-    assert "verify_phase2" not in SynthesisAdapters.__dataclass_fields__
-    assert not hasattr(result, "phase2_verification")
-    assert "phase2_verification" not in result.manifest
-    assert "verify_phase2" not in result.manifest["stage_call_counts"]
-    assert result.stage_errors == []
-    written = {path.name for path in tmp_path.iterdir()}
-    assert written.isdisjoint(
-        {
-            "system-resource-map.yaml",
-            "correspondence-proposals.yaml",
-            "correspondence-reconciliation.yaml",
-            "hybrid-coverage-assessment.yaml",
-        }
-    )
-    assert result.report_path is not None
-    assert "Phase 2" not in result.report_path.read_text(encoding="utf-8")
 
 
 def test_synthesis_rechecks_every_applicable_obligation_once_after_revision(

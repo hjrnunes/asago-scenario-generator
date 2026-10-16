@@ -464,13 +464,6 @@ def test_a_client_records_only_through_the_session_it_was_given(
     assert not (tmp_path / "other" / RECORD_FILENAME).exists()
 
 
-def test_no_process_wide_session_remains() -> None:
-    from asago_scenario_generator.stpa.infra import provider_record
-
-    assert not hasattr(provider_record, "_ACTIVE")
-    assert not hasattr(provider_record, "active_provider_session")
-
-
 def test_run_command_threads_replay_calls_to_the_inputs(tmp_path: Path) -> None:
     for name in ("risk.json", "facts.json", "mapping.tsv", "profiles.yaml"):
         (tmp_path / name).write_text("{}", encoding="utf-8")

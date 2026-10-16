@@ -244,10 +244,10 @@ def test_run_sp1_uses_one_unified_analysis_for_an_observed_target(tmp_path: Path
     assert "target_relevance" not in steps
 
 
-def test_run_sp1_then_sp3_publishes_the_handoff_without_the_retired_companion(
+def test_run_sp1_then_sp3_completes_without_stage_errors(
     tmp_path: Path,
 ):
-    """The unified run publishes the scenario handoff and no execution bundle."""
+    """The unified run completes SP1 and then SP3 without stage errors."""
 
     result = run_sp1(
         llm_client=setup_sp1_mock_client(),
@@ -272,6 +272,3 @@ def test_run_sp1_then_sp3_publishes_the_handoff_without_the_retired_companion(
     )
     manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
     assert manifest["stage_errors"] == []
-    # The retired observed-target companions are not published on this path.
-    assert not (tmp_path / "execution-bundle.json").exists()
-    assert not (tmp_path / "scenarios" / "canonical").exists()

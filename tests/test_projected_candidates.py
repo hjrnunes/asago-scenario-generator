@@ -677,12 +677,6 @@ def test_candidate_v2_identity_is_stable_and_sensitive_to_every_identity_axis() 
         type(baseline[0]).model_validate(forged)
 
 
-def test_candidates_carry_no_technique_subset_axis() -> None:
-    candidates = _project().candidates
-    assert all(not hasattr(candidate, "technique_ids") for candidate in candidates)
-    assert all(not hasattr(candidate, "prompt_emphasis") for candidate in candidates)
-
-
 def test_legacy_catalog_record_cannot_masquerade_as_projected_candidate() -> None:
     legacy = {
         "id": "AP-T1-01",

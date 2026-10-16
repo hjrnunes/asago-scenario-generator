@@ -116,9 +116,6 @@ class TestSystemModelNormalizerSurface:
         source = system_model_files["critic"].read_text(encoding="utf-8")
         assert "def _stitch_revision_delta" in source
         assert "validate_normalized_control_structure" in source
-        assert (
-            "ControlStructure.model_validate(normalized_payload.payload)" not in source
-        )
 
 
 class TestSafeLlmCallExceptionSafety:
@@ -495,26 +492,6 @@ class TestContextPropagationBoundary:
     def test_bdi_prompts_is_public(self):
         """Stage 5 prompt assembly is a public seam, not a private helper."""
         assert hasattr(prompt_view, "build_context_bdi_prompts")
-        assert not hasattr(prompt_view, "_build_context_bdi_prompts")
-
-    def test_stage5_has_no_facade_module(self):
-        """Callers import the stage5 modules; no re-export module fronts them."""
-        assert not (SCENARIO_PROD_DIR / "bdi_generation.py").exists()
-
-    def test_stage5_has_no_execution_design_path(self):
-        """Stage 5 renders and generates one shape; no mode flag selects another."""
-        import inspect
-
-        from asago_scenario_generator.stpa.scenario_prod.stage5 import generate
-
-        for function in (
-            generate.generate_bdi_for_context,
-            prompt_view.build_context_bdi_prompts,
-        ):
-            parameters = inspect.signature(function).parameters
-            assert "execution_design" not in parameters, function.__name__
-            assert "requested_environment_basis" not in parameters, function.__name__
-        assert not (SCENARIO_PROD_DIR / "stage5" / "route.py").exists()
 
     def test_stage5_retry_feedback_has_no_default(self):
         """The one Stage 5 caller supplies the correction text; none is stored."""

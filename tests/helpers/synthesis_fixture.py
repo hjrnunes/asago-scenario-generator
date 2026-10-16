@@ -23,7 +23,6 @@ from asago_scenario_generator.models.obligation_consideration import (
     NeutralObligationBrief,
     ObligationRoute,
 )
-from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.pipeline.obligation_contracts import (
     TaxonomyObligationInputs,
     compute_mapping_bundle_digest,
@@ -154,27 +153,6 @@ def synthesis_inputs(
         output_dir=output_dir,
         **changes,
     )
-
-
-def applicable_obligation_ids(plan: TaxonomyObligationPlan) -> tuple[str, ...]:
-    """Return the plan's applicable obligation IDs in canonical order."""
-    return tuple(
-        sorted(
-            row.obligation_id
-            for row in plan.obligations
-            if row.scope_disposition == "applicable"
-        )
-    )
-
-
-def obligation_id_for(plan: TaxonomyObligationPlan, scope_disposition: str) -> str:
-    """Return the single obligation ID with one non-applicable scope."""
-    (match,) = (
-        row.obligation_id
-        for row in plan.obligations
-        if row.scope_disposition == scope_disposition
-    )
-    return match
 
 
 def baseline_loss_analysis() -> LossAnalysis:

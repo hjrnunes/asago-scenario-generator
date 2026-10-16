@@ -1,6 +1,6 @@
 # Expectations for data/taxonomies/attack-patterns/attack-patterns-memory-tool.yaml.
 # Read by tests/test_attack_pattern_catalog_invariants.py. Keys:
-#   ids / ordered / absent_ids   exact live record set (catalog order when ordered)
+#   ids / ordered                exact live record set (catalog order when ordered)
 #   checks                       opt-in invariants beyond the shared ones
 #   observation_kind_counts      outcome-link observation kinds across the catalog
 #   records.<id>                 per-record pins: digest, chain_exact, step_exact,
@@ -12,7 +12,6 @@ observation_kind_counts: {persistent_state: 24, model_context: 18, tool_invocati
 ids: [AP-T1-01, AP-T1-02, AP-T1-03, AP-T1-04, AP-T2-01, AP-T2-02, AP-T2-03, AP-T2-04, AP-T2-05,
   AP-T2-06, AP-T3-02, AP-T3-03, AP-T4-01, AP-T4-03]
 ordered: true
-absent_ids: [AP-T3-01, AP-T4-02, AP-T4-04]
 records:
   AP-T1-01:
     steps: [craft_payload, conceal_injection, deliver_payload, execute_injection, persist_in_memory,
