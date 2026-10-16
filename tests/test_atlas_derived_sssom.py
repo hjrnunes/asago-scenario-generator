@@ -100,34 +100,12 @@ class TestTechniquesFromCanonicalChain:
     """Canonical chain exact mappings overlap with SSSOM provenance.
 
     The SSSOM file carries historical ``relatedMatch`` provenance hints; the
-    canonical chain carries authoritative ``exact`` mappings.  These tests
-    verify that each pattern has a canonical chain with exact ATLAS mappings
-    and that at least one exact mapping is supported by (or is a
-    parent/sub-technique of) an SSSOM ``relatedMatch`` entry, confirming
-    historical continuity.
+    canonical chain carries authoritative ``exact`` mappings.  At least one
+    exact mapping of each pattern's canonical chain must be supported by (or
+    be a parent/sub-technique of) an SSSOM ``relatedMatch`` entry, confirming
+    historical continuity.  A chain without an exact ATLAS mapping fails
+    this check too.
     """
-
-    @pytest.mark.parametrize("pid", ATLAS_DERIVED_IDS)
-    def test_canonical_chain_has_exact_mappings(
-        self,
-        all_patterns: dict[str, dict],
-        pid: str,
-    ) -> None:
-        """Each pattern's canonical chain has at least one exact ATLAS mapping."""
-        pattern = all_patterns[pid]
-        cc = pattern.get("canonical_chain")
-        assert cc is not None, f"{pid} missing canonical_chain"
-
-        exact_techniques: set[str] = set()
-        for mapping in cc.get("mappings", []):
-            if mapping.get("decision") == "exact":
-                exact_techniques.update(mapping.get("ids", []))
-        for step in cc.get("steps", []):
-            for mapping in step.get("mappings", []):
-                if mapping.get("decision") == "exact":
-                    exact_techniques.update(mapping.get("ids", []))
-
-        assert exact_techniques, f"{pid}: canonical chain has no exact ATLAS mappings"
 
     @pytest.mark.parametrize("pid", ATLAS_DERIVED_IDS)
     def test_historical_continuity_with_sssom(
