@@ -283,10 +283,10 @@ def _empty_gap_response() -> dict:
     }
 
 
-def _disposition_repair_rows(*, count: int = 7) -> list[dict]:
+def _disposition_repair_rows() -> list[dict]:
     """Corrected rows for the seven selected cards: four cited, three not applicable."""
     rows = []
-    for index, risk_id in enumerate(_SAVED_MISSING_SEVEN[:count]):
+    for index, risk_id in enumerate(_SAVED_MISSING_SEVEN):
         if index < 4:
             rows.append(
                 {
