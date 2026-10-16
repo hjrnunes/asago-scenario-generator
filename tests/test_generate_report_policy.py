@@ -3,21 +3,24 @@
 from __future__ import annotations
 
 import json
-import re
 from pathlib import Path
 
 import pytest
 
 from asago_scenario_generator.report.policy_section import policy_section
 from asago_scenario_generator.report.run_data import load_run
-from asago_scenario_generator.report_kit import FootingError, read_metrics
-from tests.helpers.generate_report_fixture import copy_run, edit_yaml
+from asago_scenario_generator.report_kit import FootingError
+from tests.helpers.generate_report_fixture import (
+    body_rows,
+    copy_run,
+    edit_yaml,
+    metrics,
+)
 
 
 def shown(output: Path) -> tuple[str, dict]:
     html = str(policy_section(load_run(output)))
-    values = {k: int(v["value"]) for k, v in read_metrics(html).items()}
-    return html, values
+    return html, metrics(html)
 
 
 def edit_policy(output: Path, change) -> None:
@@ -25,11 +28,6 @@ def edit_policy(output: Path, change) -> None:
     value = json.loads(path.read_text())
     change(value)
     path.write_text(json.dumps(value, sort_keys=True))
-
-
-def body_rows(html: str, table_id: str) -> int:
-    table = re.search(rf'<table[^>]*id="{table_id}".*?</table>', html, re.S).group(0)
-    return len(re.findall(r"<tr[^>]*>\s*<td", table))
 
 
 def test_the_cited_and_outside_boundary_tables_list_every_such_risk(

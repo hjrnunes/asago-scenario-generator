@@ -9,12 +9,12 @@ from asago_scenario_generator.report.effort_section import effort_section
 from asago_scenario_generator.report.failure_section import failure_section
 from asago_scenario_generator.report.run_data import load_run
 from asago_scenario_generator.report.warning_section import warning_section
-from asago_scenario_generator.report_kit import read_metrics
-from tests.helpers.generate_report_fixture import copy_run, edit_calls, edit_yaml
-
-
-def numbers(html: str) -> dict[str, int]:
-    return {k: int(v["value"]) for k, v in read_metrics(html).items()}
+from tests.helpers.generate_report_fixture import (
+    copy_run,
+    edit_calls,
+    edit_yaml,
+    metrics,
+)
 
 
 def row(html: str, ident: str) -> str:
@@ -22,7 +22,7 @@ def row(html: str, ident: str) -> str:
 
 
 def test_failed_requests_are_counted_against_all_requests(tmp_path: Path) -> None:
-    n = numbers(str(failure_section(load_run(copy_run(tmp_path)))))
+    n = metrics(str(failure_section(load_run(copy_run(tmp_path)))))
 
     assert (n["failures.failed"], n["failures.requests"], n["failures.chains"]) == (
         10,
@@ -52,7 +52,7 @@ def test_a_failure_fixed_by_a_repair_request_is_counted_as_repaired(
         ),
     )
 
-    n = numbers(str(failure_section(load_run(output))))
+    n = metrics(str(failure_section(load_run(output))))
 
     assert (n["failures.repaired"], n["failures.lost"]) == (1, 0)
 
@@ -91,7 +91,7 @@ def test_a_run_without_failures_says_so(tmp_path: Path) -> None:
 
 def test_warnings_that_differ_only_in_an_id_share_a_row(tmp_path: Path) -> None:
     html = str(warning_section(load_run(copy_run(tmp_path))))
-    n = numbers(html)
+    n = metrics(html)
 
     assert n["warnings.total"] == 14
     assert len(re.findall(r"<tr id=\"warning-", html)) == 7
@@ -120,7 +120,7 @@ def test_no_warnings_is_stated(tmp_path: Path) -> None:
 def test_effort_groups_requests_by_step_and_foots_to_the_total(tmp_path: Path) -> None:
     run = load_run(copy_run(tmp_path))
     html = str(effort_section(run))
-    n = numbers(html)
+    n = metrics(html)
 
     assert n["effort.requests"] == len(run.calls)
     assert n["effort.tokens"] == sum(c.tokens for c in run.calls)
@@ -142,7 +142,7 @@ def test_effort_counts_failed_requests_and_adds_up_the_seconds(tmp_path: Path) -
     )
     run = load_run(output)
 
-    n = numbers(str(effort_section(run)))
+    n = metrics(str(effort_section(run)))
 
     assert n["effort.failed"] == 10
     assert n["effort.seconds"] == 2 * len(run.calls)

@@ -8,11 +8,14 @@ no prompt or response text. Tests copy it before changing it.
 from __future__ import annotations
 
 import json
+import re
 import shutil
 from pathlib import Path
 from typing import Any
 
 import yaml
+
+from asago_scenario_generator.report_kit import read_metrics
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "generate_report" / "klarna-r1"
 SCENARIOS = "SCN-001 SCN-002 SCN-003 SCN-004 SCN-006 SCN-011 SCN-012 SCN-023".split()
@@ -38,3 +41,14 @@ def edit_calls(output: Path, change: Any) -> None:
     calls = [json.loads(line) for line in path.read_text().splitlines()]
     change(calls)
     path.write_text("".join(json.dumps(call) + "\n" for call in calls))
+
+
+def metrics(html: str) -> dict[str, int]:
+    """Return the integer value of each metric a rendered section declares."""
+    return {k: int(v["value"]) for k, v in read_metrics(html).items()}
+
+
+def body_rows(html: str, table_id: str) -> int:
+    """Count the rows with data cells in the table whose id is *table_id*."""
+    table = re.search(rf'<table[^>]*id="{table_id}".*?</table>', html, re.S).group(0)
+    return len(re.findall(r"<tr[^>]*>\s*<td", table))

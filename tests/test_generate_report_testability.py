@@ -9,13 +9,12 @@ from asago_scenario_generator.report.run_data import load_run
 from asago_scenario_generator.report.testability_section import (
     testability_section as render_section,
 )
-from asago_scenario_generator.report_kit import read_metrics
-from tests.helpers.generate_report_fixture import copy_run, edit_yaml
+from tests.helpers.generate_report_fixture import copy_run, edit_yaml, metrics
 
 
 def shown(output: Path) -> tuple[str, dict]:
     html = str(render_section(load_run(output)))
-    return html, {k: int(v["value"]) for k, v in read_metrics(html).items()}
+    return html, metrics(html)
 
 
 def test_the_bar_counts_sent_duplicate_and_analytical_scenarios(tmp_path: Path) -> None:

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from collections import Counter
 from pathlib import Path
 from typing import get_args
@@ -15,18 +14,17 @@ from asago_scenario_generator.report.obligation_section import (
     obligation_section,
 )
 from asago_scenario_generator.report.run_data import load_run
-from asago_scenario_generator.report_kit import read_metrics
-from tests.helpers.generate_report_fixture import copy_run, edit_yaml
+from tests.helpers.generate_report_fixture import (
+    body_rows,
+    copy_run,
+    edit_yaml,
+    metrics,
+)
 
 
 def shown(output: Path) -> tuple[str, dict]:
     html = str(obligation_section(load_run(output)))
-    return html, {k: int(v["value"]) for k, v in read_metrics(html).items()}
-
-
-def body_rows(html: str, table_id: str) -> int:
-    table = re.search(rf'<table[^>]*id="{table_id}".*?</table>', html, re.S).group(0)
-    return len(re.findall(r"<tr[^>]*>\s*<td", table))
+    return html, metrics(html)
 
 
 def test_every_stop_reason_table_lists_one_row_per_obligation(tmp_path: Path) -> None:
