@@ -1,6 +1,6 @@
 """Tests for SP1 run orchestration.
 
-Covers SP1-RUN-01 through SP1-RUN-14 from the Gherkin feature file.
+Covers the SP1-RUN scenarios from the Gherkin feature file.
 """
 
 from __future__ import annotations
@@ -254,7 +254,7 @@ def _observed_gemma_invalid_feedback_update_dict() -> dict:
 
 
 class TestRunOrchestration:
-    """SP1-RUN-01 through SP1-RUN-14."""
+    """Run orchestration: SP1-RUN-05, SP1-RUN-12 and SP1-RUN-15 have own tests."""
 
     def test_run_records_typed_stage1a_reference_failure_and_stops(self, tmp_path):
         """A Stage 1a reference failure gets one correction, then stops typed.
@@ -296,18 +296,45 @@ class TestRunOrchestration:
         ]
         assert [entry["success"] for entry in stage1a_entries] == [False, False]
 
-    def test_run_01_full_run_produces_all_artifacts(self, tmp_path):
-        """SP1-RUN-01: full run produces all three output artifacts."""
+    def test_default_run_publishes_artifacts_logs_calls_and_records_manifest(
+        self, tmp_path
+    ):
         client = _setup_mock_client()
-        run_sp1(
+        result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
             risk_cards=make_risk_cards(),
             run_dir=tmp_path,
         )
+
         assert (tmp_path / "loss-analysis.yaml").exists()
         assert (tmp_path / "capability-profile.yaml").exists()
         assert (tmp_path / "control-structure.yaml").exists()
+
+        assert isinstance(result.loss_analysis, LossAnalysis)
+        assert isinstance(result.capability_profile, CapabilityProfile)
+        assert isinstance(result.control_structure, ControlStructure)
+
+        assert (tmp_path / "calls.jsonl").exists()
+        entries = read_calls_jsonl(tmp_path)
+        stages = [e["stage"] for e in entries]
+        assert "stage_1a" in stages
+        assert "stage_1b" in stages
+        assert "stage_2" in stages
+        assert stages.index("stage_1b") < stages.index("stage_1a")
+        assert stages.index("stage_1a") < stages.index("stage_2")
+
+        manifest_file = tmp_path / "run-manifest.yaml"
+        assert manifest_file.exists()
+        manifest = yaml.safe_load(manifest_file.read_text())
+        assert "stage_1a" in manifest["stage_summary"]
+        assert "stage_2" in manifest["stage_summary"]
+        assert "use_case_text" in manifest["input_hashes"]
+        assert "risk_extraction" in manifest["input_hashes"]
+        assert "stage1a_risk_system.j2" in manifest["prompt_hashes"]
+        assert "critic_system.j2" in manifest["prompt_hashes"]
+
+        assert any("SC-1" in call.user_prompt for call in client.calls)
 
     def test_run_with_target_evidence_persists_and_renders_it(self, tmp_path):
         """Observed target evidence reaches Stage 1a and every Stage 2 call."""
@@ -388,46 +415,6 @@ class TestRunOrchestration:
             == 4
         )
 
-    def test_run_02_stages_execute_in_order(self, tmp_path):
-        """SP1-RUN-02: stages execute in order 1b then 1a then 2."""
-        client = _setup_mock_client()
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        assert isinstance(result.loss_analysis, LossAnalysis)
-        assert isinstance(result.capability_profile, CapabilityProfile)
-        assert isinstance(result.control_structure, ControlStructure)
-        # Verify call order by checking call log stages
-        entries = read_calls_jsonl(tmp_path)
-        stages = [e["stage"] for e in entries]
-        assert "stage_1a" in stages
-        assert "stage_1b" in stages
-        assert "stage_2" in stages
-        # Stage 1b should come before stage_1a (reversed ordering)
-        assert stages.index("stage_1b") < stages.index("stage_1a")
-        # Stage 1a should come before stage_2
-        assert stages.index("stage_1a") < stages.index("stage_2")
-
-    def test_run_03_all_calls_logged(self, tmp_path):
-        """SP1-RUN-03: all LLM calls logged to calls.jsonl."""
-        client = _setup_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        calls_file = tmp_path / "calls.jsonl"
-        assert calls_file.exists()
-        entries = read_calls_jsonl(tmp_path)
-        stages = {e["stage"] for e in entries}
-        assert "stage_1a" in stages
-        assert "stage_1b" in stages
-        assert "stage_2" in stages
-
     def test_run_inherits_effective_client_temperature(self, tmp_path):
         """Stage defaults do not override the resolved client configuration."""
         client = _setup_mock_client()
@@ -445,23 +432,6 @@ class TestRunOrchestration:
 
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["model_settings"]["temperature"] == 1.0
-
-    def test_run_04_run_manifest_written(self, tmp_path):
-        """SP1-RUN-04: run manifest is written with stage_summary."""
-        client = _setup_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        manifest_file = tmp_path / "run-manifest.yaml"
-        assert manifest_file.exists()
-
-        manifest = yaml.safe_load(manifest_file.read_text())
-        assert "stage_summary" in manifest
-        assert "stage_1a" in manifest["stage_summary"]
-        assert "stage_2" in manifest["stage_summary"]
 
     def test_observed_gemma_references_are_rejected_before_typed_serialization(
         self, tmp_path
@@ -605,56 +575,6 @@ class TestRunOrchestration:
         assert manifest["revised"] is False
         assert len(manifest["post_revision_warnings"]) == 1
         assert manifest["post_revision_warnings"][0].startswith("Revision failed:")
-
-    def test_run_06_manifest_records_input_hashes(self, tmp_path):
-        """SP1-RUN-06: run manifest records input hashes."""
-        client = _setup_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        manifest_file = tmp_path / "run-manifest.yaml"
-
-        manifest = yaml.safe_load(manifest_file.read_text())
-        assert "input_hashes" in manifest
-        assert "use_case_text" in manifest["input_hashes"]
-        assert "risk_extraction" in manifest["input_hashes"]
-
-    def test_run_07_manifest_records_prompt_hashes(self, tmp_path):
-        """SP1-RUN-07: run manifest records prompt hashes."""
-        client = _setup_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        manifest_file = tmp_path / "run-manifest.yaml"
-
-        manifest = yaml.safe_load(manifest_file.read_text())
-        assert "prompt_hashes" in manifest
-        assert "stage1a_risk_system.j2" in manifest["prompt_hashes"]
-        assert "critic_system.j2" in manifest["prompt_hashes"]
-
-    def test_run_08_stage_2_receives_loss_analysis_and_profile(self, tmp_path):
-        """SP1-RUN-08: Stage 2 Call 1 receives security constraints from loss analysis."""
-        client = _setup_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        # Find the call_1_requirements call (Stage 2 Call 1)
-        call1 = None
-        for call in client.calls:
-            if "SC-1" in call.user_prompt:
-                call1 = call
-                break
-        assert call1 is not None
-        assert "SC-1" in call1.user_prompt
 
     def test_run_12_profile_flag_skips_stage_1b(self, tmp_path):
         """SP1-RUN-12: run with profile flag skips Stage 1b LLM call."""
