@@ -54,6 +54,10 @@ from asago_scenario_generator.stpa.system_model.id_normalization import (
 from asago_scenario_generator.stpa.system_model import run as run_module
 from tests.stpa.sp1_helpers import MockLLMClient
 
+_FIXTURE_SAFE = settings(
+    deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+
 
 # ---------------------------------------------------------------------------
 # ControlStructure strategy
@@ -271,11 +275,7 @@ class TestRevisionNeedsAnExplicitGap:
     """Only explicit structural gaps authorize revision."""
 
     @given(findings=st_critic_findings())
-    @settings(
-        max_examples=100,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=100)
     def test_revision_iff_at_least_one_gap(self, findings, tmp_path):
         """Probe statuses alone do not authorize revision."""
         assert _revision_attempted(findings, tmp_path) == bool(findings.gaps)
@@ -326,11 +326,7 @@ class TestDismissalVisibility:
     """Every dismissed_gaps entry surfaces in run_revision warnings."""
 
     @given(dismissals=st.lists(st_dismissal_text, min_size=0, max_size=5, unique=True))
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=50)
     def test_each_dismissal_warns_once(self, tmp_path, dismissals):
         """Each dismissal appears in the warnings, one warning per dismissal."""
         client = MockLLMClient()
@@ -407,11 +403,7 @@ class TestMergeConservation:
     """When the delta has no modifications, existing elements survive in order."""
 
     @given(cs=st_cs_with_links())
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=50)
     def test_empty_delta_keeps_every_element_in_order(self, tmp_path, cs):
         """Empty-delta revision keeps every element and publishes position IDs.
 
@@ -573,11 +565,7 @@ class TestAllDismissedWarning:
         assert "no changes" in warning
 
     @given(findings=st_critic_findings(), extra_dismissals=st.integers(0, 3))
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=50)
     def test_warns_iff_findings_all_dismissed_without_changes(
         self, tmp_path, findings, extra_dismissals
     ):
