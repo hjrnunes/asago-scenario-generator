@@ -767,8 +767,7 @@ uv run pytest tests/ -q
 The unit suite is deterministic and does not require an LLM endpoint. Unit
 tests pin behavior, and the phrase tables in `tests/phrases/*.yaml` pin prompt
 text. Pipeline output and harness state are ignored.
-See [the development methodology](docs/development/swarmforge.md) and
-[architecture overview](docs/architecture/overview.md).
+See the [architecture overview](docs/architecture/overview.md).
 
 ## License
 
