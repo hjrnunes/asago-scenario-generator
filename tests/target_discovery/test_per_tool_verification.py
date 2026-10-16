@@ -32,57 +32,22 @@ from asago_scenario_generator.target_discovery import (
     discover_mcp_target,
 )
 from asago_scenario_generator.target_discovery.prompts import build_verifier_prompt
+from tests.helpers.target_discovery import (
+    OBSERVER,
+    InMemoryInterpreter,
+    InMemoryInventory,
+)
 
 
 FIXTURE = (
     Path(__file__).parents[2] / "data/contracts/target-discovery/mcp-tools-list.json"
 )
 DISPUTED = "lookup_order"
-OBSERVER = "get_klarna_state_summary"
 REASON = "The description names an identifier lookup, not a free-text search."
 
 
-class _Inventory:
-    def __init__(self) -> None:
-        self.payload = json.loads(FIXTURE.read_text(encoding="utf-8"))
-
-    def list_tools(self, cursor=None):
-        del cursor
-        return self.payload
-
-    def call_tool(self, name, arguments):
-        del name, arguments
-        return None
-
-
-class _Interpreter:
-    """Interpret every tool as a supported read; verify through ``verdicts``."""
-
-    def __init__(self, verdicts) -> None:
-        self._verdicts = verdicts
-
-    def interpret(self, request):
-        return TargetInterpretationResponse(
-            interpretations=tuple(
-                TargetInterpretationDraft(
-                    tool_handle=tool.handle,
-                    disposition=TargetInterpretationDisposition.supported,
-                    likely_effect=(
-                        TargetOperationEffect.observe
-                        if tool.name == OBSERVER
-                        else TargetOperationEffect.read
-                    ),
-                    likely_state_effect=TargetStateEffect.none,
-                    evidence_refs=(f"inventory:tool:{tool.name}:description",),
-                    rationale="The quoted description supports this bounded label.",
-                )
-                for tool in request.tools
-            )
-        )
-
-    def verify(self, request, response):
-        del response
-        return self._verdicts(request)
+def _inventory() -> InMemoryInventory:
+    return InMemoryInventory(json.loads(FIXTURE.read_text(encoding="utf-8")))
 
 
 def _inputs() -> McpTargetDiscoveryInputs:
@@ -118,7 +83,9 @@ def _agreements(result) -> dict[str, InterpreterVerifierAgreement]:
 
 
 def test_disputed_tool_loses_only_its_own_verification():
-    result = discover_mcp_target(_inputs(), _Inventory(), _Interpreter(_dispute_one))
+    result = discover_mcp_target(
+        _inputs(), _inventory(), InMemoryInterpreter(_dispute_one)
+    )
 
     agreements = _agreements(result)
     assert agreements.pop(DISPUTED) is InterpreterVerifierAgreement.disagree
@@ -136,7 +103,7 @@ def test_disputed_tool_loses_only_its_own_verification():
 
 def test_batch_level_disagreement_still_marks_every_tool_in_the_batch():
     result = discover_mcp_target(
-        _inputs(), _Inventory(), _Interpreter(lambda request: False)
+        _inputs(), _inventory(), InMemoryInterpreter(lambda request: False)
     )
 
     assert set(_agreements(result).values()) == {InterpreterVerifierAgreement.disagree}
@@ -159,7 +126,9 @@ def test_missing_verdict_leaves_only_that_tool_unverified():
             )
         )
 
-    result = discover_mcp_target(_inputs(), _Inventory(), _Interpreter(omit_disputed))
+    result = discover_mcp_target(
+        _inputs(), _inventory(), InMemoryInterpreter(omit_disputed)
+    )
 
     agreements = _agreements(result)
     assert agreements.pop(DISPUTED) is InterpreterVerifierAgreement.unverified
@@ -186,7 +155,7 @@ def test_verdict_for_a_foreign_handle_leaves_the_batch_unverified():
             )
         )
 
-    result = discover_mcp_target(_inputs(), _Inventory(), _Interpreter(foreign))
+    result = discover_mcp_target(_inputs(), _inventory(), InMemoryInterpreter(foreign))
 
     assert set(_agreements(result).values()) == {
         InterpreterVerifierAgreement.unverified
@@ -201,7 +170,9 @@ def test_mapping_verdicts_are_accepted_from_plain_adapters():
     def as_mapping(request):
         return _dispute_one(request).model_dump(mode="json")
 
-    result = discover_mcp_target(_inputs(), _Inventory(), _Interpreter(as_mapping))
+    result = discover_mcp_target(
+        _inputs(), _inventory(), InMemoryInterpreter(as_mapping)
+    )
 
     agreements = _agreements(result)
     assert agreements.pop(DISPUTED) is InterpreterVerifierAgreement.disagree

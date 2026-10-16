@@ -39,60 +39,12 @@ from asago_scenario_generator.target_discovery.contracts import (
     TargetInterpretationRequest,
     TargetToolPromptView,
 )
+from tests.helpers.target_discovery import InMemoryInterpreter, InMemoryInventory
 
 
 FIXTURE = (
     Path(__file__).parents[2] / "data/contracts/target-discovery/mcp-tools-list.json"
 )
-
-
-class InMemoryInventory:
-    def __init__(self, payload: dict) -> None:
-        self.payload = payload
-        self.list_calls: list[str | None] = []
-        self.tool_calls: list[tuple[str, dict]] = []
-
-    def list_tools(self, cursor: str | None = None):
-        self.list_calls.append(cursor)
-        return self.payload
-
-    def call_tool(self, name: str, arguments: dict):
-        self.tool_calls.append((name, arguments))
-        return {"name": name}
-
-
-class InMemoryInterpreter:
-    def __init__(self, *, agree: bool = True) -> None:
-        self.requests = []
-        self.agree = agree
-
-    def interpret(self, request):
-        self.requests.append(request)
-        return TargetInterpretationResponse(
-            interpretations=tuple(
-                TargetInterpretationDraft(
-                    tool_handle=tool.handle,
-                    disposition=TargetInterpretationDisposition.supported,
-                    likely_effect=(
-                        TargetOperationEffect.observe
-                        if tool.name == "get_klarna_state_summary"
-                        else TargetOperationEffect.read
-                    ),
-                    likely_state_effect=TargetStateEffect.none,
-                    semantic_roles=("observer",)
-                    if tool.name == "get_klarna_state_summary"
-                    else ("reader",),
-                    observer_tool_handles=(),
-                    evidence_refs=(f"inventory:tool:{tool.name}:description",),
-                    rationale="The quoted description supports this bounded label.",
-                )
-                for tool in request.tools
-            )
-        )
-
-    def verify(self, request, response):
-        del request, response
-        return self.agree
 
 
 def _inputs(**updates):
