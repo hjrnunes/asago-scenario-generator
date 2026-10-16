@@ -24,6 +24,7 @@ from asago_scenario_generator.request_schema import (
     string_items_enum,
     uses_guided_decoding,
 )
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.llm import (
     DEFAULT_TEMPERATURE,
     LLMClient,
@@ -371,8 +372,8 @@ def _entries_logged_since(
         return []
     with calls_path.open("rb") as handle:
         handle.seek(offset)
-        lines = handle.read().decode("utf-8").splitlines()
-    entries = [json.loads(line) for line in lines if line.strip()]
+        lines = jsonl_lines(handle.read().decode("utf-8"))
+    entries = [json.loads(line) for line in lines]
     for entry in entries:
         entry["batch_id"] = batch_id
         if failure is not None and "error" in entry:

@@ -10,6 +10,7 @@ from typing import Any
 import httpx
 from openai.types.chat import ChatCompletion
 from pydantic import BaseModel
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 
@@ -89,7 +90,7 @@ def _client(provider: _Provider | None = None, **overrides: Any) -> LLMClient:
 
 def _records(directory: Path) -> list[dict[str, Any]]:
     path = directory / RECORD_FILENAME
-    return [json.loads(line) for line in path.read_text().splitlines() if line]
+    return [json.loads(line) for line in jsonl_lines(path.read_text())]
 
 
 def _answer(**kwargs: Any) -> ChatCompletion:

@@ -17,6 +17,7 @@ from typing import Any
 
 import pytest
 
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -116,9 +117,7 @@ def _client(*replies: Any) -> MockLLMClient:
 
 def _attempts(run_dir: Path) -> list[dict[str, Any]]:
     rows = [
-        json.loads(line)
-        for line in (run_dir / "calls.jsonl").read_text().splitlines()
-        if line
+        json.loads(line) for line in jsonl_lines((run_dir / "calls.jsonl").read_text())
     ]
     return [row for row in rows if row["step"] == STEP]
 

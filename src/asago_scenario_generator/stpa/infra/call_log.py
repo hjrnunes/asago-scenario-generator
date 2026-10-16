@@ -395,6 +395,16 @@ def call_log_of(client: Any) -> CallLog | None:
     return log if isinstance(log, CallLog) else None
 
 
+def jsonl_lines(text: str) -> list[str]:
+    """Split JSONL *text* into its non-blank record lines.
+
+    Splits on ``"\\n"`` only: ``json.dumps(..., ensure_ascii=False)`` leaves
+    U+0085, U+2028 and U+2029 raw, and ``str.splitlines()`` would cut a record
+    at each of them.
+    """
+    return [line for line in text.split("\n") if line.strip()]
+
+
 def append_call_log(
     entries: list[dict], run_dir: Path, call_log: CallLog | None = None
 ) -> None:
@@ -445,9 +455,7 @@ def _load_call_entries(calls_path: Path) -> list[dict[str, Any]]:
     if not calls_path.exists():
         raise ValueError("cannot publish lifecycle for a missing call log")
     return [
-        json.loads(line)
-        for line in calls_path.read_text(encoding="utf-8").splitlines()
-        if line.strip()
+        json.loads(line) for line in jsonl_lines(calls_path.read_text(encoding="utf-8"))
     ]
 
 

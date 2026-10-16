@@ -27,6 +27,7 @@ from pydantic import (
 from asago_scenario_generator.models.obligation_accounting import ObligationAccounting
 from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferReport
 from asago_scenario_generator.models.target_realization import TargetRealizationResult
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.scenario_prod.handoff import ScenarioHandoffV4
@@ -237,7 +238,7 @@ def _read_calls(output: Path) -> tuple[CallRecord, ...]:
     path = output / CALLS
     if not path.exists():
         return ()
-    lines = [line for line in path.read_text(encoding="utf-8").splitlines() if line]
+    lines = jsonl_lines(path.read_text(encoding="utf-8"))
     return tuple(
         CallRecord.model_validate(json.loads(line)).model_copy(update={"n": n})
         for n, line in enumerate(lines, 1)

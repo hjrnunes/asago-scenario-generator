@@ -39,6 +39,7 @@ from typing import Any, Callable, Iterable, Sequence
 import yaml
 
 import asago_scenario_generator
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 
 _SCRIPT = Path(__file__).resolve()
@@ -498,7 +499,7 @@ def _short(value: Any, limit: int = 160) -> str:
 
 def _parse(text: str, suffix: str) -> Any:
     if suffix == ".jsonl":
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
+        return [json.loads(line) for line in jsonl_lines(text)]
     if suffix == ".json":
         return json.loads(text)
     return yaml.safe_load(text)

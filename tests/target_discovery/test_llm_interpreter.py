@@ -12,6 +12,7 @@ import openai
 import pytest
 from pydantic import ValidationError
 
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.llm_helpers import CallOutcome
 from tests.discovery_call_log import logged
 from tests.helpers.scripted_client import ScriptedClient
@@ -342,7 +343,7 @@ def test_discovery_includes_adapter_calls_and_profile_provenance(tmp_path: Path)
     written = write_target_discovery(tmp_path, result)
     persisted_calls = [
         json.loads(line)
-        for line in written["calls.jsonl"].read_text(encoding="utf-8").splitlines()
+        for line in jsonl_lines(written["calls.jsonl"].read_text(encoding="utf-8"))
     ]
     assert persisted_calls[1]["system_prompt_text"]
     assert persisted_calls[1]["user_prompt_text"]
@@ -397,7 +398,7 @@ def test_the_shared_call_log_in_the_run_directory_holds_each_request(tmp_path: P
     adapter.interpret(_request())
 
     (record,) = adapter.drain_call_records()
-    logged_lines = (tmp_path / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+    logged_lines = jsonl_lines((tmp_path / "calls.jsonl").read_text(encoding="utf-8"))
     assert [json.loads(line) for line in logged_lines] == [
         {key: value for key, value in record.items() if key != "batch_id"}
     ]
@@ -405,6 +406,20 @@ def test_the_shared_call_log_in_the_run_directory_holds_each_request(tmp_path: P
     assert record["batch_id"] == "BATCH-1"
     assert record["success"] is True
     assert record["prompt_tokens"] == 5
+
+
+def test_a_reply_with_line_separators_stays_one_logged_entry(tmp_path: Path):
+    reply = json.loads(_wire_answer())
+    rationale = "reads\u0085an\u2028order\u2029now"
+    reply["interpretations"][0]["rationale"] = rationale
+    content = json.dumps(reply, ensure_ascii=False)
+    adapter = TargetDiscoveryLlmInterpreter(_scripted_client(content), run_dir=tmp_path)
+
+    adapter.interpret(_request())
+
+    (record,) = adapter.drain_call_records()
+    assert record["response_content"] == content
+    assert record["cleaned_response"]["interpretations"][0]["rationale"] == rationale
 
 
 def test_a_later_call_collects_only_its_own_entries(tmp_path: Path):
