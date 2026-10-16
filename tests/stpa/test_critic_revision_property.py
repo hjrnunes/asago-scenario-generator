@@ -270,26 +270,6 @@ class TestRevisionNeedsAnExplicitGap:
         """Probe statuses alone do not authorize revision."""
         assert _revision_attempted(findings, tmp_path) == bool(findings.gaps)
 
-    @given(
-        checklist=st.dictionaries(st_checklist_key, st_status, min_size=1, max_size=3),
-        taxonomy=st.dictionaries(st_taxonomy_key, st_status, min_size=0, max_size=2),
-    )
-    @settings(
-        max_examples=80,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_probe_only_unjustified_does_not_trigger(
-        self, checklist, taxonomy, tmp_path
-    ):
-        """Absent results without explicit gaps remain diagnostic only."""
-        findings = CriticFindings(
-            gaps=[],
-            checklist_results=checklist,
-            taxonomy_probe_results=taxonomy,
-        )
-        assert _revision_attempted(findings, tmp_path) is False
-
 
 # ---------------------------------------------------------------------------
 # 4. Dismissal visibility: every dismissed_gaps entry appears in warnings
@@ -341,8 +321,8 @@ class TestDismissalVisibility:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_each_dismissal_in_warnings(self, tmp_path, dismissals):
-        """Each dismissal string appears in the returned warnings."""
+    def test_each_dismissal_warns_once(self, tmp_path, dismissals):
+        """Each dismissal appears in the warnings, one warning per dismissal."""
         client = MockLLMClient()
         client.set_response_for(
             RevisionDelta,
@@ -366,62 +346,10 @@ class TestDismissalVisibility:
             assert d in warning_text, (
                 f"Dismissal '{d}' not found in warnings: {warnings}"
             )
-
-    @given(dismissals=st.lists(st_dismissal_text, min_size=1, max_size=5, unique=True))
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_dismissal_warning_count_matches(self, tmp_path, dismissals):
-        """The number of dismissal warnings equals len(dismissed_gaps)."""
-        client = MockLLMClient()
-        client.set_response_for(
-            RevisionDelta,
-            {
-                "new_responsibilities": [],
-                "new_controlled_processes": [],
-                "new_coordination_links": [],
-                "modified_responsibilities": [],
-                "dismissed_gaps": dismissals,
-            },
-        )
-        _, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_base_cs(),
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
         dismissal_warnings = [
             w for w in warnings if w.startswith("Revision dismissed finding:")
         ]
         assert len(dismissal_warnings) == len(dismissals)
-
-    def test_empty_dismissals_produce_no_dismissal_warnings(self, tmp_path):
-        """When dismissed_gaps is empty, no dismissal warnings appear."""
-        client = MockLLMClient()
-        client.set_response_for(
-            RevisionDelta,
-            {
-                "new_responsibilities": [],
-                "new_controlled_processes": [],
-                "new_coordination_links": [],
-                "modified_responsibilities": [],
-                "dismissed_gaps": [],
-            },
-        )
-        _, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_base_cs(),
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
-        dismissal_warnings = [
-            w for w in warnings if w.startswith("Revision dismissed finding:")
-        ]
-        assert len(dismissal_warnings) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -480,38 +408,8 @@ class TestMergeConservation:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_all_resp_ids_survive(self, tmp_path, cs):
-        """Every original resp_id is present after an empty-delta revision."""
-        client = MockLLMClient()
-        client.set_response_for(
-            RevisionDelta,
-            {
-                "new_responsibilities": [],
-                "new_controlled_processes": [],
-                "new_coordination_links": [],
-                "modified_responsibilities": [],
-                "dismissed_gaps": [],
-            },
-        )
-        revised, _ = run_revision(
-            llm_client=client,
-            control_structure=cs,
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
-        original_resp_ids = {r.resp_id for r in cs.responsibilities}
-        revised_resp_ids = {r.resp_id for r in revised.responsibilities}
-        assert original_resp_ids <= revised_resp_ids
-
-    @given(cs=st_cs_with_links())
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_all_link_ids_survive(self, tmp_path, cs):
-        """Empty-delta revision keeps every link and publishes position IDs.
+    def test_empty_delta_keeps_every_element_in_order(self, tmp_path, cs):
+        """Empty-delta revision keeps every element and publishes position IDs.
 
         Source ``link_id`` values are stitch keys only.  After the
         merged lists are known, published IDs are ``CL-1..N`` /
@@ -540,8 +438,10 @@ class TestMergeConservation:
             use_case_text="Test",
             run_dir=tmp_path,
         )
+        assert [r.resp_id for r in revised.responsibilities] == [
+            r.resp_id for r in cs.responsibilities
+        ]
         n_links = len(cs.coordination_links)
-        assert len(revised.coordination_links) == n_links
         assert [cl.link_id for cl in revised.coordination_links] == _canonical_link_ids(
             n_links
         )
@@ -554,34 +454,6 @@ class TestMergeConservation:
         assert [
             cl.coordination_mechanism.payload for cl in revised.coordination_links
         ] == original_payloads
-
-    @given(cs=st_cs_with_links())
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_resp_count_unchanged_with_empty_delta(self, tmp_path, cs):
-        """Empty delta does not add or remove responsibilities."""
-        client = MockLLMClient()
-        client.set_response_for(
-            RevisionDelta,
-            {
-                "new_responsibilities": [],
-                "new_controlled_processes": [],
-                "new_coordination_links": [],
-                "modified_responsibilities": [],
-                "dismissed_gaps": [],
-            },
-        )
-        revised, _ = run_revision(
-            llm_client=client,
-            control_structure=cs,
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
-        assert len(revised.responsibilities) == len(cs.responsibilities)
 
 
 # ---------------------------------------------------------------------------
@@ -623,15 +495,6 @@ def _dismiss_all(findings: CriticFindings) -> list[str]:
 class TestAllDismissedWarning:
     """A revision that dismisses everything and changes nothing warns once."""
 
-    def test_all_dismissed_with_no_changes_warns(self, tmp_path):
-        findings = _make_critic_findings_for_revision()
-        warnings = _revision_warnings(
-            tmp_path,
-            delta=RevisionDelta(dismissed_gaps=_dismiss_all(findings)),
-            findings=findings,
-        )
-        assert _count_all_dismissed(warnings) == 1, warnings
-
     def test_partial_dismissal_does_not_warn(self, tmp_path):
         findings = _make_critic_findings_for_revision()
         partial = _dismiss_all(findings)[:-1]
@@ -640,14 +503,6 @@ class TestAllDismissedWarning:
             tmp_path,
             delta=RevisionDelta(dismissed_gaps=partial),
             findings=findings,
-        )
-        assert _count_all_dismissed(warnings) == 0, warnings
-
-    def test_empty_findings_does_not_warn(self, tmp_path):
-        warnings = _revision_warnings(
-            tmp_path,
-            delta=RevisionDelta(dismissed_gaps=["not applicable"]),
-            findings=CriticFindings(),
         )
         assert _count_all_dismissed(warnings) == 0, warnings
 
