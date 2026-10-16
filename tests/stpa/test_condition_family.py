@@ -73,8 +73,6 @@ from tests.helpers.condition_family import (
     _state,
 )
 
-# --- synthetic widget/owner target -----------------------------------------
-
 
 def _families(operation, state=None, operations=OPS):
     return derive_condition_families(
@@ -85,9 +83,6 @@ def _families(operation, state=None, operations=OPS):
 def _candidate_record_paths(family) -> tuple[str, ...]:
     """Return every candidate record path in candidate order."""
     return tuple(path for item in family.candidates for path in item.record_paths)
-
-
-# --- ownership --------------------------------------------------------------
 
 
 def test_keyed_ownership_lists_records_owned_by_another_subject() -> None:
@@ -175,9 +170,6 @@ def test_prefix_binding_to_a_list_valued_key_domain() -> None:
     )
 
 
-# --- flag, bound, state -------------------------------------------------------
-
-
 def test_flag_lists_records_per_boolean_value() -> None:
     (family,) = _kind(_families(EDIT), "flag")
     assert family.field_paths == ("TARGET-STATE.widgets.<record_key>.locked",)
@@ -250,9 +242,6 @@ def test_state_rejects_fields_that_are_not_status_like(stages) -> None:
     assert _kind(_families(EDIT, state), "state") == []
 
 
-# --- prior read -------------------------------------------------------------
-
-
 def test_prior_read_needs_a_read_operation_on_the_same_key_domain() -> None:
     (family,) = _kind(_families(EDIT), "prior_read")
     assert family.prior_operation == "read_widget"
@@ -264,9 +253,6 @@ def test_prior_read_needs_a_read_operation_on_the_same_key_domain() -> None:
 def test_prior_read_ignores_state_changing_readers() -> None:
     writer = _op("touch_widget", {"widget_id": "string"}, effect="read")
     assert _kind(_families(EDIT, operations=(EDIT, writer)), "prior_read") == []
-
-
-# --- binding labels, determinism, rename invariance --------------------------
 
 
 def test_binding_labels_distinguish_field_names_from_prefixes() -> None:
@@ -387,9 +373,6 @@ def test_consistent_renames_yield_isomorphic_families() -> None:
             )
         ]
         assert sorted(actual) == expected, original.operation_id
-
-
-# --- fan-out ----------------------------------------------------------------
 
 
 @dataclass(frozen=True)
@@ -586,9 +569,6 @@ def test_plan_without_target_facts_changes_nothing() -> None:
     assert plan.candidates == (CandidateFamilyPlan(), CandidateFamilyPlan())
 
 
-# --- context selection and the family sidecar --------------------------------
-
-
 def test_scenario_id_context_wins_over_the_ica_context() -> None:
     threat = _Threat("RESP-1:CA-1-1:INCORRECT", "RESP-1:CA-1-1:INCORRECT:1")
     by_scenario, by_ica = object(), object()
@@ -721,9 +701,6 @@ def test_sidecar_records_hint_capped_families_and_honoured(tmp_path) -> None:
     }
 
 
-# --- prompt ------------------------------------------------------------------
-
-
 _HINT = ConditionFamily(
     kind="ownership",
     operation="update_gadget",
@@ -806,9 +783,6 @@ def test_hinted_request_stays_within_the_token_budget() -> None:
     ).model_json_schema()
     total = estimate_prompt_tokens(system + user + json.dumps(schema))
     assert total <= STAGE5_PROMPT_TOKEN_BUDGET
-
-
-# --- deduplication of family siblings ----------------------------------------
 
 
 def test_family_siblings_deduplicate_by_their_comparisons() -> None:

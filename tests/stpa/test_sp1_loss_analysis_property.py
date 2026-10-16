@@ -37,10 +37,6 @@ from tests.stpa.sp1_helpers import (
 )
 from asago_scenario_generator.models.capability_profile import Stage1Profile
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 
 def _make_risk_loss(loss_id: str, n_cards: int = 1) -> Loss:
     """Build a risk-card loss with valid provenance."""
@@ -151,11 +147,6 @@ def _build_gap_draft(
     )
 
 
-# ---------------------------------------------------------------------------
-# _merge_drafts property tests
-# ---------------------------------------------------------------------------
-
-
 class TestMergeDraftsProperties:
     """Property tests for _merge_drafts invariants.
 
@@ -217,11 +208,6 @@ class TestMergeDraftsProperties:
         for loss in merged.use_case_losses:
             assert loss.provenance == LossProvenance.use_case
             assert len(loss.source_risk_cards) == 0
-
-
-# ---------------------------------------------------------------------------
-# Cross-draft reference remapping property tests
-# ---------------------------------------------------------------------------
 
 
 class TestCrossDraftReferenceRemapping:
@@ -307,11 +293,6 @@ class TestCrossDraftReferenceRemapping:
                 assert ref in all_loss_ids
 
 
-# ---------------------------------------------------------------------------
-# Empty draft edge cases
-# ---------------------------------------------------------------------------
-
-
 class TestMergeDraftsEmptyEdgeCases:
     """Property tests for merge with empty drafts."""
 
@@ -366,11 +347,6 @@ class TestMergeDraftsEmptyEdgeCases:
         assert [loss.loss_id for loss in merged.risk_card_losses] == [
             loss.loss_id for loss in risk.risk_card_losses
         ]
-
-
-# ---------------------------------------------------------------------------
-# Call-log ordering and profile-skip semantics property tests
-# ---------------------------------------------------------------------------
 
 
 class TestCallLogOrderingAndProfileSkip:

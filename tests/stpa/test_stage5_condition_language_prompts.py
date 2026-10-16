@@ -53,9 +53,6 @@ NO_SEPARATING_CONDITION = (
 )
 
 
-# --- P2: the literal_unsupported correction ---------------------------------
-
-
 def test_literal_correction_limits_not_called_and_names_the_way_out(
     tmp_path,
 ) -> None:

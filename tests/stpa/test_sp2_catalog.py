@@ -143,11 +143,6 @@ def _make_minimal_cs(
     )
 
 
-# ---------------------------------------------------------------------------
-# Keyword matching (SP2-CAT-01, SP2-CAT-02, SP2-CAT-03)
-# ---------------------------------------------------------------------------
-
-
 class TestKeywordMatching:
     """Catalog keyword matching tests."""
 
@@ -190,11 +185,6 @@ class TestKeywordMatching:
         assert any(m.confidence == "low" for m in mappings)
 
 
-# ---------------------------------------------------------------------------
-# N/A reconciliation (SP2-CAT-04, SP2-CAT-05)
-# ---------------------------------------------------------------------------
-
-
 class TestNAReconciliation:
     """N/A reconciliation tests."""
 
@@ -229,11 +219,6 @@ class TestNAReconciliation:
         flags = reconcile_na_slots([slot], cs)
         assert len(flags) == 1
         assert slot.slot_id in flags[0]
-
-
-# ---------------------------------------------------------------------------
-# Coverage analysis (SP2-CAT-06 through SP2-CAT-11)
-# ---------------------------------------------------------------------------
 
 
 class TestCoverageAnalysis:
@@ -526,11 +511,6 @@ class TestCoverageAnalysis:
         assert result["quality_rate"] is None
 
 
-# ---------------------------------------------------------------------------
-# No LLM calls (SP2-CAT-12)
-# ---------------------------------------------------------------------------
-
-
 class TestNoLLMCalls:
     """Catalog enrichment makes no LLM calls."""
 
@@ -544,11 +524,6 @@ class TestNoLLMCalls:
         # This is deterministic — no LLM client involved
         enriched = enrich_threats(ica_enum, cs)
         assert enriched is not None
-
-
-# ---------------------------------------------------------------------------
-# Structural threat provenance (SP2-CAT-13)
-# ---------------------------------------------------------------------------
 
 
 class TestStructuralThreatProvenance:
@@ -570,11 +545,6 @@ class TestStructuralThreatProvenance:
             assert threat.provenance == "structural"
 
 
-# ---------------------------------------------------------------------------
-# N/A reconciliation flags in coverage (SP2-CAT-14)
-# ---------------------------------------------------------------------------
-
-
 class TestNAReconciliationFlagsInCoverage:
     """N/A reconciliation flags are recorded in coverage analysis."""
 
@@ -586,11 +556,6 @@ class TestNAReconciliationFlagsInCoverage:
         ica_enum = ICAEnumeration(slots=slots)
         enriched = enrich_threats(ica_enum, cs)
         assert len(enriched.coverage_analysis.na_reconciliation_flags) == 1
-
-
-# ---------------------------------------------------------------------------
-# Enriched threat set validates (SP2-CAT-15)
-# ---------------------------------------------------------------------------
 
 
 class TestEnrichedThreatSetValidates:

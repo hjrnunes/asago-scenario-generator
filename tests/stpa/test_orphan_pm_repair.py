@@ -42,11 +42,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analysis_dict
 
 
-# ---------------------------------------------------------------------------
-# Prompt content tests (SP1-PMFB-01, SP1-PMFB-02, SP1-PMFB-03)
-# ---------------------------------------------------------------------------
-
-
 class TestCall2aPromptPMFBCorrespondence:
     """SP1-PMFB-01 through SP1-PMFB-03: prompt enforces PM-FB 1:1."""
 
@@ -80,11 +75,6 @@ class TestCall2aPromptPMFBCorrespondence:
         )
         assert "Every PM-X-Y must appear in at least one FB" in text
         assert "every PM-X-Y listed above has at least one corresponding FB" in text
-
-
-# ---------------------------------------------------------------------------
-# Helper builders
-# ---------------------------------------------------------------------------
 
 
 def _make_resp(
@@ -126,11 +116,6 @@ def _make_resp(
 def _make_cs(responsibilities: list[Responsibility]) -> ControlStructure:
     """Build a ControlStructure from a list of responsibilities."""
     return ControlStructure(responsibilities=responsibilities)
-
-
-# ---------------------------------------------------------------------------
-# repair_orphan_pms tests (SP1-PMFB-04 through SP1-PMFB-12)
-# ---------------------------------------------------------------------------
 
 
 class TestRepairOrphanPMs:
@@ -295,11 +280,6 @@ class TestRepairOrphanPMs:
         assert _extract_resp_num("RESP-abc") == 0
         assert _extract_resp_num("RESP-") == 0
         assert _extract_resp_num("") == 0
-
-
-# ---------------------------------------------------------------------------
-# Integration test (SP1-PMFB-13)
-# ---------------------------------------------------------------------------
 
 
 class TestRepairCalledInDeriveControlStructure:

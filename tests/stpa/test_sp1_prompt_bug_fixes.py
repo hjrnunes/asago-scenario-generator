@@ -22,7 +22,6 @@ def test_review_prompts_reuse_the_control_loop_method(template_name: str) -> Non
     assert '{% include "_control_loop_method.j2" %}' in text
 
 
-# ---------------------------------------------------------------------------
 # Property-based tests for template rendering invariants
 #
 # These tests verify invariants that hold across all zero-variable system
@@ -34,7 +33,6 @@ def test_review_prompts_reuse_the_control_loop_method(template_name: str) -> Non
 #   template text appears in the rendered output.
 # - **No duplicate section headings**: no ``##`` heading appears more than
 #   once in a single template (detects accidental copy-paste duplication).
-# ---------------------------------------------------------------------------
 
 _ZERO_VAR_SYSTEM_TEMPLATES = [
     "stage1a_risk_system.j2",

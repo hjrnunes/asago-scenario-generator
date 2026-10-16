@@ -29,9 +29,6 @@ def _stage5(family: ConditionFamily | None = None) -> tuple[str, str]:
     return _flat(system), _flat(user)
 
 
-# --- item 1: argument_values in bounded comparisons ------------------------
-
-
 def test_bound_family_records_the_record_selecting_argument() -> None:
     (family,) = _kind(
         derive_condition_families(EDIT, OPS, _index(_state())),
@@ -137,9 +134,6 @@ def test_selector_mapped_bounded_comparison_stays_request_dependent() -> None:
     assert outcome.failures == ()
     assert outcome.check is not None
     assert [item.result for item in outcome.check.comparisons] == ["not_checkable"]
-
-
-# --- item 5: party rules compare supplied state ----------------------------
 
 
 def test_prior_read_hint_defers_to_supplied_party_fields() -> None:

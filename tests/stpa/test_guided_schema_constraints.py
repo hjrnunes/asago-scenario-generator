@@ -123,9 +123,6 @@ def _stage1_profile_dict(**overrides) -> dict:
     return data
 
 
-# --- Stage 1b ---------------------------------------------------------------
-
-
 def _stage1b_call(client: MockLLMClient, tmp_path, responses: list[dict]):
     client.set_response_for(Stage1Profile, responses)
     return derive_capability_profile(
@@ -200,9 +197,6 @@ def test_stage1b_guided_missing_inventory_is_corrected_in_the_call(tmp_path):
 
     assert len(client.calls) == 2
     assert "tool_inventory" in client.calls[1].user_prompt
-
-
-# --- Stage 1a risk derivation ------------------------------------------------
 
 
 def _keyed_refs(array_schema: dict) -> list[list[str]]:
@@ -337,9 +331,6 @@ def test_disposition_repair_guided_schema_asks_for_each_selected_card(tmp_path):
     ]
 
 
-# --- Target discovery interpretation ----------------------------------------
-
-
 def _discovery_request(count: int = 2) -> TargetInterpretationRequest:
     return TargetInterpretationRequest(
         batch_id="BATCH-1",
@@ -459,9 +450,6 @@ def test_discovery_guided_verification_schema_closes_handles(tmp_path):
     schema = verification.model_json_schema()
     row = _resolve(schema, schema["properties"]["verdicts"]["items"])["properties"]
     assert row["tool_handle"]["enum"] == ["TOOL-1", "TOOL-2"]
-
-
-# --- Transport: the flag selects the schema, not the request shape -----------
 
 
 def _captured_response_format(use_guided_decoding: bool) -> dict:

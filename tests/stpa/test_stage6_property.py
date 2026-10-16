@@ -27,9 +27,6 @@ from asago_scenario_generator.stpa.scenario_prod.validators import (
     validate_loss_hazard_id_references,
 )
 
-# ---------------------------------------------------------------------------
-# Strategies
-# ---------------------------------------------------------------------------
 
 st_step_text = st.text(
     alphabet=st.characters(
@@ -86,11 +83,6 @@ def _gherkin_spec_strategy(
     )
 
 
-# ---------------------------------------------------------------------------
-# GherkinSpec.to_feature_text() round-trip
-# ---------------------------------------------------------------------------
-
-
 class TestGherkinSpecRoundTrip:
     """GherkinSpec serialization and rendering invariants."""
 
@@ -116,11 +108,6 @@ class TestGherkinSpecRoundTrip:
         dumped = spec.model_dump(mode="json")
         restored = GherkinSpec.model_validate(dumped)
         assert restored == spec
-
-
-# ---------------------------------------------------------------------------
-# Loss/Hazard ID references
-# ---------------------------------------------------------------------------
 
 
 def _make_loss_analysis_with_ids(
@@ -156,11 +143,6 @@ def _make_loss_analysis_with_ids(
             ),
         ],
     )
-
-
-# ---------------------------------------------------------------------------
-# Loss/Hazard ID reference validator properties
-# ---------------------------------------------------------------------------
 
 
 class TestLossHazardIdValidator:

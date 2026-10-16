@@ -59,10 +59,6 @@ _FIXTURE_SAFE = settings(
 )
 
 
-# ---------------------------------------------------------------------------
-# ControlStructure strategy
-# ---------------------------------------------------------------------------
-
 st_description = st.text(
     alphabet=st.characters(blacklist_categories=("Cs", "Cc")),
     min_size=1,
@@ -186,10 +182,6 @@ class TestComputeNextIdsProperty:
         }
 
 
-# ---------------------------------------------------------------------------
-# 3. Revision runs iff an explicit structural gap is present
-# ---------------------------------------------------------------------------
-
 st_status = st.sampled_from(["present", "absent_justified", "absent_unjustified"])
 st_checklist_key = st.sampled_from(
     [
@@ -281,10 +273,6 @@ class TestRevisionNeedsAnExplicitGap:
         assert _revision_attempted(findings, tmp_path) == bool(findings.gaps)
 
 
-# ---------------------------------------------------------------------------
-# 4. Dismissal visibility: every dismissed_gaps entry appears in warnings
-# ---------------------------------------------------------------------------
-
 st_dismissal_text = st.text(
     alphabet=st.characters(blacklist_categories=("Cs", "Cc")),
     min_size=1,
@@ -350,11 +338,6 @@ class TestDismissalVisibility:
             w for w in warnings if w.startswith("Revision dismissed finding:")
         ]
         assert len(dismissal_warnings) == len(dismissals)
-
-
-# ---------------------------------------------------------------------------
-# 5. Merge conservation: existing elements survive when delta has no mods
-# ---------------------------------------------------------------------------
 
 
 @st.composite
@@ -445,10 +428,6 @@ class TestMergeConservation:
             cl.coordination_mechanism.payload for cl in revised.coordination_links
         ] == original_payloads
 
-
-# ---------------------------------------------------------------------------
-# 6. All-dismissed / no-change warning
-# ---------------------------------------------------------------------------
 
 ALL_DISMISSED_FRAGMENT = "dismissed all findings"
 
@@ -581,12 +560,6 @@ class TestAllDismissedWarning:
         assert _count_all_dismissed(warnings) == expected, warnings
 
 
-# ---------------------------------------------------------------------------
-# 7. Merge guard correctness: duplicate skip, existing-link preservation,
-#    non-colliding cm_id preservation
-# ---------------------------------------------------------------------------
-
-
 class TestMergeGuardCorrectness:
     """The merge guards in _add_new_items and _renumber_colliding_cm_ids
     behave correctly under mutations that invert their skip/collision
@@ -671,11 +644,6 @@ class TestMergeGuardCorrectness:
         assert not any("Renumber" in w for w in warnings), (
             f"Expected no stitch-time collision warnings but got: {warnings}"
         )
-
-
-# ---------------------------------------------------------------------------
-# 8. Revision-delta published IDs come from final merged position
-# ---------------------------------------------------------------------------
 
 
 def _unvalidated_new_resp(source_prefix: str, index: int) -> Responsibility:

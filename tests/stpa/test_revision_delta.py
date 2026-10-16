@@ -44,11 +44,6 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.revision_delta import _make_control_structure
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_critic_findings() -> CriticFindings:
     return CriticFindings(
         gaps=[
@@ -98,11 +93,6 @@ def _render_template(name: str, **kwargs) -> str:
     return loader.render_prompt(name, **kwargs)
 
 
-# ---------------------------------------------------------------------------
-# RevisionDelta-01: schema contains only delta fields
-# ---------------------------------------------------------------------------
-
-
 class TestRevisionDelta01Schema:
     """RevisionDelta-01: RevisionDelta schema contains only delta fields."""
 
@@ -118,11 +108,6 @@ class TestRevisionDelta01Schema:
         assert "responsibilities" not in fields
         assert "controlled_processes" not in fields
         assert "coordination_links" not in fields
-
-
-# ---------------------------------------------------------------------------
-# RevisionDelta-02: run_revision produces RevisionDelta from LLM
-# ---------------------------------------------------------------------------
 
 
 class TestRevisionDelta02UsesRevisionDelta:
@@ -160,11 +145,6 @@ class TestRevisionDelta02UsesRevisionDelta:
         assert isinstance(cs, ControlStructure)
 
 
-# ---------------------------------------------------------------------------
-# RevisionDelta-03: new_responsibilities are merged
-# ---------------------------------------------------------------------------
-
-
 class TestRevisionDelta03MergeNewResponsibilities:
     """RevisionDelta-03: new_responsibilities are merged into existing CS."""
 
@@ -198,11 +178,6 @@ class TestRevisionDelta03MergeNewResponsibilities:
         assert "RESP-1" in resp_ids
         assert "RESP-2" in resp_ids
         assert "RESP-3" in resp_ids
-
-
-# ---------------------------------------------------------------------------
-# RevisionDelta-04: modified_responsibilities replace by resp_id
-# ---------------------------------------------------------------------------
 
 
 class TestRevisionDelta04ModifiedReplace:
@@ -273,11 +248,6 @@ class TestRevisionDeltaModifiedMatchKey:
         assert any("renamed-controller" in warning for warning in warnings)
 
 
-# ---------------------------------------------------------------------------
-# RevisionDelta-05: new_controlled_processes are merged
-# ---------------------------------------------------------------------------
-
-
 class TestRevisionDelta05MergeNewCps:
     """RevisionDelta-05: new_controlled_processes are merged into CS."""
 
@@ -292,11 +262,6 @@ class TestRevisionDelta05MergeNewCps:
         # The final payload is normalized by list position.  This fixture
         # starts without controlled processes, so the added process is CP-1.
         assert "CP-1" in cp_ids
-
-
-# ---------------------------------------------------------------------------
-# RevisionDelta-06: new_coordination_links are added
-# ---------------------------------------------------------------------------
 
 
 class TestRevisionDelta06MergeNewCoordLinks:
@@ -326,11 +291,6 @@ class TestRevisionDelta06MergeNewCoordLinks:
         assert "CL-2" in cl_ids
 
 
-# ---------------------------------------------------------------------------
-# RevisionDelta-07: revision_user.j2 contains numbered per-finding checklist
-# ---------------------------------------------------------------------------
-
-
 class TestRevisionDelta07UserPromptChecklist:
     """RevisionDelta-07: revision_user.j2 contains the add-or-dismiss per-finding checklist."""
 
@@ -341,11 +301,6 @@ class TestRevisionDelta07UserPromptChecklist:
         assert "{% for gap in critic_findings.gaps %}" in text
         assert "gap_type" in text
         assert "suggested_remedy" in text
-
-
-# ---------------------------------------------------------------------------
-# RevisionDelta-09: next-available-ID template variables are computed from existing structure
-# ---------------------------------------------------------------------------
 
 
 class TestRevisionDelta09NextAvailableIds:
@@ -368,11 +323,6 @@ class TestRevisionDelta09NextAvailableIds:
         assert "2" in rendered  # next available coordination link number
         # next_cm_num: CM-1 -> max=1, next=2 (lrya bead — unit-level guard)
         assert str(next_ids["next_cm_num"]) in rendered
-
-
-# ---------------------------------------------------------------------------
-# RevisionDelta-10: RevisionDelta merge validates the final ControlStructure
-# ---------------------------------------------------------------------------
 
 
 class TestRevisionDelta10ValidatesFinal:
@@ -499,11 +449,6 @@ class TestRevisionDeltaIdNormalization:
         assert not any("degrad" in warning.lower() for warning in warnings)
 
 
-# ---------------------------------------------------------------------------
-# RevisionDelta-11: strip_empty_responsibilities remains as safety net
-# ---------------------------------------------------------------------------
-
-
 class TestRevisionDelta11StripEmptySafetyNet:
     """RevisionDelta-11: strip_empty_responsibilities remains as safety net."""
 
@@ -529,11 +474,6 @@ class TestRevisionDelta11StripEmptySafetyNet:
         assert "RESP-4" in warning_text or "empty" in warning_text.lower()
 
 
-# ---------------------------------------------------------------------------
-# RevisionDelta-12: empty delta preserves existing responsibilities
-# ---------------------------------------------------------------------------
-
-
 class TestRevisionDelta12EmptyDeltaPreserves:
     """RevisionDelta-12: empty delta preserves existing responsibilities."""
 
@@ -546,11 +486,6 @@ class TestRevisionDelta12EmptyDeltaPreserves:
         assert "RESP-1" in resp_ids
         assert "RESP-2" in resp_ids
         assert len(cs.responsibilities) == 2
-
-
-# ---------------------------------------------------------------------------
-# RevisionDelta-13: revision_user.j2 checklist includes each gap with required action
-# ---------------------------------------------------------------------------
 
 
 class TestRevisionDelta13ChecklistEachGap:
@@ -574,11 +509,6 @@ class TestRevisionDelta13ChecklistEachGap:
         # rendering is a for loop, not a numbered list)
         assert rendered.count("missing_responsibility") >= 1
         assert rendered.count("missing_feedback") >= 1
-
-
-# ---------------------------------------------------------------------------
-# Mutation hardening: _compute_next_ids / _next_num_from / _extract_num
-# ---------------------------------------------------------------------------
 
 
 class TestComputeNextIds:
@@ -680,11 +610,6 @@ class TestExtractNum:
         assert _extract_num(text) == expected
 
 
-# ---------------------------------------------------------------------------
-# Mutation hardening: _is_responsibility_empty with partial responsibilities
-# ---------------------------------------------------------------------------
-
-
 class TestIsResponsibilityEmpty:
     """_is_responsibility_empty is True only when PM, CA and FB are all empty."""
 
@@ -732,11 +657,6 @@ class TestIsResponsibilityEmpty:
             ),
         )
         assert _is_responsibility_empty(resp) is expected
-
-
-# ---------------------------------------------------------------------------
-# CmDedup-01..14: Duplicate cm_id handling in revision delta merge
-# ---------------------------------------------------------------------------
 
 
 def _make_cs_with_two_cls() -> ControlStructure:
@@ -974,11 +894,6 @@ class TestCmDedupNestedPmIdCollision:
         assert "ValidationError" in wtext or "ValueError" in wtext
 
 
-# ---------------------------------------------------------------------------
-# Mutation hardening: direct unit tests for _next_free_cm_id
-# ---------------------------------------------------------------------------
-
-
 class TestNextFreeCmId:
     """_next_free_cm_id returns CM-(max numeric suffix + 1)."""
 
@@ -995,11 +910,6 @@ class TestNextFreeCmId:
     )
     def test_next_free(self, used, expected):
         assert _next_free_cm_id(used) == expected
-
-
-# ---------------------------------------------------------------------------
-# Mutation hardening: direct unit tests for _renumber_colliding_cm_ids
-# ---------------------------------------------------------------------------
 
 
 def _make_cl(link_id: str, cm_id: str) -> CoordinationLink:

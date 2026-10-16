@@ -121,9 +121,6 @@ ESCALATE_ONLY = {
 }
 
 
-# --- ported reference cases ---------------------------------------------------
-
-
 def test_not_called_alone_binds_with_an_empty_where() -> None:
     result = bind(handoff([not_called("escalate")]))
     assert result.status.status == "bound"
@@ -346,9 +343,6 @@ def test_bound_status_carries_status_reason_and_detail() -> None:
     assert result.status.detail.strip()
 
 
-# --- producer cases -----------------------------------------------------------
-
-
 REASON_CASES: dict[str, Any] = {
     "no_condition": None,
     "condition_problem": handoff([{"kind": "sometimes"}, not_called("escalate")]),
@@ -498,9 +492,6 @@ def test_status_pairs_bound_only_with_reason_bound(
 def test_status_rejects_a_blank_detail() -> None:
     with pytest.raises(ValidationError):
         ToolCallConditionStatus(status="bound", reason="bound", detail="  ")
-
-
-# --- the session subject is not behavior ----------------------------------------
 
 
 SESSION_ONLY_DETAIL = (

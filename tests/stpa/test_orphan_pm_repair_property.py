@@ -28,11 +28,6 @@ st_description = st.text(
 )
 
 
-# ---------------------------------------------------------------------------
-# Strategies — repair
-# ---------------------------------------------------------------------------
-
-
 def _make_resp(
     num: int,
     pm_count: int,
@@ -111,11 +106,6 @@ def st_no_orphan_responsibility_set(draw) -> ResponsibilitySet:
         desc = draw(st_description)
         responsibilities.append(_make_resp(i, pm_count, pm_count, desc))
     return ResponsibilitySet(responsibilities=responsibilities)
-
-
-# ---------------------------------------------------------------------------
-# Repair property tests
-# ---------------------------------------------------------------------------
 
 
 class TestRepairOrphanPmsProperties:

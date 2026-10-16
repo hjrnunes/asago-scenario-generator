@@ -514,9 +514,6 @@ def test_run_command_threads_replay_calls_to_the_inputs(tmp_path: Path) -> None:
     assert captured[0].replay_calls_dir == tmp_path / "earlier-run"
 
 
-# --- the sufficiency proof -------------------------------------------------
-
-
 class _ScriptedSP1Provider(_Provider):
     """Answers each request from the shared SP1 mock, keyed by response class.
 

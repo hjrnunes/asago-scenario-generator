@@ -51,11 +51,6 @@ from asago_scenario_generator.models.capability_profile import Stage1Profile
 from tests.helpers.critic_id_sanitization import _make_control_structure
 
 
-# ---------------------------------------------------------------------------
-# Prompt content tests (SP1-CRITIC-SAN-01, SP1-CRITIC-SAN-02)
-# ---------------------------------------------------------------------------
-
-
 class TestCriticSystemPromptIDSanitization:
     """SP1-CRITIC-SAN-01 and SP1-CRITIC-SAN-02: prompt instructs no specific IDs."""
 
@@ -75,11 +70,6 @@ class TestCriticSystemPromptIDSanitization:
         assert "a responsibility for input validation" in text
         assert "not 'add RESP-5'" in text
         assert "not 'add PM-0-1'" in text
-
-
-# ---------------------------------------------------------------------------
-# Sanitization function tests (SP1-CRITIC-SAN-03 through SP1-CRITIC-SAN-07)
-# ---------------------------------------------------------------------------
 
 
 def _make_findings_with_remedy(remedy: str) -> CriticFindings:
@@ -193,11 +183,6 @@ class TestSanitizeCriticIDs:
         assert isinstance(sanitized, CriticFindings)
         assert sanitized.checklist_results == {"Input validation": "absent_unjustified"}
         assert sanitized.taxonomy_probe_results == {"Tool validation": "present"}
-
-
-# ---------------------------------------------------------------------------
-# Flow-to-revision tests (SP1-CRITIC-SAN-08, SP1-CRITIC-SAN-09)
-# ---------------------------------------------------------------------------
 
 
 class TestSanitizationFlow:

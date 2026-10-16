@@ -382,9 +382,6 @@ def test_the_dumped_shape_keeps_null_values_when_none_is_excluded() -> None:
     assert dumped["downgrade_reason"] is None
 
 
-# --- R8: the carrier belongs to the run's observed operations ---------------
-
-
 @pytest.mark.parametrize(
     ("payload", "observed", "expected"),
     [
@@ -420,8 +417,6 @@ def test_r8_matches_whole_operation_names_only() -> None:
     assert carrier_operation_observed(shape, ("get_listing_extra",)) is False
     assert carrier_operation_observed(shape, ("GET_LISTING",)) is False
 
-
-# --- structural guarantee: no whitespace in any string leaf ------------------
 
 IDENTIFIERS = st.from_regex(r"[A-Za-z0-9][A-Za-z0-9_.:-]{0,63}", fullmatch=True)
 

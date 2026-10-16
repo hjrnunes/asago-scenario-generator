@@ -32,11 +32,6 @@ from asago_scenario_generator.stpa.system_model.critic import (
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
-# ---------------------------------------------------------------------------
-# 2. RevisionDelta merge property tests
-# ---------------------------------------------------------------------------
-
-
 def _make_cs(n_resps: int = 2) -> ControlStructure:
     """Build a ControlStructure with n responsibilities."""
     responsibilities = []
@@ -232,11 +227,6 @@ class TestMergeRevisionDeltaProperties:
         merged, _ = _merge_revision_delta(cs, delta)
         # Should still have only n_existing responsibilities
         assert len(merged.responsibilities) == n_existing
-
-
-# ---------------------------------------------------------------------------
-# 2b. cm_id renumbering property tests
-# ---------------------------------------------------------------------------
 
 
 def _make_cs_with_cls(n_cls: int = 2) -> ControlStructure:

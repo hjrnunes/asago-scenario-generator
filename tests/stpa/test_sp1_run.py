@@ -724,11 +724,6 @@ class TestPinnedLossAnalysis:
         assert stage_1a["call_count"] == 0
 
 
-# ---------------------------------------------------------------------------
-# Run directory, revised flag and manifest call counts
-# ---------------------------------------------------------------------------
-
-
 def _valid_loss_analysis_dict() -> dict:
     """Risk draft for the risk_derivation call (density-safe wording)."""
     return {

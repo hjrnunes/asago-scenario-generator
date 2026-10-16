@@ -53,11 +53,6 @@ def _resp(resp_id: str = "RESP-1") -> Responsibility:
     )
 
 
-# ---------------------------------------------------------------------------
-# _assign_elements_to_responsibilities — element with no matching resp
-# ---------------------------------------------------------------------------
-
-
 class TestAssignElementsUnmatched:
     """Element with no matching responsibility is not assigned."""
 
@@ -97,11 +92,6 @@ class TestAssignElementsUnmatched:
         assert len(resp2.control_actions) == 1
 
 
-# ---------------------------------------------------------------------------
-# _next_fb_num — multiple FBs with matching IDs
-# ---------------------------------------------------------------------------
-
-
 def _resp_with_fbs(fb_ids: list[str]) -> Responsibility:
     """A responsibility whose channels bypass validation, like deserialized data."""
     return Responsibility.model_construct(
@@ -133,11 +123,6 @@ def test_next_fb_num(fb_ids, expected):
     assert _next_fb_num(_resp_with_fbs(fb_ids)) == expected
 
 
-# ---------------------------------------------------------------------------
-# _find_orphan_pms — direct test of the not-in condition
-# ---------------------------------------------------------------------------
-
-
 @pytest.mark.parametrize(
     ("pm_ids", "updated_pm_ids", "orphans"),
     [
@@ -162,11 +147,6 @@ def test_find_orphan_pms(pm_ids, updated_pm_ids, orphans):
         ],
     )
     assert set(_find_orphan_pms(resp)) == orphans
-
-
-# ---------------------------------------------------------------------------
-# _add_coordination_links
-# ---------------------------------------------------------------------------
 
 
 class TestAddCoordinationLinks:
