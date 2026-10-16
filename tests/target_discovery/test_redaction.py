@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from hypothesis import given, settings, strategies as st
 
@@ -216,4 +218,21 @@ def test_an_existing_redaction_marker_stays_as_it_is():
 def test_other_text_keys_still_redact_one_token():
     assert redaction.sanitize_json("token: abc def password=xyz uvw") == (
         "token: [REDACTED] def password=[REDACTED] uvw"
+    )
+
+
+@pytest.mark.parametrize("key", ["token", "Authorization"])
+def test_an_unclosed_quote_before_a_backslash_run_redacts_in_linear_time(key):
+    text = f'{key}: "' + "\\" * 36 + " tail"
+
+    started = time.perf_counter()
+    redacted = redaction.sanitize_json(text)
+
+    assert time.perf_counter() - started < 0.5
+    assert redacted.startswith(f"{key}: [REDACTED]")
+
+
+def test_an_escaped_quote_stays_inside_the_quoted_value():
+    assert redaction.sanitize_json('{"token": "a\\"b c", "next": 1}') == (
+        '{"token": "[REDACTED]", "next": 1}'
     )
