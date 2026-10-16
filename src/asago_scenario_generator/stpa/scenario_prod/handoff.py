@@ -881,11 +881,11 @@ def build_scenario_handoff(
     functional one.
 
     The builder is deterministic and consumes only the producer's own
-    scenario meaning. It never copies artifact-design content: the envelope's
-    ``execution_contract`` and ``unsafe_outcome_condition`` are deliberately
-    not read. ``enriched_operations``
-    is the verified view of the run's ``control-action-enrichment.yaml``
-    sidecar (control-action id to documented operation identity); only those
+    scenario meaning. It never copies artifact-design content: the spec's
+    ``unsafe_outcome_condition`` is deliberately not read.
+    ``enriched_operations`` is the verified view of the run's
+    ``control-action-enrichment.yaml`` sidecar (control-action id to
+    documented operation identity); only those
     verified rows contribute an operation identity.
     ``observed_operations`` is the exact inventory from the run's observed
     target profile. A criterion token is binding only on an exact token match
