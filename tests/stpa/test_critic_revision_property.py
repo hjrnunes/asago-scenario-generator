@@ -1,23 +1,31 @@
 """Property-based tests for SP1 critic/revision invariants.
 
-Covers five invariant families:
+Covers seven invariant families:
 
 1. **Next IDs**: ``_compute_next_ids`` returns one above the highest
-   number in each namespace.
-2. **ID-space independence**: ``next_cm_num`` depends only on ``cm_id``
-   values, and ``next_cl_num`` depends only on ``link_id`` values.
-3. **Revision needs a gap**: Stage 2 requests a revision iff the
+   number in each namespace, counted from that namespace's own IDs:
+   ``next_cm_num`` depends only on ``cm_id`` values, and
+   ``next_cl_num`` depends only on ``link_id`` values.
+2. **Revision needs a gap**: Stage 2 requests a revision iff the
    findings contain at least one explicit structural gap. Checklist and
    taxonomy statuses remain diagnostic context.
-4. **Dismissal visibility**: every ``dismissed_gaps`` entry surfaces in
+3. **Dismissal visibility**: every ``dismissed_gaps`` entry surfaces in
    the returned warnings from ``run_revision``.
-5. **Merge conservation**: when the RevisionDelta contains no
+4. **Merge conservation**: when the RevisionDelta contains no
    modifications to existing elements, existing responsibilities,
    processes, and links survive in list order. Published IDs are
    assigned from those final positions, not from source IDs.
-6. **All-dismissed warning**: ``run_revision`` emits exactly one
+5. **All-dismissed warning**: ``run_revision`` emits exactly one
    all-dismissed warning iff the findings are non-empty, every finding
    is dismissed, and the delta carries no additions or modifications.
+6. **Merge guards**: a new responsibility whose ``resp_id`` already
+   exists is not added, and when a new link's ``cm_id`` collides, the
+   existing link keeps its ``cm_id``. A non-colliding source ``cm_id``
+   still publishes from its final position.
+7. **Published IDs**: a merge publishes IDs from final positions
+   instead of the delta's source IDs and rewrites references to match.
+   The same merge always gives the same structure, and merging an empty
+   delta into a merged structure changes nothing.
 """
 
 from __future__ import annotations
