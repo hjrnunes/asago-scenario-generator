@@ -22,12 +22,16 @@ from asago_scenario_generator.models.attack_pattern_validation import (
 
 def test_all_live_records_are_model_valid() -> None:
     """The live catalog carries 53 pattern IDs, and every record parses as a
-    valid AttackPattern and is qualified by the production resolver."""
+    valid AttackPattern, is qualified by the production resolver and has a
+    non-empty name and description, which the model does not require."""
     resolver = load_taxonomy_resolver()
     live = load_attack_patterns()
     assert len(live) == 53
     for pid, record in live.items():
-        assert validate_attack_pattern(record, resolver).id == pid
+        pattern = validate_attack_pattern(record, resolver)
+        assert pattern.id == pid
+        assert pattern.name.strip(), pid
+        assert pattern.description.strip(), pid
 
 
 def test_activation_mechanism_counts() -> None:
