@@ -1403,7 +1403,7 @@ class _Stage1aCall:
     # draft_references, or draft_semantics.
     failure_class: str | None = None
     span_repairs: list[RuleSpanRepairRecord] = field(default_factory=list)
-    # The first response with its span repairs applied.  The repair path adapts
+    # The first response with its span repairs applied.  The repair path reads
     # this body, not the logged provider response, so a repaired span is the
     # span every later validator reads.
     span_repaired_result: LLMResult | None = None
@@ -2135,10 +2135,10 @@ def _missing_repair_input_reason(
     first_wire_error: ValidationError | None,
     first_result: LLMResult | None,
 ) -> str:
-    """Name why the failed response could not be adapted for repair."""
+    """Name why the failed response gave no repair input."""
     reason = (
-        "the failed response did not contain a valid current local-handle "
-        "wire that can be adapted for the approved repair scope"
+        "the failed response did not contain a local-handle graph that satisfies "
+        "the response schema without its dispositions and obligations"
     )
     if first_wire_error is not None:
         wire_classification = classify_wire_validation_errors(first_wire_error)
