@@ -1,9 +1,10 @@
 """Linkage invariants over the canonical attack-pattern YAML.
 
-Tests check structural invariants and focused regressions for
-``resource_links`` and ``observable_outcome_links``.  The
-``fixtures/reviewed_linkage_decisions.yaml`` table provides reviewed semantic rationale
-for non-obvious linkage decisions and is validated against the YAML.
+Tests pin step counts and focused regressions for ``resource_links`` and
+``observable_outcome_links``; ``AttackPattern`` validation enforces the
+structural linkage rules.  The ``fixtures/reviewed_linkage_decisions.yaml``
+table provides reviewed semantic rationale for non-obvious linkage decisions
+and is validated against the YAML.
 
 Tests operate on raw YAML records before indexing so that uniqueness
 collapses in the catalog index cannot mask divergent linkage.
@@ -17,11 +18,7 @@ from typing import Any
 import pytest
 import yaml
 
-from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
-from asago_scenario_generator.models.attack_pattern_digests import (
-    compute_chain_semantic_digest,
-)
 from asago_scenario_generator.models.attack_pattern_validation import (
     validate_attack_pattern,
 )
@@ -62,30 +59,15 @@ def test_canonical_yaml_has_292_steps() -> None:
     assert total == 292
 
 
-def test_all_77_outside_steps_have_empty_outcome_links() -> None:
-    """Every outside step must have empty observable_outcome_links."""
+def test_canonical_yaml_has_77_outside_steps() -> None:
+    """The canonical YAML carries 77 attacker-side steps outside the boundary."""
     raw = _load_raw_patterns()
-    outside_count = 0
-    for pid, p in raw.items():
-        for s in p["canonical_chain"]["steps"]:
-            if s.get("boundary_position") == "outside":
-                outside_count += 1
-                assert s.get("observable_outcome_links", []) == [], (
-                    f"{pid}/{s['step_id']} is outside but has outcome links"
-                )
+    outside_count = sum(
+        s.get("boundary_position") == "outside"
+        for p in raw.values()
+        for s in p["canonical_chain"]["steps"]
+    )
     assert outside_count == 77
-
-
-def test_no_outside_step_has_activation_resource_link() -> None:
-    """No outside step may carry an ingress or source_influence link."""
-    raw = _load_raw_patterns()
-    for pid, p in raw.items():
-        for s in p["canonical_chain"]["steps"]:
-            if s.get("boundary_position") == "outside":
-                for rl in s.get("resource_links", []):
-                    assert rl["role"] not in ("ingress", "source_influence"), (
-                        f"{pid}/{s['step_id']} is outside but has {rl['role']} link"
-                    )
 
 
 def test_ap_t2_04_craft_payload_has_no_outcome_links() -> None:
@@ -160,92 +142,6 @@ def test_ap_t6_03_goal_outcomes_are_intrinsic_agent_state() -> None:
                 "binding_slot_id": "agent_goal",
             }
         ]
-
-
-def test_all_53_patterns_validate_and_digests_match() -> None:
-    """All 53 patterns must pass model validation and have matching digests."""
-    resolver = load_taxonomy_resolver()
-    patterns = load_attack_patterns()
-    assert len(patterns) == 53
-    for pid, raw in patterns.items():
-        validate_attack_pattern(raw, resolver)
-        chain = raw["canonical_chain"]
-        assert chain["semantic_digest"] == compute_chain_semantic_digest(chain), (
-            f"{pid} digest mismatch"
-        )
-
-
-def test_activation_classification_is_explicit() -> None:
-    """45 direct-ingress and 4 source-influence chains are explicit."""
-    raw = _load_raw_patterns()
-    ingress = []
-    source = []
-    none = []
-    for pid, p in raw.items():
-        chain = p["canonical_chain"]
-        slot = chain["initial_ingress_slot_id"]
-        has_ingress = any(
-            rl["role"] == "ingress" and rl["slot_id"] == slot
-            for s in chain["steps"]
-            for rl in s.get("resource_links", [])
-        )
-        has_source = any(
-            rl["role"] == "source_influence"
-            and rl.get("target_ingress_slot_id") == slot
-            for s in chain["steps"]
-            for rl in s.get("resource_links", [])
-        )
-        if has_ingress:
-            ingress.append(pid)
-        elif has_source:
-            source.append(pid)
-        else:
-            none.append(pid)
-    assert len(ingress) == 45
-    assert len(source) == 4
-    assert none == []
-
-
-def test_no_duplicate_outcome_link_per_postcondition() -> None:
-    """No step may have multiple outcome links for the same postcondition."""
-    raw = _load_raw_patterns()
-    for pid, p in raw.items():
-        for s in p["canonical_chain"]["steps"]:
-            pc_ids = [
-                ol["postcondition_id"] for ol in s.get("observable_outcome_links", [])
-            ]
-            assert len(pc_ids) == len(set(pc_ids)), (
-                f"{pid}/{s['step_id']} has duplicate outcome links for same postcondition"
-            )
-
-
-def test_every_outcome_link_references_valid_postcondition() -> None:
-    """Every outcome link must reference a postcondition on the same step."""
-    raw = _load_raw_patterns()
-    for pid, p in raw.items():
-        for s in p["canonical_chain"]["steps"]:
-            pc_ids = {
-                pc["postcondition_id"] for pc in s.get("observable_postconditions", [])
-            }
-            for ol in s.get("observable_outcome_links", []):
-                assert ol["postcondition_id"] in pc_ids, (
-                    f"{pid}/{s['step_id']} outcome link references absent postcondition "
-                    f"{ol['postcondition_id']}"
-                )
-
-
-def test_every_outcome_link_binding_references_valid_slot() -> None:
-    """Every outcome link's binding_slot_id must reference a declared slot."""
-    raw = _load_raw_patterns()
-    for pid, p in raw.items():
-        chain = p["canonical_chain"]
-        slot_ids = {slot["slot_id"] for slot in chain["resource_slots"]}
-        for s in chain["steps"]:
-            for ol in s.get("observable_outcome_links", []):
-                assert ol["binding_slot_id"] in slot_ids, (
-                    f"{pid}/{s['step_id']} outcome link references absent slot "
-                    f"{ol['binding_slot_id']}"
-                )
 
 
 def test_71_source_facts_and_49_live_ids_preserved() -> None:

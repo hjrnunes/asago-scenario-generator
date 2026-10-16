@@ -5,7 +5,7 @@
 #   observation_kind_counts      outcome-link observation kinds across the catalog
 #   records.<id>                 per-record pins: digest, chain_exact, step_exact,
 #                                step_exact_pins, forbidden_exact, steps, slots, edges,
-#                                preconditions, step_tiers, terminal
+#                                preconditions, step_tiers, terminal, case_study
 catalog: attack-patterns-atlas-derived.yaml
 checks: [observed_cites_case_study, tier_confidence_bands, lineage_design_reference, description_evidence]
 observation_kind_counts: {persistent_state: 24, tool_invocation: 9, model_context: 4, agent_state: 1,

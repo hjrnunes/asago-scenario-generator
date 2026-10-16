@@ -5,7 +5,7 @@
 #   observation_kind_counts      outcome-link observation kinds across the catalog
 #   records.<id>                 per-record pins: digest, chain_exact, step_exact,
 #                                step_exact_pins, forbidden_exact, steps, slots, edges,
-#                                preconditions, step_tiers, terminal
+#                                preconditions, step_tiers, terminal, case_study
 catalog: attack-patterns-halluc-intent.yaml
 checks: [no_yaml_aliases, single_root, final_step_only_effects, observed_cites_case_study]
 observation_kind_counts: {persistent_state: 33, model_context: 15, tool_invocation: 4, agent_state: 2,
@@ -14,6 +14,7 @@ ids: [AP-T11-01, AP-T11-02, AP-T11-03, AP-T13-04, AP-T5-01, AP-T5-02, AP-T5-04, 
   AP-T6-02, AP-T6-03, AP-T6-04, AP-T6-05]
 records:
   AP-T11-01:
+    case_study: AML.CS0052
     digest: 8d890a406e190195bdae45eeb423532ab30d0c30eef3ccb0e88b7eabab108266
     chain_exact: [AML.T0051.000, AML.T0053]
     step_exact:
@@ -25,6 +26,7 @@ records:
       access_public_application, submit_crafted_prompt, bypass_guardrails, invoke_tools_with_attacker_args,
       generate_backdoored_configuration, deploy_configuration, execute_embedded_payload]
   AP-T11-02:
+    case_study: AML.CS0047
     digest: b82b93768cf65021c11a1bf541d8522b23ce8534f8b15bb4a419a1a70d5cef4f
     chain_exact: [AML.T0051.000]
     step_exact:

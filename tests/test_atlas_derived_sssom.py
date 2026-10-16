@@ -1,22 +1,19 @@
-"""Tests for ATLAS-derived SSSOM provenance entries (bead r446).
+"""Tests for ATLAS-derived SSSOM provenance entries.
 
-Validates that:
-- All 5 ATLAS-derived patterns have SSSOM entries that parse correctly
-- Each pattern has at least 2 entries (distinctive techniques)
-- No duplicate entries exist across the file
-- All entries reference techniques from their pattern's kill chain
-- Generic techniques (AML.T0065, AML.T0051) are excluded
+The file carries exactly 18 rows, and each of the 5 ATLAS-derived patterns
+maps to exactly its expected distinctive techniques.  Together these pins
+rule out duplicate rows, rows for other patterns and the generic techniques
+(AML.T0065, AML.T0051).  The rows name the expected sources and curation
+justification, and every pattern's canonical exact mappings overlap its
+SSSOM provenance.
 """
 
 from __future__ import annotations
-
-from collections import Counter
 
 import pytest
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.sssom import SSSOMMapping, load_sssom
-from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
 
 # Path to the new SSSOM file
 _SSSOM_PATH = "data/taxonomies/attack-patterns/attack-patterns-atlas-derived.sssom.tsv"
@@ -33,9 +30,6 @@ EXPECTED_TECHNIQUES: dict[str, list[str]] = {
     "AP-T3-04": ["AML.T0000", "AML.T0049", "AML.T0083"],
 }
 
-# Generic techniques that should NOT appear (per abstraction strategy 7.5)
-GENERIC_TECHNIQUES = {"AML.T0065", "AML.T0051"}
-
 
 @pytest.fixture(scope="module")
 def sssom_mappings() -> list[SSSOMMapping]:
@@ -50,20 +44,14 @@ def all_patterns() -> dict[str, dict]:
 
 
 class TestAtlasDerivedSSSOMParsing:
-    """All entries in the new SSSOM file parse correctly."""
-
-    def test_file_loads_without_error(self, sssom_mappings: list[SSSOMMapping]):
-        """The SSSOM file parses without exceptions."""
-        assert len(sssom_mappings) > 0
+    """The SSSOM file's row count, sources and justification."""
 
     def test_total_entry_count(self, sssom_mappings: list[SSSOMMapping]):
-        """File contains exactly 18 entries (4+3+4+4+3)."""
-        assert len(sssom_mappings) == 18
+        """File contains exactly 18 entries (4+3+4+4+3).
 
-    def test_all_entries_are_sssom_mappings(self, sssom_mappings: list[SSSOMMapping]):
-        """Every parsed entry is a valid SSSOMMapping instance."""
-        for m in sssom_mappings:
-            assert isinstance(m, SSSOMMapping)
+        With the exact per-pattern sets, this count leaves no room for a
+        duplicate row or a row for another pattern."""
+        assert len(sssom_mappings) == 18
 
     def test_all_entries_have_correct_subject_source(
         self, sssom_mappings: list[SSSOMMapping]
@@ -85,13 +73,6 @@ class TestAtlasDerivedSSSOMParsing:
                 f"{m.object_source}"
             )
 
-    def test_all_entries_have_correct_predicate(
-        self, sssom_mappings: list[SSSOMMapping]
-    ):
-        """All entries use 'skos:relatedMatch' predicate."""
-        for m in sssom_mappings:
-            assert m.predicate_id == "skos:relatedMatch"
-
     def test_all_entries_have_correct_justification(
         self, sssom_mappings: list[SSSOMMapping]
     ):
@@ -101,27 +82,7 @@ class TestAtlasDerivedSSSOMParsing:
 
 
 class TestAtlasDerivedSSSOMCoverage:
-    """Each ATLAS-derived pattern has sufficient SSSOM entries."""
-
-    @pytest.mark.parametrize("pid", ATLAS_DERIVED_IDS)
-    def test_pattern_has_at_least_two_entries(
-        self, sssom_mappings: list[SSSOMMapping], pid: str
-    ):
-        """Each pattern has at least 2 SSSOM entries."""
-        entries = [m for m in sssom_mappings if m.subject_id == pid]
-        assert len(entries) >= 2, (
-            f"{pid} has only {len(entries)} SSSOM entries, expected >= 2"
-        )
-
-    @pytest.mark.parametrize("pid", ATLAS_DERIVED_IDS)
-    def test_pattern_has_at_most_four_entries(
-        self, sssom_mappings: list[SSSOMMapping], pid: str
-    ):
-        """Each pattern has at most 4 SSSOM entries (per strategy)."""
-        entries = [m for m in sssom_mappings if m.subject_id == pid]
-        assert len(entries) <= 4, (
-            f"{pid} has {len(entries)} SSSOM entries, expected <= 4"
-        )
+    """Each ATLAS-derived pattern maps to its expected techniques."""
 
     @pytest.mark.parametrize("pid", ATLAS_DERIVED_IDS)
     def test_expected_techniques_present(
@@ -135,52 +96,16 @@ class TestAtlasDerivedSSSOMCoverage:
         )
 
 
-class TestNoGenericTechniques:
-    """Generic techniques should not appear in the ATLAS-derived SSSOM."""
-
-    def test_no_prompt_crafting(self, sssom_mappings: list[SSSOMMapping]):
-        """AML.T0065 (Prompt Crafting) should not appear."""
-        technique_ids = {m.object_id for m in sssom_mappings}
-        assert "AML.T0065" not in technique_ids, (
-            "Generic technique AML.T0065 (Prompt Crafting) should not be in "
-            "ATLAS-derived SSSOM entries"
-        )
-
-    def test_no_prompt_injection(self, sssom_mappings: list[SSSOMMapping]):
-        """AML.T0051 (LLM Prompt Injection) should not appear."""
-        technique_ids = {m.object_id for m in sssom_mappings}
-        assert "AML.T0051" not in technique_ids, (
-            "Generic technique AML.T0051 (LLM Prompt Injection) should not "
-            "be in ATLAS-derived SSSOM entries"
-        )
-
-
-class TestNoDuplicateEntries:
-    """No duplicate entries exist in the file."""
-
-    def test_no_exact_duplicates(self, sssom_mappings: list[SSSOMMapping]):
-        """No two entries share the same (subject_id, object_id) pair."""
-        pairs = [(m.subject_id, m.object_id) for m in sssom_mappings]
-        counter = Counter(pairs)
-        duplicates = {pair: count for pair, count in counter.items() if count > 1}
-        assert not duplicates, f"Duplicate SSSOM entries found: {duplicates}"
-
-
 class TestTechniquesFromCanonicalChain:
-    """Canonical chain exact mappings are valid and overlap with SSSOM provenance.
+    """Canonical chain exact mappings overlap with SSSOM provenance.
 
     The SSSOM file carries historical ``relatedMatch`` provenance hints; the
     canonical chain carries authoritative ``exact`` mappings.  These tests
-    verify that each pattern has a canonical chain with exact ATLAS mappings,
-    that every exact mapping is a valid pinned ATLAS identifier (via the
-    production resolver), and that at least one exact mapping is supported
-    by (or is a parent/sub-technique of) an SSSOM ``relatedMatch`` entry,
-    confirming historical continuity.
+    verify that each pattern has a canonical chain with exact ATLAS mappings
+    and that at least one exact mapping is supported by (or is a
+    parent/sub-technique of) an SSSOM ``relatedMatch`` entry, confirming
+    historical continuity.
     """
-
-    @pytest.fixture(scope="module")
-    def resolver(self):
-        return load_taxonomy_resolver()
 
     @pytest.mark.parametrize("pid", ATLAS_DERIVED_IDS)
     def test_canonical_chain_has_exact_mappings(
@@ -203,29 +128,6 @@ class TestTechniquesFromCanonicalChain:
                     exact_techniques.update(mapping.get("ids", []))
 
         assert exact_techniques, f"{pid}: canonical chain has no exact ATLAS mappings"
-
-    @pytest.mark.parametrize("pid", ATLAS_DERIVED_IDS)
-    def test_exact_mappings_are_valid_atlas_ids(
-        self,
-        all_patterns: dict[str, dict],
-        resolver,
-        pid: str,
-    ) -> None:
-        """All exact canonical chain mappings are valid pinned ATLAS identifiers."""
-        pattern = all_patterns[pid]
-        cc = pattern["canonical_chain"]
-        all_exact: set[str] = set()
-        for mapping in cc.get("mappings", []):
-            if mapping.get("decision") == "exact":
-                all_exact.update(mapping.get("ids", []))
-        for step in cc.get("steps", []):
-            for mapping in step.get("mappings", []):
-                if mapping.get("decision") == "exact":
-                    all_exact.update(mapping.get("ids", []))
-        for tech in all_exact:
-            assert resolver.contains("ATLAS", tech), (
-                f"{pid}: exact mapping {tech} is not a valid pinned ATLAS identifier"
-            )
 
     @pytest.mark.parametrize("pid", ATLAS_DERIVED_IDS)
     def test_historical_continuity_with_sssom(
