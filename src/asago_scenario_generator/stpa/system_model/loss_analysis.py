@@ -770,7 +770,8 @@ _PROVIDER_GRAPH_COLLECTIONS = (
 class _RepairInput:
     """A failed reply in its own handles, and the canonical ID of each handle.
 
-    Every row of ``result`` names itself by its handle in its ID field
+    ``result.content`` is always the decoded JSON object, never text or a
+    model.  Every row of ``result`` names itself by its handle in its ID field
     (``loss_id``, ``hazard_id``, ``constraint_id``), so the row-level repair
     wire ``response_format`` reads it; references keep the reply's values.
     """
@@ -2167,7 +2168,7 @@ def _check_repair_graph(
     # be smuggled through an otherwise repairable obligation and trigger a
     # second model call.
     try:
-        graph = repair_input.ids.compile(_repair_graph_draft(repair_input.result))
+        graph = repair_input.ids.compile(_repair_graph_draft(repair_input))
     except (ValidationError, ValueError) as exc:
         _stop_outside_graph_scope(call, exc, error_msg)
     try:
@@ -2363,14 +2364,9 @@ def _reference_meanings(
     return tuple(sorted(meanings.items()))
 
 
-def _repair_graph_draft(repair_first_result: LLMResult) -> LossAnalysisDraft:
+def _repair_graph_draft(repair_input: _RepairInput) -> LossAnalysisDraft:
     """Parse the repair input without its disposition rows and obligations."""
-    repair_content = repair_first_result.content
-    if isinstance(repair_content, BaseModel):
-        repair_content = repair_content.model_dump(mode="json")
-    if not isinstance(repair_content, dict):
-        raise ValueError("the adapted repair graph is not a JSON object")
-    graph_content = deepcopy(repair_content)
+    graph_content = deepcopy(repair_input.result.content)
     graph_content["risk_dispositions"] = []
     constraints = graph_content.get("security_constraints", [])
     if isinstance(constraints, list):
