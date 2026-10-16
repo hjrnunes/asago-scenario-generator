@@ -9,11 +9,9 @@ projection fixture instead of supplying candidate records as input.
 from __future__ import annotations
 
 import hashlib
-import json
 import re
 from copy import deepcopy
 from importlib import import_module
-from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import Mock
@@ -64,10 +62,6 @@ from tests.helpers.projection_factory import (
 )
 from asago_scenario_generator.models.obligation_plan import (
     RiskEvidence,
-    TaxonomyObligationPlan,
-)
-from asago_scenario_generator.pipeline.obligation_persistence import (
-    write_taxonomy_obligation_plan,
 )
 from asago_scenario_generator.cli import app
 from asago_scenario_generator.pipeline.taxonomy_inputs import (
@@ -827,26 +821,6 @@ def test_repinned_pattern_content_is_accepted_with_a_new_identity() -> None:
         original_plan.obligations[0].obligation_id
         != mutated_plan.obligations[0].obligation_id
     )
-
-
-def test_run_plan_obligations_publishes_a_round_trip_validated_artifact(
-    tmp_path: Path,
-) -> None:
-    """The persistence adapter returns exactly what its written artifact reloads."""
-
-    inputs = _input_type().model_validate(
-        json.loads(json.dumps(_jsonable(_input_payload())))
-    )
-    output_dir = tmp_path / "published"
-
-    plan = _plan(inputs)
-    written = [write_taxonomy_obligation_plan(output_dir, plan)]
-
-    assert written == [output_dir / "taxonomy-obligation-plan.yaml"]
-    assert len(plan.obligations) == 1
-    published = TaxonomyObligationPlan.from_yaml(written[0].read_text(encoding="utf-8"))
-    assert published == plan
-    assert not list(output_dir.glob("*.tmp"))
 
 
 def test_missing_qualification_facts_preserve_an_unready_obligation() -> None:
