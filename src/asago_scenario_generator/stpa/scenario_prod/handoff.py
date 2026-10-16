@@ -16,13 +16,9 @@ exclusion is verified by :func:`handoff_ownership_violations`, which is the
 ownership boundary enforced by the negative tests.
 
 Schema version: the builder emits :class:`ScenarioHandoffV4`
-(:data:`HANDOFF_SCHEMA_VERSION_V4`), the only handoff model. The v1, v2 and v3
-kits in ``data/contracts/scenario-handoff/`` stay frozen for their readers,
-with their version constants and digest domains; their committed
-``schema.json`` files are the authority for them. :data:`HANDOFF_SCHEMA_VERSION`
-stays at v3: it names the digest domain a payload without ``schema_version``
-is framed in. The consumer vendors the kits byte-for-byte, the same
-discipline as ``data/contracts/target-profile/``.
+(:data:`HANDOFF_SCHEMA_VERSION_V4`), the only handoff model. Its kit lives in
+``data/contracts/scenario-handoff/handoff-v4/``, and the consumer vendors it
+byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
 """
 
 from __future__ import annotations
@@ -84,26 +80,8 @@ from asago_scenario_generator.stpa.tool_call_condition import (
     ToolCallConditionStatus,
 )
 
-HANDOFF_SCHEMA_VERSION_V1 = "scenario-handoff-v1"
-HANDOFF_SCHEMA_VERSION_V2 = "scenario-handoff-v2"
-HANDOFF_SCHEMA_VERSION = "scenario-handoff-v3"
 HANDOFF_SCHEMA_VERSION_V4 = "scenario-handoff-v4"
-HANDOFF_SCHEMA_VERSIONS = (
-    HANDOFF_SCHEMA_VERSION_V1,
-    HANDOFF_SCHEMA_VERSION_V2,
-    HANDOFF_SCHEMA_VERSION,
-    HANDOFF_SCHEMA_VERSION_V4,
-)
-HANDOFF_DIGEST_DOMAIN_V1 = "scenario-handoff-v1"
-HANDOFF_DIGEST_DOMAIN_V2 = "scenario-handoff-v2"
-HANDOFF_DIGEST_DOMAIN = "scenario-handoff-v3"
 HANDOFF_DIGEST_DOMAIN_V4 = "scenario-handoff-v4"
-HANDOFF_DIGEST_DOMAINS = {
-    HANDOFF_SCHEMA_VERSION_V1: HANDOFF_DIGEST_DOMAIN_V1,
-    HANDOFF_SCHEMA_VERSION_V2: HANDOFF_DIGEST_DOMAIN_V2,
-    HANDOFF_SCHEMA_VERSION: HANDOFF_DIGEST_DOMAIN,
-    HANDOFF_SCHEMA_VERSION_V4: HANDOFF_DIGEST_DOMAIN_V4,
-}
 OPERATION_AUTHORITY_CRITERION = "criterion_observed_operation"
 OPERATION_AUTHORITY_ENRICHMENT = "verified_control_action_specialization"
 OPERATION_AUTHORITY_SAFE_OUTCOME = "safe_observable_outcome_operation"
@@ -186,7 +164,8 @@ class HandoffOperation(HandoffModel):
 
     name: str
     relevance: StrictStr
-    # Optional so sealed v1 handoffs remain readable and digest-stable.
+    # None when no authority is recorded for the name; the published schema
+    # keeps the field optional.
     authority: (
         Literal[
             OPERATION_AUTHORITY_CRITERION,
@@ -410,12 +389,11 @@ class ScenarioHandoffV4(HandoffModel):
 
 
 def handoff_payload_digest(payload: dict[str, Any]) -> str:
-    """Return the framed content digest for a v1, v2, v3, or v4 handoff payload."""
-    version = payload.get("schema_version", HANDOFF_SCHEMA_VERSION)
-    domain = HANDOFF_DIGEST_DOMAINS.get(version)
-    if domain is None:
+    """Return the framed content digest for a v4 handoff payload."""
+    version = payload.get("schema_version")
+    if version != HANDOFF_SCHEMA_VERSION_V4:
         raise ValueError(f"unsupported scenario handoff schema_version: {version!r}")
-    return compute_framed_digest(domain, payload)
+    return compute_framed_digest(HANDOFF_DIGEST_DOMAIN_V4, payload)
 
 
 def finalize_handoff(handoff: ScenarioHandoffV4) -> ScenarioHandoffV4:
@@ -473,8 +451,8 @@ def handoff_ownership_violations(payload: dict[str, Any]) -> list[str]:
     return violations
 
 
-#: The v4 kit's ``schema-unknown-version`` case records these codes: they are
-#: what the retired v3 model reported for it, and the kit stays byte-identical.
+#: The kit's ``schema-unknown-version`` case records these codes, and the kit
+#: stays byte-identical.
 _OTHER_VERSION_VIOLATIONS = (
     "schema_violation:schema_version",
     "schema_violation:attack_shape",
@@ -485,8 +463,8 @@ def handoff_schema_violations(payload: dict[str, Any]) -> list[str]:
     """Return ``schema_violation:<top-level field>`` codes for one v4 payload.
 
     A payload with any other ``schema_version`` gets
-    :data:`_OTHER_VERSION_VIOLATIONS`, the codes the frozen v4 kit records for
-    its unknown-version case. An empty list means the closed schema accepts
+    :data:`_OTHER_VERSION_VIOLATIONS`, the codes the kit records for its
+    unknown-version case. An empty list means the closed schema accepts
     the payload.
     """
     if payload.get("schema_version") != HANDOFF_SCHEMA_VERSION_V4:
@@ -983,15 +961,7 @@ __all__ = [
     "AUTHORITY_SUPPLIED_PROPOSED",
     "AUTHORITY_SUPPLIED_REVIEWED",
     "AUTHORITY_UNSOURCED",
-    "HANDOFF_DIGEST_DOMAIN",
-    "HANDOFF_DIGEST_DOMAINS",
-    "HANDOFF_DIGEST_DOMAIN_V1",
-    "HANDOFF_DIGEST_DOMAIN_V2",
     "HANDOFF_DIGEST_DOMAIN_V4",
-    "HANDOFF_SCHEMA_VERSION",
-    "HANDOFF_SCHEMA_VERSIONS",
-    "HANDOFF_SCHEMA_VERSION_V1",
-    "HANDOFF_SCHEMA_VERSION_V2",
     "HANDOFF_SCHEMA_VERSION_V4",
     "HYPOTHESIS_FRAMING",
     "OPERATION_AUTHORITY_CRITERION",

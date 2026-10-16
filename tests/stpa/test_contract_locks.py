@@ -13,39 +13,17 @@ from pathlib import Path
 import pytest
 
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_DIGEST_DOMAIN,
-    HANDOFF_DIGEST_DOMAIN_V1,
-    HANDOFF_DIGEST_DOMAIN_V2,
     HANDOFF_DIGEST_DOMAIN_V4,
-    HANDOFF_SCHEMA_VERSION,
-    HANDOFF_SCHEMA_VERSION_V1,
-    HANDOFF_SCHEMA_VERSION_V2,
     HANDOFF_SCHEMA_VERSION_V4,
 )
 
 DATA = Path(__file__).resolve().parents[2] / "data/contracts"
 AUTHORITY = "asago-scenario-generator"
-_HANDOFF_VERSIONS = [
-    HANDOFF_SCHEMA_VERSION_V1,
-    HANDOFF_SCHEMA_VERSION_V2,
-    HANDOFF_SCHEMA_VERSION,
-    HANDOFF_SCHEMA_VERSION_V4,
-]
-_HANDOFF_DOMAINS = [
-    HANDOFF_DIGEST_DOMAIN_V1,
-    HANDOFF_DIGEST_DOMAIN_V2,
-    HANDOFF_DIGEST_DOMAIN,
-    HANDOFF_DIGEST_DOMAIN_V4,
-]
 
 LOCKS = {
     "scenario-handoff": {
-        # The singular fields keep their v1 values so v1-only readers still match;
-        # the plural fields enumerate every supported version.
-        "handoff_schema_version": HANDOFF_SCHEMA_VERSION_V1,
-        "digest_domain": HANDOFF_DIGEST_DOMAIN_V1,
-        "handoff_schema_versions": _HANDOFF_VERSIONS,
-        "digest_domains": dict(zip(_HANDOFF_VERSIONS, _HANDOFF_DOMAINS, strict=True)),
+        "handoff_schema_version": HANDOFF_SCHEMA_VERSION_V4,
+        "digest_domain": HANDOFF_DIGEST_DOMAIN_V4,
     },
     "target-profile": {
         "schema_version": "execution-target-profile-v1",

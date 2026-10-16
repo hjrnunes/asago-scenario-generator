@@ -539,9 +539,9 @@ def test_documented_operations_resolve_against_the_profile_inventory(
     tmp_path: Path,
 ) -> None:
     """Mirror of the consumer's ``_resolve_detector_tool``: the live envelope
-    resolves against the observed profile inventory the same way the M1
-    contract fixture does, so no ``unsupported-observation`` exclusion blocks
-    an enriched adversarial scenario."""
+    resolves against the observed profile inventory, so no
+    ``unsupported-observation`` exclusion blocks an enriched adversarial
+    scenario."""
     inventory_names = {
         "process_refund",
         "lookup_order",
@@ -560,11 +560,3 @@ def test_documented_operations_resolve_against_the_profile_inventory(
     live = _published_handoff(tmp_path)
 
     assert _matches(live) == ["process_refund"]
-
-    # The M1 contract fixture carries the same expectation by hand.
-    fixture_path = (
-        Path(__file__).resolve().parents[2]
-        / "data/contracts/scenario-handoff/handoff-v1/valid/adversarial-refund.json"
-    )
-    fixture = json.loads(fixture_path.read_text(encoding="utf-8"))
-    assert _matches(fixture) == ["process_refund"]

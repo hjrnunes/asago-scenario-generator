@@ -2,8 +2,7 @@
 """Generate the scenario-handoff v4 contract kit and refresh CONTRACT.lock.
 
 Run from any directory: ``uv run python scripts/gen_handoff_kit.py``.
-The v1, v2 and v3 kits are frozen and never written; the lock keeps their
-entries. Regenerating the v4 kit must leave every byte unchanged, which
+Regenerating the kit must leave every byte unchanged, which
 ``git status --porcelain data/contracts`` confirms.
 Downstream repositories mirror the regenerated files byte-identically.
 """
@@ -24,9 +23,8 @@ from asago_scenario_generator.stpa.scenario_prod.condition_check import (
     check_discriminating_condition,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_DIGEST_DOMAINS,
+    HANDOFF_DIGEST_DOMAIN_V4,
     HANDOFF_SCHEMA_VERSION_V4,
-    HANDOFF_SCHEMA_VERSIONS,
     HYPOTHESIS_FRAMING,
     ScenarioHandoffV4,
     finalize_handoff,
@@ -619,10 +617,10 @@ def key_by_constraints(payload: dict) -> dict:
 
 
 def v4_payloads(builders: dict) -> dict[str, dict]:
-    """Rebuild the v3 payloads as v4 and add one fixture per shape.
+    """Build the base payloads and add one fixture per shape.
 
-    The rebuilt adversarial payloads carry a Stage 5 validated single direct
-    shape; the rebuilt functional ones carry none.
+    The base adversarial payloads carry a Stage 5 validated single direct
+    shape; the base functional ones carry none.
     """
 
     version = HANDOFF_SCHEMA_VERSION_V4
@@ -644,7 +642,7 @@ def v4_payloads(builders: dict) -> dict[str, dict]:
     }
 
 
-#: The v4 kit rebuilds these v3-era payloads beside its shaped fixtures.
+#: The base payloads the kit carries beside its shaped fixtures.
 BUILDERS = {
     "valid/adversarial-observed-record.json": adversarial,
     "valid/functional-record-unavailable.json": functional,
@@ -811,9 +809,9 @@ SCHEMA_CASES = {
 
 def resigned(payload: dict) -> dict:
     """Sign *payload* again so a reader that checks the digest first reaches the
-    broken field; a payload whose version has no digest domain keeps its digest."""
+    broken field; a payload of another version keeps its digest."""
 
-    if payload.get("schema_version") in HANDOFF_DIGEST_DOMAINS:
+    if payload.get("schema_version") == HANDOFF_SCHEMA_VERSION_V4:
         unsigned = {k: v for k, v in payload.items() if k != "content_digest"}
         payload["content_digest"] = handoff_payload_digest(unsigned)
     return payload
@@ -828,8 +826,7 @@ def ownership_invalid(base: dict) -> dict[str, dict]:
 
     Each case sits in a free-form field (the narrative, the attack tree or the
     unknowns), so the closed schema accepts it and a reader that skips the
-    ownership scan accepts the whole document. The last four cases are the
-    handoff-v1 ownership cases.
+    ownership scan accepts the whole document.
     """
 
     def tree_role(payload: dict) -> None:
@@ -1042,40 +1039,31 @@ def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> No
     (kit / "canonical-digests.json").write_text(dump(digests), encoding="utf-8")
 
 
-def write_lock(kits: tuple[Path, ...]) -> None:
-    """Refresh file digests and version lists; singular fields stay at v1."""
+def write_lock(kit: Path) -> None:
+    """Pin every kit file and the ownership rules; keep the descriptive fields."""
 
     lock_path = ROOT / "CONTRACT.lock"
-    lock = json.loads(lock_path.read_text(encoding="utf-8"))
-    for kit in kits:
-        for path in sorted(kit.rglob("*.json")):
-            lock["files"][str(path.relative_to(ROOT))] = sha(path)
-    lock["files"]["ownership-rules.json"] = sha(ROOT / "ownership-rules.json")
-    lock["handoff_schema_versions"] = list(HANDOFF_SCHEMA_VERSIONS)
-    for field in (
-        "discriminating_condition",
-        "condition_check",
-        "condition_omitted_reason",
-        "tool_call_condition_status",
-        "tool_call_condition",
-        "attack_shape",
-    ):
-        if field not in lock["metadata_fields"]:
-            lock["metadata_fields"].append(field)
-    ordered: dict = {}
-    for key, value in lock.items():
-        if key == "digest_domains":
-            continue
-        ordered[key] = value
-        if key == "digest_domain":
-            ordered["digest_domains"] = dict(HANDOFF_DIGEST_DOMAINS)
-    lock_path.write_text(json.dumps(ordered, indent=2) + "\n", encoding="utf-8")
+    previous = json.loads(lock_path.read_text(encoding="utf-8"))
+    files = {
+        str(path.relative_to(ROOT)): sha(path) for path in sorted(kit.rglob("*.json"))
+    }
+    files["ownership-rules.json"] = sha(ROOT / "ownership-rules.json")
+    lock = {
+        "authority": previous["authority"],
+        "contract": previous["contract"],
+        "digest_domain": HANDOFF_DIGEST_DOMAIN_V4,
+        "files": files,
+        "handoff_schema_version": HANDOFF_SCHEMA_VERSION_V4,
+        "metadata_fields": previous["metadata_fields"],
+        "representations": previous["representations"],
+    }
+    lock_path.write_text(json.dumps(lock, indent=2) + "\n", encoding="utf-8")
 
 
 def main() -> None:
     valid = v4_payloads(BUILDERS)
     write_kit(KIT_V4, valid, v4_invalid(valid))
-    write_lock((KIT_V4,))
+    write_lock(KIT_V4)
 
 
 if __name__ == "__main__":

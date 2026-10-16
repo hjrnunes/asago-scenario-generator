@@ -34,7 +34,7 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
 DATA = Path(__file__).resolve().parents[2] / "data/contracts"
 CONTRACT_ROOT = DATA / "tool-call-condition"
 KIT = CONTRACT_ROOT / "tool-call-condition-v1"
-HANDOFF_V3_VALID = DATA / "scenario-handoff/handoff-v3/valid"
+HANDOFF_VALID = DATA / "scenario-handoff/handoff-v4/valid"
 
 VALUE_OPS = ("eq", "ne", "gt", "ge", "lt", "le", "in", "not_in")
 OUTCOME_REASONS = {
@@ -273,9 +273,9 @@ def test_bound_condition_satisfies_the_schema(case: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "fixture", sorted(HANDOFF_V3_VALID.glob("*.json")), ids=lambda path: path.name
+    "fixture", sorted(HANDOFF_VALID.glob("*.json")), ids=lambda path: path.name
 )
-def test_handoff_v3_fixture_condition_satisfies_the_schema(fixture: Path) -> None:
+def test_handoff_fixture_condition_satisfies_the_schema(fixture: Path) -> None:
     payload = _load(fixture)
     if payload["tool_call_condition_status"]["status"] != "bound":
         assert "tool_call_condition" not in payload

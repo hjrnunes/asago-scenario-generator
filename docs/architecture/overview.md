@@ -37,29 +37,25 @@ commands.
 
 ## Current ownership and historical seams
 
-The normal producer `generate` publishes one semantics-only `scenario-handoff-v4`.
-Version 2 added the Stage 5 `discriminating_condition`, its code-owned
-`condition_check`, and an optional `condition_omitted_reason` for a scenario
-published without its condition. Version 3 adds the binding of that condition
-against the target-observation facts: the required `tool_call_condition_status`
-(`bound`, or `not_executable` with a reason code and detail) and, only when
-bound, the `tool_call_condition`, whose comparisons hold only `argument` and
-`literal` operands. Version 4 adds the required `attack_shape`: an object for an
-adversarial scenario and `null` for a functional one, made only of closed
-enums, a turn count from 1 to 4 and identifiers (see
-[The shape step](#the-shape-step)). The `handoff-v1`, `handoff-v2` and
-`handoff-v3` kits and digest domains stay unchanged; the producer has one
-handoff model, `ScenarioHandoffV4`, and checks the frozen kits against their
-own `schema.json`, the ownership scan, the framed digest, and their recorded
-codes. The ownership scan reads its forbidden keys and prose patterns from
-`ownership-rules.json` beside the kits; the lock pins that file and the
-consumer mirrors it, so both sides enforce one list.
-`scripts/gen_handoff_kit.py` regenerates the v4 kit and the lock; every
-file must come out byte-identical. The v3 and v4 kits carry the cases every
-reader runs: ownership cases, schema cases (`invalid/schema-*.json`, one broken
-field each), and for v3 the `refund-bound.json` valid case. Each invalid case's
-codes are in the kit's `expected-violations.json`; a reader that words a
-rejection differently maps its message to those codes in its own tests.
+The normal producer `generate` publishes one semantics-only `scenario-handoff-v4`
+through its one handoff model, `ScenarioHandoffV4`. The envelope carries the
+Stage 5 `discriminating_condition`, its code-owned `condition_check`, and an
+optional `condition_omitted_reason` for a scenario published without its
+condition. It carries the binding of that condition against the
+target-observation facts: the required `tool_call_condition_status` (`bound`,
+or `not_executable` with a reason code and detail) and, only when bound, the
+`tool_call_condition`, whose comparisons hold only `argument` and `literal`
+operands. The required `attack_shape` is an object for an adversarial scenario
+and `null` for a functional one, made only of closed enums, a turn count from
+1 to 4 and identifiers (see [The shape step](#the-shape-step)). The ownership
+scan reads its forbidden keys and prose patterns from `ownership-rules.json`
+beside the kit; the lock pins that file and the consumer mirrors it, so both
+sides enforce one list. `scripts/gen_handoff_kit.py` regenerates the kit and
+the lock; every kit file must come out byte-identical. The kit carries the
+cases every reader runs: ownership cases and schema cases
+(`invalid/schema-*.json`, one broken field each). Each invalid case's codes are
+in the kit's `expected-violations.json`; a reader that words a rejection
+differently maps its message to those codes in its own tests.
 The producer owns STPA lineage, the selected semantic failure criterion, safe
 alternatives, supported causal hypotheses, and the narrative, causal tree,
 structured Gherkin, and native feature derived from that semantic account. It
