@@ -1,8 +1,8 @@
 """Tests for SP1 Stage 2 — Control Structure derivation.
 
-Covers SP1-S2-01 through SP1-S2-15 from the Gherkin feature file, and the
+Covers the SP1-S2 scenarios from the Gherkin feature file, and the
 coordination-link and controlled-process behavior that replaced the old
-ConnectionSet merge (ConnSet-01 through ConnSet-11).
+ConnectionSet merge.
 
 Stage 2 now has 4 calls:
   Call 1  — Requirements
@@ -311,60 +311,12 @@ class TestResponsibilitySet:
                     assert ca.target.id in cp_ids
 
 
-class TestStage2CallLogging:
-    """SP1-S2-05, S2-09, S2-12: call logging for each Stage 2 call."""
-
-    def test_s2_05_call_1_logged(self, tmp_path):
-        """SP1-S2-05: Call 1 logged with stage stage_2 and step call_1_requirements."""
-        client = _setup_mock_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-
-        entries = read_calls_jsonl(tmp_path)
-        call1 = [e for e in entries if e["step"] == "call_1_requirements"]
-        assert len(call1) == 1
-        assert call1[0]["stage"] == "stage_2"
-
-    def test_s2_09_call_2a_logged(self, tmp_path):
-        """SP1-S2-09: Call 2a logged with stage stage_2 and step call_2a_responsibilities."""
-        client = _setup_mock_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-
-        entries = read_calls_jsonl(tmp_path)
-        call2a = [e for e in entries if e["step"] == "call_2a_responsibilities"]
-        assert len(call2a) == 1
-        assert call2a[0]["stage"] == "stage_2"
-
-    def test_s2_12_call_3_logged(self, tmp_path):
-        """SP1-S2-12: Call 3 logged with stage stage_2 and step call_3_coordination."""
-        client = _setup_mock_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-
-        entries = read_calls_jsonl(tmp_path)
-        call3 = [e for e in entries if e["step"] == "call_3_coordination"]
-        assert len(call3) == 1
-        assert call3[0]["stage"] == "stage_2"
-
-
 class TestStage2Derivation:
-    """SP1-S2-10, S2-11, S2-13: Call 3 output and file writing."""
+    """The default four-call derivation: call log, hand-offs, and artifacts."""
 
-    def test_s2_10_call_3_produces_valid_control_structure(self, tmp_path):
-        """SP1-S2-10: Stage 2 produces a valid ControlStructure."""
+    def test_default_derivation_logs_calls_hands_off_data_and_writes_structure(
+        self, tmp_path
+    ):
         client = _setup_mock_client()
         result = derive_control_structure(
             llm_client=client,
@@ -372,130 +324,53 @@ class TestStage2Derivation:
             loss_analysis=_make_loss_analysis(),
             run_dir=tmp_path,
         )
+
+        entries = read_calls_jsonl(tmp_path)
+        for step in (
+            "call_1_requirements",
+            "call_2a_responsibilities",
+            "call_3_coordination",
+        ):
+            logged = [e for e in entries if e["step"] == step]
+            assert len(logged) == 1
+            assert logged[0]["stage"] == "stage_2"
+
         cs = result.control_structure
         assert isinstance(cs, ControlStructure)
         assert len(cs.responsibilities) == 2
-
-    def test_s2_11_coordination_links_identified(self, tmp_path):
-        """SP1-S2-11: coordination links are identified in Call 3."""
-        client = _setup_mock_client()
-        result = derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        cs = result.control_structure
         assert len(cs.coordination_links) == 1
         cl = cs.coordination_links[0]
         assert cl.link_id == "CL-1"
         assert cl.source == "RESP-1"
         assert cl.target == "RESP-2"
+        assert "CP-1" in {cp.cp_id for cp in cs.controlled_processes}
 
-    def test_s2_13_control_structure_written_to_yaml(self, tmp_path):
-        """SP1-S2-13: control-structure.yaml exists and contains valid model."""
-        client = _setup_mock_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
         yaml_file = tmp_path / "control-structure.yaml"
         assert yaml_file.exists()
         loaded = read_yaml(yaml_file, ControlStructure)
         assert isinstance(loaded, ControlStructure)
         assert len(loaded.responsibilities) == 2
-
-
-class TestStage2PromptPassing:
-    """SP1-S2-14, S2-15: prompts receive data from previous calls."""
-
-    def test_s2_14_call_2a_receives_requirements_from_call_1(self, tmp_path):
-        """SP1-S2-14: Call 2a user prompt contains requirements from Call 1."""
-        client = _setup_mock_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        # Call 2a is the second call (index 1)
-        call2a = client.calls[1]
-        assert "REQ-1" in call2a.user_prompt
-        assert "REQ-2" in call2a.user_prompt
-
-    def test_s2_15_call_3_receives_responsibilities_from_call_2(self, tmp_path):
-        """SP1-S2-15: Call 3 user prompt contains responsibilities and CPs from Call 2."""
-        client = _setup_mock_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        # Call 3 is the fourth call (index 3)
-        call3 = client.calls[3]
-        assert "RESP-1" in call3.user_prompt
-        assert "RESP-2" in call3.user_prompt
-        assert "CP-1" in call3.user_prompt
-
-
-class TestConnSetCoordination:
-    """ConnSet-01, -02, -07: Call 3 output and the final ControlStructure."""
-
-    def test_connset_01_call_3_response_format_is_coordination_analysis(self, tmp_path):
-        """Call 3's provider schema excludes code-owned integrity findings."""
-        client = _setup_mock_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        # Call 3 is the fourth call (index 3)
-        call3 = client.calls[3]
-        assert issubclass(call3.response_format, _CoordinationProviderEnvelope)
-        assert set(call3.response_format.model_fields) == {
-            "coordination_links",
-            "semantic_review",
-        }
-
-    def test_connset_02_contains_coordination_links_and_cps(self, tmp_path):
-        """CoordinationAnalysis has CL-1, ControlElementSet has CP-1, FB-1-1 has source."""
-        client = _setup_mock_client()
-        derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        cs = read_yaml(tmp_path / "control-structure.yaml", ControlStructure)
-        # Coordination link CL-1 present
-        cl_ids = {cl.link_id for cl in cs.coordination_links}
-        assert "CL-1" in cl_ids
-        # Controlled process CP-1 present
-        cp_ids = {cp.cp_id for cp in cs.controlled_processes}
-        assert "CP-1" in cp_ids
-        # FB-1-1 has source set (from ControlElementSet)
-        for resp in cs.responsibilities:
+        assert "CL-1" in {link.link_id for link in loaded.coordination_links}
+        assert "CP-1" in {cp.cp_id for cp in loaded.controlled_processes}
+        for resp in loaded.responsibilities:
             for fb in resp.feedback_channels:
                 if fb.fb_id == "FB-1-1":
                     assert fb.source is not None
                     assert fb.source.id == "CP-1"
 
-    def test_connset_07_controlled_process_present(self, tmp_path):
-        """Controlled process CP-1 from ControlElementSet appears in final CS."""
-        client = _setup_mock_client()
-        result = derive_control_structure(
-            llm_client=client,
-            use_case_text="Test",
-            loss_analysis=_make_loss_analysis(),
-            run_dir=tmp_path,
-        )
-        cs = result.control_structure
-        cp_ids = {cp.cp_id for cp in cs.controlled_processes}
-        assert "CP-1" in cp_ids
+        call2a = client.calls[1]
+        assert "REQ-1" in call2a.user_prompt
+        assert "REQ-2" in call2a.user_prompt
+
+        call3 = client.calls[3]
+        assert "RESP-1" in call3.user_prompt
+        assert "RESP-2" in call3.user_prompt
+        assert "CP-1" in call3.user_prompt
+        assert issubclass(call3.response_format, _CoordinationProviderEnvelope)
+        assert set(call3.response_format.model_fields) == {
+            "coordination_links",
+            "semantic_review",
+        }
 
 
 class TestConnSet11RevisionUsesRevisionDelta:
