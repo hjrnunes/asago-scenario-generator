@@ -48,7 +48,55 @@ def test_authorization_redaction_stops_at_the_line_end():
     )
 
 
+def test_quoted_key_with_quoted_value_keeps_key_and_quotes():
+    assert redaction.sanitize_json('{"token": "x"}') == '{"token": "[REDACTED]"}'
+    assert redaction.sanitize_json('{"Authorization": "Bearer x"}') == (
+        '{"Authorization": "[REDACTED]"}'
+    )
+    assert redaction.sanitize_json("{'password': 'two words', 'id': 'keep'}") == (
+        "{'password': '[REDACTED]', 'id': 'keep'}"
+    )
+    assert redaction.sanitize_json('{"api_key":"k","name":"keep"}') == (
+        '{"api_key":"[REDACTED]","name":"keep"}'
+    )
+    assert redaction.sanitize_json("{'token': \"x'y\"}") == "{'token': \"[REDACTED]\"}"
+
+
+def test_quoted_value_ends_at_its_closing_quote_not_an_escaped_one():
+    assert redaction.sanitize_json(r'{"token": "a\"b c", "id": "keep"}') == (
+        '{"token": "[REDACTED]", "id": "keep"}'
+    )
+
+
+def test_quoted_key_with_unquoted_value_redacts_the_value():
+    assert redaction.sanitize_json('{"token": 12345, "id": 1}') == (
+        '{"token": [REDACTED], "id": 1}'
+    )
+    assert redaction.sanitize_json('{"secret": null}') == '{"secret": [REDACTED]}'
+
+
+def test_unterminated_quoted_value_still_redacts_its_first_token():
+    assert redaction.sanitize_json('{"token": "abc') == '{"token": [REDACTED]'
+
+
+def test_unquoted_key_with_quoted_value_redacts_the_whole_value():
+    assert redaction.sanitize_json('token: "abc def" next') == "token: [REDACTED] next"
+    assert redaction.sanitize_json("password='p q'") == "password=[REDACTED]"
+
+
+def test_quoted_text_without_a_sensitive_key_is_unchanged():
+    text = '{"name": "token holder", "note": "no secrets here"}'
+    assert redaction.sanitize_json(text) == text
+
+
 IDEMPOTENCE_SAMPLES = (
+    '{"token": "x"}',
+    '{"Authorization": "Bearer x"}',
+    "{'password': 'two words', 'id': 'keep'}",
+    '{"token": 12345, "id": 1}',
+    '{"token": "[REDACTED]"}',
+    '{"token": "abc',
+    'token: "abc def" next',
     "token=secret",
     "token: abc def password=xyz uvw",
     "token=[REDACTED]",
