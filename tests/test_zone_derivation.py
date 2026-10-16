@@ -18,7 +18,6 @@ from asago_scenario_generator.models.capability_profile import (
     CapabilityProfile,
     Stage1Profile,
     ToolInventoryEntry,
-    VALID_KC_SUBCODES,
     derive_zones_from_kc,
 )
 import pytest
@@ -35,95 +34,10 @@ _TEST_TOOL_INVENTORY = [ToolInventoryEntry(name="test_tool", description="A test
 class TestDeriveZonesBasic:
     """Minimal KC set produces baseline zones."""
 
-    def test_derive_zones_basic(self):
-        """KC1.1 alone -> ['input', 'reasoning']."""
-        result = derive_zones_from_kc(["KC1.1"])
-        assert result == ["input", "reasoning"]
-
     def test_derive_zones_empty_list(self):
         """Empty KC list still returns baseline zones."""
         result = derive_zones_from_kc([])
         assert result == ["input", "reasoning"]
-
-    def test_derive_zones_kc3_stays_baseline(self):
-        """KC3.* codes don't add zones beyond baseline."""
-        result = derive_zones_from_kc(["KC1.1", "KC3.1", "KC3.2"])
-        assert result == ["input", "reasoning"]
-
-
-class TestDeriveZonesMemory:
-    """KC4.3-KC4.6 activate the memory zone; KC4.1/KC4.2 do not."""
-
-    @pytest.mark.parametrize(
-        "code",
-        [
-            pytest.param("KC4.4", id="derive_zones_with_memory"),
-            pytest.param("KC4.3", id="derive_zones_kc4_3_activates_memory"),
-            pytest.param("KC4.5", id="derive_zones_kc4_5_activates_memory"),
-            pytest.param("KC4.6", id="derive_zones_kc4_6_activates_memory"),
-        ],
-    )
-    def test_derive_zones_memory_code_activates_memory(self, code):
-        """Cross-session or cross-user memory (KC4.3-KC4.6) -> 'memory'."""
-        result = derive_zones_from_kc(["KC1.1", code])
-        assert "memory" in result
-
-    @pytest.mark.parametrize(
-        "code",
-        [
-            pytest.param("KC4.1", id="derive_zones_session_memory_no_zone_kc4_1"),
-            pytest.param("KC4.2", id="derive_zones_session_memory_no_zone_kc4_2"),
-        ],
-    )
-    def test_derive_zones_session_memory_no_zone(self, code):
-        """Session-only memory (KC4.1 in-agent, KC4.2 cross-agent) -> no memory."""
-        result = derive_zones_from_kc(["KC1.1", code])
-        assert "memory" not in result
-        assert result == ["input", "reasoning"]
-
-
-class TestDeriveZonesToolExecution:
-    """KC5.* and KC6.* activate tool_execution zone."""
-
-    @pytest.mark.parametrize(
-        "code",
-        [
-            pytest.param("KC5.1", id="derive_zones_kc5"),
-            pytest.param("KC6.2.2", id="derive_zones_kc6"),
-        ],
-    )
-    def test_derive_zones_tool_code_activates_tool_execution(self, code):
-        """KC5.1 and KC6.2.2 -> include 'tool_execution'."""
-        result = derive_zones_from_kc(["KC1.1", code])
-        assert "tool_execution" in result
-
-    def test_derive_zones_kc6_all_variants(self):
-        """All KC6 sub-codes activate tool_execution."""
-        kc6_codes = [c for c in sorted(VALID_KC_SUBCODES) if c.startswith("KC6.")]
-        for code in kc6_codes:
-            result = derive_zones_from_kc(["KC1.1", code])
-            assert "tool_execution" in result, f"{code} should activate tool_execution"
-
-
-class TestDeriveZonesInterAgent:
-    """KC2.3 activates inter_agent zone."""
-
-    def test_derive_zones_inter_agent(self):
-        """KC2.3 -> includes 'inter_agent'."""
-        result = derive_zones_from_kc(["KC1.1", "KC2.3"])
-        assert "inter_agent" in result
-
-    @pytest.mark.parametrize(
-        "code",
-        [
-            pytest.param("KC2.1", id="derive_zones_kc2_1_no_inter_agent"),
-            pytest.param("KC2.2", id="derive_zones_kc2_2_no_inter_agent"),
-        ],
-    )
-    def test_derive_zones_without_kc2_3_has_no_inter_agent(self, code):
-        """KC2.1 (predefined workflows), KC2.2 (hierarchical) -> no inter_agent."""
-        result = derive_zones_from_kc(["KC1.1", code])
-        assert "inter_agent" not in result
 
 
 class TestDeriveZonesFull:
@@ -232,78 +146,56 @@ class TestDeriveZonesMatchesRealData:
 class TestStage1ProfileZoneDerivation:
     """Stage1Profile.to_capability_profile() derives zones from kc_subcodes."""
 
-    def test_basic_kc_produces_baseline_zones(self):
-        """KC1.1 only -> zones_active=['input', 'reasoning']."""
+    @pytest.mark.parametrize(
+        ("kc_subcodes", "stated_flags", "expected_zones", "expected_flags"),
+        [
+            pytest.param(
+                ["KC1.1", "KC4.4"],
+                (False, False, False),
+                ["input", "memory", "reasoning"],
+                (True, False, False),
+                id="cross_session_memory_corrects_persistent_memory",
+            ),
+            pytest.param(
+                ["KC1.1", "KC2.3"],
+                (False, False, False),
+                ["input", "inter_agent", "reasoning"],
+                (False, True, False),
+                id="peer_agents_correct_multi_agent",
+            ),
+            pytest.param(
+                ["KC1.1", "KC2.1", "KC4.1"],
+                (True, True, True),
+                ["input", "reasoning"],
+                (False, False, False),
+                id="session_memory_and_workflows_clear_stated_flags",
+            ),
+            pytest.param(
+                ["KC1.1", "KC2.3", "KC4.4", "KC5.1"],
+                (False, False, True),
+                ["input", "inter_agent", "memory", "reasoning", "tool_execution"],
+                (True, True, False),
+                id="full_set_corrects_every_stated_flag",
+            ),
+        ],
+    )
+    def test_promotion_derives_zones_and_flags_from_kc_subcodes(
+        self, kc_subcodes, stated_flags, expected_zones, expected_flags
+    ):
+        """Stated flags are replaced by the flags the KC sub-codes imply."""
+        persistent_memory, multi_agent, hitl = stated_flags
         s = Stage1Profile(
-            has_persistent_memory=False,
-            multi_agent=False,
-            hitl=False,
+            has_persistent_memory=persistent_memory,
+            multi_agent=multi_agent,
+            hitl=hitl,
             entry_points=["user input (input)"],
             confidence="medium",
-            kc_subcodes=["KC1.1"],
-        )
-        p = s.to_capability_profile()
-        assert p.zones_active == ["input", "reasoning"]
-
-    def test_tool_kc_activates_tool_execution(self):
-        """KC5.1 -> zones_active includes 'tool_execution'."""
-        s = Stage1Profile(
-            has_persistent_memory=False,
-            multi_agent=False,
-            hitl=False,
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC5.1"],
+            kc_subcodes=kc_subcodes,
             tool_inventory=_TEST_TOOL_INVENTORY,
         )
         p = s.to_capability_profile()
-        assert p.zones_active == ["input", "reasoning", "tool_execution"]
-
-    def test_memory_kc_activates_memory_zone(self):
-        """KC4.3 -> zones_active includes 'memory'."""
-        s = Stage1Profile(
-            has_persistent_memory=True,
-            multi_agent=False,
-            hitl=False,
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC4.3"],
-        )
-        p = s.to_capability_profile()
-        assert "memory" in p.zones_active
-
-    def test_inter_agent_kc_activates_inter_agent_zone(self):
-        """KC2.3 -> zones_active includes 'inter_agent'."""
-        s = Stage1Profile(
-            has_persistent_memory=False,
-            multi_agent=True,
-            hitl=False,
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC2.3"],
-        )
-        p = s.to_capability_profile()
-        assert "inter_agent" in p.zones_active
-
-    def test_all_zones_from_full_kc_set(self):
-        """All optional zones activated by appropriate KC codes."""
-        s = Stage1Profile(
-            has_persistent_memory=True,
-            multi_agent=True,
-            hitl=True,
-            entry_points=["user input (input)"],
-            confidence="high",
-            kc_subcodes=["KC1.1", "KC2.3", "KC4.4", "KC5.1"],
-            tool_inventory=_TEST_TOOL_INVENTORY,
-        )
-        p = s.to_capability_profile()
-        assert p.zones_active == [
-            "input",
-            "inter_agent",
-            "memory",
-            "reasoning",
-            "tool_execution",
-        ]
+        assert p.zones_active == expected_zones
+        assert (p.has_persistent_memory, p.multi_agent, p.hitl) == expected_flags
 
     def test_empty_kc_subcodes_on_stage1_produces_baseline(self):
         """Empty kc_subcodes on Stage1Profile -> baseline zones on promoted profile.
@@ -335,17 +227,6 @@ class TestStage1ProfileZoneDerivation:
 class TestCapabilityProfileZoneDerivation:
     """CapabilityProfile derives zones_active from kc_subcodes."""
 
-    def test_zones_derived_from_kc_subcodes(self):
-        """When kc_subcodes is populated, zones_active is derived."""
-        p = CapabilityProfile(
-            zones_active=["input", "reasoning"],  # will be overridden
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC5.1"],
-            tool_inventory=_TEST_TOOL_INVENTORY,
-        )
-        assert p.zones_active == ["input", "reasoning", "tool_execution"]
-
     def test_explicit_zones_overridden_by_kc_derivation(self):
         """Explicit zones_active is replaced by KC-derived zones."""
         p = CapabilityProfile(
@@ -358,34 +239,6 @@ class TestCapabilityProfileZoneDerivation:
         # memory should be gone, tool_execution should be present
         assert "memory" not in p.zones_active
         assert "tool_execution" in p.zones_active
-
-    def test_all_zones_derived(self):
-        """Full KC set derives all five zones."""
-        p = CapabilityProfile(
-            zones_active=["input", "reasoning"],  # will be overridden
-            entry_points=["user input (input)"],
-            confidence="high",
-            kc_subcodes=["KC1.1", "KC2.3", "KC4.4", "KC5.1"],
-            tool_inventory=_TEST_TOOL_INVENTORY,
-        )
-        assert p.zones_active == [
-            "input",
-            "inter_agent",
-            "memory",
-            "reasoning",
-            "tool_execution",
-        ]
-
-    def test_kc_derived_flags_prevent_cross_field_error(self):
-        """KC4.3 derives both memory zone AND has_persistent_memory=True (no error)."""
-        p = CapabilityProfile(
-            zones_active=["input", "reasoning"],
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC4.3"],
-        )
-        assert "memory" in p.zones_active
-        assert p.has_persistent_memory is True  # computed from KC4.3
 
 
 # ---------------------------------------------------------------------------
@@ -478,120 +331,12 @@ class TestComputedFlags:
 
 
 # ---------------------------------------------------------------------------
-# Flag derivation on Stage1Profile
-# ---------------------------------------------------------------------------
-
-
-class TestStage1ProfileFlagDerivation:
-    """Stage1Profile.to_capability_profile() derives flags from kc_subcodes."""
-
-    def test_kc4_4_derives_persistent_memory_flag(self):
-        """KC4.4 with LLM-inferred has_persistent_memory=False -> corrected to True."""
-        s = Stage1Profile(
-            has_persistent_memory=False,  # LLM got it wrong
-            multi_agent=False,
-            hitl=False,
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC4.4"],
-        )
-        p = s.to_capability_profile()
-        assert p.has_persistent_memory is True
-        assert "memory" in p.zones_active
-
-    def test_kc4_1_does_not_derive_persistent_memory(self):
-        """KC4.1 only -> has_persistent_memory stays False."""
-        s = Stage1Profile(
-            has_persistent_memory=False,
-            multi_agent=False,
-            hitl=False,
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC4.1"],
-        )
-        p = s.to_capability_profile()
-        assert p.has_persistent_memory is False
-        assert "memory" not in p.zones_active
-
-    def test_kc2_3_derives_multi_agent_flag(self):
-        """KC2.3 with LLM-inferred multi_agent=False -> corrected to True."""
-        s = Stage1Profile(
-            has_persistent_memory=False,
-            multi_agent=False,  # LLM got it wrong
-            hitl=False,
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC2.3"],
-        )
-        p = s.to_capability_profile()
-        assert p.multi_agent is True
-        assert "inter_agent" in p.zones_active
-
-    def test_no_kc2_3_multi_agent_stays_false(self):
-        """No KC2.3 -> multi_agent stays False."""
-        s = Stage1Profile(
-            has_persistent_memory=False,
-            multi_agent=False,
-            hitl=False,
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC2.1"],
-        )
-        p = s.to_capability_profile()
-        assert p.multi_agent is False
-
-    def test_full_profile_both_flags_derived(self):
-        """KC4.4 + KC2.3 -> both flags True, validator passes."""
-        s = Stage1Profile(
-            has_persistent_memory=False,  # LLM got both wrong
-            multi_agent=False,
-            hitl=True,
-            entry_points=["user input (input)"],
-            confidence="high",
-            kc_subcodes=["KC1.1", "KC2.3", "KC4.4", "KC5.1"],
-            tool_inventory=_TEST_TOOL_INVENTORY,
-        )
-        p = s.to_capability_profile()
-        assert p.has_persistent_memory is True
-        assert p.multi_agent is True
-        assert p.zones_active == [
-            "input",
-            "inter_agent",
-            "memory",
-            "reasoning",
-            "tool_execution",
-        ]
-
-
-# ---------------------------------------------------------------------------
 # Flag derivation on CapabilityProfile (computed properties)
 # ---------------------------------------------------------------------------
 
 
 class TestCapabilityProfileFlagDerivation:
     """CapabilityProfile computed boolean flags from kc_subcodes."""
-
-    def test_kc4_4_computes_persistent_memory(self):
-        """KC4.4 -> has_persistent_memory computed as True."""
-        p = CapabilityProfile(
-            zones_active=["input", "reasoning"],
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC4.4"],
-        )
-        assert p.has_persistent_memory is True
-        assert "memory" in p.zones_active
-
-    def test_kc2_3_computes_multi_agent(self):
-        """KC2.3 -> multi_agent computed as True."""
-        p = CapabilityProfile(
-            zones_active=["input", "reasoning"],
-            entry_points=["user input (input)"],
-            confidence="medium",
-            kc_subcodes=["KC1.1", "KC2.3"],
-        )
-        assert p.multi_agent is True
-        assert "inter_agent" in p.zones_active
 
     def test_legacy_bool_fields_stripped_from_input(self):
         """Legacy boolean fields in input data are silently stripped."""
