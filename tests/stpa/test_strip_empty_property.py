@@ -1,18 +1,10 @@
 """Property-based tests for strip_empty_responsibilities invariants.
 
-These tests verify invariants that hold across broad input ranges:
-
-- **Idempotence**: stripping twice yields the same result as stripping once.
-- **No empty survives**: every responsibility in the output has at least one
-  PM part, control action, or feedback channel.
-- **Order preservation**: kept responsibilities maintain their relative order.
-- **Warning-stripped correspondence**: the number of warnings equals the
-  number of responsibilities removed.
-- **No-op identity**: when nothing is stripped, the returned object is the
-  same instance (identity preserved).
-- **Subset preservation**: output resp_ids are a subset of input resp_ids.
-- **Kept responsibilities unchanged**: kept responsibilities are identical
-  to their input counterparts (same field values).
+The output must equal the input filtered by ``_is_responsibility_empty``,
+in input order and with each kept responsibility unchanged. That one
+oracle implies idempotence, that no empty responsibility survives, and
+that output IDs are an ordered subset of the input. Each removal yields
+one warning, and when nothing is removed the same object is returned.
 """
 
 from __future__ import annotations
@@ -132,159 +124,16 @@ def st_control_structure(draw) -> ControlStructure:
     return ControlStructure(responsibilities=responsibilities)
 
 
-# ---------------------------------------------------------------------------
-# Idempotence: strip(strip(cs)) == strip(cs)
-# ---------------------------------------------------------------------------
-
-
-class TestStripIdempotence:
-    """Stripping twice produces the same result as stripping once."""
+class TestStripEmptyResponsibilities:
+    """Stripping is a filter that drops exactly the empty responsibilities."""
 
     @given(cs=st_control_structure())
     @settings(max_examples=80, deadline=None)
-    def test_strip_is_idempotent(self, cs):
-        """strip(strip(cs)) has the same resp_ids as strip(cs)."""
-        stripped_once, _ = strip_empty_responsibilities(cs)
-        stripped_twice, _ = strip_empty_responsibilities(stripped_once)
-        ids_once = [r.resp_id for r in stripped_once.responsibilities]
-        ids_twice = [r.resp_id for r in stripped_twice.responsibilities]
-        assert ids_once == ids_twice
-
-
-# ---------------------------------------------------------------------------
-# No empty survives: every output responsibility is non-empty
-# ---------------------------------------------------------------------------
-
-
-class TestNoEmptySurvives:
-    """No responsibility in the output is empty."""
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_no_empty_in_output(self, cs):
-        """Every responsibility in the stripped output is non-empty."""
-        stripped, _ = strip_empty_responsibilities(cs)
-        for resp in stripped.responsibilities:
-            assert not _is_responsibility_empty(resp), (
-                f"Empty responsibility {resp.resp_id} survived stripping"
-            )
-
-
-# ---------------------------------------------------------------------------
-# Order preservation: kept responsibilities maintain relative order
-# ---------------------------------------------------------------------------
-
-
-class TestOrderPreservation:
-    """Kept responsibilities maintain their input relative order."""
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_relative_order_preserved(self, cs):
-        """The output resp_ids are a subsequence of the input resp_ids."""
-        stripped, _ = strip_empty_responsibilities(cs)
-        input_ids = [r.resp_id for r in cs.responsibilities]
-        output_ids = [r.resp_id for r in stripped.responsibilities]
-        # output_ids must be a subsequence of input_ids
-        idx = 0
-        for oid in output_ids:
-            idx = input_ids.index(oid, idx) + 1
-        # If we reach here without ValueError, order is preserved
-
-
-# ---------------------------------------------------------------------------
-# Warning-stripped correspondence: len(warnings) == count of stripped
-# ---------------------------------------------------------------------------
-
-
-class TestWarningStrippedCorrespondence:
-    """The number of warnings equals the number of stripped responsibilities."""
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_warning_count_equals_stripped_count(self, cs):
-        """len(warnings) == number of responsibilities removed."""
+    def test_strip_keeps_exactly_the_non_empty_responsibilities(self, cs):
+        """Output equals the order-preserving filter; one warning per removal."""
         stripped, warnings = strip_empty_responsibilities(cs)
-        stripped_count = len(cs.responsibilities) - len(stripped.responsibilities)
-        assert len(warnings) == stripped_count
-
-
-# ---------------------------------------------------------------------------
-# No-op identity: when nothing stripped, same object returned
-# ---------------------------------------------------------------------------
-
-
-class TestNoOpIdentity:
-    """When no responsibilities are empty, the same object is returned."""
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_no_op_returns_same_object(self, cs):
-        """When nothing is stripped, the returned object is identical."""
-        stripped, warnings = strip_empty_responsibilities(cs)
-        if len(warnings) == 0:
-            assert stripped is cs, (
-                "No-op strip should return the same object (identity preserved)"
-            )
-
-
-# ---------------------------------------------------------------------------
-# Subset preservation: output resp_ids ⊆ input resp_ids
-# ---------------------------------------------------------------------------
-
-
-class TestSubsetPreservation:
-    """Output resp_ids are a subset of input resp_ids."""
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_output_ids_subset_of_input(self, cs):
-        """Every output resp_id was in the input."""
-        stripped, _ = strip_empty_responsibilities(cs)
-        input_ids = {r.resp_id for r in cs.responsibilities}
-        output_ids = {r.resp_id for r in stripped.responsibilities}
-        assert output_ids <= input_ids
-
-
-# ---------------------------------------------------------------------------
-# Kept responsibilities unchanged: identical field values
-# ---------------------------------------------------------------------------
-
-
-class TestKeptResponsibilitiesUnchanged:
-    """Kept responsibilities have the same field values as their input."""
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_kept_resps_unchanged(self, cs):
-        """Each kept responsibility has identical fields to its input counterpart."""
-        stripped, _ = strip_empty_responsibilities(cs)
-        input_by_id = {r.resp_id: r for r in cs.responsibilities}
-        for resp in stripped.responsibilities:
-            original = input_by_id[resp.resp_id]
-            assert resp.resp_id == original.resp_id
-            assert resp.description == original.description
-            assert (
-                resp.responsibility_constraints == original.responsibility_constraints
-            )
-            assert resp.process_model_parts == original.process_model_parts
-            assert resp.control_actions == original.control_actions
-            assert resp.feedback_channels == original.feedback_channels
-
-
-# ---------------------------------------------------------------------------
-# Conservation: stripped count == count of empty input responsibilities
-# ---------------------------------------------------------------------------
-
-
-class TestStrippedCountConservation:
-    """The number of stripped responsibilities equals the empty input count."""
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_stripped_equals_empty_input(self, cs):
-        """len(input) - len(output) == count of empty responsibilities in input."""
-        stripped, _ = strip_empty_responsibilities(cs)
-        empty_count = sum(1 for r in cs.responsibilities if _is_responsibility_empty(r))
-        stripped_count = len(cs.responsibilities) - len(stripped.responsibilities)
-        assert stripped_count == empty_count
+        kept = [r for r in cs.responsibilities if not _is_responsibility_empty(r)]
+        assert stripped.responsibilities == kept
+        assert len(warnings) == len(cs.responsibilities) - len(kept)
+        if len(kept) == len(cs.responsibilities):
+            assert stripped is cs
