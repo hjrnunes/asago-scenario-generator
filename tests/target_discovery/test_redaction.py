@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from asago_scenario_generator.target_discovery import redaction
 
 
@@ -44,6 +46,38 @@ def test_authorization_redaction_stops_at_the_line_end():
     assert redaction.sanitize_json("Authorization: Bearer\nnext line") == (
         "Authorization: [REDACTED]\nnext line"
     )
+
+
+IDEMPOTENCE_SAMPLES = (
+    "token=secret",
+    "token: abc def password=xyz uvw",
+    "token=[REDACTED]",
+    "token: [REDACTED] and more",
+    "api_key=[REDACTED]]",
+    "token=[REDACTED]trailing",
+    "Header Authorization: Bearer EXAMPLE_ONLY_TOKEN",
+    "authorization = Basic RVhBTVBMRQ==, then retry",
+    "Authorization: [REDACTED]",
+    "Authorization: Bearer [REDACTED]",
+    "Authorization: Bearer\nnext line",
+    'Authorization: "Bearer EXAMPLE_ONLY_TOKEN"',
+    "Authorization: EXAMPLE_ONLY_TOKEN; retry",
+    "no credential here",
+)
+
+
+@pytest.mark.parametrize("text", IDEMPOTENCE_SAMPLES)
+def test_text_redaction_is_idempotent(text):
+    once = redaction.sanitize_json(text)
+    assert redaction.sanitize_json(once) == once
+
+
+def test_an_existing_redaction_marker_stays_as_it_is():
+    assert redaction.sanitize_json("token=[REDACTED]") == "token=[REDACTED]"
+    assert redaction.sanitize_json("password: [REDACTED], next") == (
+        "password: [REDACTED], next"
+    )
+    assert redaction.sanitize_json("token=[REDACTED]trailing") == "token=[REDACTED]"
 
 
 def test_other_text_keys_still_redact_one_token():

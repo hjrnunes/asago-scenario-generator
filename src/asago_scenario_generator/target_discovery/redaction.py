@@ -17,11 +17,15 @@ _SENSITIVE_KEY = re.compile(
     r"api[_-]?key|access[_-]?key|private[_-]?key|default|examples?|sample)",
     re.IGNORECASE,
 )
+# An unquoted value ends at whitespace or a closing delimiter. A marker left by
+# an earlier pass counts as part of the value, so a second pass replaces it with
+# an identical marker instead of leaving a stray "]".
+_VALUE_TOKEN = r"(?:\[REDACTED\]|[^\s,;\]}])+"
 _SENSITIVE_TEXT = re.compile(
     r"(\b(?:secret|token|password|passwd|credential|"
     r"api[_-]?key|access[_-]?key|private[_-]?key|default|examples?|sample)"
     r"\b\s*[:=]\s*)"
-    r"([^\s,;\]}]+)",
+    rf"({_VALUE_TOKEN})",
     re.IGNORECASE,
 )
 # An authorization value is usually "<scheme> <credential>" (Bearer, Basic,
@@ -31,7 +35,7 @@ _SENSITIVE_TEXT = re.compile(
 _AUTHORIZATION_TEXT = re.compile(
     r"(\bauthorization\b\s*[:=]\s*)"
     r"(?:[\"']?[A-Za-z][A-Za-z0-9_-]*[ \t]+)?"
-    r"[^\s,;\]}]+",
+    rf"{_VALUE_TOKEN}",
     re.IGNORECASE,
 )
 
