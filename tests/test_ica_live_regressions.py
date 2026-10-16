@@ -7,7 +7,6 @@ from pathlib import Path
 import yaml
 
 from asago_scenario_generator.models.obligation_consideration import ObligationRoute
-from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudget
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionTemporality,
@@ -91,32 +90,18 @@ def test_captured_resp6_uses_nested_consideration_results(tmp_path) -> None:
             ),
         ),
     )
-    calls = 0
-
-    class Client:
-        model = "captured-resp-6"
-
-        def complete(self, **kwargs):
-            nonlocal calls
-            calls += 1
-            content = {"filled_slots": [provider_slot_payload(draft)]}
-            return LLMResult(
-                content=content,
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient(
+        [{"filled_slots": [provider_slot_payload(draft)]}], model="captured-resp-6"
+    )
 
     provider = ObligationAwareLLMAdapter(
-        Client(),
+        client,
         run_dir=tmp_path,
         controls=_controls(),
     )
     response = provider.fill(_provider_slot_request(routed_routes=(route,)))
 
-    assert calls == 1
+    assert len(client.calls) == 1
     assert captured["normative_field"] == "consideration_results"
     assert captured["legacy_ica_id"] != captured["canonical_ica_id"]
     assert response.considerations[0].obligation_id == obligation_id
@@ -167,23 +152,13 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
             )
         }
     )
-    calls = 0
-
-    class Client:
-        model = "captured-compile-retry"
-
-        def complete(self, **kwargs):
-            nonlocal calls
-            calls += 1
-            draft = invalid if calls == 1 else corrected
-            return LLMResult(
-                content={"filled_slots": [provider_slot_payload(draft)]},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient(
+        [
+            {"filled_slots": [provider_slot_payload(invalid)]},
+            {"filled_slots": [provider_slot_payload(corrected)]},
+        ],
+        model="captured-compile-retry",
+    )
 
     request = SynthesisSlotRequest(
         target_id=slot.responsibility or slot.coordination_link or "",
@@ -194,14 +169,14 @@ def test_provider_retries_schema_valid_draft_when_compile_semantics_fail(
         controls=_controls().model_copy(update={"validation_retries": 1}),
     )
     provider = ObligationAwareLLMAdapter(
-        Client(),
+        client,
         run_dir=tmp_path,
         controls=request.controls,
     )
 
     result = provider.fill(request)
 
-    assert calls == 2
+    assert len(client.calls) == 2
     assert result.filled_slots[0].is_na is False
     entries = read_calls_jsonl(tmp_path)
     assert entries[0]["success"] is False
