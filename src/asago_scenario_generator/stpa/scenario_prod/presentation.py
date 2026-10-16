@@ -35,6 +35,10 @@ from asago_scenario_generator.stpa.models.scenario_spec import (
     DefenderBDI,
     ScenarioSpec,
 )
+from asago_scenario_generator.stpa.scenario_prod.tree_sources import (
+    context_tree_sources,
+    defender_tree_sources,
+)
 
 TREE_FRAMING = (
     "Proposed causal hypothesis. No node below is an observed execution result, "
@@ -439,10 +443,10 @@ def _allowed_tree_sources(account: dict[str, Any]) -> set[str]:
     """Return exact structural sources that the tree is allowed to explain."""
     allowed = _lineage_tree_sources(account["lineage"])
     allowed.update(factor.source_id for factor in account["factors"])
-    allowed.update(_defender_tree_sources(account["defender"]))
+    allowed.update(defender_tree_sources(account["defender"]))
     context = account["context"]
     if context is not None:
-        allowed.update(_context_tree_sources(context))
+        allowed.update(context_tree_sources(context))
     return allowed
 
 
@@ -455,44 +459,6 @@ def _lineage_tree_sources(lineage: dict[str, Any]) -> set[str]:
         *lineage["constraint_ids"],
         *lineage["loss_ids"],
     }
-
-
-def _defender_tree_sources(defender: DefenderBDI) -> set[str]:
-    """Collect exact IDs grounded by defender BDI."""
-    return {
-        *[belief.pm_id for belief in defender.beliefs],
-        *[desire.resp_id for desire in defender.desires],
-        *[
-            desire.constraint_id
-            for desire in defender.desires
-            if desire.constraint_id is not None
-        ],
-        *[intention.ca_id for intention in defender.intentions],
-    }
-
-
-def _context_tree_sources(context: Any) -> set[str]:
-    """Collect exact IDs from the selected control path."""
-    path = context.target_control_path
-    allowed = {
-        *(item.element_id for item in path.process_model_parts),
-        *(item.element_id for item in path.feedback),
-        *(item.action_id for item in path.related_control_actions),
-    }
-    if path.responsibility is not None:
-        allowed.add(path.responsibility.element_id)
-    if path.coordination_path is not None:
-        coordination = path.coordination_path
-        allowed.update(
-            {
-                coordination.link_id,
-                coordination.source.element_id,
-                coordination.target.element_id,
-                coordination.shared_process_model.element_id,
-                coordination.coordination_mechanism.element_id,
-            }
-        )
-    return allowed
 
 
 def _actor_nodes(

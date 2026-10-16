@@ -585,6 +585,8 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "realized_operation": 0,
     "condition_family": 0,
     "presentation": 1,
+    # Tree-source collectors shared by presentation and validators.
+    "tree_sources": 0,
     "_constants": 0,
     "context": 0,
     # Phase 3 content-surface facts: a pure leaf over the IO capability model.
