@@ -14,6 +14,7 @@ foundation property tests in ``test_property.py``:
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import tempfile
 
@@ -40,7 +41,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     call_with_policy,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.helpers.calls_log import read_calls_jsonl
 
 # ---------------------------------------------------------------------------
 # Strategies
@@ -272,7 +272,13 @@ class TestSafeLlmCallInvariants:
         assert passed.error is None
         assert passed.result is not None
 
-        failure_entry, success_entry = read_calls_jsonl(run_dir)
+        # Split on "\n" only: the call log is written with ensure_ascii=False,
+        # so characters such as U+0085 in the random error text stay raw, and
+        # str.splitlines() splits on them.
+        log_text = (run_dir / "calls.jsonl").read_text(encoding="utf-8")
+        failure_entry, success_entry = [
+            json.loads(line) for line in log_text.split("\n") if line
+        ]
         assert failure_entry["success"] is False
         assert failure_entry["error"]
         assert success_entry["success"] is True
