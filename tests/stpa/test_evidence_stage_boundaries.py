@@ -37,6 +37,15 @@ def _load(run_dir: Path, name: str) -> dict:
     return yaml.safe_load((run_dir / name).read_text())
 
 
+def _run_sp1(client, tmp_path):
+    return run_sp1(
+        llm_client=client,
+        use_case_text="Test use case",
+        risk_cards=make_risk_cards(),
+        run_dir=tmp_path,
+    )
+
+
 def _unresolved_review() -> dict:
     payload = valid_empty_coordination_analysis_dict(
         constraint_ids=("SC-1", "SC-2"),
@@ -74,12 +83,7 @@ def _spy_canonical_writes(writes: Counter):
 class TestReviewedLossAnalysisVersions:
     def test_review_is_kept_under_its_own_name_and_canonical_holds_it(self, tmp_path):
         client = setup_sp1_mock_client()
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _run_sp1(client, tmp_path)
 
         assert result.loss_analysis is not None
         reviewed = (tmp_path / "loss-analysis-reviewed.yaml").read_bytes()
@@ -91,12 +95,7 @@ class TestReviewedLossAnalysisVersions:
     ):
         client = setup_sp1_mock_client()
         client.set_response_for(CoordinationAnalysis, _unresolved_review())
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _run_sp1(client, tmp_path)
 
         assert result.control_structure is None
         reviewed = _load(tmp_path, "loss-analysis-reviewed.yaml")
@@ -118,12 +117,7 @@ class TestReviewedLossAnalysisVersions:
         )
         client = setup_sp1_mock_client()
         client.set_response_for(CoordinationAnalysis, [_unresolved_review(), corrected])
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _run_sp1(client, tmp_path)
 
         assert result.stage_errors == []
         first = _load(tmp_path, "loss-analysis-reviewed.yaml")
@@ -142,12 +136,7 @@ class TestReviewedLossAnalysisVersions:
         writes: Counter = Counter()
         spies = _spy_canonical_writes(writes)
         with spies[0], spies[1], spies[2]:
-            run_sp1(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _run_sp1(client, tmp_path)
 
         assert writes[("loss_analysis", "loss-analysis.yaml")] == 1
         assert writes[("control_structure", "loss-analysis.yaml")] == 1
@@ -204,12 +193,7 @@ class TestControlStructureVersions:
         with ExitStack() as stack:
             for item in patches:
                 stack.enter_context(item)
-            return run_sp1(
-                llm_client=setup_sp1_mock_client(),
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=run_dir,
-            )
+            return _run_sp1(setup_sp1_mock_client(), run_dir)
 
     @staticmethod
     def _description(run_dir: Path, name: str) -> str:
@@ -247,12 +231,7 @@ class TestControlStructureVersions:
         assert writes[("run", "control-structure.yaml")] == 1
 
     def test_unchanged_steps_write_no_extra_version(self, tmp_path):
-        run_sp1(
-            llm_client=setup_sp1_mock_client(),
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        _run_sp1(setup_sp1_mock_client(), tmp_path)
 
         assert (tmp_path / "control-structure-reviewed.yaml").exists()
         assert (tmp_path / "control-structure.yaml").read_bytes() == (

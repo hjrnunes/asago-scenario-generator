@@ -15,6 +15,15 @@ from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient, valid_risk_draft_dict, make_risk_cards
 
 
+def _derive(client, tmp_path):
+    return derive_loss_analysis(
+        llm_client=client,
+        use_case_text="Klarna's assistant serves authenticated fintech customers.",
+        risk_cards=make_risk_cards(),
+        run_dir=tmp_path,
+    )
+
+
 def _run14_invalid_gap_response() -> dict:
     """Return the exact missing-loss shape from the run-14 saved response."""
     return {
@@ -304,12 +313,7 @@ def test_run15_gap_graph_merges_without_id_union_leakage(tmp_path):
         [_run15_risk_response(), gap],
     )
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text="Klarna's assistant serves authenticated fintech customers.",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    result = _derive(client, tmp_path)
 
     assert [loss.loss_id for loss in result.risk_card_losses] == ["L-1"]
     assert [loss.loss_id for loss in result.use_case_losses] == [
@@ -364,12 +368,7 @@ def test_run15_invalid_gap_references_fail_typed(tmp_path):
     )
 
     with pytest.raises(StageError) as exc_info:
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Klarna's assistant serves authenticated fintech customers.",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        _derive(client, tmp_path)
 
     message = str(exc_info.value)
     assert "targeted repair failed" in message
@@ -512,12 +511,7 @@ def test_run15_authority_merge_scopes_redeclared_ids_without_overwrite(tmp_path)
         [_run15_risk_response(), gap],
     )
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text="Klarna's assistant serves authenticated fintech customers.",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    result = _derive(client, tmp_path)
 
     assert result.hazards[0].hazard_id == "H-1"
     assert (
@@ -598,12 +592,7 @@ def test_gap_valid_disposition_is_not_malformed_row_cleanup(tmp_path):
     )
 
     with pytest.raises(StageError, match="valid out-of-contract"):
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Klarna's assistant serves authenticated fintech customers.",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        _derive(client, tmp_path)
 
     # The risk-stage response survives in call evidence; the valid extra row
     # is terminal and receives no cleanup or repair call.

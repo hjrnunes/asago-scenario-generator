@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
     _CoordinationProviderEnvelope,
 )
+from asago_scenario_generator.stpa.system_model.run import run_sp1
 from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 
 
@@ -507,6 +508,17 @@ class MockLLMClient:
 def make_risk_cards() -> list[RiskCard]:
     """Return a minimal list of RiskCards for SP1 pipeline tests."""
     return [RiskCard(**row) for row in load_sp1_fixture("risk_cards")]
+
+
+def run_sp1_default(client: Any, run_dir: Any, **overrides: Any) -> Any:
+    """Run SP1 on the default test use case and risk cards."""
+    return run_sp1(
+        llm_client=client,
+        use_case_text="Test use case",
+        risk_cards=make_risk_cards(),
+        run_dir=run_dir,
+        **overrides,
+    )
 
 
 def valid_stage1_profile_dict() -> dict:

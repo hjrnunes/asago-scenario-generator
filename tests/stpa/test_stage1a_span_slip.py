@@ -40,6 +40,16 @@ UNMAPPABLE_SPAN = "health records are never shared"
 GAP_RULE = "The neutralized system must uphold control SC-8."
 
 
+def _derive_default(client, tmp_path, **overrides):
+    return derive_loss_analysis(
+        llm_client=client,
+        use_case_text=_USE_CASE,
+        risk_cards=_occiai_cards(),
+        run_dir=tmp_path,
+        **overrides,
+    )
+
+
 def _risk_response_with_span(span: str) -> dict:
     """The seven-missing-dispositions response, SC-1/O1 quoting ``span``."""
     response = _attempt_two_response()
@@ -58,12 +68,7 @@ def _derive(tmp_path, responses: list[dict], *, repair: dict | None = None):
     )
     if repair is not None:
         client.set_response_for(ObligationRepairResponse, repair)
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text=_USE_CASE,
-        risk_cards=_occiai_cards(),
-        run_dir=tmp_path,
-    )
+    result = _derive_default(client, tmp_path)
     return result, client
 
 
@@ -149,13 +154,7 @@ def test_risk_derivation_drops_an_obligation_whose_span_stays_unmapped(
     client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
     client.set_response_for(ObligationRepairResponse, repair)
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text=_USE_CASE,
-        risk_cards=_occiai_cards(),
-        run_dir=tmp_path,
-        normalization_warnings=warnings,
-    )
+    result = _derive_default(client, tmp_path, normalization_warnings=warnings)
 
     assert [o.obligation_id for o in result.security_constraints[0].obligations] == [
         "O2"
@@ -194,13 +193,7 @@ def test_a_corrected_span_that_a_repair_maps_is_kept(tmp_path) -> None:
     client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
     client.set_response_for(ObligationRepairResponse, repair)
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text=_USE_CASE,
-        risk_cards=_occiai_cards(),
-        run_dir=tmp_path,
-        normalization_warnings=warnings,
-    )
+    result = _derive_default(client, tmp_path, normalization_warnings=warnings)
 
     obligations = result.security_constraints[0].obligations
     assert [(o.obligation_id, o.rule_span) for o in obligations] == [
@@ -238,13 +231,7 @@ def test_a_constraint_that_loses_its_last_obligation_is_kept(tmp_path) -> None:
     client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
     client.set_response_for(ObligationRepairResponse, repair)
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text=_USE_CASE,
-        risk_cards=_occiai_cards(),
-        run_dir=tmp_path,
-        normalization_warnings=warnings,
-    )
+    result = _derive_default(client, tmp_path, normalization_warnings=warnings)
 
     assert [c.constraint_id for c in result.security_constraints] == [
         f"SC-{number}" for number in range(1, 8)
@@ -267,12 +254,7 @@ def test_a_gap_constraint_left_without_obligations_keeps_the_chain_complete(
     client.set_response_for(LossAnalysisDraft, [_complete_risk_response(), gap])
     client.set_response_for(ObligationRepairResponse, repair)
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text=_USE_CASE,
-        risk_cards=_occiai_cards(),
-        run_dir=tmp_path,
-    )
+    result = _derive_default(client, tmp_path)
 
     gap_constraint = result.security_constraints[7]
     assert gap_constraint.constraint_id == "SC-8"
@@ -294,12 +276,7 @@ def test_gap_analysis_drops_an_obligation_whose_span_stays_unmapped(tmp_path) ->
     client.set_response_for(LossAnalysisDraft, [_complete_risk_response(), gap])
     client.set_response_for(ObligationRepairResponse, repair)
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text=_USE_CASE,
-        risk_cards=_occiai_cards(),
-        run_dir=tmp_path,
-    )
+    result = _derive_default(client, tmp_path)
 
     gap_constraint = result.security_constraints[7]
     assert gap_constraint.constraint_id == "SC-8"
@@ -328,12 +305,7 @@ def test_an_unknown_hazard_beside_an_unmapped_span_gets_a_reference_repair(
         },
     )
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text=_USE_CASE,
-        risk_cards=_occiai_cards(),
-        run_dir=tmp_path,
-    )
+    result = _derive_default(client, tmp_path)
 
     assert [entry["step"] for entry in _stage1a_entries(tmp_path)] == [
         "risk_derivation",
@@ -362,9 +334,4 @@ def test_a_slipping_span_beside_an_unrelated_edit_still_stops(tmp_path) -> None:
     )
 
     with pytest.raises(StageError, match="repair_unrelated_field_edit"):
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text=_USE_CASE,
-            risk_cards=_occiai_cards(),
-            run_dir=tmp_path,
-        )
+        _derive_default(client, tmp_path)

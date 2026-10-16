@@ -118,6 +118,25 @@ ITERATION20_RISK_IDS: tuple[str, ...] = (
 )
 
 
+def _derive_atlas(client, tmp_path, **overrides):
+    return derive_loss_analysis(
+        llm_client=client,
+        use_case_text="Test use case",
+        risk_cards=make_risk_cards(("atlas-001",)),
+        run_dir=tmp_path,
+        **overrides,
+    )
+
+
+def _run_atlas(client, tmp_path):
+    return run_sp1(
+        llm_client=client,
+        use_case_text="Test use case",
+        risk_cards=make_risk_cards(("atlas-001",)),
+        run_dir=tmp_path,
+    )
+
+
 @pytest.fixture
 def iteration20_analysis() -> LossAnalysis:
     return LossAnalysis.model_validate(yaml.safe_load(FIXTURE_PATH.read_text()))
@@ -496,12 +515,7 @@ class TestDeriveLossAnalysisAccounting:
                 ]
             },
         )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _derive_atlas(client, tmp_path)
 
         assert result.risk_dispositions[0].risk_ref == "atlas-001"
         assert result.risk_dispositions[0].disposition == "cited"
@@ -543,12 +557,7 @@ class TestDeriveLossAnalysisAccounting:
             },
         )
         with pytest.raises(StageError, match="targeted repair failed"):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(("atlas-001",)),
-                run_dir=tmp_path,
-            )
+            _derive_atlas(client, tmp_path)
         assert len(client.calls) == 2
 
     def test_dispositions_and_conditions_are_persisted(self, tmp_path) -> None:
@@ -556,12 +565,7 @@ class TestDeriveLossAnalysisAccounting:
         draft["security_constraints"][0]["applies_when"] = ["before execution"]
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [draft, valid_gap_draft_dict()])
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        _derive_atlas(client, tmp_path)
 
         loaded = read_yaml(tmp_path / "loss-analysis.yaml", LossAnalysis)
         assert loaded.risk_dispositions[0].risk_ref == "atlas-001"
@@ -748,13 +752,7 @@ class TestWireSchemaRetry:
             [valid_risk_draft_dict(), bad_gap],
         )
         warnings: list[str] = []
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-            normalization_warnings=warnings,
-        )
+        result = _derive_atlas(client, tmp_path, normalization_warnings=warnings)
 
         assert result.risk_dispositions[0].risk_ref == "atlas-001"
         assert any("dropped malformed risk_dispositions" in w for w in warnings)
@@ -776,13 +774,7 @@ class TestWireSchemaRetry:
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [valid_risk_draft_dict(), bad_gap])
         warnings: list[str] = []
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-            normalization_warnings=warnings,
-        )
+        result = _derive_atlas(client, tmp_path, normalization_warnings=warnings)
 
         # Every garbage row is dropped and the run proceeds deterministically.
         assert result.risk_dispositions[0].risk_ref == "atlas-001"
@@ -840,12 +832,7 @@ class TestRunSp1Gates:
 
     def test_clean_graph_passes_without_a_revision_call(self, tmp_path) -> None:
         client = setup_sp1_mock_client()
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.loss_analysis is not None
         assert result.control_structure is not None
@@ -885,12 +872,7 @@ class TestRunSp1Gates:
             LossAnalysisDraft,
             [contradictory, valid_gap_draft_dict()],
         )
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.loss_analysis is not None
         disposition = result.loss_analysis.risk_dispositions[0]
@@ -917,12 +899,7 @@ class TestRunSp1Gates:
             _Stage1aRevisionPatch, _revision_response(fix_constraint=True)
         )
         _set_three_hazard_review(client)
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.loss_analysis is not None
@@ -971,12 +948,7 @@ class TestRunSp1Gates:
             _Stage1aRevisionPatch, _revision_response(fix_constraint=True)
         )
         _set_three_hazard_review(client)
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         entries = read_calls_jsonl(tmp_path)
@@ -998,12 +970,7 @@ class TestRunSp1Gates:
             ],
         )
         client.set_response_for(_Stage1aRevisionPatch, _revision_covering_h2())
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.loss_analysis is not None
@@ -1043,12 +1010,7 @@ class TestRunSp1Gates:
         client.set_response_for(
             _Stage1aRevisionPatch, _revision_response_for_disallowed_deletion()
         )
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.loss_analysis is None
         assert result.control_structure is None
@@ -1086,12 +1048,7 @@ class TestRunSp1Gates:
         client.set_response_for(
             _Stage1aRevisionPatch, _revision_response(fix_constraint=False)
         )
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.loss_analysis is None
         assert result.control_structure is None
@@ -1140,12 +1097,7 @@ class TestRunSp1Gates:
             ],
         )
         _set_three_hazard_review(client)
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.loss_analysis is not None
@@ -1198,12 +1150,7 @@ class TestRunSp1Gates:
             [valid_risk_draft_dict(), _gap_draft_with_uncovered_hazard()],
         )
         client.set_response_for(_Stage1aRevisionPatch, [first, second])
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        _run_atlas(client, tmp_path)
 
         entries = read_calls_jsonl(tmp_path)
         revisions = [e for e in entries if e["step"] == "hazard_graph_revision"]
@@ -1248,12 +1195,7 @@ def _run_sp1_with_revisions(tmp_path: Path, revisions: list[dict]):
         [valid_risk_draft_dict(), _gap_draft_with_uncovered_hazard()],
     )
     client.set_response_for(_Stage1aRevisionPatch, revisions)
-    result = run_sp1(
-        llm_client=client,
-        use_case_text="Test use case",
-        risk_cards=make_risk_cards(("atlas-001",)),
-        run_dir=tmp_path,
-    )
+    result = _run_atlas(client, tmp_path)
     return result
 
 
@@ -1799,12 +1741,7 @@ class TestRevisionCountsRequestsSent:
         )
         client.set_response_for(_Stage1aRevisionPatch, _revision_covering_h2())
 
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert any("prompt_budget_exceeded" in error for error in result.stage_errors)
         assert not [
@@ -1955,12 +1892,7 @@ class TestRunSp1RevisionDefenses:
             _Stage1aRevisionPatch, _revision_response(fix_constraint=True)
         )
         _set_three_hazard_review(client)
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.loss_analysis is not None
@@ -1997,12 +1929,7 @@ class TestRunSp1RevisionDefenses:
             _Stage1aRevisionPatch, _revision_response_changing_sc2_conditions()
         )
         _set_three_hazard_review(client)
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.loss_analysis is not None
@@ -2053,12 +1980,7 @@ class TestRunSp1RevisionDefenses:
         review["semantic_review"]["constraints"][1]["related_hazards"] = ["H-2", "H-3"]
         review["semantic_review"]["constraints"][2]["related_hazards"] = ["H-4"]
         client.set_response_for(CoordinationAnalysis, review)
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.loss_analysis is not None
@@ -2262,12 +2184,7 @@ class TestPostReviewDensityRecheck:
 
         client = setup_sp1_mock_client()
         client.set_response_for(CoordinationAnalysis, self._unresolved_review())
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         # Stage 2 fails closed and the published artifact is the exact graph
         # the gate evaluated: the reviewed graph replaced the canonical
@@ -2338,12 +2255,7 @@ class TestPostReviewDensityRecheck:
         client.set_response_for(
             CoordinationAnalysis, [self._unresolved_review(), corrected]
         )
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.control_structure is not None
@@ -2407,12 +2319,7 @@ class TestPostReviewDensityRecheck:
             CoordinationAnalysis,
             self._mark_hazard_unresolved(self._unresolved_review(), 1),
         )
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.control_structure is not None
@@ -2443,12 +2350,7 @@ class TestPostReviewDensityRecheck:
         client.set_response_for(
             CoordinationAnalysis, [self._unresolved_review(), corrected]
         )
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.control_structure is not None
@@ -2475,12 +2377,7 @@ class TestPostReviewDensityRecheck:
         self, tmp_path
     ) -> None:
         client = setup_sp1_mock_client()
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         assert result.stage_errors == []
         assert result.control_structure is not None
@@ -2518,12 +2415,7 @@ class TestPostReviewDensityRecheck:
         client = setup_sp1_mock_client()
         client.set_response_for(CoordinationAnalysis, review)
 
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _run_atlas(client, tmp_path)
 
         expected = "post-review: constraint SC-2 and hazard H-2 share no subject phrase"
         assert result.stage_errors == []
@@ -2633,12 +2525,7 @@ class TestAccountingGroundRules:
                 ]
             },
         )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _derive_atlas(client, tmp_path)
         assert result.risk_dispositions[0].reason is None
         entries = read_calls_jsonl(tmp_path)
         assert [e["step"] for e in entries if e["stage"] == "stage_1a"] == [
@@ -2674,12 +2561,7 @@ class TestAccountingGroundRules:
                 ]
             },
         )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-        )
+        result = _derive_atlas(client, tmp_path)
         assert result.risk_dispositions[0].disposition == "cited"
         entries = read_calls_jsonl(tmp_path)
         assert [e["success"] for e in entries if e["stage"] == "stage_1a"] == [
@@ -2710,13 +2592,7 @@ class TestAccountingGroundRules:
             [contradictory, valid_gap_draft_dict()],
         )
         warnings: list[str] = []
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(("atlas-001",)),
-            run_dir=tmp_path,
-            normalization_warnings=warnings,
-        )
+        result = _derive_atlas(client, tmp_path, normalization_warnings=warnings)
 
         disposition = result.risk_dispositions[0]
         assert disposition.disposition == "cited"
@@ -3022,12 +2898,7 @@ class TestRetryPromptFailureKind:
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [ungrounded])
         with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(("atlas-001",)),
-                run_dir=tmp_path,
-            )
+            _derive_atlas(client, tmp_path)
         message = str(exc_info.value)
         # A constraint-field wire violation is outside the approved repair
         # scope, so the current local-wire adapter stops before any repair.
