@@ -31,10 +31,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    SemanticCondition,
-    StimulusTurn,
-)
+from asago_scenario_generator.stpa.models.semantic_conditions import SemanticCondition
 from asago_scenario_generator.stpa.discriminating_condition import (
     ConditionCheck,
     DiscriminatingCondition,
@@ -172,13 +169,6 @@ class ScenarioSpec(BaseModel):
     unsafe_outcome_hazard_refs: list[str] = Field(default_factory=list)
     unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None
-    # Prepared user turns for a conversation_context delivery route.  The
-    # producer copies them verbatim into the published stimulus requirement;
-    # a missing value keeps the route free of turn content.
-    stimulus_turns: tuple[StimulusTurn, ...] | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-    )
     # Phase 3.1 adversary record.  Optional only for historical/non-contextual
     # values; the corrected contextual Stage 5 wire requires it.
     adversary: Adversary | None = None

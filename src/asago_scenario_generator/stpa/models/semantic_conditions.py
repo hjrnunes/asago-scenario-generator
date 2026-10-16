@@ -77,22 +77,6 @@ SemanticLiteral = Union[StrictStr, StrictInt, StrictFloat, StrictBool]
 SemanticValue = Union[SemanticBindingPlaceholder, SemanticLiteral]
 
 
-class StimulusTurn(ClosedSemanticModel):
-    """One prepared user turn delivered as conversation history.
-
-    Every entry is a user turn by definition: the wire carries no role
-    field and no mode field.  There is no assistant text between turns.
-    """
-
-    turn_id: StrictStr = Field(pattern=r"^T-\d+$")
-    text: StrictStr = Field(min_length=1)
-    intent: StrictStr | None = Field(
-        default=None,
-        min_length=1,
-        exclude_if=lambda value: value is None,
-    )
-
-
 class OrderingCondition(ClosedSemanticModel):
     """A relation between an action and an exported projected step.
 
@@ -464,7 +448,6 @@ __all__ = [
     "SemanticOperator",
     "SemanticValue",
     "StateValueCondition",
-    "StimulusTurn",
     "WindowCondition",
     "contains_binding_placeholder",
 ]
