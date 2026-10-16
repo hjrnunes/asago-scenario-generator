@@ -426,13 +426,6 @@ def test_dropped_row_for_an_unsupplied_card_is_removed_and_recorded(tmp_path):
     )
 
 
-def _without(collection: str):
-    def edit(body: dict) -> None:
-        del body[collection]
-
-    return edit
-
-
 def _damage_container(body: dict) -> None:
     body["hazards"] = "none"
 
@@ -443,11 +436,6 @@ def _damage_disposition_container(body: dict) -> None:
 
 def _damage_loss_row(body: dict) -> None:
     body["risk_card_losses"][0]["provenance"] = "invented"
-
-
-def _drop_a_card(body: dict) -> None:
-    body["risk_dispositions"].pop()
-    body["risk_dispositions"][0]["loss_ids"] = []
 
 
 def _break_a_supplied_disposition(body: dict) -> None:

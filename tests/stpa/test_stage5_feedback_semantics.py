@@ -119,17 +119,3 @@ def test_stage5_observation_view_keeps_empty_read_as_quoted_feedback() -> None:
 
     assert "TARGET-READ-001" in rendered
     assert '"items":[],"status":"not_found"' in rendered
-
-
-def _route_payload(source_handle: str, stimulus_category: str) -> dict:
-    payload = _provider_payload()
-    payload["stimulus"] = {
-        "category": stimulus_category,
-        "description": "The supplied delivery carries the causal condition.",
-    }
-    payload["causal_factors"][0]["source_handle"] = source_handle
-    payload["causal_factors"][0]["evidence"] = (
-        "The selected source contributes to the unsafe action."
-    )
-    payload["attacker_bdi"]["intentions"][0]["source_handles"] = [source_handle]
-    return payload

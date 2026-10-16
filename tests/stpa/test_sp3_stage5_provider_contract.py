@@ -3,11 +3,6 @@
 from __future__ import annotations
 
 
-from asago_scenario_generator.stpa.scenario_prod.target_observations import (
-    TargetObservation,
-    TargetObservationSnapshot,
-)
-
 from asago_scenario_generator.stpa.models.semantic_conditions import DelayCondition
 from tests.stpa.sp1_helpers import MockLLMClient
 from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
@@ -37,28 +32,6 @@ def _model_output_payload() -> dict:
         ),
     }
     return payload
-
-
-def _comparison_snapshot() -> TargetObservationSnapshot:
-    return TargetObservationSnapshot.create(
-        target_profile_digest="a" * 64,
-        observations=(
-            TargetObservation(
-                observation_ref="TARGET-STATE",
-                kind="state",
-                content_format="json",
-                content='{"amount":129,"plan_id":"PLAN21"}',
-            ),
-            TargetObservation(
-                observation_ref="TARGET-READ-001",
-                kind="read",
-                source_name="lookup_business_state",
-                source_description="Look up the current business state.",
-                content_format="json",
-                content='{"amount":129,"plan_id":"PLAN21"}',
-            ),
-        ),
-    )
 
 
 def test_context_materialization_preserves_proposition(

@@ -396,7 +396,6 @@ def test_only_the_absent_hazard_chain_raises_the_dedicated_error(
 # Source: derived from the MiniKlarna refund constraint above.  The recorded
 # gap replies carry no obligations, so the obligation rows here are written
 # for the fixture: one quotes the rule, one paraphrases it.
-_REFUND_RULE = _constraint()["rule"]
 _QUOTED_SPAN = "must issue a refund only for an order the verified customer owns"
 _PARAPHRASED_SPAN = "refund only when the policy covers the order"
 

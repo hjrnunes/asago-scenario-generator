@@ -46,8 +46,6 @@ _ZERO_VAR_SYSTEM_TEMPLATES = [
     "stage2_call3_system.j2",
 ]
 
-_SECTION_RE = re.compile(r"^(##+) .+$", re.MULTILINE)
-
 
 def _section_headings(template_name: str, prefix: str = "##") -> list[str]:
     """Extract all markdown headings with *prefix* from a template's raw text."""
