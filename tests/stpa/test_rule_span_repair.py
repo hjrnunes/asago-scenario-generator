@@ -155,15 +155,16 @@ def test_repair_obligation_rows_rewrites_only_repairable_rows() -> None:
         constraint="SC-5", rule=FINANCIAL_RULE, obligations=rows
     )
 
-    assert [record.as_dict() for record in records] == [
-        {
-            "constraint": "SC-5",
-            "obligation_id": "O1",
-            "kind": "whitespace",
-            "original": "must only   execute",
-            "repaired": "must only execute",
-        }
-    ]
+    assert [
+        (
+            record.constraint,
+            record.obligation_id,
+            record.repair.kind,
+            record.repair.original,
+            record.repair.repaired,
+        )
+        for record in records
+    ] == [("SC-5", "O1", "whitespace", "must only   execute", "must only execute")]
     assert [row["rule_span"] for row in rows] == [
         "must only execute",
         "an unrelated paraphrase",
