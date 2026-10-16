@@ -44,11 +44,6 @@ from asago_scenario_generator.stpa.system_model.critic import CriticFindings
 from tests.helpers.sp1_control_structure import _valid_requirement_set_dict
 
 
-# ---------------------------------------------------------------------------
-# Shared helpers
-# ---------------------------------------------------------------------------
-
-
 def _make_loss_analysis() -> LossAnalysis:
     """One hazard, so the Call 3 semantic review needs one hazard entry."""
     return LossAnalysis(

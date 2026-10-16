@@ -26,11 +26,6 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 )
 
 
-# ===========================================================================
-# Feature: parallel_max_workers_config — ParallelConfig-01 .. ParallelConfig-03
-# ===========================================================================
-
-
 class TestParallelMaxWorkersConfig:
     """max_workers configuration and manifest recording."""
 
@@ -73,11 +68,6 @@ class TestParallelMaxWorkersConfig:
         )
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["model_settings"]["max_workers"] == 4
-
-
-# ===========================================================================
-# Feature: parallel_sp1_compatibility — ParallelSP1-01 .. ParallelSP1-06
-# ===========================================================================
 
 
 class TestParallelSP1Compatibility:

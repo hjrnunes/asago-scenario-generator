@@ -19,10 +19,6 @@ from asago_scenario_generator.stpa.system_model.critic import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
 st_description = st.text(
     alphabet=st.characters(blacklist_categories=("Cs", "Cc")),
     min_size=1,
@@ -63,11 +59,6 @@ def _has_non_conforming_id(text: str) -> bool:
         if not any(p.match(token) for p in _CONFORMING_PATTERNS):
             return True
     return False
-
-
-# ---------------------------------------------------------------------------
-# Strategies — sanitization
-# ---------------------------------------------------------------------------
 
 
 @st.composite
@@ -161,11 +152,6 @@ def st_critic_findings(draw) -> CriticFindings:
         checklist_results=checklist_results,
         taxonomy_probe_results=taxonomy_probe_results,
     )
-
-
-# ---------------------------------------------------------------------------
-# Sanitization property tests
-# ---------------------------------------------------------------------------
 
 
 class TestSanitizeCriticIdsProperties:

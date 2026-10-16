@@ -50,9 +50,6 @@ _FIXTURE_SAFE = settings(
     deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
 
-# ---------------------------------------------------------------------------
-# Hypothesis strategies
-# ---------------------------------------------------------------------------
 
 # Unique-ID strategies: generate N unique IDs with a given prefix pattern.
 st_loss_ids = st.lists(
@@ -84,11 +81,6 @@ st_text = st.text(
     min_size=1,
     max_size=50,
 )
-
-
-# ---------------------------------------------------------------------------
-# YAML round-trip property tests
-# ---------------------------------------------------------------------------
 
 
 def _yaml_round_trip(model: BaseModel, tmp_path: Path) -> BaseModel:
@@ -213,10 +205,6 @@ class TestYamlRoundTrip:
         result = _yaml_round_trip(enum, tmp_path)
         assert result == enum
 
-
-# ---------------------------------------------------------------------------
-# ID format validation property tests
-# ---------------------------------------------------------------------------
 
 from asago_scenario_generator.stpa.models.control_structure import (  # noqa: E402
     ControlledProcess,

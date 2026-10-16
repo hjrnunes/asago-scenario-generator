@@ -54,11 +54,6 @@ def _payload_with_references() -> dict:
     return load_json_fixture("id_normalization/payload_with_references.json")
 
 
-# ---------------------------------------------------------------------------
-# Canonical IDs from structural position
-# ---------------------------------------------------------------------------
-
-
 def test_normalization_assigns_ids_from_structural_position() -> None:
     payload = _raw_payload()
 
@@ -290,11 +285,6 @@ def test_normalization_leaves_non_list_control_actions_untouched(malformed) -> N
     assert first["feedback_channels"][0]["updates"] == "PM-1-1"
 
 
-# ---------------------------------------------------------------------------
-# Result type and payload guards
-# ---------------------------------------------------------------------------
-
-
 class _OptionalFieldPayload(BaseModel):
     """Decoded payload that still carries an explicit None field."""
 
@@ -339,10 +329,6 @@ class TestPayloadDictGuards:
         with pytest.raises(TypeError, match="mapping or Pydantic model"):
             normalize_control_structure_payload(["not", "a", "mapping"])  # type: ignore[arg-type]
 
-
-# ---------------------------------------------------------------------------
-# Defensive paths: the normalizer leaves what it cannot resolve
-# ---------------------------------------------------------------------------
 
 _SLOT_PATHS = {
     "target": ("control_actions", "target"),
@@ -610,11 +596,6 @@ class TestValidateNormalizedControlStructure:
         assert "absent-reference" in message
         assert expected in message
         assert "unhashable" not in message
-
-
-# ---------------------------------------------------------------------------
-# Recoverable defects
-# ---------------------------------------------------------------------------
 
 
 def test_normalization_infers_element_ref_types_before_rewriting_ids() -> None:

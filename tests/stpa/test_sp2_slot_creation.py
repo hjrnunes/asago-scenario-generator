@@ -147,11 +147,6 @@ def _make_control_structure_varied() -> ControlStructure:
     )
 
 
-# ---------------------------------------------------------------------------
-# Slot count formula tests (SP2-SLOT-01, SP2-SLOT-02, SP2-SLOT-03)
-# ---------------------------------------------------------------------------
-
-
 class TestSlotCountFormula:
     """Tests for the slot count formula."""
 
@@ -218,11 +213,6 @@ class TestSlotCountFormula:
         assert len(slots) == 68  # (5×3×4) + (2×4) = 60+8
 
 
-# ---------------------------------------------------------------------------
-# UCA type coverage (SP2-SLOT-04)
-# ---------------------------------------------------------------------------
-
-
 class TestUCATypeCoverage:
     """Each control action produces all four UCA types."""
 
@@ -236,11 +226,6 @@ class TestUCATypeCoverage:
             UCAType.wrong_timing,
             UCAType.wrong_duration,
         }
-
-
-# ---------------------------------------------------------------------------
-# Slot ID format (SP2-SLOT-05, SP2-SLOT-06)
-# ---------------------------------------------------------------------------
 
 
 class TestSlotIDFormat:
@@ -266,11 +251,6 @@ class TestSlotIDFormat:
         assert np_slot.control_action == "CM-1"
 
 
-# ---------------------------------------------------------------------------
-# Initial slot state (SP2-SLOT-07)
-# ---------------------------------------------------------------------------
-
-
 class TestInitialSlotState:
     """Initial slot state has is_na=False, empty icas, na_justification=None."""
 
@@ -281,11 +261,6 @@ class TestInitialSlotState:
             assert slot.is_na is False
             assert slot.icas == []
             assert slot.na_justification is None
-
-
-# ---------------------------------------------------------------------------
-# SlotPlaceholder model defaults
-# ---------------------------------------------------------------------------
 
 
 class TestSlotPlaceholderDefaults:
@@ -319,11 +294,6 @@ class TestSlotPlaceholderDefaults:
         assert slot.na_justification is None
 
 
-# ---------------------------------------------------------------------------
-# No LLM calls (SP2-SLOT-08)
-# ---------------------------------------------------------------------------
-
-
 class TestNoLLMCalls:
     """Slot creation makes no LLM calls."""
 
@@ -332,11 +302,6 @@ class TestNoLLMCalls:
         slots = create_slots(cs)
         # No LLM client involved — just verify it returns without error
         assert len(slots) > 0
-
-
-# ---------------------------------------------------------------------------
-# Determinism (SP2-SLOT-09)
-# ---------------------------------------------------------------------------
 
 
 class TestDeterminism:
@@ -351,11 +316,6 @@ class TestDeterminism:
         assert ids1 == ids2
 
 
-# ---------------------------------------------------------------------------
-# No duplicate slot IDs (SP2-SLOT-10)
-# ---------------------------------------------------------------------------
-
-
 class TestUniqueSlotIDs:
     """No duplicate slot IDs."""
 
@@ -364,11 +324,6 @@ class TestUniqueSlotIDs:
         slots = create_slots(cs)
         ids = [s.slot_id for s in slots]
         assert len(ids) == len(set(ids))
-
-
-# ---------------------------------------------------------------------------
-# Different control action counts (SP2-SLOT-11)
-# ---------------------------------------------------------------------------
 
 
 class TestDifferentCACounts:

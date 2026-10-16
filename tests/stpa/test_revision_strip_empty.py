@@ -78,11 +78,6 @@ def _make_cs(responsibilities: list[Responsibility]) -> ControlStructure:
     return ControlStructure(responsibilities=responsibilities)
 
 
-# ---------------------------------------------------------------------------
-# SP1-STRIP-01: empty responsibilities are stripped, non-empty are kept
-# ---------------------------------------------------------------------------
-
-
 class TestStripEmptyResponsibilities:
     """SP1-STRIP-01: revision with empty responsibilities strips them."""
 
@@ -98,11 +93,6 @@ class TestStripEmptyResponsibilities:
         resp_ids = {r.resp_id for r in stripped.responsibilities}
         assert "RESP-1" in resp_ids
         assert "RESP-2" not in resp_ids
-
-
-# ---------------------------------------------------------------------------
-# SP1-STRIP-02: no empty responsibilities means all preserved
-# ---------------------------------------------------------------------------
 
 
 class TestNoEmptyResponsibilitiesKept:
@@ -125,11 +115,6 @@ class TestNoEmptyResponsibilitiesKept:
         assert warnings == []
 
 
-# ---------------------------------------------------------------------------
-# SP1-STRIP-03: responsibility with some parts is not stripped
-# ---------------------------------------------------------------------------
-
-
 class TestPartialResponsibilityNotStripped:
     """SP1-STRIP-03: a responsibility with PM parts but no CA/FB is kept."""
 
@@ -144,11 +129,6 @@ class TestPartialResponsibilityNotStripped:
         stripped, warnings = strip_empty_responsibilities(cs)
         resp_ids = {r.resp_id for r in stripped.responsibilities}
         assert "RESP-3" in resp_ids
-
-
-# ---------------------------------------------------------------------------
-# SP1-STRIP-04: warning logged for each stripped responsibility
-# ---------------------------------------------------------------------------
 
 
 class TestWarningForStrippedResponsibilities:
@@ -178,11 +158,6 @@ class TestWarningForStrippedResponsibilities:
         assert "Empty B" in warning_text
 
 
-# ---------------------------------------------------------------------------
-# SP1-STRIP-05: stripped control structure passes validation
-# ---------------------------------------------------------------------------
-
-
 class TestStrippedControlStructureValid:
     """SP1-STRIP-05: the stripped control structure is valid and non-empty."""
 
@@ -198,11 +173,6 @@ class TestStrippedControlStructureValid:
         resp_ids = {r.resp_id for r in stripped.responsibilities}
         assert "RESP-7" not in resp_ids
         assert len(stripped.responsibilities) >= 1
-
-
-# ---------------------------------------------------------------------------
-# SP1-STRIP-06: responsibility with only constraints but no PM/CA/FB is stripped
-# ---------------------------------------------------------------------------
 
 
 class TestConstraintsOnlyResponsibilityStripped:

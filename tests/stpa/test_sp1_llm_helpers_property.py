@@ -32,11 +32,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 
 
-# ---------------------------------------------------------------------------
-# max_completion_tokens threading through call_with_policy
-# ---------------------------------------------------------------------------
-
-
 class _DummyModel(BaseModel):
     """Simple model for LLM call testing."""
 

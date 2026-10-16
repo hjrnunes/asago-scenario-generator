@@ -15,9 +15,6 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     contains_binding_placeholder,
 )
 
-# ---------------------------------------------------------------------------
-# Ordering reference fields: typed rejections
-
 
 def test_reference_argument_without_reference_tool_fails():
     with pytest.raises(ValueError, match="reference_tool"):

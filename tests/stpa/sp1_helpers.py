@@ -500,11 +500,6 @@ class MockLLMClient:
         return len(self.calls)
 
 
-# ---------------------------------------------------------------------------
-# Shared fixture data builders (used by multiple test modules)
-# ---------------------------------------------------------------------------
-
-
 def make_risk_cards() -> list[RiskCard]:
     """Return a minimal list of RiskCards for SP1 pipeline tests."""
     return [RiskCard(**row) for row in load_sp1_fixture("risk_cards")]

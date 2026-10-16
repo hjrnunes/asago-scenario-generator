@@ -25,9 +25,6 @@ from asago_scenario_generator.model_profiles import (
     load_profile,
 )
 
-# ---------------------------------------------------------------------------
-# Strategies
-# ---------------------------------------------------------------------------
 
 st_nonempty_str = st.text(
     alphabet=st.characters(blacklist_categories=("Cs", "Cc")),
@@ -66,11 +63,6 @@ def _build_profile_dict(optionals: dict) -> dict:
     return profile
 
 
-# ---------------------------------------------------------------------------
-# Profile round-trip property tests
-# ---------------------------------------------------------------------------
-
-
 class TestProfileRoundTrip:
     """Any valid profile round-trips through YAML without loss."""
 
@@ -105,11 +97,6 @@ class TestProfileRoundTrip:
                 assert field not in result, f"Optional field '{field}' should be absent"
 
 
-# ---------------------------------------------------------------------------
-# Required field conservation property tests
-# ---------------------------------------------------------------------------
-
-
 class TestRequiredFieldConservation:
     """The result always contains exactly the required fields from the source."""
 
@@ -130,13 +117,3 @@ class TestRequiredFieldConservation:
         result = load_profile(path, profile_name)
         for field in REQUIRED_FIELDS:
             assert field in result, f"Required field '{field}' missing from result"
-
-
-# ---------------------------------------------------------------------------
-# Empty required field rejection property tests
-# ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Unknown profile name rejection property tests
-# ---------------------------------------------------------------------------

@@ -91,9 +91,6 @@ def _findings(
     )
 
 
-# --- not_called on the operation an INCORRECT action calls -----------------
-
-
 def test_not_called_on_the_incorrect_actions_operation_is_inverted() -> None:
     findings = _findings(_not_called())
 
@@ -131,9 +128,6 @@ def test_not_called_on_another_operation_is_not_judged(
     assert _findings(_not_called(operation), unsafe_operation=unsafe_operation) == ()
 
 
-# --- a condition that names no call under a command-attempt claim ----------
-
-
 def test_state_only_condition_under_a_command_attempt_names_no_call() -> None:
     findings = _findings(_state_only(), uca_type=UCAType.wrong_timing)
 
@@ -161,9 +155,6 @@ def test_selection_argument_gives_the_condition_a_call() -> None:
     assert _findings(_state_only(selected)) == ()
 
 
-# --- claim levels the checks leave alone ------------------------------------
-
-
 @pytest.mark.parametrize(
     "safe_outcome",
     [
@@ -188,9 +179,6 @@ def test_checks_run_only_under_a_command_attempt_claim(condition, safe_outcome) 
 )
 def test_each_code_has_repair_guidance(code) -> None:
     assert code in {item.value for item in _repair_guidance("TARGET-STATE")}
-
-
-# --- Stage 5 correction and publication -------------------------------------
 
 
 def _generate_incorrect(client: MockLLMClient, tmp_path):

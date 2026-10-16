@@ -27,9 +27,6 @@ from asago_scenario_generator.stpa.system_model.critic import (
     strip_empty_responsibilities,
 )
 
-# ---------------------------------------------------------------------------
-# Strategies
-# ---------------------------------------------------------------------------
 
 st_description = st.text(
     alphabet=st.characters(blacklist_categories=("Cs", "Cc")),

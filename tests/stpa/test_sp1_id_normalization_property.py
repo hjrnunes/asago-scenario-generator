@@ -481,10 +481,6 @@ class TestCrossNamespaceCollisionsAreOmitted:
         assert result.payload["controlled_processes"][0]["cp_id"] == "CP-1"
 
 
-# ---------------------------------------------------------------------------
-# Recoverable repairs
-# ---------------------------------------------------------------------------
-
 st_label = st.text(
     alphabet=st.characters(
         whitelist_categories=("Ll", "Lu", "Nd"),

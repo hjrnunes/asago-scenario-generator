@@ -21,11 +21,6 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 from tests.helpers.stpa_builders import make_capability_profile
 
 
-# ---------------------------------------------------------------------------
-# Capability profile conditional rendering in stage2_call2a_user.j2
-# ---------------------------------------------------------------------------
-
-
 def _make_requirement_set():
     """Build a minimal RequirementSet for template rendering."""
     req = Requirement(

@@ -46,9 +46,6 @@ _FIXTURE_SAFE = settings(
     deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
 
-# ---------------------------------------------------------------------------
-# Strategies
-# ---------------------------------------------------------------------------
 
 st_text = st.text(
     alphabet=st.characters(
@@ -63,11 +60,6 @@ st_classification = st.sampled_from(["control", "constraint"])
 st_gap_type = st.sampled_from(
     ["missing_responsibility", "missing_feedback", "missing_pm_part"]
 )
-
-
-# ---------------------------------------------------------------------------
-# YAML round-trip property tests
-# ---------------------------------------------------------------------------
 
 
 def _yaml_round_trip(model, tmp_path: Path):
@@ -172,11 +164,6 @@ class TestCriticFindingsYamlRoundTrip:
         assert result == findings
 
 
-# ---------------------------------------------------------------------------
-# Empty / default invariants
-# ---------------------------------------------------------------------------
-
-
 class TestEmptyModelInvariants:
     """Empty/default models are valid where their stage contract permits it."""
 
@@ -185,10 +172,6 @@ class TestEmptyModelInvariants:
         with pytest.raises(ValueError, match="requirements"):
             RequirementSet(requirements=[])
 
-
-# ---------------------------------------------------------------------------
-# call_with_policy return-shape and logging invariants
-# ---------------------------------------------------------------------------
 
 st_label = st.text(
     alphabet=st.characters(

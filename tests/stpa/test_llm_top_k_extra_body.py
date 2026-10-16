@@ -106,11 +106,6 @@ class TestExtraKwargsShape:
         )
 
 
-# ---------------------------------------------------------------------------
-# LLM-TOPK-05: top_k forwarded while retaining raw structured responses
-# ---------------------------------------------------------------------------
-
-
 class TestTopKInStructuredCreateCall:
     """LLM-TOPK-05: structured create keeps top_k and the raw response."""
 
@@ -141,11 +136,6 @@ class TestTopKInStructuredCreateCall:
         assert call_kwargs["extra_body"]["top_k"] == top_k_value
         assert "top_k" not in call_kwargs
         assert call_kwargs["response_format"]["type"] == "json_schema"
-
-
-# ---------------------------------------------------------------------------
-# LLM-TOPK-06: top_k forwarded in extra_body for unstructured create calls
-# ---------------------------------------------------------------------------
 
 
 class TestTopKInUnstructuredCreateCall:

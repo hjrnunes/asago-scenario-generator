@@ -7,11 +7,6 @@ from asago_scenario_generator.stpa.threat_enum.na_quality import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Structural keyword check — pass cases (SP2-NA-01, SP2-NA-03)
-# ---------------------------------------------------------------------------
-
-
 class TestStructuralKeywordPass:
     """N/A justification with structural keyword passes."""
 
@@ -38,11 +33,6 @@ class TestStructuralKeywordPass:
 
     def test_none_justification(self):
         assert check_structural_keywords(None) is False
-
-
-# ---------------------------------------------------------------------------
-# Structural keyword check — flag case (SP2-NA-02)
-# ---------------------------------------------------------------------------
 
 
 class TestStructuralKeywordFlag:

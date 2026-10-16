@@ -69,11 +69,6 @@ from tests.helpers.sp1_graceful_degradation import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Shared fixtures / helpers
-# ---------------------------------------------------------------------------
-
-
 def _run_critic(client, tmp_path):
     return run_completeness_critic(
         llm_client=client,
@@ -148,11 +143,6 @@ def _setup_valid_mock_client() -> MockLLMClient:
     )
     client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
     return client
-
-
-# ---------------------------------------------------------------------------
-# SP1-GD-01 through SP1-GD-07: Recoverable failures (critic + revision)
-# ---------------------------------------------------------------------------
 
 
 class TestRevisionGracefulDegradation:
@@ -271,11 +261,6 @@ class TestCriticGracefulDegradation:
         assert critic_entries[0]["stage"] == "stage_2"
         assert critic_entries[0]["success"] is False
         assert "error" in critic_entries[0]
-
-
-# ---------------------------------------------------------------------------
-# SP1-GD-08: Derivation stage failure raises StageError with context
-# ---------------------------------------------------------------------------
 
 
 class TestDerivationStageFailure:
@@ -402,11 +387,6 @@ class TestDerivationStageFailure:
         return client, invoke
 
 
-# ---------------------------------------------------------------------------
-# SP1-GD-09 through SP1-GD-15: Run orchestration with stage failures
-# ---------------------------------------------------------------------------
-
-
 class TestRunOrchestrationPartialFailure:
     """SP1-GD-09 through SP1-GD-15: run returns partial results on stage failure."""
 
@@ -504,11 +484,6 @@ class TestRunOrchestrationPartialFailure:
         assert any("stage_1b" in e for e in manifest["stage_errors"])
 
 
-# ---------------------------------------------------------------------------
-# Mutation-killing tests: fallback values when result is None
-# ---------------------------------------------------------------------------
-
-
 class TestSafeLlmCallFallbackValues:
     """When the LLM call raises before returning a result, the failure log
     entry must record zero token counts and zero duration.
@@ -544,11 +519,6 @@ class TestSafeLlmCallFallbackValues:
         assert entries[0]["completion_tokens"] is None
         assert entries[0]["usage"]["status"] == "unavailable"
         assert entries[0]["duration_ms"] == 0
-
-
-# ---------------------------------------------------------------------------
-# Mutation-killing test: timestamp defaults to current time
-# ---------------------------------------------------------------------------
 
 
 class TestCallLogTimestampDefault:

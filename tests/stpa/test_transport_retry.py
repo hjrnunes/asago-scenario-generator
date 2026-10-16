@@ -135,9 +135,6 @@ def test_the_service_tier_fallback_keeps_its_own_rule() -> None:
     assert [r.get("service_tier") for r in provider.requests] == ["flex", "default"]
 
 
-# --- the retry is recorded ---------------------------------------------------
-
-
 def test_both_attempts_are_recorded_and_the_retry_names_the_failure(
     tmp_path: Path,
 ) -> None:
@@ -201,9 +198,6 @@ def test_a_local_rejection_is_recorded_on_the_retry(tmp_path: Path) -> None:
     failed, retried = _records(tmp_path)
     assert failed["local_rejection"] is None
     assert retried["local_rejection"] is not None
-
-
-# --- replay ------------------------------------------------------------------
 
 
 def _identity() -> CallIdentity:

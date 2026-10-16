@@ -140,8 +140,6 @@ def test_evaluate_vectors_cover_every_outcome_with_and_without_completeness() ->
     assert ops == set(VALUE_OPS)
 
 
-# --- conditions the binder produces ----------------------------------------
-
 FACTS = target_observation_fact_values(
     TargetObservationSnapshot.from_runtime_context(
         {

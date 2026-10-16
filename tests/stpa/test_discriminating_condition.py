@@ -127,9 +127,6 @@ def _amount_condition() -> dict:
     }
 
 
-# --- schema ---------------------------------------------------------------
-
-
 def _mutated(mutate) -> dict:
     payload = copy.deepcopy(_ownership_condition())
     mutate(payload)
@@ -226,9 +223,6 @@ def test_condition_check_status_must_match_comparison_results() -> None:
                 ],
             }
         )
-
-
-# --- reference resolution -------------------------------------------------
 
 
 def test_fact_values_cover_nested_record_paths_but_not_list_indexes() -> None:
@@ -344,9 +338,6 @@ def test_duplicate_paths_with_different_values_are_ambiguous() -> None:
     assert any("ambiguous" in error for error in outcome.reference_errors)
 
 
-# --- evaluation -----------------------------------------------------------
-
-
 def test_foreign_owner_record_satisfies_the_session_comparison() -> None:
     outcome = _check(_ownership_condition("ORD-2"))
     assert outcome.failures == ()
@@ -439,9 +430,6 @@ def test_booleans_do_not_equal_numbers() -> None:
     outcome = _check(payload)
     assert outcome.check is not None
     assert outcome.check.status == "violated"
-
-
-# --- Stage 5 correction ---------------------------------------------------
 
 
 def test_stage5_records_the_condition_and_its_code_owned_check(tmp_path) -> None:
@@ -804,9 +792,6 @@ def test_analytical_only_condition_is_discarded_with_a_note(tmp_path) -> None:
     )
 
 
-# --- downstream rendering -------------------------------------------------
-
-
 def _spec_with(condition: dict, tmp_path):
     client = MockLLMClient()
     client.set_response_queue([_payload_with(condition)])
@@ -876,9 +861,6 @@ def test_canonical_comparisons_ignore_comparison_order() -> None:
     ) == canonical_comparisons(DiscriminatingCondition.model_validate(reordered))
 
 
-# --- rendered request -----------------------------------------------------
-
-
 def test_rendered_request_explains_the_condition_within_the_token_budget() -> None:
     context = _wrong_timing_context()
     system, user = build_context_bdi_prompts(
@@ -897,9 +879,6 @@ def test_rendered_request_explains_the_condition_within_the_token_budget() -> No
     assert "DiscriminatingCondition" in json.dumps(schema)
     total = estimate_prompt_tokens(system + user + json.dumps(schema))
     assert total <= STAGE5_PROMPT_TOKEN_BUDGET
-
-
-# --- relative argument paths ----------------------------------------------
 
 
 @pytest.mark.parametrize(
@@ -970,9 +949,6 @@ def test_stage5_publishes_the_normalized_absolute_path(tmp_path) -> None:
     assert selection.argument_values[0].path == "TARGET-STATE.orders.ORD-2"
 
 
-# --- not_called -----------------------------------------------------------
-
-
 def _not_called_condition(operation: str) -> dict:
     return {
         "statement": "The assistant refunds without escalating the dispute.",
@@ -999,9 +975,6 @@ def test_not_called_rejects_an_operation_outside_the_inventory() -> None:
         "names operation 'assistant_message'" in error
         for error in outcome.reference_errors
     )
-
-
-# --- omission reaches the handoff -----------------------------------------
 
 
 def test_omitted_condition_reason_reaches_the_handoff(tmp_path) -> None:
@@ -1037,9 +1010,6 @@ def test_omitted_condition_reason_reaches_the_handoff(tmp_path) -> None:
     payload = handoff.model_dump(mode="json", exclude_none=True)
     assert "discriminating_condition" not in payload
     assert payload["condition_omitted_reason"] == spec.condition_omitted_reason
-
-
-# --- rendered request on a realistic fixture ------------------------------
 
 
 def _realistic_request() -> tuple[str, str, str]:
@@ -1080,9 +1050,6 @@ def test_realistic_rendered_request_stays_within_the_token_budget() -> None:
     system, user, schema = _realistic_request()
     total = estimate_prompt_tokens(system + user + schema)
     assert total <= STAGE5_PROMPT_TOKEN_BUDGET
-
-
-# --- value kinds, anchoring, and preconditions ----------------------------
 
 
 def _linked_universe() -> ConditionUniverse:
@@ -1438,9 +1405,6 @@ def test_stage5_publishes_nothing_when_the_final_reply_has_no_recoverable_condit
     assert client.call_count == calls
 
 
-# --- findings: a condition that resolves but cannot separate the call -------
-
-
 def _typed_operation(
     name: str,
     properties: dict,
@@ -1699,9 +1663,6 @@ def test_finding_codes_are_stage5_issue_codes_with_repair_guidance() -> None:
         assert IssueCode(code) in _repair_guidance("none")
 
 
-# --- findings: a literal no supplied value supports -------------------------
-
-
 def _literal_universe(**schema_extra) -> ConditionUniverse:
     operation = _typed_operation(
         "publish_item",
@@ -1904,9 +1865,6 @@ def test_universe_literals_skip_observation_content_that_is_not_json() -> None:
     assert universe.literal_values == frozenset()
 
 
-# --- findings: a not_called on an operation the scenario does not concern ----
-
-
 def _not_called(operation: str) -> dict:
     return {"kind": "not_called", "operation": operation}
 
@@ -2008,9 +1966,6 @@ def test_stage5_corrects_a_not_called_on_an_operation_no_criterion_names(
     correction = client.calls[1].user_prompt
     assert f"{OPERATION_MISMATCH}:" in correction
     assert "comparisons[0] is not_called get_gadget" in correction
-
-
-# --- findings: an order that does not pin the record ---------------------------
 
 
 def _profile_universe() -> ConditionUniverse:

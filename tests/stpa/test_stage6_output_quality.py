@@ -39,11 +39,6 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 )
 
 
-# ---------------------------------------------------------------------------
-# Fixture builders
-# ---------------------------------------------------------------------------
-
-
 def _make_scenario_spec(
     ica_type: UCAType = UCAType.not_provided,
     ca_id: str = "CA-1-1",
@@ -163,11 +158,6 @@ def _make_envelope(
     )
 
 
-# ===========================================================================
-# JPKW — GherkinSpec structured output
-# ===========================================================================
-
-
 class TestGherkinSpecModel:
     """JPKW-01: GherkinSpec model has structured fields."""
 
@@ -235,11 +225,6 @@ class TestGherkinSpecToFeatureText:
         assert "Given PM-1-1 is active" in text
         assert "When a revoked user requests access" in text
         assert "Then the system should reject the request" in text
-
-
-# ===========================================================================
-# GDDI — Loss/Hazard ID validation
-# ===========================================================================
 
 
 class TestLossHazardIdValidator:

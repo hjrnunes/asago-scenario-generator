@@ -43,11 +43,6 @@ def _render(template_name: str, **variables: object) -> str:
     return TemplateLoader(PROMPTS_DIR).render_prompt(template_name, **variables)
 
 
-# ---------------------------------------------------------------------------
-# stage1a_risk_user rendering and source checks
-# ---------------------------------------------------------------------------
-
-
 def test_pqf_06_stage1a_risk_user_renders_with_use_case_and_risk_cards() -> None:
     cards = [
         RiskCard(
@@ -74,11 +69,6 @@ def test_pqf_08_stage1a_risk_user_preserves_jinja_variables() -> None:
     assert "{{ use_case_text }}" in text
     assert "{% if risk_cards %}" in text
     assert "{{ card.risk_id }}" in text
-
-
-# ---------------------------------------------------------------------------
-# stage1a_gap_user rendering and source checks
-# ---------------------------------------------------------------------------
 
 
 def test_pqf_11_stage1a_gap_user_renders_with_existing_analysis() -> None:
@@ -120,11 +110,6 @@ def test_pqf_12_stage1a_gap_user_preserves_jinja_variables() -> None:
     assert "{{ kc_subcodes" in text
 
 
-# ---------------------------------------------------------------------------
-# stage1b_user source checks
-# ---------------------------------------------------------------------------
-
-
 def test_pqf_17_stage1b_user_no_loss_context() -> None:
     text = (PROMPTS_DIR / "stage1b_user.j2").read_text()
     assert "loss_analysis" not in text
@@ -136,10 +121,6 @@ def test_pqf_18_stage1b_user_preserves_use_case_variable() -> None:
     text = (PROMPTS_DIR / "stage1b_user.j2").read_text()
     assert "{{ use_case_text }}" in text
 
-
-# ---------------------------------------------------------------------------
-# Property-based tests for template rendering
-# ---------------------------------------------------------------------------
 
 _st_safe_text = st.text(
     alphabet=st.characters(
