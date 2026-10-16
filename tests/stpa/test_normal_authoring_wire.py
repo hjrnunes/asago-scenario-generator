@@ -65,7 +65,7 @@ from tests.helpers.normal_authoring_wire import (
 )
 
 
-def _af_run1_ordering_draft_one() -> dict:
+def _recorded_ordering_draft_one() -> dict:
     """Recorded run SCN-008 candidate one, expressed in the normal schema.
 
     Saved failure: ``unsafe outcome ordering cannot compare the target action
@@ -115,13 +115,13 @@ def _af_run1_ordering_draft_one() -> dict:
     }
 
 
-def _af_run1_ordering_draft_two() -> dict:
+def _recorded_ordering_draft_two() -> dict:
     """Recorded run SCN-008 candidate two, expressed in the normal schema.
 
     Saved failure: the same ordering self-reference check, for a draft whose
     outcome ordering referenced ``target_action`` with two declared factors.
     """
-    payload = _af_run1_ordering_draft_one()
+    payload = _recorded_ordering_draft_one()
     payload["adversary"] = {
         "kind": "none",
         "gain": (
@@ -164,7 +164,7 @@ def _af_run1_ordering_draft_two() -> dict:
     return payload
 
 
-def _af_run1_feedback_delay_draft() -> dict:
+def _recorded_feedback_delay_draft() -> dict:
     """Recorded run SCN-042 candidate, expressed in the normal schema.
 
     Saved failure: ``direct_prompt cannot exercise selected factor kind
@@ -507,12 +507,12 @@ def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
 @pytest.mark.parametrize(
     "draft",
     (
-        _af_run1_ordering_draft_one,
-        _af_run1_ordering_draft_two,
-        _af_run1_feedback_delay_draft,
+        _recorded_ordering_draft_one,
+        _recorded_ordering_draft_two,
+        _recorded_feedback_delay_draft,
     ),
 )
-def test_af_run1_failure_classes_publish_through_normal_wire(draft, tmp_path) -> None:
+def test_recorded_failure_classes_publish_through_normal_wire(draft, tmp_path) -> None:
     """The three recorded artifact decisions no longer block."""
     client = MockLLMClient()
     client.set_response_queue([draft()])

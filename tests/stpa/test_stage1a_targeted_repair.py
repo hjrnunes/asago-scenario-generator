@@ -1487,7 +1487,7 @@ class TestIndependentReviewCorrections:
             for warning in warnings
         )
 
-    def test_malformed_unsupplied_row_receives_c2_cleanup(self, tmp_path):
+    def test_malformed_unsupplied_row_receives_unsupplied_card_cleanup(self, tmp_path):
         """A malformed row referencing an unsupplied card is cleaned up, not
         a typed failure.
 

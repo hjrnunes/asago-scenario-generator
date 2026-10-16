@@ -575,7 +575,7 @@ def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
     assert len(client.calls) == 3
 
 
-def test_a18_gap_valid_disposition_is_not_c1_cleanup(tmp_path):
+def test_gap_valid_disposition_is_not_malformed_row_cleanup(tmp_path):
     """A valid out-of-contract gap disposition fails closed.
 
     Cleanup is limited to malformed gap disposition rows.  A valid-looking
