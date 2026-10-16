@@ -8,14 +8,10 @@ These tests load the live ``load_attack_patterns()`` catalog and check that:
 - every pattern has explicit activation, resource and observable-outcome
   linkage that references valid slots and postconditions.
 
-They also pin the flattening helpers for live step mappings and for lineage
-``atlas_step_mappings`` rows.  They do not read ``catalog-lineage.yaml``.
+They do not read ``catalog-lineage.yaml``.
 """
 
 from __future__ import annotations
-
-from collections import Counter
-
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.data.taxonomy_pins import load_taxonomy_resolver
@@ -62,44 +58,6 @@ def _live_exact_chain_ids(pattern: dict) -> set[str]:
             if m.get("decision") == "exact":
                 ids.update(m["ids"])
     return ids
-
-
-# ---------------------------------------------------------------------------
-# Flattened (step_id, id) exact mappings
-# ---------------------------------------------------------------------------
-
-
-def _live_step_mappings(pattern: dict) -> Counter[tuple[str, str]]:
-    """Return a ``Counter`` of ``(step_id, atlas_id)`` pairs for every exact
-    step mapping in a live pattern.
-
-    Every ID in every exact mapping is flattened as a complete pair, so a
-    step with multiple exact IDs produces one pair per ID.  A ``Counter`` is
-    used so that duplicate ``(step_id, atlas_id)`` rows (if any) are detected
-    rather than silently collapsed by a set or dict.
-    """
-    cc = pattern["canonical_chain"]
-    out: Counter[tuple[str, str]] = Counter()
-    for step in cc.get("steps", []):
-        for m in step.get("mappings", []):
-            if m.get("decision") == "exact":
-                for atlas_id in m.get("ids", []):
-                    out[(step["step_id"], atlas_id)] += 1
-    return out
-
-
-def _lineage_step_mappings(resulting: dict) -> Counter[tuple[str, str]]:
-    """Return a ``Counter`` of ``(step, id)`` pairs from a lineage resulting
-    record's ``atlas_step_mappings``.
-
-    Every row is preserved as a complete pair.  A ``Counter`` is used so that
-    duplicate rows (if any) are detected rather than silently collapsed by a
-    dict keyed on ``step``.
-    """
-    out: Counter[tuple[str, str]] = Counter()
-    for m in resulting.get("atlas_step_mappings", []):
-        out[(m["step"], m["id"])] += 1
-    return out
 
 
 # ---------------------------------------------------------------------------
@@ -155,106 +113,6 @@ def test_all_live_records_are_digest_valid() -> None:
 # ---------------------------------------------------------------------------
 # Mechanism-boundary contract documentation
 # ---------------------------------------------------------------------------
-
-
-# ---------------------------------------------------------------------------
-# Adversarial unit coverage for helper exactness
-# ---------------------------------------------------------------------------
-
-
-class TestLiveStepMappingsFlattensAllIds:
-    """Prove that ``_live_step_mappings`` flattens every ID of every exact
-    mapping, not just ``ids[0]``."""
-
-    def test_single_id_step(self) -> None:
-        pattern = {
-            "canonical_chain": {
-                "steps": [
-                    {
-                        "step_id": "s1",
-                        "mappings": [
-                            {"decision": "exact", "ids": ["AML.T0001"]},
-                        ],
-                    }
-                ]
-            }
-        }
-        result = _live_step_mappings(pattern)
-        assert result == Counter({("s1", "AML.T0001"): 1})
-
-    def test_multi_id_step_flattens_every_id(self) -> None:
-        """A step with two exact IDs produces two complete pairs."""
-        pattern = {
-            "canonical_chain": {
-                "steps": [
-                    {
-                        "step_id": "s1",
-                        "mappings": [
-                            {"decision": "exact", "ids": ["AML.T0001", "AML.T0002"]},
-                        ],
-                    }
-                ]
-            }
-        }
-        result = _live_step_mappings(pattern)
-        assert result == Counter({("s1", "AML.T0001"): 1, ("s1", "AML.T0002"): 1})
-
-    def test_old_ids0_bug_would_lose_second_id(self) -> None:
-        """The old ``ids[0]``-only code would produce one pair; the fixed
-        code produces two, and the two Counters are not equal."""
-        pattern = {
-            "canonical_chain": {
-                "steps": [
-                    {
-                        "step_id": "s1",
-                        "mappings": [
-                            {"decision": "exact", "ids": ["AML.T0001", "AML.T0002"]},
-                        ],
-                    }
-                ]
-            }
-        }
-        correct = _live_step_mappings(pattern)
-        buggy = Counter({("s1", "AML.T0001"): 1})
-        assert correct != buggy, "fix must detect a second exact ID lost by ids[0]"
-
-
-class TestLineageStepMappingsPreservesAllRows:
-    """Prove that ``_lineage_step_mappings`` preserves every row as a complete
-    pair, not dict-collapsing by ``step``."""
-
-    def test_single_row(self) -> None:
-        resulting = {
-            "atlas_step_mappings": [
-                {"step": "s1", "id": "AML.T0001"},
-            ]
-        }
-        result = _lineage_step_mappings(resulting)
-        assert result == Counter({("s1", "AML.T0001"): 1})
-
-    def test_duplicate_step_different_id_preserved(self) -> None:
-        """Two rows with the same step but different IDs must both survive."""
-        resulting = {
-            "atlas_step_mappings": [
-                {"step": "s1", "id": "AML.T0001"},
-                {"step": "s1", "id": "AML.T0002"},
-            ]
-        }
-        result = _lineage_step_mappings(resulting)
-        assert result == Counter({("s1", "AML.T0001"): 1, ("s1", "AML.T0002"): 1})
-
-    def test_old_dict_collapse_bug_would_lose_second_row(self) -> None:
-        """The old dict-comprehension code would collapse to one entry; the
-        fixed Counter preserves both."""
-        resulting = {
-            "atlas_step_mappings": [
-                {"step": "s1", "id": "AML.T0001"},
-                {"step": "s1", "id": "AML.T0002"},
-            ]
-        }
-        correct = _lineage_step_mappings(resulting)
-        buggy = Counter({("s1", "AML.T0001"): 1})
-        assert correct != buggy, "fix must detect a second row lost by dict collapse"
 
 
 # ---------------------------------------------------------------------------
