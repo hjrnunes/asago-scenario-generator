@@ -23,6 +23,7 @@ intended contract change, never to make a refactor pass.
 
 from __future__ import annotations
 
+import functools
 import gzip
 import hashlib
 import json
@@ -96,7 +97,9 @@ def planner_inputs(tmp_path_factory: pytest.TempPathFactory) -> Path:
     return root
 
 
+@functools.cache
 def _taxonomy_inputs(unit: str, inputs_root: Path) -> TaxonomyObligationInputs:
+    # Cached because the plan and manifest tests rebuild the same frozen value.
     target = EXPECTED["units"][unit]["target"]
     profile = CapabilityProfile.model_validate(
         yaml.safe_load((FIXTURES / unit / "capability-profile.yaml").read_text())
