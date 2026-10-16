@@ -158,17 +158,3 @@ class TestHazardIDValidation:
             assert False, "Should have raised ValueError"
         except ValueError as e:
             assert "related_hazards" in str(e) or "H-99" in str(e)
-
-
-# Single-responsibility fill entry point
-
-
-def _make_ica() -> ICA:
-    return ICA(
-        ica_id="RESP-1:CA-1-1:NOT_PROVIDED:1",
-        ica_text="The agent fails to validate input",
-        hazardous_context="Context",
-        loss_scenario="Scenario",
-        related_hazards=[],
-        related_constraints=[],
-    )

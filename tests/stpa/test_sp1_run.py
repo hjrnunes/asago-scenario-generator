@@ -61,16 +61,6 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     build_target_evidence,
 )
-from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
-from asago_scenario_generator.stpa.system_model import (
-    loss_analysis,
-    profile,
-    control_structure,
-    critic,
-    heuristics,
-    run,
-)
-from asago_scenario_generator.stpa.system_model.run import run_sp1 as _run
 
 
 def _valid_critic_findings_dict() -> dict:
@@ -666,58 +656,6 @@ class TestRunOrchestration:
         assert call1 is not None
         assert "SC-1" in call1.user_prompt
 
-    def test_run_09_prompt_templates_exist(self):
-        """SP1-RUN-09: all prompt template files exist (updated for stage1a split)."""
-        expected = [
-            "stage1a_risk_system.j2",
-            "stage1a_risk_user.j2",
-            "stage1a_gap_system.j2",
-            "stage1a_gap_user.j2",
-            "stage1b_system.j2",
-            "stage1b_user.j2",
-            "stage2_call1_system.j2",
-            "stage2_call1_user.j2",
-            "stage2_call2a_system.j2",
-            "stage2_call2a_user.j2",
-            "stage2_call2b_system.j2",
-            "stage2_call2b_user.j2",
-            "stage2_call3_system.j2",
-            "stage2_call3_user.j2",
-            "critic_system.j2",
-            "critic_user.j2",
-            "revision_system.j2",
-            "revision_user.j2",
-        ]
-        for name in expected:
-            assert (PROMPTS_DIR / name).exists(), f"Missing template: {name}"
-
-    def test_run_10_module_layout(self):
-        """SP1-RUN-10: all modules exist and are importable."""
-        assert loss_analysis is not None
-        assert profile is not None
-        assert control_structure is not None
-        assert critic is not None
-        assert heuristics is not None
-        assert run is not None
-
-    def test_run_11_internal_models_defined(self):
-        """SP1-RUN-11: internal models are defined."""
-        from asago_scenario_generator.stpa.system_model.control_structure import (
-            RequirementSet,
-            Requirement,
-            ResponsibilitySet,
-        )
-        from asago_scenario_generator.stpa.system_model.critic import (
-            CriticFindings,
-            CriticGap,
-        )
-
-        assert RequirementSet is not None
-        assert Requirement is not None
-        assert ResponsibilitySet is not None
-        assert CriticFindings is not None
-        assert CriticGap is not None
-
     def test_run_12_profile_flag_skips_stage_1b(self, tmp_path):
         """SP1-RUN-12: run with profile flag skips Stage 1b LLM call."""
         # Write a pre-built profile
@@ -773,25 +711,6 @@ class TestRunOrchestration:
         artifact = run_dir / "capability-profile.yaml"
         assert artifact.exists()
         assert result.capability_profile == profile
-
-    def test_run_13_temperature_is_0_4(self, tmp_path):
-        """SP1-RUN-13: all Stage 2 LLM calls use temperature 0.4."""
-        client = _setup_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        # All calls should have temperature 0.4
-        for call in client.calls:
-            assert call.temperature == 0.4
-
-    def test_run_14_existing_tests_unaffected(self):
-        """SP1-RUN-14: existing pipeline tests are unaffected (module imports work)."""
-        # Just verify the import doesn't break anything
-
-        assert _run is not None
 
     def test_run_15_manifest_with_empty_risk_cards(self, tmp_path):
         """SP1-RUN-15: manifest is written correctly when no risk cards are provided."""

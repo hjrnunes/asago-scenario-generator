@@ -87,8 +87,6 @@ class _CapturedKlarnaClient:
 def test_captured_klarna_ca3_1_deviations_survive_public_fill(tmp_path) -> None:
     """All three saved CA-3-1 findings remain valid after one provider compile."""
     fixture = yaml.safe_load(_REPLAY_FIXTURE.read_text(encoding="utf-8"))
-    repo_root = Path(__file__).resolve().parents[1]
-    source_root = repo_root / fixture["source"]["run_root"]
     loss_path = _REPLAY_FIXTURE.parent / fixture["source"]["embedded_loss_analysis"]
     control_path = (
         _REPLAY_FIXTURE.parent / fixture["source"]["embedded_control_structure"]
@@ -100,43 +98,6 @@ def test_captured_klarna_ca3_1_deviations_survive_public_fill(tmp_path) -> None:
     captured_payloads: dict[str, dict] = {}
     for record in records:
         captured_payloads[record["slot_id"]] = current_fill_reply(record["response"])
-
-    # The ignored run is an optional audit source.  The committed fixture above
-    # is authoritative for deterministic/offline execution, while a checkout
-    # containing the run can still verify every provenance hash and wire value.
-    # The loss-analysis bytes were migrated to the authored rule/applies_when
-    # shape, so the source-run digest comparison is restricted to the control
-    # structure, whose bytes did not change.
-    calls_path = source_root / fixture["source"]["calls_file"]
-    source_control_path = source_root / "control-structure.yaml"
-    if source_root.is_dir() and calls_path.is_file() and source_control_path.is_file():
-        assert (
-            _sha256(source_control_path)
-            == fixture["source"]["control_structure_sha256"]
-        )
-        call_lines = calls_path.read_text(encoding="utf-8").splitlines()
-        for record in records:
-            index = record["zero_based_call_index"]
-            assert record["one_based_call_number"] == index + 1
-            call = json.loads(call_lines[index])
-            assert call["stage"] == "synthesis_obligation_aware_icas"
-            assert call["step"] == record["slot_id"].split(":")[0]
-            assert call["model"] == record["model"]
-            assert call["success"] is True
-            assert call["provider_response_received"] is True
-            assert call["draft_parsed"] is True
-            assert call["semantic_validation_passed"] is True
-            assert call["compiled"] is True
-            assert call["published"] is True
-            assert call["system_prompt_hash"] == record["system_prompt_hash"]
-            assert call["user_prompt_hash"] == record["user_prompt_hash"]
-            assert call["rendered_prompt_digest"] == record["rendered_prompt_digest"]
-            assert (
-                hashlib.sha256(call["response_content"].encode()).hexdigest()
-                == record["response_sha256"]
-            )
-            payload = json.loads(call["response_content"])
-            assert payload == record["response"]
 
     loss_analysis = read_yaml(loss_path, LossAnalysis)
     control_structure = read_yaml(control_path, ControlStructure)

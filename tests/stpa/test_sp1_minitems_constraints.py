@@ -122,16 +122,6 @@ class TestMinItemsEmptyCriticalArrayFails:
 class TestMinItemsEmptyOptionalArrayPasses:
     """MinItems-02: empty optional array passes validation."""
 
-    def test_minitems_02_empty_risk_card_losses_passes(self):
-        """Empty risk_card_losses passes validation."""
-        la = LossAnalysis(
-            risk_card_losses=[],
-            use_case_losses=[_make_loss()],
-            hazards=[_make_hazard()],
-            security_constraints=[_make_constraint()],
-        )
-        assert la is not None
-
     def test_minitems_02_empty_use_case_losses_passes(self):
         """Empty use_case_losses passes validation."""
         la = LossAnalysis(

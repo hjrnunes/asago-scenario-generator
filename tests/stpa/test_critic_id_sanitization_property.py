@@ -35,9 +35,6 @@ st_remedy_text = st.text(
     max_size=120,
 )
 
-# ID prefixes used in the domain
-_ID_PREFIXES = ["RESP", "PM", "CA", "FB", "CP", "CL", "RC"]
-
 # Conforming ID examples (valid format per model schema)
 _CONFORMING_ID_EXAMPLES = [
     "RESP-1",
@@ -56,23 +53,6 @@ _CONFORMING_ID_EXAMPLES = [
     "CL-3",
     "RC-1-1",
     "RC-2-3",
-]
-
-# Non-conforming ID examples (wrong format — single-part where multi-part
-# expected, or extra/missing segments)
-_NON_CONFORMING_ID_EXAMPLES = [
-    "PM-0",
-    "CA-0",
-    "FB-0",
-    "RESP-0",
-    "PM-1",
-    "CA-2",
-    "FB-3",  # missing second segment
-    "CP-1-1",
-    "CL-1-1",
-    "RESP-1-1",  # extra segment for single-part types
-    "RC-1",  # missing second segment
-    "XX-1-1",  # unknown prefix (not matched by _ID_LIKE_PATTERN)
 ]
 
 

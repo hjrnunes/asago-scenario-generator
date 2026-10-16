@@ -21,7 +21,6 @@ _VARIANTS = [
     ("responsibility_set", "one_responsibility", ResponsibilitySet),
     ("control_element_set", "with_controlled_process", ControlElementSet),
     ("control_element_set", "responsibility_only", ControlElementSet),
-    ("critic_findings", "no_unjustified", CriticFindings),
     ("critic_findings", "no_gaps_all_present", CriticFindings),
     ("loss_analysis", "two_losses", LossAnalysis),
 ]

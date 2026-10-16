@@ -232,52 +232,6 @@ def _recorded_feedback_delay_draft() -> dict:
     }
 
 
-def _historical_execution_payload() -> dict:
-    """The historical wire shape: stimulus + factor-selected execution route."""
-    return {
-        "stimulus": {
-            "category": "user_message",
-            "description": "A user request exercises the delayed feedback.",
-        },
-        "adversary": {
-            "kind": "external_attacker",
-            "gain": "Diverts funds away from the platform's payment systems.",
-        },
-        "attacker_bdi": {
-            "beliefs": ["The request will be processed."],
-            "desires": ["Execute the unsafe action."],
-            "intentions": [
-                {
-                    "description": "Request the action through the delay.",
-                    "source_handles": ["cause_2"],
-                }
-            ],
-        },
-        "causal_factors": [
-            {
-                "source_handle": "cause_2",
-                "evidence": "The feedback classification is delayed.",
-                "temporal_condition": None,
-                "evidence_status": "structural_failure",
-                "selected_for_route": True,
-            }
-        ],
-        "unsafe_outcome": {
-            "condition": {
-                "type": "ordering",
-                "reference_handle": "target_action",
-                "relation": "before",
-            },
-            "semantic_proposition": None,
-        },
-        "execution_route": {
-            "disposition": "executable_route",
-            "action_kind": "model_output",
-            "reason": "The delayed feedback exercises the selected action.",
-        },
-    }
-
-
 def test_normal_prompt_renders_observation_contract() -> None:
     system, user = build_context_bdi_prompts(
         _wrong_timing_context(),

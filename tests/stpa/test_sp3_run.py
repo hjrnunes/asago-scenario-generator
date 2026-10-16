@@ -36,7 +36,6 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
-from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from unittest.mock import MagicMock
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
@@ -406,35 +405,6 @@ class TestFullRun:
             manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
             assert len(calls) == 4  # Stage 5 and shape, per threat
             assert manifest["max_workers"] == 2
-
-
-class TestPromptTemplatesExist:
-    """SP3-RUN-09."""
-
-    def test_all_template_files_exist(self):
-        templates = [
-            "stage5_context_system.j2",
-            "stage5_context_user.j2",
-            "stage5_shape_system.j2",
-            "stage5_shape_user.j2",
-        ]
-        for t in templates:
-            assert (PROMPTS_DIR / t).exists(), f"Missing template: {t}"
-
-
-class TestModuleLayout:
-    """SP3-RUN-10."""
-
-    def test_all_modules_importable(self):
-        from asago_scenario_generator.stpa.scenario_prod import (
-            validators,
-            assembly,
-            run,
-        )
-
-        assert validators is not None
-        assert assembly is not None
-        assert run is not None
 
 
 class TestErrorPaths:

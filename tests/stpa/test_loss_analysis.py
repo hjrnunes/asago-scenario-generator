@@ -56,20 +56,6 @@ def _make_constraint(
     )
 
 
-def _make_loss_analysis(
-    risk_card_losses: list[Loss] | None = None,
-    use_case_losses: list[Loss] | None = None,
-    hazards: list[Hazard] | None = None,
-    security_constraints: list[SecurityConstraint] | None = None,
-) -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=risk_card_losses or [],
-        use_case_losses=use_case_losses or [_make_loss()],
-        hazards=hazards or [_make_hazard()],
-        security_constraints=security_constraints or [_make_constraint()],
-    )
-
-
 def _analysis(**overrides) -> LossAnalysis:
     """A valid analysis (one use-case loss, hazard and constraint) with fields replaced."""
     fields = {
