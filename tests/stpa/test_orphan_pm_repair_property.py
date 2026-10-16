@@ -123,51 +123,34 @@ class TestRepairOrphanPmsProperties:
 
     @given(resp_set=st_responsibility_set())
     @settings(max_examples=80, deadline=None)
-    def test_no_orphan_pms_after_repair(self, resp_set: ResponsibilitySet) -> None:
-        """After repair, every PM is referenced by at least one FB."""
-        repaired, _ = repair_orphan_pms(resp_set)
-        for resp in repaired.responsibilities:
-            updated_pms = {fb.updates for fb in resp.feedback_channels}
-            for pm in resp.process_model_parts:
+    def test_repair_links_every_orphan_and_keeps_existing_elements(
+        self, resp_set: ResponsibilitySet
+    ) -> None:
+        """Repair warns once per orphan, removes nothing, and leaves no orphan."""
+        orphan_count = _count_orphan_pms(resp_set)
+        repaired, warnings = repair_orphan_pms(resp_set)
+        assert len(warnings) == orphan_count
+        assert [r.resp_id for r in repaired.responsibilities] == [
+            r.resp_id for r in resp_set.responsibilities
+        ]
+        for orig_resp, rep_resp in zip(
+            resp_set.responsibilities,
+            repaired.responsibilities,
+            strict=True,
+        ):
+            assert {pm.pm_id for pm in orig_resp.process_model_parts} <= {
+                pm.pm_id for pm in rep_resp.process_model_parts
+            }
+            assert {fb.fb_id for fb in orig_resp.feedback_channels} <= {
+                fb.fb_id for fb in rep_resp.feedback_channels
+            }
+            updated_pms = {fb.updates for fb in rep_resp.feedback_channels}
+            for pm in rep_resp.process_model_parts:
                 assert pm.pm_id in updated_pms, (
-                    f"Orphan PM {pm.pm_id} survived repair in {resp.resp_id}"
+                    f"Orphan PM {pm.pm_id} survived repair in {rep_resp.resp_id}"
                 )
-
-    @given(resp_set=st_responsibility_set())
-    @settings(max_examples=80, deadline=None)
-    def test_existing_pms_preserved(self, resp_set: ResponsibilitySet) -> None:
-        """No existing PM is removed by repair."""
-        repaired, _ = repair_orphan_pms(resp_set)
-        for orig_resp, rep_resp in zip(
-            resp_set.responsibilities,
-            repaired.responsibilities,
-            strict=True,
-        ):
-            orig_pm_ids = {pm.pm_id for pm in orig_resp.process_model_parts}
-            rep_pm_ids = {pm.pm_id for pm in rep_resp.process_model_parts}
-            assert orig_pm_ids.issubset(rep_pm_ids)
-
-    @given(resp_set=st_responsibility_set())
-    @settings(max_examples=80, deadline=None)
-    def test_existing_fbs_preserved(self, resp_set: ResponsibilitySet) -> None:
-        """No existing FB is removed by repair."""
-        repaired, _ = repair_orphan_pms(resp_set)
-        for orig_resp, rep_resp in zip(
-            resp_set.responsibilities,
-            repaired.responsibilities,
-            strict=True,
-        ):
-            orig_fb_ids = {fb.fb_id for fb in orig_resp.feedback_channels}
-            rep_fb_ids = {fb.fb_id for fb in rep_resp.feedback_channels}
-            assert orig_fb_ids.issubset(rep_fb_ids)
-
-    @given(resp_set=st_responsibility_set())
-    @settings(max_examples=80, deadline=None)
-    def test_idempotence(self, resp_set: ResponsibilitySet) -> None:
-        """Repairing twice produces no warnings on the second call."""
-        repaired_once, warnings_once = repair_orphan_pms(resp_set)
-        repaired_twice, warnings_twice = repair_orphan_pms(repaired_once)
-        assert len(warnings_twice) == 0
+        _, warnings_twice = repair_orphan_pms(repaired)
+        assert warnings_twice == []
 
     @given(resp_set=st_no_orphan_responsibility_set())
     @settings(max_examples=50, deadline=None)
@@ -176,29 +159,3 @@ class TestRepairOrphanPmsProperties:
         repaired, warnings = repair_orphan_pms(resp_set)
         assert len(warnings) == 0
         assert repaired is resp_set
-
-    @given(resp_set=st_responsibility_set())
-    @settings(max_examples=80, deadline=None)
-    def test_warning_count_equals_orphan_count(
-        self, resp_set: ResponsibilitySet
-    ) -> None:
-        """The number of warnings equals the number of orphan PMs repaired."""
-        orphan_count = _count_orphan_pms(resp_set)
-        _, warnings = repair_orphan_pms(resp_set)
-        assert len(warnings) == orphan_count
-
-    @given(resp_set=st_responsibility_set())
-    @settings(max_examples=80, deadline=None)
-    def test_resp_count_preserved(self, resp_set: ResponsibilitySet) -> None:
-        """The number of responsibilities is preserved by repair."""
-        repaired, _ = repair_orphan_pms(resp_set)
-        assert len(repaired.responsibilities) == len(resp_set.responsibilities)
-
-    @given(resp_set=st_responsibility_set())
-    @settings(max_examples=80, deadline=None)
-    def test_resp_ids_preserved(self, resp_set: ResponsibilitySet) -> None:
-        """Responsibility IDs are preserved in order by repair."""
-        repaired, _ = repair_orphan_pms(resp_set)
-        orig_ids = [r.resp_id for r in resp_set.responsibilities]
-        rep_ids = [r.resp_id for r in repaired.responsibilities]
-        assert orig_ids == rep_ids
