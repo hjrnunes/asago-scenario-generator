@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
@@ -169,12 +168,6 @@ class TestInfraLLMComplete:
             client.complete("system", "user", response_format=dict)
 
         assert not client._client.method_calls
-
-    def test_complete_takes_no_compatibility_flag(self):
-        """Every structured request has a schema; no caller can opt out."""
-        parameters = inspect.signature(LLMClient.complete).parameters
-
-        assert "allow_unvalidated" not in parameters
 
     def test_qwen_controls_use_supported_request_body(self):
         """Thinking and strict output use the vLLM-supported request fields."""

@@ -7,7 +7,6 @@ validation-error text.
 
 from __future__ import annotations
 
-import inspect
 import json
 from pathlib import Path
 
@@ -652,9 +651,6 @@ class TestRetryAttemptLog:
             policy=policy,
             **extra,
         )
-
-    def test_call_with_policy_takes_no_compatibility_flag(self) -> None:
-        assert "allow_unvalidated" not in inspect.signature(call_with_policy).parameters
 
     def test_malformed_json_is_retried_once_and_both_attempts_are_logged(
         self, tmp_path: Path

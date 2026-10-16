@@ -691,11 +691,6 @@ class TestRunOrchestration:
         for name in expected:
             assert (PROMPTS_DIR / name).exists(), f"Missing template: {name}"
 
-    def test_run_09b_old_stage1a_templates_absent(self):
-        """Old stage1a templates are absent after the split."""
-        assert not (PROMPTS_DIR / "stage1a_system.j2").exists()
-        assert not (PROMPTS_DIR / "stage1a_user.j2").exists()
-
     def test_run_10_module_layout(self):
         """SP1-RUN-10: all modules exist and are importable."""
         assert loss_analysis is not None

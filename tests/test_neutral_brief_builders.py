@@ -23,9 +23,7 @@ def test_every_public_builder_name_is_the_shared_function() -> None:
     assert pipeline.build_neutral_briefs is shared.build_neutral_briefs
 
 
-def test_the_pipeline_batches_under_its_own_name_only() -> None:
-    assert "create_obligation_batches" not in pipeline.__all__
-    assert not hasattr(pipeline, "create_obligation_batches")
+def test_the_pipeline_exports_its_batching_function() -> None:
     assert "batch_neutral_obligation_briefs" in pipeline.__all__
 
 

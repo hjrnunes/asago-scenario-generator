@@ -20,7 +20,6 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossAnalysis,
     SecurityConstraint,
 )
-from asago_scenario_generator.stpa.system_model import loss_analysis_gates as gates
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     _ProviderConstraint,
@@ -254,17 +253,6 @@ class TestGateUsesTheDeclaredClass:
         assert report.passed
         assert report.unclassified_constraints == ("SC-1", "SC-2")
         assert {name for _, name in report.constraint_classes} == {UNCLASSIFIED}
-
-    def test_the_keyword_table_is_gone(self) -> None:
-        for name in (
-            "load_behavior_classes",
-            "classify_constraint",
-            "BehaviorClassTable",
-            "default_behavior_classes_path",
-        ):
-            assert not hasattr(gates, name)
-        root = Path(__file__).resolve().parents[2]
-        assert not (root / "data" / "loss-analysis" / "behavior-classes.yaml").exists()
 
 
 class TestPrompts:

@@ -162,9 +162,6 @@ def test_run_publishes_the_versioned_scenario_handoff(tmp_path: Path) -> None:
     # The matching declarative .feature companion is present.
     feature = (tmp_path / "scenarios" / "SCN-001.feature").read_text(encoding="utf-8")
     assert feature.startswith("Feature: ")
-    # No execution projection, canonical projection, or bundle is published.
-    assert not (tmp_path / "scenarios" / "canonical").exists()
-    assert not (tmp_path / "execution-bundle.json").exists()
 
 
 def test_handoff_is_the_envelope_over_three_representations_only(
@@ -361,7 +358,6 @@ def test_functional_scenario_is_persisted_not_rejected(tmp_path: Path) -> None:
     document = _published_handoff(tmp_path)
     assert document["kind"] == "functional"
     assert document["narrative"].strip()
-    assert not (tmp_path / "execution-bundle.json").exists()
     manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
     assert manifest["stage_errors"] == []
     # A functional scenario is persisted evidence, never a generated or

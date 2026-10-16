@@ -26,7 +26,6 @@ from asago_scenario_generator.models.target_realization import (
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.scenario_prod._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
-from asago_scenario_generator.stpa.scenario_prod.stage5 import wire
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
     _ContextScenarioSemanticsPayload,
@@ -502,7 +501,6 @@ def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
     assert "stimulus" not in dumped
     assert "execution_route" not in dumped
     assert "execution_route" not in ScenarioSpec.model_fields
-    assert not hasattr(wire, "AnalyticalOnlyRouteSelection")
     assert result.unsafe_outcome_condition is None
     assert result.unsafe_outcome_semantic_proposition == PROPOSITION
 

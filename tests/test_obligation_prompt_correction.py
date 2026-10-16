@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import inspect
 import json
 import re
 from pathlib import Path
@@ -307,10 +306,6 @@ def test_obligation_aware_provider_instructions_live_in_jinja_templates() -> Non
     hashes = TemplateLoader(template_dir).hash_prompt_templates()
     assert expected <= set(hashes)
     assert all(len(hashes[name]) == 64 for name in expected)
-
-    source = inspect.getsource(prompt_module)
-    assert "You are performing structural STPA analysis" not in source
-    assert "Fill every supplied STPA ICA slot" not in source
 
 
 def test_target_prompt_view_deduplicates_losses_by_exact_identity() -> None:

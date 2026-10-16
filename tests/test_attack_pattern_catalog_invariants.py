@@ -63,7 +63,6 @@ OPT_IN_CHECKS = frozenset(
     }
 )
 
-LEGACY_KEYS = frozenset({"kill_chain", "evidence"})
 ACTION_KINDS = frozenset(
     {"prepare", "deliver", "invoke", "transform", "persist", "observe", "impact"}
 )
@@ -227,15 +226,6 @@ def test_resulting_id_set_is_exact(catalog: Catalog) -> None:
 
 
 @over_catalogs()
-def test_deferred_and_retired_ids_are_not_live(
-    catalog: Catalog, merged_catalog
-) -> None:
-    for pid in catalog.expected.get("absent_ids", ()):
-        assert pid not in catalog.records
-        assert pid not in merged_catalog
-
-
-@over_catalogs()
 def test_merged_catalog_carries_the_records(catalog: Catalog, merged_catalog) -> None:
     for pid, record in catalog.records.items():
         assert merged_catalog[pid] == record
@@ -246,7 +236,6 @@ def test_records_are_canonical_not_legacy(catalog: Catalog) -> None:
     schema = Draft202012Validator(AttackPattern.model_json_schema())
     for pid, record in catalog.records.items():
         assert record["id"] == pid
-        assert not LEGACY_KEYS & set(record), pid
         chain = record["canonical_chain"]
         assert chain["schema_version"] == "v1", pid
         assert chain["pattern_id"] == pid

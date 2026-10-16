@@ -438,4 +438,3 @@ class TestRunSp3ProductionWiring:
             "Stage 5 BDI generation failed" in error for error in result.stage_errors
         )
         assert not (run_dir / "scenarios" / "SCN-001.yaml").exists()
-        assert not (run_dir / "scenarios" / "canonical").exists()

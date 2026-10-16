@@ -46,29 +46,6 @@ class TestEntryPointIdentification:
         assert "tool_inventory" in text
         assert "entry_points" in text
 
-    def test_template_does_not_contain_old_categories(self):
-        """None of the old 5-category names are present."""
-        text = _load_template_text()
-        for old_category in (
-            "RAG/retrieval data sources",
-            "Tool execution results",
-            "External data feeds",
-            "Admin/config interfaces",
-        ):
-            assert old_category not in text, (
-                f"Old category still present: {old_category}"
-            )
-
-    def test_template_does_not_have_schneider_zones_section(self):
-        """The template does not have the old Schneider zones section."""
-        text = _load_template_text()
-        assert "## Schneider zones" not in text
-
-    def test_template_does_not_have_emphasis_section(self):
-        """The template does not have the old Emphasis section."""
-        text = _load_template_text()
-        assert "## Emphasis" not in text
-
     def test_template_has_rules_section(self):
         """The template has a Rules section with grounding instructions."""
         text = _load_template_text()

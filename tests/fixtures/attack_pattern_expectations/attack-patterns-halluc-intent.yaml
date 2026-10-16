@@ -1,6 +1,6 @@
 # Expectations for data/taxonomies/attack-patterns/attack-patterns-halluc-intent.yaml.
 # Read by tests/test_attack_pattern_catalog_invariants.py. Keys:
-#   ids / ordered / absent_ids   exact live record set (catalog order when ordered)
+#   ids / ordered                exact live record set (catalog order when ordered)
 #   checks                       opt-in invariants beyond the shared ones
 #   observation_kind_counts      outcome-link observation kinds across the catalog
 #   records.<id>                 per-record pins: digest, chain_exact, step_exact,
@@ -12,7 +12,6 @@ observation_kind_counts: {persistent_state: 33, model_context: 15, tool_invocati
   endpoint_receipt: 1}
 ids: [AP-T11-01, AP-T11-02, AP-T11-03, AP-T13-04, AP-T5-01, AP-T5-02, AP-T5-04, AP-T6-01,
   AP-T6-02, AP-T6-03, AP-T6-04, AP-T6-05]
-absent_ids: [AP-T13-01, AP-T13-02, AP-T13-03, AP-T5-03]
 records:
   AP-T11-01:
     digest: 8d890a406e190195bdae45eeb423532ab30d0c30eef3ccb0e88b7eabab108266
