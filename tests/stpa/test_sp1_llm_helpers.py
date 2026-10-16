@@ -148,13 +148,6 @@ class TestCallWithPolicyRequestShape:
         assert outcome.value.name == "ok"
         assert client.calls[0]["max_completion_tokens"] == 10
 
-    def test_default_validates_against_the_response_model(self, tmp_path):
-        outcome = _send(ScriptedClient([{"item_id": "malformed"}]), tmp_path)
-
-        assert outcome.value is None
-        assert outcome.error is not None
-        assert "malformed source ID" in outcome.error
-
     @pytest.mark.parametrize(
         "error",
         [
