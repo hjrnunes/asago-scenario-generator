@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 
 import pytest
 import yaml
@@ -110,13 +111,9 @@ class TestLoadAttackPatterns:
         with pytest.raises(ValueError, match="duplicate attack pattern id"):
             load_attack_patterns()
 
-    def test_empty_glob_falls_back_to_default_path(self, tmp_path, monkeypatch) -> None:
-        fallback = tmp_path / "attack-patterns.yaml"
-        fallback.write_text(
-            yaml.safe_dump({"patterns": {"AP-T1-01": {"threat_id": "T1"}}})
-        )
+    def test_empty_catalog_directory_raises(self, tmp_path, monkeypatch) -> None:
         empty_dir = tmp_path / "empty"
         empty_dir.mkdir()
         monkeypatch.setattr(loaders_module, "_DEFAULT_ATTACK_PATTERNS_DIR", empty_dir)
-        monkeypatch.setattr(loaders_module, "_DEFAULT_ATTACK_PATTERNS_PATH", fallback)
-        assert load_attack_patterns() == {"AP-T1-01": {"threat_id": "T1"}}
+        with pytest.raises(FileNotFoundError, match=re.escape(str(empty_dir))):
+            load_attack_patterns()

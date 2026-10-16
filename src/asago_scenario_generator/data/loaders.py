@@ -145,8 +145,6 @@ def load_reviewed_risk_extraction(path: str | Path) -> list[RiskCard]:
 
 _DEFAULT_ATTACK_PATTERNS_DIR = DATA_ROOT / "taxonomies" / "attack-patterns"
 
-_DEFAULT_ATTACK_PATTERNS_PATH = _DEFAULT_ATTACK_PATTERNS_DIR / "attack-patterns.yaml"
-
 
 def _load_single_attack_patterns_file(p: Path) -> dict[str, dict]:
     """Load a single attack patterns YAML file and return its patterns dict."""
@@ -168,19 +166,21 @@ def load_attack_patterns(
     catalog must not silently overwrite one record with another.
 
     Returns:
-        Dict mapping pattern IDs (e.g. 'AP-T7-01') to their full pattern dicts.
+        Dict mapping pattern IDs (e.g. 'AP-T1-01') to their full pattern dicts.
 
     Raises:
+        FileNotFoundError: If ``path`` is ``None`` and the default directory
+            holds no ``attack-patterns*.yaml`` file.
         ValueError: If the merged files declare the same pattern ID.
     """
     if path is not None:
         return _load_single_attack_patterns_file(Path(path))
 
-    # Glob all matching files from the default directory
     files = sorted(_DEFAULT_ATTACK_PATTERNS_DIR.glob("attack-patterns*.yaml"))
     if not files:
-        # Fallback: try the exact default path (raises FileNotFoundError if missing)
-        return _load_single_attack_patterns_file(_DEFAULT_ATTACK_PATTERNS_PATH)
+        raise FileNotFoundError(
+            f"no attack-patterns*.yaml file found in {_DEFAULT_ATTACK_PATTERNS_DIR}"
+        )
     return _merge_pattern_files(files)
 
 

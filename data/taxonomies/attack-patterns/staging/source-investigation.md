@@ -54,7 +54,7 @@ These focus on traditional ML, early LLM attacks, and pre-agentic systems. **Low
 
 ## Staging Analysis Files Review
 
-### 1. atlas-case-studies-part1.md
+### 1. ATLAS case-study analysis, CS0040-CS0051
 
 **Coverage**: Exhaustive analysis of CS0040-CS0051 (12 case studies)
 
@@ -71,7 +71,7 @@ These focus on traditional ML, early LLM attacks, and pre-agentic systems. **Low
 
 ---
 
-### 2. atlas-case-studies-part2.md
+### 2. ATLAS case-study analysis, CS0052-CS0056
 
 **Coverage**: Exhaustive analysis of CS0052-CS0056 (5 case studies; earlier version claimed CS0052-CS0062 but CS0057+ do not exist)
 
@@ -88,7 +88,7 @@ These focus on traditional ML, early LLM attacks, and pre-agentic systems. **Low
 
 ---
 
-### 3. atlas-data-model-analysis.md
+### 3. ATLAS data model analysis
 
 **Coverage**: ATLAS v6 YAML format structural analysis
 
@@ -108,7 +108,7 @@ These focus on traditional ML, early LLM attacks, and pre-agentic systems. **Low
 
 ---
 
-### 4. atlas-actor-analysis.md
+### 4. ATLAS actor analysis
 
 **Coverage**: Kill chain step actor classification across 14 case studies
 
@@ -128,7 +128,7 @@ These focus on traditional ML, early LLM attacks, and pre-agentic systems. **Low
 
 ---
 
-### 5. case-study-abstraction-strategy.md
+### 5. Case-study abstraction strategy
 
 **Coverage**: Methodology for transforming ATLAS concrete case studies into abstract asago-scenario-generator patterns
 
@@ -190,7 +190,7 @@ These focus on traditional ML, early LLM attacks, and pre-agentic systems. **Low
 
 ---
 
-### 8. asago-scenario-generator-format-analysis.md
+### 8. Asago scenario generator format analysis
 
 **Coverage**: Exhaustive analysis of asago-scenario-generator attack pattern data model and pipeline consumption
 
@@ -337,7 +337,7 @@ These focus on traditional ML, early LLM attacks, and pre-agentic systems. **Low
 4. **CS0050** (OpenClaw 1-click RCE) → AP-T3-05
 5. **CS0054** (MCP tool docstring injection) → AP-T16-04
 
-**Method**: Follow case-study-abstraction-strategy.md transformation rules:
+**Method**: Follow the transformation rules of the case-study abstraction strategy (section 5 above):
 - Strip domain-specific anchors (named actors, specific targets, CVEs)
 - Keep tactical progression and technique IDs
 - Abstract action descriptions to be domain-agnostic
@@ -391,7 +391,7 @@ Based on the staging analysis, the following gaps exist in the current extractio
 
 ### Gap 1: No Automated ATLAS-to-Asago Scenario Generator Transformer
 
-**Issue**: case-study-abstraction-strategy.md provides manual transformation rules, but there is no tooling to automate the extraction
+**Issue**: The case-study abstraction strategy (section 5 above) provides manual transformation rules, but there is no tooling to automate the extraction
 
 **Recommendation**: Build a script that:
 1. Parses ATLAS v6 YAML `relationships.employs` section
