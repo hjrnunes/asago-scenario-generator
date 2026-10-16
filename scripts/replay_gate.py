@@ -214,7 +214,7 @@ def recorded_stage(
 ) -> tuple[list[str], int]:
     """Return the ``generate`` arguments and exit code the recording came from.
 
-    *stage_json* (default: the orch ``stage.json`` beside the output
+    *stage_json* (default: the orchestrator's ``stage.json`` beside the output
     directory) holds the full command line as ``argv`` and its ``exit_code``.
     """
     stage = stage_json or recorded.parent / STAGE_FILENAME

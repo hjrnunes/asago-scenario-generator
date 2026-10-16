@@ -353,7 +353,7 @@ def test_synthesis_retains_baseline_diagnostics_without_changing_yield(tmp_path)
 
 
 def test_a_run_writes_the_generate_report_and_its_stage_summary(tmp_path):
-    """The report lives in report/, beside the summary orch reads."""
+    """The report lives in report/, beside the summary the orchestrator reads."""
     result = run_synthesis(
         _inputs(tmp_path), SynthesisAdapters.from_object(_FakeAdapters(calls=[]))
     )
