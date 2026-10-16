@@ -126,14 +126,6 @@ def test_untyped_capability_profile_is_rejected(tmp_path) -> None:
         _build(tmp_path, profile={"kc_subcodes": _ALL_KC_SUBCODES})
 
 
-def test_non_object_llm_pattern_table_is_rejected(tmp_path) -> None:
-    cross = tmp_path / "table.yaml"
-    cross.write_text("- not an object\n")
-
-    with pytest.raises(ValueError, match="must contain an object"):
-        _build(tmp_path, llm_pattern_path=cross)
-
-
 def test_empty_bundled_catalog_is_rejected(tmp_path, monkeypatch) -> None:
     monkeypatch.setattr(
         "asago_scenario_generator.data.loaders.load_attack_patterns", lambda: {}

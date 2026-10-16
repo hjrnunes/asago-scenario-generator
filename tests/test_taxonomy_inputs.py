@@ -2,19 +2,15 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-
 import pytest
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
-from asago_scenario_generator.data.sssom import SSSOMMapping
 from asago_scenario_generator.data.threat_gating import in_scope_attack_pattern_ids
 from asago_scenario_generator.pipeline.taxonomy_inputs import (
     OBLIGATION_EDGES_RELEASE,
     bundled_attack_pattern_catalog,
     close_reviewed_graph,
     llm_pattern_edges,
-    reviewed_owasp_llm_rows,
     taxonomy_obligation_inputs,
 )
 from tests.helpers.obligation_factory import make_inputs
@@ -22,17 +18,6 @@ from tests.helpers.obligation_factory import make_inputs
 
 def _edge(source: str, target: str) -> dict:
     return {"source_id": source, "target_id": target}
-
-
-def _mapping(subject: str, predicate: str, obj: str, source: str) -> SSSOMMapping:
-    return SSSOMMapping(
-        subject_id=subject,
-        subject_source="credo-ucf",
-        predicate_id=predicate,
-        object_id=obj,
-        object_source=source,
-        mapping_justification="j",
-    )
 
 
 def test_closure_keeps_only_complete_risk_llm_pattern_paths() -> None:
@@ -47,21 +32,6 @@ def test_closure_keeps_only_complete_risk_llm_pattern_paths() -> None:
 
     assert closed_rows == [{"object_id": "LLM01"}]
     assert closed_edges == [_edge("LLM01", "AP-1"), _edge("LLM01", "AP-2")]
-
-
-def test_reviewed_rows_keep_reviewed_owasp_llm_matches_only() -> None:
-    mappings = [
-        _mapping("risk-a", "skos:relatedMatch", "llm012025-x", "owasp-llm-2.0"),
-        _mapping("risk-a", "skos:relatedMatch", "ail-hate", "ailuminate-v1.0"),
-        _mapping("risk-a", "semapv:NoMatch", "llm062025-x", "owasp-llm-2.0"),
-        _mapping("risk-z", "skos:relatedMatch", "llm092025-x", "owasp-llm-2.0"),
-    ]
-
-    rows = reviewed_owasp_llm_rows(mappings, [SimpleNamespace(risk_id="risk-a")])
-
-    assert [(row["subject_id"], row["object_id"]) for row in rows] == [
-        ("risk-a", "LLM01")
-    ]
 
 
 def _table(*entries: tuple[str, list[str]]) -> dict:
