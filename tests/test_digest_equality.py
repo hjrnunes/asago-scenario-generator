@@ -1,21 +1,20 @@
 """Pin recorded plan bytes and digests across the canonical-JSON helpers.
 
-The fixtures under ``tests/fixtures/digest_equality`` come from the six
-``pp-int38m`` replay recordings at producer ``8e108133``: each unit's
-capability profile, its target's qualification facts and reviewed risk
-records (only the fields ``load_reviewed_risk_extraction`` reads), the shared
-SSSOM file, and every ``scenario_context.semantic_digest`` payload a strict
-replay of the unit computed. ``expected.json`` holds the recorded plan's
-sha256, semantic digest and candidate IDs, the synthesis manifest's
-``taxonomy_inputs_digest``, and the bundled taxonomy pins.
+The fixtures under ``tests/fixtures/digest_equality`` come from six replay
+recordings at producer ``8e108133``: each unit's capability profile, its
+target's qualification facts and reviewed risk records (only the fields
+``load_reviewed_risk_extraction`` reads), the shared SSSOM file, and every
+``scenario_context.semantic_digest`` payload a strict replay of the unit
+computed. ``expected.json`` holds the recorded plan's sha256, semantic digest
+and candidate IDs, the synthesis manifest's ``taxonomy_inputs_digest``, and
+the bundled taxonomy pins.
 
 The ``taxonomy_inputs_digest`` values come from the ``synthesis-manifest.yaml``
-of the six ``pp-s3`` strict replays (recorded at ``w4/int-b`` ``9a642ef2``,
-which includes P5-11 ``352cfefa``). The same fixture inputs rebuild them, so
-no extra fixture data exists. The ``pp-int38m`` recordings at ``8e108133``
-predate P5-11 and hold different values for the same inputs, because the
-planner input model dropped its ``compatibility_policy`` field; their plan
-digests are unchanged.
+of six later strict replays (recorded at producer ``9a642ef2``, which includes
+commit ``352cfefa``). The same fixture inputs rebuild them, so no extra fixture
+data exists. The recordings at ``8e108133`` predate that commit and hold
+different values for the same inputs, because the planner input model dropped
+its ``compatibility_policy`` field; their plan digests are unchanged.
 
 A change to canonical JSON, NFC normalization or digest framing that alters
 any recorded byte fails here. Update the expected values only for an

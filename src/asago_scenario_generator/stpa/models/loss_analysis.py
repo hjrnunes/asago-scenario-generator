@@ -25,13 +25,13 @@ class LossProvenance(str, Enum):
 
 RiskDispositionKind = Literal["cited", "not_applicable"]
 
-# Obligation entries (owner ruling Q30, 2026-09-10): an explicit, reviewed
-# failure direction for a security constraint.  A ``required`` entry names a
-# behavior the rule mandates and the channel that would realize it; a
-# ``forbidden`` entry names a behavior the rule prohibits and the channel a
-# violation would take.  ``provider_request`` is the transmission of a prompt
-# to the third-party model: a real channel, but neither an agent tool call
-# nor the reply, so no oracle kind observes it on this target.
+# Obligation entries: an explicit, reviewed failure direction for a security
+# constraint.  A ``required`` entry names a behavior the rule mandates and
+# the channel that would realize it; a ``forbidden`` entry names a behavior
+# the rule prohibits and the channel a violation would take.
+# ``provider_request`` is the transmission of a prompt to the third-party
+# model: a real channel, but neither an agent tool call nor the reply, so no
+# oracle kind observes it on this target.
 ObligationKind = Literal["required", "forbidden"]
 # Channels on which a forbidden behavior can be violated.  ``state`` and
 # ``result`` name effect-layer observations (a state change, a tool result)
@@ -221,7 +221,7 @@ class Hazard(BaseModel):
 
 
 def compose_constraint_description(rule: str, applies_when: list[str]) -> str:
-    """Compose the persisted constraint description (Phase 1.3 as amended).
+    """Compose the persisted constraint description.
 
     The fixed rendering every consumer sees: ``rule`` alone when the
     constraint applies unconditionally, otherwise ``"<rule> Applies when:
@@ -260,12 +260,11 @@ class SecurityConstraint(BaseModel):
     # silently recomposed (not detected as corruption); the authored fields
     # are the integrity anchor.
     description: str = ""
-    # Explicit failure-direction entries (owner ruling Q30, 2026-09-10).
-    # Entries on a derived graph hold ``proposed`` authority, stamped by
-    # deterministic code after every derivation or revision merge; the model
-    # wire cannot claim ``reviewed``.  A pinned graph carries ``reviewed``
-    # with its reviewer stamp.  ``None`` means unstamped and reads as
-    # ``proposed``.
+    # Explicit failure-direction entries.  Entries on a derived graph hold
+    # ``proposed`` authority, stamped by deterministic code after every
+    # derivation or revision merge; the model wire cannot claim
+    # ``reviewed``.  A pinned graph carries ``reviewed`` with its reviewer
+    # stamp.  ``None`` means unstamped and reads as ``proposed``.
     obligations: list[Obligation] = Field(
         default_factory=list, exclude_if=lambda value: not value
     )

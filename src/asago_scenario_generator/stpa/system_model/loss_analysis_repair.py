@@ -1,4 +1,4 @@
-"""Targeted Stage 1a repair (owner authorization 2026-09-11, freeze exception).
+"""Targeted Stage 1a repair.
 
 The former bounded whole-object retry embedded the entire original prompt,
 the prior structured object, and the validation feedback in one correction
@@ -14,14 +14,13 @@ exactly three approved failure classes:
 1. missing or malformed ``risk_dispositions`` entries;
 2. malformed obligation entries within an otherwise preserved constraint; and
 3. unknown IDs in a hazard's ``related_losses`` or a security constraint's
-   ``related_hazards``, when every failing list names one (decision 243,
-   2026-10-08).  Each unknown entry may only be removed or replaced with a
-   valid ID the list does not already name; a repeated entry stays for the
-   reference gate's duplicate detection, and a list that only repeats an ID
-   stops the draft with a typed failure and no repair call.
+   ``related_hazards``, when every failing list names one.  Each unknown
+   entry may only be removed or replaced with a valid ID the list does not
+   already name; a repeated entry stays for the reference gate's duplicate
+   detection, and a list that only repeats an ID stops the draft with a typed
+   failure and no repair call.
 
-Contract (owner authorization 2026-09-11; narrowed per the approved
-correction specification revision 2, 2026-09-11):
+Contract:
 
 - Deterministic code selects the repair identities and the single permitted
   correction per identity.  A known channel value in the wrong field
@@ -46,15 +45,15 @@ correction specification revision 2, 2026-09-11):
 - Two semantic failures get one feedback correction instead of a scoped
   repair wire: the original prompts, the validator's feedback, and the prior
   reply.  They are a risk-derivation reply that declares no grounded loss
-  (``loss_presence``, decision 327) and a gap reply that leaves the declared
-  or supplied losses with no hazard and no constraint
-  (``missing_hazard_chain``, decision 347).  Every other semantic failure,
-  including any other incomplete chain, stops with no repair call.  The
-  corrected reply gets the first reply's record-level recovery (decision
-  353): rule-span repair, then removal of the obligation entries and
-  disposition rows that fail their own wire models (``salvage_corrected_reply``).
-  It never gets a model repair: an out-of-scope failure, a scope error, or a
-  draft that fails the full validators stops the unit.
+  (``loss_presence``) and a gap reply that leaves the declared or supplied
+  losses with no hazard and no constraint (``missing_hazard_chain``).  Every
+  other semantic failure, including any other incomplete chain, stops with
+  no repair call.  The corrected reply gets the first reply's record-level
+  recovery: rule-span repair, then removal of the obligation entries and
+  disposition rows that fail their own wire models
+  (``salvage_corrected_reply``).  It never gets a model repair: an
+  out-of-scope failure, a scope error, or a draft that fails the full
+  validators stops the unit.
 - Exactly one repair call follows one failed first attempt, and the repair is
   never retried.  Every transformation (salvage drop, deterministic
   cleanup, repair, unsupported outcome) is recorded in one run-level,
@@ -311,7 +310,7 @@ class DispositionReferenceRepairResponse(ReferenceRepairResponse):
 
 
 # ---------------------------------------------------------------------------
-# Cut-off risk-derivation recovery (owner approval 2026-09-30)
+# Cut-off risk-derivation recovery
 # ---------------------------------------------------------------------------
 
 TRUNCATED_DISPOSITION_RECOVERY_KIND = "truncated_disposition_recovery"
@@ -628,7 +627,7 @@ def record_truncated_disposition_recovery(
 
 
 # ---------------------------------------------------------------------------
-# Hazard-less constraint drop (owner choice 9, decision 327)
+# Hazard-less constraint drop
 # ---------------------------------------------------------------------------
 
 HAZARDLESS_CONSTRAINT_DROP_KIND = "hazardless_constraint_drop"
@@ -757,8 +756,8 @@ def _classify_wire_error(item: Any) -> tuple[bool, str]:
     error_type = str(item.get("type", ""))
     message = str(item.get("msg", ""))
     if len(location) == 1 and location[0] in _WIRE_COLLECTIONS:
-        # The gap contract deliberately omits risk accounting, but owner
-        # policy C1 permits deterministic row cleanup when a gap response
+        # The gap contract deliberately omits risk accounting, but
+        # deterministic row cleanup is permitted when a gap response
         # nevertheless includes a malformed ``risk_dispositions`` list.
         # Keep this one extra top-level collection in the row salvage path;
         # every other unknown top-level field remains terminal.
@@ -1082,7 +1081,7 @@ def salvage_provider_response(
     )
     # The gap provider contract has no risk-accounting collection.  If a
     # malformed gap response nevertheless carries one, preserve only its
-    # malformed rows as deterministic C1 cleanup evidence. A valid-looking
+    # malformed rows as malformed-gap-row cleanup evidence. A valid-looking
     # out-of-contract row is terminal; it must never become authoritative or
     # be silently removed. Risk-stage responses still validate and salvage
     # this collection normally.
@@ -1613,8 +1612,8 @@ class DispositionRepairPlan:
     """One targeted repair of missing or malformed risk-disposition entries.
 
     ``removed_unknown`` carries one ``(risk reference, removal reason)`` pair
-    per unsupplied-card row the repair application removes (C2), whether the
-    row was wire-valid or malformed; the reason names the cleanup policy that
+    per unsupplied-card row the repair application removes, whether the row
+    was wire-valid or malformed; the reason names the cleanup policy that
     authorizes the removal.
     """
 
@@ -1651,8 +1650,8 @@ class LossPresenceRepairPlan:
     """One correction of a risk-derivation reply that declared no grounded loss.
 
     The request repeats the original prompts with the validator's exact
-    ``feedback`` and the prior reply (owner choice 5, decision 327).  It is
-    the call's one targeted repair.
+    ``feedback`` and the prior reply.  It is the call's one targeted
+    repair.
     """
 
     feedback: str
@@ -1695,8 +1694,8 @@ class MissingHazardChainRepairPlan:
     The gap call needed a complete chain, losses were declared or supplied,
     and neither the reply nor the prior view had a hazard or a constraint.
     The request repeats the original prompts with the validator's exact
-    ``feedback`` and the prior reply (decision 347).  It is the call's one
-    targeted repair.
+    ``feedback`` and the prior reply.  It is the call's one targeted
+    repair.
     """
 
     feedback: str
@@ -2532,8 +2531,7 @@ def _dropped_disposition_plan(
     warnings = report.dropped_disposition_warnings()
     if step == "gap_analysis":
         # The gap call's contract carries no risk accounting; its
-        # disposition rows are out of contract and are removed
-        # (owner-approved cleanup policy C1, 2026-09-11).
+        # disposition rows are out of contract and are removed.
         return DeterministicCleanup(
             draft=prior,
             warnings=warnings,
@@ -2577,13 +2575,12 @@ def _classify_dropped_dispositions(
     """Split dropped disposition rows by their original identity.
 
     Classify every dropped row by its original identity before any
-    selection runs (owner correction, 2026-09-12): a supplied card's
-    malformed row must join the repair selection, because a supplied
-    card's missing, duplicate, or malformed state may never be
-    silently resolved by cleanup, and an unsupplied identity routes
-    to the C2 cleanup policy even when the row itself was malformed.
-    A malformed row with no usable identity cannot be classified
-    and fails closed with a typed reason.
+    selection runs: a supplied card's malformed row must join the repair
+    selection, because a supplied card's missing, duplicate, or malformed
+    state may never be silently resolved by cleanup, and an unsupplied
+    identity routes to the unsupplied-card cleanup even when the row
+    itself was malformed. A malformed row with no usable identity cannot
+    be classified and fails closed with a typed reason.
     """
     supplied_drop_reasons: dict[str, list[str]] = {}
     unknown_reasons: dict[str, str] = {}
@@ -3749,7 +3746,7 @@ def _record_removed_unknown_rows(
     step: str,
     repair_record: RepairRecord | None,
 ) -> None:
-    """Record the unsupplied-card rows the repair application removes (C2).
+    """Record the unsupplied-card rows the repair application removes.
 
     Every removed row exists only in the original first-attempt response, so
     the entry's source reference (``raw_step``) always points at the original
@@ -4151,7 +4148,7 @@ def _finish_failed_repair(
     ``answered`` means the parser reached a typed verdict: a response came
     back and was rejected or failed validation.  A transport or undecodable
     failure has nothing to resolve.  Every selected reference list names an
-    unknown ID (decision 243), so any answered reference plan reaches the drop.
+    unknown ID, so any answered reference plan reaches the drop.
     """
     if isinstance(plan, ReferenceRepairPlan) and answered:
         return _drop_unresolved(

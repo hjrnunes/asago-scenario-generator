@@ -1325,7 +1325,7 @@ def _terminal_error_code(
     A provider that answered but whose answer failed stage-local semantic
     validation is not a call failure: the record already shows
     ``provider_response_received``, so the code names the semantic failure
-    instead (fourth checkpoint 4 finding 6).
+    instead.
     """
     if isinstance(error, PromptBudgetExceeded):
         return "prompt_budget_exceeded"

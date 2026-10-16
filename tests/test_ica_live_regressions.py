@@ -339,8 +339,8 @@ def test_captured_target_reference_contract_failure_is_recorded_precisely(
     stale_constraint = SecurityConstraint.model_validate(
         {
             **baseline.model_dump(),
-            # Phase 1.3 as amended: the stale hazard reference lives in the
-            # authored rule so the composed description carries it.
+            # The stale hazard reference lives in the authored rule so the
+            # composed description carries it.
             "rule": "Requests must satisfy policy. (related hazards: H-2)",
             "applies_when": [],
         }

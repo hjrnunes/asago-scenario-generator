@@ -1,4 +1,4 @@
-"""Phase 3.2: deterministic content-surface facts from a capability profile.
+"""Deterministic content-surface facts from a capability profile.
 
 A ``third_party_via_content`` adversary needs a retrieval or tool-content
 surface the third party could reach.  The facts derive only from typed

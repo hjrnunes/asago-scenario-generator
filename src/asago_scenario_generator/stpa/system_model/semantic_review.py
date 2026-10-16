@@ -363,8 +363,8 @@ def _apply_constraint_review(
     """Validate one constraint row and apply its wording and hazard edges."""
     _validate_disposition(
         identity=constraint_id,
-        # Phase 1.3 as amended: the review corrects the authored rule;
-        # an unchanged echo of the composed statement is not a change.
+        # The review corrects the authored rule; an unchanged echo of
+        # the composed statement is not a change.
         original_description=compose_constraint_description(
             constraint.rule, constraint.applies_when
         ),
@@ -390,9 +390,9 @@ def _apply_constraint_review(
             row.revised_description,  # type: ignore[arg-type]
             constraint.obligations,
         )
-        # Phase 1.3 as amended: a reviewed wording correction rewrites
-        # the authored rule; the composed description follows it with
-        # the authored conditions intact.
+        # A reviewed wording correction rewrites the authored rule;
+        # the composed description follows it with the authored
+        # conditions intact.
         constraint.rule = row.revised_description  # type: ignore[assignment]
         constraint.description = compose_constraint_description(
             constraint.rule, constraint.applies_when

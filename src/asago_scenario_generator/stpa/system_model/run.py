@@ -272,7 +272,7 @@ def run_sp1(
             derivation_sent,
         )
 
-    # --- Stage 1a advisory risk-coverage review (spec deviation 10) ---
+    # --- Stage 1a advisory risk-coverage review ---
     # One bounded call reviews the gated graph against the risk cards.  It is
     # advisory: it never changes the graph and never blocks the run.  Pinned
     # runs skip it because the supplied graph was already reviewed.
@@ -507,8 +507,7 @@ def _try_derive_loss_analysis(
             target_evidence=target_evidence,
         )
         # Deterministic code owns the direction-authority stamp: entries on
-        # a derived graph are proposals until a human reviews them (owner
-        # ruling Q30, 2026-09-10).
+        # a derived graph are proposals until a human reviews them.
         stamp_proposed_direction(analysis)
         if stage_warnings is not None:
             stage_warnings.extend(normalization_warnings)
@@ -656,10 +655,10 @@ def _try_run_risk_coverage_review(
 ) -> RiskCoverageReviewOutcome:
     """Run the advisory Stage 1a risk-coverage review without blocking the run.
 
-    The review is advisory (spec deviation 10): it never changes the graph,
-    never raises, and records an ``unavailable`` verdict with the typed
-    reason when its single bounded call fails.  The digest pins the review
-    to the exact gated graph bytes.
+    The review is advisory: it never changes the graph, never raises, and
+    records an ``unavailable`` verdict with the typed reason when its
+    single bounded call fails.  The digest pins the review to the exact
+    gated graph bytes.
     """
     digest = graph_digest(loss_analysis)
     outcome = run_risk_coverage_review(

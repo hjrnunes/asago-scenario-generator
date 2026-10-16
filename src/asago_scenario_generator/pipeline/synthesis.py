@@ -232,13 +232,12 @@ def _run_synthesis(
         final_control=final_control,
     )
 
-    # Enrichment grounding (owner decision, M2 unified path): when an
-    # observed target profile is supplied, the same operation-matching
-    # discipline as target realization runs before ICA enumeration and names
-    # each supported logical control action's documented operation.  Known
-    # operations enrich the logical control actions; they never replace the
-    # control model with tool enumeration, and no input switches the
-    # generation algorithm.
+    # Enrichment grounding: when an observed target profile is supplied, the
+    # same operation-matching discipline as target realization runs before
+    # ICA enumeration and names each supported logical control action's
+    # documented operation.  Known operations enrich the logical control
+    # actions; they never replace the control model with tool enumeration,
+    # and no input switches the generation algorithm.
     operation_enrichment = log.take(
         _run_operation_enrichment(
             loss_analysis=final_loss,

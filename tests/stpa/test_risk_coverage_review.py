@@ -1,4 +1,4 @@
-"""Tests for the advisory Stage 1a risk-coverage review (spec deviation 10).
+"""Tests for the advisory Stage 1a risk-coverage review.
 
 The review is advisory: it never changes the graph and never blocks the run.
 Every test uses a fake client and contacts no network.

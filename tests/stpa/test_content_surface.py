@@ -1,7 +1,6 @@
-"""Phase 3.2: content-surface facts derived from typed capability-profile facts.
+"""Content-surface facts derived from typed capability-profile facts.
 
-Spec: ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md,
-Phase 3.2.  A ``third_party_via_content`` adversary is only eligible when the
+A ``third_party_via_content`` adversary is only eligible when the
 capability profile itself records a retrieval or tool-content surface.
 """
 

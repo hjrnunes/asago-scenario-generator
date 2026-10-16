@@ -93,7 +93,7 @@ def _discriminating_condition_result(
 
 
 def _materialize_adversary(draft: BaseModel) -> Adversary:
-    """Derive the compiler-owned adversary fields (Phase 3 deviations 7-8).
+    """Derive the compiler-owned adversary fields.
 
     A ``kind: none`` record ignores the provider's gain text and carries the
     fixed functional-test marker. The wire carries no stimulus, so the reach

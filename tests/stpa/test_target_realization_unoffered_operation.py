@@ -2,7 +2,7 @@
 
 The correction covers this failure only.  A schema or parser failure of the
 map reply, and a valid reply, behave as before.  The fixture is the recorded
-CA-3-3 reply of the L1 occiai-r1 rerun (request 79 of the b8-glm batch), whose
+CA-3-3 reply of a recorded OcciAI rerun (request 79), whose
 ``selected_operation.resource_id`` carries JSON punctuation.
 """
 

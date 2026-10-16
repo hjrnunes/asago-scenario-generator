@@ -1,7 +1,7 @@
 """A graph-revision hazard with a blank description takes the step's correction.
 
 The fixture is the reply that added hazard H-10 with a one-space description
-in the b8-glm L3 occiai-r1 run; every synthesis ICA prompt then named a hazard
+in a recorded OcciAI run; every synthesis ICA prompt then named a hazard
 outside its authoritative slice.
 """
 

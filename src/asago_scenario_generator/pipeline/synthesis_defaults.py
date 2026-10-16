@@ -196,11 +196,11 @@ def _default_baseline(
     """Run ordinary SP1 using one resolved provider client.
 
     One unified analysis runs for every supplied input.  The observed
-    execution target enters SP1 as evidence (owner decision, 2026-09-29
-    STPA review): its inventory, state schema, session fields, and policy
-    reads ground the Stage 1a hazards and constraints and every Stage 2
-    call; they never select a different derivation.  A pinned loss analysis
-    skips Stage 1a's model calls entirely.
+    execution target enters SP1 as evidence: its inventory, state schema,
+    session fields, and policy reads ground the Stage 1a hazards and
+    constraints and every Stage 2 call; they never select a different
+    derivation.  A pinned loss analysis skips Stage 1a's model calls
+    entirely.
     """
     from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
     from asago_scenario_generator.stpa.system_model.run import run_sp1
@@ -450,10 +450,10 @@ def _default_enrich_control_actions(
 ) -> Any | None:
     """Run the pre-ICA enrichment grounding for an observed target profile.
 
-    Owner decision (M2 unified path): known operations enrich the logical
-    control actions; they never replace the control model with tool
-    enumeration.  Without an observed profile, or for a simulation profile,
-    there is nothing to ground and the analysis is returned unchanged.
+    Known operations enrich the logical control actions; they never replace
+    the control model with tool enumeration.  Without an observed profile,
+    or for a simulation profile, there is nothing to ground and the
+    analysis is returned unchanged.
     """
     from asago_scenario_generator.stpa.models.execution_classification import (
         ProfileBasis,

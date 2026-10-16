@@ -944,13 +944,13 @@ def _both_state_changing_profile():
 
 
 class _Attempt4ShapeExtension(_ExtensionInterpreter):
-    """Replay the preserved attempt-4 extension outcome shape.
+    """Replay a recorded extension outcome shape.
 
     The accepted outcome proposes controller RESP-4 (next action identity
     CA-4-2) whose target is the responsibility RESP-3: the exact shape that
-    crashed run m2-e2e-first-run-attempt4.  A sibling outcome keeps a plain
-    tool-target (no explicit target) proposal so the test also proves sibling
-    actions are unaffected by the hold.
+    crashed a recorded run.  A sibling outcome keeps a plain tool-target (no
+    explicit target) proposal so the test also proves sibling actions are
+    unaffected by the hold.
     """
 
     def extend(self, request):

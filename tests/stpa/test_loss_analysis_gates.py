@@ -1,8 +1,7 @@
-"""Phase 1 gates on the loss analysis: risk accounting and hazard-graph density.
+"""Gates on the loss analysis: risk accounting and hazard-graph density.
 
-Spec: ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md,
-Phase 1.  The iteration-20 replay anchors every check to the observed
-failure that motivated the phase.
+A recorded replay anchors every check to the observed failure that
+motivated the gates.
 """
 
 from __future__ import annotations
@@ -710,9 +709,9 @@ class TestWireSchemaRetry:
     def test_invalid_gap_dispositions_are_dropped_and_accounting_survives(
         self, tmp_path
     ) -> None:
-        # The live gemma4-oc run emitted a garbage risk_dispositions
-        # collection in the gap response; the rows are out of contract, so
-        # deterministic code drops them and Call 1's accounting survives.
+        # A live run emitted a garbage risk_dispositions collection in the
+        # gap response; the rows are out of contract, so deterministic
+        # code drops them and Call 1's accounting survives.
         bad_gap = valid_gap_draft_dict()
         bad_gap["risk_dispositions"] = [
             {"risk_ref": "L-2", "disposition": "not_applicable"},
@@ -2576,7 +2575,7 @@ class TestAccountingGroundRules:
         assert report.contradictions == ()
 
     def test_cited_disposition_reason_echo_is_normalized(self) -> None:
-        # Live gemma4-oc evidence: the provider echoes an empty reason field
+        # Live evidence: the provider echoes an empty reason field
         # on cited entries; the stray reason is dropped, not fatal.
         for echoed_reason in ("", "   ", None):
             analysis = LossAnalysis.model_validate(
@@ -2685,9 +2684,9 @@ class TestAccountingGroundRules:
         self, tmp_path
     ) -> None:
         """A not_applicable card cited by a loss is flipped, not fatal."""
-        # Live gemma4-oc evidence (v5): the model marked a risk
-        # not_applicable while L-1 cited it as a source.  The response's
-        # own citation evidence resolves the contradiction deterministically.
+        # Live evidence: the model marked a risk not_applicable while
+        # L-1 cited it as a source.  The response's own citation
+        # evidence resolves the contradiction deterministically.
         contradictory = valid_risk_draft_dict()
         contradictory["risk_dispositions"] = [
             {
@@ -2808,7 +2807,7 @@ class TestSubjectRuleDeterminism:
 
 
 class TestConstraintRuleAndConditions:
-    """Phase 1.3 as amended: authored rule + applies_when; code composes."""
+    """Authored rule + applies_when; code composes the description."""
 
     def test_composition_rendering_both_branches(self) -> None:
         conditional = SecurityConstraint.model_validate(

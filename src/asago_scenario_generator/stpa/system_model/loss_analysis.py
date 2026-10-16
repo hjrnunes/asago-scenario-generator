@@ -127,9 +127,9 @@ STEP_RISK = "risk_derivation"
 STEP_GAP = "gap_analysis"
 STEP_MERGE = "merge"
 # No automatic second dispatch on a malformed JSON body: the corrected
-# Stage 1a contract (owner authorization 2026-09-11, rev2) allows exactly one
-# call per stage plus at most one targeted repair, so an undecodable body is
-# a typed terminal outcome of the first attempt, never a retry trigger.
+# Stage 1a contract allows exactly one call per stage plus at most one
+# targeted repair, so an undecodable body is a typed terminal outcome of the
+# first attempt, never a retry trigger.
 JSON_DECODE_RETRIES = 0
 STAGE1A_MAX_COMPLETION_TOKENS = 8192
 # Above the longest list a stop reply has cited (23 cards), below a runaway.
@@ -878,7 +878,7 @@ def _validate_provider_structure(
         clean["risk_dispositions"] = []
     else:
         # Gap responses may carry a malformed disposition collection in the
-        # explicitly approved C1 cleanup path.  Remove only that known
+        # malformed-gap-row cleanup path.  Remove only that known
         # cleanup-scoped field before re-validating the remaining current
         # local-handle wire; the original rows stay in ``raw`` for the
         # deterministic cleanup/repair record.
@@ -1834,17 +1834,15 @@ def _repair_stage1a_failure(
 ) -> LossAnalysisDraft:
     """Route a failed first attempt to its one targeted repair or typed stop."""
     # Reference validation and wire-schema violations are deterministic and
-    # actionable.  The former bounded whole-object retry is replaced (owner
-    # authorization 2026-09-11) by one narrowly scoped targeted repair for
-    # three approved failure classes: missing or malformed risk-disposition
-    # entries, malformed obligation entries within an otherwise preserved
-    # constraint, and unknown reference IDs (decision 243, 2026-10-08).
-    # A risk-derivation reply that declares no grounded loss gets one
-    # correction carrying the validator's feedback (decision 327), and so
+    # actionable.  The former bounded whole-object retry is replaced by one
+    # narrowly scoped targeted repair for three approved failure classes:
+    # missing or malformed risk-disposition entries, malformed obligation
+    # entries within an otherwise preserved constraint, and unknown
+    # reference IDs.  A risk-derivation reply that declares no grounded
+    # loss gets one correction carrying the validator's feedback, and so
     # does a gap reply that leaves its losses with no hazard and no
-    # constraint (decision 347).
-    # Every other failure class gets an explicit typed outcome and no
-    # additional model call.
+    # constraint.  Every other failure class gets an explicit typed outcome
+    # and no additional model call.
     if call.validation_feedback is None:
         raise StageError(stage=STAGE, step=call.step, message=error_msg)
     _reject_unsupported_wire_error(call, error_msg)
@@ -2879,7 +2877,7 @@ def _chain_error_type(
     """Pick the error of an incomplete chain.
 
     Only losses left with no hazard and no constraint at all earn the one
-    correction (decision 347); every other incomplete chain stops the unit.
+    correction; every other incomplete chain stops the unit.
     """
     if loss_ids and not hazard_ids and not has_constraints:
         return _MissingHazardChainError

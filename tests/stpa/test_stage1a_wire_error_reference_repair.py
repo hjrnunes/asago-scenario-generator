@@ -1,12 +1,12 @@
 """A first reply with a record-level wire error and a dangling reference.
 
-The recorded L4 klarna-r1 ``risk_derivation`` reply carries an obligation
-entry whose ``rule_span`` does not quote its rule (a record-level wire
-error) and cites ``loss_customer_trust``, a loss it never declared, from two
-hazards and two ``risk_dispositions`` rows.  Salvage removes the failing
-obligation entry, and the dangling reference goes to the one reference
-repair, which may now also edit a disposition row's ``loss_ids``.  The
-repair reply chooses to remove or replace each unknown entry (decision 243).
+A recorded MiniKlarna ``risk_derivation`` reply carries an obligation entry
+whose ``rule_span`` does not quote its rule (a record-level wire error) and
+cites ``loss_customer_trust``, a loss it never declared, from two hazards
+and two ``risk_dispositions`` rows.  Salvage removes the failing obligation
+entry, and the dangling reference goes to the one reference repair, which
+may now also edit a disposition row's ``loss_ids``.  The repair reply
+chooses to remove or replace each unknown entry.
 """
 
 from __future__ import annotations

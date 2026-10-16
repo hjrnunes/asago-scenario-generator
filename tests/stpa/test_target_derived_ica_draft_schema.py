@@ -4,8 +4,8 @@ The draft schema lists exactly the request's slot IDs as `slot_id` values and
 has no `ica_id` field, because code binds each ICA ID from its resolved slot.
 Local parsing stays lenient, so the mapping of a `<slot>:<digits>` slot_id
 and the drop of any other unknown slot remain as a backstop for a server that
-does not enforce the schema. The fixture is the trimmed L1 klarna-r2 draft of
-the b8-glm batch; every test uses a fake client.
+does not enforce the schema. The fixture is the trimmed draft of a recorded
+MiniKlarna run; every test uses a fake client.
 """
 
 from __future__ import annotations

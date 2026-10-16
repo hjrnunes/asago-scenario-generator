@@ -436,8 +436,8 @@ class TestStage1aLossAnalysis:
     ):
         """A model cannot satisfy risk derivation with the empty shortcut.
 
-        An empty baseline gets the one loss-presence correction (owner choice
-        5, decision 327); a second empty reply fails typed with no third call.
+        An empty baseline gets the one loss-presence correction; a second empty
+        reply fails typed with no third call.
         """
         empty_risk = {
             "risk_card_losses": [],

@@ -578,7 +578,7 @@ def test_gap_reference_failure_feedback_preserves_new_loss_guidance(tmp_path):
 def test_a18_gap_valid_disposition_is_not_c1_cleanup(tmp_path):
     """A valid out-of-contract gap disposition fails closed.
 
-    C1 cleanup is limited to malformed gap disposition rows.  A valid-looking
+    Cleanup is limited to malformed gap disposition rows.  A valid-looking
     row is still an extra collection on the current gap wire and cannot
     overwrite the risk-stage accounting or be silently discarded.
     """

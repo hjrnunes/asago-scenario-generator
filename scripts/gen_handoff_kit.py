@@ -799,7 +799,7 @@ SCHEMA_CASES = {
             "detail": "the condition holds only state predicates",
         },
     ),
-    # Decision 182: the top-level variant of stimulus-turn-field; the closed
+    # The top-level variant of stimulus-turn-field; the closed
     # schema rejects the unknown field before any ownership scan.
     "schema-stimulus-turn-field-top-level": put(
         "stimulus_turns", [{"content": "Please refund my order.", "role": "user"}]

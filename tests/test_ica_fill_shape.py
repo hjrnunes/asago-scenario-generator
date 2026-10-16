@@ -1,8 +1,9 @@
 """The fill schema requires every slot field, and code drops stray indexes.
 
-pp-s11 klarna-r1 calls.jsonl row 104 (gemma-4-26b-a4b-it, producer
-fa33a907) gave an ``unresolved`` result ``finding_indexes``; the provider
-rejected the reply for that alone, and the correction lost the slot.
+Row 104 of a recorded MiniKlarna run's calls.jsonl (gemma-4-26b-a4b-it,
+producer fa33a907) gave an ``unresolved`` result ``finding_indexes``;
+the provider rejected the reply for that alone, and the correction lost
+the slot.
 """
 
 from __future__ import annotations

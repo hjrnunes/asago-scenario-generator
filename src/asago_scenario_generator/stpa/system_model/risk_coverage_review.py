@@ -1,4 +1,4 @@
-"""Advisory Stage 1a risk-coverage review (spec deviation 10).
+"""Advisory Stage 1a risk-coverage review.
 
 After the five offline density checks pass on a derived loss analysis, one
 bounded model call reviews the whole graph against the supplied risk cards
@@ -20,23 +20,23 @@ rows of the same batch are kept.  The status is
 invalid or missing, and ``unavailable`` only when no batch returned a valid
 row.  Nothing is inferred or repaired, and the review never blocks a run.
 
-Split rule (amended 2026-09-11, owner authorization): the advisory review
-may issue at most four calls.  A response with one row of quotations per
-card can approach the profile's ``max_completion_tokens``, so before the
-first call the module sizes batches with the current per-row completion
-estimate: ``max_completion_tokens // _ESTIMATED_TOKENS_PER_ROW`` cards per
-batch (32 at the 8,192 cap), then distributes the supplied cards
-deterministically across balanced contiguous batches in supplied order.
-The four-call total is a ceiling, not a retry permission and not an
-assumption that every response fits: a batch that fails or omits cards is
-recorded with its typed reason, cards beyond what four capacity-sized
-batches cover are recorded under ``rows_missing``, and no batch is ever
-retried.  The artifact records the estimate inputs, the planned batch
-sizes, and the conservative prompt-plus-row estimate per batch; that
-conservative figure includes a prompt-share proxy for echo overhead and is
-recorded for transparency, not used for sizing, because it cannot fit any
-bounded batch on large graphs.  Both prompts carry identical instructions
-and the full graph, and the merged rows keep the supplied card order.
+Split rule: the advisory review may issue at most four calls.  A response
+with one row of quotations per card can approach the profile's
+``max_completion_tokens``, so before the first call the module sizes
+batches with the current per-row completion estimate:
+``max_completion_tokens // _ESTIMATED_TOKENS_PER_ROW`` cards per batch (32
+at the 8,192 cap), then distributes the supplied cards deterministically
+across balanced contiguous batches in supplied order.  The four-call total
+is a ceiling, not a retry permission and not an assumption that every
+response fits: a batch that fails or omits cards is recorded with its
+typed reason, cards beyond what four capacity-sized batches cover are
+recorded under ``rows_missing``, and no batch is ever retried.  The
+artifact records the estimate inputs, the planned batch sizes, and the
+conservative prompt-plus-row estimate per batch; that conservative figure
+includes a prompt-share proxy for echo overhead and is recorded for
+transparency, not used for sizing, because it cannot fit any bounded batch
+on large graphs.  Both prompts carry identical instructions and the full
+graph, and the merged rows keep the supplied card order.
 """
 
 from __future__ import annotations
@@ -79,8 +79,8 @@ STEP_RISK_COVERAGE_REVIEW = "risk_coverage_review"
 ARTIFACT_FILENAME = "loss-analysis-risk-coverage-review.yaml"
 SCHEMA_VERSION = "loss-analysis-risk-coverage-review-v3"
 
-# Owner authorization 2026-09-11: the advisory review may issue at most four
-# calls.  The ceiling is a call-limit policy constant, not a retry budget.
+# The advisory review may issue at most four calls.  The ceiling is a
+# call-limit policy constant, not a retry budget.
 MAX_REVIEW_BATCHES = 4
 
 SYSTEM_TEMPLATE = "stage1a_coverage_review_system.j2"
@@ -155,9 +155,8 @@ class RiskCoverageRow(BaseModel):
 #
 # The wire row carries types and the closed literal id sets only.  Every
 # semantic rule lives in :func:`_row_invalid_reason`, which records an
-# invalid row instead of failing the batch, so one bad row cannot discard
-# the valid rows beside it (amended 2026-09-08, owner ruling at the fourth
-# checkpoint 4 review).
+# invalid row instead of failing the batch, so one bad row cannot discard the
+# valid rows beside it.
 # ---------------------------------------------------------------------------
 
 

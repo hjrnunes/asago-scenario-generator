@@ -1,14 +1,14 @@
 """Stage 1a prompt hardening for the derived-branch templates.
 
 Four fresh OcciAI/Airbnb chains died at derived Stage 1a on provider output
-quality (see the mission library m3-stage1a-blocker-diagnosis): the bounded
-revision prompt lacked a concrete ``NEW-*`` handle example and any negative
-example, so providers continued the reserved canonical numbering
-(``H-7``/``SC-4``); the "quote the rule verbatim" instruction never said
-character-for-character, so ``rule_span`` paraphrases survived the single
-repair call; and no worked example showed a compliant addition for the
-behavior-class check shape. Round 2 added a phantom edit target (``SC-11``
-outside ``SC-1``..``SC-10``) and a byte-identical restatement of SC-3.
+quality: the bounded revision prompt lacked a concrete ``NEW-*`` handle
+example and any negative example, so providers continued the reserved
+canonical numbering (``H-7``/``SC-4``); the "quote the rule verbatim"
+instruction never said character-for-character, so ``rule_span``
+paraphrases survived the single repair call; and no worked example showed a
+compliant addition for the behavior-class check shape. A second round of
+runs added a phantom edit target (``SC-11`` outside ``SC-1``..``SC-10``)
+and a byte-identical restatement of SC-3.
 
 The fixed wording that answers these failures lives in the phrase tables
 ``tests/phrases/stage1a_graph_revision_system.yaml`` and

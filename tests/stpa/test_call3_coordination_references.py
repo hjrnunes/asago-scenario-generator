@@ -1,6 +1,6 @@
 """Call 3 rejects a coordination description that names an ID that does not exist.
 
-The fixture is coordination link CL-7 from the b8-glm L3 occiai-r1 run: its
+The fixture is coordination link CL-7 from a recorded OcciAI run: its
 description names "PM-3" and "PM-4", which the prompt-reference check reads
 as references, and every synthesis routing prompt failed that check.
 """

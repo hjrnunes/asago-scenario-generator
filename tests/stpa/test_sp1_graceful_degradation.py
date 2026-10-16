@@ -512,8 +512,8 @@ class TestRunOrchestrationPartialFailure:
         failed = [e for e in entries if e.get("success") is False]
         assert len(failed) >= 1
         stage_1a_failed = [e for e in failed if e["stage"] == "stage_1a"]
-        # Stage 1a never retries an undecodable body (owner correction
-        # 2026-09-12): exactly one failed attempt, then the typed terminal.
+        # Stage 1a never retries an undecodable body: exactly one failed
+        # attempt, then the typed terminal.
         assert len(stage_1a_failed) == 1
         assert [entry["step"] for entry in stage_1a_failed] == ["risk_derivation"]
         assert all("error" in entry for entry in stage_1a_failed)

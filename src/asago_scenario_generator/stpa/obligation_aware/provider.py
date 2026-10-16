@@ -1135,8 +1135,8 @@ class _ConsiderationResultWire(_Model):
         """Ignore indexes on a result that names no finding instead of failing.
 
         Only a finding result points at findings, so the indexes carry no
-        meaning; rejecting them cost pp-s11 a slot whose reply was otherwise
-        valid.
+        meaning; rejecting them cost a recorded live run a slot whose reply was
+        otherwise valid.
         """
         if isinstance(value, dict) and value.get("disposition") != "finding":
             return {**value, "finding_indexes": ()}
