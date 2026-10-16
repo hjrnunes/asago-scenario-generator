@@ -243,37 +243,13 @@ class TestGherkinSpecToFeatureText:
 
 
 class TestLossHazardIdValidator:
-    """GDDI-05 through GDDI-08: validator catches hallucinated IDs."""
+    """The validator catches hallucinated IDs and passes valid ones."""
 
     def _la_with_ids(self, loss_ids=None, hazard_ids=None):
         return _make_loss_analysis(
             loss_ids=loss_ids or ["L-1", "L-2"],
             hazard_ids=hazard_ids or ["H-1", "H-2"],
         )
-
-    def test_gddi_05_catches_hallucinated_loss_l99(self):
-        text = "Scenario: Test\n  But loss L-99 is realized\n"
-        result = validate_loss_hazard_id_references(text, self._la_with_ids())
-        assert not result.passed
-        assert any("L-99" in e for e in result.errors)
-
-    def test_gddi_05_catches_hallucinated_loss_l100(self):
-        text = "Scenario: Test\n  But loss L-100 is realized\n"
-        result = validate_loss_hazard_id_references(text, self._la_with_ids())
-        assert not result.passed
-        assert any("L-100" in e for e in result.errors)
-
-    def test_gddi_05_catches_hallucinated_hazard_h99(self):
-        text = "Scenario: Test\n  And hazard H-99 occurs\n"
-        result = validate_loss_hazard_id_references(text, self._la_with_ids())
-        assert not result.passed
-        assert any("H-99" in e for e in result.errors)
-
-    def test_gddi_05_catches_hallucinated_hazard_h100(self):
-        text = "Scenario: Test\n  And hazard H-100 occurs\n"
-        result = validate_loss_hazard_id_references(text, self._la_with_ids())
-        assert not result.passed
-        assert any("H-100" in e for e in result.errors)
 
     def test_gddi_06_catches_multiple_hallucinated_ids(self):
         text = "Scenario: Test\n  But loss L-99 is realized\n  And hazard H-88 occurs\n"

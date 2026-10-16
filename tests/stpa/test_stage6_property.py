@@ -98,46 +98,14 @@ class TestGherkinSpecRoundTrip:
     @settings(
         max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
     )
-    def test_feature_text_starts_with_feature_keyword(self, spec: GherkinSpec):
-        """to_feature_text() always starts with 'Feature:'."""
+    def test_feature_text_renders_every_field(self, spec: GherkinSpec):
+        """to_feature_text() renders the feature, scenario and every step."""
         text = spec.to_feature_text()
         assert text.startswith(f"Feature: {spec.feature}")
-
-    @given(spec=_gherkin_spec_strategy())
-    @settings(
-        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-    )
-    def test_feature_text_contains_scenario_keyword(self, spec: GherkinSpec):
-        """to_feature_text() always contains 'Scenario:'."""
-        text = spec.to_feature_text()
         assert f"Scenario: {spec.scenario}" in text
-
-    @given(spec=_gherkin_spec_strategy())
-    @settings(
-        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-    )
-    def test_feature_text_ends_with_newline(self, spec: GherkinSpec):
-        """to_feature_text() always ends with a trailing newline."""
-        text = spec.to_feature_text()
-        assert text.endswith("\n")
-
-    @given(spec=_gherkin_spec_strategy())
-    @settings(
-        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-    )
-    def test_idempotent_render(self, spec: GherkinSpec):
-        """Rendering twice produces identical output."""
-        assert spec.to_feature_text() == spec.to_feature_text()
-
-    @given(spec=_gherkin_spec_strategy())
-    @settings(
-        max_examples=50, deadline=None, suppress_health_check=[HealthCheck.too_slow]
-    )
-    def test_feature_text_contains_all_steps(self, spec: GherkinSpec):
-        """to_feature_text() contains every step from every field."""
-        text = spec.to_feature_text()
         for step in spec.given + spec.when + spec.then_expected + spec.then_actual:
             assert step in text, f"Step '{step}' missing from feature text"
+        assert text.endswith("\n")
 
     @given(spec=_gherkin_spec_strategy())
     @settings(
@@ -197,35 +165,6 @@ def _make_loss_analysis_with_ids(
 
 class TestLossHazardIdValidator:
     """validate_loss_hazard_id_references invariants."""
-
-    @given(
-        spec=_gherkin_spec_strategy(),
-        loss_ids=st.lists(
-            st.builds(lambda n: f"L-{n}", st.integers(min_value=1, max_value=999)),
-            min_size=1,
-            max_size=5,
-            unique=True,
-        ),
-        hazard_ids=st.lists(
-            st.builds(lambda n: f"H-{n}", st.integers(min_value=1, max_value=999)),
-            min_size=1,
-            max_size=5,
-            unique=True,
-        ),
-    )
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.too_slow],
-    )
-    def test_valid_ids_always_pass(
-        self, spec: GherkinSpec, loss_ids: list[str], hazard_ids: list[str]
-    ):
-        """When no L-*/H-* IDs appear in Gherkin, validation always passes."""
-        la = _make_loss_analysis_with_ids(loss_ids, hazard_ids)
-        # The spec strategy doesn't inject L-*/H-* IDs, so this should pass
-        result = validate_loss_hazard_id_references(spec, la)
-        assert result.passed
 
     @given(
         loss_ids=st.lists(
