@@ -58,6 +58,10 @@ class TestBuildKcSubcodesDisplay:
         """An empty kc_subcodes list produces an empty display dict."""
         assert build_kc_subcodes_display([]) == {}
 
+    def test_inject_without_kc_subcodes_is_noop(self):
+        """A dict without kc_subcodes gets no display field."""
+        assert inject_kc_subcodes_display({"zones_active": []}) == {"zones_active": []}
+
 
 class TestStpaWriteYamlInjection:
     """KCDisp-01 through KCDisp-06: STPA write_yaml path injects display."""

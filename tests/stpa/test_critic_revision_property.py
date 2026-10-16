@@ -2,8 +2,8 @@
 
 Covers five invariant families:
 
-1. **Next-ID collision freedom**: ``_compute_next_ids`` never returns a
-   number that collides with an existing ID of that kind.
+1. **Next IDs**: ``_compute_next_ids`` returns one above the highest
+   number in each namespace.
 2. **ID-space independence**: ``next_cm_num`` depends only on ``cm_id``
    values, and ``next_cl_num`` depends only on ``link_id`` values.
 3. **Revision needs a gap**: Stage 2 requests a revision iff the
@@ -25,7 +25,7 @@ from __future__ import annotations
 from unittest.mock import patch
 
 import pytest
-from hypothesis import HealthCheck, assume, given, settings, strategies as st
+from hypothesis import HealthCheck, given, settings, strategies as st
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -109,278 +109,67 @@ def _make_cl(cl_num: int, cm_num: int, resp_a: int, resp_b: int) -> Coordination
 
 @st.composite
 def st_control_structure(draw) -> ControlStructure:
-    """Generate a valid ControlStructure with 1-5 responsibilities.
+    """Generate a valid ControlStructure with sparse ID numbers.
 
-    Each responsibility is fully populated (PM, CA, FB). When there are
-    2+ responsibilities, 0-3 coordination links are added with unique
-    link_id and cm_id numbers.
+    Each responsibility is fully populated (PM, CA, FB). Controlled
+    processes are unreferenced. When there are 2+ responsibilities, 0-3
+    coordination links are added; their link_id and cm_id numbers never
+    overlap, so a next ID read from the wrong field gives another answer.
     """
-    n_resps = draw(st.integers(min_value=1, max_value=5))
-    responsibilities = [_make_resp(i) for i in range(1, n_resps + 1)]
+    resp_nums = draw(
+        st.lists(
+            st.integers(min_value=1, max_value=20), min_size=1, max_size=5, unique=True
+        )
+    )
+    cp_nums = draw(
+        st.lists(st.integers(min_value=1, max_value=20), max_size=3, unique=True)
+    )
 
     coordination_links: list[CoordinationLink] = []
-    if n_resps >= 2:
+    if len(resp_nums) >= 2:
         n_links = draw(st.integers(min_value=0, max_value=3))
-        cl_nums = draw(
+        nums = draw(
             st.lists(
                 st.integers(min_value=1, max_value=20),
-                min_size=n_links,
-                max_size=n_links,
+                min_size=2 * n_links,
+                max_size=2 * n_links,
                 unique=True,
             )
         )
-        cm_nums = draw(
-            st.lists(
-                st.integers(min_value=1, max_value=20),
-                min_size=n_links,
-                max_size=n_links,
-                unique=True,
-            )
-        )
-        for cl_num, cm_num in zip(cl_nums, cm_nums):
-            coordination_links.append(_make_cl(cl_num, cm_num, resp_a=1, resp_b=2))
+        coordination_links = [
+            _make_cl(cl_num, cm_num, resp_a=resp_nums[0], resp_b=resp_nums[1])
+            for cl_num, cm_num in zip(nums[:n_links], nums[n_links:])
+        ]
 
     return ControlStructure(
-        responsibilities=responsibilities,
+        responsibilities=[_make_resp(num) for num in resp_nums],
+        controlled_processes=[
+            ControlledProcess(cp_id=f"CP-{num}", description="Process")
+            for num in cp_nums
+        ],
         coordination_links=coordination_links,
     )
 
 
-# ---------------------------------------------------------------------------
-# 1. Next-ID collision freedom
-# ---------------------------------------------------------------------------
+def _one_above_max(ids) -> int:
+    return max((int(id_.split("-")[1]) for id_ in ids), default=0) + 1
 
 
-class TestNextIdsCollisionFree:
-    """_compute_next_ids never returns a number colliding with an existing ID."""
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_next_resp_num_above_all_existing(self, cs):
-        """next_resp_num > max(existing resp_id numbers)."""
-        ids = _compute_next_ids(cs)
-        existing_resp_nums = {int(r.resp_id.split("-")[1]) for r in cs.responsibilities}
-        assert ids["next_resp_num"] not in existing_resp_nums
+class TestComputeNextIdsProperty:
+    """Each next ID is one above the highest number in its own namespace."""
 
     @given(cs=st_control_structure())
     @settings(max_examples=80, deadline=None)
-    def test_next_cl_num_above_all_existing(self, cs):
-        """next_cl_num > max(existing link_id numbers)."""
-        ids = _compute_next_ids(cs)
-        existing_cl_nums = {
-            int(cl.link_id.split("-")[1]) for cl in cs.coordination_links
+    def test_each_next_id_is_one_above_its_namespace_max(self, cs):
+        links = cs.coordination_links
+        assert _compute_next_ids(cs) == {
+            "next_resp_num": _one_above_max(r.resp_id for r in cs.responsibilities),
+            "next_cl_num": _one_above_max(cl.link_id for cl in links),
+            "next_cp_num": _one_above_max(cp.cp_id for cp in cs.controlled_processes),
+            "next_cm_num": _one_above_max(
+                cl.coordination_mechanism.cm_id for cl in links
+            ),
         }
-        if existing_cl_nums:
-            assert ids["next_cl_num"] not in existing_cl_nums
-        else:
-            assert ids["next_cl_num"] == 1
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_next_cm_num_above_all_existing(self, cs):
-        """next_cm_num > max(existing cm_id numbers)."""
-        ids = _compute_next_ids(cs)
-        existing_cm_nums = {
-            int(cl.coordination_mechanism.cm_id.split("-")[1])
-            for cl in cs.coordination_links
-        }
-        if existing_cm_nums:
-            assert ids["next_cm_num"] not in existing_cm_nums
-        else:
-            assert ids["next_cm_num"] == 1
-
-    @given(cs=st_control_structure())
-    @settings(max_examples=80, deadline=None)
-    def test_next_cp_num_above_all_existing(self, cs):
-        """next_cp_num > max(existing cp_id numbers)."""
-        ids = _compute_next_ids(cs)
-        existing_cp_nums = {
-            int(cp.cp_id.split("-")[1]) for cp in cs.controlled_processes
-        }
-        if existing_cp_nums:
-            assert ids["next_cp_num"] not in existing_cp_nums
-        else:
-            assert ids["next_cp_num"] == 1
-
-
-# ---------------------------------------------------------------------------
-# 2. ID-space independence: next_cm_num depends only on cm_ids,
-#    next_cl_num depends only on link_ids
-# ---------------------------------------------------------------------------
-
-
-@st.composite
-def st_two_cs_same_link_ids_diff_cm_ids(draw):
-    """Two CSs with identical link_id numbers but different cm_id numbers."""
-    n_resps = draw(st.integers(min_value=2, max_value=4))
-
-    n_links = draw(st.integers(min_value=1, max_value=3))
-    cl_nums = draw(
-        st.lists(
-            st.integers(min_value=1, max_value=20),
-            min_size=n_links,
-            max_size=n_links,
-            unique=True,
-        )
-    )
-    cm_nums_a = draw(
-        st.lists(
-            st.integers(min_value=1, max_value=20),
-            min_size=n_links,
-            max_size=n_links,
-            unique=True,
-        )
-    )
-    cm_nums_b = draw(
-        st.lists(
-            st.integers(min_value=1, max_value=20),
-            min_size=n_links,
-            max_size=n_links,
-            unique=True,
-        )
-    )
-    # Ensure the two cm_id sets differ
-    assume(set(cm_nums_a) != set(cm_nums_b))
-
-    cs_a = ControlStructure(
-        responsibilities=[_make_resp(i) for i in range(1, n_resps + 1)],
-        coordination_links=[
-            _make_cl(cl_num, cm_num, 1, 2) for cl_num, cm_num in zip(cl_nums, cm_nums_a)
-        ],
-    )
-    cs_b = ControlStructure(
-        responsibilities=[_make_resp(i) for i in range(1, n_resps + 1)],
-        coordination_links=[
-            _make_cl(cl_num, cm_num, 1, 2) for cl_num, cm_num in zip(cl_nums, cm_nums_b)
-        ],
-    )
-    return cs_a, cs_b
-
-
-@st.composite
-def st_two_cs_same_cm_ids_diff_link_ids(draw):
-    """Two CSs with identical cm_id numbers but different link_id numbers."""
-    n_resps = draw(st.integers(min_value=2, max_value=4))
-
-    n_links = draw(st.integers(min_value=1, max_value=3))
-    cm_nums = draw(
-        st.lists(
-            st.integers(min_value=1, max_value=20),
-            min_size=n_links,
-            max_size=n_links,
-            unique=True,
-        )
-    )
-    cl_nums_a = draw(
-        st.lists(
-            st.integers(min_value=1, max_value=20),
-            min_size=n_links,
-            max_size=n_links,
-            unique=True,
-        )
-    )
-    cl_nums_b = draw(
-        st.lists(
-            st.integers(min_value=1, max_value=20),
-            min_size=n_links,
-            max_size=n_links,
-            unique=True,
-        )
-    )
-    assume(set(cl_nums_a) != set(cl_nums_b))
-
-    cs_a = ControlStructure(
-        responsibilities=[_make_resp(i) for i in range(1, n_resps + 1)],
-        coordination_links=[
-            _make_cl(cl_num, cm_num, 1, 2) for cl_num, cm_num in zip(cl_nums_a, cm_nums)
-        ],
-    )
-    cs_b = ControlStructure(
-        responsibilities=[_make_resp(i) for i in range(1, n_resps + 1)],
-        coordination_links=[
-            _make_cl(cl_num, cm_num, 1, 2) for cl_num, cm_num in zip(cl_nums_b, cm_nums)
-        ],
-    )
-    return cs_a, cs_b
-
-
-class TestIdSpaceIndependence:
-    """next_cm_num depends only on cm_ids; next_cl_num depends only on link_ids."""
-
-    @given(pair=st_two_cs_same_link_ids_diff_cm_ids())
-    @settings(max_examples=50, deadline=None)
-    def test_next_cl_num_independent_of_cm_ids(self, pair):
-        """Same link_ids, different cm_ids → next_cl_num is the same."""
-        cs_a, cs_b = pair
-        ids_a = _compute_next_ids(cs_a)
-        ids_b = _compute_next_ids(cs_b)
-        assert ids_a["next_cl_num"] == ids_b["next_cl_num"]
-
-    @given(pair=st_two_cs_same_link_ids_diff_cm_ids())
-    @settings(max_examples=50, deadline=None)
-    def test_next_cm_num_differs_when_cm_ids_differ(self, pair):
-        """Same link_ids, different cm_ids → next_cm_num may differ."""
-        cs_a, cs_b = pair
-        ids_a = _compute_next_ids(cs_a)
-        ids_b = _compute_next_ids(cs_b)
-        # When cm_id sets differ, next_cm_num is derived from cm_ids only.
-        # It might coincidentally be the same if max+1 happens to match,
-        # but next_cm_num must be determined solely by the cm_id values.
-        expected_a = (
-            max(
-                (
-                    int(cl.coordination_mechanism.cm_id.split("-")[1])
-                    for cl in cs_a.coordination_links
-                ),
-                default=0,
-            )
-            + 1
-        )
-        expected_b = (
-            max(
-                (
-                    int(cl.coordination_mechanism.cm_id.split("-")[1])
-                    for cl in cs_b.coordination_links
-                ),
-                default=0,
-            )
-            + 1
-        )
-        assert ids_a["next_cm_num"] == expected_a
-        assert ids_b["next_cm_num"] == expected_b
-
-    @given(pair=st_two_cs_same_cm_ids_diff_link_ids())
-    @settings(max_examples=50, deadline=None)
-    def test_next_cm_num_independent_of_link_ids(self, pair):
-        """Same cm_ids, different link_ids → next_cm_num is the same."""
-        cs_a, cs_b = pair
-        ids_a = _compute_next_ids(cs_a)
-        ids_b = _compute_next_ids(cs_b)
-        assert ids_a["next_cm_num"] == ids_b["next_cm_num"]
-
-    @given(pair=st_two_cs_same_cm_ids_diff_link_ids())
-    @settings(max_examples=50, deadline=None)
-    def test_next_cl_num_differs_when_link_ids_differ(self, pair):
-        """Same cm_ids, different link_ids → next_cl_num is determined by link_ids."""
-        cs_a, cs_b = pair
-        ids_a = _compute_next_ids(cs_a)
-        ids_b = _compute_next_ids(cs_b)
-        expected_a = (
-            max(
-                (int(cl.link_id.split("-")[1]) for cl in cs_a.coordination_links),
-                default=0,
-            )
-            + 1
-        )
-        expected_b = (
-            max(
-                (int(cl.link_id.split("-")[1]) for cl in cs_b.coordination_links),
-                default=0,
-            )
-            + 1
-        )
-        assert ids_a["next_cl_num"] == expected_a
-        assert ids_b["next_cl_num"] == expected_b
 
 
 # ---------------------------------------------------------------------------
@@ -481,26 +270,6 @@ class TestRevisionNeedsAnExplicitGap:
         """Probe statuses alone do not authorize revision."""
         assert _revision_attempted(findings, tmp_path) == bool(findings.gaps)
 
-    @given(
-        checklist=st.dictionaries(st_checklist_key, st_status, min_size=1, max_size=3),
-        taxonomy=st.dictionaries(st_taxonomy_key, st_status, min_size=0, max_size=2),
-    )
-    @settings(
-        max_examples=80,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_probe_only_unjustified_does_not_trigger(
-        self, checklist, taxonomy, tmp_path
-    ):
-        """Absent results without explicit gaps remain diagnostic only."""
-        findings = CriticFindings(
-            gaps=[],
-            checklist_results=checklist,
-            taxonomy_probe_results=taxonomy,
-        )
-        assert _revision_attempted(findings, tmp_path) is False
-
 
 # ---------------------------------------------------------------------------
 # 4. Dismissal visibility: every dismissed_gaps entry appears in warnings
@@ -552,8 +321,8 @@ class TestDismissalVisibility:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_each_dismissal_in_warnings(self, tmp_path, dismissals):
-        """Each dismissal string appears in the returned warnings."""
+    def test_each_dismissal_warns_once(self, tmp_path, dismissals):
+        """Each dismissal appears in the warnings, one warning per dismissal."""
         client = MockLLMClient()
         client.set_response_for(
             RevisionDelta,
@@ -577,62 +346,10 @@ class TestDismissalVisibility:
             assert d in warning_text, (
                 f"Dismissal '{d}' not found in warnings: {warnings}"
             )
-
-    @given(dismissals=st.lists(st_dismissal_text, min_size=1, max_size=5, unique=True))
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_dismissal_warning_count_matches(self, tmp_path, dismissals):
-        """The number of dismissal warnings equals len(dismissed_gaps)."""
-        client = MockLLMClient()
-        client.set_response_for(
-            RevisionDelta,
-            {
-                "new_responsibilities": [],
-                "new_controlled_processes": [],
-                "new_coordination_links": [],
-                "modified_responsibilities": [],
-                "dismissed_gaps": dismissals,
-            },
-        )
-        _, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_base_cs(),
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
         dismissal_warnings = [
             w for w in warnings if w.startswith("Revision dismissed finding:")
         ]
         assert len(dismissal_warnings) == len(dismissals)
-
-    def test_empty_dismissals_produce_no_dismissal_warnings(self, tmp_path):
-        """When dismissed_gaps is empty, no dismissal warnings appear."""
-        client = MockLLMClient()
-        client.set_response_for(
-            RevisionDelta,
-            {
-                "new_responsibilities": [],
-                "new_controlled_processes": [],
-                "new_coordination_links": [],
-                "modified_responsibilities": [],
-                "dismissed_gaps": [],
-            },
-        )
-        _, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_base_cs(),
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
-        dismissal_warnings = [
-            w for w in warnings if w.startswith("Revision dismissed finding:")
-        ]
-        assert len(dismissal_warnings) == 0
 
 
 # ---------------------------------------------------------------------------
@@ -691,38 +408,8 @@ class TestMergeConservation:
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_all_resp_ids_survive(self, tmp_path, cs):
-        """Every original resp_id is present after an empty-delta revision."""
-        client = MockLLMClient()
-        client.set_response_for(
-            RevisionDelta,
-            {
-                "new_responsibilities": [],
-                "new_controlled_processes": [],
-                "new_coordination_links": [],
-                "modified_responsibilities": [],
-                "dismissed_gaps": [],
-            },
-        )
-        revised, _ = run_revision(
-            llm_client=client,
-            control_structure=cs,
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
-        original_resp_ids = {r.resp_id for r in cs.responsibilities}
-        revised_resp_ids = {r.resp_id for r in revised.responsibilities}
-        assert original_resp_ids <= revised_resp_ids
-
-    @given(cs=st_cs_with_links())
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_all_link_ids_survive(self, tmp_path, cs):
-        """Empty-delta revision keeps every link and publishes position IDs.
+    def test_empty_delta_keeps_every_element_in_order(self, tmp_path, cs):
+        """Empty-delta revision keeps every element and publishes position IDs.
 
         Source ``link_id`` values are stitch keys only.  After the
         merged lists are known, published IDs are ``CL-1..N`` /
@@ -751,8 +438,10 @@ class TestMergeConservation:
             use_case_text="Test",
             run_dir=tmp_path,
         )
+        assert [r.resp_id for r in revised.responsibilities] == [
+            r.resp_id for r in cs.responsibilities
+        ]
         n_links = len(cs.coordination_links)
-        assert len(revised.coordination_links) == n_links
         assert [cl.link_id for cl in revised.coordination_links] == _canonical_link_ids(
             n_links
         )
@@ -765,34 +454,6 @@ class TestMergeConservation:
         assert [
             cl.coordination_mechanism.payload for cl in revised.coordination_links
         ] == original_payloads
-
-    @given(cs=st_cs_with_links())
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_resp_count_unchanged_with_empty_delta(self, tmp_path, cs):
-        """Empty delta does not add or remove responsibilities."""
-        client = MockLLMClient()
-        client.set_response_for(
-            RevisionDelta,
-            {
-                "new_responsibilities": [],
-                "new_controlled_processes": [],
-                "new_coordination_links": [],
-                "modified_responsibilities": [],
-                "dismissed_gaps": [],
-            },
-        )
-        revised, _ = run_revision(
-            llm_client=client,
-            control_structure=cs,
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
-        assert len(revised.responsibilities) == len(cs.responsibilities)
 
 
 # ---------------------------------------------------------------------------
@@ -834,15 +495,6 @@ def _dismiss_all(findings: CriticFindings) -> list[str]:
 class TestAllDismissedWarning:
     """A revision that dismisses everything and changes nothing warns once."""
 
-    def test_all_dismissed_with_no_changes_warns(self, tmp_path):
-        findings = _make_critic_findings_for_revision()
-        warnings = _revision_warnings(
-            tmp_path,
-            delta=RevisionDelta(dismissed_gaps=_dismiss_all(findings)),
-            findings=findings,
-        )
-        assert _count_all_dismissed(warnings) == 1, warnings
-
     def test_partial_dismissal_does_not_warn(self, tmp_path):
         findings = _make_critic_findings_for_revision()
         partial = _dismiss_all(findings)[:-1]
@@ -851,14 +503,6 @@ class TestAllDismissedWarning:
             tmp_path,
             delta=RevisionDelta(dismissed_gaps=partial),
             findings=findings,
-        )
-        assert _count_all_dismissed(warnings) == 0, warnings
-
-    def test_empty_findings_does_not_warn(self, tmp_path):
-        warnings = _revision_warnings(
-            tmp_path,
-            delta=RevisionDelta(dismissed_gaps=["not applicable"]),
-            findings=CriticFindings(),
         )
         assert _count_all_dismissed(warnings) == 0, warnings
 

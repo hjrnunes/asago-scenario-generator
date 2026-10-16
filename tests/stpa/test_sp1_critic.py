@@ -692,6 +692,18 @@ class TestProbeGating:
                 {"Tool parameter validation"},
                 id="tools_via_kc5",
             ),
+            pytest.param(
+                ["KC1.1", "KC4.3", "KC5.1", "KC6.3.3", "KC2.3", "KCX-HITL"],
+                ["User chat", "RAG retrieval"],
+                {
+                    "RAG retrieval",
+                    "Tool parameter validation",
+                    "Memory integrity",
+                    "Multi-agent coordination",
+                    "Human-in-the-loop",
+                },
+                id="full_profile",
+            ),
         ],
     )
     def test_probes_follow_the_capability_profile(
@@ -709,29 +721,4 @@ class TestProbeGating:
             name for name in every_probe if any(name in probe for probe in probes)
         }
         assert included == expected
-
-
-@pytest.mark.parametrize(
-    "checklist_results",
-    [
-        pytest.param({}, id="empty"),
-        pytest.param({"a": "present", "b": "present"}, id="all_present"),
-        pytest.param(
-            {"a": "absent_justified", "b": "absent_justified"},
-            id="all_absent_justified",
-        ),
-        pytest.param(
-            {
-                "a": "present",
-                "b": "absent_justified",
-                "c": "absent_unjustified",
-            },
-            id="mixed_with_one_unjustified",
-        ),
-        pytest.param({"a": "absent_unjustified"}, id="only_unjustified"),
-    ],
-)
-def test_no_typed_gap_means_no_revision(checklist_results):
-    """Probe statuses alone are diagnostic: without a typed gap nothing triggers."""
-    findings = CriticFindings(gaps=[], checklist_results=checklist_results)
-    assert not findings.gaps
+        assert len(probes) == len(expected)
