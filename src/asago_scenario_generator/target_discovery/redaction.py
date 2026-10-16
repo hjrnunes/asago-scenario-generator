@@ -22,8 +22,9 @@ _SENSITIVE_KEY = re.compile(
 # an identical marker instead of leaving a stray "]".
 _VALUE_TOKEN = r"(?:\[REDACTED\]|[^\s,;\]}])+"
 # A quoted value runs to its closing quote on the same line and may hold
-# escaped quotes.
-_QUOTED_VALUE = r"(?P<quote>[\"'])(?:\\.|(?!(?P=quote)).)*(?P=quote)"
+# escaped quotes. Text glued to the closing quote belongs to the value: leaving
+# it behind would make a second pass redact it and break idempotence.
+_QUOTED_VALUE = r"(?P<quote>[\"'])(?:\\.|(?!(?P=quote)).)*(?P=quote)[^\s,;\]}]*"
 
 
 def _text_key_prefix(names: str) -> str:

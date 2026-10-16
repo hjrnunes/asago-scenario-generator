@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from hypothesis import given, settings, strategies as st
 
 from asago_scenario_generator.target_discovery import redaction
 
@@ -116,6 +117,16 @@ def test_unquoted_key_with_quoted_value_redacts_the_whole_value():
     assert redaction.sanitize_json("password='p q'") == "password=[REDACTED]"
 
 
+def test_text_glued_to_a_closing_quote_belongs_to_the_value():
+    assert redaction.sanitize_json('token:""token') == "token:[REDACTED]"
+    assert redaction.sanitize_json('token: "abc def"next, id') == (
+        "token: [REDACTED], id"
+    )
+    assert redaction.sanitize_json('{"token": "x"y, "id": 1}') == (
+        '{"token": "[REDACTED]", "id": 1}'
+    )
+
+
 def test_quoted_text_without_a_sensitive_key_is_unchanged():
     text = '{"name": "token holder", "note": "no secrets here"}'
     assert redaction.sanitize_json(text) == text
@@ -129,6 +140,8 @@ IDEMPOTENCE_SAMPLES = (
     '{"token": "[REDACTED]"}',
     '{"token": "abc',
     'token: "abc def" next',
+    'token:""token',
+    'token: "abc def"next, id',
     "token=secret",
     "token: abc def password=xyz uvw",
     "token=[REDACTED]",
@@ -151,6 +164,43 @@ IDEMPOTENCE_SAMPLES = (
 
 @pytest.mark.parametrize("text", IDEMPOTENCE_SAMPLES)
 def test_text_redaction_is_idempotent(text):
+    once = redaction.sanitize_json(text)
+    assert redaction.sanitize_json(once) == once
+
+
+_FRAGMENTS = st.sampled_from(
+    [
+        "token",
+        "Token",
+        "Authorization",
+        "authorization",
+        "password",
+        "api_key",
+        "Bearer",
+        "Basic",
+        "AWS4-HMAC-SHA256",
+        "[REDACTED]",
+        "abc",
+        "two words",
+        "required",
+        ":",
+        "=",
+        " ",
+        "\n",
+        ",",
+        ";",
+        "]",
+        "}",
+        '"',
+        "'",
+        "\\",
+    ]
+)
+
+
+@given(st.lists(_FRAGMENTS, max_size=12).map("".join))
+@settings(max_examples=500, deadline=None)
+def test_text_redaction_is_idempotent_over_joined_fragments(text):
     once = redaction.sanitize_json(text)
     assert redaction.sanitize_json(once) == once
 
