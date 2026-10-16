@@ -14,7 +14,6 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from types import MappingProxyType
 from typing import TypeVar
 
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
@@ -23,8 +22,6 @@ LOSS = "loss"
 HAZARD = "hazard"
 CONSTRAINT = "constraint"
 
-_EMPTY: Mapping[str, str] = MappingProxyType({})
-
 Draft = TypeVar("Draft", bound=LossAnalysisDraft)
 
 
@@ -32,9 +29,9 @@ Draft = TypeVar("Draft", bound=LossAnalysisDraft)
 class IdSpace:
     """Per-kind maps from a reply's handles to their canonical IDs."""
 
-    losses: Mapping[str, str] = field(default=_EMPTY)
-    hazards: Mapping[str, str] = field(default=_EMPTY)
-    constraints: Mapping[str, str] = field(default=_EMPTY)
+    losses: Mapping[str, str] = field(default_factory=dict)
+    hazards: Mapping[str, str] = field(default_factory=dict)
+    constraints: Mapping[str, str] = field(default_factory=dict)
 
     def _map(self, kind: str) -> Mapping[str, str]:
         return {LOSS: self.losses, HAZARD: self.hazards, CONSTRAINT: self.constraints}[
