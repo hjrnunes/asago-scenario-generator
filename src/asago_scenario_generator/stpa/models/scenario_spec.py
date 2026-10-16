@@ -231,20 +231,6 @@ class ScenarioSpec(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
-    # Exact prepared direct-prompt user text copied verbatim from the authored
-    # stimulus before projection.  The v3 stimulus requirement delivers it
-    # verbatim; a missing value keeps the route free of prepared content.
-    # The 4,096 cap mirrors the v3 requirement model's
-    # ``MAX_PREPARED_USER_TEXT_LENGTH`` (equality is pinned in the pipeline
-    # tests); the constant itself is not imported here to keep this module's
-    # import graph leaf-safe.
-    prepared_user_text: StrictStr | None = Field(
-        default=None,
-        min_length=1,
-        max_length=4096,
-        exclude_if=lambda value: value is None,
-    )
-
     # The structure of an adversarial scenario's attack (channel, planned
     # turns, planted item), set by the shape step after Stage 5 compiles the
     # spec.  Omitted when absent so spec digests written before the step hold.

@@ -882,8 +882,8 @@ def build_scenario_handoff(
 
     The builder is deterministic and consumes only the producer's own
     scenario meaning. It never copies artifact-design content: the envelope's
-    ``execution_contract``, ``unsafe_outcome_condition``, ``prepared_user_text``
-    and ``stimulus_turns`` are deliberately not read. ``enriched_operations``
+    ``execution_contract``, ``unsafe_outcome_condition`` and ``stimulus_turns``
+    are deliberately not read. ``enriched_operations``
     is the verified view of the run's ``control-action-enrichment.yaml``
     sidecar (control-action id to documented operation identity); only those
     verified rows contribute an operation identity.
