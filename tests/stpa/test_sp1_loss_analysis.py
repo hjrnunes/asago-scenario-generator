@@ -81,11 +81,20 @@ def _gap_draft_with_empty_references() -> dict:
     return draft
 
 
+def _with_defect(draft: dict, collection: str, field: str, value: object) -> dict:
+    """Set *field* on the first record of *collection* and return the draft."""
+    draft[collection][0][field] = value
+    return draft
+
+
 class TestStage1aLossAnalysis:
     """SP1 Stage 1a loss analysis derivation (two-call split)."""
 
-    def test_la_01_valid_response_produces_valid_loss_analysis(self, tmp_path):
-        """A valid two-call response produces a valid LossAnalysis."""
+    def test_valid_two_call_response_produces_linked_loss_analysis(self, tmp_path):
+        """A valid two-call response yields a linked, sequentially numbered graph.
+
+        The run logs both calls and writes the result to loss-analysis.yaml.
+        """
         client = MockLLMClient()
         client.set_response_for(
             LossAnalysisDraft,
@@ -101,109 +110,96 @@ class TestStage1aLossAnalysis:
         assert len(result.risk_card_losses) == 1
         assert len(result.use_case_losses) == 1
 
-    def test_la_02_risk_card_losses_have_correct_provenance(self, tmp_path):
-        """Risk-card-derived losses have correct provenance."""
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [valid_risk_draft_dict(), valid_gap_draft_dict()],
-        )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
         for loss in result.risk_card_losses:
             assert loss.provenance == LossProvenance.risk_card
             assert len(loss.source_risk_cards) > 0
-
-    def test_la_03_use_case_losses_have_correct_provenance(self, tmp_path):
-        """Use-case-derived losses have correct provenance."""
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [valid_risk_draft_dict(), valid_gap_draft_dict()],
-        )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
         for loss in result.use_case_losses:
             assert loss.provenance == LossProvenance.use_case
             assert len(loss.source_risk_cards) == 0
 
-    def test_la_04_invalid_hazard_reference_fails(self, tmp_path):
-        """Hazard referencing non-existent loss fails."""
-        bad_risk = valid_risk_draft_dict()
-        bad_risk["hazards"][0]["related_losses"] = ["L-99"]
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [bad_risk, bad_risk],
-        )
-        with pytest.raises(
-            (ValidationError, ValueError, StageError), match="related_losses"
-        ):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+        all_losses = result.risk_card_losses + result.use_case_losses
+        all_loss_ids = {loss.loss_id for loss in all_losses}
+        for hazard in result.hazards:
+            assert len(hazard.related_losses) >= 1
+            for ref in hazard.related_losses:
+                assert ref in all_loss_ids
+        all_hazard_ids = {h.hazard_id for h in result.hazards}
+        for sc in result.security_constraints:
+            assert len(sc.related_hazards) >= 1
+            for ref in sc.related_hazards:
+                assert ref in all_hazard_ids
 
-    def test_la_04b_invalid_constraint_reference_fails(self, tmp_path):
-        """Constraint referencing non-existent hazard fails."""
-        bad_risk = valid_risk_draft_dict()
-        bad_risk["security_constraints"][0]["related_hazards"] = ["H-99"]
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [bad_risk, bad_risk],
-        )
-        with pytest.raises(
-            (ValidationError, ValueError, StageError), match="related_hazards"
-        ):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+        assert [loss.loss_id for loss in all_losses] == ["L-1", "L-2"]
+        assert [h.hazard_id for h in result.hazards] == ["H-1", "H-2"]
+        assert [sc.constraint_id for sc in result.security_constraints] == [
+            "SC-1",
+            "SC-2",
+        ]
 
-    def test_la_05_risk_card_loss_missing_source_fails(self, tmp_path):
-        """Risk-card loss with empty source_risk_cards fails."""
-        bad_risk = valid_risk_draft_dict()
-        bad_risk["risk_card_losses"][0]["source_risk_cards"] = []
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [bad_risk, valid_gap_draft_dict()],
-        )
-        with pytest.raises(
-            (ValidationError, ValueError, StageError), match="source_risk_cards"
-        ):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+        assert (tmp_path / "calls.jsonl").exists()
+        entries = read_calls_jsonl(tmp_path)
+        assert len(entries) == 2
+        assert entries[0]["stage"] == "stage_1a"
+        assert entries[0]["step"] == "risk_derivation"
+        assert entries[1]["stage"] == "stage_1a"
+        assert entries[1]["step"] == "gap_analysis"
 
-    def test_la_06_use_case_loss_with_source_fails(self, tmp_path):
-        """Use-case loss having source_risk_cards fails."""
-        bad_gap = valid_gap_draft_dict()
-        bad_gap["use_case_losses"][0]["source_risk_cards"] = ["atlas-001"]
+        yaml_file = tmp_path / "loss-analysis.yaml"
+        assert yaml_file.exists()
+        loaded = read_yaml(yaml_file, LossAnalysis)
+        assert isinstance(loaded, LossAnalysis)
+        assert len(loaded.risk_card_losses) == 1
+
+    @pytest.mark.parametrize(
+        ("bad_draft", "script", "match"),
+        [
+            pytest.param(
+                _with_defect(
+                    valid_risk_draft_dict(), "hazards", "related_losses", ["L-99"]
+                ),
+                lambda bad: [bad, bad],
+                "related_losses",
+                id="hazard-references-unknown-loss",
+            ),
+            pytest.param(
+                _with_defect(
+                    valid_risk_draft_dict(),
+                    "security_constraints",
+                    "related_hazards",
+                    ["H-99"],
+                ),
+                lambda bad: [bad, bad],
+                "related_hazards",
+                id="constraint-references-unknown-hazard",
+            ),
+            pytest.param(
+                _with_defect(
+                    valid_risk_draft_dict(),
+                    "risk_card_losses",
+                    "source_risk_cards",
+                    [],
+                ),
+                lambda bad: [bad, valid_gap_draft_dict()],
+                "source_risk_cards",
+                id="risk-card-loss-has-no-source",
+            ),
+            pytest.param(
+                _with_defect(
+                    valid_gap_draft_dict(),
+                    "use_case_losses",
+                    "source_risk_cards",
+                    ["atlas-001"],
+                ),
+                lambda bad: [valid_risk_draft_dict(), bad],
+                "source_risk_cards",
+                id="use-case-loss-has-source",
+            ),
+        ],
+    )
+    def test_defective_draft_fails_validation(self, tmp_path, bad_draft, script, match):
         client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [valid_risk_draft_dict(), bad_gap],
-        )
-        with pytest.raises(
-            (ValidationError, ValueError, StageError), match="source_risk_cards"
-        ):
+        client.set_response_for(LossAnalysisDraft, script(bad_draft))
+        with pytest.raises((ValidationError, ValueError, StageError), match=match):
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text="Test use case",
@@ -250,47 +246,6 @@ class TestStage1aLossAnalysis:
         assert result.security_constraints[0].related_hazards == ["H-1"]
         assert result.security_constraints[1].related_hazards == ["H-2"]
 
-    def test_la_08_two_call_log_entries_recorded(self, tmp_path):
-        """Two call-log entries are recorded with correct stage and step."""
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [valid_risk_draft_dict(), valid_gap_draft_dict()],
-        )
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        calls_file = tmp_path / "calls.jsonl"
-        assert calls_file.exists()
-        entries = read_calls_jsonl(tmp_path)
-        assert len(entries) == 2
-        assert entries[0]["stage"] == "stage_1a"
-        assert entries[0]["step"] == "risk_derivation"
-        assert entries[1]["stage"] == "stage_1a"
-        assert entries[1]["step"] == "gap_analysis"
-
-    def test_la_09_loss_analysis_written_to_yaml(self, tmp_path):
-        """loss-analysis.yaml exists and contains valid model."""
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [valid_risk_draft_dict(), valid_gap_draft_dict()],
-        )
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        yaml_file = tmp_path / "loss-analysis.yaml"
-        assert yaml_file.exists()
-        loaded = read_yaml(yaml_file, LossAnalysis)
-        assert isinstance(loaded, LossAnalysis)
-        assert len(loaded.risk_card_losses) == 1
-
     def test_la_10_both_loss_types_coexist(self, tmp_path):
         """Both risk-card and use-case losses coexist after merge."""
         risk_draft = valid_risk_draft_dict()
@@ -324,69 +279,6 @@ class TestStage1aLossAnalysis:
         )
         assert len(result.risk_card_losses) == 2
         assert len(result.use_case_losses) == 2
-
-    def test_la_11_every_hazard_links_to_loss(self, tmp_path):
-        """Every hazard links to at least one loss."""
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [valid_risk_draft_dict(), valid_gap_draft_dict()],
-        )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        all_loss_ids = {
-            loss.loss_id for loss in result.risk_card_losses + result.use_case_losses
-        }
-        for hazard in result.hazards:
-            assert len(hazard.related_losses) >= 1
-            for ref in hazard.related_losses:
-                assert ref in all_loss_ids
-
-    def test_la_12_every_constraint_links_to_hazard(self, tmp_path):
-        """Every security constraint links to at least one hazard."""
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [valid_risk_draft_dict(), valid_gap_draft_dict()],
-        )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        all_hazard_ids = {h.hazard_id for h in result.hazards}
-        for sc in result.security_constraints:
-            assert len(sc.related_hazards) >= 1
-            for ref in sc.related_hazards:
-                assert ref in all_hazard_ids
-
-    def test_la_13_ids_are_sequential_after_merge(self, tmp_path):
-        """Loss, hazard, and SC IDs are sequential with no duplicates after merge."""
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [valid_risk_draft_dict(), valid_gap_draft_dict()],
-        )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
-        all_losses = result.risk_card_losses + result.use_case_losses
-        loss_ids = [loss.loss_id for loss in all_losses]
-        assert loss_ids == ["L-1", "L-2"]
-
-        hazard_ids = [h.hazard_id for h in result.hazards]
-        assert hazard_ids == ["H-1", "H-2"]
-
-        sc_ids = [sc.constraint_id for sc in result.security_constraints]
-        assert sc_ids == ["SC-1", "SC-2"]
 
     def test_la_14_gap_call_receives_kc_subcodes(self, tmp_path):
         """Gap analysis user prompt includes kc_subcodes from capability profile."""
