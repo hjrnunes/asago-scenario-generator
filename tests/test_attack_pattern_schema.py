@@ -950,97 +950,83 @@ def test_absent_ingress_link_validates_but_unsupported() -> None:
     assert pattern.canonical_chain.steps[0].resource_links == ()
 
 
-def test_source_influence_without_target_ingress_fails_closed() -> None:
-    """A source_influence link without a target_ingress_slot_id fails."""
-    raw = _link_chain()
-    raw["steps"][0]["resource_links"] = []
-    raw["steps"][1]["resource_links"] = [
-        {
-            "slot_id": "source",
-            "role": "source_influence",
-            "trust_boundary_slot_id": "boundary",
-            "target_ingress_slot_id": None,
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="source_influence.*requires a target_ingress_slot_id"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
+_SOURCE_INFLUENCE_LINK = {
+    "slot_id": "source",
+    "role": "source_influence",
+    "trust_boundary_slot_id": "boundary",
+    "target_ingress_slot_id": "ingress",
+}
 
 
-def test_source_influence_target_ingress_not_initial_ingress_fails_closed() -> None:
-    """A source_influence link whose target is not the initial ingress fails."""
+@pytest.mark.parametrize(
+    ("step_2_link", "step_1_keeps_link", "boundary", "match"),
+    [
+        pytest.param(
+            {**_SOURCE_INFLUENCE_LINK, "target_ingress_slot_id": None},
+            False,
+            None,
+            "source_influence.*requires a target_ingress_slot_id",
+            id="source_influence_without_target_ingress_fails_closed",
+        ),
+        # 'tool' is a declared slot but not the initial ingress entry point.
+        pytest.param(
+            {**_SOURCE_INFLUENCE_LINK, "target_ingress_slot_id": "tool"},
+            False,
+            None,
+            "target_ingress_slot_id must reference the initial",
+            id="source_influence_target_ingress_not_initial_ingress_fails_closed",
+        ),
+        pytest.param(
+            _SOURCE_INFLUENCE_LINK,
+            False,
+            "outside",
+            "source_influence link requires a crossing or inside",
+            id="source_influence_on_outside_step_fails_closed",
+        ),
+        pytest.param(
+            _SOURCE_INFLUENCE_LINK,
+            True,
+            None,
+            "exactly one activation mechanism is permitted",
+            id="both_ingress_and_source_influence_fails_closed",
+        ),
+        pytest.param(
+            {
+                "slot_id": "ingress",
+                "role": "ingress",
+                "trust_boundary_slot_id": None,
+                "target_ingress_slot_id": None,
+            },
+            True,
+            None,
+            "at most one",
+            id="two_direct_ingress_links_fail_closed",
+        ),
+    ],
+)
+def test_invalid_activation_link_fails_closed(
+    step_2_link: dict[str, Any],
+    step_1_keeps_link: bool,
+    boundary: str | None,
+    match: str,
+) -> None:
+    """An activation link on a required step 2 that breaks the activation
+    contract fails validation, with or without step 1's ingress link."""
     raw = _link_chain()
-    raw["steps"][0]["resource_links"] = []
+    if not step_1_keeps_link:
+        raw["steps"][0]["resource_links"] = []
     # Step 2 is conditional in the fixture; activation links require a
     # required step, so make it required before adding the link.
     raw["steps"][1]["requirement"] = "required"
     raw["steps"][1]["condition"] = None
-    # 'tool' is a declared slot but not the initial ingress entry point.
-    raw["steps"][1]["resource_links"] = [
-        {
-            "slot_id": "source",
-            "role": "source_influence",
-            "trust_boundary_slot_id": "boundary",
-            "target_ingress_slot_id": "tool",
-        }
-    ]
+    if boundary is not None:
+        raw["steps"][1]["boundary_position"] = boundary
+        # Clear outcome links so the outside-step outcome link prohibition
+        # does not fire before the activation-link rule.
+        raw["steps"][1]["observable_outcome_links"] = []
+    raw["steps"][1]["resource_links"] = [step_2_link]
     resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="target_ingress_slot_id must reference the initial"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_source_influence_on_outside_step_fails_closed() -> None:
-    """A source_influence link on an outside (no-crossing) step fails."""
-    raw = _link_chain()
-    raw["steps"][0]["resource_links"] = []
-    # Step 2 is conditional in the fixture; activation links require a
-    # required step, so make it required before adding the link.
-    raw["steps"][1]["requirement"] = "required"
-    raw["steps"][1]["condition"] = None
-    # Force it to 'outside' to break the boundary compatibility of the
-    # source-influence crossing.  Clear outcome links so the outside-step
-    # outcome link prohibition doesn't fire first.
-    raw["steps"][1]["boundary_position"] = "outside"
-    raw["steps"][1]["observable_outcome_links"] = []
-    raw["steps"][1]["resource_links"] = [
-        {
-            "slot_id": "source",
-            "role": "source_influence",
-            "trust_boundary_slot_id": "boundary",
-            "target_ingress_slot_id": "ingress",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="source_influence link requires a crossing or inside"
-    ):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
-
-
-def test_both_ingress_and_source_influence_fails_closed() -> None:
-    """A chain carrying both a direct ingress link and a source_influence
-    link to the initial ingress violates the one-mechanism rule."""
-    raw = _link_chain()
-    # Step 2 is conditional in the fixture; activation links require a
-    # required step, so make it required before adding the link.
-    raw["steps"][1]["requirement"] = "required"
-    raw["steps"][1]["condition"] = None
-    raw["steps"][1]["resource_links"] = [
-        {
-            "slot_id": "source",
-            "role": "source_influence",
-            "trust_boundary_slot_id": "boundary",
-            "target_ingress_slot_id": "ingress",
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(
-        ValidationError, match="exactly one activation mechanism is permitted"
-    ):
+    with pytest.raises(ValidationError, match=match):
         AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
@@ -1106,28 +1092,6 @@ def test_digest_helper_does_not_mutate_input() -> None:
 # ---------------------------------------------------------------------------
 # Chain-wide activation uniqueness (second independent review)
 # ---------------------------------------------------------------------------
-
-
-def test_two_direct_ingress_links_fail_closed() -> None:
-    """Two required steps each carrying an ingress link to the initial
-    ingress slot must fail validation: at most one chain-wide activation
-    link is permitted."""
-    raw = _link_chain()
-    # Step 2 is conditional in the fixture; make it required and add
-    # a second ingress link.
-    raw["steps"][1]["requirement"] = "required"
-    raw["steps"][1]["condition"] = None
-    raw["steps"][1]["resource_links"] = [
-        {
-            "slot_id": "ingress",
-            "role": "ingress",
-            "trust_boundary_slot_id": None,
-            "target_ingress_slot_id": None,
-        }
-    ]
-    resign_chain(raw)
-    with pytest.raises(ValidationError, match="at most one"):
-        AttackPattern.model_validate({**pattern_data(), "canonical_chain": raw})
 
 
 def test_two_source_influence_links_fail_closed() -> None:
