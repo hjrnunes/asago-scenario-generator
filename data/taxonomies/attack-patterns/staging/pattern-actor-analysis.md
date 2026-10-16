@@ -498,7 +498,7 @@ This ATK-to-AGT progression reflects the real conceptual structure of prompt inj
 
 ## Comparison with ATLAS Case Studies
 
-Source: `staging/atlas-case-studies-part1.md` and `atlas-case-studies-part2.md` (CS0040--CS0062).
+Source: the ATLAS agentic case studies AML.CS0040--AML.CS0056 in `data/taxonomies/atlas/ATLAS-2026.05.yaml`.
 
 ### ATLAS framing model
 
