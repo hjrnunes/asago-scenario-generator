@@ -68,6 +68,7 @@ from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
+from tests.helpers.scripted_client import ScriptedClient
 from tests.helpers.obligation_aware import (
     _control_structure,
     _controls,
@@ -894,30 +895,16 @@ def test_provider_preflight_blocks_oversized_ica_before_dispatch(tmp_path) -> No
         update={"context_window": 2048, "maximum_completion_tokens": 4096}
     )
     request = request.model_copy(update={"controls": controls})
-    calls: list[object] = []
-
-    class Client:
-        model = "preflight-test"
-
-        def complete(self, **kwargs):
-            calls.append(kwargs)
-            return LLMResult(
-                content={},
-                prompt_tokens=0,
-                completion_tokens=0,
-                duration_ms=0,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient([], model="preflight-test")
 
     provider = ObligationAwareLLMAdapter(
-        Client(),
+        client,
         run_dir=tmp_path,
         controls=controls,
     )
     with pytest.raises(ValueError, match="prompt_budget_exceeded"):
         provider.fill(request)
-    assert calls == []
+    assert client.calls == []
 
 
 def test_routing_budget_exhaustion_is_typed_and_does_not_retry(tmp_path) -> None:
@@ -926,17 +913,10 @@ def test_routing_budget_exhaustion_is_typed_and_does_not_retry(tmp_path) -> None
     controls = _controls().model_copy(
         update={"context_window": 2048, "maximum_completion_tokens": 4096}
     )
-    calls: list[object] = []
-
-    class Client:
-        model = "preflight-test"
-
-        def complete(self, **kwargs):
-            calls.append(kwargs)
-            raise AssertionError("the oversized prompt must not be dispatched")
+    client = ScriptedClient([], model="preflight-test")
 
     provider = ObligationAwareLLMAdapter(
-        Client(),
+        client,
         run_dir=tmp_path,
         controls=controls,
     )
@@ -950,7 +930,7 @@ def test_routing_budget_exhaustion_is_typed_and_does_not_retry(tmp_path) -> None
     assert result.routes[0].disposition == "unresolved"
     assert result.routes[0].diagnostics[0].code == "prompt_budget_exceeded"
     assert result.call_evidence[0].attempt_count == 0
-    assert calls == []
+    assert client.calls == []
 
 
 def test_routing_budget_splits_compact_batches_in_canonical_order() -> None:
@@ -1012,39 +992,30 @@ def test_revision_provider_schema_uses_local_handles_without_final_gap_ids(
         baseline_control_structure=_control_structure(),
         controls=controls,
     )
-    response_formats: list[type] = []
-
-    class Client:
-        model = "revision-schema-test"
-
-        def complete(self, **kwargs):
-            response_formats.append(kwargs["response_format"])
-            return LLMResult(
-                content={
-                    "draft": {},
-                    "gap_decisions": [
-                        {
-                            "gap_handle": "revision-gap-1",
-                            "disposition": "dismiss_unsupported",
-                            "rationale": "The supplied evidence does not justify it.",
-                        }
-                    ],
-                },
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient(
+        [
+            {
+                "draft": {},
+                "gap_decisions": [
+                    {
+                        "gap_handle": "revision-gap-1",
+                        "disposition": "dismiss_unsupported",
+                        "rationale": "The supplied evidence does not justify it.",
+                    }
+                ],
+            }
+        ],
+        model="revision-schema-test",
+    )
 
     provider = ObligationAwareLLMAdapter(
-        Client(),
+        client,
         run_dir=tmp_path,
         controls=controls,
     )
     response = provider.revise(request)
     assert response.draft.gap_decisions[0].gap_handle == "revision-gap-1"
-    schema = response_formats[0].model_json_schema()
+    schema = client.calls[0]["response_format"].model_json_schema()
     draft_fields = schema["$defs"]["_RevisionProviderDraft"]["properties"]
     assert "trigger_gap_ids" not in draft_fields
 
@@ -1122,24 +1093,13 @@ def test_revision_provider_rejects_a_handle_decided_twice(tmp_path) -> None:
         controls=controls,
     )
 
-    class Client:
-        model = "revision-duplicate-test"
-
-        def complete(self, **kwargs):
-            return LLMResult(
-                content={
-                    "draft": {},
-                    "gap_decisions": [_RETRY_DECISION, _RETRY_DECISION],
-                },
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient(
+        [{"draft": {}, "gap_decisions": [_RETRY_DECISION, _RETRY_DECISION]}],
+        model="revision-duplicate-test",
+    )
 
     with pytest.raises(ValueError, match="unique gap handles"):
-        ObligationAwareLLMAdapter(Client(), run_dir=tmp_path, controls=controls).revise(
+        ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=controls).revise(
             request
         )
 
@@ -1179,21 +1139,12 @@ def test_provider_accepts_nested_structured_ica_consideration_results(tmp_path) 
         ),
     )
 
-    class Client:
-        model = "nested-ica-test"
-
-        def complete(self, **kwargs):
-            return LLMResult(
-                content={"filled_slots": [provider_slot_payload(draft)]},
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient(
+        [{"filled_slots": [provider_slot_payload(draft)]}], model="nested-ica-test"
+    )
 
     provider = ObligationAwareLLMAdapter(
-        Client(),
+        client,
         run_dir=tmp_path,
         controls=_controls(),
     )
