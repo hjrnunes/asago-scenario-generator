@@ -1,34 +1,22 @@
-"""Tests for the stimulus turn (G05) and ordering reference (G12) value objects.
+"""Tests for the ordering reference (G12) value objects.
 
-Covers ``StimulusTurn`` and the ``OrderingCondition`` reference fields with
-their typed rejections.
+Covers the ``OrderingCondition`` reference fields with their typed rejections.
 """
 
 from __future__ import annotations
 
 
 import pytest
-from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     OrderingCondition,
     ReferenceArgument,
     SemanticBindingPlaceholder,
-    StimulusTurn,
     contains_binding_placeholder,
 )
 
 # ---------------------------------------------------------------------------
-# A. Stimulus turns: typed rejections
-
-
-def test_turn_entry_rejects_role_and_mode_fields():
-    with pytest.raises(ValidationError, match="Extra inputs"):
-        StimulusTurn(turn_id="T-1", text="text", role="assistant")
-
-
-# ---------------------------------------------------------------------------
-# B. Ordering reference fields: typed rejections
+# Ordering reference fields: typed rejections
 
 
 def test_reference_argument_without_reference_tool_fails():

@@ -31,10 +31,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
-from asago_scenario_generator.stpa.models.semantic_conditions import (
-    SemanticCondition,
-    StimulusTurn,
-)
+from asago_scenario_generator.stpa.models.semantic_conditions import SemanticCondition
 from asago_scenario_generator.stpa.discriminating_condition import (
     ConditionCheck,
     DiscriminatingCondition,
@@ -172,13 +169,6 @@ class ScenarioSpec(BaseModel):
     unsafe_outcome_hazard_refs: list[str] = Field(default_factory=list)
     unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None
-    # Prepared user turns for a conversation_context delivery route.  The
-    # producer copies them verbatim into the published stimulus requirement;
-    # a missing value keeps the route free of turn content.
-    stimulus_turns: tuple[StimulusTurn, ...] | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-    )
     # Phase 3.1 adversary record.  Optional only for historical/non-contextual
     # values; the corrected contextual Stage 5 wire requires it.
     adversary: Adversary | None = None
@@ -231,34 +221,6 @@ class ScenarioSpec(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
     )
-    # Obligation-direction observation stamps (owner ruling Q30, 2026-09-10).
-    # ``oracle_observes`` names what the compiled oracle measures (attempt,
-    # total_omission, reply); ``oracle_basis`` records why the direction
-    # check admitted the compile (reviewed interpretation, proxy, or an
-    # explicitly UNVERIFIED default).  Both are omitted when absent, so
-    # existing projection digests hold.
-    oracle_observes: StrictStr | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-    )
-    oracle_basis: StrictStr | None = Field(
-        default=None,
-        exclude_if=lambda value: value is None,
-    )
-    # Exact prepared direct-prompt user text copied verbatim from the authored
-    # stimulus before projection.  The v3 stimulus requirement delivers it
-    # verbatim; a missing value keeps the route free of prepared content.
-    # The 4,096 cap mirrors the v3 requirement model's
-    # ``MAX_PREPARED_USER_TEXT_LENGTH`` (equality is pinned in the pipeline
-    # tests); the constant itself is not imported here to keep this module's
-    # import graph leaf-safe.
-    prepared_user_text: StrictStr | None = Field(
-        default=None,
-        min_length=1,
-        max_length=4096,
-        exclude_if=lambda value: value is None,
-    )
-
     # The structure of an adversarial scenario's attack (channel, planned
     # turns, planted item), set by the shape step after Stage 5 compiles the
     # spec.  Omitted when absent so spec digests written before the step hold.
