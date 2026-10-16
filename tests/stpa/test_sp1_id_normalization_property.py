@@ -31,6 +31,10 @@ from asago_scenario_generator.stpa.system_model.id_normalization import (
     validate_normalized_control_structure,
 )
 
+_FIXTURE_SAFE = settings(
+    deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+
 st_text = st.text(
     alphabet=st.characters(
         whitelist_categories=("Ll", "Lu", "Nd"),
@@ -225,11 +229,7 @@ class TestPositionBasedIdsAreDeterministic:
     """The same ordered structure always yields the same published IDs."""
 
     @given(st_structure)
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=40)
     def test_ids_depend_only_on_position(self, structure):
         n_resps, n_children, n_cps, with_links, descriptions = structure
         first = _payload(
@@ -261,11 +261,7 @@ class TestUniqueSourceIdsMapToCanonicalIds:
     """Unique source IDs appear in the flat mapping and resolve references."""
 
     @given(st_structure)
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=40)
     def test_mapping_and_references_follow_source_ids(self, structure):
         n_resps, n_children, n_cps, with_links, descriptions = structure
         payload = _payload(
@@ -312,11 +308,7 @@ class TestNormalizationIsIdempotent:
     """A second pass leaves an already-canonical payload unchanged."""
 
     @given(st_structure)
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=40)
     def test_second_pass_is_identity(self, structure):
         n_resps, n_children, n_cps, with_links, descriptions = structure
         payload = _payload(
@@ -340,11 +332,7 @@ class TestOrderAndNonIdFieldsArePreserved:
     """Normalization does not reorder lists or rewrite descriptions."""
 
     @given(st_structure)
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_descriptions_and_order_survive(self, structure):
         n_resps, n_children, n_cps, with_links, descriptions = structure
         payload = _payload(
@@ -444,11 +432,7 @@ class TestAmbiguousGlobalIdsAreNotRewritten:
     """A duplicated global source ID is left for validation to reject."""
 
     @given(st.sampled_from(("resp", "cp", "pm")), st_dup)
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_duplicate_global_id_stays_unmapped(self, kind, dup):
         payload = _dup_payload(kind, dup)
         result = normalize_control_structure_payload(payload)
@@ -475,11 +459,7 @@ class TestCrossNamespaceCollisionsAreOmitted:
     """The same source ID in two namespaces stays out of the flat map."""
 
     @given(st_shared)
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_shared_source_id_is_omitted_from_flat_map(self, shared):
         payload = _payload(
             n_resps=1,
@@ -575,11 +555,7 @@ class TestElementRefTypeInference:
     """Type repair is prefix-driven and never overwrites a valid type."""
 
     @given(st_valid_type, st_prefix, st_label)
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=40)
     def test_valid_types_are_preserved(self, source_type, prefix, label):
         payload = _element_ref_payload(
             source_type=source_type,
@@ -592,11 +568,7 @@ class TestElementRefTypeInference:
         assert target["type"] == source_type
 
     @given(st_bad_type, st_prefix, st_label)
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=40)
     def test_invalid_prefix_types_are_inferred(self, source_type, prefix, label):
         source_id = f"{prefix}{label}"
         payload = _element_ref_payload(
@@ -610,11 +582,7 @@ class TestElementRefTypeInference:
         assert target["type"] == _expected_type(source_type, source_id)
 
     @given(st_bad_type)
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_uninferable_types_stay_for_validation(self, source_type):
         payload = _element_ref_payload(
             source_type=source_type,
@@ -677,11 +645,7 @@ class TestBareStringWrap:
     """Only recognized bare CP-/RESP- strings become ElementRef objects."""
 
     @given(st_slot, st_prefix, st_label)
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=40)
     def test_known_prefix_strings_become_objects(self, slot, prefix, label):
         source_id = f"{prefix}{label}"
         result = normalize_control_structure_payload(_slot_payload(slot, source_id))
@@ -692,31 +656,19 @@ class TestBareStringWrap:
         assert actual["type"] == expected_type
 
     @given(st_slot, st_unknown)
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_unknown_prefix_strings_stay_strings(self, slot, source_id):
         result = normalize_control_structure_payload(_slot_payload(slot, source_id))
         assert _slot_value(result.payload, slot) == source_id
 
     @given(st_slot)
-    @settings(
-        max_examples=10,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=10)
     def test_null_slots_stay_null(self, slot):
         result = normalize_control_structure_payload(_slot_payload(slot, None))
         assert _slot_value(result.payload, slot) is None
 
     @given(st_slot, st_valid_type, st_label)
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_dicts_stay_dicts(self, slot, source_type, label):
         original = {"type": source_type, "id": f"keep-{label}"}
         result = normalize_control_structure_payload(_slot_payload(slot, original))
@@ -730,11 +682,7 @@ class TestEmptyDescriptionRepair:
     """Only the empty-string sentinel is replaced."""
 
     @given(st_desc_kind, st_label)
-    @settings(
-        max_examples=40,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=40)
     def test_only_empty_strings_are_replaced(self, kind, label):
         include_description = kind != "omit"
         if kind == "empty":

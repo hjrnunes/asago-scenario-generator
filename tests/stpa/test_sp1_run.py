@@ -42,6 +42,7 @@ from tests.helpers.sp1_graceful_degradation import (
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
+    run_sp1_default,
     valid_control_element_set_dict,
     valid_empty_coordination_analysis_dict,
     valid_requirement_set_dict,
@@ -269,12 +270,7 @@ class TestRunOrchestration:
             [_run3_invalid_risk_draft_dict()],
         )
 
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
 
         assert len(result.stage_errors) == 1
         error = result.stage_errors[0]
@@ -300,12 +296,7 @@ class TestRunOrchestration:
         self, tmp_path
     ):
         client = _setup_mock_client()
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
 
         assert (tmp_path / "loss-analysis.yaml").exists()
         assert (tmp_path / "capability-profile.yaml").exists()
@@ -351,13 +342,7 @@ class TestRunOrchestration:
         )
         client = _setup_mock_client()
 
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-            target_evidence=evidence,
-        )
+        run_sp1_default(client, tmp_path, target_evidence=evidence)
 
         record = yaml.safe_load((tmp_path / "target-evidence.yaml").read_text())
         assert "operation:get_referral" in {op["ref"] for op in record["operations"]}
@@ -386,12 +371,7 @@ class TestRunOrchestration:
     ):
         client = _setup_mock_client()
         client.set_response_for(CoordinationAnalysis, _reviewed_coordination_for_run())
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
         assert result.loss_analysis is not None
         assert result.loss_analysis.security_constraints[0].related_hazards == ["H-2"]
         assert result.loss_analysis.security_constraints[1].related_hazards == ["H-1"]
@@ -420,12 +400,7 @@ class TestRunOrchestration:
         client = _setup_mock_client()
         client.temperature = 1.0
 
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(client, tmp_path)
 
         assert client.calls
         assert {call.temperature for call in client.calls} == {1.0}
@@ -444,12 +419,7 @@ class TestRunOrchestration:
             _observed_gemma_control_element_set_dict(),
         )
 
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
 
         assert result.control_structure is None
         assert result.stage_warnings == []
@@ -469,12 +439,7 @@ class TestRunOrchestration:
             _observed_gemma_invalid_feedback_update_dict(),
         )
 
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
 
         assert result.control_structure is None
         assert result.stage_warnings == []
@@ -498,12 +463,7 @@ class TestRunOrchestration:
             [invented, invented, valid_control_element_set_dict()],
         )
 
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
 
         assert result.control_structure is not None
         attempts = [
@@ -519,13 +479,7 @@ class TestRunOrchestration:
     def test_run_manifest_records_profile_name(self, tmp_path):
         """A selected model profile is preserved in the manifest configuration."""
         client = _setup_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-            profile_name="production-profile",
-        )
+        run_sp1_default(client, tmp_path, profile_name="production-profile")
 
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["model_settings"]["profile"] == "production-profile"
@@ -540,12 +494,7 @@ class TestRunOrchestration:
         client.api_key = "must-not-appear"
         client.extra_headers = {"Authorization": "must-not-appear"}
 
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(client, tmp_path)
 
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         settings = manifest["model_settings"]
@@ -561,12 +510,7 @@ class TestRunOrchestration:
     def test_run_05_manifest_records_critic_findings(self, tmp_path):
         """SP1-RUN-05: run manifest records critic findings count."""
         client = _setup_mock_client(critic_findings=_valid_critic_findings_dict())
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(client, tmp_path)
         manifest_file = tmp_path / "run-manifest.yaml"
 
         manifest = yaml.safe_load(manifest_file.read_text())
@@ -593,13 +537,7 @@ class TestRunOrchestration:
         ).to_capability_profile()
 
         client = _setup_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-            capability_profile=profile,
-        )
+        run_sp1_default(client, tmp_path, capability_profile=profile)
         entries = read_calls_jsonl(tmp_path)
         stage_1b_entries = [e for e in entries if e["stage"] == "stage_1b"]
         assert len(stage_1b_entries) == 0
@@ -620,12 +558,8 @@ class TestRunOrchestration:
         ).to_capability_profile()
         run_dir = tmp_path / "output"
 
-        result = run_sp1(
-            llm_client=_setup_mock_client(),
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=run_dir,
-            capability_profile=profile,
+        result = run_sp1_default(
+            _setup_mock_client(), run_dir, capability_profile=profile
         )
 
         artifact = run_dir / "capability-profile.yaml"
@@ -677,13 +611,7 @@ class TestPinnedLossAnalysis:
         pinned = self._write_pinned(tmp_path)
         client = _setup_mock_client()
 
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-            loss_analysis_path=pinned,
-        )
+        result = run_sp1_default(client, tmp_path, loss_analysis_path=pinned)
 
         assert result.stage_errors == []
         assert result.loss_analysis is not None
@@ -696,13 +624,7 @@ class TestPinnedLossAnalysis:
     def test_pinned_analysis_is_published_byte_identically(self, tmp_path):
         """The canonical artifact matches the pinned graph byte for byte."""
         pinned = self._write_pinned(tmp_path)
-        run_sp1(
-            llm_client=_setup_mock_client(),
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-            loss_analysis_path=pinned,
-        )
+        run_sp1_default(_setup_mock_client(), tmp_path, loss_analysis_path=pinned)
         published = LossAnalysis.model_validate(
             yaml.safe_load((tmp_path / "loss-analysis.yaml").read_text())
         )
@@ -715,13 +637,7 @@ class TestPinnedLossAnalysis:
     def test_pinned_analysis_records_input_digest_and_zero_calls(self, tmp_path):
         """The manifest pins the supplied bytes and reports a zero-call stage."""
         pinned = self._write_pinned(tmp_path)
-        run_sp1(
-            llm_client=_setup_mock_client(),
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-            loss_analysis_path=pinned,
-        )
+        run_sp1_default(_setup_mock_client(), tmp_path, loss_analysis_path=pinned)
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert (
             manifest["input_hashes"]["loss_analysis"]
@@ -735,12 +651,7 @@ class TestPinnedLossAnalysis:
 
     def test_derived_stage_reports_source_derived(self, tmp_path):
         """The unpinned manifest keeps its call count and gains source: derived."""
-        run_sp1(
-            llm_client=_setup_mock_client(),
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(_setup_mock_client(), tmp_path)
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         stage_1a = manifest["stage_summary"]["stage_1a"]
         assert stage_1a["source"] == "derived"
@@ -748,12 +659,7 @@ class TestPinnedLossAnalysis:
 
     def test_derived_run_records_the_advisory_risk_coverage_review(self, tmp_path):
         """The derived path runs the review, records it, and writes its artifact."""
-        run_sp1(
-            llm_client=_setup_mock_client(),
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(_setup_mock_client(), tmp_path)
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         stage_1a = manifest["stage_summary"]["stage_1a"]
         review = stage_1a["risk_coverage_review"]
@@ -776,12 +682,7 @@ class TestPinnedLossAnalysis:
         """
         client = _setup_mock_client()
         client.set_response_for(CoordinationAnalysis, _reviewed_coordination_for_run())
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(client, tmp_path)
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         reviewed = manifest["stage_summary"]["stage_1a"]["risk_coverage_review"][
             "reviewed_loss_analysis_digest"
@@ -803,13 +704,7 @@ class TestPinnedLossAnalysis:
         yaml.safe_dump(broken, pinned.open("w"))
         client = _setup_mock_client()
 
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-            loss_analysis_path=pinned,
-        )
+        result = run_sp1_default(client, tmp_path, loss_analysis_path=pinned)
 
         assert result.loss_analysis is None
         assert result.control_structure is None
@@ -1005,12 +900,7 @@ class TestRunSp1Artifacts:
         nested = tmp_path / "a" / "b" / "c"
         assert not nested.exists()
         client = _make_queued_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=nested,
-        )
+        run_sp1_default(client, nested)
         assert nested.exists()
         assert (nested / "loss-analysis.yaml").exists()
 
@@ -1020,12 +910,7 @@ class TestRunSp1Artifacts:
         Kills the revised=False→True mutant on the initial assignment.
         """
         client = _make_queued_mock_client(critic_findings=_no_unjustified_gaps_dict())
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
         assert result.revised is False
 
     def test_revised_false_when_attempted_revision_is_invalid(self, tmp_path):
@@ -1034,12 +919,7 @@ class TestRunSp1Artifacts:
             critic_findings=_valid_critic_findings_dict_with_unjustified(),
             revised_cs=_revision_control_structure_dict(),
         )
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
         assert result.revised is False
 
     def test_manifest_stage_1b_call_count_zero_when_profile_skipped(self, tmp_path):
@@ -1047,25 +927,14 @@ class TestRunSp1Artifacts:
         profile = make_capability_profile()
 
         client = _make_queued_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-            capability_profile=profile,
-        )
+        run_sp1_default(client, tmp_path, capability_profile=profile)
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["stage_summary"]["stage_1b"]["call_count"] == 0
 
     def test_manifest_stage_1b_call_count_one_when_inferred(self, tmp_path):
         """Manifest stage_1b.call_count is 1 when profile is inferred."""
         client = _make_queued_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(client, tmp_path)
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert manifest["stage_summary"]["stage_1b"]["call_count"] == 1
 
@@ -1074,12 +943,7 @@ class TestRunSp1Artifacts:
         the two derivation requests plus the advisory review.
         """
         client = _make_queued_mock_client()
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(client, tmp_path)
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         stage_1a = manifest["stage_summary"]["stage_1a"]
         # Actionability, two derivations, the stated-rule extraction, and the
@@ -1106,18 +970,11 @@ class TestRunSp1Artifacts:
     def test_pinned_run_has_no_boundary_decision(self, tmp_path):
         """A pinned graph skips the classification, so the result has no record."""
         derived_dir = tmp_path / "derived"
-        derived = run_sp1(
-            llm_client=_make_queued_mock_client(),
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=derived_dir,
-        )
+        derived = run_sp1_default(_make_queued_mock_client(), derived_dir)
         assert derived.loss_analysis is not None
-        result = run_sp1(
-            llm_client=_make_queued_mock_client(),
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path / "pinned",
+        result = run_sp1_default(
+            _make_queued_mock_client(),
+            tmp_path / "pinned",
             loss_analysis_path=derived_dir / "loss-analysis.yaml",
         )
         assert result.risk_actionability is None
@@ -1129,12 +986,7 @@ class TestRunSp1Artifacts:
         client = _make_queued_mock_client()
         client.set_exception_for(LossAnalysisDraft, RuntimeError("provider offline"))
 
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
 
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         stage_1a = manifest["stage_summary"]["stage_1a"]
@@ -1174,12 +1026,7 @@ class TestRunSp1Artifacts:
                 side_effect=tagged("placed"),
             ),
         ):
-            result = run_sp1(
-                llm_client=_make_queued_mock_client(),
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            result = run_sp1_default(_make_queued_mock_client(), tmp_path)
 
         persisted = yaml.safe_load((tmp_path / "control-structure.yaml").read_text())
         descriptions = [item["description"] for item in persisted["responsibilities"]]
@@ -1198,12 +1045,7 @@ class TestRunSp1Artifacts:
         client.context_window = 1024
         client.max_completion_tokens = 256
 
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(client, tmp_path)
 
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         summary = manifest["stage_summary"]

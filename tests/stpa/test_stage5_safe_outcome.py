@@ -59,6 +59,17 @@ ARGUMENT_CONDITION = {
 }
 
 
+def _generate(client, tmp_path, **overrides):
+    return generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
+        **overrides,
+    )
+
+
 def test_stage5_materializes_the_supplied_safe_observable_outcome(tmp_path) -> None:
     payload = _normal_payload()
     payload["unsafe_outcome"]["observation_criteria"] = [
@@ -91,14 +102,11 @@ def test_stage5_materializes_the_supplied_safe_observable_outcome(tmp_path) -> N
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result, error = generate_bdi_for_context(
+    result, error = _generate(
         client,
-        _wrong_timing_context(),
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None
@@ -270,14 +278,11 @@ def test_safe_outcome_rejects_references_outside_supplied_inputs(
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
 
-    result, error = generate_bdi_for_context(
+    result, error = _generate(
         client,
-        _wrong_timing_context(),
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -322,14 +327,11 @@ def test_safe_outcome_record_paths_move_to_fact_refs(
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result, error = generate_bdi_for_context(
+    result, error = _generate(
         client,
-        _wrong_timing_context(),
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_nested_observations(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert error is None, error
@@ -359,14 +361,11 @@ def test_safe_outcome_rejects_unsupplied_record_refs(tmp_path, record_ref) -> No
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
 
-    result, error = generate_bdi_for_context(
+    result, error = _generate(
         client,
-        _wrong_timing_context(),
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_nested_observations(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
 
     assert result is None
@@ -403,13 +402,7 @@ def test_analytical_only_safe_outcome_is_coerced_to_not_observable(tmp_path) -> 
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert error is None, error
     assert result is not None
@@ -474,13 +467,7 @@ def test_executable_reply_only_safe_outcome_is_coerced_to_observable(
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert error is None, error
     assert result is not None
@@ -590,13 +577,7 @@ def test_safe_outcome_is_coerced_to_the_only_supported_reply_criterion(
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert error is None, error
     assert result is not None
@@ -648,14 +629,7 @@ def test_safe_outcome_is_coerced_to_the_only_supported_attempt_criterion(
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        target_operation=_target_operation(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path, target_operation=_target_operation())
 
     assert error is None, error
     assert result is not None
@@ -682,13 +656,7 @@ def test_a_safe_outcome_that_matches_its_only_criterion_is_not_recorded(
     client = MockLLMClient()
     client.set_response_queue([_outcome_payload([_REPLY_CRITERION], safe_outcome)])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert error is None, error
     assert result is not None
@@ -705,13 +673,7 @@ def test_safe_outcome_is_not_coerced_when_two_criteria_are_supported(
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert result is None
     assert error is not None
@@ -749,14 +711,7 @@ def test_executable_command_attempt_safe_outcome_must_be_observable(
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        target_operation=_target_operation(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path, target_operation=_target_operation())
 
     assert result is None
     assert error is not None
@@ -843,13 +798,7 @@ def test_analytical_only_safe_outcome_has_no_executable_references(tmp_path) -> 
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert error is None
     assert result is not None
@@ -880,13 +829,7 @@ def test_observable_safe_outcome_can_omit_operation_reference(tmp_path) -> None:
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert error is None
     assert result is not None
@@ -930,14 +873,7 @@ def test_command_attempt_observation_requires_exact_inventory_operation(
     client = MockLLMClient()
     client.set_response_queue([payload, corrected])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        target_operation=_target_operation(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path, target_operation=_target_operation())
 
     assert error is None
     assert result is not None
@@ -968,14 +904,7 @@ def test_non_null_reply_operation_must_be_in_inventory(tmp_path) -> None:
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        target_operation=_target_operation(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path, target_operation=_target_operation())
 
     assert result is None
     assert error is not None
@@ -1104,14 +1033,7 @@ def test_a_missing_safe_operation_is_taken_from_the_only_supported_criterion(
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        target_operation=_target_operation(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path, target_operation=_target_operation())
 
     assert error is None, error
     assert client.call_count == 1
@@ -1144,14 +1066,7 @@ def test_a_missing_safe_operation_is_not_filled_from_two_supported_criteria(
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        target_operation=_target_operation(),
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path, target_operation=_target_operation())
 
     assert result is None
     assert "observation_command_attempt_operation_missing" in error

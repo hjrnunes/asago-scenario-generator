@@ -87,6 +87,16 @@ def _with_defect(draft: dict, collection: str, field: str, value: object) -> dic
     return draft
 
 
+def _derive(client, tmp_path, **overrides):
+    return derive_loss_analysis(
+        llm_client=client,
+        use_case_text="Test use case",
+        risk_cards=make_risk_cards(),
+        run_dir=tmp_path,
+        **overrides,
+    )
+
+
 class TestStage1aLossAnalysis:
     """SP1 Stage 1a loss analysis derivation (two-call split)."""
 
@@ -100,12 +110,7 @@ class TestStage1aLossAnalysis:
             LossAnalysisDraft,
             [valid_risk_draft_dict(), valid_gap_draft_dict()],
         )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
         assert isinstance(result, LossAnalysis)
         assert len(result.risk_card_losses) == 1
         assert len(result.use_case_losses) == 1
@@ -200,12 +205,7 @@ class TestStage1aLossAnalysis:
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, script(bad_draft))
         with pytest.raises((ValidationError, ValueError, StageError), match=match):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
 
     def test_la_07_renumbering_handles_non_sequential_ids(self, tmp_path):
         """Non-sequential or duplicate input IDs are renumbered to sequential."""
@@ -226,12 +226,7 @@ class TestStage1aLossAnalysis:
         gap["security_constraints"][0]["constraint_id"] = "SC-9"
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [risk, gap])
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
         # After renumbering: L-1, L-2 / H-1, H-2 / SC-1, SC-2
         all_losses = result.risk_card_losses + result.use_case_losses
         assert [loss.loss_id for loss in all_losses] == ["L-1", "L-2"]
@@ -271,12 +266,7 @@ class TestStage1aLossAnalysis:
             LossAnalysisDraft,
             [risk_draft, gap_draft],
         )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
         assert len(result.risk_card_losses) == 2
         assert len(result.use_case_losses) == 2
 
@@ -288,13 +278,7 @@ class TestStage1aLossAnalysis:
             [valid_risk_draft_dict(), valid_gap_draft_dict()],
         )
         profile = make_capability_profile()
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-            capability_profile=profile,
-        )
+        _derive(client, tmp_path, capability_profile=profile)
         # The gap call is the second call
         gap_call = client.calls[1]
         assert "KC1.1" in gap_call.user_prompt
@@ -342,12 +326,7 @@ class TestStage1aLossAnalysis:
         client.set_response_for(LossAnalysisDraft, [empty_risk, empty_risk])
 
         with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
 
         message = str(exc_info.value)
         assert "targeted repair failed" in message
@@ -369,12 +348,7 @@ class TestStage1aLossAnalysis:
             [risk, valid_gap_draft_dict()],
         )
 
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
 
         assert [loss.loss_id for loss in result.risk_card_losses] == ["L-1"]
         assert result.hazards and result.security_constraints
@@ -390,12 +364,7 @@ class TestStage1aLossAnalysis:
             LossAnalysisDraft,
             [valid_risk_draft_dict(), gap],
         )
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
         # After renumbering, L-1 stays L-1 and L-2 stays L-2
         gap_hazard = result.hazards[1]
         assert "L-1" in gap_hazard.related_losses
@@ -480,12 +449,7 @@ class TestStage1aLossAnalysis:
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [risk, gap])
 
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
 
         assert [loss.loss_id for loss in result.risk_card_losses] == [
             f"L-{index}" for index in range(1, 6)
@@ -528,12 +492,7 @@ class TestStage1aLossAnalysis:
 
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [risk, gap])
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
 
         all_losses = result.risk_card_losses + result.use_case_losses
         assert len(all_losses) == 2
@@ -553,12 +512,7 @@ class TestStage1aLossAnalysis:
 
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [risk, gap])
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
         assert [loss.loss_id for loss in result.risk_card_losses] == ["L-1"]
         assert [loss.loss_id for loss in result.use_case_losses] == ["L-2"]
 
@@ -573,12 +527,7 @@ class TestStage1aLossAnalysis:
         )
 
         with pytest.raises(StageError, match="stage_1a") as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
         assert "source_risk_cards" in str(exc_info.value)
 
     def test_la_21_sp1_merge_failure_is_partial_and_manifested(self, tmp_path):
@@ -626,12 +575,7 @@ class TestStage1aLossAnalysis:
         client.set_response_for(LossAnalysisDraft, [_observed_invalid_risk_draft()])
 
         with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
 
         message = str(exc_info.value)
         assert "targeted repair failed" in message
@@ -659,12 +603,7 @@ class TestStage1aLossAnalysis:
         client.set_response_for(LossAnalysisDraft, [invalid])
 
         with pytest.raises(StageError, match="stage_1a/risk_derivation") as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
 
         assert "related_hazards" in str(exc_info.value)
         assert "targeted repair failed" in str(exc_info.value)
@@ -682,12 +621,7 @@ class TestStage1aLossAnalysis:
         client.set_response_for(LossAnalysisDraft, [invalid])
 
         with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
 
         message = str(exc_info.value)
         assert "Missing loss declarations: L-1" in message
@@ -710,12 +644,7 @@ class TestStage1aLossAnalysis:
         )
 
         with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
 
         message = str(exc_info.value)
         assert "Missing loss declarations: L-99" in message
@@ -741,12 +670,7 @@ class TestStage1aLossAnalysis:
         )
 
         with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
 
         message = str(exc_info.value)
         assert "targeted repair unsupported" in message
@@ -768,12 +692,7 @@ class TestStage1aLossAnalysis:
         )
 
         with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text="Test use case",
-                risk_cards=make_risk_cards(),
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
 
         message = str(exc_info.value)
         assert message.startswith("stage_1a/gap_analysis: targeted repair unsupported")
@@ -799,12 +718,7 @@ class TestStage1aLossAnalysis:
             [valid_risk_draft_dict(), empty_gap],
         )
 
-        result = derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
 
         assert result.hazards and result.security_constraints
         assert len(client.calls) == 2

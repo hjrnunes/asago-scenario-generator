@@ -4,27 +4,11 @@ from __future__ import annotations
 
 import pytest
 
-from asago_scenario_generator.stpa.models.control_structure import (
-    ProcessModelPart,
-    Responsibility,
-)
 from asago_scenario_generator.stpa.system_model.control_structure import (
     MissingControlActionsError,
     parse_control_element_set_response,
 )
-
-
-def _responsibilities() -> list[Responsibility]:
-    return [
-        Responsibility(
-            resp_id=f"RESP-{number}",
-            description=f"Responsibility {number} serves the use case",
-            process_model_parts=[
-                ProcessModelPart(pm_id=f"PM-{number}-1", description="State")
-            ],
-        )
-        for number in (1, 2, 3)
-    ]
+from tests.helpers.sp1_control_structure import _responsibilities
 
 
 def _reply_serving_only_the_first() -> dict:

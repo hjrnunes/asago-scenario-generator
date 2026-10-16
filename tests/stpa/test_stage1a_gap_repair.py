@@ -13,6 +13,18 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 )
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient, valid_risk_draft_dict, make_risk_cards
+from tests.helpers.stage1a_targeted_repair import (
+    _empty_gap_response_without_dispositions,
+)
+
+
+def _derive(client, tmp_path):
+    return derive_loss_analysis(
+        llm_client=client,
+        use_case_text="Klarna's assistant serves authenticated fintech customers.",
+        risk_cards=make_risk_cards(),
+        run_dir=tmp_path,
+    )
 
 
 def _run14_invalid_gap_response() -> dict:
@@ -241,16 +253,6 @@ def _run15_correction_response() -> dict:
     }
 
 
-def _empty_gap_response() -> dict:
-    """Return an explicitly empty, complete-gap response."""
-    return {
-        "risk_card_losses": [],
-        "use_case_losses": [],
-        "hazards": [],
-        "security_constraints": [],
-    }
-
-
 def test_run15_gap_graph_merges_without_id_union_leakage(tmp_path):
     """Captured run-15 gap graph merges with exact-repeat deduplication.
 
@@ -304,12 +306,7 @@ def test_run15_gap_graph_merges_without_id_union_leakage(tmp_path):
         [_run15_risk_response(), gap],
     )
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text="Klarna's assistant serves authenticated fintech customers.",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    result = _derive(client, tmp_path)
 
     assert [loss.loss_id for loss in result.risk_card_losses] == ["L-1"]
     assert [loss.loss_id for loss in result.use_case_losses] == [
@@ -364,12 +361,7 @@ def test_run15_invalid_gap_references_fail_typed(tmp_path):
     )
 
     with pytest.raises(StageError) as exc_info:
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Klarna's assistant serves authenticated fintech customers.",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        _derive(client, tmp_path)
 
     message = str(exc_info.value)
     assert "targeted repair failed" in message
@@ -448,7 +440,7 @@ def test_run16_canonicalizes_provenance_on_the_risk_draft(tmp_path):
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
-        [risk, _empty_gap_response()],
+        [risk, _empty_gap_response_without_dispositions()],
     )
 
     result = derive_loss_analysis(
@@ -512,12 +504,7 @@ def test_run15_authority_merge_scopes_redeclared_ids_without_overwrite(tmp_path)
         [_run15_risk_response(), gap],
     )
 
-    result = derive_loss_analysis(
-        llm_client=client,
-        use_case_text="Klarna's assistant serves authenticated fintech customers.",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    result = _derive(client, tmp_path)
 
     assert result.hazards[0].hazard_id == "H-1"
     assert (
@@ -582,7 +569,7 @@ def test_gap_valid_disposition_is_not_malformed_row_cleanup(tmp_path):
     row is still an extra collection on the current gap wire and cannot
     overwrite the risk-stage accounting or be silently discarded.
     """
-    gap = _empty_gap_response()
+    gap = _empty_gap_response_without_dispositions()
     gap["risk_dispositions"] = [
         {
             "risk_ref": "atlas-001",
@@ -598,12 +585,7 @@ def test_gap_valid_disposition_is_not_malformed_row_cleanup(tmp_path):
     )
 
     with pytest.raises(StageError, match="valid out-of-contract"):
-        derive_loss_analysis(
-            llm_client=client,
-            use_case_text="Klarna's assistant serves authenticated fintech customers.",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        _derive(client, tmp_path)
 
     # The risk-stage response survives in call evidence; the valid extra row
     # is terminal and receives no cleanup or repair call.

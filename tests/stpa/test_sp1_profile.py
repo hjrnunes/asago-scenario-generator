@@ -23,6 +23,12 @@ from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 
 
+def _derive(client, tmp_path):
+    return derive_capability_profile(
+        llm_client=client, use_case_text="Test use case", run_dir=tmp_path
+    )
+
+
 def _valid_stage1_profile_dict() -> dict:
     return {
         "entry_points": [
@@ -47,11 +53,7 @@ class TestStage1bProfile:
         """A valid LLM response produces a valid CapabilityProfile."""
         client = MockLLMClient()
         client.set_response_for(Stage1Profile, _valid_stage1_profile_dict())
-        result = derive_capability_profile(
-            llm_client=client,
-            use_case_text="Test use case",
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
         assert isinstance(result, CapabilityProfile)
         assert "input" in result.zones_active
         assert "reasoning" in result.zones_active
@@ -61,11 +63,7 @@ class TestStage1bProfile:
         """Stage1Profile is promoted via to_capability_profile."""
         client = MockLLMClient()
         client.set_response_for(Stage1Profile, _valid_stage1_profile_dict())
-        result = derive_capability_profile(
-            llm_client=client,
-            use_case_text="Test use case",
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
         # zones_active derived from kc_subcodes
         assert "input" in result.zones_active
         assert "reasoning" in result.zones_active
@@ -96,11 +94,7 @@ class TestStage1bProfile:
         client = MockLLMClient()
         client.set_response_for(Stage1Profile, response)
 
-        result = derive_capability_profile(
-            llm_client=client,
-            use_case_text="Test use case",
-            run_dir=tmp_path,
-        )
+        result = _derive(client, tmp_path)
 
         assert result.tool_inventory is not None
         assert result.tool_inventory[0].supported_operations == ("execute_code",)
@@ -113,11 +107,7 @@ class TestStage1bProfile:
         """Call log entry has stage stage_1b."""
         client = MockLLMClient()
         client.set_response_for(Stage1Profile, _valid_stage1_profile_dict())
-        derive_capability_profile(
-            llm_client=client,
-            use_case_text="Test use case",
-            run_dir=tmp_path,
-        )
+        _derive(client, tmp_path)
         calls_file = tmp_path / "calls.jsonl"
         assert calls_file.exists()
         entries = read_calls_jsonl(tmp_path)
@@ -129,11 +119,7 @@ class TestStage1bProfile:
         """capability-profile.yaml exists and contains valid model."""
         client = MockLLMClient()
         client.set_response_for(Stage1Profile, _valid_stage1_profile_dict())
-        derive_capability_profile(
-            llm_client=client,
-            use_case_text="Test use case",
-            run_dir=tmp_path,
-        )
+        _derive(client, tmp_path)
         yaml_file = tmp_path / "capability-profile.yaml"
         assert yaml_file.exists()
         loaded = read_yaml(yaml_file, CapabilityProfile)
@@ -148,11 +134,7 @@ class TestStage1bProfile:
         with pytest.raises(
             (ValidationError, ValueError, StageError), match="(?i)Invalid KC sub-code"
         ):
-            derive_capability_profile(
-                llm_client=client,
-                use_case_text="Test use case",
-                run_dir=tmp_path,
-            )
+            _derive(client, tmp_path)
 
     def test_cp_12_stage1_profile_no_bool_fields(self):
         """Stage1Profile model does not declare boolean capability fields."""

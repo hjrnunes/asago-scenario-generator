@@ -46,6 +46,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     SecurityConstraint,
 )
 
+_FIXTURE_SAFE = settings(
+    deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+
 # ---------------------------------------------------------------------------
 # Hypothesis strategies
 # ---------------------------------------------------------------------------
@@ -102,11 +106,7 @@ class TestYamlRoundTrip:
         hazard_ids=st_hazard_ids,
         constraint_ids=st_constraint_ids,
     )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_loss_analysis_yaml_round_trip(
         self, tmp_path, loss_ids, hazard_ids, constraint_ids
     ):
@@ -149,11 +149,7 @@ class TestYamlRoundTrip:
         n_pms=st.integers(min_value=1, max_value=3),
         n_cas=st.integers(min_value=1, max_value=3),
     )
-    @settings(
-        max_examples=25,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=25)
     def test_control_structure_yaml_round_trip(self, tmp_path, n_resps, n_pms, n_cas):
         """ControlStructure round-trips through YAML."""
         responsibilities = []
@@ -193,11 +189,7 @@ class TestYamlRoundTrip:
         slot_id=st.from_regex(r"RESP-1:CA-1-1:[A-Z_]+", fullmatch=True),
         ica_text=st_text,
     )
-    @settings(
-        max_examples=25,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=25)
     def test_ica_enumeration_yaml_round_trip(self, tmp_path, slot_id, ica_text):
         """ICAEnumeration round-trips through YAML."""
         slot = ICASlot(

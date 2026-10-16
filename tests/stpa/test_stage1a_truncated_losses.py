@@ -30,7 +30,11 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     recover_truncated_risk_dispositions,
     recover_truncated_risk_losses,
 )
-from tests.helpers.stage1a_targeted_repair import _repair_record, _stage1a_entries
+from tests.helpers.stage1a_targeted_repair import (
+    _CapClient,
+    _repair_record,
+    _stage1a_entries,
+)
 from tests.stpa.sp1_helpers import MockLLMClient
 
 _CAP = STAGE1A_MAX_COMPLETION_TOKENS
@@ -109,30 +113,6 @@ def _result(content: str, *, completion_tokens: int = _CAP) -> LLMResult:
         duration_ms=1,
         request_controls={"max_completion_tokens": _CAP},
     )
-
-
-class _CapClient(MockLLMClient):
-    """Report a completion-cap stop for undecodable string bodies."""
-
-    def __init__(self, *, completion_tokens: int = _CAP) -> None:
-        super().__init__()
-        self._stop_tokens = completion_tokens
-
-    def complete(self, *args, **kwargs) -> LLMResult:
-        result = super().complete(*args, **kwargs)
-        if isinstance(result.content, str):
-            try:
-                json.loads(result.content)
-            except json.JSONDecodeError:
-                return result.model_copy(
-                    update={
-                        "completion_tokens": self._stop_tokens,
-                        "request_controls": {
-                            "max_completion_tokens": kwargs.get("max_completion_tokens")
-                        },
-                    }
-                )
-        return result
 
 
 def _repair_rows() -> list[dict]:

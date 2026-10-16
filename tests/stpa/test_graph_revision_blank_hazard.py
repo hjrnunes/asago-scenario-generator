@@ -7,7 +7,6 @@ outside its authoritative slice.
 
 from __future__ import annotations
 
-import hashlib
 import json
 from pathlib import Path
 
@@ -26,7 +25,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_gates import (
     _run_graph_revision_call,
 )
 from tests.helpers.calls_log import read_calls_jsonl
-from tests.helpers.scripted_client import ScriptedClient
+from tests.helpers.scripted_client import ScriptedClient, _request_digest
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "unit_loss"
 _PRIOR = json.loads(
@@ -166,16 +165,6 @@ class TestBothRepliesBlank:
 _FIRST_REQUEST_DIGEST = (
     "7f95b8e0f4dbb07d6273bbcfdf07ae4d362ed83674559f881a896ea2784c1e6b"
 )
-
-
-def _request_digest(call: dict) -> str:
-    shape = {
-        key: value.__name__ if isinstance(value, type) else value
-        for key, value in call.items()
-    }
-    return hashlib.sha256(
-        json.dumps(shape, sort_keys=True, default=repr).encode("utf-8")
-    ).hexdigest()
 
 
 def test_a_valid_hazard_addition_sends_one_request_with_unchanged_bytes(

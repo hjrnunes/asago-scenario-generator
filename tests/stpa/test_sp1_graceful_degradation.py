@@ -44,12 +44,13 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
     derive_loss_analysis,
 )
 from asago_scenario_generator.stpa.system_model.profile import derive_capability_profile
-from asago_scenario_generator.stpa.system_model.run import SP1RunResult, run_sp1
+from asago_scenario_generator.stpa.system_model.run import SP1RunResult
 from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
+    run_sp1_default,
     valid_critic_findings_dict_no_gaps,
     valid_control_element_set_dict,
     valid_empty_coordination_analysis_dict,
@@ -71,6 +72,25 @@ from tests.helpers.sp1_graceful_degradation import (
 # ---------------------------------------------------------------------------
 # Shared fixtures / helpers
 # ---------------------------------------------------------------------------
+
+
+def _run_critic(client, tmp_path):
+    return run_completeness_critic(
+        llm_client=client,
+        control_structure=_make_control_structure(),
+        capability_profile=make_capability_profile(),
+        use_case_text="Test",
+        run_dir=tmp_path,
+    )
+
+
+def _derive_structure(client, run_dir):
+    return derive_control_structure(
+        llm_client=client,
+        use_case_text="Test",
+        loss_analysis=_make_loss_analysis(),
+        run_dir=run_dir,
+    )
 
 
 def _make_loss_analysis() -> LossAnalysis:
@@ -212,13 +232,7 @@ class TestCriticGracefulDegradation:
         """SP1-GD-04: critic validation failure returns empty CriticFindings."""
         client = MockLLMClient()
         client.set_invalid_response_for(CriticFindings)
-        findings = run_completeness_critic(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            capability_profile=make_capability_profile(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        findings = _run_critic(client, tmp_path)
         assert isinstance(findings, CriticFindings)
         assert len(findings.gaps) == 0
         assert findings.checklist_results == {}
@@ -228,13 +242,7 @@ class TestCriticGracefulDegradation:
         """SP1-GD-05: critic failure logs the failed call with success=false."""
         client = MockLLMClient()
         client.set_invalid_response_for(CriticFindings)
-        run_completeness_critic(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            capability_profile=make_capability_profile(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        _run_critic(client, tmp_path)
         entries = read_calls_jsonl(tmp_path)
         critic_entries = [e for e in entries if e["step"] == "critic"]
         assert len(critic_entries) == 1
@@ -246,13 +254,7 @@ class TestCriticGracefulDegradation:
         """SP1-GD-06: critic failure (empty findings) does not trigger revision."""
         client = MockLLMClient()
         client.set_invalid_response_for(CriticFindings)
-        findings = run_completeness_critic(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            capability_profile=make_capability_profile(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        findings = _run_critic(client, tmp_path)
         # Empty findings carry no gap, so no revision runs
         assert findings.gaps == []
 
@@ -260,13 +262,7 @@ class TestCriticGracefulDegradation:
         """SP1-GD-07: critic LLM exception returns empty CriticFindings."""
         client = MockLLMClient()
         client.set_exception_for(CriticFindings, RuntimeError("API error"))
-        findings = run_completeness_critic(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            capability_profile=make_capability_profile(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        findings = _run_critic(client, tmp_path)
         assert isinstance(findings, CriticFindings)
         assert len(findings.gaps) == 0
         entries = read_calls_jsonl(tmp_path)
@@ -368,12 +364,7 @@ class TestDerivationStageFailure:
         client.set_invalid_response_for(RequirementSet)
 
         def invoke(c, d):
-            derive_control_structure(
-                llm_client=c,
-                use_case_text="Test",
-                loss_analysis=_make_loss_analysis(),
-                run_dir=d,
-            )
+            _derive_structure(c, d)
 
         return client, invoke
 
@@ -383,12 +374,7 @@ class TestDerivationStageFailure:
         client.set_invalid_response_for(ResponsibilitySet)
 
         def invoke(c, d):
-            derive_control_structure(
-                llm_client=c,
-                use_case_text="Test",
-                loss_analysis=_make_loss_analysis(),
-                run_dir=d,
-            )
+            _derive_structure(c, d)
 
         return client, invoke
 
@@ -399,12 +385,7 @@ class TestDerivationStageFailure:
         client.set_invalid_response_for(ControlElementSet)
 
         def invoke(c, d):
-            derive_control_structure(
-                llm_client=c,
-                use_case_text="Test",
-                loss_analysis=_make_loss_analysis(),
-                run_dir=d,
-            )
+            _derive_structure(c, d)
 
         return client, invoke
 
@@ -416,12 +397,7 @@ class TestDerivationStageFailure:
         client.set_invalid_response_for(CoordinationAnalysis)
 
         def invoke(c, d):
-            derive_control_structure(
-                llm_client=c,
-                use_case_text="Test",
-                loss_analysis=_make_loss_analysis(),
-                run_dir=d,
-            )
+            _derive_structure(c, d)
 
         return client, invoke
 
@@ -442,12 +418,7 @@ class TestRunOrchestrationPartialFailure:
         """
         client = _setup_valid_mock_client()
         client.set_invalid_response_for(LossAnalysisDraft)
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
         assert isinstance(result, SP1RunResult)
         assert len(result.stage_errors) >= 1
         assert any("stage_1a" in e for e in result.stage_errors)
@@ -466,12 +437,7 @@ class TestRunOrchestrationPartialFailure:
         """
         client = _setup_valid_mock_client()
         client.set_invalid_response_for(Stage1Profile)
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
         assert isinstance(result, SP1RunResult)
         assert any("stage_1b" in e for e in result.stage_errors)
         assert result.loss_analysis is not None
@@ -484,12 +450,7 @@ class TestRunOrchestrationPartialFailure:
         client = _setup_valid_mock_client()
         # Make Call 1 fail (first Stage 2 call)
         client.set_invalid_response_for(RequirementSet)
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
         assert isinstance(result, SP1RunResult)
         assert any("stage_2" in e for e in result.stage_errors)
         assert result.loss_analysis is not None
@@ -502,12 +463,7 @@ class TestRunOrchestrationPartialFailure:
         """SP1-GD-12: failed derivation call logged with success=false and error."""
         client = _setup_valid_mock_client()
         client.set_invalid_response_for(LossAnalysisDraft)
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(client, tmp_path)
         entries = read_calls_jsonl(tmp_path)
         failed = [e for e in entries if e.get("success") is False]
         assert len(failed) >= 1
@@ -523,24 +479,14 @@ class TestRunOrchestrationPartialFailure:
         client = _setup_valid_mock_client()
         client.set_invalid_response_for(RequirementSet)
         # Should not raise
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
         assert isinstance(result, SP1RunResult)
 
     def test_gd_14_llm_exception_raises_stage_error_and_logs(self, tmp_path):
         """SP1-GD-14: LLM RuntimeError during stage_1a → partial result with stage_error."""
         client = _setup_valid_mock_client()
         client.set_exception_for(LossAnalysisDraft, RuntimeError("Connection refused"))
-        result = run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        result = run_sp1_default(client, tmp_path)
         assert isinstance(result, SP1RunResult)
         assert any("stage_1a" in e for e in result.stage_errors)
         entries = read_calls_jsonl(tmp_path)
@@ -551,12 +497,7 @@ class TestRunOrchestrationPartialFailure:
         """SP1-GD-15: run manifest records stage_errors on partial failure."""
         client = _setup_valid_mock_client()
         client.set_invalid_response_for(Stage1Profile)
-        run_sp1(
-            llm_client=client,
-            use_case_text="Test use case",
-            risk_cards=make_risk_cards(),
-            run_dir=tmp_path,
-        )
+        run_sp1_default(client, tmp_path)
 
         manifest = yaml.safe_load((tmp_path / "run-manifest.yaml").read_text())
         assert "stage_errors" in manifest

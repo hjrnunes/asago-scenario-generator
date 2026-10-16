@@ -54,6 +54,10 @@ from asago_scenario_generator.stpa.system_model.id_normalization import (
 from asago_scenario_generator.stpa.system_model import run as run_module
 from tests.stpa.sp1_helpers import MockLLMClient
 
+_FIXTURE_SAFE = settings(
+    deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+
 
 # ---------------------------------------------------------------------------
 # ControlStructure strategy
@@ -64,6 +68,16 @@ st_description = st.text(
     min_size=1,
     max_size=40,
 )
+
+
+def _revise(client, cs, tmp_path):
+    return run_revision(
+        llm_client=client,
+        control_structure=cs,
+        critic_findings=_make_critic_findings_for_revision(),
+        use_case_text="Test",
+        run_dir=tmp_path,
+    )
 
 
 def _make_resp(num: int) -> Responsibility:
@@ -261,11 +275,7 @@ class TestRevisionNeedsAnExplicitGap:
     """Only explicit structural gaps authorize revision."""
 
     @given(findings=st_critic_findings())
-    @settings(
-        max_examples=100,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=100)
     def test_revision_iff_at_least_one_gap(self, findings, tmp_path):
         """Probe statuses alone do not authorize revision."""
         assert _revision_attempted(findings, tmp_path) == bool(findings.gaps)
@@ -316,11 +326,7 @@ class TestDismissalVisibility:
     """Every dismissed_gaps entry surfaces in run_revision warnings."""
 
     @given(dismissals=st.lists(st_dismissal_text, min_size=0, max_size=5, unique=True))
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=50)
     def test_each_dismissal_warns_once(self, tmp_path, dismissals):
         """Each dismissal appears in the warnings, one warning per dismissal."""
         client = MockLLMClient()
@@ -334,13 +340,7 @@ class TestDismissalVisibility:
                 "dismissed_gaps": dismissals,
             },
         )
-        _, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_base_cs(),
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        _, warnings = _revise(client, _make_base_cs(), tmp_path)
         warning_text = " ".join(warnings)
         for d in dismissals:
             assert d in warning_text, (
@@ -403,11 +403,7 @@ class TestMergeConservation:
     """When the delta has no modifications, existing elements survive in order."""
 
     @given(cs=st_cs_with_links())
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=50)
     def test_empty_delta_keeps_every_element_in_order(self, tmp_path, cs):
         """Empty-delta revision keeps every element and publishes position IDs.
 
@@ -431,13 +427,7 @@ class TestMergeConservation:
         original_payloads = [
             cl.coordination_mechanism.payload for cl in cs.coordination_links
         ]
-        revised, _ = run_revision(
-            llm_client=client,
-            control_structure=cs,
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        revised, _ = _revise(client, cs, tmp_path)
         assert [r.resp_id for r in revised.responsibilities] == [
             r.resp_id for r in cs.responsibilities
         ]
@@ -575,11 +565,7 @@ class TestAllDismissedWarning:
         assert "no changes" in warning
 
     @given(findings=st_critic_findings(), extra_dismissals=st.integers(0, 3))
-    @settings(
-        max_examples=50,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=50)
     def test_warns_iff_findings_all_dismissed_without_changes(
         self, tmp_path, findings, extra_dismissals
     ):
@@ -616,13 +602,7 @@ class TestMergeGuardCorrectness:
             RevisionDelta,
             RevisionDelta(new_responsibilities=[dup_resp]).model_dump(),
         )
-        revised, _ = run_revision(
-            llm_client=client,
-            control_structure=cs,
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        revised, _ = _revise(client, cs, tmp_path)
         resp_ids = [r.resp_id for r in revised.responsibilities]
         assert resp_ids.count("RESP-1") == 1, (
             f"Expected exactly one RESP-1 but got: {resp_ids}"
@@ -643,13 +623,7 @@ class TestMergeGuardCorrectness:
             RevisionDelta,
             RevisionDelta(new_coordination_links=[new_cl]).model_dump(),
         )
-        revised, warnings = run_revision(
-            llm_client=client,
-            control_structure=cs,
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        revised, warnings = _revise(client, cs, tmp_path)
         cl1 = next(cl for cl in revised.coordination_links if cl.link_id == "CL-1")
         assert cl1.coordination_mechanism.cm_id == "CM-1", (
             f"Existing link CL-1 cm_id should be preserved as CM-1 but got "
@@ -680,13 +654,7 @@ class TestMergeGuardCorrectness:
             RevisionDelta,
             RevisionDelta(new_coordination_links=[new_cl]).model_dump(),
         )
-        revised, warnings = run_revision(
-            llm_client=client,
-            control_structure=cs,
-            critic_findings=_make_critic_findings_for_revision(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        revised, warnings = _revise(client, cs, tmp_path)
         assert [cl.link_id for cl in revised.coordination_links] == ["CL-1", "CL-2"]
         cl2 = next(cl for cl in revised.coordination_links if cl.link_id == "CL-2")
         assert cl2.coordination_mechanism.cm_id == "CM-2", (

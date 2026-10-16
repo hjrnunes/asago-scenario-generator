@@ -42,6 +42,10 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
 
+_FIXTURE_SAFE = settings(
+    deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+
 # ---------------------------------------------------------------------------
 # Strategies
 # ---------------------------------------------------------------------------
@@ -81,11 +85,7 @@ class TestRequirementSetYamlRoundTrip:
         descriptions=st.lists(st_text, min_size=0, max_size=5),
         classifications=st.lists(st_classification, min_size=0, max_size=5),
     )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_round_trip(self, tmp_path, n_reqs, descriptions, classifications):
         """RequirementSet with N requirements round-trips through YAML."""
         reqs = []
@@ -114,11 +114,7 @@ class TestResponsibilitySetYamlRoundTrip:
         n_resps=st.integers(min_value=1, max_value=3),
         n_pms=st.integers(min_value=1, max_value=3),
     )
-    @settings(
-        max_examples=25,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=25)
     def test_round_trip(self, tmp_path, n_resps, n_pms):
         """ResponsibilitySet round-trips through YAML."""
         responsibilities = []
@@ -150,11 +146,7 @@ class TestCriticFindingsYamlRoundTrip:
         descriptions=st.lists(st_text, min_size=0, max_size=4),
         gap_types=st.lists(st_gap_type, min_size=0, max_size=4),
     )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_round_trip(self, tmp_path, n_gaps, descriptions, gap_types):
         """CriticFindings with N gaps round-trips through YAML."""
         gaps = []
@@ -229,11 +221,7 @@ class TestSafeLlmCallInvariants:
         error_msg=st.text(min_size=1, max_size=50),
         val=st.integers(min_value=0, max_value=1000),
     )
-    @settings(
-        max_examples=25,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=25)
     def test_failure_and_success_shape_and_log(
         self, tmp_path, stage, step, error_msg, val
     ):

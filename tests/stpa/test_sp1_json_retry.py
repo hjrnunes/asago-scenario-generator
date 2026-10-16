@@ -20,11 +20,11 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
 )
-from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import (
     MockLLMClient,
     make_risk_cards,
+    run_sp1_default,
     setup_sp1_mock_client,
     valid_gap_draft_dict,
     valid_risk_draft_dict,
@@ -41,12 +41,7 @@ def test_stage2_json_decode_retry_continues_and_logs_both_attempts(tmp_path):
         ["{malformed JSON", valid_responsibility_set_dict()],
     )
 
-    result = run_sp1(
-        llm_client=client,
-        use_case_text="Test use case",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    result = run_sp1_default(client, tmp_path)
 
     assert result.control_structure is not None
     assert result.stage_errors == []
@@ -77,12 +72,7 @@ def test_stage2_json_decode_retry_is_bounded(tmp_path):
         ["{malformed JSON", "{still malformed JSON", valid_responsibility_set_dict()],
     )
 
-    result = run_sp1(
-        llm_client=client,
-        use_case_text="Test use case",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    result = run_sp1_default(client, tmp_path)
 
     assert result.control_structure is None
     assert len(result.stage_errors) == 1
@@ -104,12 +94,7 @@ def test_stage2_semantic_failure_gets_one_corrective_retry(tmp_path):
         [{"responsibilities": []}, valid_responsibility_set_dict()],
     )
 
-    result = run_sp1(
-        llm_client=client,
-        use_case_text="Test use case",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    result = run_sp1_default(client, tmp_path)
 
     assert result.control_structure is not None
     attempts = [
@@ -140,12 +125,7 @@ def test_stage2_semantic_failure_retry_is_bounded(tmp_path):
         ],
     )
 
-    result = run_sp1(
-        llm_client=client,
-        use_case_text="Test use case",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    result = run_sp1_default(client, tmp_path)
 
     assert result.control_structure is None
     attempts = [
@@ -163,12 +143,7 @@ def test_stage2_client_failure_is_not_retried(tmp_path):
     client: MockLLMClient = setup_sp1_mock_client()
     client.set_exception_for(ResponsibilitySet, RuntimeError("authentication failed"))
 
-    result = run_sp1(
-        llm_client=client,
-        use_case_text="Test use case",
-        risk_cards=make_risk_cards(),
-        run_dir=tmp_path,
-    )
+    result = run_sp1_default(client, tmp_path)
 
     assert result.control_structure is None
     attempts = [

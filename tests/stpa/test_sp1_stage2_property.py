@@ -56,6 +56,10 @@ from tests.stpa.sp1_helpers import MockLLMClient, valid_empty_coordination_analy
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.helpers import make_minimal_loss_analysis
 
+_FIXTURE_SAFE = settings(
+    deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
+)
+
 # Calls 1, 2a, 2b and 3, each answered validly on its first request.
 DERIVATION_CALLS = 4
 
@@ -176,11 +180,7 @@ class TestAssemblyConservation:
         n_pms=st.integers(min_value=1, max_value=3),
         n_cps=st.integers(min_value=1, max_value=3),
     )
-    @settings(
-        max_examples=30,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=30)
     def test_responsibility_count_preserved(self, n_resps, n_pms, n_cps):
         """Assembly preserves the number of responsibilities from ResponsibilitySet."""
         resp_nums = list(range(1, n_resps + 1))
@@ -195,11 +195,7 @@ class TestAssemblyConservation:
         n_resps=st.integers(min_value=1, max_value=5),
         n_cps=st.integers(min_value=0, max_value=3),
     )
-    @settings(
-        max_examples=25,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=25)
     def test_controlled_process_count_preserved(self, n_resps, n_cps):
         """Assembly preserves the number of controlled processes from ControlElementSet."""
         resp_nums = list(range(1, n_resps + 1))
@@ -213,11 +209,7 @@ class TestAssemblyConservation:
     @given(
         n_resps=st.integers(min_value=1, max_value=5),
     )
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=20)
     def test_resp_ids_preserved(self, n_resps):
         """Assembly preserves the resp_id set from ResponsibilitySet."""
         resp_nums = list(range(1, n_resps + 1))
@@ -240,11 +232,7 @@ class TestElementAssignmentByIdPrefix:
     @given(
         n_resps=st.integers(min_value=1, max_value=5),
     )
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=20)
     def test_ca_assigned_to_correct_resp(self, n_resps):
         """Each CA-X-1 lands in responsibility RESP-X."""
         resp_nums = list(range(1, n_resps + 1))
@@ -261,11 +249,7 @@ class TestElementAssignmentByIdPrefix:
     @given(
         n_resps=st.integers(min_value=1, max_value=5),
     )
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
+    @settings(_FIXTURE_SAFE, max_examples=20)
     def test_fb_assigned_to_correct_resp(self, n_resps):
         """Each FB-X-1 lands in responsibility RESP-X."""
         resp_nums = list(range(1, n_resps + 1))
@@ -288,11 +272,7 @@ class TestElementAssignmentByIdPrefix:
     n_pms=st.integers(min_value=1, max_value=4),
     n_fbs=st.integers(min_value=0, max_value=3),
 )
-@settings(
-    max_examples=40,
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
+@settings(_FIXTURE_SAFE, max_examples=40)
 def test_all_pms_covered_after_repair(n_resps, n_pms, n_fbs):
     """Every PM part has at least one FB updating it after repair."""
     responsibilities = []
@@ -341,11 +321,7 @@ def test_all_pms_covered_after_repair(n_resps, n_pms, n_fbs):
     n_pms=st.integers(min_value=1, max_value=3),
     n_rcs=st.integers(min_value=1, max_value=3),
 )
-@settings(
-    max_examples=30,
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
+@settings(_FIXTURE_SAFE, max_examples=30)
 def test_rc_pm_no_cross_namespace_collision(n_resps, n_pms, n_rcs):
     """No RC ID value equals any PM ID value in a valid ControlStructure."""
     resp_nums = list(range(1, n_resps + 1))
@@ -375,11 +351,7 @@ def test_rc_pm_no_cross_namespace_collision(n_resps, n_pms, n_rcs):
 @given(
     n_resps=st.integers(min_value=2, max_value=5),
 )
-@settings(
-    max_examples=20,
-    deadline=None,
-    suppress_health_check=[HealthCheck.function_scoped_fixture],
-)
+@settings(_FIXTURE_SAFE, max_examples=20)
 def test_coordination_links_reference_valid_ids(n_resps):
     """CL source/target are valid resp_ids; shared_pm is a valid pm_id."""
     resp_nums = list(range(1, n_resps + 1))

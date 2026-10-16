@@ -27,6 +27,24 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.stage2_source_selection import USE_CASE, _authorities
 
 
+def _provider_schema(structure, losses, excerpts):
+    return _coordination_provider_schema(
+        structure, losses, use_case_text=USE_CASE, source_excerpts=excerpts
+    )
+
+
+def _call_3(client, structure, losses, tmp_path):
+    return _call_3_coordination(
+        llm_client=client,
+        use_case_text=USE_CASE,
+        control_structure=structure,
+        loss_analysis=losses,
+        run_dir=tmp_path,
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0,
+    )
+
+
 def _provider_payload(losses: LossAnalysis, structure: ControlStructure) -> dict:
     excerpts = _build_call3_source_excerpts(USE_CASE, losses)
     local = _call3_source_ref_map(excerpts)
@@ -163,12 +181,7 @@ def test_parser_handles_provider_model_at_real_client_boundary() -> None:
     losses, structure = _authorities()
     excerpts = _build_call3_source_excerpts(USE_CASE, losses)
     payload = _provider_payload(losses, structure)
-    provider_schema = _coordination_provider_schema(
-        structure,
-        losses,
-        use_case_text=USE_CASE,
-        source_excerpts=excerpts,
-    )
+    provider_schema = _provider_schema(structure, losses, excerpts)
     provider_model = provider_schema.model_validate(payload)
 
     parsed = _parse_call3_source_selection(
@@ -200,25 +213,12 @@ def test_call3_closes_explicit_unresolved_constraint_after_provider_model_parse(
     payload["semantic_review"]["constraints"][0]["missing_fact"] = (
         "The requesting member identity cannot be verified."
     )
-    provider_schema = _coordination_provider_schema(
-        structure,
-        losses,
-        use_case_text=USE_CASE,
-        source_excerpts=excerpts,
-    )
+    provider_schema = _provider_schema(structure, losses, excerpts)
     provider_model = provider_schema.model_validate(payload)
     client = MockLLMClient()
     client.set_response_queue([provider_model])
 
-    result = _call_3_coordination(
-        llm_client=client,
-        use_case_text=USE_CASE,
-        control_structure=structure,
-        loss_analysis=losses,
-        run_dir=tmp_path,
-        loader=TemplateLoader(PROMPTS_DIR),
-        temperature=0,
-    )
+    result = _call_3(client, structure, losses, tmp_path)
 
     assert result.semantic_review is not None
     assert result.semantic_review.constraints[0].related_hazards == ()
@@ -233,12 +233,7 @@ def test_call3_parser_rejects_unknown_constraint_reference_before_closure() -> N
     excerpts = _build_call3_source_excerpts(USE_CASE, losses)
     payload = _provider_payload(losses, structure)
     payload["semantic_review"]["responsibilities"][0]["constraint_refs"] = ["SC-99"]
-    provider_schema = _coordination_provider_schema(
-        structure,
-        losses,
-        use_case_text=USE_CASE,
-        source_excerpts=excerpts,
-    )
+    provider_schema = _provider_schema(structure, losses, excerpts)
     provider_model = provider_schema.model_validate(payload)
 
     with pytest.raises(ValueError, match="unknown constraint"):
@@ -262,25 +257,12 @@ def test_call3_normalizes_noop_revision_before_strict_public_apply(tmp_path) -> 
     constraint = payload["semantic_review"]["constraints"][0]
     constraint["disposition"] = "revise"
     constraint["revised_description"] = losses.security_constraints[0].description
-    provider_schema = _coordination_provider_schema(
-        structure,
-        losses,
-        use_case_text=USE_CASE,
-        source_excerpts=excerpts,
-    )
+    provider_schema = _provider_schema(structure, losses, excerpts)
     provider_model = provider_schema.model_validate(payload)
     client = MockLLMClient()
     client.set_response_queue([provider_model])
 
-    result = _call_3_coordination(
-        llm_client=client,
-        use_case_text=USE_CASE,
-        control_structure=structure,
-        loss_analysis=losses,
-        run_dir=tmp_path,
-        loader=TemplateLoader(PROMPTS_DIR),
-        temperature=0,
-    )
+    result = _call_3(client, structure, losses, tmp_path)
 
     assert result.semantic_review is not None
     normalized = result.semantic_review.constraints[0]
@@ -302,12 +284,7 @@ def _parse_with_echo(
     constraint = payload["semantic_review"]["constraints"][0]
     constraint["revised_description"] = revised_description
     constraint["missing_fact"] = missing_fact
-    provider_schema = _coordination_provider_schema(
-        structure,
-        losses,
-        use_case_text=USE_CASE,
-        source_excerpts=excerpts,
-    )
+    provider_schema = _provider_schema(structure, losses, excerpts)
     return _parse_call3_source_selection(
         LLMResult(
             content=provider_schema.model_validate(payload),
@@ -348,12 +325,7 @@ def test_call3_parser_drops_preserve_echo_of_hazard_text() -> None:
     payload["semantic_review"]["hazards"][0]["revised_description"] = (
         f" {losses.hazards[0].description} "
     )
-    provider_schema = _coordination_provider_schema(
-        structure,
-        losses,
-        use_case_text=USE_CASE,
-        source_excerpts=excerpts,
-    )
+    provider_schema = _provider_schema(structure, losses, excerpts)
 
     parsed = _parse_call3_source_selection(
         LLMResult(
@@ -464,24 +436,13 @@ def test_call3_accepts_echoed_preserve_rules_without_correction_call(
         "SC-2",
         "SC-3",
     ]
-    provider_schema = _coordination_provider_schema(
-        structure,
-        losses,
-        use_case_text=USE_CASE,
-        source_excerpts=_build_call3_source_excerpts(USE_CASE, losses),
+    provider_schema = _provider_schema(
+        structure, losses, _build_call3_source_excerpts(USE_CASE, losses)
     )
     client = MockLLMClient()
     client.set_response_queue([provider_schema.model_validate(payload)])
 
-    result = _call_3_coordination(
-        llm_client=client,
-        use_case_text=USE_CASE,
-        control_structure=structure,
-        loss_analysis=losses,
-        run_dir=tmp_path,
-        loader=TemplateLoader(PROMPTS_DIR),
-        temperature=0,
-    )
+    result = _call_3(client, structure, losses, tmp_path)
 
     assert len(client.calls) == 1
     assert result.semantic_review is not None
@@ -501,12 +462,7 @@ def test_call3_parser_retains_changed_revision() -> None:
     payload["semantic_review"]["constraints"][0]["revised_description"] = (
         "Return each record only to its requesting member."
     )
-    provider_schema = _coordination_provider_schema(
-        structure,
-        losses,
-        use_case_text=USE_CASE,
-        source_excerpts=excerpts,
-    )
+    provider_schema = _provider_schema(structure, losses, excerpts)
     provider_model = provider_schema.model_validate(payload)
 
     parsed = _parse_call3_source_selection(
@@ -601,15 +557,7 @@ def test_call3_preserves_raw_selection_in_call_log_and_returns_final_evidence(
     client = MockLLMClient()
     client.set_response_queue([payload])
 
-    result = _call_3_coordination(
-        llm_client=client,
-        use_case_text=USE_CASE,
-        control_structure=structure,
-        loss_analysis=losses,
-        run_dir=tmp_path,
-        loader=TemplateLoader(PROMPTS_DIR),
-        temperature=0,
-    )
+    result = _call_3(client, structure, losses, tmp_path)
 
     assert result.semantic_review is not None
     assert result.semantic_review.hazards[0].source_evidence[0].source_ref == "USE_CASE"
@@ -642,11 +590,8 @@ def test_call3_integrity_diagnostics_are_code_owned() -> None:
     losses, structure = _authorities()
     loader = TemplateLoader(PROMPTS_DIR)
 
-    provider_fields = _coordination_provider_schema(
-        structure,
-        losses,
-        use_case_text=USE_CASE,
-        source_excerpts=_build_call3_source_excerpts(USE_CASE, losses),
+    provider_fields = _provider_schema(
+        structure, losses, _build_call3_source_excerpts(USE_CASE, losses)
     ).model_json_schema()["properties"]
     assert "integrity_findings" not in provider_fields
     rendered = loader.render_prompt(

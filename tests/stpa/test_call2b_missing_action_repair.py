@@ -20,35 +20,19 @@ import pytest
 from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.models.control_structure import (
-    ProcessModelPart,
-    Responsibility,
-)
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ResponsibilitySet,
     _call_2b_control_elements,
     _MissingActionProviderSet,
 )
+from tests.helpers.sp1_control_structure import _responsibilities
 from tests.stpa.sp1_helpers import MockLLMClient
 
 STEP = "call_2b_control_elements"
 REPAIR_OPENING = (
     "The prior response leaves these responsibilities without a control action:"
 )
-
-
-def _responsibilities() -> list[Responsibility]:
-    return [
-        Responsibility(
-            resp_id=f"RESP-{number}",
-            description=f"Responsibility {number} serves the use case",
-            process_model_parts=[
-                ProcessModelPart(pm_id=f"PM-{number}-1", description="State")
-            ],
-        )
-        for number in (1, 2, 3)
-    ]
 
 
 def _action(number: int, *, effect_kind: str = "model_output") -> dict[str, Any]:

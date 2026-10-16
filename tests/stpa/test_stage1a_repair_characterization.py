@@ -34,6 +34,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
 from tests.helpers.calls_log import read_calls_jsonl, stage1a_steps
 from tests.helpers.stage1a_targeted_repair import (
     _USE_CASE,
+    _RawClient,
     _attempt_two_response,
     _complete_risk_response,
     _disposition_repair_rows,
@@ -196,7 +197,7 @@ CASES: dict[str, tuple[Callable[[MockLLMClient], dict], type[MockLLMClient]]] = 
     "reference_risk": (_reference_risk, MockLLMClient),
     "reference_drop": (_reference_drop, MockLLMClient),
     "reference_gap": (_reference_gap, MockLLMClient),
-    "feedback_correction": (_feedback_correction, loss_presence._RawClient),
+    "feedback_correction": (_feedback_correction, _RawClient),
 }
 
 
