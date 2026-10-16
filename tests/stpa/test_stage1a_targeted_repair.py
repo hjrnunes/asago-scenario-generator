@@ -901,70 +901,48 @@ class TestSavedDispositionFailure:
         }
         assert row_schema.get("additionalProperties") is False
 
-    def test_rejects_duplicate_identities(self, tmp_path):
-        rows = _disposition_repair_rows()
-        rows.append(dict(rows[0]))
-        client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [_attempt_two_response()])
-        client.set_response_for(DispositionRepairResponse, {"risk_dispositions": rows})
-
-        with pytest.raises(StageError, match="duplicate repair row"):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        assert len(client.calls) == 2
-
-    def test_rejects_unknown_identities(self, tmp_path):
-        rows = _disposition_repair_rows()
-        rows.append(
-            {
-                "risk_ref": "atlas-not-in-the-supplied-set",
-                "disposition": "not_applicable",
-                "loss_ids": [],
-                "reason": "Neutralized reason.",
-            }
-        )
-        client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [_attempt_two_response()])
-        client.set_response_for(DispositionRepairResponse, {"risk_dispositions": rows})
-
-        with pytest.raises(StageError, match="unknown or out-of-scope repair identity"):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        assert len(client.calls) == 2
-
-    def test_rejects_incomplete_repairs(self, tmp_path):
+    @pytest.mark.parametrize(
+        ("damage", "match"),
+        [
+            pytest.param(
+                lambda rows: [*rows, dict(rows[0])],
+                "duplicate repair row",
+                id="duplicate-identity",
+            ),
+            pytest.param(
+                lambda rows: [
+                    *rows,
+                    {
+                        "risk_ref": "atlas-not-in-the-supplied-set",
+                        "disposition": "not_applicable",
+                        "loss_ids": [],
+                        "reason": "Neutralized reason.",
+                    },
+                ],
+                "unknown or out-of-scope repair identity",
+                id="unknown-identity",
+            ),
+            pytest.param(
+                lambda rows: rows[:6],
+                "incomplete repair",
+                id="incomplete-repair",
+            ),
+            pytest.param(
+                lambda rows: [{**rows[0], "loss_ids": ["L-99"]}, *rows[1:]],
+                "never declared: L-99",
+                id="row-cites-undeclared-loss",
+            ),
+        ],
+    )
+    def test_rejects_damaged_repair_rows(self, tmp_path, damage, match):
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [_attempt_two_response()])
         client.set_response_for(
             DispositionRepairResponse,
-            {"risk_dispositions": _disposition_repair_rows(count=6)},
+            {"risk_dispositions": damage(_disposition_repair_rows())},
         )
 
-        with pytest.raises(StageError, match="incomplete repair"):
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        assert len(client.calls) == 2
-
-    def test_rejects_rows_citing_undeclared_losses(self, tmp_path):
-        rows = _disposition_repair_rows()
-        rows[0]["loss_ids"] = ["L-99"]
-        client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [_attempt_two_response()])
-        client.set_response_for(DispositionRepairResponse, {"risk_dispositions": rows})
-
-        with pytest.raises(StageError, match="never declared: L-99"):
+        with pytest.raises(StageError, match=match):
             derive_loss_analysis(
                 llm_client=client,
                 use_case_text=_USE_CASE,
@@ -1077,13 +1055,73 @@ class TestContainerErrorClassification:
     record-level errors.
     """
 
-    def test_a14_gap_string_use_case_losses_with_bad_row_is_terminal(self, tmp_path):
-        gap = _gap_malformed_disposition_response() | {"use_case_losses": "not a list"}
+    @pytest.mark.parametrize(
+        ("responses", "fragments", "call_count"),
+        [
+            pytest.param(
+                lambda: [
+                    _complete_risk_response(),
+                    _gap_malformed_disposition_response()
+                    | {"use_case_losses": "not a list"},
+                ],
+                (
+                    "non-record wire errors are outside the approved repair scope",
+                    "container-type",
+                    "use_case_losses",
+                ),
+                2,
+                id="gap-string-use-case-losses-with-bad-row",
+            ),
+            pytest.param(
+                lambda: [
+                    _complete_risk_response(),
+                    {
+                        key: value
+                        for key, value in _gap_malformed_disposition_response().items()
+                        if key != "security_constraints"
+                    },
+                ],
+                ("container-presence", "security_constraints"),
+                2,
+                id="gap-missing-security-constraints-with-bad-row",
+            ),
+            pytest.param(
+                lambda: [
+                    {
+                        key: value
+                        for key, value in _complete_risk_response().items()
+                        if key != "security_constraints"
+                    }
+                ],
+                ("container-presence", "security_constraints"),
+                1,
+                id="risk-missing-security-constraints",
+            ),
+            pytest.param(
+                lambda: [_complete_risk_response() | {"hazards": _hazards(17)}],
+                ("container-bounds",),
+                1,
+                id="risk-hazards-exceed-container-bounds",
+            ),
+            pytest.param(
+                lambda: [
+                    {
+                        key: value
+                        for key, value in _complete_risk_response().items()
+                        if key != "risk_dispositions"
+                    }
+                ],
+                ("container-presence", "risk_dispositions"),
+                1,
+                id="risk-missing-dispositions",
+            ),
+        ],
+    )
+    def test_container_damage_is_terminal_without_a_repair_call(
+        self, tmp_path, responses, fragments, call_count
+    ):
         client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [_complete_risk_response(), gap],
-        )
+        client.set_response_for(LossAnalysisDraft, responses())
 
         with pytest.raises(StageError) as exc_info:
             derive_loss_analysis(
@@ -1093,92 +1131,12 @@ class TestContainerErrorClassification:
                 run_dir=tmp_path,
             )
         message = str(exc_info.value)
-        assert "non-record wire errors are outside the approved repair scope" in message
-        assert "container-type" in message
-        assert "use_case_losses" in message
-        # Zero repair or cleanup calls: the risk call and the failed gap call.
-        assert len(client.calls) == 2
+        for fragment in fragments:
+            assert fragment in message
+        assert len(client.calls) == call_count
         assert not any(
             entry["step"].endswith("_repair") for entry in _stage1a_entries(tmp_path)
         )
-
-    def test_a15_gap_missing_security_constraints_with_bad_row_is_terminal(
-        self, tmp_path
-    ):
-        gap = _gap_malformed_disposition_response()
-        del gap["security_constraints"]
-        client = MockLLMClient()
-        client.set_response_for(
-            LossAnalysisDraft,
-            [_complete_risk_response(), gap],
-        )
-
-        with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        message = str(exc_info.value)
-        assert "container-presence" in message
-        assert "security_constraints" in message
-        assert len(client.calls) == 2
-
-    def test_a16_risk_missing_security_constraints_spends_no_repair_call(
-        self, tmp_path
-    ):
-        risk = _complete_risk_response()
-        del risk["security_constraints"]
-        client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [risk])
-
-        with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        message = str(exc_info.value)
-        assert "container-presence" in message
-        assert "security_constraints" in message
-        assert len(client.calls) == 1
-
-    def test_a17_container_bounds_violation_is_terminal(self, tmp_path):
-        risk = _complete_risk_response()
-        risk["hazards"] = _hazards(17)
-        client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [risk])
-
-        with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        message = str(exc_info.value)
-        assert "container-bounds" in message
-        assert len(client.calls) == 1
-
-    def test_risk_missing_dispositions_collection_is_terminal(self, tmp_path):
-        risk = _complete_risk_response()
-        del risk["risk_dispositions"]
-        client = MockLLMClient()
-        client.set_response_for(LossAnalysisDraft, [risk])
-
-        with pytest.raises(StageError) as exc_info:
-            derive_loss_analysis(
-                llm_client=client,
-                use_case_text=_USE_CASE,
-                risk_cards=_occiai_cards(),
-                run_dir=tmp_path,
-            )
-        message = str(exc_info.value)
-        assert "container-presence" in message
-        assert "risk_dispositions" in message
-        assert len(client.calls) == 1
 
 
 class TestDeterministicCleanup:

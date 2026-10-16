@@ -290,6 +290,28 @@ class TestSubjectPhrases:
         assert extract_subject_phrases("Losses.") & extract_subject_phrases("The loss.")
         assert "bia" not in extract_subject_phrases("Bias detected.")
 
+    def test_inflected_function_words_never_leak_into_phrases(self) -> None:
+        phrases = extract_subject_phrases("The agent does data exposure matches.")
+        assert all("doe" not in phrase.split() for phrase in phrases)
+        assert all("matche" not in phrase.split() for phrase in phrases)
+
+    def test_stopwords_separate_runs(self) -> None:
+        # R2 regression: stopwords must end a run, so no cross-stopword
+        # n-gram may count as a shared subject.
+        phrases = extract_subject_phrases(
+            "The agent must not share account data unless the customer "
+            "explicitly consents."
+        )
+        joined = " | ".join(sorted(phrases))
+        assert "account data" in phrases
+        assert "explicitly consents" in phrases or "explicitly consent" in phrases
+        for leaked in (
+            "data unless",
+            "unless the customer",
+            "data unless the customer",
+        ):
+            assert leaked not in joined
+
 
 class TestHazardGraphDensityChecks:
     def _analysis(self, payload: dict) -> LossAnalysis:
@@ -646,8 +668,11 @@ def _revision_response_for_disallowed_deletion() -> dict:
     }
 
 
-def _legacy_revision_conditions_changed_same_rule() -> dict:
-    """Return a current delta for an explicit applicability-only edit."""
+def _revision_response_changing_sc2_conditions() -> dict:
+    """Return a delta that grows SC-2's applies_when and keeps its rule.
+
+    H-2 is reworded so the composed text still passes the subject-phrase check.
+    """
     return {
         "hazard_edits": [
             {
@@ -1015,7 +1040,9 @@ class TestRunSp1Gates:
                 _gap_draft_with_uncovered_hazard(),
             ],
         )
-        client.set_response_for(_Stage1aRevisionPatch, _revision_leaving_h2_uncovered())
+        client.set_response_for(
+            _Stage1aRevisionPatch, _revision_response_for_disallowed_deletion()
+        )
         result = run_sp1(
             llm_client=client,
             use_case_text="Test use case",
@@ -1884,11 +1911,6 @@ class TestGraphRevisionEdgeRepair:
             _revision_patch_to_draft(prior, patch, [])
 
 
-def _revision_dropping_h1() -> dict:
-    """A delta omitting H-1; the compiler must carry it forward unchanged."""
-    return _revision_response(fix_constraint=True)
-
-
 def _gap_draft_with_uncovered_hazard() -> dict:
     """A gap draft that adds hazard H-2 and no constraint for it."""
     draft = valid_gap_draft_dict()
@@ -1914,25 +1936,6 @@ def _revision_covering_h2() -> dict:
     }
 
 
-def _revision_leaving_h2_uncovered() -> dict:
-    """A deletion-shaped response rejected by the explicit delta wire."""
-    return _revision_response_for_disallowed_deletion()
-
-
-def _revision_adding_unclassified_constraint() -> dict:
-    """A valid delta that adds a constraint matching no behavior class."""
-    return _revision_response_with_hazard_addition(fix_constraint=True)
-
-
-def _revision_conditions_changed_same_rule() -> dict:
-    """A dense revision that changes SC-2's conditions on an unchanged rule.
-
-    The prior SC-2 rule is kept; its applies_when list grows.  The hazard is
-    reworded so the composed text still passes the subject-phrase check.
-    """
-    return _legacy_revision_conditions_changed_same_rule()
-
-
 class TestRunSp1RevisionDefenses:
     """A failing revision call stops the run with recorded evidence."""
 
@@ -1947,7 +1950,10 @@ class TestRunSp1RevisionDefenses:
                 _structurally_failing_gap_draft(),
             ],
         )
-        client.set_response_for(_Stage1aRevisionPatch, _revision_dropping_h1())
+        # The delta omits H-1; the compiler must carry it forward unchanged.
+        client.set_response_for(
+            _Stage1aRevisionPatch, _revision_response(fix_constraint=True)
+        )
         _set_three_hazard_review(client)
         result = run_sp1(
             llm_client=client,
@@ -1988,7 +1994,7 @@ class TestRunSp1RevisionDefenses:
             ],
         )
         client.set_response_for(
-            _Stage1aRevisionPatch, _revision_conditions_changed_same_rule()
+            _Stage1aRevisionPatch, _revision_response_changing_sc2_conditions()
         )
         _set_three_hazard_review(client)
         result = run_sp1(
@@ -2034,8 +2040,10 @@ class TestRunSp1RevisionDefenses:
                 _structurally_failing_gap_draft(),
             ],
         )
+        # A valid delta that adds a constraint matching no behavior class.
         client.set_response_for(
-            _Stage1aRevisionPatch, _revision_adding_unclassified_constraint()
+            _Stage1aRevisionPatch,
+            _revision_response_with_hazard_addition(fix_constraint=True),
         )
 
         review = valid_empty_coordination_analysis_dict(
@@ -2774,38 +2782,6 @@ class TestAccountingGroundRules:
         assert "bulk citation" not in small_warning
 
 
-class TestSubjectRuleDeterminism:
-    """The fixed rule splits runs at stopwords and singularizes the rest."""
-
-    def test_inflected_function_words_never_leak_into_phrases(self) -> None:
-        phrases = extract_subject_phrases("The agent does data exposure matches.")
-        assert all("doe" not in phrase.split() for phrase in phrases)
-        assert all("matche" not in phrase.split() for phrase in phrases)
-
-    def test_shared_noun_phrase_still_detected(self) -> None:
-        shared = extract_subject_phrases("The agent does an unintended payment.") & (
-            extract_subject_phrases("An unintended payment is created.")
-        )
-        assert "unintended payment" in shared
-
-    def test_stopwords_separate_runs(self) -> None:
-        # R2 regression: stopwords must end a run, so no cross-stopword
-        # n-gram may count as a shared subject.
-        phrases = extract_subject_phrases(
-            "The agent must not share account data unless the customer "
-            "explicitly consents."
-        )
-        joined = " | ".join(sorted(phrases))
-        assert "account data" in phrases
-        assert "explicitly consents" in phrases or "explicitly consent" in phrases
-        for leaked in (
-            "data unless",
-            "unless the customer",
-            "data unless the customer",
-        ):
-            assert leaked not in joined
-
-
 class TestConstraintRuleAndConditions:
     """Authored rule + applies_when; code composes the description."""
 
@@ -2873,10 +2849,79 @@ class TestConstraintRuleAndConditions:
                 }
             )
 
-    def test_revision_conditions_changed_on_unchanged_rule_records_warning(
+    @pytest.mark.parametrize(
+        (
+            "prior_hazards",
+            "rule",
+            "applies_when",
+            "related_hazards",
+            "description",
+            "warning_fragments",
+        ),
+        [
+            pytest.param(
+                ["H-2"],
+                "The agent must preserve user trust.",
+                ["in writing", "on request"],
+                ["H-2"],
+                "The agent must preserve user trust. "
+                "Applies when: in writing; on request.",
+                (
+                    "changed the applies_when conditions of constraint SC-2 "
+                    "without changing its rule",
+                    "['through transparency'] -> ['in writing', 'on request']",
+                ),
+                id="conditions-changed-on-unchanged-rule",
+            ),
+            pytest.param(
+                ["H-2"],
+                "The agent must never improvise fee amounts.",
+                ["through transparency"],
+                ["H-1"],
+                "The agent must never improvise fee amounts. "
+                "Applies when: through transparency.",
+                (
+                    "changed the rule of constraint SC-2 and re-pointed it to "
+                    "hazards ['H-1'] sharing none of its prior hazards ['H-2']",
+                ),
+                id="rule-changed-onto-disjoint-hazards",
+            ),
+            pytest.param(
+                [],
+                "The agent must never improvise fee amounts.",
+                [],
+                ["H-2"],
+                "The agent must never improvise fee amounts.",
+                (
+                    "changed the rule of constraint SC-2 and re-pointed it to "
+                    "hazards ['H-2'] sharing none of its prior hazards []",
+                ),
+                id="rule-changed-with-empty-prior-hazards",
+            ),
+            pytest.param(
+                ["H-2"],
+                "The agent must preserve user trust explicitly.",
+                ["through transparency"],
+                ["H-2"],
+                "The agent must preserve user trust explicitly. "
+                "Applies when: through transparency.",
+                (),
+                id="rule-changed-with-retained-hazard",
+            ),
+        ],
+    )
+    def test_revision_edit_of_sc2_records_the_expected_warning(
         self,
+        prior_hazards: list[str],
+        rule: str,
+        applies_when: list[str],
+        related_hazards: list[str],
+        description: str,
+        warning_fragments: tuple[str, ...],
     ) -> None:
-        prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
+        prior_dict = valid_loss_analysis_dict()
+        prior_dict["security_constraints"][1]["related_hazards"] = prior_hazards
+        prior = LossAnalysis.model_validate(prior_dict)
         patch = _Stage1aRevisionPatch.model_validate(
             {
                 "hazard_edits": [],
@@ -2884,9 +2929,9 @@ class TestConstraintRuleAndConditions:
                 "security_constraint_edits": [
                     {
                         "constraint_id": "SC-2",
-                        "rule": "The agent must preserve user trust.",
-                        "applies_when": ["in writing", "on request"],
-                        "related_hazards": ["H-2"],
+                        "rule": rule,
+                        "applies_when": applies_when,
+                        "related_hazards": related_hazards,
                         "obligations": [],
                     }
                 ],
@@ -2896,100 +2941,15 @@ class TestConstraintRuleAndConditions:
         warnings: list[str] = []
         draft = _revision_patch_to_draft(prior, patch, warnings)
         sc2 = next(c for c in draft.security_constraints if c.constraint_id == "SC-2")
-        assert sc2.applies_when == ["in writing", "on request"]
-        assert sc2.description == (
-            "The agent must preserve user trust. Applies when: in writing; on request."
-        )
-        assert any(
-            "changed the applies_when conditions of constraint SC-2 without "
-            "changing its rule"
-            in warning
-            and "['through transparency'] -> ['in writing', 'on request']" in warning
-            for warning in warnings
-        )
-
-    def test_revision_rule_changed_onto_disjoint_hazards_records_warning(
-        self,
-    ) -> None:
-        prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
-        patch = _Stage1aRevisionPatch.model_validate(
-            {
-                "hazard_edits": [],
-                "hazard_additions": [],
-                "security_constraint_edits": [
-                    {
-                        "constraint_id": "SC-2",
-                        "rule": "The agent must never improvise fee amounts.",
-                        "applies_when": ["through transparency"],
-                        "related_hazards": ["H-1"],
-                        "obligations": [],
-                    }
-                ],
-                "security_constraint_additions": [],
-            }
-        )
-        warnings: list[str] = []
-        _revision_patch_to_draft(prior, patch, warnings)
-        assert any(
-            "changed the rule of constraint SC-2 and re-pointed it to hazards "
-            "['H-1'] sharing none of its prior hazards ['H-2']" in warning
-            for warning in warnings
-        )
-
-    def test_revision_rule_changed_with_empty_prior_hazards_records_warning(
-        self,
-    ) -> None:
-        prior_dict = valid_loss_analysis_dict()
-        prior_dict["security_constraints"][1]["related_hazards"] = []
-        prior = LossAnalysis.model_validate(prior_dict)
-        patch = _Stage1aRevisionPatch.model_validate(
-            {
-                "hazard_edits": [],
-                "hazard_additions": [],
-                "security_constraint_edits": [
-                    {
-                        "constraint_id": "SC-2",
-                        "rule": "The agent must never improvise fee amounts.",
-                        "applies_when": [],
-                        "related_hazards": ["H-2"],
-                        "obligations": [],
-                    }
-                ],
-                "security_constraint_additions": [],
-            }
-        )
-        warnings: list[str] = []
-        _revision_patch_to_draft(prior, patch, warnings)
-        assert any(
-            "changed the rule of constraint SC-2 and re-pointed it to hazards "
-            "['H-2'] sharing none of its prior hazards []" in warning
-            for warning in warnings
-        )
-
-    def test_revision_rule_changed_with_retained_hazard_records_no_warning(
-        self,
-    ) -> None:
-        prior = LossAnalysis.model_validate(valid_loss_analysis_dict())
-        patch = _Stage1aRevisionPatch.model_validate(
-            {
-                "hazard_edits": [],
-                "hazard_additions": [],
-                "security_constraint_edits": [
-                    {
-                        "constraint_id": "SC-2",
-                        "rule": "The agent must preserve user trust explicitly.",
-                        "applies_when": ["through transparency"],
-                        "related_hazards": ["H-2"],
-                        "obligations": [],
-                    }
-                ],
-                "security_constraint_additions": [],
-            }
-        )
-        warnings: list[str] = []
-        _revision_patch_to_draft(prior, patch, warnings)
-        assert not any("re-pointed" in warning for warning in warnings)
-        assert warnings == []
+        assert sc2.applies_when == applies_when
+        assert sc2.description == description
+        if warning_fragments:
+            assert any(
+                all(fragment in warning for fragment in warning_fragments)
+                for warning in warnings
+            )
+        else:
+            assert warnings == []
 
 
 class TestProductManifestGateStatuses:
