@@ -1,15 +1,4 @@
-# Valid CriticFindings payloads: no_unjustified has no gaps and no unjustified absences; no_gaps_all_present marks every checklist item present.
-no_unjustified:
-  gaps: []
-  checklist_results:
-    Input validation: present
-    Authorization: present
-    Action selection: present
-    Outcome verification: present
-    Context management: present
-    Multi-agent coordination: absent_justified
-    Human-in-the-loop: absent_justified
-  taxonomy_probe_results: {}
+# Valid CriticFindings payloads: no_gaps_all_present marks every checklist item present.
 no_gaps_all_present:
   gaps: []
   checklist_results:
