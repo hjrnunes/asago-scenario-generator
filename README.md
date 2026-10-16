@@ -130,9 +130,7 @@ receipts, and separate backend result/state observations.
 
 Use `generate` as the producer's sole normal scenario-generation command. Use the
 consumer's `generate` and `check` commands for artifact design and offline
-validation. The
-additive R9 reconciliation and exact evidence boundaries are recorded in
-[`docs/development/qualification-reports/r9-reconciliation-2026-09-17.md`](docs/development/qualification-reports/r9-reconciliation-2026-09-17.md).
+validation.
 
 Qualification cleanup records current process existence, full command,
 ancestry, owner, and mission path before signaling. A stale PID or pattern
@@ -141,8 +139,7 @@ seam waits boundedly for every confirmed mission-owned process to exit; a
 successful signal records only a signal match, and a timeout remains failed
 with exact survivor evidence. Each terminal run writes
 `cleanup/stack-cleanup.json` plus a timestamped
-`stack-cleanup-current-verification-*.json` record. The current record is
-distinct from the preserved `2026-09-17T18:54:29Z` Klarna cleanup failure.
+`stack-cleanup-current-verification-*.json` record.
 
 ## Install
 
@@ -234,11 +231,6 @@ retired. Taxonomy still
 provides systematic risk discovery, mapping provenance, qualification, and
 obligations; it no longer authors scenarios.
 
-The final R1–R9 evidence matrix, counterexample ledger, completion gate, final
-test logs, and frozen-evidence comparison are generated under
-`build/qualification/scenario-fidelity-final/` and described in the
-[final completion-gate report](docs/development/qualification-reports/final-completion-gate-2026-09-17.md).
-
 The run prepares one capability/fact snapshot, always executes Phase 1
 planning, runs the ordinary SP1 baseline, considers every applicable
 obligation, and permits at most one structural revision. An applied revision
@@ -279,12 +271,8 @@ the reason. The forged-transcript channel stays out of the request unless
 criterion, the safe alternative, lineage, identity, and hypothesis framing,
 and publishes no prepared message, prepared history, delivery route, oracle
 selection, detector expression, judge prompt, or executable setup. The
-consumer's artifact-design path (see the
-[adaptive redesign plan](docs/development/designs/adaptive-scenarios-artifact-ownership-plan-2026-09-14.md)
-and the
-[orchestration entry point](docs/development/adaptive-redesign/orchestration-entry-point.md))
-reads the handoff plus an explicit environment and owns the concrete test
-design.
+consumer's artifact-design path reads the handoff plus an explicit environment
+and owns the concrete test design.
 
 ### Execution meaning and target profiles
 
@@ -335,7 +323,7 @@ uv run asago-target-scan mcp \
   --server-url http://localhost:8888/sse \
   --target-id my-agent \
   --authorization-scope local-test \
-  --profile gemma4-oc \
+  --profile <profile-name> \
   --output-dir build/target-discovery/my-agent
 
 uv run asago-scenario-generator generate \
@@ -520,9 +508,9 @@ the profile's controls are part of each request's digest.
 
 When the code now sends requests the record lacks (a new pipeline step, or a
 prompt you changed), fill the replay: serve what the record holds and send only
-the rest live. A fill run contacts the model endpoint, so read
-`docs/development/private-live-model-approval.md` first and set the budget from
-the approved request allowance.
+the rest live. A fill run contacts the model endpoint, so send only data you
+may share with that endpoint, and set the budget from the task's request
+allowance.
 
 ```bash
 asago-scenario-generator generate ... --profile <profile> \
@@ -554,7 +542,7 @@ live request.
 
 To check that a change leaves recorded runs unchanged, run the replay gate,
 which replays offline and compares every output file
-(see `docs/development/replay-gate.md`):
+(`scripts/replay_gate.py` documents the comparison rules):
 
 ```bash
 ./scripts/replay-check.sh ../asago-orch/runs/<run-id>/stages/generate/output
@@ -742,11 +730,9 @@ prepared message, prepared history, delivery route, oracle selection, detector
 expression, judge prompt, or executable setup. The artifact generator reads
 that handoff plus an explicit environment (target profile and runtime
 context) and owns the concrete test design: stimulus, setup, detector with a
-distinguishing rationale, fidelity assessment, and freeze. See the
-[adaptive redesign plan](docs/development/designs/adaptive-scenarios-artifact-ownership-plan-2026-09-14.md)
-and the orch qualification runbook in
-`asago-orch/docs/qualification.md` for the complete producer → consumer →
-execution workflow.
+distinguishing rationale, fidelity assessment, and freeze. See the orch
+qualification runbook in `asago-orch/docs/qualification.md` for the complete
+producer → consumer → execution workflow.
 
 ## Gold set evaluation
 
@@ -772,8 +758,3 @@ See the [architecture overview](docs/architecture/overview.md).
 ## License
 
 Apache 2.0 — see [LICENSE](LICENSE).
-
-Model-facing authoring and review interfaces separate semantic selections from
-compiler-owned references and assembly; see [Model-facing interfaces](docs/architecture/model-facing-interfaces.md)
-for the separate scenario/no-scenario response forms, evidence, compatibility,
-and observation limits.

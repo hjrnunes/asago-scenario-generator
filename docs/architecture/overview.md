@@ -31,11 +31,9 @@ each name.
 
 The former taxonomy-led runner, generation stages, finalization controllers,
 scenario-authoring prompts, reports, evaluation adapters, and their acceptance
-surface have been deleted. Decision 52 also removed the read-only manifest-v3
+surface have been deleted. The same cleanup removed the read-only manifest-v3
 audit seam and the `qualify-catalog` and `validate-catalog-qualification`
-commands. See
-[legacy-taxonomy-generator-cleanup-inventory.md](legacy-taxonomy-generator-cleanup-inventory.md)
-for the exact boundary.
+commands.
 
 ## Current ownership and historical seams
 
@@ -88,9 +86,7 @@ receipts, and separate backend/state observations. A command-level detector
 does not establish a completed backend effect.
 
 The current workflow is producer `generate` → `scenario-handoff-v4` →
-consumer `generate` → consumer `check`. The dated source-cited accounting
-corrections and independent evidence axes are in
-[the R9 reconciliation report](../development/qualification-reports/r9-reconciliation-2026-09-17.md).
+consumer `generate` → consumer `check`.
 
 ## Taxonomy obligation planning (observational Phase 1)
 
@@ -256,8 +252,8 @@ The root atomically publishes `taxonomy-obligation-plan.yaml`,
 `scenario-realization.yaml`, `synthesis-manifest.yaml`, when slot
 filling sent requests, `slot-hazard-offers.yaml`, and, when slot compilation
 merged findings that differ only by context row or pair, `ica-merges.yaml`
-(one entry per merged ICA, with the as-written findings it stands for; see
-`model-facing-interfaces.md`). Accounting joins
+(one entry per merged ICA, with the as-written findings it stands for).
+Accounting joins
 exact obligation/slot, ICA,
 `EXEC:*`, hazard, and constraint evidence but makes no correspondence
 or coverage claim. Scenario realization separately records whether that exact
@@ -312,8 +308,7 @@ never selects a different Stage 2 algorithm; the observed target enters
 later as enrichment evidence through control-action enrichment and target
 realization.
 
-Security constraints may carry explicit obligation entries (owner ruling
-Q30, 2026-09-10): a `required` entry names a mandated behavior, the rule
+Security constraints may carry explicit obligation entries: a `required` entry names a mandated behavior, the rule
 span it reads, and the channel that would realize it (`realized_by`); a
 `forbidden` entry names a prohibited behavior, its span, and the channel a
 violation would take (`violated_via`). The channel fields are
@@ -507,8 +502,8 @@ duration merely because a finding requests the WRONG_DURATION category.
 The producer does not classify binding completeness, and the published scenario
 carries no execution route or contract. A scenario is either executable (its
 observable outcome is supported by the observation contract) or
-analytical-only (it is not, or its discriminating condition could not be kept;
-see the condition routing in `model-facing-interfaces.md`). Runtime-readiness
+analytical-only (it is not, or its discriminating condition could not be kept).
+Runtime-readiness
 concerns (chat surfaces, clocks, observers, locators, credentials, and endpoint
 details) belong to the consumer. A caller-requested environment basis
 (`target_profile` or `simulation_profile`) must agree with a supplied profile's
@@ -675,7 +670,7 @@ read-only historical data and is not accepted as a compatibility contract.
 
 ## Model-facing interface ownership
 
-[Model-facing interfaces](model-facing-interfaces.md) defines which choices
-belong to model authors and which values, references, identities, joins and
-validation steps belong to deterministic adapters. Consult it when changing
-authoring, evidence review, graph correction, or presentation interfaces.
+Model authors make the semantic choices. Deterministic adapters own the values,
+references, identities, joins and validation steps. Keep that split when you
+change authoring, evidence review, graph correction, or presentation
+interfaces.
