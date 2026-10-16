@@ -64,15 +64,17 @@ with unit tests under `tests/` and prompt text with rows in
 ## Live work and evidence
 
 - Before private model use, send an endpoint only the project data the owner
-  approved for it (use-case, policy, scenario, and synthetic target material,
-  never real customer data), keep its URL and credentials in the local model
-  profile without printing or committing them, and do not publish the material
-  or use another provider or profile without approval. Carry a standing approval
-  forward for work inside that scope and ask only when the data or destination
-  materially exceeds it; data approval is not an unlimited call allowance, and
-  attacks run only against the local safe targets. A replay-fill `generate` run
-  sends its unrecorded requests to the endpoint, so the same rules apply and
-  `--max-live-requests` equals the task's request limit.
+  approved for it: use-case, policy, scenario, and synthetic target material,
+  never real customer data. Keep its URL and credentials in the local model
+  profile without printing or committing them. Do not publish the material or
+  switch provider or profile without approval.
+- Carry a standing approval forward for work inside its scope; ask only when
+  the data or destination materially exceeds it. Data approval is not an
+  unlimited call allowance or permission to execute attacks; attacks run only
+  against the local safe targets.
+- A replay-fill `generate` run sends its unrecorded requests to the endpoint,
+  so the same rules apply; set `--max-live-requests` to the task's request
+  limit.
 - Follow the task's model, thinking, token, request, and target limits. Record
   actual controls and spend. Stop at the specified boundary without hidden
   retries. The one retry the client makes after a transport error (HTTP 5xx or
