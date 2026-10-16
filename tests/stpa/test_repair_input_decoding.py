@@ -63,8 +63,8 @@ HANDLE_BODY: dict[str, Any] = {
     ],
 }
 DEFAULT_REASON = (
-    "the failed response did not contain a valid current local-handle "
-    "wire that can be adapted for the approved repair scope"
+    "the failed response did not contain a local-handle graph that satisfies "
+    "the response schema without its dispositions and obligations"
 )
 NEVER_DECODED = "the response body never decoded as JSON"
 
