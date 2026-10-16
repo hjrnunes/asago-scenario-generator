@@ -47,16 +47,21 @@ _SENSITIVE_TEXT = re.compile(
     + ")",
     re.IGNORECASE,
 )
-# An authorization value is usually "<scheme> <credential>" (Bearer, Basic,
-# Digest, ...). The optional scheme word and the credential after it both
-# belong to the value, so neither survives. The scheme and credential stay on
-# one line.
+# An authorization value is usually "<scheme> <credential>". A word joins the
+# credential only when it is a registered HTTP authentication scheme, so prose
+# such as "Authorization: required for admin tools" loses one word, not two.
+# The scheme and credential stay on one line.
+_AUTHENTICATION_SCHEME = (
+    r"(?:basic|bearer|digest|negotiate|ntlm|token|hoba|mutual|aws4-hmac-sha256)"
+)
 _AUTHORIZATION_TEXT = re.compile(
     _text_key_prefix("authorization")
     + "(?:"
     + _QUOTED_VALUE
     + "|"
-    + r"(?:[A-Za-z][A-Za-z0-9_-]*[ \t]+)?"
+    + "(?:"
+    + _AUTHENTICATION_SCHEME
+    + r"[ \t]+)?"
     + _VALUE_TOKEN
     + ")",
     re.IGNORECASE,

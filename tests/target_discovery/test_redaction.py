@@ -42,6 +42,38 @@ def test_authorization_value_without_a_scheme_is_one_token():
     )
 
 
+@pytest.mark.parametrize(
+    "scheme",
+    [
+        "Basic",
+        "Bearer",
+        "Digest",
+        "Negotiate",
+        "NTLM",
+        "Token",
+        "HOBA",
+        "Mutual",
+        "AWS4-HMAC-SHA256",
+        "bearer",
+        "BEARER",
+        "aws4-hmac-sha256",
+    ],
+)
+def test_known_authentication_scheme_joins_the_credential(scheme):
+    assert redaction.sanitize_json(f"Authorization: {scheme} EXAMPLE_ONLY, next") == (
+        "Authorization: [REDACTED], next"
+    )
+
+
+def test_prose_after_authorization_loses_only_its_first_word():
+    assert redaction.sanitize_json("Authorization: required for admin tools") == (
+        "Authorization: [REDACTED] for admin tools"
+    )
+    assert redaction.sanitize_json("authorization = Bearerish value") == (
+        "authorization = [REDACTED] value"
+    )
+
+
 def test_authorization_redaction_stops_at_the_line_end():
     assert redaction.sanitize_json("Authorization: Bearer\nnext line") == (
         "Authorization: [REDACTED]\nnext line"
@@ -107,6 +139,9 @@ IDEMPOTENCE_SAMPLES = (
     "authorization = Basic RVhBTVBMRQ==, then retry",
     "Authorization: [REDACTED]",
     "Authorization: Bearer [REDACTED]",
+    "Authorization: required for admin tools",
+    "Authorization: AWS4-HMAC-SHA256 Credential=EXAMPLE, Signature=EXAMPLE",
+    "Authorization: Token for access",
     "Authorization: Bearer\nnext line",
     'Authorization: "Bearer EXAMPLE_ONLY_TOKEN"',
     "Authorization: EXAMPLE_ONLY_TOKEN; retry",
