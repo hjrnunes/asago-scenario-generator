@@ -43,7 +43,6 @@ EXPECTATION_FILES = sorted(EXPECTATION_DIR.glob("*.yaml"))
 
 # Catalog files that carry no expectation file, with the reason.
 UNCOVERED = {
-    "attack-patterns.yaml": "historical T7 file with zero live records",
     "attack-patterns-conversational.yaml": "pinned by test_conversational_patterns.py",
 }
 

@@ -5,6 +5,7 @@
 # only; ATLAS is the sole v1 authority.
 # source_catalog_context pins the canonicalized production loader
 # records the decisions were made against.
+# source_file names refer to source_git_revision; attack-patterns.yaml (5 T7 records) left the tree.
 schema_version: '1'
 release:
   version: 1.3.0
