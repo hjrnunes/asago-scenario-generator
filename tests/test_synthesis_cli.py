@@ -6,6 +6,7 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
+import pytest
 import yaml
 
 from asago_scenario_generator.cli import app
@@ -29,6 +30,25 @@ def _input_files(tmp_path: Path) -> tuple[Path, Path, Path]:
     return risk, facts, sssom
 
 
+def _generate_argv(tmp_path: Path, *extra: str) -> list[str]:
+    """Build a ``generate`` command over fresh input files, writing to ``run/``."""
+    risk, facts, sssom = _input_files(tmp_path)
+    return [
+        "generate",
+        "--use-case",
+        "a deterministic system",
+        "--risk-extraction",
+        str(risk),
+        "--qualification-facts",
+        str(facts),
+        "--sssom",
+        str(sssom),
+        "--output-dir",
+        str(tmp_path / "run"),
+        *extra,
+    ]
+
+
 def _result(output_dir: Path, status: str) -> SimpleNamespace:
     plan = output_dir / "taxonomy-obligation-plan.yaml"
     plan.parent.mkdir(parents=True, exist_ok=True)
@@ -42,9 +62,8 @@ def _result(output_dir: Path, status: str) -> SimpleNamespace:
 
 
 def _invoke_run(tmp_path: Path, *, status: str) -> object:
-    risk, facts, sssom = _input_files(tmp_path)
-    output_dir = tmp_path / "run"
-    fake = _result(output_dir, status)
+    argv = _generate_argv(tmp_path)
+    fake = _result(tmp_path / "run", status)
     with (
         patch(
             "asago_scenario_generator.data.loaders.load_reviewed_risk_extraction",
@@ -55,29 +74,13 @@ def _invoke_run(tmp_path: Path, *, status: str) -> object:
             return_value=fake,
         ),
     ):
-        return PlainCliRunner().invoke(
-            app,
-            [
-                "generate",
-                "--use-case",
-                "a deterministic system",
-                "--risk-extraction",
-                str(risk),
-                "--qualification-facts",
-                str(facts),
-                "--sssom",
-                str(sssom),
-                "--output-dir",
-                str(output_dir),
-            ],
-        )
+        return PlainCliRunner().invoke(app, argv)
 
 
 def _invoke_capturing(tmp_path: Path, *extra: str) -> tuple[object, list, list]:
     """Invoke ``run`` and capture the synthesis inputs and adapters it builds."""
-    risk, facts, sssom = _input_files(tmp_path)
-    output_dir = tmp_path / "run"
-    fake = _result(output_dir, "completed")
+    argv = _generate_argv(tmp_path, *extra)
+    fake = _result(tmp_path / "run", "completed")
     inputs: list = []
     adapters: list = []
 
@@ -96,23 +99,7 @@ def _invoke_capturing(tmp_path: Path, *extra: str) -> tuple[object, list, list]:
             side_effect=_capture,
         ),
     ):
-        result = PlainCliRunner().invoke(
-            app,
-            [
-                "generate",
-                "--use-case",
-                "a deterministic system",
-                "--risk-extraction",
-                str(risk),
-                "--qualification-facts",
-                str(facts),
-                "--sssom",
-                str(sssom),
-                "--output-dir",
-                str(output_dir),
-                *extra,
-            ],
-        )
+        result = PlainCliRunner().invoke(app, argv)
     return result, inputs, adapters
 
 
@@ -174,11 +161,10 @@ def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:
             "reason": None,
         }
     ]
-    risk, facts, sssom = _input_files(tmp_path)
     pinned = tmp_path / "loss-analysis.yaml"
     pinned.write_text(yaml.safe_dump(payload), encoding="utf-8")
-    output_dir = tmp_path / "run"
-    fake = _result(output_dir, "completed")
+    argv = _generate_argv(tmp_path, "--loss-analysis", str(pinned))
+    fake = _result(tmp_path / "run", "completed")
     captured: list[SynthesisInputs] = []
 
     def _capture(inputs, adapter):
@@ -195,24 +181,7 @@ def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:
             side_effect=_capture,
         ),
     ):
-        result = PlainCliRunner().invoke(
-            app,
-            [
-                "generate",
-                "--use-case",
-                "a deterministic system",
-                "--risk-extraction",
-                str(risk),
-                "--qualification-facts",
-                str(facts),
-                "--sssom",
-                str(sssom),
-                "--output-dir",
-                str(output_dir),
-                "--loss-analysis",
-                str(pinned),
-            ],
-        )
+        result = PlainCliRunner().invoke(app, argv)
 
     assert result.exit_code == 0
     assert len(captured) == 1
@@ -222,7 +191,6 @@ def test_product_cli_threads_pinned_loss_analysis(tmp_path: Path) -> None:
 def test_product_cli_threads_observation_contract(tmp_path: Path) -> None:
     """A valid --observation-contract file is loaded into synthesis inputs."""
 
-    risk, facts, sssom = _input_files(tmp_path)
     contract_path = tmp_path / "observation-contract.yaml"
     contract_path.write_text(
         yaml.safe_dump(
@@ -233,8 +201,8 @@ def test_product_cli_threads_observation_contract(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
-    output_dir = tmp_path / "run"
-    fake = _result(output_dir, "completed")
+    argv = _generate_argv(tmp_path, "--observation-contract", str(contract_path))
+    fake = _result(tmp_path / "run", "completed")
     captured: list[SynthesisInputs] = []
 
     def _capture(inputs, adapter):
@@ -251,116 +219,53 @@ def test_product_cli_threads_observation_contract(tmp_path: Path) -> None:
             side_effect=_capture,
         ),
     ):
-        result = PlainCliRunner().invoke(
-            app,
-            [
-                "generate",
-                "--use-case",
-                "a deterministic system",
-                "--risk-extraction",
-                str(risk),
-                "--qualification-facts",
-                str(facts),
-                "--sssom",
-                str(sssom),
-                "--output-dir",
-                str(output_dir),
-                "--observation-contract",
-                str(contract_path),
-            ],
-        )
+        result = PlainCliRunner().invoke(app, argv)
 
     assert result.exit_code == 0
     assert len(captured) == 1
     assert captured[0].observation_contract == default_observation_contract()
 
 
-def test_product_cli_rejects_missing_pinned_loss_analysis(tmp_path: Path) -> None:
-    """A --loss-analysis path that does not exist aborts the run."""
-    risk, facts, sssom = _input_files(tmp_path)
-    output_dir = tmp_path / "run"
-
-    result = PlainCliRunner().invoke(
-        app,
-        [
-            "generate",
-            "--use-case",
-            "a deterministic system",
-            "--risk-extraction",
-            str(risk),
-            "--qualification-facts",
-            str(facts),
-            "--sssom",
-            str(sssom),
-            "--output-dir",
-            str(output_dir),
-            "--loss-analysis",
-            str(tmp_path / "absent.yaml"),
-        ],
-    )
-
-    assert result.exit_code != 0
-    assert "loss analysis file" in result.stderr
-
-
-def test_product_cli_rejects_malformed_pinned_loss_analysis(tmp_path: Path) -> None:
-    """A pinned file that is not a LossAnalysis aborts before any run work."""
-    risk, facts, sssom = _input_files(tmp_path)
+def _malformed_loss_analysis(tmp_path: Path) -> list[str]:
     pinned = tmp_path / "loss-analysis.yaml"
     pinned.write_text("not: a loss analysis\n", encoding="utf-8")
-    output_dir = tmp_path / "run"
-
-    result = PlainCliRunner().invoke(
-        app,
-        [
-            "generate",
-            "--use-case",
-            "a deterministic system",
-            "--risk-extraction",
-            str(risk),
-            "--qualification-facts",
-            str(facts),
-            "--sssom",
-            str(sssom),
-            "--output-dir",
-            str(output_dir),
-            "--loss-analysis",
-            str(pinned),
-        ],
-    )
-
-    assert result.exit_code != 0
+    return ["--loss-analysis", str(pinned)]
 
 
-def test_product_cli_requires_the_profiles_file_for_a_named_profile(
-    tmp_path: Path,
+@pytest.mark.parametrize(
+    ("options", "message"),
+    [
+        pytest.param(
+            lambda root: ["--loss-analysis", str(root / "absent.yaml")],
+            "loss analysis file",
+            id="missing-loss-analysis",
+        ),
+        pytest.param(
+            _malformed_loss_analysis,
+            "validation errors for LossAnalysis",
+            id="malformed-loss-analysis",
+        ),
+        pytest.param(
+            lambda root: [
+                "--profile",
+                "fixture-profile",
+                "--profiles-file",
+                str(root / "absent-profiles.yaml"),
+            ],
+            "model profiles file",
+            id="named-profile-without-profiles-file",
+        ),
+    ],
+)
+def test_product_cli_rejects_an_unusable_input_file(
+    tmp_path: Path, options, message: str
 ) -> None:
-    """A named model profile cannot resolve without its profiles file."""
-    risk, facts, sssom = _input_files(tmp_path)
-
-    result = PlainCliRunner().invoke(
-        app,
-        [
-            "generate",
-            "--use-case",
-            "a deterministic system",
-            "--risk-extraction",
-            str(risk),
-            "--qualification-facts",
-            str(facts),
-            "--sssom",
-            str(sssom),
-            "--output-dir",
-            str(tmp_path / "run"),
-            "--profile",
-            "fixture-profile",
-            "--profiles-file",
-            str(tmp_path / "absent-profiles.yaml"),
-        ],
-    )
+    """A missing pinned file, a pinned file that is not a LossAnalysis, or a named
+    profile without its profiles file aborts before any run work."""
+    result = PlainCliRunner().invoke(app, _generate_argv(tmp_path, *options(tmp_path)))
 
     assert result.exit_code != 0
-    assert "model profiles file" in result.stderr
+    assert message in result.stderr
 
 
 def test_product_cli_rejects_a_worker_count_below_one(tmp_path: Path) -> None:
@@ -393,7 +298,7 @@ def test_product_cli_prints_the_report_path_when_one_is_rendered(
     tmp_path: Path,
 ) -> None:
     """A rendered report is listed with the other artifact locations."""
-    risk, facts, sssom = _input_files(tmp_path)
+    argv = _generate_argv(tmp_path)
     output_dir = tmp_path / "run"
     fake = _result(output_dir, "completed")
     fake.report_path = output_dir / "report" / "index.html"
@@ -408,22 +313,7 @@ def test_product_cli_prints_the_report_path_when_one_is_rendered(
             return_value=fake,
         ),
     ):
-        result = PlainCliRunner().invoke(
-            app,
-            [
-                "generate",
-                "--use-case",
-                "a deterministic system",
-                "--risk-extraction",
-                str(risk),
-                "--qualification-facts",
-                str(facts),
-                "--sssom",
-                str(sssom),
-                "--output-dir",
-                str(output_dir),
-            ],
-        )
+        result = PlainCliRunner().invoke(app, argv)
 
     assert result.exit_code == 0
     assert f"  Report: {fake.report_path}" in result.stdout
