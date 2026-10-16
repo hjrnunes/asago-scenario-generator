@@ -67,15 +67,6 @@ class RuleSpanRepairRecord:
     obligation_id: str
     repair: RuleSpanRepair
 
-    def as_dict(self) -> dict[str, str]:
-        return {
-            "constraint": self.constraint,
-            "obligation_id": self.obligation_id,
-            "kind": self.repair.kind,
-            "original": self.repair.original,
-            "repaired": self.repair.repaired,
-        }
-
 
 @cache
 def rule_span_requirement() -> str:

@@ -294,12 +294,6 @@ def _revision_delta_from_wire(value: Any) -> RevisionDelta:
     return RevisionDelta.model_validate(value, context=ASSEMBLY_DEFERRED)
 
 
-def _parse_revision_delta(value: Any) -> RevisionDelta:
-    """Parse one decoded revision response."""
-    _validate_revision_wire(value)
-    return _revision_delta_from_wire(value)
-
-
 def _parse_revision_result(
     result: LLMResult, cleanup_transformations: list[dict[str, Any]]
 ) -> RevisionDelta:

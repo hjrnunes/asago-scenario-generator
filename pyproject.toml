@@ -32,7 +32,6 @@ asago-target-scan = "asago_scenario_generator.target_discovery.cli:app"
 [dependency-groups]
 dev = [
     "hypothesis>=6.164.0",
-    "pytest-cov>=7.1.0",
     "pytest-xdist>=3.8.0",
     "ruff",
 ]

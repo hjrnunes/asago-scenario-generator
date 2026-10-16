@@ -17,7 +17,9 @@ from pydantic import ValidationError
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
-    _parse_revision_delta,
+    RevisionDelta,
+    _revision_delta_from_wire,
+    _validate_revision_wire,
     run_revision,
 )
 from tests.helpers.revision_delta import _make_control_structure
@@ -37,6 +39,11 @@ _MALFORMED_LINK_DELTA = {
 _MALFORMED_LINK_ERROR = (
     "- new_coordination_links.0.cl_id: Extra inputs are not permitted (extra_forbidden)"
 )
+
+
+def _parse_revision_delta(value: Any) -> RevisionDelta:
+    _validate_revision_wire(value)
+    return _revision_delta_from_wire(value)
 
 
 class _ScriptedProvider:

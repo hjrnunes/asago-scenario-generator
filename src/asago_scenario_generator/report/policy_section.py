@@ -34,10 +34,6 @@ STEPS = (
     ("loss", "loss_analysis", "Loss analysis"),
     ("scenarios", "scenario_writing", "Scenario writing"),
 )
-STEP_NAME = {
-    "boundary_decision": "the boundary decision",
-    "loss_analysis": "loss analysis",
-}
 DROP_LABEL = {
     "outside_boundary": ("outside what the assistant controls", "neutral-soft"),
     "not_applicable": ("judged not applicable", "warn"),
@@ -65,11 +61,6 @@ def risk_scenarios(policy: dict[str, Any], risk: dict[str, Any]) -> list[str]:
 def _present(run: RunData, risk: dict[str, Any]) -> list[str]:
     """List the scenarios of *risk* that have a file in this run."""
     return [s for s in risk_scenarios(run.policy, risk) if s in run.scenarios]
-
-
-def _drop_label(step: str, coverage: str) -> str:
-    label = DROP_LABEL[coverage][0]
-    return f"{STEP_NAME[step]} {label}" if coverage == "not_applicable" else label
 
 
 def _step_drops(risks: list[dict[str, Any]], step: str) -> list[Drop]:
