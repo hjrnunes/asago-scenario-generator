@@ -63,10 +63,18 @@ with unit tests under `tests/` and prompt text with rows in
 
 ## Live work and evidence
 
-- Before private model use, read `docs/development/private-live-model-approval.md`.
-  Carry standing data approval forward; read credentials from the local profile
-  without printing or committing them. Data approval is not an unlimited call
-  allowance or permission to execute attacks.
+- Before private model use, send an endpoint only the project data the owner
+  approved for it: use-case, policy, scenario, and synthetic target material,
+  never real customer data. Keep its URL and credentials in the local model
+  profile without printing or committing them. Do not publish the material or
+  switch provider or profile without approval.
+- Carry a standing approval forward for work inside its scope; ask only when
+  the data or destination materially exceeds it. Data approval is not an
+  unlimited call allowance or permission to execute attacks; attacks run only
+  against the local safe targets.
+- A replay-fill `generate` run sends its unrecorded requests to the endpoint,
+  so the same rules apply; set `--max-live-requests` to the task's request
+  limit.
 - Follow the task's model, thinking, token, request, and target limits. Record
   actual controls and spend. Stop at the specified boundary without hidden
   retries. The one retry the client makes after a transport error (HTTP 5xx or
@@ -92,7 +100,7 @@ with unit tests under `tests/` and prompt text with rows in
 | --- | --- |
 | Entry points and configuration | `README.md`, CLI `--help` |
 | Pipeline or cross-repository contract change | `docs/architecture/overview.md`, applicable schema in `data/contracts/`, current task spec |
-| Prompt, response, grounding, or review change | `docs/architecture/model-facing-interfaces.md`, actual prompt builders and tests |
+| Prompt, response, grounding, or review change | The actual prompt builders and their tests; `tests/phrases/*.yaml` pins prompt text |
 | Live setup, frozen-package execution, cleanup | `asago-orch/docs/qualification.md`; modules live under `asago-orch/src/asago_orch/qualification/` |
 | Gold scoring or recovery claims | Scoring lives in the orch repo's score stage and uses `asago_orch.qualification.probe_detector` |
 

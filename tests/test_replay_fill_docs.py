@@ -1,4 +1,4 @@
-"""Each replay-fill flag has one description, and the approval note exists."""
+"""Each replay-fill flag has one description, and the README warns of live requests."""
 
 from __future__ import annotations
 
@@ -35,9 +35,7 @@ def test_each_flag_has_exactly_one_description(flag: str) -> None:
     }
 
 
-def test_the_live_model_approval_covers_replay_fill() -> None:
-    approval = (
-        ROOT / "docs" / "development" / "private-live-model-approval.md"
-    ).read_text(encoding="utf-8")
+def test_the_readme_says_replay_fill_contacts_the_model_endpoint() -> None:
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
 
-    assert "## Replay fill sends live requests" in approval
+    assert "A fill run contacts the model endpoint" in readme

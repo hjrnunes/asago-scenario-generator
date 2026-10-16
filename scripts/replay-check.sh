@@ -4,7 +4,8 @@
 #
 #   ./scripts/replay-check.sh RECORDED_OUTPUT_DIR [RECORDED_OUTPUT_DIR ...]
 #
-# See docs/development/replay-gate.md.
+# The module docstring of scripts/replay_gate.py describes what the replay
+# compares and which differences it allows.
 set -uo pipefail
 
 export PATH="/opt/homebrew/bin:/usr/local/bin:$PATH"

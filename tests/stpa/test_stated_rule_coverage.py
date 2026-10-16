@@ -1,7 +1,6 @@
 """Stated use-case rule coverage after the Stage 1a gates.
 
-Design: docs/development/designs/stated-rule-coverage-2026-09-30.md.  An
-uncovered stated rule feeds the graph revision, but never fails the stage.
+An uncovered stated rule feeds the graph revision, but never fails the stage.
 """
 
 from __future__ import annotations
