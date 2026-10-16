@@ -59,13 +59,12 @@ generation code:
 - capability profiles, capability-fact snapshots, and projection
   qualification;
 - deterministic candidate projection used to materialize obligation evidence;
-- Phase 1 obligations and obligation-aware STPA synthesis;
-- STPA SP1, SP2, SP3, reporting, and execution projection; and
-- offline Phase 2, Phase 3, and Phase 4 verification contracts.
+- Phase 1 obligations and obligation-aware STPA synthesis; and
+- STPA SP1, SP2, SP3, and the generate report.
 
 ## Reachability result
 
-The registered CLI exposes `run` as the sole normal scenario-generation
-command and `stpa-run` as an advanced baseline diagnostic. Static import and
-acceptance checks confirm that neither path imports a retired taxonomy runner
-or `pipeline.generate` namespace. All scenarios are authored by STPA.
+The registered CLI exposes `generate` as the only scenario-generation
+command; `asago-target-scan` is a separate target-discovery entry point. The
+package has no `pipeline.generate` module and no retired taxonomy runner. All
+scenarios are authored by STPA.
