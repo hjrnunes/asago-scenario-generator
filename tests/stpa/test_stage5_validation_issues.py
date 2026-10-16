@@ -187,15 +187,19 @@ def _generate(tmp_path, payload, **kwargs):
     return client, result
 
 
-def test_correction_lists_only_the_code_that_was_raised(tmp_path) -> None:
-    payload = _command_attempt_payload(["TARGET-STATE.not_supplied"], [])
-
-    client, (result, error) = _generate(
+def _generate_nested(tmp_path, payload):
+    return _generate(
         tmp_path,
         payload,
         target_operation=_target_operation(),
         target_observations=_nested_observations(),
     )
+
+
+def test_correction_lists_only_the_code_that_was_raised(tmp_path) -> None:
+    payload = _command_attempt_payload(["TARGET-STATE.not_supplied"], [])
+
+    client, (result, error) = _generate_nested(tmp_path, payload)
 
     assert result is None
     retry_prompt = client.calls[1].user_prompt
@@ -214,12 +218,7 @@ def test_an_unsupplied_fact_ref_names_its_nearest_supplied_parent(tmp_path) -> N
         ["TARGET-STATE.widgets.W-2.widget_id", "TARGET-STATE.order_id"],
     )
 
-    client, (result, error) = _generate(
-        tmp_path,
-        payload,
-        target_operation=_target_operation(),
-        target_observations=_nested_observations(),
-    )
+    client, (result, error) = _generate_nested(tmp_path, payload)
 
     assert result is None
     assert "safe_outcome_fact_ref_not_supplied:" in error
@@ -237,12 +236,7 @@ def test_an_unsupplied_fact_ref_under_an_unsupplied_record_has_no_parent(
 ) -> None:
     payload = _command_attempt_payload([], ["OTHER-STATE.order_id"])
 
-    client, (result, error) = _generate(
-        tmp_path,
-        payload,
-        target_operation=_target_operation(),
-        target_observations=_nested_observations(),
-    )
+    client, (result, error) = _generate_nested(tmp_path, payload)
 
     assert result is None
     retry_prompt = client.calls[1].user_prompt
@@ -255,12 +249,7 @@ def test_an_adversary_without_intentions_raises_its_own_code(tmp_path) -> None:
     payload = _command_attempt_payload([], [])
     payload["attacker_bdi"]["intentions"] = []
 
-    client, (result, error) = _generate(
-        tmp_path,
-        payload,
-        target_operation=_target_operation(),
-        target_observations=_nested_observations(),
-    )
+    client, (result, error) = _generate_nested(tmp_path, payload)
 
     assert result is None
     assert "attacker_intentions_missing:" in error
@@ -275,12 +264,7 @@ def test_an_observable_safe_outcome_without_a_claim_raises_its_own_code(
         claim_level=None, evidence=None, operation_name=None
     )
 
-    client, (result, error) = _generate(
-        tmp_path,
-        payload,
-        target_operation=_target_operation(),
-        target_observations=_nested_observations(),
-    )
+    client, (result, error) = _generate_nested(tmp_path, payload)
 
     assert result is None
     assert "observable safe outcomes require claim_level and evidence" in error
@@ -294,12 +278,7 @@ def test_an_unknown_operation_name_raises_its_own_code(tmp_path) -> None:
         "wire_money"
     )
 
-    client, (result, error) = _generate(
-        tmp_path,
-        payload,
-        target_operation=_target_operation(),
-        target_observations=_nested_observations(),
-    )
+    client, (result, error) = _generate_nested(tmp_path, payload)
 
     assert result is None
     assert "observation_operation_not_in_inventory:" in error
@@ -312,12 +291,7 @@ def test_a_missing_command_attempt_operation_raises_its_own_code(tmp_path) -> No
     payload = _command_attempt_payload([], [])
     payload["unsafe_outcome"]["observation_criteria"][0]["operation_name"] = None
 
-    client, (result, error) = _generate(
-        tmp_path,
-        payload,
-        target_operation=_target_operation(),
-        target_observations=_nested_observations(),
-    )
+    client, (result, error) = _generate_nested(tmp_path, payload)
 
     assert result is None
     assert "observation_command_attempt_operation_missing:" in error

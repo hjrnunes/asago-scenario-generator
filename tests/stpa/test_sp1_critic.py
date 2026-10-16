@@ -35,6 +35,17 @@ from tests.helpers.sp1_critic import _make_control_structure
 from tests.stpa.helpers import make_minimal_loss_analysis
 
 
+def _revise(client, findings, tmp_path, **overrides):
+    return run_revision(
+        llm_client=client,
+        control_structure=_make_control_structure(),
+        critic_findings=findings,
+        use_case_text="Test",
+        run_dir=tmp_path,
+        **overrides,
+    )
+
+
 def _valid_critic_findings_dict() -> dict:
     return {
         "gaps": [
@@ -334,14 +345,10 @@ class TestRevision:
         client = MockLLMClient()
         client.set_response_for(RevisionDelta, delta)
 
-        revised, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=CriticFindings.model_validate(
-                _valid_critic_findings_dict()
-            ),
-            use_case_text="Test",
-            run_dir=tmp_path,
+        revised, warnings = _revise(
+            client,
+            CriticFindings.model_validate(_valid_critic_findings_dict()),
+            tmp_path,
         )
 
         assert warnings == []
@@ -414,13 +421,7 @@ class TestRevision:
         }
         client.set_response_for(RevisionDelta, revision_delta_dict)
         findings = CriticFindings.model_validate(_valid_critic_findings_dict())
-        revised, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=findings,
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        revised, warnings = _revise(client, findings, tmp_path)
         assert isinstance(revised, ControlStructure)
         resp_ids = {r.resp_id for r in revised.responsibilities}
         assert "RESP-3" in resp_ids
@@ -436,13 +437,7 @@ class TestRevision:
         }
         client.set_response_for(RevisionDelta, delta_dict)
         findings = CriticFindings.model_validate(_valid_critic_findings_dict())
-        run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=findings,
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        _revise(client, findings, tmp_path)
         entries = read_calls_jsonl(tmp_path)
         rev_entries = [e for e in entries if e["step"] == "revision"]
         assert len(rev_entries) == 1
@@ -464,13 +459,7 @@ class TestRevision:
         }
         client.set_response_for(RevisionDelta, delta_dict)
         findings = CriticFindings.model_validate(_valid_critic_findings_dict())
-        run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=findings,
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        _revise(client, findings, tmp_path)
         system_prompt = client.calls[0].system_prompt
         user_prompt = client.calls[0].user_prompt
         # Control structure listing is in the system prompt
@@ -491,13 +480,8 @@ class TestRevision:
         }
         client.set_response_for(RevisionDelta, delta_dict)
         findings = CriticFindings.model_validate(_valid_critic_findings_dict())
-        revised, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=findings,
-            use_case_text="Test",
-            run_dir=tmp_path,
-            loss_analysis=make_minimal_loss_analysis(),
+        revised, warnings = _revise(
+            client, findings, tmp_path, loss_analysis=make_minimal_loss_analysis()
         )
         # Heuristics were re-run — warnings is a list (may be empty)
         assert isinstance(warnings, list)
@@ -516,14 +500,10 @@ class TestRevision:
             },
         )
 
-        revised, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=CriticFindings.model_validate(
-                _valid_critic_findings_dict()
-            ),
-            use_case_text="Test",
-            run_dir=tmp_path,
+        revised, warnings = _revise(
+            client,
+            CriticFindings.model_validate(_valid_critic_findings_dict()),
+            tmp_path,
         )
 
         assert isinstance(revised, ControlStructure)
@@ -600,13 +580,7 @@ class TestRevision:
         }
         client.set_response_for(RevisionDelta, revision_delta_dict)
         findings = CriticFindings.model_validate(_valid_critic_findings_dict())
-        revised, _ = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=findings,
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        revised, _ = _revise(client, findings, tmp_path)
         resp_ids = {r.resp_id for r in revised.responsibilities}
         assert "RESP-3" in resp_ids
         assert "RESP-1" in resp_ids

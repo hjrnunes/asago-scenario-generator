@@ -74,6 +74,25 @@ from tests.helpers.sp1_graceful_degradation import (
 # ---------------------------------------------------------------------------
 
 
+def _run_critic(client, tmp_path):
+    return run_completeness_critic(
+        llm_client=client,
+        control_structure=_make_control_structure(),
+        capability_profile=make_capability_profile(),
+        use_case_text="Test",
+        run_dir=tmp_path,
+    )
+
+
+def _derive_structure(client, run_dir):
+    return derive_control_structure(
+        llm_client=client,
+        use_case_text="Test",
+        loss_analysis=_make_loss_analysis(),
+        run_dir=run_dir,
+    )
+
+
 def _make_loss_analysis() -> LossAnalysis:
     return LossAnalysis(
         risk_card_losses=[
@@ -213,13 +232,7 @@ class TestCriticGracefulDegradation:
         """SP1-GD-04: critic validation failure returns empty CriticFindings."""
         client = MockLLMClient()
         client.set_invalid_response_for(CriticFindings)
-        findings = run_completeness_critic(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            capability_profile=make_capability_profile(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        findings = _run_critic(client, tmp_path)
         assert isinstance(findings, CriticFindings)
         assert len(findings.gaps) == 0
         assert findings.checklist_results == {}
@@ -229,13 +242,7 @@ class TestCriticGracefulDegradation:
         """SP1-GD-05: critic failure logs the failed call with success=false."""
         client = MockLLMClient()
         client.set_invalid_response_for(CriticFindings)
-        run_completeness_critic(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            capability_profile=make_capability_profile(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        _run_critic(client, tmp_path)
         entries = read_calls_jsonl(tmp_path)
         critic_entries = [e for e in entries if e["step"] == "critic"]
         assert len(critic_entries) == 1
@@ -247,13 +254,7 @@ class TestCriticGracefulDegradation:
         """SP1-GD-06: critic failure (empty findings) does not trigger revision."""
         client = MockLLMClient()
         client.set_invalid_response_for(CriticFindings)
-        findings = run_completeness_critic(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            capability_profile=make_capability_profile(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        findings = _run_critic(client, tmp_path)
         # Empty findings carry no gap, so no revision runs
         assert findings.gaps == []
 
@@ -261,13 +262,7 @@ class TestCriticGracefulDegradation:
         """SP1-GD-07: critic LLM exception returns empty CriticFindings."""
         client = MockLLMClient()
         client.set_exception_for(CriticFindings, RuntimeError("API error"))
-        findings = run_completeness_critic(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            capability_profile=make_capability_profile(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        findings = _run_critic(client, tmp_path)
         assert isinstance(findings, CriticFindings)
         assert len(findings.gaps) == 0
         entries = read_calls_jsonl(tmp_path)
@@ -369,12 +364,7 @@ class TestDerivationStageFailure:
         client.set_invalid_response_for(RequirementSet)
 
         def invoke(c, d):
-            derive_control_structure(
-                llm_client=c,
-                use_case_text="Test",
-                loss_analysis=_make_loss_analysis(),
-                run_dir=d,
-            )
+            _derive_structure(c, d)
 
         return client, invoke
 
@@ -384,12 +374,7 @@ class TestDerivationStageFailure:
         client.set_invalid_response_for(ResponsibilitySet)
 
         def invoke(c, d):
-            derive_control_structure(
-                llm_client=c,
-                use_case_text="Test",
-                loss_analysis=_make_loss_analysis(),
-                run_dir=d,
-            )
+            _derive_structure(c, d)
 
         return client, invoke
 
@@ -400,12 +385,7 @@ class TestDerivationStageFailure:
         client.set_invalid_response_for(ControlElementSet)
 
         def invoke(c, d):
-            derive_control_structure(
-                llm_client=c,
-                use_case_text="Test",
-                loss_analysis=_make_loss_analysis(),
-                run_dir=d,
-            )
+            _derive_structure(c, d)
 
         return client, invoke
 
@@ -417,12 +397,7 @@ class TestDerivationStageFailure:
         client.set_invalid_response_for(CoordinationAnalysis)
 
         def invoke(c, d):
-            derive_control_structure(
-                llm_client=c,
-                use_case_text="Test",
-                loss_analysis=_make_loss_analysis(),
-                run_dir=d,
-            )
+            _derive_structure(c, d)
 
         return client, invoke
 

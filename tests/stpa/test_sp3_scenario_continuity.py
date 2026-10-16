@@ -159,12 +159,7 @@ def _coordination_threat() -> StructuralThreat:
 
 
 def test_context_supports_exact_coordination_link_path() -> None:
-    context = build_scenario_generation_context(
-        _coordination_threat(),
-        _coordination_control_structure(),
-        _loss_analysis(),
-        scenario_id="SCN-001",
-    )
+    context = _coordination_context()
 
     path = context.target_control_path
     assert path.controller.element_id == "CL-1"
@@ -187,12 +182,7 @@ def test_context_supports_exact_coordination_link_path() -> None:
 
 def test_context_stage5_offers_only_compiler_owned_causal_source_handles() -> None:
     """Coordination IDs stay context, while causal sources use local handles."""
-    context = build_scenario_generation_context(
-        _coordination_threat(),
-        _coordination_control_structure(),
-        _loss_analysis(),
-        scenario_id="SCN-001",
-    )
+    context = _coordination_context()
 
     _system, prompt = build_context_bdi_prompts(context, TemplateLoader(PROMPTS_DIR))
     choices = prompt.split("## Allowed Causal-Factor Sources", 1)[1].split(
@@ -681,12 +671,7 @@ def test_context_stage5_derives_public_pm_annotations_from_causal_factors(
     tmp_path,
 ) -> None:
     """One causal story drives exact PM evidence and unselected markers."""
-    context = build_scenario_generation_context(
-        _coordination_threat(),
-        _coordination_control_structure(),
-        _loss_analysis(),
-        scenario_id="SCN-001",
-    )
+    context = _coordination_context()
     client = MockLLMClient()
     response = {
         "stimulus": {

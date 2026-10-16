@@ -65,6 +65,16 @@ from tests.helpers.normal_authoring_wire import (
 )
 
 
+def _generate(client, tmp_path, **overrides):
+    return generate_bdi_for_context(
+        client,
+        _wrong_timing_context(),
+        tmp_path,
+        assembly=_wrong_timing_assembly(_wrong_timing_context()),
+        **overrides,
+    )
+
+
 def _recorded_ordering_draft_one() -> dict:
     """Recorded run SCN-008 candidate one, expressed in the normal schema.
 
@@ -295,13 +305,11 @@ def test_normal_prompt_carries_target_operation_and_observed_record_values(
     """
     client = MockLLMClient()
     client.set_response_queue([_normal_payload()])
-    result, error = generate_bdi_for_context(
+    result, error = _generate(
         client,
-        _wrong_timing_context(),
         tmp_path,
         target_operation=_target_operation(),
         target_observations=_record_observations(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
     assert error is None
     assert result is not None
@@ -401,12 +409,8 @@ def test_normal_contract_requires_observation_criteria(tmp_path) -> None:
     payload = _normal_payload()
     client.set_response_queue([payload, payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        observation_contract=default_observation_contract(),
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
+    result, error = _generate(
+        client, tmp_path, observation_contract=default_observation_contract()
     )
 
     assert result is None
@@ -421,12 +425,7 @@ def test_functional_normal_response_can_omit_gain(tmp_path) -> None:
     payload["attacker_bdi"] = {"beliefs": [], "desires": [], "intentions": []}
     client = MockLLMClient()
     client.set_response_queue([payload])
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert error is None
     assert result is not None
@@ -442,12 +441,7 @@ def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
     """The accepted draft itself carries no execution fields."""
     client = MockLLMClient()
     client.set_response_queue([_normal_payload()])
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
     assert error is None
     assert result is not None
     dumped = result.model_dump(mode="json")
@@ -470,12 +464,7 @@ def test_recorded_failure_classes_publish_through_normal_wire(draft, tmp_path) -
     """The three recorded artifact decisions no longer block."""
     client = MockLLMClient()
     client.set_response_queue([draft()])
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
     assert error is None, f"recorded failure class still blocks authoring: {error}"
     assert result is not None
     assert result.unsafe_outcome_semantic_proposition
@@ -539,12 +528,7 @@ def test_causally_invalid_drafts_still_reject_with_typed_reasons(
     client = MockLLMClient()
     client.set_response_queue([payload, payload])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert result is None
     assert error is not None
@@ -629,12 +613,7 @@ def test_repeated_length_failure_retries_once_with_a_shorter_request(
         LengthFinishReasonError("structured response reached its length limit"),
     )
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert result is None
     assert error == (
@@ -667,12 +646,7 @@ def test_length_failure_then_a_complete_reply_publishes_the_retry(tmp_path) -> N
     client = TruncatedFirstClient()
     client.set_response_queue([_normal_payload()])
 
-    result, error = generate_bdi_for_context(
-        client,
-        _wrong_timing_context(),
-        tmp_path,
-        assembly=_wrong_timing_assembly(_wrong_timing_context()),
-    )
+    result, error = _generate(client, tmp_path)
 
     assert error is None
     assert result is not None

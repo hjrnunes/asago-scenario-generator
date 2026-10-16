@@ -42,6 +42,27 @@ _USE_CASE_EVIDENCE = {
 }
 
 
+def _call_3(client, structure, losses, tmp_path):
+    return _call_3_coordination(
+        llm_client=client,
+        use_case_text=USE_CASE,
+        control_structure=structure,
+        loss_analysis=losses,
+        run_dir=tmp_path,
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0,
+    )
+
+
+def _apply(draft, losses, payload, **overrides):
+    return apply_control_structure_semantic_review(
+        draft,
+        losses,
+        ControlStructureSemanticReview.model_validate(payload),
+        **overrides,
+    )
+
+
 @pytest.mark.parametrize("field", ["quote", "meaning"])
 def test_source_evidence_rejects_blank_text(field):
     value = {"source_ref": "L-1", "quote": "quoted", "meaning": "why"}
@@ -65,15 +86,7 @@ def test_coordination_provider_schema_requires_the_complete_review(
     payload = response_payload(review_payload(losses, structure))
     client = MockLLMClient()
     client.set_response_queue([payload])
-    _call_3_coordination(
-        llm_client=client,
-        use_case_text=USE_CASE,
-        control_structure=structure,
-        loss_analysis=losses,
-        run_dir=tmp_path,
-        loader=TemplateLoader(PROMPTS_DIR),
-        temperature=0,
-    )
+    _call_3(client, structure, losses, tmp_path)
     validator = Draft202012Validator(
         client.calls[0].response_format.model_json_schema()
     )
@@ -276,15 +289,7 @@ def test_coordination_prompts_state_the_endpoint_ownership_rule(tmp_path):
     losses, structure = authorities()
     client = MockLLMClient()
     client.set_response_queue([response_payload(review_payload(losses, structure))])
-    _call_3_coordination(
-        llm_client=client,
-        use_case_text=USE_CASE,
-        control_structure=structure,
-        loss_analysis=losses,
-        run_dir=tmp_path,
-        loader=TemplateLoader(PROMPTS_DIR),
-        temperature=0,
-    )
+    _call_3(client, structure, losses, tmp_path)
     normalized = " ".join(client.calls[0].user_prompt.split())
     assert "listed under the link's `source` or `target`" in normalized
 
@@ -327,12 +332,7 @@ def test_constraint_revision_that_drops_an_obligation_phrase_names_it():
     )
 
     with pytest.raises(ValueError) as error:
-        apply_control_structure_semantic_review(
-            draft,
-            losses,
-            ControlStructureSemanticReview.model_validate(payload),
-            use_case_text=USE_CASE,
-        )
+        _apply(draft, losses, payload, use_case_text=USE_CASE)
 
     message = str(error.value)
     assert (
@@ -351,12 +351,7 @@ def test_constraint_revision_that_keeps_obligation_phrases_is_applied():
         "validate settings against the loaded profile before applying them.",
     )
 
-    result = apply_control_structure_semantic_review(
-        draft,
-        losses,
-        ControlStructureSemanticReview.model_validate(payload),
-        use_case_text=USE_CASE,
-    )
+    result = _apply(draft, losses, payload, use_case_text=USE_CASE)
 
     reviewed = result.loss_analysis.security_constraints[0]
     assert reviewed.rule.startswith("validate settings against")
@@ -369,15 +364,7 @@ def test_call3_prompt_lists_obligation_phrases_a_revision_must_keep(tmp_path):
     losses = _with_obligation(losses, "Validate settings")
     client = MockLLMClient()
     client.set_response_queue([response_payload(review_payload(losses, structure))])
-    _call_3_coordination(
-        llm_client=client,
-        use_case_text=USE_CASE,
-        control_structure=structure,
-        loss_analysis=losses,
-        run_dir=tmp_path,
-        loader=TemplateLoader(PROMPTS_DIR),
-        temperature=0,
-    )
+    _call_3(client, structure, losses, tmp_path)
 
     user = " ".join(client.calls[0].user_prompt.split())
     assert (
@@ -416,12 +403,7 @@ def test_review_preserves_drafts_and_applies_hazard_then_constraint_changes():
             }
         ],
     )
-    result = apply_control_structure_semantic_review(
-        draft,
-        losses,
-        ControlStructureSemanticReview.model_validate(payload),
-        use_case_text=USE_CASE,
-    )
+    result = _apply(draft, losses, payload, use_case_text=USE_CASE)
 
     assert result.loss_analysis.hazards[0].description.startswith(
         "A chamber setting can damage"
@@ -461,12 +443,7 @@ def test_conditional_constraint_revision_rewords_the_rule_once():
             }
         ],
     )
-    result = apply_control_structure_semantic_review(
-        draft,
-        losses,
-        ControlStructureSemanticReview.model_validate(payload),
-        use_case_text=USE_CASE,
-    )
+    result = _apply(draft, losses, payload, use_case_text=USE_CASE)
     reviewed = result.loss_analysis.security_constraints[0]
     assert reviewed.rule == (
         "Validate every chamber setting against the loaded profile."
@@ -541,11 +518,7 @@ def test_review_repairs_ownership_and_internal_observation_without_mutating_draf
         "effect_kind": "agent_message",
         "rationale": "The message is internal, not returned to the caller.",
     }
-    reviewed = apply_control_structure_semantic_review(
-        draft,
-        losses,
-        ControlStructureSemanticReview.model_validate(payload),
-    ).control_structure
+    reviewed = _apply(draft, losses, payload).control_structure
     assert reviewed.responsibilities[1].security_constraint_refs == ["SC-1"]
     assert (
         reviewed.responsibilities[1].control_actions[0].effect_kind.value
@@ -571,11 +544,7 @@ def test_review_cannot_guess_or_silently_omit_identities(change):
     else:
         payload["responsibilities"].append(payload["responsibilities"][0])
     with pytest.raises(ValueError):
-        apply_control_structure_semantic_review(
-            draft,
-            losses,
-            ControlStructureSemanticReview.model_validate(payload),
-        )
+        _apply(draft, losses, payload)
 
 
 def test_genuine_missing_constraint_and_unknown_effect_remain_explicit():
@@ -589,11 +558,7 @@ def test_genuine_missing_constraint_and_unknown_effect_remain_explicit():
         effect_kind=None,
         rationale="The use case does not establish where this action is observed.",
     )
-    reviewed = apply_control_structure_semantic_review(
-        draft,
-        losses,
-        ControlStructureSemanticReview.model_validate(payload),
-    ).control_structure
+    reviewed = _apply(draft, losses, payload).control_structure
     assert reviewed.responsibilities[1].security_constraint_refs == []
     assert reviewed.responsibilities[1].control_actions[0].effect_kind is None
 
@@ -607,11 +572,7 @@ def test_joint_review_corrects_constraint_hazard_edge_without_inventing_authorit
     payload["constraints"][0]["rationale"] = (
         "The supplied material does not establish this constraint-to-hazard edge."
     )
-    result = apply_control_structure_semantic_review(
-        draft,
-        losses,
-        ControlStructureSemanticReview.model_validate(payload),
-    )
+    result = _apply(draft, losses, payload)
     assert result.loss_analysis.security_constraints[0].related_hazards == []
     assert result.control_structure.responsibilities[0].security_constraint_refs == [
         "SC-1"
@@ -627,11 +588,7 @@ def test_constraint_hazard_review_rejects_unknown_or_duplicate_edges(edge_change
     payload = review_payload(losses, draft)
     payload["constraints"][0]["related_hazards"] = edge_change
     with pytest.raises(ValueError):
-        apply_control_structure_semantic_review(
-            draft,
-            losses,
-            ControlStructureSemanticReview.model_validate(payload),
-        )
+        _apply(draft, losses, payload)
 
 
 @pytest.mark.parametrize(
@@ -714,12 +671,7 @@ def test_review_disposition_invariants_are_closed(
     row["disposition"] = disposition
     row.update(updates)
     with pytest.raises(ValueError, match=match):
-        apply_control_structure_semantic_review(
-            structure,
-            losses,
-            ControlStructureSemanticReview.model_validate(payload),
-            use_case_text=USE_CASE,
-        )
+        _apply(structure, losses, payload, use_case_text=USE_CASE)
 
 
 def test_review_is_required():
@@ -744,11 +696,7 @@ def test_review_rejects_bad_evidence_and_unresolved_links_or_ownership():
         ],
     )
     with pytest.raises(ValueError, match="exact substring"):
-        apply_control_structure_semantic_review(
-            structure,
-            losses,
-            ControlStructureSemanticReview.model_validate(bad_quote),
-        )
+        _apply(structure, losses, bad_quote)
 
     unknown_source = review_payload(losses, structure)
     unknown_source["constraints"][0].update(
@@ -763,11 +711,7 @@ def test_review_rejects_bad_evidence_and_unresolved_links_or_ownership():
         ],
     )
     with pytest.raises(ValueError, match="source_ref"):
-        apply_control_structure_semantic_review(
-            structure,
-            losses,
-            ControlStructureSemanticReview.model_validate(unknown_source),
-        )
+        _apply(structure, losses, unknown_source)
 
     unresolved_hazard = review_payload(losses, structure)
     unresolved_hazard["hazards"][0].update(
@@ -775,12 +719,7 @@ def test_review_rejects_bad_evidence_and_unresolved_links_or_ownership():
         missing_fact="The consequence path is not established.",
     )
     with pytest.raises(ValueError, match="unresolved hazard"):
-        apply_control_structure_semantic_review(
-            structure,
-            losses,
-            ControlStructureSemanticReview.model_validate(unresolved_hazard),
-            use_case_text=USE_CASE,
-        )
+        _apply(structure, losses, unresolved_hazard, use_case_text=USE_CASE)
 
     unresolved_constraint = review_payload(losses, structure)
     unresolved_constraint["constraints"][0].update(
@@ -789,20 +728,10 @@ def test_review_rejects_bad_evidence_and_unresolved_links_or_ownership():
         missing_fact="The governing condition is not supplied.",
     )
     with pytest.raises(ValueError, match="owns an unresolved constraint"):
-        apply_control_structure_semantic_review(
-            structure,
-            losses,
-            ControlStructureSemanticReview.model_validate(unresolved_constraint),
-            use_case_text=USE_CASE,
-        )
+        _apply(structure, losses, unresolved_constraint, use_case_text=USE_CASE)
 
     unresolved_constraint["responsibilities"][0]["constraint_refs"] = []
-    result = apply_control_structure_semantic_review(
-        structure,
-        losses,
-        ControlStructureSemanticReview.model_validate(unresolved_constraint),
-        use_case_text=USE_CASE,
-    )
+    result = _apply(structure, losses, unresolved_constraint, use_case_text=USE_CASE)
     assert result.loss_analysis.security_constraints[0].related_hazards == []
 
 
@@ -860,12 +789,7 @@ def test_run17_scope_corrections_preserve_authorized_output_and_input_direction(
         revised_description="Do not send unauthorized secrets to a third-party model.",
         source_evidence=payload["hazards"][1]["source_evidence"],
     )
-    result = apply_control_structure_semantic_review(
-        structure,
-        losses,
-        ControlStructureSemanticReview.model_validate(payload),
-        use_case_text=use_case_text,
-    )
+    result = _apply(structure, losses, payload, use_case_text=use_case_text)
     assert (
         "unauthorized or wrong-account" in result.loss_analysis.hazards[0].description
     )
@@ -888,15 +812,7 @@ def test_call3_repairs_one_invalid_constraint_edge_once(tmp_path):
     valid = response_payload(review_payload(losses, structure))
     client = MockLLMClient()
     client.set_response_queue([invalid, valid])
-    result = _call_3_coordination(
-        llm_client=client,
-        use_case_text=USE_CASE,
-        control_structure=structure,
-        loss_analysis=losses,
-        run_dir=tmp_path,
-        loader=TemplateLoader(PROMPTS_DIR),
-        temperature=0,
-    )
+    result = _call_3(client, structure, losses, tmp_path)
     assert result.semantic_review is not None
     assert len(client.calls) == 2
     assert "Exact USE_CASE source context" in client.calls[0].user_prompt

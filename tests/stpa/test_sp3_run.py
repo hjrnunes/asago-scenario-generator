@@ -44,6 +44,17 @@ from asago_scenario_generator.pipeline.target_realization import TargetRealizati
 from tests.helpers.sp3_run import _make_ets, _setup_mock_client
 
 
+def _run_sp3(client, ets, cs, la, run_dir, **overrides):
+    return run_sp3(
+        llm_client=client,
+        enriched_threat_set=ets,
+        control_structure=cs,
+        loss_analysis=la,
+        run_dir=run_dir,
+        **overrides,
+    )
+
+
 def _target_profile_fixture() -> ExecutionTargetProfile:
     """Load the producer-owned target profile fixture for orchestration tests."""
     contract_root = (
@@ -191,13 +202,7 @@ class TestFullRun:
 
         with TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir) / "nested" / "deep" / "rundir"
-            result = run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=run_dir,
-            )
+            result = _run_sp3(client, ets, cs, la, run_dir)
             assert len(result.scenario_envelopes) == 1
             assert run_dir.exists()
             assert [outcome.status for outcome in result.candidate_outcomes] == [
@@ -256,13 +261,7 @@ class TestFullRun:
         with TemporaryDirectory() as tmpdir:
             run_dir = Path(tmpdir)
             (run_dir / "scenarios").mkdir(parents=True, exist_ok=True)
-            result = run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=run_dir,
-            )
+            result = _run_sp3(client, ets, cs, la, run_dir)
             assert len(result.scenario_envelopes) == 1
 
     def test_produces_scenario_envelopes_and_scorecard(self):
@@ -272,13 +271,7 @@ class TestFullRun:
         client = _setup_mock_client(2)
 
         with TemporaryDirectory() as tmpdir:
-            result = run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            result = _run_sp3(client, ets, cs, la, Path(tmpdir))
             assert len(result.scenario_envelopes) == 2
             assert (Path(tmpdir) / "scenarios").exists()
             assert any(Path(tmpdir).glob("scenarios/*.yaml"))
@@ -291,13 +284,7 @@ class TestFullRun:
         client = _setup_mock_client(2)
 
         with TemporaryDirectory() as tmpdir:
-            run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            _run_sp3(client, ets, cs, la, Path(tmpdir))
             calls = read_calls_jsonl(Path(tmpdir))
             stage_5 = [c for c in calls if c["stage"] == "stage_5"]
             shape = [c for c in calls if c["stage"] == "stage5_shape"]
@@ -311,13 +298,7 @@ class TestFullRun:
         client = _setup_mock_client(2)
 
         with TemporaryDirectory() as tmpdir:
-            run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            _run_sp3(client, ets, cs, la, Path(tmpdir))
             calls = read_calls_jsonl(Path(tmpdir))
             stage_7 = [c for c in calls if c["stage"] == "stage_7"]
             assert len(stage_7) == 0
@@ -329,13 +310,7 @@ class TestFullRun:
         client = _setup_mock_client(2)
 
         with TemporaryDirectory() as tmpdir:
-            run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            _run_sp3(client, ets, cs, la, Path(tmpdir))
             manifest_path = Path(tmpdir) / "run-manifest.yaml"
             assert manifest_path.exists()
             manifest = yaml.safe_load(manifest_path.read_text())
@@ -357,13 +332,7 @@ class TestFullRun:
         client = _setup_mock_client(2)
 
         with TemporaryDirectory() as tmpdir:
-            run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            _run_sp3(client, ets, cs, la, Path(tmpdir))
             yaml_files = sorted(Path(tmpdir).glob("scenarios/*.yaml"))
             assert len(yaml_files) == 2
             for yaml_file in yaml_files:
@@ -377,13 +346,7 @@ class TestFullRun:
         client = _setup_mock_client(3)
 
         with TemporaryDirectory() as tmpdir:
-            result = run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            result = _run_sp3(client, ets, cs, la, Path(tmpdir))
             assert len(result.scenario_envelopes) == 3
 
     def test_max_workers_flag(self):
@@ -393,14 +356,7 @@ class TestFullRun:
         client = _setup_mock_client(2)
 
         with TemporaryDirectory() as tmpdir:
-            run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-                max_workers=2,
-            )
+            _run_sp3(client, ets, cs, la, Path(tmpdir), max_workers=2)
             calls = read_calls_jsonl(Path(tmpdir))
             manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
             assert len(calls) == 4  # Stage 5 and shape, per threat
@@ -438,13 +394,7 @@ class TestErrorPaths:
         client = MockLLMClient()
 
         with TemporaryDirectory() as tmpdir:
-            result = run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            result = _run_sp3(client, ets, cs, la, Path(tmpdir))
             assert len(result.scenario_envelopes) == 0
             assert any("Stage 5" in e for e in result.stage_errors)
             assert (
@@ -463,13 +413,7 @@ class TestErrorPaths:
         )
 
         with TemporaryDirectory() as tmpdir:
-            result = run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            result = _run_sp3(client, ets, cs, la, Path(tmpdir))
             assert len(result.scenario_envelopes) == 0
             assert any(
                 "Stage 5 BDI generation failed" in e for e in result.stage_errors
@@ -518,13 +462,7 @@ class TestErrorPaths:
         )
 
         with TemporaryDirectory() as tmpdir:
-            result = run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            result = _run_sp3(client, ets, cs, la, Path(tmpdir))
 
         assert client.call_count == 2
         assert any(
@@ -619,13 +557,7 @@ class TestErrorPaths:
         )
 
         with TemporaryDirectory() as tmpdir:
-            result = run_sp3(
-                llm_client=client,
-                enriched_threat_set=ets,
-                control_structure=cs,
-                loss_analysis=la,
-                run_dir=Path(tmpdir),
-            )
+            result = _run_sp3(client, ets, cs, la, Path(tmpdir))
 
         assert result.scenario_envelopes == []
         assert client.call_count == 2

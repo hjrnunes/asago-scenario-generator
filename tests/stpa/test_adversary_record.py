@@ -49,6 +49,15 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.compile import (
 from tests.stpa.stage5_wire import normal_wire_queue
 
 
+def _generate(client, tmp_path):
+    return generate_bdi_for_context(
+        client,
+        _typed_tool_context(),
+        tmp_path,
+        assembly=_typed_tool_assembly(_typed_tool_context()),
+    )
+
+
 def _adversary(**overrides: object) -> Adversary:
     fields: dict[str, object] = {
         "kind": "malicious_customer",
@@ -155,12 +164,7 @@ class TestStage5AdversaryWire:
         client = MockLLMClient()
         client.set_response_queue(normal_wire_queue([payload, payload]))
 
-        result, error = generate_bdi_for_context(
-            client,
-            _typed_tool_context(),
-            tmp_path,
-            assembly=_typed_tool_assembly(_typed_tool_context()),
-        )
+        result, error = _generate(client, tmp_path)
 
         assert result is None
         assert error is not None
@@ -174,12 +178,7 @@ class TestStage5AdversaryWire:
         client = MockLLMClient()
         client.set_response_queue(normal_wire_queue([payload, payload]))
 
-        result, error = generate_bdi_for_context(
-            client,
-            _typed_tool_context(),
-            tmp_path,
-            assembly=_typed_tool_assembly(_typed_tool_context()),
-        )
+        result, error = _generate(client, tmp_path)
 
         assert result is None
         assert error is not None
@@ -200,12 +199,7 @@ class TestStage5AdversaryWire:
         client = MockLLMClient()
         client.set_response_queue(normal_wire_queue([payload, payload]))
 
-        result, error = generate_bdi_for_context(
-            client,
-            _typed_tool_context(),
-            tmp_path,
-            assembly=_typed_tool_assembly(_typed_tool_context()),
-        )
+        result, error = _generate(client, tmp_path)
 
         assert error is None
         assert result is not None
@@ -218,12 +212,7 @@ class TestStage5AdversaryWire:
         client = MockLLMClient()
         client.set_response_queue(normal_wire_queue([_provider_payload()]))
 
-        result, error = generate_bdi_for_context(
-            client,
-            _typed_tool_context(),
-            tmp_path,
-            assembly=_typed_tool_assembly(_typed_tool_context()),
-        )
+        result, error = _generate(client, tmp_path)
 
         assert error is None
         assert result is not None

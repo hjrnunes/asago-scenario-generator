@@ -153,13 +153,7 @@ class TestRevisionDelta02UsesRevisionDelta:
             ]
         )
         client.set_response_for(RevisionDelta, delta)
-        cs, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=_make_critic_findings(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        cs, warnings = _run_revision(client, tmp_path)
         # The LLM call used the RevisionDelta provider class as response_format
         assert client.calls[0].response_format is _RevisionDeltaProviderSet
         # A revised ControlStructure was produced
@@ -199,13 +193,7 @@ class TestRevisionDelta03MergeNewResponsibilities:
             ]
         )
         client.set_response_for(RevisionDelta, delta)
-        cs, _ = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=_make_critic_findings(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        cs, _ = _run_revision(client, tmp_path)
         resp_ids = {r.resp_id for r in cs.responsibilities}
         assert "RESP-1" in resp_ids
         assert "RESP-2" in resp_ids
@@ -245,13 +233,7 @@ class TestRevisionDelta04ModifiedReplace:
             ]
         )
         client.set_response_for(RevisionDelta, delta)
-        cs, _ = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=_make_critic_findings(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        cs, _ = _run_revision(client, tmp_path)
         resp1 = next(r for r in cs.responsibilities if r.resp_id == "RESP-1")
         assert resp1.description == "Updated controller description"
         # RESP-2 should be unchanged
@@ -305,13 +287,7 @@ class TestRevisionDelta05MergeNewCps:
             new_controlled_processes=[{"cp_id": "CP-2", "description": "New process"}]
         )
         client.set_response_for(RevisionDelta, delta)
-        cs, _ = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=_make_critic_findings(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        cs, _ = _run_revision(client, tmp_path)
         cp_ids = {cp.cp_id for cp in cs.controlled_processes}
         # The final payload is normalized by list position.  This fixture
         # starts without controlled processes, so the added process is CP-1.
@@ -345,13 +321,7 @@ class TestRevisionDelta06MergeNewCoordLinks:
             ]
         )
         client.set_response_for(RevisionDelta, delta)
-        cs, _ = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=_make_critic_findings(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        cs, _ = _run_revision(client, tmp_path)
         cl_ids = {cl.link_id for cl in cs.coordination_links}
         assert "CL-2" in cl_ids
 
@@ -433,13 +403,7 @@ class TestRevisionDelta10ValidatesFinal:
             ]
         )
         client.set_response_for(RevisionDelta, delta)
-        cs, _ = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=_make_critic_findings(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        cs, _ = _run_revision(client, tmp_path)
         # If CS was constructed, it passed validation
         assert isinstance(cs, ControlStructure)
         assert len(cs.responsibilities) == 3
@@ -514,13 +478,7 @@ class TestRevisionDeltaIdNormalization:
         )
         client.set_response_for(RevisionDelta, delta)
 
-        cs, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=_make_critic_findings(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        cs, warnings = _run_revision(client, tmp_path)
 
         added_resp = cs.responsibilities[-1]
         assert added_resp.resp_id == "RESP-3"
@@ -563,13 +521,7 @@ class TestRevisionDelta11StripEmptySafetyNet:
             ]
         )
         client.set_response_for(RevisionDelta, delta)
-        cs, warnings = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=_make_critic_findings(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        cs, warnings = _run_revision(client, tmp_path)
         resp_ids = {r.resp_id for r in cs.responsibilities}
         assert "RESP-4" not in resp_ids
         # A warning should be logged about the stripped empty responsibility
@@ -589,13 +541,7 @@ class TestRevisionDelta12EmptyDeltaPreserves:
         client = MockLLMClient()
         delta = _make_revision_delta_dict()
         client.set_response_for(RevisionDelta, delta)
-        cs, _ = run_revision(
-            llm_client=client,
-            control_structure=_make_control_structure(),
-            critic_findings=_make_critic_findings(),
-            use_case_text="Test",
-            run_dir=tmp_path,
-        )
+        cs, _ = _run_revision(client, tmp_path)
         resp_ids = {r.resp_id for r in cs.responsibilities}
         assert "RESP-1" in resp_ids
         assert "RESP-2" in resp_ids
@@ -887,6 +833,16 @@ def _cl_dict(
         },
         "description": description,
     }
+
+
+def _run_revision(client, tmp_path):
+    return run_revision(
+        llm_client=client,
+        control_structure=_make_control_structure(),
+        critic_findings=_make_critic_findings(),
+        use_case_text="Test",
+        run_dir=tmp_path,
+    )
 
 
 def _run_rev(tmp_path, delta_dict):
