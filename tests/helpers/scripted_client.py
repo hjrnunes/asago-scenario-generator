@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import hashlib
+import json
 from typing import Any
 
 from asago_scenario_generator.stpa.infra.llm import LLMResult
@@ -52,3 +54,13 @@ class ScriptedClient:
         return LLMResult(
             content=response, prompt_tokens=1, completion_tokens=1, duration_ms=1
         )
+
+
+def _request_digest(call: dict) -> str:
+    shape = {
+        key: value.__name__ if isinstance(value, type) else value
+        for key, value in call.items()
+    }
+    return hashlib.sha256(
+        json.dumps(shape, sort_keys=True, default=repr).encode("utf-8")
+    ).hexdigest()

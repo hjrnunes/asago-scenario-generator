@@ -12,9 +12,6 @@ import pytest
 
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
-from asago_scenario_generator.stpa.system_model.loss_analysis import (
-    derive_loss_analysis,
-)
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     DispositionRepairResponse,
     ObligationRepairResponse,
@@ -22,14 +19,13 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
 )
 from tests.stpa.sp1_helpers import MockLLMClient, valid_gap_draft_dict
 from tests.helpers.stage1a_targeted_repair import (
-    _USE_CASE,
     _VALID_OBLIGATION,
     _attempt_two_response,
     _complete_risk_response,
+    _derive_default,
     _disposition_repair_rows,
     _empty_gap_response,
     _gap_constraint_defect_response,
-    _occiai_cards,
     _repair_record,
     _stage1a_entries,
 )
@@ -38,16 +34,6 @@ ELLIPSIS_SPAN = "no sensitive health data... in model outputs"
 REPAIRED_SPAN = "no sensitive health data is included in model outputs"
 UNMAPPABLE_SPAN = "health records are never shared"
 GAP_RULE = "The neutralized system must uphold control SC-8."
-
-
-def _derive_default(client, tmp_path, **overrides):
-    return derive_loss_analysis(
-        llm_client=client,
-        use_case_text=_USE_CASE,
-        risk_cards=_occiai_cards(),
-        run_dir=tmp_path,
-        **overrides,
-    )
 
 
 def _risk_response_with_span(span: str) -> dict:

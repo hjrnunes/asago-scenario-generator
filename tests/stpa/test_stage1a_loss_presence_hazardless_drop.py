@@ -18,11 +18,14 @@ from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     HAZARDLESS_CONSTRAINT_DROP_KIND,
 )
-from tests.helpers.stage1a_targeted_repair import _repair_record, _stage1a_entries
+from tests.helpers.stage1a_targeted_repair import (
+    _client,
+    _repair_record,
+    _stage1a_entries,
+)
 from tests.stpa.test_stage1a_loss_presence_repair import (
     _CARD_IDS,
     _EMPTY_REPLY,
-    _client,
     _corrected_reply,
     _derive,
     _gap_reply,

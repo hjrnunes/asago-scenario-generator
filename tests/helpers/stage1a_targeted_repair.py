@@ -2,10 +2,18 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 import yaml
 from asago_scenario_generator.models.risk_card import RiskCard
+from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
+from asago_scenario_generator.stpa.system_model.loss_analysis import (
+    STAGE1A_MAX_COMPLETION_TOKENS,
+    derive_loss_analysis,
+)
 from tests.helpers.calls_log import read_calls_jsonl
+from tests.stpa.sp1_helpers import MockLLMClient
 
 
 # The exact supplied-card identities of the saved MiniOcciAI risk set, in the
@@ -358,3 +366,64 @@ def _repair_record(run_dir: Path) -> dict:
     return yaml.safe_load(
         (run_dir / "loss-analysis-repair.yaml").read_text(encoding="utf-8")
     )
+
+
+def _derive_default(client, tmp_path, **overrides):
+    return derive_loss_analysis(
+        llm_client=client,
+        use_case_text=_USE_CASE,
+        risk_cards=_occiai_cards(),
+        run_dir=tmp_path,
+        **overrides,
+    )
+
+
+class _CapClient(MockLLMClient):
+    """Report a completion-cap stop for undecodable string bodies."""
+
+    def __init__(
+        self, *, completion_tokens: int = STAGE1A_MAX_COMPLETION_TOKENS
+    ) -> None:
+        super().__init__()
+        self._stop_tokens = completion_tokens
+
+    def complete(self, *args, **kwargs) -> LLMResult:
+        result = super().complete(*args, **kwargs)
+        if isinstance(result.content, str):
+            try:
+                json.loads(result.content)
+            except json.JSONDecodeError:
+                return result.model_copy(
+                    update={
+                        "completion_tokens": self._stop_tokens,
+                        "request_controls": {
+                            "max_completion_tokens": kwargs.get("max_completion_tokens")
+                        },
+                    }
+                )
+        return result
+
+
+class _RawClient(MockLLMClient):
+    """Return string replies verbatim, as the provider client does."""
+
+    def _adapt_legacy_stage1a(self, content, response_format):
+        if isinstance(content, str):
+            return content
+        return super()._adapt_legacy_stage1a(content, response_format)
+
+
+def _client(*replies: str) -> MockLLMClient:
+    client = _RawClient()
+    client.set_response_for(LossAnalysisDraft, list(replies))
+    return client
+
+
+def _empty_gap_response_without_dispositions() -> dict:
+    """Return an empty complete-gap response without a risk_dispositions key."""
+    return {
+        "risk_card_losses": [],
+        "use_case_losses": [],
+        "hazards": [],
+        "security_constraints": [],
+    }

@@ -33,6 +33,7 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
 from tests.helpers.stage1a_targeted_repair import (
     _USE_CASE,
     _attempt_two_response,
+    _client,
     _occiai_cards,
     _repair_record,
     _stage1a_entries,
@@ -134,21 +135,6 @@ def _gap_reply() -> str:
             ],
         }
     )
-
-
-class _RawClient(MockLLMClient):
-    """Return string replies verbatim, as the provider client does."""
-
-    def _adapt_legacy_stage1a(self, content, response_format):
-        if isinstance(content, str):
-            return content
-        return super()._adapt_legacy_stage1a(content, response_format)
-
-
-def _client(*replies: str) -> MockLLMClient:
-    client = _RawClient()
-    client.set_response_for(LossAnalysisDraft, list(replies))
-    return client
 
 
 def _derive(client: MockLLMClient, tmp_path):

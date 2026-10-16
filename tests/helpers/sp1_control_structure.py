@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+from asago_scenario_generator.stpa.models.control_structure import (
+    ProcessModelPart,
+    Responsibility,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
     Loss,
@@ -124,3 +128,16 @@ def _valid_control_element_set_dict() -> dict:
             {"cp_id": "CP-1", "description": "Payment transaction system"}
         ],
     }
+
+
+def _responsibilities() -> list[Responsibility]:
+    return [
+        Responsibility(
+            resp_id=f"RESP-{number}",
+            description=f"Responsibility {number} serves the use case",
+            process_model_parts=[
+                ProcessModelPart(pm_id=f"PM-{number}-1", description="State")
+            ],
+        )
+        for number in (1, 2, 3)
+    ]

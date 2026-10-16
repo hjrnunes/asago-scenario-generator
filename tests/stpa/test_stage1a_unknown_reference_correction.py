@@ -36,6 +36,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
 from tests.helpers.calls_log import read_calls_jsonl, stage1a_steps
 from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import MockLLMClient, valid_risk_draft_dict
+from tests.helpers.stage1a_targeted_repair import (
+    _empty_gap_response_without_dispositions,
+)
 
 # The gap_analysis response body a recorded run stopped on: the constraint
 # lists its own handle in related_hazards instead of the hazard it declared.
@@ -308,7 +311,7 @@ class TestUnresolvedReferenceDrop:
 
         analysis = _derive(
             tmp_path,
-            [risk, _empty_gap()],
+            [risk, _empty_gap_response_without_dispositions()],
             [_constraint_repair("SC-1", ["H-9"])],
         )
 
@@ -370,7 +373,7 @@ class TestUnresolvedReferenceDrop:
     def test_a_draft_still_invalid_after_the_drop_stops(self, tmp_path) -> None:
         risk = valid_risk_draft_dict()
         risk["security_constraints"] = []
-        gap = _empty_gap()
+        gap = _empty_gap_response_without_dispositions()
         gap["security_constraints"] = [
             {
                 "handle": "payment_constraint",
@@ -404,15 +407,6 @@ class TestUnresolvedReferenceDrop:
 
         assert not (tmp_path / "loss-analysis.yaml").exists()
         assert _records(tmp_path, "reference_dropped") == []
-
-
-def _empty_gap() -> dict:
-    return {
-        "risk_card_losses": [],
-        "use_case_losses": [],
-        "hazards": [],
-        "security_constraints": [],
-    }
 
 
 def _two_hazard_gap() -> dict:
@@ -488,7 +482,7 @@ class TestRepairNeedsAnUnknownIdInEveryList:
                     _risk_with_two_hazards(
                         related_losses=["L-1"], related_hazards=["H-1", "H-9"]
                     ),
-                    _empty_gap(),
+                    _empty_gap_response_without_dispositions(),
                 ],
                 _constraint_repair("SC-1", ["H-1", "H-2"]),
                 "8d87587a173bff2ee94ec6e32fd96b2d8ca5f3100f73cc342c0d6a90ea6e6513",
@@ -554,7 +548,7 @@ class TestRepairNeedsAnUnknownIdInEveryList:
         with pytest.raises(StageError) as raised:
             _derive(
                 tmp_path,
-                [risk, _empty_gap()],
+                [risk, _empty_gap_response_without_dispositions()],
                 [_constraint_repair("SC-1", ["H-1", "H-1", "H-2"])],
             )
 
@@ -581,7 +575,7 @@ class TestRepairNeedsAnUnknownIdInEveryList:
         )
 
         with pytest.raises(StageError) as raised:
-            _derive(tmp_path, [risk, _empty_gap()], [])
+            _derive(tmp_path, [risk, _empty_gap_response_without_dispositions()], [])
 
         assert stage1a_steps(tmp_path) == ["risk_derivation"]
         assert "H-1 -> L-1" in str(raised.value)

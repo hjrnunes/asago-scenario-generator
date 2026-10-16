@@ -32,7 +32,6 @@ import yaml
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysisDraft
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
-    derive_loss_analysis,
     STAGE1A_MAX_COMPLETION_TOKENS,
     normalize_disposition_citations,
     _ProviderSecurityConstraint,
@@ -64,6 +63,7 @@ from tests.helpers.stage1a_targeted_repair import (
     _attempt_two_response,
     _complete_risk_response,
     _constraint,
+    _derive_default,
     _disposition_repair_rows,
     _dispositions,
     _empty_gap_response,
@@ -196,16 +196,6 @@ def _record_tuples(record: dict) -> list[tuple]:
     ]
 
 
-def _derive(client, tmp_path, **overrides):
-    return derive_loss_analysis(
-        llm_client=client,
-        use_case_text=_USE_CASE,
-        risk_cards=_occiai_cards(),
-        run_dir=tmp_path,
-        **overrides,
-    )
-
-
 class TestSavedObligationFailure:
     """Attempt 1: malformed obligation entries inside a preserved constraint."""
 
@@ -217,7 +207,7 @@ class TestSavedObligationFailure:
         )
         client.set_response_for(ObligationRepairResponse, _obligation_repair_response())
 
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         # The repaired entry lands; the constraint's own fields are intact.
         constraint = result.security_constraints[0]
@@ -272,7 +262,7 @@ class TestSavedObligationFailure:
             [_attempt_one_response(), _empty_gap_response()],
         )
         client.set_response_for(ObligationRepairResponse, _obligation_repair_response())
-        _derive(client, tmp_path)
+        _derive_default(client, tmp_path)
         repair_call = client.calls[1]
         assert repair_call.response_format is ObligationRepairResponse
         schema = repair_call.response_format.model_json_schema()
@@ -290,7 +280,7 @@ class TestSavedObligationFailure:
         client.set_response_for(ObligationRepairResponse, repair)
 
         with pytest.raises(StageError, match="targeted repair failed"):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         # The failed first attempt and the rejected repair, and nothing else.
         assert len(client.calls) == 2
         assert [entry["success"] for entry in _stage1a_entries(tmp_path)] == [
@@ -306,7 +296,7 @@ class TestSavedObligationFailure:
         client.set_response_for(ObligationRepairResponse, repair)
 
         with pytest.raises(StageError, match="out-of-scope repair identity"):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         assert len(client.calls) == 2
 
     def test_a5_repair_tampers_a_preserved_entry_is_rejected(self, tmp_path):
@@ -337,7 +327,7 @@ class TestSavedObligationFailure:
         with pytest.raises(
             StageError, match="altered or dropped the preserved obligation entry"
         ):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         assert len(client.calls) == 2
 
 
@@ -350,7 +340,7 @@ class TestObligationRepairRejections:
         client.set_response_for(LossAnalysisDraft, [_attempt_one_response()])
         client.set_response_for(ObligationRepairResponse, repair_payload)
         try:
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         except StageError as exc:
             return exc, client
         raise AssertionError("the repair must be rejected")
@@ -478,7 +468,7 @@ class TestObligationRepairRejections:
             },
         )
 
-        _derive(client, tmp_path)
+        _derive_default(client, tmp_path)
 
         repair_prompt = client.calls[1].user_prompt
         assert "set `observation_role` to `proxy`" in repair_prompt
@@ -525,7 +515,7 @@ class TestObligationRepairRejections:
         client.set_response_for(LossAnalysisDraft, [fixture])
 
         with pytest.raises(StageError) as exc_info:
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         message = str(exc_info.value)
         assert "obligation repair scope is not deterministically definable" in message
         assert reason in message
@@ -552,7 +542,7 @@ class TestChannelMeaningPreservation:
                 ]
             },
         )
-        return _derive(client, tmp_path)
+        return _derive_default(client, tmp_path)
 
     def test_a6_the_saved_defect_repairs_by_relocation_only(self, tmp_path):
         result = self._repair_run(
@@ -727,7 +717,7 @@ class TestChannelMeaningPreservation:
                 ]
             },
         )
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
         entries = result.security_constraints[0].obligations
         assert [entry.violated_via for entry in entries] == ["reply", "reply"]
 
@@ -785,7 +775,7 @@ class TestSavedDispositionFailure:
             {"risk_dispositions": _disposition_repair_rows()},
         )
 
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         assert len(result.risk_dispositions) == 112
         by_ref = {row.risk_ref: row for row in result.risk_dispositions}
@@ -838,7 +828,7 @@ class TestSavedDispositionFailure:
             DispositionRepairResponse,
             {"risk_dispositions": _disposition_repair_rows()},
         )
-        _derive(client, tmp_path)
+        _derive_default(client, tmp_path)
         repair_call = client.calls[1]
         assert repair_call.response_format is DispositionRepairResponse
         schema = repair_call.response_format.model_json_schema()
@@ -893,7 +883,7 @@ class TestSavedDispositionFailure:
         )
 
         with pytest.raises(StageError, match=match):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         assert len(client.calls) == 2
 
 
@@ -909,7 +899,7 @@ class TestUnsupportedFailureClasses:
         client.set_response_for(LossAnalysisDraft, [draft])
 
         with pytest.raises(StageError) as exc_info:
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         message = str(exc_info.value)
         assert "targeted repair failed" in message
         assert "draft_references failure class" in message
@@ -933,7 +923,7 @@ class TestUnsupportedFailureClasses:
         client.set_response_for(LossAnalysisDraft, [draft])
 
         with pytest.raises(StageError) as exc_info:
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         message = str(exc_info.value)
         assert "targeted repair unsupported" in message
         assert "wire violation outside the approved repair scope" in message
@@ -951,7 +941,7 @@ class TestUnsupportedFailureClasses:
         client.set_response_for(LossAnalysisDraft, [draft])
 
         with pytest.raises(StageError) as exc_info:
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         assert "mixes obligation-entry and risk-disposition wire failures" in str(
             exc_info.value
         )
@@ -967,7 +957,7 @@ class TestUnsupportedFailureClasses:
         client.set_response_for(LossAnalysisDraft, [draft])
 
         with pytest.raises(StageError) as exc_info:
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         assert "draft_semantics failure class" in str(exc_info.value)
         assert len(client.calls) == 1
 
@@ -1049,7 +1039,7 @@ class TestContainerErrorClassification:
         client.set_response_for(LossAnalysisDraft, responses())
 
         with pytest.raises(StageError) as exc_info:
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         message = str(exc_info.value)
         for fragment in fragments:
             assert fragment in message
@@ -1083,7 +1073,7 @@ class TestDeterministicCleanup:
         )
         warnings: list[str] = []
 
-        result = _derive(client, tmp_path, normalization_warnings=warnings)
+        result = _derive_default(client, tmp_path, normalization_warnings=warnings)
 
         assert len(result.risk_dispositions) == 112
         assert all(
@@ -1130,7 +1120,7 @@ class TestDeterministicCleanup:
         client.set_response_for(LossAnalysisDraft, [risk, gap])
         warnings: list[str] = []
 
-        result = _derive(client, tmp_path, normalization_warnings=warnings)
+        result = _derive_default(client, tmp_path, normalization_warnings=warnings)
 
         # Call 1's accounting survives; the gap's out-of-contract rows are
         # dropped deterministically and no repair call is made.
@@ -1175,7 +1165,7 @@ class TestDeterministicCleanup:
         )
         warnings: list[str] = []
 
-        result = _derive(client, tmp_path, normalization_warnings=warnings)
+        result = _derive_default(client, tmp_path, normalization_warnings=warnings)
 
         assert len(result.risk_dispositions) == 112
         assert all(
@@ -1262,7 +1252,7 @@ class TestIndependentReviewCorrections:
             },
         )
         warnings: list[str] = []
-        result = _derive(client, tmp_path, normalization_warnings=warnings)
+        result = _derive_default(client, tmp_path, normalization_warnings=warnings)
         # Exactly one disposition row survives for the duplicated card, and
         # the unsupplied row is gone.
         assert len(result.risk_dispositions) == 112
@@ -1363,7 +1353,7 @@ class TestIndependentReviewCorrections:
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
         warnings: list[str] = []
-        result = _derive(client, tmp_path, normalization_warnings=warnings)
+        result = _derive_default(client, tmp_path, normalization_warnings=warnings)
         assert len(result.risk_dispositions) == 112
         assert all(
             row.risk_ref != "not-a-supplied-risk" for row in result.risk_dispositions
@@ -1442,7 +1432,7 @@ class TestIndependentReviewCorrections:
             DispositionRepairResponse,
             {"risk_dispositions": _disposition_repair_rows()},
         )
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
         assert len(result.risk_dispositions) == 112
         entries = _stage1a_entries(tmp_path)
         assert [entry["step"] for entry in entries] == [
@@ -1491,7 +1481,7 @@ class TestIndependentReviewCorrections:
         )
         client.set_response_for(ObligationRepairResponse, _obligation_repair_response())
         with pytest.raises(StageError, match="never decoded as JSON"):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         # The risk repair happened; the gap body failed once with no second
         # dispatch and no gap repair call.
         entries = _stage1a_entries(tmp_path)
@@ -1576,7 +1566,7 @@ class TestIndependentReviewCorrections:
             ],
         )
         with pytest.raises(StageError, match="targeted repair failed"):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         entries = _stage1a_entries(tmp_path)
         assert [entry["step"] for entry in entries] == [
             "risk_derivation",
@@ -1632,7 +1622,7 @@ class TestIndependentReviewCorrections:
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [risk, _empty_gap_response()])
         with pytest.raises(StageError, match="no usable risk_ref identity"):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         assert len(client.calls) == 1
         record = _repair_record(tmp_path)
         assert [
@@ -1670,7 +1660,7 @@ class TestGapObligationRepair:
             _gap_obligation_repair_response(constraint_id="SC-8"),
         )
 
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         # The risk draft's records survive the authority merge untouched.
         assert len(result.risk_card_losses) == 7
@@ -1714,7 +1704,7 @@ class TestGapObligationRepair:
             _gap_obligation_repair_response(constraint_id="SC-8", entry=entry),
         )
 
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         repaired = result.security_constraints[7].obligations[0]
         assert repaired.source_outcome is None
@@ -1743,7 +1733,7 @@ class TestRepairScopeBoundaries:
         )
 
         with pytest.raises(StageError, match="targeted repair failed"):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
 
         assert len(client.calls) == 3
         assert client.calls[2].response_format is ReferenceRepairResponse
@@ -1763,7 +1753,7 @@ class TestRepairScopeBoundaries:
         )
 
         with pytest.raises(StageError, match="unknown obligation field"):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
 
         assert len(client.calls) == 2
         assert not any(
@@ -1827,7 +1817,7 @@ class TestRepairScopeBoundaries:
         }
         client = MockLLMClient()
         client.set_response_for(LossAnalysisDraft, [risk, gap])
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         entry = result.security_constraints[7].obligations[0]
         assert entry.rule_span == (
@@ -1879,7 +1869,7 @@ class TestRepairRecord:
         )
         client.set_response_for(ObligationRepairResponse, _obligation_repair_response())
 
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         assert len(result.risk_dispositions) == 112
         record = _repair_record(tmp_path)
@@ -1910,7 +1900,7 @@ class TestRepairRecord:
             [_obligation_repair_response(), _gap_obligation_repair_response()],
         )
 
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         assert len(result.security_constraints) == 2
         record = _repair_record(tmp_path)
@@ -1945,7 +1935,7 @@ class TestRepairRecord:
         )
 
         with pytest.raises(StageError, match="targeted repair failed"):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
 
         record = _repair_record(tmp_path)
         tuples = _record_tuples(record)
@@ -1975,7 +1965,7 @@ class TestRepairRecord:
         client.set_response_for(LossAnalysisDraft, [risk])
 
         with pytest.raises(StageError) as exc_info:
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         assert "container-type" in str(exc_info.value)
 
         record = _repair_record(tmp_path)
@@ -1999,7 +1989,7 @@ class TestRepairRecord:
             [_complete_risk_response(), _empty_gap_response()],
         )
 
-        _derive(client, tmp_path)
+        _derive_default(client, tmp_path)
 
         assert not (tmp_path / "loss-analysis-repair.yaml").exists()
 
@@ -2130,7 +2120,7 @@ class TestRepairPreflight:
             {"risk_dispositions": _disposition_repair_rows()},
         )
 
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         assert len(result.risk_dispositions) == 112
         entries = _stage1a_entries(tmp_path)
@@ -2310,7 +2300,7 @@ class TestUndeclaredDispositionReferences:
         client.set_response_for(LossAnalysisDraft, [draft, _empty_gap_response()])
         client.set_response_for(DispositionRepairResponse, self._corrected_rows(refs))
 
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         by_ref = {row.risk_ref: row for row in result.risk_dispositions}
         assert len(by_ref) == 112
@@ -2340,7 +2330,7 @@ class TestUndeclaredDispositionReferences:
         client.set_response_for(DispositionRepairResponse, rows)
 
         with pytest.raises(StageError, match="never declared: unsafe_state_hazard"):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         assert len(client.calls) == 2
 
     def test_obligation_repair_is_followed_by_one_disposition_repair(self, tmp_path):
@@ -2351,7 +2341,7 @@ class TestUndeclaredDispositionReferences:
         client.set_response_for(ObligationRepairResponse, _obligation_repair_response())
         client.set_response_for(DispositionRepairResponse, self._corrected_rows(refs))
 
-        result = _derive(client, tmp_path)
+        result = _derive_default(client, tmp_path)
 
         assert result.security_constraints[0].obligations[0].violated_via == "reply"
         by_ref = {row.risk_ref: row for row in result.risk_dispositions}
@@ -2385,5 +2375,5 @@ class TestUndeclaredDispositionReferences:
         )
 
         with pytest.raises(StageError):
-            _derive(client, tmp_path)
+            _derive_default(client, tmp_path)
         assert len(client.calls) == 2

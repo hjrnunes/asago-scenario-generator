@@ -31,7 +31,11 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     MISSING_HAZARD_CHAIN_REPAIR_KIND,
 )
-from tests.helpers.stage1a_targeted_repair import _repair_record, _stage1a_entries
+from tests.helpers.stage1a_targeted_repair import (
+    _client,
+    _repair_record,
+    _stage1a_entries,
+)
 from tests.stpa.sp1_helpers import MockLLMClient
 
 _CARD_IDS = ("credo-risk-026", "atlas-hallucination", "credo-risk-034")
@@ -158,21 +162,6 @@ def _gap_reply(*, hazards: list[dict], constraints: list[dict]) -> str:
 _COMPLETE_GAP_REPLY = _gap_reply(
     hazards=[_hazard(["L-1"])], constraints=[_constraint()]
 )
-
-
-class _RawClient(MockLLMClient):
-    """Return string replies verbatim, as the provider client does."""
-
-    def _adapt_legacy_stage1a(self, content, response_format):
-        if isinstance(content, str):
-            return content
-        return super()._adapt_legacy_stage1a(content, response_format)
-
-
-def _client(*replies: str) -> MockLLMClient:
-    client = _RawClient()
-    client.set_response_for(LossAnalysisDraft, list(replies))
-    return client
 
 
 def _cards() -> list[RiskCard]:

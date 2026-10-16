@@ -13,6 +13,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis import (
 )
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient, valid_risk_draft_dict, make_risk_cards
+from tests.helpers.stage1a_targeted_repair import (
+    _empty_gap_response_without_dispositions,
+)
 
 
 def _derive(client, tmp_path):
@@ -250,16 +253,6 @@ def _run15_correction_response() -> dict:
     }
 
 
-def _empty_gap_response() -> dict:
-    """Return an explicitly empty, complete-gap response."""
-    return {
-        "risk_card_losses": [],
-        "use_case_losses": [],
-        "hazards": [],
-        "security_constraints": [],
-    }
-
-
 def test_run15_gap_graph_merges_without_id_union_leakage(tmp_path):
     """Captured run-15 gap graph merges with exact-repeat deduplication.
 
@@ -447,7 +440,7 @@ def test_run16_canonicalizes_provenance_on_the_risk_draft(tmp_path):
     client = MockLLMClient()
     client.set_response_for(
         LossAnalysisDraft,
-        [risk, _empty_gap_response()],
+        [risk, _empty_gap_response_without_dispositions()],
     )
 
     result = derive_loss_analysis(
@@ -576,7 +569,7 @@ def test_gap_valid_disposition_is_not_malformed_row_cleanup(tmp_path):
     row is still an extra collection on the current gap wire and cannot
     overwrite the risk-stage accounting or be silently discarded.
     """
-    gap = _empty_gap_response()
+    gap = _empty_gap_response_without_dispositions()
     gap["risk_dispositions"] = [
         {
             "risk_ref": "atlas-001",

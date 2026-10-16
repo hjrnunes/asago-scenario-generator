@@ -44,18 +44,12 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
     ControlledProcess,
 )
-from asago_scenario_generator.stpa.models.loss_analysis import (
-    Hazard,
-    Loss,
-    LossAnalysis,
-    LossProvenance,
-    SecurityConstraint,
-)
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.sp3_run import _semantics_wire
 from tests.helpers.stage5_assembly import stage5_assembly
 from tests.helpers.stage5_compile import compile_draft, draft_payload, factor
+from tests.helpers.stpa_builders import make_loss_analysis
 
 UCA_SLOT = "RESP-1:CA-1-1:WRONG_TIMING"
 ICA_ID = "RESP-1:CA-1-1:WRONG_TIMING:1"
@@ -111,26 +105,6 @@ def _control_structure() -> ControlStructure:
     )
 
 
-def _loss_analysis() -> LossAnalysis:
-    return LossAnalysis(
-        risk_card_losses=[
-            Loss(
-                loss_id="L-1",
-                description="Loss",
-                provenance=LossProvenance.risk_card,
-                source_risk_cards=["r1"],
-            )
-        ],
-        use_case_losses=[],
-        hazards=[Hazard(hazard_id="H-1", description="Hazard", related_losses=["L-1"])],
-        security_constraints=[
-            SecurityConstraint(
-                constraint_id="SC-1", rule="Must validate", related_hazards=["H-1"]
-            )
-        ],
-    )
-
-
 def _declare(
     kind: CausalFactorKind,
     source_id: str,
@@ -152,7 +126,7 @@ def _assemble(declarations: list[CausalFactorDeclaration]) -> ScenarioSpec:
     """
     control_structure = _control_structure()
     context = build_scenario_generation_context(
-        _threat(), control_structure, _loss_analysis(), scenario_id="SCN-001"
+        _threat(), control_structure, make_loss_analysis(), scenario_id="SCN-001"
     )
     choices = list(_causal_source_choices(context))
     handles = []
@@ -308,7 +282,7 @@ class TestRunSp3ProductionWiring:
     ):
 
         control_structure = _control_structure()
-        loss_analysis = _loss_analysis()
+        loss_analysis = make_loss_analysis()
         threats = [
             StructuralThreat(
                 ica_slot_id=UCA_SLOT,
