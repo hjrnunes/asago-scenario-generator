@@ -59,7 +59,11 @@ from typing import Any, Callable, Iterator, Mapping
 
 from pydantic import BaseModel
 
-from asago_scenario_generator.stpa.infra.call_log import CallLog, _safe_error
+from asago_scenario_generator.stpa.infra.call_log import (
+    CallLog,
+    _safe_error,
+    jsonl_lines,
+)
 from asago_scenario_generator.stpa.infra.transport_retry import (
     note_transport_retry,
     pause_before_retry,
@@ -373,9 +377,7 @@ class ProviderCallReplayer:
     def __init__(self, directory: Path) -> None:
         path = Path(directory) / RECORD_FILENAME
         records = [
-            json.loads(line)
-            for line in path.read_text(encoding="utf-8").splitlines()
-            if line.strip()
+            json.loads(line) for line in jsonl_lines(path.read_text(encoding="utf-8"))
         ]
         records.sort(key=lambda record: record["sequence"])
         self.directory = Path(directory)

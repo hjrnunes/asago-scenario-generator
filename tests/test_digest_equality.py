@@ -73,6 +73,7 @@ from asago_scenario_generator.pipeline.synthesis_manifest import (
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _manifest_artifact_identity,
 )
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.models.scenario_context import semantic_digest
 from asago_scenario_generator.target_discovery.prompts import (
     _canonical_json as prompt_canonical_json,
@@ -128,7 +129,7 @@ def _plan_yaml(unit: str, inputs_root: Path) -> str:
 
 def _digest_records(unit: str) -> list[dict[str, Any]]:
     text = gzip.decompress((FIXTURES / unit / "semantic-digests.jsonl.gz").read_bytes())
-    return [json.loads(line) for line in text.decode("utf-8").splitlines()]
+    return [json.loads(line) for line in jsonl_lines(text.decode("utf-8"))]
 
 
 @pytest.mark.parametrize("unit", UNITS)

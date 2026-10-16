@@ -14,6 +14,8 @@ from typing import Any
 
 import yaml
 
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
+
 __all__ = ["hash_model", "count_calls_by_stage"]
 
 
@@ -76,9 +78,7 @@ def count_calls_by_stage(run_dir: Path) -> dict[str, dict[str, int]]:
         return {}
 
     counts: dict[str, dict[str, int]] = {}
-    for line in calls_file.read_text().splitlines():
-        if not line.strip():
-            continue
+    for line in jsonl_lines(calls_file.read_text(encoding="utf-8")):
         entry = json.loads(line)
         stage = entry.get("stage", "unknown")
         if stage not in counts:

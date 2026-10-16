@@ -119,6 +119,13 @@ def test_a_replay_that_differs_only_in_allowed_ways_matches(trees) -> None:
     assert differences == []
 
 
+def test_a_jsonl_record_with_unicode_line_separators_parses_whole() -> None:
+    record = {"text": "a\u0085b\u2028c\u2029d"}
+    text = json.dumps(record, ensure_ascii=False) + "\n"
+
+    assert replay_gate._parse(text, ".jsonl") == [record]
+
+
 def test_an_unexplained_field_difference_is_reported_with_its_path(trees) -> None:
     recorded, replayed, path_map = trees
     _jsonl(

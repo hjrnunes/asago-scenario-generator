@@ -19,6 +19,7 @@ import pytest
 from openai.types.chat import ChatCompletion
 from pydantic import BaseModel
 
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
@@ -574,7 +575,7 @@ def _mask(value: Any) -> Any:
 def _comparable(path: Path) -> Any:
     """Return bytes, or masked content for files that carry run-time stamps."""
     if path.name.endswith(".jsonl"):
-        return [_mask(json.loads(line)) for line in path.read_text().splitlines()]
+        return [_mask(json.loads(line)) for line in jsonl_lines(path.read_text())]
     if path.name == "run-manifest.yaml":
         import yaml
 

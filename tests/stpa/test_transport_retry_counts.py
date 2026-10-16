@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     count_requests,
 )
@@ -51,7 +52,7 @@ def test_the_logged_request_controls_name_the_retry(tmp_path: Path) -> None:
 
     assert outcome.result is not None
     log = (tmp_path / "calls.jsonl").read_text(encoding="utf-8")
-    entry = json.loads(log.splitlines()[-1])
+    entry = json.loads(jsonl_lines(log)[-1])
     assert entry["request_controls"]["transport_retries"] == 1
 
 
@@ -61,7 +62,7 @@ def test_a_failed_call_logs_the_retry_it_made(tmp_path: Path) -> None:
 
     assert outcome.error is not None
     log = (tmp_path / "calls.jsonl").read_text(encoding="utf-8")
-    entry = json.loads(log.splitlines()[-1])
+    entry = json.loads(jsonl_lines(log)[-1])
     assert entry["request_controls"]["transport_retries"] == 1
 
 
@@ -69,5 +70,5 @@ def test_a_call_without_a_retry_logs_no_retry_control(tmp_path: Path) -> None:
     _call(_client(_Provider(_answer)), tmp_path)
 
     log = (tmp_path / "calls.jsonl").read_text(encoding="utf-8")
-    entry = json.loads(log.splitlines()[-1])
+    entry = json.loads(jsonl_lines(log)[-1])
     assert "transport_retries" not in entry["request_controls"]
