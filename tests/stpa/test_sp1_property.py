@@ -8,11 +8,14 @@ foundation property tests in ``test_property.py``:
   ``CriticFindings`` round-trip through YAML without loss.
 - **Parse-ability**: Any valid dict representation of the internal models
   is accepted by ``model_validate``.
+- **call_with_policy**: Failed and successful calls keep their return
+  shape and log the stage and step labels verbatim.
 """
 
 from __future__ import annotations
 
 from pathlib import Path
+import tempfile
 
 from hypothesis import HealthCheck, given, settings, strategies as st
 import pytest
@@ -195,196 +198,85 @@ class TestEmptyModelInvariants:
 # call_with_policy return-shape and logging invariants
 # ---------------------------------------------------------------------------
 
+st_label = st.text(
+    alphabet=st.characters(
+        whitelist_categories=("Ll", "Lu", "Nd"),
+        whitelist_characters=("_",),
+    ),
+    min_size=1,
+    max_size=20,
+)
+
 
 class TestSafeLlmCallInvariants:
     """Property tests for ``call_with_policy`` return-shape and logging invariants.
 
     These verify that the error-handling wrapper maintains consistent
-    contracts regardless of which exception type or stage/step labels
-    are used:
+    contracts regardless of the exception text or stage/step labels used:
 
     - **Return-shape dichotomy**: On success, ``(model, result, None)``;
-      on failure, ``(None, result_or_None, error_str)``.  The ``error``
-      slot and the ``model`` slot are never both non-None.
-    - **Failure logging**: Every failed call produces a ``calls.jsonl``
-      entry with ``success=false`` and a non-empty ``error`` field.
+      on failure, ``(None, result_or_None, error_str)``.
+    - **Logging**: Every call produces one ``calls.jsonl`` entry; a failed
+      call logs ``success=false`` with an error, a successful call logs
+      ``success=true`` without one.
     - **Stage/step propagation**: The stage and step labels passed to
       ``call_with_policy`` appear verbatim in the logged entry.
     """
 
     @given(
-        stage=st.text(
-            alphabet=st.characters(
-                whitelist_categories=("Ll", "Lu", "Nd"),
-                whitelist_characters=("_",),
-            ),
-            min_size=1,
-            max_size=20,
-        ),
-        step=st.text(
-            alphabet=st.characters(
-                whitelist_categories=("Ll", "Lu", "Nd"),
-                whitelist_characters=("_",),
-            ),
-            min_size=1,
-            max_size=20,
-        ),
+        stage=st_label,
+        step=st_label,
         error_msg=st.text(min_size=1, max_size=50),
+        val=st.integers(min_value=0, max_value=1000),
     )
     @settings(
         max_examples=25,
         deadline=None,
         suppress_health_check=[HealthCheck.function_scoped_fixture],
     )
-    def test_failure_return_shape(self, tmp_path, stage, step, error_msg):
-        """On failure: model is None, error is non-None, result may be None."""
+    def test_failure_and_success_shape_and_log(
+        self, tmp_path, stage, step, error_msg, val
+    ):
+        class _Failing(BaseModel):
+            val: int = 0
 
-        class _M(BaseModel):
+        class _Passing(BaseModel):
             val: int = 0
 
         client = MockLLMClient()
-        client.set_exception_for(_M, RuntimeError(error_msg))
+        client.set_exception_for(_Failing, RuntimeError(error_msg))
+        client.set_response_for(_Passing, {"val": val})
+        run_dir = Path(tempfile.mkdtemp(dir=tmp_path))
 
-        outcome = call_with_policy(
-            llm_client=client,
-            system_prompt="s",
-            user_prompt="u",
-            response_format=_M,
-            run_dir=tmp_path,
-            stage=stage,
-            step=step,
-            temperature=0.4,
-            policy=CorrectionPolicy(),
-        )
-        model, error = outcome.value, outcome.error
-        assert model is None
-        assert error is not None
-        assert error_msg in error
+        def send(response_format):
+            return call_with_policy(
+                llm_client=client,
+                system_prompt="s",
+                user_prompt="u",
+                response_format=response_format,
+                run_dir=run_dir,
+                stage=stage,
+                step=step,
+                temperature=0.4,
+                policy=CorrectionPolicy(),
+            )
 
-    @given(
-        stage=st.text(
-            alphabet=st.characters(
-                whitelist_categories=("Ll", "Lu", "Nd"),
-                whitelist_characters=("_",),
-            ),
-            min_size=1,
-            max_size=20,
-        ),
-        step=st.text(
-            alphabet=st.characters(
-                whitelist_categories=("Ll", "Lu", "Nd"),
-                whitelist_characters=("_",),
-            ),
-            min_size=1,
-            max_size=20,
-        ),
-    )
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_failure_logged_with_success_false_and_error(self, tmp_path, stage, step):
-        """Failed calls are logged with success=false and a non-empty error."""
+        failed = send(_Failing)
+        assert failed.value is None
+        assert failed.error is not None
+        assert error_msg in failed.error
 
-        class _M(BaseModel):
-            val: int = 0
+        passed = send(_Passing)
+        assert passed.value is not None
+        assert passed.value.val == val
+        assert passed.error is None
+        assert passed.result is not None
 
-        # Clear any prior entries (function-scoped fixture reused across examples)
-        calls_file = tmp_path / "calls.jsonl"
-        if calls_file.exists():
-            calls_file.unlink()
-
-        client = MockLLMClient()
-        client.set_exception_for(_M, RuntimeError("boom"))
-
-        call_with_policy(
-            llm_client=client,
-            system_prompt="s",
-            user_prompt="u",
-            response_format=_M,
-            run_dir=tmp_path,
-            stage=stage,
-            step=step,
-            policy=CorrectionPolicy(),
-        )
-        calls_file = tmp_path / "calls.jsonl"
-        assert calls_file.exists()
-        entries = read_calls_jsonl(tmp_path)
-        assert len(entries) == 1
-        assert entries[0]["success"] is False
-        assert entries[0]["error"]
-        assert entries[0]["stage"] == stage
-        assert entries[0]["step"] == step
-
-    @given(
-        val=st.integers(min_value=0, max_value=1000),
-    )
-    @settings(
-        max_examples=20,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_success_return_shape(self, tmp_path, val):
-        """On success: model is non-None, error is None."""
-
-        class _M(BaseModel):
-            val: int = 0
-
-        client = MockLLMClient()
-        client.set_response_for(_M, {"val": val})
-
-        outcome = call_with_policy(
-            llm_client=client,
-            system_prompt="s",
-            user_prompt="u",
-            response_format=_M,
-            run_dir=tmp_path,
-            stage="test",
-            step="test",
-            policy=CorrectionPolicy(),
-        )
-        model, result, error = outcome.value, outcome.result, outcome.error
-        assert model is not None
-        assert model.val == val
-        assert error is None
-        assert result is not None
-
-    @given(
-        val=st.integers(min_value=0, max_value=1000),
-    )
-    @settings(
-        max_examples=15,
-        deadline=None,
-        suppress_health_check=[HealthCheck.function_scoped_fixture],
-    )
-    def test_success_logged_with_success_true_no_error(self, tmp_path, val):
-        """Successful calls are logged with success=true and no error field."""
-
-        class _M(BaseModel):
-            val: int = 0
-
-        # Clear any prior entries (function-scoped fixture reused across examples)
-        calls_file = tmp_path / "calls.jsonl"
-        if calls_file.exists():
-            calls_file.unlink()
-
-        client = MockLLMClient()
-        client.set_response_for(_M, {"val": val})
-
-        call_with_policy(
-            llm_client=client,
-            system_prompt="s",
-            user_prompt="u",
-            response_format=_M,
-            run_dir=tmp_path,
-            stage="test",
-            step="test",
-            policy=CorrectionPolicy(),
-        )
-        calls_file = tmp_path / "calls.jsonl"
-        assert calls_file.exists()
-        entries = read_calls_jsonl(tmp_path)
-        assert len(entries) == 1
-        assert entries[0]["success"] is True
-        assert "error" not in entries[0]
+        failure_entry, success_entry = read_calls_jsonl(run_dir)
+        assert failure_entry["success"] is False
+        assert failure_entry["error"]
+        assert success_entry["success"] is True
+        assert "error" not in success_entry
+        for entry in (failure_entry, success_entry):
+            assert entry["stage"] == stage
+            assert entry["step"] == step
