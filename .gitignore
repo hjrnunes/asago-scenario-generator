@@ -48,12 +48,7 @@ config/model-profiles.yaml.backup
 .factory/
 .opencode/
 .superpowers/
-.swarmforge/
-.swarmforge-droid/
 .worktrees/
-swarmforge/
-swarm
-close-swarm
 ai/*
 !ai/findings/
 ai/findings/*
@@ -102,4 +97,3 @@ opencode.json
 .cache/
 data/reference-gym/
 tests/test_reference_gym_contract.py
-.swarmforge-droid/
