@@ -49,42 +49,7 @@ config/model-profiles.yaml.backup
 .opencode/
 .superpowers/
 .worktrees/
-ai/*
-!ai/findings/
-ai/findings/*
-!ai/findings/phase12-live-run-klarna-nhs-2026-08-29.md
-!ai/findings/stpa-taxonomy-phase3-closed-loop-spec.md
-!ai/findings/stpa-taxonomy-phase3-swarmforge-tasks.md
-!ai/findings/stpa-taxonomy-phase4-combined-projection-spec.md
-!ai/findings/stpa-taxonomy-phase4-swarmforge-tasks.md
-!ai/findings/garak-execution-orchestration-spec.md
-!ai/findings/stpa-execution-bundle-producer-spec.md
-!ai/findings/stpa-execution-classification-and-binding-spec.md
-!ai/findings/stpa-taxonomy-phase4-live-pilot-runbook.md
-!ai/findings/stpa-obligation-aware-prompt-contract-correction-spec.md
-!ai/findings/stpa-obligation-aware-prompt-contract-live-qualification-2026-09-01.md
-!ai/findings/stpa-synthesis-semantic-quality-spec.md
-!ai/findings/stpa-only-execution-cutover-spec.md
-!ai/findings/session-handoff-stpa-taxonomy-garak-2026-09-03.md
-!ai/findings/stpa-garak-readiness-corrections-spec.md
-!ai/findings/klarna-live-prompt-contract-recovery-fixes-spec-2026-09-04.md
-!ai/findings/stpa-execution-environment-basis-default-fix-spec-2026-09-04.md
-!ai/findings/stpa-semantic-outcome-lineage-and-obligation-attribution-spec-2026-09-04.md
-# Preserve the committed Klarna review records alongside the retained findings above.
-!ai/findings/klarna-automatic-garak-iteration-log-2026-09-05.md
-!ai/findings/klarna-iteration-9-quality-assessment-2026-09-06.md
-!ai/findings/klarna-iteration-10-quality-assessment-2026-09-06.md
-!ai/findings/klarna-iteration-11-quality-assessment-2026-09-06.md
-!ai/findings/klarna-iteration-12-quality-assessment-2026-09-06.md
-!ai/findings/klarna-iteration-13-quality-assessment-2026-09-06.md
-!ai/findings/klarna-iteration-14-quality-assessment-2026-09-06.md
-!ai/findings/klarna-iteration-15-quality-assessment-2026-09-06.md
-!ai/findings/klarna-iteration-16-quality-assessment-2026-09-06.md
-!ai/findings/klarna-iteration-17-quality-assessment-2026-09-06.md
-!ai/findings/klarna-iteration-18-bounded-corrections-2026-09-06.md
-!ai/findings/klarna-iteration-19-quality-2026-09-06.md
-!ai/findings/klarna-iteration-20-quality-2026-09-06.md
-!ai/findings/klarna-semantic-review-compilation-quality-2026-09-05.md
+ai/
 opencode.json
 
 # Preserve the organization-managed Claude project scaffold only
