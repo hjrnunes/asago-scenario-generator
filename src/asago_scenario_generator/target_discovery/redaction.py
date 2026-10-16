@@ -17,21 +17,56 @@ _SENSITIVE_KEY = re.compile(
     r"api[_-]?key|access[_-]?key|private[_-]?key|default|examples?|sample)",
     re.IGNORECASE,
 )
+# An unquoted value ends at whitespace or a closing delimiter. A marker left by
+# an earlier pass counts as part of the value, so a second pass replaces it with
+# an identical marker instead of leaving a stray "]".
+_VALUE_TOKEN = r"(?:\[REDACTED\]|[^\s,;\]}])+"
+# A quoted value runs to its closing quote on the same line and may hold
+# escaped quotes. Text glued to the closing quote belongs to the value: leaving
+# it behind would make a second pass redact it and break idempotence. A
+# backslash matches only as an escape, so each character has one way to match;
+# otherwise an unclosed quote before a backslash run backtracks exponentially.
+_QUOTED_VALUE = r"(?P<quote>[\"'])(?:\\.|(?!(?P=quote))[^\\\n])*(?P=quote)[^\s,;\]}]*"
+
+
+def _text_key_prefix(names: str) -> str:
+    """Match a key, with or without quotes around it, and its separator.
+
+    Group ``open`` records a quote before the key, which marks JSON or a
+    Python repr, where the value keeps its own quotes.
+    """
+    return rf"(?P<key>(?P<open>[\"']?)\b(?:{names})\b[\"']?\s*[:=]\s*)"
+
+
 _SENSITIVE_TEXT = re.compile(
-    r"(\b(?:secret|token|password|passwd|credential|"
-    r"api[_-]?key|access[_-]?key|private[_-]?key|default|examples?|sample)"
-    r"\b\s*[:=]\s*)"
-    r"([^\s,;\]}]+)",
+    _text_key_prefix(
+        r"secret|token|password|passwd|credential|"
+        r"api[_-]?key|access[_-]?key|private[_-]?key|default|examples?|sample"
+    )
+    + "(?:"
+    + _QUOTED_VALUE
+    + "|"
+    + _VALUE_TOKEN
+    + ")",
     re.IGNORECASE,
 )
-# An authorization value is usually "<scheme> <credential>" (Bearer, Basic,
-# Digest, ...). The optional scheme word and the credential after it both
-# belong to the value, so neither survives. The scheme and credential stay on
-# one line.
+# An authorization value is usually "<scheme> <credential>". A word joins the
+# credential only when it is a registered HTTP authentication scheme, so prose
+# such as "Authorization: required for admin tools" loses one word, not two.
+# The scheme and credential stay on one line.
+_AUTHENTICATION_SCHEME = (
+    r"(?:basic|bearer|digest|negotiate|ntlm|token|hoba|mutual|aws4-hmac-sha256)"
+)
 _AUTHORIZATION_TEXT = re.compile(
-    r"(\bauthorization\b\s*[:=]\s*)"
-    r"(?:[\"']?[A-Za-z][A-Za-z0-9_-]*[ \t]+)?"
-    r"[^\s,;\]}]+",
+    _text_key_prefix("authorization")
+    + "(?:"
+    + _QUOTED_VALUE
+    + "|"
+    + "(?:"
+    + _AUTHENTICATION_SCHEME
+    + r"[ \t]+)?"
+    + _VALUE_TOKEN
+    + ")",
     re.IGNORECASE,
 )
 
@@ -182,8 +217,14 @@ def _redacted_json_value(value: Any) -> Any:
 
 def _sanitize_text(value: str) -> str:
     """Redact credential-like key/value fragments embedded in prose."""
-    value = _AUTHORIZATION_TEXT.sub(rf"\1{_REDACTED}", value)
-    return _SENSITIVE_TEXT.sub(rf"\1{_REDACTED}", value)
+    value = _AUTHORIZATION_TEXT.sub(_redact_text_match, value)
+    return _SENSITIVE_TEXT.sub(_redact_text_match, value)
+
+
+def _redact_text_match(match: re.Match[str]) -> str:
+    """Replace the value of one key/value match, keeping a quoted pair's quotes."""
+    quote = match["quote"] if match["open"] else None
+    return f"{match['key']}{quote or ''}{_REDACTED}{quote or ''}"
 
 
 __all__ = ["sanitize_json", "sanitize_tool_fields"]
