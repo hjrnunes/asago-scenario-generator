@@ -1,10 +1,9 @@
 """Discovered target evidence for the systemic analysis (Stages 1a and 2).
 
-Owner decision (2026-09-29 STPA review, recommendation 5): the discovered
-tool inventory, state schema, session fields, and the target's own policy
-snippets enter the Stage 1a hazard and constraint calls and Stage 2 as
-evidence.  Losses stay derived from risk cards.  The evidence enriches the
-one unified analysis; it never selects a different derivation.
+The discovered tool inventory, state schema, session fields, and the target's
+own policy snippets enter the Stage 1a hazard and constraint calls and
+Stage 2 as evidence.  Losses stay derived from risk cards.  The evidence
+enriches the one unified analysis; it never selects a different derivation.
 
 The block is a deterministic, bounded projection of generator-visible
 discovery outputs.  Every item carries an exact evidence reference so the

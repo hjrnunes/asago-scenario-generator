@@ -441,7 +441,7 @@ def test_conditional_constraint_revision_rewords_the_rule_once():
     Call 3 renders the authored rule with the applies-when conditions shown
     separately as fixed context, so the model's revised_description is the
     corrected rule.  The composed description must carry the conditions
-    exactly once (Phase 1.3 as amended).
+    exactly once.
     """
     losses, draft = authorities()
     constraint = losses.security_constraints[0]

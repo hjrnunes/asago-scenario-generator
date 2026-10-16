@@ -131,7 +131,7 @@ class SP3CandidateStatus(str, Enum):
     """One terminal lifecycle status for a requested SP3 candidate."""
 
     published = "published"
-    # Phase 3.2: ``kind: none`` marks a functional test.  It is persisted for
+    # ``kind: none`` marks a functional test.  It is persisted for
     # the owner's information but never enters the execution bundle.
     functional_test = "functional_test"
     generation_failed = "generation_failed"
@@ -159,8 +159,8 @@ class SP3RunResult:
     scenario_envelopes: list[ScenarioEnvelope] = field(default_factory=list)
     stage_errors: list[str] = field(default_factory=list)
     validation_errors: list[str] = field(default_factory=list)
-    # Phase 3.2 functional-test specs (``kind: none``).  They are persisted
-    # under scenarios/ but never enter scenario_specs, the bundle, or the
+    # Functional-test specs (``kind: none``).  They are persisted under
+    # scenarios/ but never enter scenario_specs, the bundle, or the
     # obligation accounting above.
     functional_test_specs: list[ScenarioSpec] = field(default_factory=list)
     # A real SP3 run always returns a tuple, including ``()`` when no
@@ -876,10 +876,10 @@ def _persist_functional_test_candidates(
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
-    Phase 3.2: a functional test is retained in the run for the owner's
-    information.  It renders deterministically (no provider calls), never
-    prepares an execution projection, and never enters the bundle index.  A
-    functional scenario is *not* rejected for lacking an attacker.
+    A functional test is retained in the run for the owner's information.
+    It renders deterministically (no provider calls), never prepares an
+    execution projection, and never enters the bundle index.  A functional
+    scenario is *not* rejected for lacking an attacker.
     """
     for spec in specs:
         prior_error_count = len(stage_errors)
@@ -1495,13 +1495,13 @@ def _manifest_input_hashes(
     }
     if preserved.loss_analysis_input_hash is not None:
         # A pinned run's manifest input hash is the digest of the supplied
-        # file, not the canonical model hash (spec Phase 5, qualification
-        # rule 1: a qualifying run's manifest shows the pinned digest).
+        # file, not the canonical model hash (a qualifying run's manifest shows
+        # the pinned digest).
         input_hashes["loss_analysis"] = preserved.loss_analysis_input_hash
     if target_observations is not None:
         # The observation set's content digest pins the exact Stage 5
-        # companion this run consumed (round 48 ruling 1); it is run-manifest
-        # bookkeeping, not a schema field on any provider wire.
+        # companion this run consumed; it is run-manifest bookkeeping,
+        # not a schema field on any provider wire.
         input_hashes["target_observations"] = target_observations.content_digest
     return input_hashes
 

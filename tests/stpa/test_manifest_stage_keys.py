@@ -155,7 +155,7 @@ def test_canonical_hash_wins_for_a_run_without_a_prior_manifest(tmp_path):
 
 
 def test_manifest_records_the_observation_content_digest(tmp_path):
-    """Round 48 ruling 1: input_hashes carries the observation set digest."""
+    """input_hashes carries the observation set digest."""
     run_dir = tmp_path / "observed"
     run_dir.mkdir()
     snapshot = TargetObservationSnapshot.create(

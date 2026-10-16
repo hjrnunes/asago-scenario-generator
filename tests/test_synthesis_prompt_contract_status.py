@@ -1,9 +1,9 @@
 """A synthesis run that loses every candidate to the prompt check fails.
 
-The b8-glm L3 occiai-r1 run generated no scenario and exited 0: all 119
-synthesis calls failed the prompt-reference check (``PromptContractError``)
-before any request was sent, every slot became unresolved, and the manifest
-read ``no_candidates``.
+A recorded OcciAI run generated no scenario and exited 0: all 119 synthesis
+calls failed the prompt-reference check (``PromptContractError``) before
+any request was sent, every slot became unresolved, and the manifest read
+``no_candidates``.
 """
 
 from __future__ import annotations
@@ -32,8 +32,8 @@ from asago_scenario_generator.stpa.infra.call_log import append_call_log
 from tests.cli_helpers import PlainCliRunner
 from tests.helpers.synthesis import _FakeAdapters, _inputs
 
-# Two of the blocked rows of the L3 occiai-r1 call log, trimmed to the fields
-# the manifest copies.
+# Two of the blocked rows of that run's call log, trimmed to the fields the
+# manifest copies.
 _CONTRACT_FAILURES = (
     {
         "stage": "synthesis_obligation_aware_routing",

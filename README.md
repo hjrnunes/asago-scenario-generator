@@ -95,10 +95,7 @@ uv run asago-artifact-generator check runs/authoring/<case-id>/<case-id> \
   --evidence <evidence.json>
 ```
 
-The orchestration repository (`asago-orch`) owns qualification. Run the
-pipeline from that repository with `uv run asago-orch run`, or invoke the
-modules under `asago-orch/src/asago_orch/qualification/` as documented in
-`asago-orch/docs/qualification.md`. The orch runtime loads the immutable
+The orchestrator owns qualification. Its runtime loads the immutable
 consumer package without authoring and owns live setup, execution, detector
 evaluation, evidence, and cleanup.
 
@@ -113,7 +110,7 @@ uv run pytest tests/ -q
 The current `generate` command runs the STPA workflow. It reuses the name of
 the retired taxonomy-led `generate` command and shares nothing else with it;
 historical records of the retired command remain read-only. The workflow is
-producer `generate` → consumer `generate` → consumer `check` → orch
+producer `generate` → consumer `generate` → consumer `check` → orchestrator
 qualification. Do not restore the retired command as a second semantic engine.
 
 ## Ownership and current workflow
@@ -175,15 +172,14 @@ file is ignored because it may contain credentials. The example file also holds
 `glm53-enmaas-65k-low-rp`, the GLM profile with low reasoning effort and a
 repetition penalty of 1.05. `data/contracts/model-profile/` lists every profile
 field with its validity rule and the load and request cases, and it is the
-single field list; the consumer and orch mirror it and run the same cases. To
-add a model, add a profile. To add a field, change the contract first, then
-each reader. A profile with an unknown or invalid
-field fails to load and the error names the field, not its value. `generate`
-accepts named profiles. STPA sampling values use the same
-precedence: an explicit Python argument, then the selected profile or
-environment value, then the client default; `generate` has no sampling override.
-Invalid numeric or
-boolean environment values fail before the first model call.
+single field list; the consumer and the orchestrator mirror it and run the same
+cases. To add a model, add a profile. To add a field, change the contract
+first, then each reader. A profile with an unknown or invalid field fails to
+load and the error names the field, not its value. `generate` accepts named
+profiles. STPA sampling values use the same precedence: an explicit Python
+argument, then the selected profile or environment value, then the client
+default; `generate` has no sampling override. Invalid numeric or boolean
+environment values fail before the first model call.
 Requests have a 600-second application default deadline. Named-profile
 `timeout` and `ASAGO_SCENARIO_GENERATOR_TIMEOUT` values override that default.
 The SDK's implicit retries are disabled so retry decisions remain bounded and
@@ -353,8 +349,7 @@ multi-agent targets and runs without a profile execute the identical stage
 pipeline with fewer enrichment inputs.
 
 `generate --target-observations PATH` optionally accepts normalized runtime-context
-JSON from the standalone orch capture workflow documented in
-`asago-orch/docs/qualification.md`.
+JSON from the orchestrator's standalone capture workflow.
 It requires the exact matching target profile. Stage 5 receives bounded quoted
 state/read evidence separately from its systemic context; baseline loss/control
 analysis, obligation routing and ICA enumeration remain target-blind. Observed
@@ -471,8 +466,9 @@ earlier failed one, its `calls.jsonl` line names that attempt in `retry_of`.
 report kit, with `report/stage-summary.json` beside it. `policy-coverage.json`
 (`data/contracts/policy-coverage/`) records where each policy risk stopped on
 its way to a scenario, and the report reads it. The report, the stage summary,
-and the coverage file are for people and for orch's run reports; the consumer
-reads none of them. A run no longer writes `synthesis-report.html`.
+and the coverage file are for people and for the orchestrator's run reports;
+the consumer reads none of them. A run no longer writes
+`synthesis-report.html`.
 
 `generate` also writes `provider-calls.jsonl` to the output directory: one line per
 provider request, with the request exactly as sent (messages, response format,
@@ -544,7 +540,7 @@ which replays offline and compares every output file
 (`scripts/replay_gate.py` documents the comparison rules):
 
 ```bash
-./scripts/replay-check.sh ../asago-orch/runs/<run-id>/stages/generate/output
+./scripts/replay-check.sh <recorded-generate-output-dir>
 ```
 
 `generate` plans the obligation ledger deterministically, without contacting an LLM
@@ -729,18 +725,13 @@ prepared message, prepared history, delivery route, oracle selection, detector
 expression, judge prompt, or executable setup. The artifact generator reads
 that handoff plus an explicit environment (target profile and runtime
 context) and owns the concrete test design: stimulus, setup, detector with a
-distinguishing rationale, fidelity assessment, and freeze. See the orch
-qualification runbook in `asago-orch/docs/qualification.md` for the complete
-producer → consumer → execution workflow.
+distinguishing rationale, fidelity assessment, and freeze.
 
 ## Gold set evaluation
 
 The producer holds no gold cases and no scorer. The hand-authored gold sets
-and gold scoring live in the orchestration repository (`asago-orch`), whose
-score stage is the only reader of gold. That stage checks a package's detector
-through `asago_orch.qualification.probe_detector`, as described in
-`asago-orch/docs/qualification.md`, so the producer never receives gold
-content.
+and the scorer live in the orchestrator, and only its score stage reads gold,
+so the producer never receives gold content.
 
 ## Development
 

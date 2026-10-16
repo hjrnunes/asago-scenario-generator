@@ -5,7 +5,7 @@ A model answer that lists the same loss twice in a hazard's
 ``related_hazards``) is a validation finding, like an unknown reference ID.
 In a first Stage 1a draft (risk_derivation, gap_analysis) a repeat gets no
 repair call of its own: the reference gate reports it and the unit stops
-(decision 243, 2026-10-08; the one targeted repair replaces unknown IDs only,
+(the one targeted repair replaces unknown IDs only,
 ``test_stage1a_unknown_reference_correction.py``).  The repair-limit tests
 below use an unknown ID to open that one call.  The bounded
 hazard_graph_revision call sends the duplicate back to the model in its one

@@ -22,8 +22,7 @@ own documents.
   runtime bindings, and semantic judge specifications. Authoring uses supplied context
   without accessing the target.
 - Downstream qualification owns live setup, Garak execution, evidence collection,
-  detector evaluation, and cleanup. Its tooling lives in the orch repository
-  under `src/asago_orch/qualification/`; read `asago-orch/docs/qualification.md`.
+  detector evaluation, and cleanup. The orchestrator runs this tooling.
 - Adapt scenarios to the supplied use-case information. Keep missing facts
   explicit rather than inventing tools, records, permissions, or outcomes.
 - Older branches retain legacy execution projections and bundles. Inspect the
@@ -83,9 +82,8 @@ with unit tests under `tests/` and prompt text with rows in
   one stated exception: the Stage 1a risk-coverage review repeats a batch once
   when its reply decodes but carries no row (`{"rows": []}`); the repeat is a
   recorded request and counts too.
-- For execution, use `asago-orch/docs/qualification.md` and the existing orch
-  stage runner.
-  Consumer authoring does not start services or perform setup.
+- For execution, use the orchestrator's existing stage runner. Consumer
+  authoring does not start services or perform setup.
 - Keep frozen inputs, packages, and historical evidence unchanged; write new
   attempts and corrections separately. An unavailable fact stays unavailable.
 - Report generation, validation, packaging, execution, and recovery separately.
@@ -101,7 +99,5 @@ with unit tests under `tests/` and prompt text with rows in
 | Entry points and configuration | `README.md`, CLI `--help` |
 | Pipeline or cross-repository contract change | `docs/architecture/overview.md`, applicable schema in `data/contracts/`, current task spec |
 | Prompt, response, grounding, or review change | The actual prompt builders and their tests; `tests/phrases/*.yaml` pins prompt text |
-| Live setup, frozen-package execution, cleanup | `asago-orch/docs/qualification.md`; modules live under `asago-orch/src/asago_orch/qualification/` |
-| Gold scoring or recovery claims | Scoring lives in the orch repo's score stage and uses `asago_orch.qualification.probe_detector` |
 
 `AGENTS.md` is a symlink to this file. Edit `CLAUDE.md`; preserve the symlink.

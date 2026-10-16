@@ -2,11 +2,11 @@
 
 A target-derived ICA draft that names the same hazard or constraint twice in
 one finding gets exactly one correction request carrying the exact error and
-the prior response (decision 47c, 2026-10-04).  An accepted correction goes
-on to verification.  A correction that still repeats a reference, or a
-correction call that fails, drops the derived findings with a
-provider-failure diagnostic and the run continues; a duplicate never fails
-the run.  Unknown references keep failing closed, with no correction call.
+the prior response.  An accepted correction goes on to verification.  A
+correction that still repeats a reference, or a correction call that fails,
+drops the derived findings with a provider-failure diagnostic and the run
+continues; a duplicate never fails the run.  Unknown references keep failing
+closed, with no correction call.
 """
 
 from __future__ import annotations

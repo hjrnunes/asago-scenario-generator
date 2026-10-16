@@ -292,8 +292,8 @@ SCHEMA_CASES: dict[str, list[str]] = {
     "schema-tool-call-condition-empty": [SCHEMA + "tool_call_condition"],
     "schema-bound-without-tool-call-condition": [SCHEMA + "<root>"],
     "schema-not-executable-with-tool-call-condition": [SCHEMA + "<root>"],
-    # Decision 182: the top-level variant of stimulus-turn-field. The closed
-    # schema rejects the unknown field before a reader's ownership scan runs.
+    # The top-level variant of stimulus-turn-field. The closed schema
+    # rejects the unknown field before a reader's ownership scan runs.
     "schema-stimulus-turn-field-top-level": [
         KEY + "stimulus_turns",
         KEY + "role",

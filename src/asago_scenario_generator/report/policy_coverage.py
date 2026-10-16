@@ -2,9 +2,9 @@
 
 The producer owns the rule that maps a policy risk to its scenarios and
 publishes the result once, so the run reports (this producer's, the
-consumer's, and orch's) do not each re-derive it. A loss lists the risks it
-came from (``source_risk_cards``) and a scenario cites losses, so a risk
-reaches scenarios only through its harms.
+consumer's, and the orchestrator's) do not each re-derive it. A loss
+lists the risks it came from (``source_risk_cards``) and a scenario
+cites losses, so a risk reaches scenarios only through its harms.
 """
 
 from __future__ import annotations

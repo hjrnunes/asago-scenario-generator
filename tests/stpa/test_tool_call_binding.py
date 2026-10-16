@@ -1,9 +1,9 @@
 """Offline tests for binding a discriminating condition to a tool-call condition.
 
-The first group ports every case of the reference binder's tests
-(``asago-orch`` ``tests/experiments/test_bind.py``); the reference statuses map
-to the handoff's ``tool_call_condition_status`` values. Facts come from the
-producer's own target-observation fact values.
+The first group ports every case of an earlier reference binder's tests;
+the reference statuses map to the handoff's
+``tool_call_condition_status`` values. Facts come from the producer's
+own target-observation fact values.
 """
 
 from __future__ import annotations

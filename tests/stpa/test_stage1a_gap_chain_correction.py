@@ -40,7 +40,7 @@ _CHAIN_FINDING = (
     "no hazards were declared or supplied; no security constraints were declared"
 )
 
-# Source: batch fill L3 klarna-r1, call 24 (risk_derivation), trimmed to two
+# Source: a recorded MiniKlarna fill, call 24 (risk_derivation), trimmed to two
 # losses and three cards.  Grounded losses, no hazards, no constraints.
 _RISK_REPLY = json.dumps(
     {
@@ -97,7 +97,7 @@ _RISK_REPLY = json.dumps(
     indent=2,
 )
 
-# Source: batch fill L3 klarna-r1, call 25 (gap_analysis), byte for byte
+# Source: the same MiniKlarna fill, call 25 (gap_analysis), byte for byte
 # apart from one dropped use-case loss.
 _CHAINLESS_GAP_REPLY = (
     "{\n"
@@ -393,7 +393,7 @@ def test_only_the_absent_hazard_chain_raises_the_dedicated_error(
     assert isinstance(exc_info.value, _MissingHazardChainError) is missing_chain
 
 
-# Source: derived from the klarna-r1 refund constraint above.  The recorded
+# Source: derived from the MiniKlarna refund constraint above.  The recorded
 # gap replies carry no obligations, so the obligation rows here are written
 # for the fixture: one quotes the rule, one paraphrases it.
 _REFUND_RULE = _constraint()["rule"]

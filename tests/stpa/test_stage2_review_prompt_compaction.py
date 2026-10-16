@@ -58,8 +58,7 @@ def test_call3_shows_the_rule_with_conditions_as_fixed_context() -> None:
     """Call 3 displays the authored rule; conditions are numbered context.
 
     The composed description must never reach the model: a revision that
-    echoes what it was shown would otherwise compose the conditions twice
-    (Phase 1.3 as amended).
+    echoes what it was shown would otherwise compose the conditions twice.
     """
     losses, structure = _authorities()
     conditional = SecurityConstraint.model_validate(

@@ -1232,7 +1232,7 @@ class TestRunSp1Artifacts:
 
     def test_manifest_stage_1a_call_count_derivation_plus_review(self, tmp_path):
         """Manifest stage_1a.call_count sums the requests of every Stage 1a step:
-        the two derivation requests plus the advisory review (spec deviation 10).
+        the two derivation requests plus the advisory review.
         """
         client = _make_queued_mock_client()
         run_sp1(

@@ -104,9 +104,9 @@ def test_captured_klarna_ca3_1_deviations_survive_public_fill(tmp_path) -> None:
     # The ignored run is an optional audit source.  The committed fixture above
     # is authoritative for deterministic/offline execution, while a checkout
     # containing the run can still verify every provenance hash and wire value.
-    # The loss-analysis bytes were migrated to the amended Phase 1.3
-    # rule/applies_when shape, so the source-run digest comparison is
-    # restricted to the control structure, whose bytes did not change.
+    # The loss-analysis bytes were migrated to the authored rule/applies_when
+    # shape, so the source-run digest comparison is restricted to the control
+    # structure, whose bytes did not change.
     calls_path = source_root / fixture["source"]["calls_file"]
     source_control_path = source_root / "control-structure.yaml"
     if source_root.is_dir() and calls_path.is_file() and source_control_path.is_file():

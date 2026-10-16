@@ -1,17 +1,16 @@
 """Enrichment grounding: observed operations enrich logical control actions.
 
-Owner decision for the M2 unified adaptive path: known operations enrich the
-logical control actions; they never replace the control model with tool
-enumeration.  When an observed (non-simulation) execution target profile is
-supplied, this seam runs the target-realization operation-matching discipline
-— the bounded interpreter call and independent verification of
-:func:`realize_baseline_rows` — before ICA enumeration, and specializes each
-supported match's logical control action description with the exact documented
-operation identity.  This is the run's only matching: post-ICA
-:func:`realize_target_operations` adopts the returned ``rows`` instead of
-matching again.  ICA slot filling,
-Stage 5 and Stage 6 then associate the failure with the documented operation
-where the association is supported.
+Known operations enrich the logical control actions; they never replace the
+control model with tool enumeration.  When an observed (non-simulation)
+execution target profile is supplied, this seam runs the target-realization
+operation-matching discipline — the bounded interpreter call and independent
+verification of :func:`realize_baseline_rows` — before ICA enumeration, and
+specializes each supported match's logical control action description with the
+exact documented operation identity.  This is the run's only matching:
+post-ICA :func:`realize_target_operations` adopts the returned ``rows``
+instead of matching again.  ICA slot filling, Stage 5 and Stage 6 then
+associate the failure with the documented operation where the association is
+supported.
 
 The seam is strictly additive: an unmatched action keeps its exact
 description, an enriched description always carries the original text as its

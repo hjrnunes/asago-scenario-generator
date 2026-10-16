@@ -341,7 +341,7 @@ def test_instruction_like_description_is_delimited_as_quoted_evidence():
 
 def test_persistence_round_trip_excludes_runtime_locator(tmp_path):
     result = discover_mcp_target(
-        _inputs(model_profile="gemma4-oc"),
+        _inputs(model_profile="test-profile"),
         InMemoryInventory(json.loads(FIXTURE.read_text(encoding="utf-8"))),
         InMemoryInterpreter(),
     )

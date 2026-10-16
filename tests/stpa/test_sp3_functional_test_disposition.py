@@ -1,4 +1,4 @@
-"""Phase 3.2: deterministic disposition of ``kind: none`` candidates.
+"""Deterministic disposition of ``kind: none`` candidates.
 
 A functional test is persisted in the run for the owner's information but
 never reaches Stage 7 or obligation realization.

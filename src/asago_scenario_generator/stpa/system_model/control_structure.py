@@ -622,9 +622,9 @@ def _preserve_unchanged_revisions(
     ``revised_description``.  A ``preserve`` row that also carries a
     ``missing_fact`` is left for the strict review validation to reject.
 
-    Phase 1.3 as amended: Call 3 displays the authored rule with the
-    composed conditions shown separately, so an unchanged echo of
-    either the rule or the full composed statement means "preserve".
+    Call 3 displays the authored rule with the composed conditions
+    shown separately, so an unchanged echo of either the rule or the
+    full composed statement means "preserve".
     """
     unchanged_by_collection = {
         "hazards": (

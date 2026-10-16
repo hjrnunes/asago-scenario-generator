@@ -1,8 +1,8 @@
 """A trimmed generate output directory to render reports from.
 
-``tests/fixtures/generate_report/klarna-r1`` holds eight scenarios of a recorded
-klarna run with the sidecars the report reads; ``calls.jsonl`` has no prompt or
-response text. Tests copy it before changing it.
+The fixture under ``tests/fixtures/generate_report`` holds eight scenarios of a
+recorded MiniKlarna run with the sidecars the report reads; ``calls.jsonl`` has
+no prompt or response text. Tests copy it before changing it.
 """
 
 from __future__ import annotations

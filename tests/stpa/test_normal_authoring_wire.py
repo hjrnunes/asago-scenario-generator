@@ -7,9 +7,8 @@ executable unsafe-outcome conditions, factor-route bindings) belongs to the
 artifact generator and must remain reachable only for explicit historical
 callers (execution projection, bundle publication).
 
-The af-run1 drafts reproduced here come from the saved run evidence
-(``build/adaptive-runs/af-run1/calls.jsonl``): two candidates lost to the
-unsafe-outcome ordering self-reference check and one lost to the
+The drafts reproduced here come from a recorded adaptive run: two candidates
+lost to the unsafe-outcome ordering self-reference check and one lost to the
 ``direct_prompt``/``FEEDBACK_DELAY`` delivery-factor table. The corrected
 normal wire must author and publish equivalents of all three while preserved
 causal validation still rejects invalid drafts with typed reasons.
@@ -66,8 +65,8 @@ from tests.helpers.normal_authoring_wire import (
 )
 
 
-def _af_run1_ordering_draft_one() -> dict:
-    """af-run1 SCN-008 candidate one, expressed in the normal schema.
+def _recorded_ordering_draft_one() -> dict:
+    """Recorded run SCN-008 candidate one, expressed in the normal schema.
 
     Saved failure: ``unsafe outcome ordering cannot compare the target action
     with itself``. The causal semantics (a response produced before the
@@ -116,13 +115,13 @@ def _af_run1_ordering_draft_one() -> dict:
     }
 
 
-def _af_run1_ordering_draft_two() -> dict:
-    """af-run1 SCN-008 candidate two, expressed in the normal schema.
+def _recorded_ordering_draft_two() -> dict:
+    """Recorded run SCN-008 candidate two, expressed in the normal schema.
 
     Saved failure: the same ordering self-reference check, for a draft whose
     outcome ordering referenced ``target_action`` with two declared factors.
     """
-    payload = _af_run1_ordering_draft_one()
+    payload = _recorded_ordering_draft_one()
     payload["adversary"] = {
         "kind": "none",
         "gain": (
@@ -165,8 +164,8 @@ def _af_run1_ordering_draft_two() -> dict:
     return payload
 
 
-def _af_run1_feedback_delay_draft() -> dict:
-    """af-run1 SCN-042 candidate, expressed in the normal schema.
+def _recorded_feedback_delay_draft() -> dict:
+    """Recorded run SCN-042 candidate, expressed in the normal schema.
 
     Saved failure: ``direct_prompt cannot exercise selected factor kind
     FEEDBACK_DELAY``. The causal semantics (a delayed content-classification
@@ -294,7 +293,7 @@ def test_normal_prompt_renders_observation_contract() -> None:
 
 
 def test_normal_prompt_names_the_context_cause_handles() -> None:
-    """VAL-A1-001: the prompt offers the causal-source handles of the context."""
+    """The prompt offers the causal-source handles of the context."""
     _, user = build_context_bdi_prompts(
         _wrong_timing_context(),
         TemplateLoader(PROMPTS_DIR),
@@ -331,9 +330,9 @@ def test_system_prompt_names_no_clinical_domain_for_a_clinical_operation() -> No
 def test_normal_prompt_carries_target_operation_and_observed_record_values(
     tmp_path,
 ) -> None:
-    """VAL-A1-005: the normal wire forwards the target facts and grounding.
+    """The normal wire forwards the target facts and grounding.
 
-    The M2 blocker: the normal path dropped ``target_operation`` and
+    The normal path once dropped ``target_operation`` and
     ``target_observations`` on the way to the prompt, so the model never saw
     the record facts and degraded every criterion into a constraint
     restatement. The rendered normal request must carry the exact documented
@@ -421,7 +420,7 @@ def test_normal_prompt_with_observations_only_carries_the_observed_record() -> N
 
 
 def test_normal_response_schema_carries_no_execution_design(tmp_path) -> None:
-    """VAL-A1-002: the schema offered to the model has no execution fields."""
+    """The schema offered to the model has no execution fields."""
     context = _wrong_timing_context()
     client = MockLLMClient()
     client.set_response_queue([_normal_payload()])
@@ -486,7 +485,7 @@ def test_functional_normal_response_can_omit_gain(tmp_path) -> None:
 
 
 def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
-    """VAL-A1-002: the accepted draft itself carries no execution fields."""
+    """The accepted draft itself carries no execution fields."""
     client = MockLLMClient()
     client.set_response_queue([_normal_payload()])
     result, error = generate_bdi_for_context(
@@ -508,13 +507,13 @@ def test_normal_draft_publishes_without_generate_then_discard(tmp_path) -> None:
 @pytest.mark.parametrize(
     "draft",
     (
-        _af_run1_ordering_draft_one,
-        _af_run1_ordering_draft_two,
-        _af_run1_feedback_delay_draft,
+        _recorded_ordering_draft_one,
+        _recorded_ordering_draft_two,
+        _recorded_feedback_delay_draft,
     ),
 )
-def test_af_run1_failure_classes_publish_through_normal_wire(draft, tmp_path) -> None:
-    """VAL-A1-003: the three af-run1 artifact decisions no longer block."""
+def test_recorded_failure_classes_publish_through_normal_wire(draft, tmp_path) -> None:
+    """The three recorded artifact decisions no longer block."""
     client = MockLLMClient()
     client.set_response_queue([draft()])
     result, error = generate_bdi_for_context(
@@ -523,7 +522,7 @@ def test_af_run1_failure_classes_publish_through_normal_wire(draft, tmp_path) ->
         tmp_path,
         assembly=_wrong_timing_assembly(_wrong_timing_context()),
     )
-    assert error is None, f"af-run1 failure class still blocks authoring: {error}"
+    assert error is None, f"recorded failure class still blocks authoring: {error}"
     assert result is not None
     assert result.unsafe_outcome_semantic_proposition
 
@@ -580,7 +579,7 @@ def test_af_run1_failure_classes_publish_through_normal_wire(draft, tmp_path) ->
 def test_causally_invalid_drafts_still_reject_with_typed_reasons(
     tmp_path, mutate, reason
 ) -> None:
-    """VAL-A1-003 positive control: preserved validation stays enforced."""
+    """Positive control: preserved validation stays enforced."""
     payload = _normal_payload()
     mutate(payload)
     client = MockLLMClient()
@@ -599,7 +598,7 @@ def test_causally_invalid_drafts_still_reject_with_typed_reasons(
 
 
 def test_normal_draft_publishes_to_handoff_without_execution_content(tmp_path) -> None:
-    """VAL-A1-002: accepted draft flows to the handoff with nothing stripped.
+    """An accepted draft flows to the handoff with nothing stripped.
 
     The published handoff keeps the semantic failure criterion, the safe
     alternative and the lineage, and the ownership boundary still holds

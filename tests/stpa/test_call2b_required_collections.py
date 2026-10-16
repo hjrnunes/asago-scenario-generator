@@ -8,8 +8,8 @@ omission within the step's three requests.
 
 The client here is the real `LLMClient` with a mocked transport, so its own
 local parse of the reply runs; no request leaves the process. The fixture is
-the trimmed L3 klarna-r2 rerun of the b8-glm batch, whose three Call 2b
-replies all omit `controlled_processes`.
+the trimmed rerun of a recorded MiniKlarna run, whose three Call 2b replies
+all omit `controlled_processes`.
 """
 
 from __future__ import annotations

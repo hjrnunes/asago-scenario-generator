@@ -1,25 +1,21 @@
-"""Targeted Stage 1a repair: contract tests on the two saved 2026-09-11 failures.
+"""Targeted Stage 1a repair: contract tests on two saved failures.
 
-The fixtures are neutralized structural reproductions of the two saved
-MiniOcciAI risk-derivation failures preserved under
-``build/qualification/supplemental-target-baselines-20260911/derived/``:
-collection sizes, card identities, disposition kinds, and the malformed
-obligation-entry shape are exact; prose is neutralized per the repository's
-captured-response fixture convention.  Attempt 1 failed the wire because one
-forbidden obligation entry carried ``realized_by``; attempt 2 parsed but
-omitted seven of the 112 risk-disposition entries.  Both are the two failure
-classes the owner authorized for targeted repair (2026-09-11); every other
-failure class must keep an explicit typed outcome with no additional call.
+The fixtures are neutralized structural reproductions of two saved
+MiniOcciAI risk-derivation failures: collection sizes, card identities,
+disposition kinds, and the malformed obligation-entry shape are exact; prose
+is neutralized per the repository's captured-response fixture convention.
+Attempt 1 failed the wire because one forbidden obligation entry carried
+``realized_by``; attempt 2 parsed but omitted seven of the 112
+risk-disposition entries.  Both are failure classes that get targeted
+repair; every other failure class must keep an explicit typed outcome with
+no additional call.
 
-These tests verify the implemented corrected contract (specification
-revision 2, owner implementation approval 2026-09-11): the salvage retains
+These tests verify the implemented corrected contract: the salvage retains
 malformed obligation entries verbatim, the repair relocates a known channel
 value unchanged and never re-chooses a channel meaning, container-level wire
 damage is a typed terminal failure before any salvage, and every
 transformation is recorded in the cross-stage ``loss-analysis-repair.yaml``
-artifact.  The build-directory verification harness
-(``verification-hold-20260911``) additionally drives the exact saved
-MiniOcciAI and Airbnb evidence objects through the same production paths.
+artifact.
 
 Synthetic successful repairs demonstrate the merge mechanics only; they are
 not semantic-correctness claims about any target.  Every test uses a fake
@@ -1280,7 +1276,7 @@ class TestDeterministicCleanup:
             if entry["step"] == "gap_analysis"
         ]
         assert [entry["success"] for entry in gap_entries] == [False]
-        # The removed row is recorded with its reason (approved policy C1).
+        # The removed row is recorded with its reason.
         record = _repair_record(tmp_path)
         assert _record_tuples(record) == [
             ("gap_analysis", "first", "cleanup", "L-1", "removed")
@@ -1350,14 +1346,13 @@ class TestDeterministicCleanup:
 
 
 class TestIndependentReviewCorrections:
-    """Corrections from the independent rev2-implementation review (2026-09-12).
+    """Corrections from an independent review of the implementation.
 
-    The review reproduced four production defects despite the green suite
-    (owner correction authorization 2026-09-12, within the approved rev2
-    scope).  Each test here drives the same production path as the
-    reviewer's reproduction and asserts the corrected behavior exactly:
-    dispatch counts, selected identities, record outcomes, and the raw
-    response step each record entry points at.
+    The review reproduced four production defects despite the green suite.
+    Each test here drives the same production path as the reviewer's
+    reproduction and asserts the corrected behavior exactly: dispatch
+    counts, selected identities, record outcomes, and the raw response
+    step each record entry points at.
     """
 
     def test_supplied_card_malformed_duplicate_gets_identity_scoped_repair(
@@ -1372,7 +1367,7 @@ class TestIndependentReviewCorrections:
         supplied card's duplicate state.  Corrected behavior: the dropped
         row is classified by its original identity first, so the supplied
         card joins the repair selection and the unsupplied row alone feeds
-        the C2 cleanup.
+        the unsupplied-card cleanup.
         """
         risk = _complete_risk_response()
         # A malformed duplicate for a supplied card that already has one
@@ -1444,7 +1439,7 @@ class TestIndependentReviewCorrections:
             in repair_prompt
         )
         # The record shows the identity-scoped repair: the salvage drop that
-        # feeds it, the C2 cleanup of the unsupplied row (its source is the
+        # feeds it, the unsupplied-card cleanup of the row (its source is the
         # original response), and the repaired supplied card.  The supplied
         # card never appears as a cleanup identity.
         record = _repair_record(tmp_path)
@@ -1492,15 +1487,15 @@ class TestIndependentReviewCorrections:
             for warning in warnings
         )
 
-    def test_malformed_unsupplied_row_receives_c2_cleanup(self, tmp_path):
-        """A malformed row referencing an unsupplied card is C2 cleanup, not
+    def test_malformed_unsupplied_row_receives_unsupplied_card_cleanup(self, tmp_path):
+        """A malformed row referencing an unsupplied card is cleaned up, not
         a typed failure.
 
         Review finding (spec axis, P2): the dropped row vanished from
         selection, so the run typed-failed with "no repairable disposition
         rows".  Corrected behavior: the dropped row's identity is
-        unsupplied, so the C2 policy authorizes its removal and the cleaned
-        draft re-validates with no repair call.
+        unsupplied, so the unsupplied-card cleanup authorizes its removal
+        and the cleaned draft re-validates with no repair call.
         """
         risk = _complete_risk_response()
         risk["risk_dispositions"].append(
@@ -1532,7 +1527,7 @@ class TestIndependentReviewCorrections:
             "gap_analysis",
         ]
         assert [entry["success"] for entry in entries] == [False, True]
-        # The removal is recorded once, as a C2 cleanup of an unsupplied
+        # The removal is recorded once, as a cleanup of an unsupplied
         # reference whose row was also malformed, pointing at the original
         # response.
         record = _repair_record(tmp_path)
@@ -1575,8 +1570,8 @@ class TestIndependentReviewCorrections:
     def test_unsupplied_row_removed_during_repair_cites_the_original_response(
         self, tmp_path
     ):
-        """A C2 row removed by a repair application is evidenced at the
-        response that carries it.
+        """An unsupplied-card row removed by a repair application is evidenced
+        at the response that carries it.
 
         Review finding (standards/spec axis, P2): the cleanup entry's
         ``raw_step`` pointed at the repair response, but the removed row
@@ -1788,9 +1783,10 @@ class TestIndependentReviewCorrections:
 
         The classification works from the original identity: a supplied
         identity routes to the repair selection and an unsupplied identity
-        routes to the C2 cleanup.  A row with no ``risk_ref`` satisfies
-        neither policy (C2 removes only rows referencing unsupplied cards),
-        so it fails closed with no repair call and no cleanup.
+        routes to the unsupplied-card cleanup.  A row with no ``risk_ref``
+        satisfies neither policy (the cleanup removes only rows
+        referencing unsupplied cards), so it fails closed with no repair
+        call and no cleanup.
         """
         risk = _complete_risk_response()
         risk["risk_dispositions"].append(
@@ -2278,7 +2274,7 @@ class TestRepairRecord:
 
 
 class _ConfiguredClient(MockLLMClient):
-    """A fake client carrying the audited gemma4-oc budget numbers."""
+    """A fake client carrying audited live-run budget numbers."""
 
     def __init__(self) -> None:
         super().__init__()

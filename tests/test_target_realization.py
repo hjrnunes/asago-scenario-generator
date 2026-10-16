@@ -943,14 +943,14 @@ def _both_state_changing_profile():
     return ExecutionTargetProfile.model_validate(payload)
 
 
-class _Attempt4ShapeExtension(_ExtensionInterpreter):
-    """Replay the preserved attempt-4 extension outcome shape.
+class _ResponsibilityTargetExtension(_ExtensionInterpreter):
+    """Replay a recorded extension outcome shape.
 
     The accepted outcome proposes controller RESP-4 (next action identity
     CA-4-2) whose target is the responsibility RESP-3: the exact shape that
-    crashed run m2-e2e-first-run-attempt4.  A sibling outcome keeps a plain
-    tool-target (no explicit target) proposal so the test also proves sibling
-    actions are unaffected by the hold.
+    crashed a recorded run.  A sibling outcome keeps a plain tool-target (no
+    explicit target) proposal so the test also proves sibling actions are
+    unaffected by the hold.
     """
 
     def extend(self, request):
@@ -993,7 +993,7 @@ class _Attempt4ShapeExtension(_ExtensionInterpreter):
 def test_bounded_extension_holds_responsibility_target_with_typed_reason():
     baseline = _multi_controller_authorities()[0]
     before = baseline.model_dump(mode="json")
-    extension = _Attempt4ShapeExtension()
+    extension = _ResponsibilityTargetExtension()
 
     result = _realize(
         baseline,
@@ -1032,7 +1032,7 @@ def test_held_responsibility_target_extension_keeps_stpa_projection_valid():
     baseline, loss_analysis, control_structure, ica_enumeration = (
         _multi_controller_authorities()
     )
-    extension = _Attempt4ShapeExtension()
+    extension = _ResponsibilityTargetExtension()
     realization = _realize(
         baseline,
         _both_state_changing_profile(),

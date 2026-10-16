@@ -1,10 +1,9 @@
 """Risk-card actionability classification before Stage 1a.
 
-Owner decision (2026-09-29 STPA review, recommendation 8): risk cards stay
-the only input for losses, but only actionable cards feed loss derivation.
-A bounded classification applies the STPA boundary test to every card: can a
-controller inside the analysis boundary realize the card's threat through a
-control action it takes or omits, with a consequence that reaches a
+Risk cards stay the only input for losses, but only actionable cards feed loss
+derivation. A bounded classification applies the STPA boundary test to every
+card: can a controller inside the analysis boundary realize the card's threat
+through a control action it takes or omits, with a consequence that reaches a
 stakeholder of this system?
 
 Every card receives a decision and reason in ``risk-actionability.yaml``.

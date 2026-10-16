@@ -7,8 +7,9 @@ used to end the step before it ran. The correction now carries the instruction
 text, the exact decode error, and the prior reply without its trailing
 whitespace. The step keeps its limit of two requests.
 
-The recorded reply is the trimmed last row of the b8-glm batch L3 klarna-r1
-call log: it stops decoding at character 2,291 and then runs only whitespace.
+The recorded reply is the trimmed last row of a recorded MiniKlarna
+call log: it stops decoding at character 2,291 and then runs only
+whitespace.
 """
 
 from __future__ import annotations

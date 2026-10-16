@@ -5,8 +5,8 @@ drops each constraint edit or addition that carries a blank ``applies_when``
 entry or an obligation span no repair maps onto its rule, records each drop
 with its reason, and keeps the prior constraint for a dropped edit.  A blank
 entry is never rewritten to an empty list, because an empty list on an edit
-would delete the prior conditions.  The fixture is the trimmed G2 klarna-r2
-revision (b8-glm batch): both replies edit SC-1 with ``applies_when: [""]``
+would delete the prior conditions.  The fixture is the trimmed revision of a
+recorded MiniKlarna run: both replies edit SC-1 with ``applies_when: [""]``
 and add NEW-2 with a span that reads "or" where the rule reads "and".
 """
 
@@ -85,7 +85,7 @@ def _kept_fields(constraint) -> dict:
 
 
 class TestRecordedRevision:
-    """The G2 klarna-r2 revision keeps everything but SC-1's edit and NEW-2."""
+    """The recorded revision keeps everything but SC-1's edit and NEW-2."""
 
     def test_both_defective_records_are_dropped_and_the_rest_applied(
         self, tmp_path

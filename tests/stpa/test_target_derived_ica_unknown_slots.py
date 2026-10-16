@@ -5,8 +5,8 @@ The finder maps a ``slot_id`` written as an exact request slot plus a
 finding naming any other unknown slot with a diagnostic.  Compilation keeps a
 backstop: a finding whose slot the realization does not hold becomes a
 per-finding diagnostic, and the other findings continue.  The fixture is the
-trimmed L1 klarna-r2 draft (requests 308 and 309 of the b8-glm batch), in
-which every finding's ``slot_id`` carries the ``:1`` suffix.
+trimmed draft of a recorded MiniKlarna run (requests 308 and 309), in which
+every finding's ``slot_id`` carries the ``:1`` suffix.
 """
 
 from __future__ import annotations

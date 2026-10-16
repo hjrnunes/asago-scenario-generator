@@ -169,7 +169,7 @@ class ScenarioSpec(BaseModel):
     unsafe_outcome_hazard_refs: list[str] = Field(default_factory=list)
     unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None
-    # Phase 3.1 adversary record.  Optional only for historical/non-contextual
+    # Adversary record.  Optional only for historical/non-contextual
     # values; the corrected contextual Stage 5 wire requires it.
     adversary: Adversary | None = None
     # Stage 5's target-agnostic observation declaration.  The producer does
@@ -231,7 +231,7 @@ class ScenarioSpec(BaseModel):
 
     @property
     def is_functional_test(self) -> bool:
-        """Phase 3.2: ``kind: none`` means nobody gains; a functional test."""
+        """``kind: none`` means nobody gains; a functional test."""
         return self.adversary is not None and self.adversary.kind is AdversaryKind.none
 
     @model_validator(mode="after")

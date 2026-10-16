@@ -1,9 +1,8 @@
-"""Phase 3: a required adversary on every scenario candidate.
+"""A required adversary on every scenario candidate.
 
-Spec: ai/findings/target-grounded-scenario-generation-spec-2026-09-07.md,
-Phase 3.1/3.2.  Every scenario names who attempts the unsafe behavior and
-what they gain; ``kind: none`` marks a functional test that never reaches
-the execution bundle.
+Every scenario names who attempts the unsafe behavior and what they gain;
+``kind: none`` marks a functional test that never reaches the execution
+bundle.
 """
 
 from __future__ import annotations
@@ -237,7 +236,7 @@ class TestStage5AdversaryWire:
 
 
 class TestAdversaryMaterialization:
-    """Compiler-owned reach and gain derivation (Phase 3 deviations 7-8)."""
+    """Compiler-owned reach and gain derivation."""
 
     @pytest.mark.parametrize(
         ("kind", "reach"),

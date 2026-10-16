@@ -1,4 +1,4 @@
-"""Phase 1.2 — deterministic gates on the loss-analysis hazard graph.
+"""Deterministic gates on the loss-analysis hazard graph.
 
 After the Stage 1a loss analysis is accepted, offline code checks that the
 hazard graph is dense enough to tell scenarios apart:
@@ -2529,10 +2529,10 @@ def _run_graph_revision_call(
     returns the unchanged graph without a correction request.
 
     The response is an explicit edit/add delta carrying the authored ``rule``
-    + ``applies_when`` shape (Phase 1.3 as amended). Losses and risk
-    dispositions come from the prior analysis and deterministic code carries
-    omitted graph records forward, so the model cannot damage immutable
-    records by echoing or omitting them.
+    + ``applies_when`` shape. Losses and risk dispositions come from the
+    prior analysis and deterministic code carries omitted graph records
+    forward, so the model cannot damage immutable records by echoing or
+    omitting them.
 
     A response that fails parsing or validation receives one correction call
     carrying the exact validation error and the prior response.  A response

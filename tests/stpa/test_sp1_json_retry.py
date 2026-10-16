@@ -1,8 +1,7 @@
 """JSON-decode retry behavior at the model-call boundaries.
 
 Stage 2 keeps its bounded JSON-decode retry (one extra attempt).  Stage 1a
-has none (owner authorization 2026-09-11, rev2; owner correction
-2026-09-12): an undecodable body is a typed terminal outcome of the single
+has none: an undecodable body is a typed terminal outcome of the single
 first attempt, recorded as an unsupported response failure in the run-level
 repair record, and is never answered with a second dispatch or a repair
 call.
@@ -185,9 +184,8 @@ def test_stage2_client_failure_is_not_retried(tmp_path):
 def test_stage1a_malformed_json_gets_no_second_dispatch_and_is_recorded(tmp_path):
     """One malformed risk draft is a typed terminal: no retry, one attempt.
 
-    The corrected Stage 1a contract (owner authorization 2026-09-11, rev2;
-    owner correction 2026-09-12) allows exactly one call per stage plus at
-    most one targeted repair, so an undecodable body is a typed terminal
+    The corrected Stage 1a contract allows exactly one call per stage plus
+    at most one targeted repair, so an undecodable body is a typed terminal
     outcome of the first attempt — never an automatic second dispatch —
     and the run-level repair record carries it.
     """

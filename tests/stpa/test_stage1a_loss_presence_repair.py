@@ -244,7 +244,7 @@ def test_other_semantic_failures_still_get_no_repair(tmp_path):
     assert len(client.calls) == 1
 
 
-# Source: batch fill L4 occiai-r2, attempt 1, call 26 (risk_derivation_repair),
+# Source: a recorded OcciAI fill, attempt 1, call 26 (risk_derivation_repair),
 # trimmed to one loss, one hazard, three constraints, and three cards.  The
 # recorded reply carried paraphrased rule_span values on three obligations of
 # its nine constraints.  The cards here are neutral; the loss, hazard, rules,

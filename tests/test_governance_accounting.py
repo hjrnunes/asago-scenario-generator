@@ -401,10 +401,10 @@ def test_capability_excluded_rows_still_reject_findings() -> None:
         )
 
 
-# Trimmed from the governance obligation of the airbnb-r1 L4 fill recording:
+# Trimmed from the governance obligation of a recorded Airbnb fill:
 # its ICA findings, one per routed slot, repeat H-8 and SC-4 across slots.
 _REPEATED_FINDINGS_FIXTURE = {
-    "source": "airbnb-r1 L4 fill recording, governance obligation, trimmed",
+    "source": "recorded Airbnb fill, governance obligation, trimmed",
     "findings": (
         {
             "slot_id": "RESP-1:CA-1-1:NOT_PROVIDED",

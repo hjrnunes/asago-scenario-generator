@@ -81,8 +81,8 @@ _PROSE_STRUCTURAL_REFERENCE = re.compile(
 )
 
 
-# Phase 3 deviation 8: a ``kind: none`` record is a functional test whose
-# gain is compiler-owned bookkeeping, never provider text.
+# A ``kind: none`` record is a functional test whose gain is compiler-owned
+# bookkeeping, never provider text.
 FUNCTIONAL_TEST_GAIN = "Functional test: no adversary gains from this unsafe outcome."
 
 

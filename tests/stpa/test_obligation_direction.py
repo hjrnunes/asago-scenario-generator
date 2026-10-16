@@ -1,7 +1,6 @@
-"""Owner ruling Q30 (2026-09-10): obligation entries and direction derivation.
+"""Obligation entries and direction derivation.
 
-Offline coverage for the option-iii contract frozen as v3
-(``build/qualification/replay-round64/c2_option3_v3_freeze.yaml``):
+Offline coverage for:
 
 - ``Obligation`` parsing and kind-exclusive channel validators;
 - constraint-level direction derivation, reviewer stamps, and the proposed

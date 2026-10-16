@@ -1,10 +1,10 @@
 """A fill reply gives each routed obligation exactly one consideration result.
 
-The fixture is pp-s11 klarna-r2 calls.jsonl row 81 (gemma-4-26b-a4b-it,
-producer fa33a907): one slot, six routed obligations, and a reply that lists
-every handle three times with conflicting R4 dispositions. The provider
-accepted it because it compared pair sets, and the contract rejected it after
-the request had ended, with no correction.
+The fixture is row 81 of a recorded MiniKlarna run's calls.jsonl
+(gemma-4-26b-a4b-it, producer fa33a907): one slot, six routed obligations,
+and a reply that lists every handle three times with conflicting R4
+dispositions. The provider accepted it because it compared pair sets, and the
+contract rejected it after the request had ended, with no correction.
 """
 
 from __future__ import annotations

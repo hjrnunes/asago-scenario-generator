@@ -1,10 +1,10 @@
 """Enrichment grounding: observed operations enrich logical control actions.
 
-Owner decision for the M2 unified path: known operations enrich the logical
-control actions; they never replace the control model with tool enumeration.
-These tests pin the seam that matches observed operations to the systemic
-control actions before ICA enumeration and specializes the supported matches'
-descriptions with the exact documented operation identity.
+Known operations enrich the logical control actions; they never replace the
+control model with tool enumeration. These tests pin the seam that matches
+observed operations to the systemic control actions before ICA enumeration
+and specializes the supported matches' descriptions with the exact documented
+operation identity.
 """
 
 from __future__ import annotations

@@ -243,9 +243,9 @@ def test_semantic_diagnostics_flag_dependency_and_mechanism_hazards() -> None:
 def test_component_failure_hazard_fails_typed_without_repair(tmp_path) -> None:
     """A semantic hazard failure is typed and recorded, with no retry.
 
-    Component-failure hazards are outside the two approved targeted-repair
-    classes (owner authorization 2026-09-11), so the run records the exact
-    semantic feedback and stops after the first attempt.
+    Component-failure hazards are outside the targeted-repair classes, so the
+    run records the exact semantic feedback and stops after the first
+    attempt.
     """
     bad = valid_risk_draft_dict()
     bad["hazards"][0]["description"] = "The sensor fails"
