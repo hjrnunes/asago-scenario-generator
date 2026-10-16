@@ -33,6 +33,7 @@ from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
+from tests.helpers.scripted_client import ScriptedClient
 from tests.helpers.obligation_aware import (
     provider_slot_payload,
     _control_structure,
@@ -232,32 +233,25 @@ def test_provider_compiles_strict_slot_draft_once_before_outer_fill(
     # the outer seam without introducing a second target or unrelated routes.
     request = _provider_slot_request()
 
-    class NAFakeClient:
-        model = "captured-single-compile"
-
-        def complete(self, **kwargs):
-            slot_id = request.slots[0].slot_id
-            return LLMResult(
-                content={
-                    "filled_slots": [
-                        {
-                            "slot_id": slot_id,
-                            "is_na": True,
-                            "na_rationale": "No finding applies to this slot.",
-                            "findings": [],
-                            "consideration_results": {},
-                        }
-                    ]
-                },
-                prompt_tokens=1,
-                completion_tokens=1,
-                duration_ms=1,
-                system_prompt=kwargs["system_prompt"],
-                user_prompt=kwargs["user_prompt"],
-            )
+    client = ScriptedClient(
+        [
+            {
+                "filled_slots": [
+                    {
+                        "slot_id": request.slots[0].slot_id,
+                        "is_na": True,
+                        "na_rationale": "No finding applies to this slot.",
+                        "findings": [],
+                        "consideration_results": {},
+                    }
+                ]
+            }
+        ],
+        model="captured-single-compile",
+    )
 
     provider = ObligationAwareLLMAdapter(
-        NAFakeClient(),
+        client,
         run_dir=tmp_path,
         controls=request.controls,
     )
@@ -288,17 +282,10 @@ def test_local_ica_preflight_failure_is_recorded_before_provider_dispatch(
         update={"context_window": 2048, "maximum_completion_tokens": 4096}
     )
     request = request.model_copy(update={"controls": controls})
-    calls: list[object] = []
-
-    class Client:
-        model = "captured-preflight"
-
-        def complete(self, **kwargs):
-            calls.append(kwargs)
-            raise AssertionError("the rejected prompt must not be dispatched")
+    client = ScriptedClient([], model="captured-preflight")
 
     provider = ObligationAwareLLMAdapter(
-        Client(),
+        client,
         run_dir=tmp_path,
         controls=controls,
     )
@@ -310,7 +297,7 @@ def test_local_ica_preflight_failure_is_recorded_before_provider_dispatch(
     else:  # pragma: no cover - assertion gives a clearer failure than pytest.raises
         raise AssertionError("expected target preflight rejection")
 
-    assert calls == []
+    assert client.calls == []
     entry = read_calls_jsonl(tmp_path)[0]
     assert entry["success"] is False
     assert entry["stage"] == "synthesis_obligation_aware_icas"
@@ -357,17 +344,10 @@ def test_captured_target_reference_contract_failure_is_recorded_precisely(
         control_structure=request.control_structure,
         controls=controls,
     )
-    calls: list[object] = []
-
-    class Client:
-        model = "captured-reference-contract"
-
-        def complete(self, **kwargs):
-            calls.append(kwargs)
-            raise AssertionError("the rejected prompt must not be dispatched")
+    client = ScriptedClient([], model="captured-reference-contract")
 
     provider = ObligationAwareLLMAdapter(
-        Client(),
+        client,
         run_dir=tmp_path,
         controls=controls,
     )
@@ -378,7 +358,7 @@ def test_captured_target_reference_contract_failure_is_recorded_precisely(
     else:  # pragma: no cover - assertion gives a clearer failure than pytest.raises
         raise AssertionError("expected target prompt contract rejection")
 
-    assert calls == []
+    assert client.calls == []
     entry = read_calls_jsonl(tmp_path)[0]
     assert entry["success"] is False
     assert entry["error"].startswith("PromptContractError:")
