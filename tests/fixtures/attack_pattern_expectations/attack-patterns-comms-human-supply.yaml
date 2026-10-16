@@ -5,7 +5,7 @@
 #   observation_kind_counts      outcome-link observation kinds across the catalog
 #   records.<id>                 per-record pins: digest, chain_exact, step_exact,
 #                                step_exact_pins, forbidden_exact, steps, slots, edges,
-#                                preconditions, step_tiers, terminal
+#                                preconditions, step_tiers, terminal, case_study
 catalog: attack-patterns-comms-human-supply.yaml
 checks: [final_step_only_effects, observed_cites_case_study, no_preconditions, unmapped_cites_lineage,
   design_records_exist_in_staging, technique_references_resolve]
@@ -16,4 +16,8 @@ records:
   AP-T12-03: {}
   AP-T15-01: {}
   AP-T15-02: {}
-  AP-T17-01: {}
+  AP-T17-01:
+    case_study: AML.CS0041
+    steps: [stage_malicious_payload, craft_prompt_injection, obfuscate_in_config,
+      distribute_poisoned_config, persist_via_adoption, execute_hidden_prompt, jailbreak_guardrails,
+      suppress_output_mentions, impact_backdoored_code]

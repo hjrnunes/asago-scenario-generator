@@ -5,7 +5,7 @@
 #   observation_kind_counts      outcome-link observation kinds across the catalog
 #   records.<id>                 per-record pins: digest, chain_exact, step_exact,
 #                                step_exact_pins, forbidden_exact, steps, slots, edges,
-#                                preconditions, step_tiers, terminal
+#                                preconditions, step_tiers, terminal, case_study
 catalog: attack-patterns-memory-tool.yaml
 checks: [final_step_only_effects]
 observation_kind_counts: {persistent_state: 24, model_context: 18, tool_invocation: 11}
@@ -14,6 +14,7 @@ ids: [AP-T1-01, AP-T1-02, AP-T1-03, AP-T1-04, AP-T2-01, AP-T2-02, AP-T2-03, AP-T
 ordered: true
 records:
   AP-T1-01:
+    case_study: AML.CS0040
     steps: [craft_payload, conceal_injection, deliver_payload, execute_injection, persist_in_memory,
       impact]
     step_tiers:

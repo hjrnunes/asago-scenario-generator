@@ -4,9 +4,9 @@ Each ``tests/fixtures/attack_pattern_expectations/<catalog>.yaml`` pins one
 catalog under ``data/taxonomies/attack-patterns/``: the live record set,
 opt-in checks for conventions only some catalogs follow, and per-record pins
 (step sequences, exact ATLAS mappings, resource slots, causal edges, tiers,
-digests, observation-kind counts). The tests below run the same checks over
-every catalog that has an expectation file. Record-specific semantics live in
-``test_attack_pattern_record_semantics.py``.
+case-study references, digests, observation-kind counts). The tests below
+run the same checks over every catalog that has an expectation file.
+Record-specific semantics live in ``test_attack_pattern_record_semantics.py``.
 """
 
 from __future__ import annotations
@@ -525,6 +525,18 @@ def test_design_records_exist_in_staging(catalog: Catalog) -> None:
 def test_step_sequences_match_pins(catalog: Catalog) -> None:
     for pid, chain, steps in catalog.pinned("steps"):
         assert [s.step_id for s in chain.steps] == steps, pid
+
+
+@over_catalogs(pins_any("case_study"))
+def test_case_study_references_match_pins(catalog: Catalog) -> None:
+    for pid, chain, case_study in catalog.pinned("case_study"):
+        # A reference may name one case-study step, as in "AML.CS0041 S04".
+        cited = {
+            ref.reference_id.split(" ", 1)[0]
+            for step in chain.steps
+            for ref in step.provenance.references
+        }
+        assert case_study in cited, pid
 
 
 @over_catalogs(
