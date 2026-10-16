@@ -2,8 +2,8 @@
 
 The first group ports every case of the reference binder's tests
 (``asago-orch`` ``tests/experiments/test_bind.py``); the reference statuses map
-to v3 statuses as the scenario-handoff-v3 contract table states. Facts come
-from the producer's own target-observation fact values.
+to the handoff's ``tool_call_condition_status`` values. Facts come from the
+producer's own target-observation fact values.
 """
 
 from __future__ import annotations
@@ -245,8 +245,8 @@ def test_false_state_predicate_fails_the_precondition() -> None:
 
 
 def test_unknown_state_predicate_is_not_executable() -> None:
-    # The reference binder keeps a spec for ``precondition_unknown``; v3
-    # publishes a condition only when bound, so none is emitted.
+    # The reference binder keeps a spec for ``precondition_unknown``; the
+    # handoff publishes a condition only when bound, so none is emitted.
     scenario = handoff(
         [
             value(fact("TARGET-STATE.orders.ORD-9.id"), "eq", literal("x")),

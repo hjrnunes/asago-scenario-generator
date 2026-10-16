@@ -1,9 +1,8 @@
-"""The scenario-handoff-v4 envelope: v3 plus the required ``attack_shape`` key.
+"""The scenario-handoff-v4 envelope and its required ``attack_shape`` key.
 
-The producer emits v4 through its one handoff model; the frozen v3 kit's
-``schema.json`` stands for v3. These tests pin what v4 adds: the constants, the
-pairing of ``kind`` with the shape (R7), the digest domain, null-preserving
-serialization, and the JSON schema a schema-only reader uses.
+The producer emits v4 through its one handoff model. These tests pin the
+constants, the pairing of ``kind`` with the shape (R7), the digest domain,
+null-preserving serialization, and the JSON schema a schema-only reader uses.
 """
 
 from __future__ import annotations
@@ -21,12 +20,8 @@ from asago_scenario_generator.stpa.models import attack_shape as shape_module
 from asago_scenario_generator.stpa.models.attack_shape import ShapeSource
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     _FORBIDDEN_KEYS,
-    HANDOFF_DIGEST_DOMAIN,
     HANDOFF_DIGEST_DOMAIN_V4,
-    HANDOFF_DIGEST_DOMAINS,
-    HANDOFF_SCHEMA_VERSION,
     HANDOFF_SCHEMA_VERSION_V4,
-    HANDOFF_SCHEMA_VERSIONS,
     ScenarioHandoffV4,
     finalize_handoff,
     handoff_ownership_violations,
@@ -35,18 +30,14 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     verify_handoff_digest,
 )
 
-V3_KIT = (
-    Path(__file__).resolve().parents[2] / "data/contracts/scenario-handoff/handoff-v3"
+V4_VALID = (
+    Path(__file__).resolve().parents[2]
+    / "data/contracts/scenario-handoff/handoff-v4/valid"
 )
-V3_VALID = V3_KIT / "valid"
 OTHER_VERSION_CODES = [
     "schema_violation:schema_version",
     "schema_violation:attack_shape",
 ]
-
-
-def _v3_schema() -> dict[str, Any]:
-    return json.loads((V3_KIT / "schema.json").read_text(encoding="utf-8"))
 
 
 DIRECT_SHAPE: dict[str, Any] = {
@@ -63,10 +54,9 @@ DIRECT_SHAPE: dict[str, Any] = {
 
 
 def _v4(name: str, shape: dict[str, Any] | None) -> dict[str, Any]:
-    """Return a v3 kit payload re-versioned as v4, without its digest."""
+    """Return a kit payload with *shape* as its shape, without its digest."""
 
-    payload = json.loads((V3_VALID / f"{name}.json").read_text(encoding="utf-8"))
-    payload["schema_version"] = HANDOFF_SCHEMA_VERSION_V4
+    payload = json.loads((V4_VALID / f"{name}.json").read_text(encoding="utf-8"))
     payload["attack_shape"] = copy.deepcopy(shape)
     payload.pop("content_digest")
     return payload
@@ -80,17 +70,13 @@ def _functional(shape: dict[str, Any] | None = None) -> dict[str, Any]:
     return _v4("functional-not-called", shape)
 
 
-def test_constants_name_v4_and_leave_v3_as_the_emitted_version() -> None:
+def test_constants_name_v4() -> None:
     assert HANDOFF_SCHEMA_VERSION_V4 == "scenario-handoff-v4"
     assert HANDOFF_DIGEST_DOMAIN_V4 == "scenario-handoff-v4"
-    assert HANDOFF_SCHEMA_VERSION == "scenario-handoff-v3"
-    assert HANDOFF_DIGEST_DOMAIN == "scenario-handoff-v3"
-    assert HANDOFF_SCHEMA_VERSIONS[-1] == HANDOFF_SCHEMA_VERSION_V4
-    assert HANDOFF_DIGEST_DOMAINS[HANDOFF_SCHEMA_VERSION_V4] == HANDOFF_DIGEST_DOMAIN_V4
 
 
 @pytest.mark.parametrize(
-    "version", [HANDOFF_SCHEMA_VERSION, "scenario-handoff-v9", None], ids=str
+    "version", ["scenario-handoff-v3", "scenario-handoff-v9", None], ids=str
 )
 def test_any_other_version_gets_the_kits_unknown_version_codes(
     version: str | None,
@@ -138,7 +124,7 @@ def test_a_malformed_shape_is_reported_under_attack_shape() -> None:
     assert handoff_schema_violations(payload) == ["schema_violation:attack_shape"]
 
 
-def test_v4_keeps_the_v3_tool_call_pairing() -> None:
+def test_a_bound_status_requires_a_tool_call_condition() -> None:
     payload = _adversarial()
     del payload["tool_call_condition"]
 
@@ -163,9 +149,6 @@ def test_v4_digest_uses_its_own_domain_and_verifies() -> None:
         HANDOFF_DIGEST_DOMAIN_V4, payload
     )
     assert handoff.content_digest == handoff_payload_digest(payload)
-    assert handoff.content_digest != compute_framed_digest(
-        HANDOFF_DIGEST_DOMAIN, payload
-    )
     verify_handoff_digest(handoff)
 
 
@@ -231,12 +214,11 @@ def _schema_keys(node: Any) -> set[str]:
     return keys
 
 
-def test_no_v4_key_name_is_forbidden_by_the_ownership_scan() -> None:
-    v3_keys = _schema_keys(_v3_schema())
-    v4_only = _schema_keys(ScenarioHandoffV4.model_json_schema()) - v3_keys
+def test_no_schema_key_name_is_forbidden_by_the_ownership_scan() -> None:
+    keys = _schema_keys(ScenarioHandoffV4.model_json_schema())
 
-    assert {"attack_shape", "channel", "turn_plan", "carrier_operation"} <= v4_only
-    assert not {key.lower() for key in v4_only} & _FORBIDDEN_KEYS
+    assert {"attack_shape", "channel", "turn_plan", "carrier_operation"} <= keys
+    assert not {key.lower() for key in keys} & _FORBIDDEN_KEYS
     assert not {name.lower() for name in _shape_field_names()} & _FORBIDDEN_KEYS
 
 
@@ -254,41 +236,20 @@ def _shape_field_names() -> set[str]:
     }
 
 
-def test_the_v4_schema_differs_from_v3_only_where_the_design_says() -> None:
-    v3 = _v3_schema()
+def test_the_v4_schema_requires_the_shape_and_carries_its_pairings() -> None:
     v4 = ScenarioHandoffV4.model_json_schema()
 
-    assert v4["title"] == v3["title"] == "ScenarioHandoff"
+    assert v4["title"] == "ScenarioHandoff"
     assert v4["properties"]["schema_version"]["const"] == HANDOFF_SCHEMA_VERSION_V4
     assert v4["properties"]["schema_version"]["default"] == HANDOFF_SCHEMA_VERSION_V4
-    assert v4["required"] == [*v3["required"], "attack_shape"]
+    assert "attack_shape" in v4["required"]
     assert v4["additionalProperties"] is False
     assert {"if", "then", "else"}.isdisjoint(v4)
     assert len(v4["allOf"]) == 2
     assert {"AttackShape", "TurnShape", "IndirectShape"} <= set(v4["$defs"])
-    unchanged = {
-        name: definition
-        for name, definition in v3["$defs"].items()
-        if v4["$defs"].get(name) != definition
-    }
-    assert set(unchanged) == {"ScenarioDeduplicationKey"}
-    v3_key = v3["$defs"]["ScenarioDeduplicationKey"]
-    v4_key = v4["$defs"]["ScenarioDeduplicationKey"]
-    assert set(v4_key["properties"]) - set(v3_key["properties"]) == {"constraint_ids"}
-    assert v4_key["required"] == v3_key["required"]
-    assert {
-        name: value
-        for name, value in v4_key["properties"].items()
-        if name != "constraint_ids"
-    } == v3_key["properties"]
-    other = {
-        key: value
-        for key, value in v4["properties"].items()
-        if key not in {"schema_version", "attack_shape"}
-    }
-    assert other == {
-        key: value for key, value in v3["properties"].items() if key != "schema_version"
-    }
+    key = v4["$defs"]["ScenarioDeduplicationKey"]
+    assert "constraint_ids" in key["properties"]
+    assert "constraint_ids" not in key["required"]
 
 
 def _schema_errors(payload: dict[str, Any]) -> list[Any]:

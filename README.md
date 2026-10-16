@@ -256,12 +256,11 @@ Each generated scenario is published as a versioned **scenario handoff**
 under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the
 envelope over narrative, attack tree, Gherkin and necessary metadata defined
 by [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v4`, the producer's only handoff model; the `handoff-v1`,
-`handoff-v2` and `handoff-v3` kits stay unchanged for their readers). Version 3 adds `tool_call_condition_status`,
-which says whether Stage 5 bound the discriminating condition to target facts,
-and, when it did, the ready-to-evaluate `tool_call_condition`. Version 4 adds the
-required `attack_shape` key (closed enums, turn count 1-4 and identifiers, never
-attack text): an object for an adversarial scenario and `null` for a functional
+(schema `scenario-handoff-v4`). `tool_call_condition_status` says whether
+Stage 5 bound the discriminating condition to target facts, and, when it did,
+`tool_call_condition` carries the ready-to-evaluate condition. The required
+`attack_shape` key (closed enums, turn count 1-4 and identifiers, never attack
+text) is an object for an adversarial scenario and `null` for a functional
 one. The `stage5_shape` step fills it: after Stage 5 compiles an adversarial
 scenario, one closed-vocabulary model request proposes the channel, the planned
 turns and, for an attack through content, the carrier operation. Code validates

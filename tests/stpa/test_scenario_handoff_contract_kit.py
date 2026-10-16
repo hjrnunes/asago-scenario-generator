@@ -5,16 +5,7 @@ Gherkin and necessary metadata, with a lock/digest record the consumer vendors
 byte-for-byte. These tests assert the kit's content, its schema, its canonical
 digests, and the exact ownership-boundary violations the invalid fixtures
 retain. They also assert the kit introduces no fourth authoritative scenario
-representation.
-
-Four kits coexist: ``handoff-v1``, ``handoff-v2`` and ``handoff-v3`` stay
-byte-identical for consumers that still read them, and the producer no longer
-has a model for them: their fixtures are checked against their own
-``schema.json``, the ownership scan, the framed digest, and their recorded
-codes. ``handoff-v2`` adds the Stage 5 discriminating condition and its
-code-owned check; ``handoff-v3`` adds the condition's binding to a
-ready-to-evaluate tool-call condition; ``handoff-v4`` adds the
-``attack_shape``. The v4 invalid fixtures are checked in
+representation. The invalid shape fixtures are checked in
 ``test_scenario_handoff_v4_kit.py``.
 """
 
@@ -29,8 +20,6 @@ from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION,
-    HANDOFF_SCHEMA_VERSION_V2,
     HANDOFF_SCHEMA_VERSION_V4,
     HandoffGherkin,
     ScenarioHandoffV4,
@@ -43,58 +32,40 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 )
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/scenario-handoff"
-KIT_ROOT = CONTRACT_ROOT / "handoff-v1"
-KIT_V2_ROOT = CONTRACT_ROOT / "handoff-v2"
-KIT_V3_ROOT = CONTRACT_ROOT / "handoff-v3"
-KIT_V4_ROOT = CONTRACT_ROOT / "handoff-v4"
-KITS = (KIT_ROOT, KIT_V2_ROOT, KIT_V3_ROOT, KIT_V4_ROOT)
-FROZEN_KITS = (KIT_ROOT, KIT_V2_ROOT, KIT_V3_ROOT)
-V2_FIELDS = {"discriminating_condition", "condition_check", "condition_omitted_reason"}
-V3_FIELDS = {"tool_call_condition_status", "tool_call_condition"}
-V4_FIELDS = {"attack_shape"}
+KIT = CONTRACT_ROOT / "handoff-v4"
 
 
 def _lock() -> dict:
     return json.loads((CONTRACT_ROOT / "CONTRACT.lock").read_text(encoding="utf-8"))
 
 
-def _digests(kit: Path = KIT_ROOT) -> dict:
-    return json.loads((kit / "canonical-digests.json").read_text(encoding="utf-8"))
+def _digests() -> dict:
+    return json.loads((KIT / "canonical-digests.json").read_text(encoding="utf-8"))
 
 
-def _expected_violations(kit: Path = KIT_ROOT) -> dict:
-    return json.loads((kit / "expected-violations.json").read_text(encoding="utf-8"))
+def _expected_violations() -> dict:
+    return json.loads((KIT / "expected-violations.json").read_text(encoding="utf-8"))
 
 
-def _schema(kit: Path) -> dict:
-    return json.loads((kit / "schema.json").read_text(encoding="utf-8"))
+def _schema() -> dict:
+    return json.loads((KIT / "schema.json").read_text(encoding="utf-8"))
 
 
-def _kit_fixtures(kind: str) -> list[tuple[Path, Path]]:
-    return [
-        (kit, fixture)
-        for kit in KITS
-        for fixture in sorted((kit / kind).glob("*.json"))
-    ]
-
-
-def _fixture_id(value: object) -> str:
-    return value.name if isinstance(value, Path) else str(value)
+def _valid_fixtures() -> list[Path]:
+    return sorted((KIT / "valid").glob("*.json"))
 
 
 def test_v4_schema_matches_the_producer_model() -> None:
-    assert _schema(KIT_V4_ROOT) == ScenarioHandoffV4.model_json_schema()
+    assert _schema() == ScenarioHandoffV4.model_json_schema()
 
 
 def test_v4_schema_file_is_the_models_schema_byte_for_byte() -> None:
-    committed = (KIT_V4_ROOT / "schema.json").read_text(encoding="utf-8")
+    committed = (KIT / "schema.json").read_text(encoding="utf-8")
 
     rendered = json.dumps(ScenarioHandoffV4.model_json_schema(), indent=2) + "\n"
 
     assert rendered == committed
-    assert list(ScenarioHandoffV4.model_fields) == list(
-        _schema(KIT_V4_ROOT)["properties"]
-    )
+    assert list(ScenarioHandoffV4.model_fields) == list(_schema()["properties"])
 
 
 def test_kit_introduces_no_fourth_scenario_representation() -> None:
@@ -103,29 +74,19 @@ def test_kit_introduces_no_fourth_scenario_representation() -> None:
     # Every top-level schema property is one of the three representations or a
     # named metadata field; the envelope adds nothing else.
     declared = set(lock["representations"]) | set(lock["metadata_fields"])
-    v1_schema = _schema(KIT_ROOT)
-    v2_schema = _schema(KIT_V2_ROOT)
-    v3_schema = _schema(KIT_V3_ROOT)
-    v4_schema = _schema(KIT_V4_ROOT)
-    assert set(v4_schema["properties"]) == declared
-    assert set(v3_schema["properties"]) == declared - V4_FIELDS
-    assert set(v2_schema["properties"]) == declared - V4_FIELDS - V3_FIELDS
-    assert set(v1_schema["properties"]) == declared - V4_FIELDS - V3_FIELDS - V2_FIELDS
-    for schema in (v1_schema, v2_schema, v3_schema, v4_schema):
-        assert schema["additionalProperties"] is False
+    schema = _schema()
+    assert set(schema["properties"]) == declared
+    assert schema["additionalProperties"] is False
 
 
-@pytest.mark.parametrize(("kit", "fixture"), _kit_fixtures("valid"), ids=_fixture_id)
-def test_valid_handoff_fixtures_round_trip_with_digests(
-    kit: Path, fixture: Path
-) -> None:
+@pytest.mark.parametrize("fixture", _valid_fixtures(), ids=lambda path: path.name)
+def test_valid_handoff_fixtures_round_trip_with_digests(fixture: Path) -> None:
     payload = json.loads(fixture.read_text(encoding="utf-8"))
     relative = f"valid/{fixture.name}"
 
-    assert not list(Draft202012Validator(_schema(kit)).iter_errors(payload))
-    if kit == KIT_V4_ROOT:
-        assert handoff_schema_violations(payload) == []
-        verify_handoff_digest(ScenarioHandoffV4.model_validate(payload))
+    assert not list(Draft202012Validator(_schema()).iter_errors(payload))
+    assert handoff_schema_violations(payload) == []
+    verify_handoff_digest(ScenarioHandoffV4.model_validate(payload))
     assert handoff_ownership_violations(payload) == []
     # The semantic failure criterion and the safe alternative are retained.
     assert payload["semantic_failure_criterion"].strip()
@@ -143,7 +104,7 @@ def test_valid_handoff_fixtures_round_trip_with_digests(
         key: value for key, value in payload.items() if key != "content_digest"
     }
     assert handoff_payload_digest(payload_without_digest) == payload["content_digest"]
-    digests = _digests(kit)
+    digests = _digests()
     assert digests["handoff_digests"][relative] == payload["content_digest"]
     assert (
         digests["content_sha256"][relative]
@@ -153,29 +114,19 @@ def test_valid_handoff_fixtures_round_trip_with_digests(
     assert canonical_json_bytes(payload_without_digest)
 
 
-@pytest.mark.parametrize("kit", KITS, ids=_fixture_id)
-def test_valid_fixtures_cover_adversarial_and_functional_cases(kit: Path) -> None:
+def test_valid_fixtures_cover_adversarial_and_functional_cases() -> None:
     kinds = set()
-    for fixture in (kit / "valid").glob("*.json"):
+    for fixture in _valid_fixtures():
         payload = json.loads(fixture.read_text(encoding="utf-8"))
         kinds.add(payload["kind"])
     assert kinds == {"adversarial", "functional"}
 
 
-@pytest.mark.parametrize(
-    ("kit", "version"),
-    [
-        (KIT_V2_ROOT, HANDOFF_SCHEMA_VERSION_V2),
-        (KIT_V3_ROOT, HANDOFF_SCHEMA_VERSION),
-        (KIT_V4_ROOT, HANDOFF_SCHEMA_VERSION_V4),
-    ],
-    ids=_fixture_id,
-)
-def test_valid_fixtures_cover_every_condition_shape(kit: Path, version: str) -> None:
+def test_valid_fixtures_cover_every_condition_shape() -> None:
     shapes = set()
-    for fixture in (kit / "valid").glob("*.json"):
+    for fixture in _valid_fixtures():
         payload = json.loads(fixture.read_text(encoding="utf-8"))
-        assert payload["schema_version"] == version
+        assert payload["schema_version"] == HANDOFF_SCHEMA_VERSION_V4
         condition = payload.get("discriminating_condition")
         if condition is None:
             assert "condition_check" not in payload
@@ -202,17 +153,15 @@ def test_valid_fixtures_cover_every_condition_shape(kit: Path, version: str) -> 
 
 def test_handoff_rejects_an_omission_note_beside_a_condition() -> None:
     payload = json.loads(
-        (KIT_V4_ROOT / "valid/adversarial-observed-record.json").read_text(
-            encoding="utf-8"
-        )
+        (KIT / "valid/adversarial-observed-record.json").read_text(encoding="utf-8")
     )
     payload["condition_omitted_reason"] = "The condition was omitted."
     assert handoff_schema_violations(payload) == ["schema_violation:<root>"]
 
 
-def test_v3_valid_fixtures_cover_bound_and_not_executable() -> None:
+def test_valid_fixtures_cover_bound_and_not_executable() -> None:
     statuses = set()
-    for fixture in (KIT_V3_ROOT / "valid").glob("*.json"):
+    for fixture in _valid_fixtures():
         payload = json.loads(fixture.read_text(encoding="utf-8"))
         status = payload["tool_call_condition_status"]
         statuses.add(status["status"])
@@ -229,40 +178,11 @@ def test_v3_valid_fixtures_cover_bound_and_not_executable() -> None:
     assert statuses == {"bound", "not_executable"}
 
 
-@pytest.mark.parametrize(
-    ("kit", "fixture"),
-    [pair for pair in _kit_fixtures("invalid") if pair[0] in FROZEN_KITS],
-    ids=_fixture_id,
-)
-def test_frozen_invalid_fixtures_keep_their_recorded_codes(
-    kit: Path, fixture: Path
-) -> None:
-    """The ownership scan finds the recorded ownership codes; the kit's own
-    schema rejects the fixture exactly when a schema code is recorded and the
-    retired model, not the schema, was the one to reject it."""
-    payload = json.loads(fixture.read_text(encoding="utf-8"))
-    expected = _expected_violations(kit)[f"invalid/{fixture.name}"]
-    schema_codes = [code for code in expected if code.startswith(SCHEMA)]
-
-    assert expected
-    assert handoff_ownership_violations(payload) == [
-        code for code in expected if not code.startswith(SCHEMA)
-    ]
-    if kit != KIT_ROOT:
-        schema_rejects = bool(
-            list(Draft202012Validator(_schema(kit)).iter_errors(payload))
-        )
-        assert schema_rejects is (
-            bool(schema_codes) and fixture.stem not in MODEL_ONLY_SCHEMA_CASES
-        )
-
-
 KEY = "artifact_design_field:"
 PROSE = "prose_hiding:"
 SCHEMA = "schema_violation:"
 
-# Ownership cases the v3 and v4 kits both carry: fixture -> typed codes. The
-# last four are the handoff-v1 ownership cases.
+# Ownership cases the kit carries: fixture -> typed codes.
 OWNERSHIP_CASES: dict[str, list[str]] = {
     "narrative-role-serialization.json": [PROSE + "role_serialization"],
     "narrative-turn-array.json": [PROSE + "turn_array"],
@@ -284,25 +204,18 @@ OWNERSHIP_CASES: dict[str, list[str]] = {
 }
 
 
-@pytest.mark.parametrize(
-    ("kit", "name"),
-    [(kit, name) for kit in (KIT_V3_ROOT, KIT_V4_ROOT) for name in OWNERSHIP_CASES],
-    ids=lambda value: _fixture_id(value),
-)
-def test_ownership_cases_are_rejected_for_the_producers_reason(
-    kit: Path, name: str
-) -> None:
+@pytest.mark.parametrize("name", list(OWNERSHIP_CASES))
+def test_ownership_cases_are_rejected_for_the_producers_reason(name: str) -> None:
     expected = OWNERSHIP_CASES[name]
-    payload = json.loads((kit / "invalid" / name).read_text(encoding="utf-8"))
+    payload = json.loads((KIT / "invalid" / name).read_text(encoding="utf-8"))
 
     assert handoff_ownership_violations(payload) == expected
-    assert _expected_violations(kit)[f"invalid/{name}"] == expected
-    assert not list(Draft202012Validator(_schema(kit)).iter_errors(payload))
+    assert _expected_violations()[f"invalid/{name}"] == expected
+    assert not list(Draft202012Validator(_schema()).iter_errors(payload))
 
 
-@pytest.mark.parametrize("kit", [KIT_V3_ROOT, KIT_V4_ROOT])
-def test_the_kit_exercises_every_prose_pattern_and_oracle_key(kit: Path) -> None:
-    recorded = {code for codes in _expected_violations(kit).values() for code in codes}
+def test_the_kit_exercises_every_prose_pattern_and_oracle_key() -> None:
+    recorded = {code for codes in _expected_violations().values() for code in codes}
     required = {PROSE + slug for slug, _ in _FORBIDDEN_VALUE_PATTERNS} | {
         KEY + key for key in _FORBIDDEN_KEYS if key.startswith("oracle_")
     }
@@ -311,21 +224,9 @@ def test_the_kit_exercises_every_prose_pattern_and_oracle_key(kit: Path) -> None
 
 
 def test_expected_violations_name_every_invalid_fixture() -> None:
-    for kit in KITS:
-        named = set(_expected_violations(kit))
-        present = {f"invalid/{path.name}" for path in (kit / "invalid").glob("*.json")}
-        assert named == present, kit.name
-
-
-def test_invalid_fixture_carrying_a_prepared_message_field_is_rejected() -> None:
-    payload = json.loads(
-        (KIT_ROOT / "invalid/stimulus-turn-field.json").read_text(encoding="utf-8")
-    )
-    assert "artifact_design_field:stimulus_turns" in handoff_ownership_violations(
-        payload
-    )
-    schema = json.loads((KIT_ROOT / "schema.json").read_text(encoding="utf-8"))
-    assert list(Draft202012Validator(schema).iter_errors(payload))
+    named = set(_expected_violations())
+    present = {f"invalid/{path.name}" for path in (KIT / "invalid").glob("*.json")}
+    assert named == present
 
 
 OBSERVATION = [SCHEMA + "observation"]
@@ -333,10 +234,11 @@ DEDUPLICATION = [SCHEMA + "deduplication"]
 SAFE_OUTCOME = [SCHEMA + "safe_observable_outcome"]
 TOOL_CALL_STATUS = [SCHEMA + "tool_call_condition_status"]
 
-# Schema-level cases the v3 and v4 kits both carry, each one broken field of a
-# bound adversarial handoff: fixture stem -> codes.
+# Schema-level cases, each one broken field of a bound adversarial handoff:
+# fixture stem -> codes.
 SCHEMA_CASES: dict[str, list[str]] = {
-    "schema-unknown-version": [SCHEMA + "schema_version"],
+    # See ``handoff._OTHER_VERSION_VIOLATIONS`` for the second code.
+    "schema-unknown-version": [SCHEMA + "schema_version", SCHEMA + "attack_shape"],
     "schema-missing-narrative": [SCHEMA + "narrative"],
     "schema-unknown-field": [SCHEMA + "bogus"],
     "schema-kind-not-enumerated": [SCHEMA + "kind"],
@@ -376,6 +278,8 @@ SCHEMA_CASES: dict[str, list[str]] = {
     "schema-deduplication-key-missing-claim": DEDUPLICATION,
     "schema-deduplication-key-blank-operation": DEDUPLICATION,
     "schema-deduplication-key-claim-not-enumerated": DEDUPLICATION,
+    "schema-deduplication-key-constraint-ids-not-list": DEDUPLICATION,
+    "schema-deduplication-key-constraint-id-blank": DEDUPLICATION,
     "schema-safe-outcome-not-object": SAFE_OUTCOME,
     "schema-safe-outcome-unknown-field": SAFE_OUTCOME,
     "schema-safe-outcome-empty": SAFE_OUTCOME,
@@ -396,13 +300,6 @@ SCHEMA_CASES: dict[str, list[str]] = {
         SCHEMA + "stimulus_turns",
     ],
 }
-# The v4 kit records two codes for an unknown version: the retired v3 model
-# also rejected the attack_shape key, and the producer keeps those codes.
-SCHEMA_CASES_V4 = SCHEMA_CASES | {
-    "schema-unknown-version": [SCHEMA + "schema_version", SCHEMA + "attack_shape"],
-    "schema-deduplication-key-constraint-ids-not-list": DEDUPLICATION,
-    "schema-deduplication-key-constraint-id-blank": DEDUPLICATION,
-}
 # Cases the producer model rejects through a validator the JSON schema cannot
 # express; a reader that checks only schema.json accepts them.
 MODEL_ONLY_SCHEMA_CASES = {
@@ -417,42 +314,19 @@ MODEL_ONLY_SCHEMA_CASES = {
 }
 
 
-@pytest.mark.parametrize(
-    ("kit", "cases"),
-    [(KIT_V3_ROOT, SCHEMA_CASES), (KIT_V4_ROOT, SCHEMA_CASES_V4)],
-    ids=lambda value: _fixture_id(value) if isinstance(value, Path) else "",
-)
-def test_each_schema_case_is_rejected_with_its_recorded_codes(
-    kit: Path, cases: dict[str, list[str]]
-) -> None:
-    present = {path.stem for path in (kit / "invalid").glob("schema-*.json")}
-    assert present == set(cases)
-    validator = Draft202012Validator(_schema(kit))
-    for name, codes in cases.items():
-        payload = json.loads((kit / "invalid" / f"{name}.json").read_text("utf-8"))
+def test_each_schema_case_is_rejected_with_its_recorded_codes() -> None:
+    present = {path.stem for path in (KIT / "invalid").glob("schema-*.json")}
+    assert present == set(SCHEMA_CASES)
+    validator = Draft202012Validator(_schema())
+    for name, codes in SCHEMA_CASES.items():
+        payload = json.loads((KIT / "invalid" / f"{name}.json").read_text("utf-8"))
         found = handoff_ownership_violations(payload)
-        if kit == KIT_V4_ROOT:
-            found += handoff_schema_violations(payload)
-        else:
-            found += [code for code in codes if code.startswith(SCHEMA)]
+        found += handoff_schema_violations(payload)
         assert found == codes, name
-        assert _expected_violations(kit)[f"invalid/{name}.json"] == codes, name
+        assert _expected_violations()[f"invalid/{name}.json"] == codes, name
         schema_rejects = bool(list(validator.iter_errors(payload)))
         assert schema_rejects is (name not in MODEL_ONLY_SCHEMA_CASES), name
         if name != "schema-unknown-version":
             # Signed, so a reader that checks the digest first reaches the field.
             unsigned = {k: v for k, v in payload.items() if k != "content_digest"}
             assert payload["content_digest"] == handoff_payload_digest(unsigned), name
-
-
-def test_the_refund_bound_case_is_bound_without_a_discriminating_condition() -> None:
-    payload = json.loads(
-        (KIT_V3_ROOT / "valid/refund-bound.json").read_text(encoding="utf-8")
-    )
-
-    assert "discriminating_condition" not in payload
-    assert payload["tool_call_condition_status"]["status"] == "bound"
-    assert payload["tool_call_condition"]["comparisons"][0]["right"] == {
-        "source": "literal",
-        "value": 100,
-    }

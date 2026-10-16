@@ -180,37 +180,6 @@ def test_valid_fixtures_cover_each_channel_and_the_downgrade_and_null_cases() ->
     assert forged["turn_plan"][-1]["speaker"] == "attacker_user"
 
 
-def test_the_rebuilt_v3_payloads_keep_their_content_beside_the_shape() -> None:
-    for name in (
-        "adversarial-observed-record",
-        "functional-record-unavailable",
-        "analytical-only",
-        "functional-not-called",
-        "adversarial-condition-omitted",
-    ):
-        v3 = json.loads(
-            (CONTRACT_ROOT / f"handoff-v3/valid/{name}.json").read_text(
-                encoding="utf-8"
-            )
-        )
-        v4 = _load(f"valid/{name}.json")
-        shape = v4.pop("attack_shape")
-        key = (v4.get("deduplication") or {}).get("key", {})
-        constraint_ids = key.pop("constraint_ids", None)
-        if constraint_ids is not None:
-            assert constraint_ids == sorted(set(v4["lineage"]["constraint_ids"]))
-        for volatile in ("schema_version", "content_digest"):
-            del v3[volatile], v4[volatile]
-        # The contract fact names the handoff version it was built for.
-        v3 = json.loads(
-            json.dumps(v3).replace(
-                "contract scenario-handoff-v3", "contract scenario-handoff-v4"
-            )
-        )
-        assert v4 == v3
-        assert (shape is None) == (v3["kind"] == "functional")
-
-
 @pytest.mark.parametrize("name", sorted(INVALID))
 def test_each_invalid_fixture_is_rejected_with_its_recorded_codes(name: str) -> None:
     codes, rule, schema_rejects = INVALID[name]
