@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any, Iterable
 
 from asago_scenario_generator.report.run_data import RunData
-from asago_scenario_generator.report_kit import Markup, badge, callout, chip, esc, join
+from asago_scenario_generator.report_kit import Markup, callout, chip, esc, join
 
 ATTACK = "adversarial"
 
@@ -74,11 +74,6 @@ def missing(run: RunData, name: str) -> Markup:
             f'<p class="nm">{esc(reason)}</p>'
         ),
     )
-
-
-def status_badge(ok: bool, good: str, bad: str) -> Markup:
-    """Render a pass or warn badge from a flag."""
-    return badge("pass", good) if ok else badge("warn", bad)
 
 
 def counted(key: str, count: int) -> Markup:
