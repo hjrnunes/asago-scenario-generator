@@ -692,6 +692,18 @@ class TestProbeGating:
                 {"Tool parameter validation"},
                 id="tools_via_kc5",
             ),
+            pytest.param(
+                ["KC1.1", "KC4.3", "KC5.1", "KC6.3.3", "KC2.3", "KCX-HITL"],
+                ["User chat", "RAG retrieval"],
+                {
+                    "RAG retrieval",
+                    "Tool parameter validation",
+                    "Memory integrity",
+                    "Multi-agent coordination",
+                    "Human-in-the-loop",
+                },
+                id="full_profile",
+            ),
         ],
     )
     def test_probes_follow_the_capability_profile(
@@ -709,6 +721,7 @@ class TestProbeGating:
             name for name in every_probe if any(name in probe for probe in probes)
         }
         assert included == expected
+        assert len(probes) == len(expected)
 
 
 @pytest.mark.parametrize(
