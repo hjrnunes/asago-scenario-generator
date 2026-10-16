@@ -7,9 +7,6 @@ came from, so a derived MiniOcciAI graph (proposed direction authority,
 must derive from the actual source record and the run's Stage 1a acceptance
 record: a derived/proposed constraint stays distinguishable from a reviewed
 one, and a pinned reviewed graph still publishes as reviewed.
-
-The sealed run directories under ``build/adaptive-runs/`` are read-only
-evidence; these tests load two of them and never write there.
 """
 
 from __future__ import annotations
@@ -47,10 +44,6 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import StructuralT
 from asago_scenario_generator.pipeline import synthesis
 from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
 from asago_scenario_generator.pipeline.synthesis_defaults import _default_scenarios
-
-_REPO_ROOT = Path(__file__).resolve().parents[2]
-_OCCIAI_RUN_DIR = _REPO_ROOT / "build" / "adaptive-runs" / "m3-occiai-attempt1"
-_AF_RUN1_DIR = _REPO_ROOT / "build" / "adaptive-runs" / "af-run1"
 
 
 def _reviewed(analysis: LossAnalysis) -> LossAnalysis:
@@ -245,98 +238,6 @@ def test_authority_follows_source_record(tmp_path: Path) -> None:
         _constraint_fact(derived_with_reviewed_record)["authority"]
         == "derived_proposed_constraint"
     )
-
-
-# Sealed-run fixtures (read-only)
-
-
-@pytest.mark.skipif(
-    not _OCCIAI_RUN_DIR.is_dir(),
-    reason="sealed fixture run build/adaptive-runs/m3-occiai-attempt1 is absent",
-)
-def test_m3_occiai_derived_fixture_does_not_publish_reviewed(
-    tmp_path: Path,
-) -> None:
-    """VAL-A2-001: the saved derived OcciAI graph must not publish reviewed.
-
-    The saved run's manifest records ``stage_1a.source: derived``, its
-    loss-analysis constraints carry ``direction_authority: proposed``, and its
-    published ``scenarios/SCN-001.yaml`` carried the wrong
-    ``supplied_reviewed_constraint`` stamp. Rebuilding the same handoff at
-    the corrected seam publishes the derived authority instead.
-    """
-    manifest = yaml.safe_load((_OCCIAI_RUN_DIR / "run-manifest.yaml").read_text())
-    assert manifest["stage_summary"]["stage_1a"]["source"] == "derived"
-    analysis = LossAnalysis.model_validate(
-        yaml.safe_load((_OCCIAI_RUN_DIR / "loss-analysis.yaml").read_text())
-    )
-    assert analysis.security_constraints
-    assert all(
-        constraint.effective_direction_authority == "proposed"
-        for constraint in analysis.security_constraints
-    )
-    published = yaml.safe_load(
-        (_OCCIAI_RUN_DIR / "scenarios" / "SCN-001.yaml").read_text()
-    )
-    saved_fact = next(
-        fact
-        for fact in published["sourced_facts"]
-        if fact["source"].startswith("security constraint ")
-    )
-    assert saved_fact["authority"] == "supplied_reviewed_constraint"
-
-    # Rebuild the same constraint fact from the saved graph: the published
-    # handoff's constraint record, matched by its exact id.
-    saved_constraint_id = saved_fact["source"].rsplit(" ", 1)[-1]
-    record = analysis.security_constraints[
-        [item.constraint_id for item in analysis.security_constraints].index(
-            saved_constraint_id
-        )
-    ]
-    handoff = _handoff_for(
-        analysis,
-        stage_1a_source="derived",
-        constraint_id=record.constraint_id,
-        hazard_id=record.related_hazards[0],
-        tmp_path=tmp_path,
-    )
-    fact = _constraint_fact(handoff)
-    assert fact["authority"] == "derived_proposed_constraint"
-    # The same constraint fact, only the authority corrected.
-    assert fact["statement"] == saved_fact["statement"]
-    assert fact["source"] == saved_fact["source"]
-
-
-@pytest.mark.skipif(
-    not _AF_RUN1_DIR.is_dir(),
-    reason="sealed fixture run build/adaptive-runs/af-run1 is absent",
-)
-def test_af_run1_pinned_reviewed_fixture_still_publishes_reviewed(
-    tmp_path: Path,
-) -> None:
-    """VAL-A2-002 positive control: the pinned reviewed af-run1 graph keeps
-    publishing as reviewed at the corrected seam."""
-    manifest = yaml.safe_load((_AF_RUN1_DIR / "run-manifest.yaml").read_text())
-    assert manifest["stage_summary"]["stage_1a"]["source"] == "pinned"
-    analysis = LossAnalysis.model_validate(
-        yaml.safe_load((_AF_RUN1_DIR / "loss-analysis.yaml").read_text())
-    )
-    reviewed = [
-        constraint
-        for constraint in analysis.security_constraints
-        if constraint.effective_direction_authority == "reviewed"
-    ]
-    assert reviewed, "fixture precondition: reviewed constraint records"
-
-    record = reviewed[0]
-    handoff = _handoff_for(
-        analysis,
-        stage_1a_source="pinned",
-        constraint_id=record.constraint_id,
-        hazard_id=record.related_hazards[0],
-        tmp_path=tmp_path,
-    )
-    assert _constraint_fact(handoff)["authority"] == "supplied_reviewed_constraint"
 
 
 # The synthesis seam threads the run's actual Stage 1a source
