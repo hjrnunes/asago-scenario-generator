@@ -3,9 +3,9 @@
 **Audit Date**: 2026-07-24  
 **Auditor**: QA Agent  
 **Files Audited**:
-- `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/staging/tactic-sequences-t2.md`
-- `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/atlas/ATLAS-2026.05.yaml`
-- `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/attack-patterns-memory-tool.yaml`
+- `data/taxonomies/attack-patterns/staging/tactic-sequences-t2.md`
+- `data/taxonomies/atlas/ATLAS-2026.05.yaml`
+- `data/taxonomies/attack-patterns/attack-patterns-memory-tool.yaml`
 
 ---
 

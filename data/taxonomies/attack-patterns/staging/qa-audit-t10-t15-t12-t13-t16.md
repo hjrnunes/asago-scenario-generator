@@ -9,7 +9,7 @@
 ## AP-T10-01: Human oversight interface manipulation via artificial decision context
 
 **Source Case Study**: AML.CS0026 — Financial Transaction Hijacking with M365 Copilot  
-**Pattern Definition**: `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/attack-patterns-agentic-only.yaml` (lines 249-304)
+**Pattern Definition**: `data/taxonomies/attack-patterns/attack-patterns-agentic-only.yaml` (lines 249-304)
 
 ### Verification Results
 
@@ -69,7 +69,7 @@ The sequence accurately captures CS0026's mechanism: reconnaissance → model ac
 ## AP-T15-01: Trust-exploiting content substitution for fraudulent action
 
 **Source Case Study**: AML.CS0026 — Financial Transaction Hijacking with M365 Copilot  
-**Pattern Definition**: `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/attack-patterns-comms-human-supply.yaml` (lines 124-180)
+**Pattern Definition**: `data/taxonomies/attack-patterns/attack-patterns-comms-human-supply.yaml` (lines 124-180)
 
 ### Verification Results
 
@@ -107,7 +107,7 @@ The sequence accurately maps to AP-T15-01's mechanism: content substitution (poi
 ## AP-T15-02: AI-mediated social engineering via deceptive instruction generation
 
 **Source Case Study**: AML.CS0055 — AI ClickFix: Hijacking Computer-Use Agents  
-**Pattern Definition**: `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/attack-patterns-comms-human-supply.yaml` (lines 182-239)
+**Pattern Definition**: `data/taxonomies/attack-patterns/attack-patterns-comms-human-supply.yaml` (lines 182-239)
 
 ### Verification Results
 
@@ -161,7 +161,7 @@ This is a **known adaptation gap**, not a factual error. The "inferred" label fo
 ## AP-T12-01: Collaborative decision manipulation via inter-agent message injection
 
 **Source Case Study**: AML.CS0024 — Morris II Worm: RAG-Based Attack  
-**Pattern Definition**: `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/attack-patterns-comms-human-supply.yaml` (lines 14-34)
+**Pattern Definition**: `data/taxonomies/attack-patterns/attack-patterns-comms-human-supply.yaml` (lines 14-34)
 
 ### Verification Results
 
@@ -213,7 +213,7 @@ CS0024 demonstrates RAG poisoning via self-replicating worm in a single-agent em
 ## AP-T12-03: Misinformation cascade via shared knowledge poisoning
 
 **Source Case Study**: AML.CS0024 — Morris II Worm: RAG-Based Attack  
-**Pattern Definition**: `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/attack-patterns-comms-human-supply.yaml` (lines 59-78)
+**Pattern Definition**: `data/taxonomies/attack-patterns/attack-patterns-comms-human-supply.yaml` (lines 59-78)
 
 ### Verification Results
 
@@ -259,7 +259,7 @@ The sequence emphasizes the cascading reinforcement aspect of CS0024's worm, whi
 ## AP-T13-04: Infectious reasoning-chain backdoor propagation
 
 **Source Case Study**: AML.CS0024 — Morris II Worm: RAG-Based Attack  
-**Pattern Definition**: `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/attack-patterns-halluc-intent.yaml` (lines 559-578)
+**Pattern Definition**: `data/taxonomies/attack-patterns/attack-patterns-halluc-intent.yaml` (lines 559-578)
 
 ### Verification Results
 
@@ -299,7 +299,7 @@ CS0024's worm demonstrates output → input propagation. The sequence generalize
 ## AP-T16-02: Context hijacking via crafted protocol response injection
 
 **Source Case Study**: AML.CS0020 (primary), also CS0024/CS0045/CS0053/CS0054  
-**Pattern Definition**: `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/attack-patterns-agentic-only.yaml` (lines 501-521)
+**Pattern Definition**: `data/taxonomies/attack-patterns/attack-patterns-agentic-only.yaml` (lines 501-521)
 
 ### Verification Results
 
@@ -343,7 +343,7 @@ The sequence claims CS0024/CS0045/CS0053/CS0054 also demonstrate this pattern. T
 ## AP-T16-03: Tool capability misrepresentation via registry description poisoning
 
 **Source Case Study**: AML.CS0049 (primary), also CS0045/CS0053/CS0054  
-**Pattern Definition**: `/Users/hjrnunes/workspace/hjrnunes/asago-scenario-generator/data/taxonomies/attack-patterns/attack-patterns-agentic-only.yaml` (lines 523-543)
+**Pattern Definition**: `data/taxonomies/attack-patterns/attack-patterns-agentic-only.yaml` (lines 523-543)
 
 ### Verification Results
 
