@@ -1,4 +1,4 @@
-"""report_kit: the byte-for-byte mirror of orch's report kit."""
+"""report_kit: the report kit that the consumer and the orchestrator mirror."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ REGENERATE = (
 def test_the_catalog_matches_its_golden_file() -> None:
     golden = (KIT_DIR / "catalog.html").read_text(encoding="utf-8")
     assert golden == kit.render_catalog(), (
-        f"catalog.html differs from the kit; copy the kit from orch (or run {REGENERATE})"
+        f"catalog.html differs from the kit; run {REGENERATE}"
     )
 
 
@@ -29,5 +29,5 @@ def test_every_file_matches_the_digest_in_the_lock() -> None:
         for name in lock["files"]
     }
     assert actual == lock["files"]
-    assert lock["authority"] == "asago-orch"
+    assert lock["authority"] == "asago-scenario-generator"
     assert lock["contract"] == "report-kit"
