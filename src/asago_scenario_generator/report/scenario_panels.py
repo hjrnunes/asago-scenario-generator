@@ -284,8 +284,6 @@ def _and_or_tags(node: dict) -> list[str]:
 
 def _and_or_node(node: dict) -> TreeNode:
     ids = [node.get("source_id"), *(node.get("source_ids") or [])]
-    if node.get("scenario_id") and node.get("type") == "reference":
-        ids.append(node["scenario_id"])
     prefix = join([code_id(i) for i in dict.fromkeys(i for i in ids if i)], " ")
     label = esc(" ".join(str(node.get("label", "")).split()))
     if node.get("type") == "operator":

@@ -212,7 +212,7 @@ def build_facts(spec: ScenarioSpec) -> ScenarioFacts:
             entries.append(
                 (
                     AGENT_BELIEF,
-                    _belief_text(belief.content, belief.vulnerability, factor_texts),
+                    belief_text(belief.content, belief.vulnerability, factor_texts),
                 )
             )
         if plain(factor.description):
@@ -253,7 +253,7 @@ def _unique(entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
     return kept
 
 
-def _belief_text(content: str, vulnerability: str, factor_texts: set[str]) -> str:
+def belief_text(content: str, vulnerability: str, factor_texts: set[str]) -> str:
     """Name what the flawed belief is about; add its flaw unless a factor says it."""
     text = f"The flawed belief concerns: {_lower_first(plain(content).rstrip('.'))}."
     flaw = plain(vulnerability)

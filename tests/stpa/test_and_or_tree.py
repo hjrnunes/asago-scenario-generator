@@ -233,11 +233,9 @@ def test_an_everyday_scenario_has_no_attacker_assumptions_or_steps() -> None:
 def test_a_weak_point_carries_the_defender_belief_it_names() -> None:
     found = nodes(tree_of(pm_factor(adversarial())))
 
-    assert found["AT-WP-1"]["belief"] == {
-        "source_id": "PM-1-1",
-        "label": "State",
-        "vulnerability": "The state is stale.",
-    }
+    assert found["AT-WP-1"]["belief"] == (
+        "The flawed belief concerns: state. Flaw: The state is stale."
+    )
 
 
 def test_two_hazards_root_at_the_first_and_list_both() -> None:
@@ -271,10 +269,23 @@ def test_other_scenarios_that_share_a_hazard_are_references_in_id_order() -> Non
         (found[i]["scenario_id"], found[i]["label"], found[i]["type"])
         for i in ("AT-ALT-1", "AT-ALT-2")
     ] == [
-        ("SCN-003", "Another attack.", "reference"),
-        ("SCN-009", "Everyday failure.", "reference"),
+        ("SCN-003", "SCN-003", "reference"),
+        ("SCN-009", "SCN-009", "reference"),
     ]
     assert validate_and_or_tree_structure(tree, "SCN-001").passed
+    text = json.dumps(tree)
+    for criterion in ("Another attack.", "Everyday failure.", "Unrelated."):
+        assert criterion not in text
+
+
+def test_the_sibling_index_holds_scenario_ids_by_hazard() -> None:
+    spec = with_hazards(adversarial(), ("H-1", "First"), ("H-2", "Second"))
+    other = with_hazards(renamed(everyday(), "SCN-002", "x"), ("H-2", "Second"))
+
+    assert build_sibling_index([other, spec]) == {
+        "H-1": ["SCN-001"],
+        "H-2": ["SCN-001", "SCN-002"],
+    }
 
 
 def test_an_unsupported_structural_id_in_free_text_is_replaced() -> None:
@@ -381,10 +392,11 @@ def test_factor_coverage_rejects_an_unsupported_bridge_in_an_and_or_tree() -> No
     assert "CA-9-9" in result.errors[0]
 
 
-def test_factor_coverage_leaves_other_scenarios_text_to_their_own_trees() -> None:
+def test_another_scenarios_criterion_stays_out_of_this_tree() -> None:
     spec = adversarial()
     tree = tree_of(spec, renamed(everyday(), "SCN-002", "It calls CA-9-9."))
 
+    assert "CA-9-9" not in json.dumps(tree)
     assert validate_tree_factor_evidence_coverage(tree, spec).passed
 
 
@@ -658,7 +670,22 @@ def test_a_belief_flaw_that_repeats_the_weak_point_is_left_out() -> None:
         }
     )
 
-    assert nodes(tree_of(spec))["AT-WP-1"]["belief"] == {
-        "source_id": "PM-1-1",
-        "label": "State",
-    }
+    assert nodes(tree_of(spec))["AT-WP-1"]["belief"] == (
+        "The flawed belief concerns: state."
+    )
+
+
+def test_a_belief_flaw_that_says_not_selected_is_left_out() -> None:
+    spec = pm_factor(adversarial())
+    belief = spec.defender_bdi.beliefs[0].model_copy(
+        update={"vulnerability": "Not selected as a causal factor here."}
+    )
+    spec = spec.model_copy(
+        update={
+            "defender_bdi": spec.defender_bdi.model_copy(update={"beliefs": [belief]})
+        }
+    )
+
+    assert nodes(tree_of(spec))["AT-WP-1"]["belief"] == (
+        "The flawed belief concerns: state."
+    )

@@ -21,7 +21,7 @@ from typing import Any
 from asago_scenario_generator.stpa.models.attack_shape import default_attack_shape
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
-from .narration import NOT_SELECTED, attack_steps, plain, rule_text
+from .narration import attack_steps, belief_text, plain, rule_text
 from .presentation import (
     ADVERSARY_WORDS,
     HYPOTHESIS_AUTHORITY,
@@ -51,8 +51,8 @@ SOURCE_UNCERTAINTY = (
     "causal path; that source was not treated as tree evidence."
 )
 
-# hazard id -> (scenario id, selected criterion) of every scenario that names it
-SiblingIndex = Mapping[str, Sequence[tuple[str, str]]]
+# hazard id -> ids of every scenario that names it
+SiblingIndex = Mapping[str, Sequence[str]]
 
 
 class AttackTreeFormat(str, Enum):
@@ -74,15 +74,12 @@ def scenario_hazard_ids(spec: ScenarioSpec) -> list[str]:
     return [item.hazard_id for item in context.hazards]
 
 
-def build_sibling_index(
-    specs: Iterable[ScenarioSpec],
-) -> dict[str, list[tuple[str, str]]]:
-    """Index every scenario by each hazard it names, in scenario-id order."""
-    index: dict[str, list[tuple[str, str]]] = {}
+def build_sibling_index(specs: Iterable[ScenarioSpec]) -> dict[str, list[str]]:
+    """Index every scenario id by each hazard it names, in scenario-id order."""
+    index: dict[str, list[str]] = {}
     for spec in sorted(specs, key=lambda item: item.scenario_id):
-        entry = (spec.scenario_id, plain(selected_criterion(spec)))
         for hazard_id in dict.fromkeys(scenario_hazard_ids(spec)):
-            index.setdefault(hazard_id, []).append(entry)
+            index.setdefault(hazard_id, []).append(spec.scenario_id)
     return index
 
 
@@ -104,8 +101,6 @@ def render_and_or_tree(
     changed = sanitize_tree_sources(own, spec)
     root = _root_node(spec, tree.get("lineage", {}))
     changed |= sanitize_tree_sources(root, spec)
-    # Other scenarios' criteria belong to their own trees, which apply the
-    # source rule against their own paths.
     root["children"] = [
         _node(
             "AT-OR",
@@ -211,7 +206,11 @@ def _conditions_node(spec: ScenarioSpec, adversarial: bool) -> dict[str, Any]:
         extras: dict[str, Any] = {"evidence_status": factor.evidence_status.value}
         belief = beliefs.get(factor.source_id)
         if belief is not None and plain(belief.content):
-            extras["belief"] = _belief(belief, plain(factor.description))
+            # The belief's pm_id is the weak point's source_id, so the text
+            # alone keeps everything.
+            extras["belief"] = belief_text(
+                belief.content, belief.vulnerability, {plain(factor.description)}
+            )
         children.append(
             _node(
                 f"AT-WP-{index}",
@@ -230,15 +229,6 @@ def _conditions_node(spec: ScenarioSpec, adversarial: bool) -> dict[str, Any]:
         operator="AND",
         children=children,
     )
-
-
-def _belief(belief: Any, weak_point: str) -> dict[str, Any]:
-    """Name the flawed belief; add its flaw unless the weak point already says it."""
-    entry = {"source_id": belief.pm_id, "label": plain(belief.content)}
-    flaw = plain(belief.vulnerability)
-    if flaw and flaw != weak_point and NOT_SELECTED not in flaw.lower():
-        entry["vulnerability"] = flaw
-    return entry
 
 
 def _steps_node(spec: ScenarioSpec) -> dict[str, Any]:
@@ -301,17 +291,20 @@ def _failure_node(spec: ScenarioSpec, criterion: str) -> dict[str, Any]:
 def _reference_nodes(
     spec: ScenarioSpec, siblings: SiblingIndex
 ) -> list[dict[str, Any]]:
-    others: dict[str, str] = {}
-    for hazard_id in scenario_hazard_ids(spec):
-        for scenario_id, criterion in siblings.get(hazard_id, ()):
-            if scenario_id != spec.scenario_id:
-                others.setdefault(scenario_id, criterion)
+    # A reference names the other scenario by id only, so no other
+    # scenario's text appears in this scenario's handoff.
+    others = {
+        scenario_id
+        for hazard_id in scenario_hazard_ids(spec)
+        for scenario_id in siblings.get(hazard_id, ())
+        if scenario_id != spec.scenario_id
+    }
     return [
         _node(
             f"AT-ALT-{index}",
             "reference",
             "other_scenario",
-            others[scenario_id],
+            scenario_id,
             scenario_id=scenario_id,
         )
         for index, scenario_id in enumerate(sorted(others), 1)
