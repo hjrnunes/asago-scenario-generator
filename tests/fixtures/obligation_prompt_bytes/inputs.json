@@ -2591,7 +2591,7 @@
    "obligation_id": null
   }
  ],
- "source": "pp-int38m occiai-r2 native recording at producer 8e108133",
+ "source": "Gemma 4 run on miniocciai-2, native recording at producer 8e108133",
  "verification_items": [
   {
    "constraint_ids": [

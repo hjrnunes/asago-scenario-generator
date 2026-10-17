@@ -1,5 +1,5 @@
 {
-  "source": "b8-glm batch L3 occiai-r1, stage_2 call_3_coordination: coordination link CL-7 as the reply wrote it (control-structure.yaml), whose description names PM-3 and PM-4 although the real IDs are PM-3-1 to PM-3-4 and PM-4-1 to PM-4-4. Every synthesis routing prompt then failed the prompt-reference check. Trimmed to CL-7, constraint SC-8 and hazard H-9 that the description cites, and the IDs the link needs: RESP-3 keeps PM-3-1 and PM-3-2, RESP-4 keeps only its shared PM-4-3. The texts of records other than CL-7 are shortened.",
+  "source": "GLM 5.3 run on miniocciai-1, stage_2 call_3_coordination: coordination link CL-7 as the reply wrote it (control-structure.yaml), whose description names PM-3 and PM-4 although the real IDs are PM-3-1 to PM-3-4 and PM-4-1 to PM-4-4. Every synthesis routing prompt then failed the prompt-reference check. Trimmed to CL-7, constraint SC-8 and hazard H-9 that the description cites, and the IDs the link needs: RESP-3 keeps PM-3-1 and PM-3-2, RESP-4 keeps only its shared PM-4-3. The texts of records other than CL-7 are shortened.",
   "loss_analysis": {
     "risk_card_losses": [],
     "use_case_losses": [

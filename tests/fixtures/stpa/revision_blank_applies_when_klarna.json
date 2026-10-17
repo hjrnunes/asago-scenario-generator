@@ -1,5 +1,5 @@
 {
-  "source": "b8 Gemma batch G2 klarna-r2, Stage 1a graph revision attempt 2 (row 28): the SC-1 constraint edit, trimmed to that one record",
+  "source": "Gemma 4 run on miniklarna-2, Stage 1a graph revision attempt 2 (row 28): the SC-1 constraint edit, trimmed to that one record",
   "security_constraint_edit": {
     "constraint_id": "SC-1",
     "rule": "The assistant must only provide policy information retrieved from approved policy snippets and must escalate regulated topics when no snippet matches.",

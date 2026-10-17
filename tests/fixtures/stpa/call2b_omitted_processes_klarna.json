@@ -1,5 +1,5 @@
 {
-  "source": "b8-glm batch L3 klarna-r2 (rerun, decision 340), provider-calls.jsonl, reply content only; trimmed to RESP-1 and RESP-2 and their Call 2b records",
+  "source": "GLM 5.3 run on miniklarna-2, provider-calls.jsonl, reply content only; trimmed to RESP-1 and RESP-2 and their Call 2b records",
   "call_2a_reply": {
     "responsibilities": [
       {

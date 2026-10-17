@@ -1,5 +1,5 @@
 {
-  "source": "b8-glm batch L2 klarna-r1, provider-calls.jsonl, reply content only",
+  "source": "GLM 5.3 run on miniklarna-1, provider-calls.jsonl, reply content only",
   "call_2a_reply": {
     "responsibilities": [
       {
