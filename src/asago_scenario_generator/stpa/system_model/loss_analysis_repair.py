@@ -69,7 +69,7 @@ from collections import Counter
 from collections.abc import Callable, Container, Iterable
 from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Union
+from typing import Any, ClassVar, Union
 
 from pydantic import (
     BaseModel,
@@ -1655,32 +1655,10 @@ class LossPresenceRepairPlan:
     """
 
     feedback: str
-
-
-def record_loss_presence_repair(
-    repair_record: RepairRecord | None,
-    *,
-    step: str,
-    finding: str,
-    outcome: str,
-    reason: str = "",
-) -> None:
-    """Record the loss-presence correction with its one terminal outcome."""
-    if repair_record is None:
-        return
-    proposed = {"entries": [LOSS_PRESENCE_REPAIR_IDENTITY]}
-    repaired = outcome == "repaired"
-    repair_record.add(
-        stage=step,
-        attempt="repair",
-        kind="repair",
-        identity=LOSS_PRESENCE_REPAIR_IDENTITY,
-        reason=finding if repaired else f"{finding}; {reason}",
-        proposed=proposed,
-        applied=dict(proposed) if repaired else {},
-        outcome=outcome,
-        raw_step=step + _REPAIR_STEP_SUFFIX,
-    )
+    label: ClassVar[str] = "targeted repair"
+    record_kind: ClassVar[str] = "repair"
+    record_identity: ClassVar[str] = LOSS_PRESENCE_REPAIR_IDENTITY
+    record_entries: ClassVar[tuple[str, ...]] = (LOSS_PRESENCE_REPAIR_IDENTITY,)
 
 
 MISSING_HAZARD_CHAIN_REPAIR_KIND = "missing_hazard_chain_correction"
@@ -1699,31 +1677,64 @@ class MissingHazardChainRepairPlan:
     """
 
     feedback: str
+    label: ClassVar[str] = "missing-hazard-chain correction"
+    record_kind: ClassVar[str] = MISSING_HAZARD_CHAIN_REPAIR_KIND
+    record_identity: ClassVar[str] = MISSING_HAZARD_CHAIN_REPAIR_IDENTITY
+    record_entries: ClassVar[tuple[str, ...]] = ("hazards", "security_constraints")
 
 
-def record_missing_hazard_chain_repair(
+def _record_repair_attempt(
+    repair_record: RepairRecord,
+    *,
+    step: str,
+    kind: str,
+    identity: str,
+    finding: str,
+    proposed: dict[str, Any],
+    outcome: str,
+    reason: str,
+) -> None:
+    """Record the terminal outcome of one repair request for one identity.
+
+    A repaired entry records its proposal as applied; any other outcome
+    records ``applied: {}`` and appends ``reason`` to the finding, so no
+    failed attempt is ever recorded as applied.
+    """
+    repaired = outcome == "repaired"
+    repair_record.add(
+        stage=step,
+        attempt="repair",
+        kind=kind,
+        identity=identity,
+        reason=finding if repaired else f"{finding}; {reason}",
+        proposed=proposed,
+        applied=dict(proposed) if repaired else {},
+        outcome=outcome,
+        raw_step=step + _REPAIR_STEP_SUFFIX,
+    )
+
+
+def record_feedback_correction(
     repair_record: RepairRecord | None,
+    plan: LossPresenceRepairPlan | MissingHazardChainRepairPlan,
     *,
     step: str,
     finding: str,
     outcome: str,
     reason: str = "",
 ) -> None:
-    """Record the missing-hazard-chain correction with its one terminal outcome."""
+    """Record a feedback correction with its one terminal outcome."""
     if repair_record is None:
         return
-    proposed = {"entries": ["hazards", "security_constraints"]}
-    repaired = outcome == "repaired"
-    repair_record.add(
-        stage=step,
-        attempt="repair",
-        kind=MISSING_HAZARD_CHAIN_REPAIR_KIND,
-        identity=MISSING_HAZARD_CHAIN_REPAIR_IDENTITY,
-        reason=finding if repaired else f"{finding}; {reason}",
-        proposed=proposed,
-        applied=dict(proposed) if repaired else {},
+    _record_repair_attempt(
+        repair_record,
+        step=step,
+        kind=plan.record_kind,
+        identity=plan.record_identity,
+        finding=finding,
+        proposed={"entries": list(plan.record_entries)},
         outcome=outcome,
-        raw_step=step + _REPAIR_STEP_SUFFIX,
+        reason=reason,
     )
 
 
@@ -3649,10 +3660,8 @@ def _record_repair_outcome(
 ) -> None:
     """Record the repair attempt's proposed and applied changes per identity.
 
-    A repaired entry records the identity as proposed and applied; a rejected
-    or failed attempt records the identity as proposed with ``applied: {}``
-    and the typed reason, so no failed attempt is ever recorded as applied.
-    An identity the plan lists twice is recorded once, with its first
+    Each identity gets one :func:`_record_repair_attempt` entry.  An
+    identity the plan lists twice is recorded once, with its first
     reason.  ``proposed_values`` carries the returned reference list of
     each identity, when the repair class records one.  A dropped obligation
     is recorded by :func:`_record_dropped_obligations` as its one outcome.
@@ -3667,20 +3676,15 @@ def _record_repair_outcome(
         proposed: dict[str, Any] = {"entries": [identity]}
         if proposed_values is not None and identity in proposed_values:
             proposed["references"] = proposed_values[identity]
-        repair_record.add(
-            stage=step,
-            attempt="repair",
+        _record_repair_attempt(
+            repair_record,
+            step=step,
             kind="repair",
             identity=identity,
-            reason=(
-                identity_reason
-                if outcome == "repaired"
-                else f"{identity_reason}; {reason}"
-            ),
+            finding=identity_reason,
             proposed=proposed,
-            applied=dict(proposed) if outcome == "repaired" else {},
             outcome=outcome,
-            raw_step=step + _REPAIR_STEP_SUFFIX,
+            reason=reason,
         )
 
 

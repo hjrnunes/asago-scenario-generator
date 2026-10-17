@@ -99,10 +99,9 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     drop_hazardless_constraints,
     record_cleanup_rows,
     record_corrected_reply_salvage,
+    record_feedback_correction,
     record_first_reply_salvage,
     record_hazardless_constraint_drop,
-    record_loss_presence_repair,
-    record_missing_hazard_chain_repair,
     record_truncation_recovery,
     recover_truncated_risk_dispositions,
     recover_truncated_risk_losses,
@@ -1884,15 +1883,6 @@ def _repair_stage1a_failure(
     return _run_stage1a_repairs(call, outcome, repair_response_format)
 
 
-_FEEDBACK_CORRECTIONS: dict[type, tuple[Callable[..., None], str]] = {
-    LossPresenceRepairPlan: (record_loss_presence_repair, "targeted repair"),
-    MissingHazardChainRepairPlan: (
-        record_missing_hazard_chain_repair,
-        "missing-hazard-chain correction",
-    ),
-}
-
-
 def _send_feedback_correction(
     call: _Stage1aCall,
     plan: LossPresenceRepairPlan | MissingHazardChainRepairPlan,
@@ -1906,7 +1896,6 @@ def _send_feedback_correction(
     corrected reply gets the record-level recovery of a first reply and no
     further request (see ``_parse_corrected_reply``).
     """
-    record, label = _FEEDBACK_CORRECTIONS[type(plan)]
     # Validating the corrected reply reclassifies the call's failure.
     failure_class = call.failure_class
     outcome = call_with_policy(
@@ -1933,8 +1922,9 @@ def _send_feedback_correction(
         ),
     )
     repaired = outcome.error is None and outcome.value is not None
-    record(
+    record_feedback_correction(
         call.repair_record,
+        plan,
         step=call.step,
         finding=call.validation_finding,
         outcome="repaired" if repaired else "failed",
@@ -1946,7 +1936,7 @@ def _send_feedback_correction(
         stage=STAGE,
         step=call.step,
         message=(
-            f"{label} failed: {outcome.error}; {failure_class} "
+            f"{plan.label} failed: {outcome.error}; {failure_class} "
             f"failure class; first attempt failed: {error_msg}. "
             f"{call.validation_feedback}"
         ),
