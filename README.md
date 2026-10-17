@@ -168,9 +168,8 @@ variables:
 
 For named model profiles, copy
 `config/model-profiles.example.yaml` to `config/model-profiles.yaml`. The real
-file is ignored because it may contain credentials. The example file also holds
-`glm53-enmaas-65k-low-rp`, the GLM profile with low reasoning effort and a
-repetition penalty of 1.05. `data/contracts/model-profile/` lists every profile
+file is ignored because it may contain credentials.
+`data/contracts/model-profile/` lists every profile
 field with its validity rule and the load and request cases, and it is the
 single field list; the consumer and the orchestrator mirror it and run the same
 cases. To add a model, add a profile. To add a field, change the contract
