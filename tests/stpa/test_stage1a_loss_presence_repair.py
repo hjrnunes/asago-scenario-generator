@@ -207,6 +207,11 @@ def test_second_empty_reply_stops_typed_after_two_requests(tmp_path):
     (record,) = _repair_entries(tmp_path)
     assert record["outcome"] == "failed"
     assert record["applied"] == {}
+    finding = (
+        "risk_derivation must return a complete loss -> hazard -> security "
+        "constraint chain anchor: no grounded losses were declared"
+    )
+    assert record["reason"] == f"{finding}; _LossPresenceError: {finding}"
 
 
 def test_other_semantic_failures_still_get_no_repair(tmp_path):

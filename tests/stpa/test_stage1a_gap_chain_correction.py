@@ -260,6 +260,11 @@ def test_second_chainless_reply_stops_typed_after_three_requests(tmp_path):
     (record,) = _chain_entries(tmp_path)
     assert record["outcome"] == "failed"
     assert record["applied"] == {}
+    finding = (
+        "gap_analysis must return a complete loss -> hazard -> security "
+        f"constraint chain: {_CHAIN_FINDING}"
+    )
+    assert record["reason"] == f"{finding}; _MissingHazardChainError: {finding}"
     assert not (tmp_path / "loss-analysis.yaml").exists()
 
 
