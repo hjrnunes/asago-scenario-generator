@@ -37,7 +37,7 @@ _FIXTURE = json.loads(
         Path(__file__).resolve().parents[1]
         / "fixtures"
         / "unit_loss"
-        / "p-r24-occiai-call3-short-pm-ids.json"
+        / "miniocciai-1-call3-short-pm-ids.json"
     ).read_text(encoding="utf-8")
 )
 _LOSSES = LossAnalysis.model_validate(_FIXTURE["loss_analysis"])

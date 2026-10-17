@@ -33,7 +33,7 @@ _FIXTURE = json.loads(
         Path(__file__).resolve().parents[1]
         / "fixtures"
         / "unit_loss"
-        / "l1-occiai-r1-unoffered-operation.json"
+        / "miniocciai-1-unoffered-operation.json"
     ).read_text(encoding="utf-8")
 )
 _ASK = {"resource_id": "mcp:mini:ask", "operation_id": "ask"}

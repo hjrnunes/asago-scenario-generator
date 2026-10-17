@@ -36,10 +36,10 @@ from tests.helpers.scripted_client import ScriptedClient, _request_digest
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "unit_loss"
 _PRIOR = json.loads(
-    (_FIXTURES / "g2-klarna-r2-graph-revision.json").read_text(encoding="utf-8")
+    (_FIXTURES / "miniklarna-2-graph-revision.json").read_text(encoding="utf-8")
 )["prior_loss_analysis"]
 _RUNAWAY = json.loads(
-    (_FIXTURES / "p-r22-glm-whitespace-runaway-revision.json").read_text(
+    (_FIXTURES / "miniklarna-1-whitespace-runaway-revision.json").read_text(
         encoding="utf-8"
     )
 )["reply"]

@@ -29,10 +29,10 @@ from tests.helpers.scripted_client import ScriptedClient, _request_digest
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "unit_loss"
 _PRIOR = json.loads(
-    (_FIXTURES / "g2-klarna-r2-graph-revision.json").read_text(encoding="utf-8")
+    (_FIXTURES / "miniklarna-2-graph-revision.json").read_text(encoding="utf-8")
 )["prior_loss_analysis"]
 _BLANK_ADDITION = json.loads(
-    (_FIXTURES / "p-r24-occiai-blank-hazard-revision.json").read_text(encoding="utf-8")
+    (_FIXTURES / "miniocciai-1-blank-hazard-revision.json").read_text(encoding="utf-8")
 )["hazard_addition"]
 _DESCRIPTION = (
     "The assistant discloses one customer's account details to another customer."

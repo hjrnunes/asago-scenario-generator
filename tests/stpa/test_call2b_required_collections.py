@@ -36,7 +36,7 @@ FIXTURE = (
     Path(__file__).resolve().parents[1]
     / "fixtures"
     / "stpa"
-    / "call2b_omitted_processes_l3_klarna.json"
+    / "call2b_omitted_processes_klarna.json"
 )
 OMISSION = (
     "The prior response left out `controlled_processes` (or sent it empty), so "
