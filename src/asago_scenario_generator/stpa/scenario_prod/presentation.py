@@ -399,6 +399,18 @@ def _render_tree(account: dict[str, Any]) -> dict[str, Any]:
     return tree
 
 
+def sanitize_tree_sources(
+    value: dict[str, Any] | list[Any], spec: ScenarioSpec
+) -> bool:
+    """Replace structural IDs outside the spec's selected path in free tree text.
+
+    Applies the flat tree's rule to any tree part: ``source_id``,
+    ``source_ids``, ``source_path``, and ``node_id`` stay as they are.
+    Returns whether any text changed.
+    """
+    return _sanitize_tree_text(value, _allowed_tree_sources(_semantic_account(spec)))
+
+
 def _defender_nodes(defender: DefenderBDI) -> list[dict[str, Any]]:
     """Build source-grounded defender nodes."""
     nodes: list[dict[str, Any]] = []

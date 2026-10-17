@@ -123,7 +123,7 @@ _IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|\b[A-Z]{2,}-?\
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _LONG_QUOTE = re.compile(r"[\"\u201c][^\"\u201c\u201d]{40,}[\"\u201d]")
 _APPLIES_WHEN = re.compile(r"\bapplies when\s*:", re.IGNORECASE)
-_NOT_SELECTED = "not selected as a causal factor"
+NOT_SELECTED = "not selected as a causal factor"
 _OWNERSHIP_WORDS = {
     "turn_array": 'the word "turn" or "turns" directly followed by a colon',
     "role_serialization": 'a speaker label such as "role: user"',
@@ -257,7 +257,7 @@ def _belief_text(content: str, vulnerability: str, factor_texts: set[str]) -> st
     """Name what the flawed belief is about; add its flaw unless a factor says it."""
     text = f"The flawed belief concerns: {_lower_first(plain(content).rstrip('.'))}."
     flaw = plain(vulnerability)
-    if flaw and flaw not in factor_texts and _NOT_SELECTED not in flaw.lower():
+    if flaw and flaw not in factor_texts and NOT_SELECTED not in flaw.lower():
         text += f" Flaw: {flaw}"
     return text
 
@@ -655,7 +655,7 @@ def _misuse_fields(spec: ScenarioSpec) -> list[str]:
         fields.append(
             "Rules: "
             + " ".join(
-                _end(_rule_text(item.description)) for item in context.constraints
+                _end(rule_text(item.description)) for item in context.constraints
             )
         )
     return fields
@@ -666,7 +666,7 @@ def _end(text: str) -> str:
     return text if text.endswith((".", "!", "?")) else text + "."
 
 
-def _rule_text(description: str) -> str:
+def rule_text(description: str) -> str:
     """State the rule in full; its applicability stays in the governing rules."""
     return plain(_APPLIES_WHEN.split(description, maxsplit=1)[0]).strip(" .")
 

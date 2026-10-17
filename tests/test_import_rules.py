@@ -604,6 +604,9 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     # The narrate step's model request and write-up reuse presentation's
     # wording and the handoff's ownership check.
     "narration": 2,
+    # The AND/OR attack tree reuses the narrate step's plain wording and
+    # attack steps.
+    "and_or_tree": 2,
     "run": 3,
 }
 

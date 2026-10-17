@@ -107,6 +107,9 @@ class SynthesisInputs:
     # Where the model-written scenario write-up goes: "off", "report", or
     # "handoff" (see stpa.scenario_prod.narration.NarrationMode).
     narration_mode: str = "off"
+    # Format of each handoff's attack_tree: "flat" or "and-or" (see
+    # stpa.scenario_prod.and_or_tree.AttackTreeFormat).
+    attack_tree_format: str = "flat"
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
@@ -115,6 +118,8 @@ class SynthesisInputs:
             raise ValueError("max_workers must be positive")
         if self.narration_mode not in ("off", "report", "handoff"):
             raise ValueError("narration_mode must be off, report, or handoff")
+        if self.attack_tree_format not in ("flat", "and-or"):
+            raise ValueError("attack_tree_format must be flat or and-or")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         _normalize_request_values(self)
         _verify_request_target_inputs(self)

@@ -27,6 +27,7 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
 )
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.scenario_prod.tree_sources import (
+    AND_OR_TREE_FORMAT,
     context_tree_sources,
     defender_tree_sources,
 )
@@ -37,6 +38,7 @@ __all__ = [
     "validate_bdi_grounding",
     "validate_vulnerability_completeness",
     "validate_tree_factor_evidence_coverage",
+    "validate_and_or_tree_structure",
     "validate_loss_hazard_id_references",
     "validate_traceability",
     "collect_valid_tree_ids",
@@ -143,6 +145,8 @@ def validate_tree_factor_evidence_coverage(
     as proof of access and never imports taxonomy mechanism text into the
     allowed evidence set.
     """
+    if attack_tree.get("format") == AND_OR_TREE_FORMAT:
+        return _and_or_factor_evidence_coverage(attack_tree, scenario_spec)
     factors = _selected_tree_factors(scenario_spec)
     tree_text = _flatten_tree_to_text(attack_tree)
     normalized_tree = _normalize_evidence_text(tree_text)
@@ -154,20 +158,172 @@ def validate_tree_factor_evidence_coverage(
         evidence = _normalize_evidence_text(factor.description)
         if evidence and evidence in normalized_tree:
             continue
-        errors.append(
-            f"Attack tree does not cover declared causal factor {source_id} "
-            "with its declared evidence."
-        )
+        errors.append(_uncovered_factor_error(source_id))
+    errors.extend(_unsupported_reference_errors(tree_text, scenario_spec))
+    return ValidationResult(passed=not errors, errors=errors)
 
+
+def _uncovered_factor_error(source_id: str) -> str:
+    return (
+        f"Attack tree does not cover declared causal factor {source_id} "
+        "with its declared evidence."
+    )
+
+
+def _unsupported_reference_errors(
+    tree_text: str, scenario_spec: ScenarioSpec
+) -> list[str]:
     allowed_refs = _allowed_tree_evidence_refs(scenario_spec)
-    for reference in _structural_tree_references(tree_text):
-        if reference in allowed_refs:
+    return [
+        f"Attack tree references unsupported causal bridge {reference}; "
+        "only selected-path and declared-factor evidence is allowed."
+        for reference in sorted(_structural_tree_references(tree_text))
+        if reference not in allowed_refs
+    ]
+
+
+def _and_or_factor_evidence_coverage(
+    attack_tree: dict, scenario_spec: ScenarioSpec
+) -> ValidationResult:
+    """Apply the factor rule to an AND/OR tree's own weak-point nodes.
+
+    The first declared factor must be a weak point of this scenario's AND,
+    by its exact source ID or by its complete normalized evidence phrase.
+    Text anywhere else in the tree does not count. Reference nodes name
+    other scenarios, whose own trees answer for their text, so the
+    structural-reference scan leaves them out.
+    """
+    root = attack_tree.get("root")
+    nodes = list(_walk_tree_nodes(root)) if isinstance(root, dict) else []
+    own = next(
+        (
+            node
+            for node in nodes
+            if node.get("this_scenario") is True
+            and node.get("scenario_id") == scenario_spec.scenario_id
+        ),
+        None,
+    )
+    weak_points = [
+        node
+        for node in (_walk_tree_nodes(own) if own is not None else ())
+        if node.get("category") == "weak_point"
+    ]
+    errors: list[str] = []
+    for factor in _selected_tree_factors(scenario_spec):
+        evidence = _normalize_evidence_text(factor.description)
+        if any(
+            node.get("source_id") == factor.source_id
+            or (
+                evidence
+                and evidence in _normalize_evidence_text(str(node.get("label", "")))
+            )
+            for node in weak_points
+        ):
             continue
+        errors.append(_uncovered_factor_error(factor.source_id))
+    scanned = {key: value for key, value in attack_tree.items() if key != "root"}
+    scanned["nodes"] = [
+        {key: value for key, value in node.items() if key != "children"}
+        for node in nodes
+        if node.get("type") != "reference"
+    ]
+    errors.extend(
+        _unsupported_reference_errors(_flatten_tree_to_text(scanned), scenario_spec)
+    )
+    return ValidationResult(passed=not errors, errors=errors)
+
+
+def _walk_tree_nodes(node: dict):
+    """Yield an AND/OR tree node and every node below it, depth first."""
+    yield node
+    children = node.get("children")
+    if isinstance(children, list):
+        for child in children:
+            if isinstance(child, dict):
+                yield from _walk_tree_nodes(child)
+
+
+_AND_OR_NODE_TYPES = {"goal", "operator", "condition", "action", "reference"}
+_AND_OR_PARENT_TYPES = {"goal", "operator"}
+
+
+def validate_and_or_tree_structure(
+    attack_tree: dict, scenario_id: str
+) -> ValidationResult:
+    """Check an AND/OR attack tree's shape; a flat tree passes untouched.
+
+    The root is a goal; node ids are unique and start with ``AT-``; an
+    operator is AND or OR and has a child; ``ordered`` appears only on an
+    AND; only goal and operator nodes carry ``children``; a reference names
+    a scenario other than this one; exactly one node is this scenario.
+    """
+    if attack_tree.get("format") != AND_OR_TREE_FORMAT:
+        return ValidationResult.success()
+    errors: list[str] = []
+    if attack_tree.get("relation") != "and-or":
+        errors.append("AND/OR attack tree must declare relation and-or.")
+    root = attack_tree.get("root")
+    if not isinstance(root, dict):
+        errors.append("AND/OR attack tree root must be a node mapping.")
+        return ValidationResult(passed=False, errors=errors)
+    if root.get("type") != "goal":
+        errors.append("AND/OR attack tree root must be a goal node.")
+    seen: set[str] = set()
+    own = 0
+    for node in _walk_tree_nodes(root):
+        errors.extend(_and_or_node_errors(node, scenario_id, seen))
+        if node.get("this_scenario") is True:
+            own += 1
+            if node.get("scenario_id") != scenario_id:
+                errors.append(
+                    f"AND/OR attack tree node {node.get('node_id')} marks "
+                    f"{node.get('scenario_id')} as this scenario, not {scenario_id}."
+                )
+    if own != 1:
         errors.append(
-            f"Attack tree references unsupported causal bridge {reference}; "
-            "only selected-path and declared-factor evidence is allowed."
+            f"AND/OR attack tree must mark exactly one node as this scenario; "
+            f"found {own}."
         )
     return ValidationResult(passed=not errors, errors=errors)
+
+
+def _and_or_node_errors(node: dict, scenario_id: str, seen: set[str]) -> list[str]:
+    node_id = node.get("node_id")
+    name = node_id if isinstance(node_id, str) else repr(node_id)
+    errors: list[str] = []
+    if not isinstance(node_id, str) or not node_id.startswith("AT-"):
+        errors.append(f"AND/OR attack tree node {name} needs an AT- node_id.")
+    elif node_id in seen:
+        errors.append(f"AND/OR attack tree node id {node_id} is not unique.")
+    else:
+        seen.add(node_id)
+    node_type = node.get("type")
+    if node_type not in _AND_OR_NODE_TYPES:
+        errors.append(f"AND/OR attack tree node {name} has unknown type {node_type}.")
+    children = node.get("children")
+    if node_type in _AND_OR_PARENT_TYPES:
+        if not isinstance(children, list) or not children:
+            errors.append(f"AND/OR attack tree node {name} needs at least one child.")
+    elif "children" in node:
+        errors.append(f"AND/OR attack tree leaf {name} must not carry children.")
+    operator = node.get("operator")
+    if node_type == "operator":
+        if operator not in ("AND", "OR"):
+            errors.append(f"AND/OR attack tree operator {name} must be AND or OR.")
+    elif "operator" in node:
+        errors.append(f"AND/OR attack tree node {name} is not an operator.")
+    if "ordered" in node and (operator != "AND" or node["ordered"] is not True):
+        errors.append(
+            f"AND/OR attack tree node {name} may carry ordered: true only on an AND."
+        )
+    if node_type == "reference":
+        target = node.get("scenario_id")
+        if not isinstance(target, str) or not target:
+            errors.append(f"AND/OR attack tree reference {name} names no scenario.")
+        elif target == scenario_id:
+            errors.append(f"AND/OR attack tree reference {name} names this scenario.")
+    return errors
 
 
 def _selected_tree_factors(scenario_spec: ScenarioSpec) -> tuple[object, ...]:

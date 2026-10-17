@@ -266,8 +266,83 @@ def _branch(
     )
 
 
+def _and_or_tags(node: dict) -> list[str]:
+    tags = []
+    if node.get("operator"):
+        tags.append(node["operator"] + (", in order" if node.get("ordered") else ""))
+    tags.append(str(node.get("category", node.get("type", ""))).replace("_", " "))
+    if node.get("technique_id"):
+        tags.append(f"{node['technique_id']} {node.get('technique', '')}".strip())
+    if node.get("asset"):
+        tags.append(f"asset {node['asset']}")
+    if node.get("evidence_status"):
+        tags.append(str(node["evidence_status"]).replace("_", " "))
+    if node.get("authority", DEFAULT_AUTHORITY) != DEFAULT_AUTHORITY:
+        tags.append(f"authority {node['authority']}")
+    return tags
+
+
+def _and_or_node(node: dict) -> TreeNode:
+    ids = [node.get("source_id"), *(node.get("source_ids") or [])]
+    if node.get("scenario_id") and node.get("type") == "reference":
+        ids.append(node["scenario_id"])
+    prefix = join([code_id(i) for i in dict.fromkeys(i for i in ids if i)], " ")
+    label = esc(" ".join(str(node.get("label", "")).split()))
+    if node.get("type") == "operator":
+        label = Markup(f"<b>{label}</b>")
+    children = [
+        _and_or_node(child)
+        for child in node.get("children") or []
+        if isinstance(child, dict)
+    ]
+    return TreeNode(
+        Markup(f"{prefix} {label}"), node.get("node_id"), _and_or_tags(node), children
+    )
+
+
+def _and_or_tree_panel(attack_tree: dict) -> Panel:
+    """Render an AND/OR tree as an indented outline of its nodes."""
+    root = attack_tree.get("root") or {}
+    nodes: list[dict] = []
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        nodes.append(node)
+        stack.extend(c for c in node.get("children") or [] if isinstance(c, dict))
+    others = sum(node.get("type") == "reference" for node in nodes)
+    weak = sorted(
+        {
+            n["source_id"]
+            for n in nodes
+            if n.get("category") == "weak_point" and n.get("source_id")
+        }
+    )
+    preview = (
+        f"{plural(len(nodes), 'node')} · "
+        f"{plural(others, 'other scenario')} · weak point {', '.join(weak) or 'none'}"
+    )
+    uncertainty = attack_tree.get("source_uncertainty")
+    lines = [
+        f"Loss scenario: {attack_tree.get('loss_scenario')}",
+        f"{attack_tree.get('framing')} Format {attack_tree.get('format')}: the root is "
+        "the hazard, an OR joins the scenarios that reach it, and each scenario is "
+        f"an AND of its conditions and steps ({attack_tree.get('relation_basis')}).",
+        *([str(uncertainty)] if uncertainty else []),
+    ]
+    intro = join(Markup(f'<p class="nm">{esc(line)}</p>') for line in lines)
+    head = _and_or_node({**root, "children": []}) if root else TreeNode("")
+    children = [
+        _and_or_node(child)
+        for child in root.get("children") or []
+        if isinstance(child, dict)
+    ]
+    return Panel("tree", "Attack tree", preview, join([intro, tree(head, children)]))
+
+
 def tree_panel(attack_tree: dict) -> Panel:
     """Build the attack-tree panel: nodes grouped by category, as authoring projects them."""
+    if isinstance(attack_tree.get("root"), dict):
+        return _and_or_tree_panel(attack_tree)
     leaves = set(attack_tree.get("leaves") or [])
     leaf_sources = {leaf.split(": ", 1)[0] for leaf in leaves}
     seen: dict[str, str] = {}
