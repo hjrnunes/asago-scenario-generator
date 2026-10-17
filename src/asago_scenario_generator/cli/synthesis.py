@@ -113,6 +113,16 @@ def generate_cmd(
             "Requires --replay-fill."
         ),
     ),
+    model_narrative: str = typer.Option(
+        "off",
+        "--model-narrative",
+        help=(
+            "Model-written scenario write-up: off (no request), report (one "
+            "request per scenario, written to narratives.json; the handoff is "
+            "unchanged), or handoff (also published as each accepted "
+            "scenario's handoff narrative)."
+        ),
+    ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_input_files(
@@ -128,6 +138,11 @@ def generate_cmd(
     )
     if max_workers < 1:
         raise typer.BadParameter("must be positive", param_hint="--max-workers")
+    _require(
+        model_narrative in ("off", "report", "handoff"),
+        "--model-narrative",
+        "must be off, report, or handoff",
+    )
     fill_policy = _replay_fill_policy(
         replay_fill=replay_fill,
         live_stage=live_stage,
@@ -158,6 +173,7 @@ def generate_cmd(
             max_workers=max_workers,
             replay_calls=replay_calls,
             replay_fill=fill_policy,
+            narration_mode=model_narrative,
         )
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=partial(
@@ -252,6 +268,7 @@ def _synthesis_inputs(
     max_workers: int,
     replay_calls: Path | None,
     replay_fill: Any = None,
+    narration_mode: str = "off",
 ) -> Any:
     """Load and check the input files, then build the synthesis request."""
     from asago_scenario_generator.data.loaders import (
@@ -304,6 +321,7 @@ def _synthesis_inputs(
         max_workers=max_workers,
         replay_calls_dir=replay_calls,
         replay_fill=replay_fill,
+        narration_mode=narration_mode,
     )
 
 

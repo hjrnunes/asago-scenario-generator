@@ -104,12 +104,17 @@ class SynthesisInputs:
     # With replay_calls_dir, send the requests that record lacks live instead of
     # ending the run in a replay miss, within a live-request budget.
     replay_fill: ReplayFill | None = None
+    # Where the model-written scenario write-up goes: "off", "report", or
+    # "handoff" (see stpa.scenario_prod.narration.NarrationMode).
+    narration_mode: str = "off"
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
             raise ValueError("use_case must be a non-empty string")
         if self.max_workers < 1:
             raise ValueError("max_workers must be positive")
+        if self.narration_mode not in ("off", "report", "handoff"):
+            raise ValueError("narration_mode must be off, report, or handoff")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         _normalize_request_values(self)
         _verify_request_target_inputs(self)

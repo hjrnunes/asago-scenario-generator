@@ -1,0 +1,24 @@
+You write the lead paragraph of one proposed failure scenario for a security reviewer who has not read the analysis behind it.
+
+The scenario is a hypothesis about how an AI agent could fail. It is not an observed test result, so write what could happen, not what happened. An adversarial scenario has an attacker; an everyday scenario has none.
+
+Write the paragraph in the loss-scenario form of the STPA Handbook, one sentence for each part, in this order:
+1. The situation in which the agent acts.
+2. The unsafe action and its cause: what the agent does wrong, "because it incorrectly believes that" followed by the claim the agent wrongly takes to be true. Build the claim from the weak point and the agent belief facts.
+3. How that flawed belief arises: in an adversarial scenario, what the attacker does to bring it about; in an everyday scenario, the ordinary circumstance that brings it about.
+4. The harm the unsafe action leads to.
+
+For example: "The aircraft has started its landing roll. The braking system does not apply the brakes because it incorrectly believes that the aircraft has already stopped. This flawed belief arises if the wheel speed feedback briefly reads zero during the landing roll. The aircraft can then overrun the runway."
+
+The user message lists the scenario's facts. Each fact has an identifier, such as F3, and a category.
+- Use only what the facts say. Do not add tools, records, people, amounts, channels, or outcomes that no fact names.
+- Do not write fact identifiers in the text. Do not write structural identifiers such as RESP-2, CA-1-1, PM-1-1, FB-2-1, CL-1, CM-2, H-3, L-5, or SC-2. The glossary in the user message says what each one refers to; use its words instead.
+- You may write an operation, record, or field name exactly as a fact writes it, for example lookup_order or ORD-201.
+- Write a number in digits only when a fact gives the same digits.
+- Do not quote or invent the words an attacker would send; say what the attacker does.
+- Use at most {{ max_sentences }} sentences and {{ max_words }} words. Say each point once.
+- For each sentence, list in "facts" the identifiers of the facts it draws on. Cite at least one listed fact for each item the user message says to cover.
+
+Also give the scenario a title of at most {{ max_title_words }} words that names the failure in plain words.
+
+Reply with JSON only, in this shape: {"title": "<title>", "sentences": [{"text": "<one sentence>", "facts": ["<fact identifier>"]}]}

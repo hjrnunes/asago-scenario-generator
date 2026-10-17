@@ -65,6 +65,11 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
 from asago_scenario_generator.stpa.scenario_prod._constants import (
     PROMPTS_DIR as STAGE5_PROMPTS_DIR,
 )
+from asago_scenario_generator.stpa.scenario_prod.narration import (
+    Fact,
+    ScenarioFacts,
+    render_narration_prompts,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
 )
@@ -113,6 +118,7 @@ PROMPT_DIRS = (
 )
 
 _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
+_NARRATE_TEMPLATES = ("stage6_narrate_system.j2", "stage6_narrate_user.j2")
 
 # Stage 1a user templates take the use case and the existing records; the
 # system templates ignore these arguments.
@@ -376,6 +382,27 @@ def _stage5(
     return render
 
 
+def _narrate() -> Callable[[str], str]:
+    facts = ScenarioFacts(
+        scenario_id="SCN-001",
+        kind="adversarial",
+        facts=(
+            Fact("F1", "situation", "RESP-1 receives a refund request"),
+            Fact("F2", "weak point", "Feedback is delayed."),
+        ),
+        glossary=(("RESP-1", "Handle customer service inquiries."),),
+        coverage=(
+            ("the situation", ("situation",)),
+            ("the weak point", ("weak point",)),
+        ),
+    )
+
+    def render(template: str) -> str:
+        return dict(zip(_NARRATE_TEMPLATES, render_narration_prompts(facts)))[template]
+
+    return render
+
+
 # A case renders one template; the table that names it supplies the template.
 CASES: dict[str, Callable[[str], str]] = {
     "no-variables": _system_model(),
@@ -418,6 +445,7 @@ CASES: dict[str, Callable[[str], str]] = {
             "target_observations": _record_observations(),
         }
     ),
+    "narrate": _narrate(),
     "archive-item": _stage5(_archive_item_facts),
     "commit-operation": _stage5(_commit_operation_facts),
     "realistic-request": _stage5(_realistic_request_facts),

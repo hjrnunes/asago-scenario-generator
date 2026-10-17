@@ -89,6 +89,13 @@ from .context import build_scenario_generation_context
 from .realized_operation import realized_operation
 from .target_profile_publication import publish_execution_target_profile
 from .presentation import render_scenario_presentation
+from .narration import (
+    NarrationMode,
+    narrate_scenarios,
+    narratives_payload,
+    render_writeup,
+    write_narratives,
+)
 from .handoff import (
     ScenarioHandoffV4,
     Stage1aSource,
@@ -217,6 +224,7 @@ def run_sp3(
     stage_1a_source: Stage1aSource | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
     shape_config: ShapeStepConfig = ShapeStepConfig(),
+    narration_mode: NarrationMode = NarrationMode.OFF,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -272,6 +280,10 @@ def run_sp3(
         shape_config: Switches for the shape step that runs after Stage 5
             compiles each adversarial spec. The default keeps the
             forged-transcript channel out of the shape request.
+        narration_mode: Where the model-written write-up goes. ``off``
+            sends no narrate request; ``report`` writes ``narratives.json``
+            and leaves the handoff unchanged; ``handoff`` also publishes each
+            accepted write-up as the handoff narrative.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -329,6 +341,7 @@ def run_sp3(
             stage_1a_source=stage_1a_source,
             condition_families=condition_families,
             shape_config=shape_config,
+            narration_mode=narration_mode,
         )
         scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
             inputs, stage_errors, candidate_builders
@@ -460,6 +473,41 @@ class _SP3Inputs:
     stage_1a_source: Stage1aSource | None
     condition_families: Sequence[CandidateFamilyPlan] | None
     shape_config: ShapeStepConfig
+    narration_mode: NarrationMode = NarrationMode.OFF
+
+
+def _narrate(inputs: _SP3Inputs, specs: list[ScenarioSpec]) -> dict[str, str]:
+    """Run the narrate step the mode asks for; return the handoff narratives.
+
+    Every mode but ``off`` writes ``narratives.json``. Only ``handoff``
+    returns write-ups, one per scenario whose reply code accepted; a scenario
+    that fell back keeps its deterministic narrative.
+    """
+    mode = inputs.narration_mode
+    if mode is NarrationMode.OFF:
+        return {}
+    narrated = narrate_scenarios(
+        specs,
+        llm_client=inputs.llm_client,
+        run_dir=inputs.run_dir,
+        loader=inputs.loader,
+        temperature=inputs.temperature,
+    )
+    deterministic = {
+        spec.scenario_id: render_scenario_presentation(spec)[0] for spec in specs
+    }
+    write_narratives(
+        inputs.run_dir,
+        narratives_payload(specs, narrated, mode=mode, deterministic=deterministic),
+    )
+    if mode is not NarrationMode.HANDOFF:
+        return {}
+    by_id = {spec.scenario_id: spec for spec in specs}
+    return {
+        scenario_id: render_writeup(by_id[scenario_id], facts, narration)
+        for scenario_id, (facts, narration) in narrated.items()
+        if narration.accepted
+    }
 
 
 def _run_stages_5_and_6(
@@ -533,6 +581,7 @@ def _run_stages_5_and_6(
         _write_condition_families(
             run_dir, candidate_builders, inputs.condition_families, scenario_specs
         )
+    narratives = _narrate(inputs, deduplicated_specs)
     _persist_functional_test_candidates(
         functional_test_specs,
         inputs.scenarios_dir,
@@ -544,6 +593,7 @@ def _run_stages_5_and_6(
         observed_operations=observed_operations,
         stage_1a_source=inputs.stage_1a_source,
         deduplication_by_scenario=deduplication_by_scenario,
+        narratives=narratives,
     )
     scenario_envelopes = _collect_stage6_artifacts(
         shaped_specs,
@@ -556,6 +606,7 @@ def _run_stages_5_and_6(
         observed_operations=observed_operations,
         stage_1a_source=inputs.stage_1a_source,
         deduplication_by_scenario=deduplication_by_scenario,
+        narratives=narratives,
     )
     return shaped_specs, scenario_envelopes, functional_test_specs
 
@@ -873,18 +924,22 @@ def _persist_functional_test_candidates(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
+    narratives: Mapping[str, str] | None = None,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
     A functional test is retained in the run for the owner's information.
     It renders deterministically (no provider calls), never prepares an
     execution projection, and never enters the bundle index.  A functional
-    scenario is *not* rejected for lacking an attacker.
+    scenario is *not* rejected for lacking an attacker.  A scenario in
+    ``narratives`` publishes that narrative instead of the rendered one.
     """
     for spec in specs:
         prior_error_count = len(stage_errors)
         try:
             narrative, tree, gherkin = render_scenario_presentation(spec)
+            if narratives and spec.scenario_id in narratives:
+                narrative = narratives[spec.scenario_id]
             envelope = assemble_envelope(
                 scenario_id=spec.scenario_id,
                 scenario_spec=spec,
@@ -937,11 +992,12 @@ def _render_stage6_candidate(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
+    narrative: str | None = None,
 ) -> ScenarioEnvelope | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
     try:
-        envelope = _run_stage6_for_spec(spec)
+        envelope = _run_stage6_for_spec(spec, narrative)
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
         stage_errors.append(diagnostic)
@@ -999,6 +1055,7 @@ def _collect_stage6_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
+    narratives: Mapping[str, str] | None = None,
 ) -> list[ScenarioEnvelope]:
     """Concretize specs and write each accepted scenario companion set."""
     envelopes: list[ScenarioEnvelope] = []
@@ -1014,6 +1071,7 @@ def _collect_stage6_artifacts(
             observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
             deduplication_by_scenario=deduplication_by_scenario,
+            narrative=(narratives or {}).get(spec.scenario_id),
         )
         if envelope is not None:
             envelopes.append(envelope)
@@ -1325,15 +1383,19 @@ def _validate_stage5_spec(
     )
 
 
-def _run_stage6_for_spec(spec: ScenarioSpec) -> ScenarioEnvelope:
+def _run_stage6_for_spec(
+    spec: ScenarioSpec, narrative_override: str | None = None
+) -> ScenarioEnvelope:
     """Render one scenario's deterministic summary into its envelope.
 
     No execution projection is prepared: the scenario handoff does not carry
     one, so a scenario whose failure criterion has no downstream-compilable
     detector is still rendered and published, with the limitation reported
-    downstream.
+    downstream. ``narrative_override`` replaces the rendered narrative only.
     """
     narrative, tree, gherkin = render_scenario_presentation(spec)
+    if narrative_override is not None:
+        narrative = narrative_override
     return assemble_envelope(
         scenario_id=spec.scenario_id,
         scenario_spec=spec,

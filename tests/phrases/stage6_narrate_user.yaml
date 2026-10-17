@@ -1,0 +1,8 @@
+template: stage6_narrate_user.j2
+cases:
+  narrate:
+    ordered:
+      - - "Scenario kind:"
+        - "Facts, in causal order:"
+        - "Glossary of the structural identifiers in the facts:"
+        - "Cover each of these, citing at least one of the listed facts:"

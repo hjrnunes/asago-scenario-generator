@@ -513,6 +513,7 @@ def _default_scenarios(
     from asago_scenario_generator.stpa.scenario_prod.condition_family import (
         plan_family_candidates,
     )
+    from asago_scenario_generator.stpa.scenario_prod.narration import NarrationMode
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
     from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import (
         enrich_threats,
@@ -560,6 +561,7 @@ def _default_scenarios(
             "pinned" if inputs.loss_analysis_path is not None else "derived"
         ),
         condition_families=condition_families,
+        narration_mode=NarrationMode(inputs.narration_mode),
     )
 
 

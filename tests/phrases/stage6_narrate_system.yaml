@@ -1,0 +1,24 @@
+template: stage6_narrate_system.j2
+cases:
+  narrate:
+    required:
+      - It is not an observed test result, so write what could happen, not what happened.
+      - Write the paragraph in the loss-scenario form of the STPA Handbook, one sentence for each part, in this order
+      - '"because it incorrectly believes that" followed by the claim the agent wrongly takes to be true'
+      - This flawed belief arises if the wheel speed feedback briefly reads zero
+      - Use only what the facts say.
+      - Do not write fact identifiers in the text.
+      - The glossary in the user message says what each one refers to; use its words instead.
+      - Write a number in digits only when a fact gives the same digits.
+      - Do not quote or invent the words an attacker would send; say what the attacker does.
+      - Use at most 4 sentences and 75 words. Say each point once.
+      - a title of at most 12 words
+      - 'Reply with JSON only, in this shape: {"title": "<title>", "sentences": [{"text": "<one sentence>", "facts": ["<fact identifier>"]}]}'
+    ordered:
+      - - 1. The situation in which the agent acts.
+        - 2. The unsafe action and its cause
+        - 3. How that flawed belief arises
+        - 4. The harm the unsafe action leads to.
+    forbidden:
+      - turns
+      - message to send
