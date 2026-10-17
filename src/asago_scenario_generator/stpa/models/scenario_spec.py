@@ -98,7 +98,7 @@ class AttackerBDI(BaseModel):
 
 
 class AdversaryKind(str, Enum):
-    """Phase 3.1 adversary kinds (spec-defined, closed)."""
+    """Adversary kinds (spec-defined, closed)."""
 
     external_attacker = "external_attacker"
     malicious_customer = "malicious_customer"
@@ -115,7 +115,7 @@ class AdversaryReach(str, Enum):
 
 
 class Adversary(BaseModel):
-    """Phase 3.1 adversary record: who attempts the unsafe behavior and why.
+    """Adversary record: who attempts the unsafe behavior and why.
 
     The adversary is who and why, never how: no attack mechanism is
     required or permitted here.

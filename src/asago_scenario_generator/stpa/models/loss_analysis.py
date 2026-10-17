@@ -236,7 +236,7 @@ def compose_constraint_description(rule: str, applies_when: list[str]) -> str:
 class SecurityConstraint(BaseModel):
     """A security constraint (a condition that prevents a hazard).
 
-    Phase 1.3 as amended (2026-09-07): the model authors ``rule`` (the
+    The model authors ``rule`` (the
     obligation without its limiting conditions) and ``applies_when`` (the
     conditions under which the rule is in force, in the model's own words);
     deterministic code composes the persisted ``description``.  Nothing is

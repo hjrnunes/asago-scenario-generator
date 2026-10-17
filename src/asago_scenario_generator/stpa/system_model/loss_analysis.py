@@ -139,7 +139,7 @@ MAX_SOURCE_RISK_CARDS = 32
 class _ProviderSecurityConstraint(SecurityConstraint):
     """Provider wire constraint: authored rule and conditions are required.
 
-    Phase 1.3 as amended: the model writes ``rule`` and ``applies_when``;
+    The model writes ``rule`` and ``applies_when``;
     code composes ``description``.  Both keys stay required (``applies_when``
     may be empty) so the model always decides rather than silently omitting
     the fields.
