@@ -2,9 +2,9 @@
 
 `generate/output/policy-coverage.json` states which policy risks the producer's
 generate stage turned into scenarios and where it dropped the others. The
-producer owns the contract; orch mirrors this directory byte for byte, and
-the consumer's and orch's run reports read the file instead of re-deriving
-the mapping.
+producer owns the contract; the orchestrator mirrors this directory byte for
+byte, and the run reports of the consumer and the orchestrator read the file
+instead of re-deriving the mapping.
 
 - `schema.json` is the schema. `valid/minimal.json` is a document that passes it.
 - A risk reaches scenarios only through its harms. A harm is a loss; its
