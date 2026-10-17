@@ -3,7 +3,10 @@
 The inputs come from a recorded OcciAI run (final loss analysis and control
 structure, five pattern briefs with their final routes, the recorded missing
 concept, two governance briefs, and two final ICAs read back from the
-recorded verification request).  ``expected.json`` pins every request the
+recorded verification request).  The briefs name each evidence source by its
+path inside the policy repository rather than by the recording machine's
+absolute path, and carry the digests recomputed for that change.
+``expected.json`` pins every request the
 adapter sends for them: the SHA-256 of the system prompt, the user prompt,
 the response schema, the completion cap, and the temperature, plus each
 request's semantic digest and the adapter's outcome.  The fake client answers

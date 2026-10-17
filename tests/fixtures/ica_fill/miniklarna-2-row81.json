@@ -1050,7 +1050,7 @@
      "evidence": [
       {
        "relevance": null,
-       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "source": "policy_examples/fs-isac.pdf",
        "text": "Poor, biased, and/or unethical busi - ness practices or decisions"
       }
      ],
@@ -1102,7 +1102,7 @@
      "threat_source": "The imperfect accuracy and inherent biases of generative AI systems.",
      "vulnerability": "Failure by employees to manually verify the output or reliance on suspect AI-generated content without checking for unethical business practices."
     },
-    "semantic_digest": "ead77b42a8f41d54ceec81c055035018a59db0094b916df89b4be6e2c901b630",
+    "semantic_digest": "9033917bfc8b1a0dc0e49ce91b450733116e8fe6f7d9572e7adb6ad7c482b1c8",
     "taxonomy_chain": []
    },
    {
@@ -1148,7 +1148,7 @@
      "evidence": [
       {
        "relevance": null,
-       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "source": "policy_examples/fs-isac.pdf",
        "text": "Poor, biased, and/or unethical busi - ness practices or decisions"
       }
      ],
@@ -1240,7 +1240,7 @@
      "threat_source": "The imperfect accuracy and inherent biases of generative AI systems used by employees.",
      "vulnerability": "Failure by employees to manually verify AI outputs or to refrain from using suspect results when accuracy or completeness is in doubt."
     },
-    "semantic_digest": "c649492cd400d5c8ad16f8cddef5a751aa93b3b2ce63dfec730bf3bbe9039bda",
+    "semantic_digest": "5dec1ff585fb278dc2f9ea4dd89cfeff4c9ba0707233d022c79fb732e09d5e40",
     "taxonomy_chain": []
    },
    {
@@ -1286,12 +1286,12 @@
      "evidence": [
       {
        "relevance": null,
-       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "source": "policy_examples/fs-isac.pdf",
        "text": "Employees must check that the output does not lead to: > Poor, biased, and/or unethical business practices or decisions"
       },
       {
        "relevance": null,
-       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "source": "policy_examples/fs-isac.pdf",
        "text": "Poor, biased, and/or unethical business practices or decisions"
       }
      ],
@@ -1312,7 +1312,7 @@
      "threat_source": "The generative AI system and employees who use its output for internal HR documents or business decisions.",
      "vulnerability": "The imperfect accuracy of generative AI and the potential for managers to use the system for time-sensitive tasks like employee appraisals without sufficient manual verification."
     },
-    "semantic_digest": "e72084e34f56a19016aaaf913aa34b4b2dd73728dfa8d128a258fa4e21352f10",
+    "semantic_digest": "ec12aa1ce6c6cbc40f9c4f58e162f907aedb1f669f343bc3fbdba4e38b3bd890",
     "taxonomy_chain": []
    },
    {
@@ -1358,7 +1358,7 @@
      "evidence": [
       {
        "relevance": null,
-       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "source": "policy_examples/fs-isac.pdf",
        "text": "Ensure compliance with the terms of use of many generative AI systems (especially attribution and lack of copyright protection)"
       }
      ],
@@ -1440,7 +1440,7 @@
      "threat_source": "The generative AI models, including BloombergGPT, GitHub CoPilot, and various latent diffusion models (LDMs).",
      "vulnerability": "The training processes of these multimedia creation tools and LLMs may incorporate protected intellectual property without sufficient filtering or adherence to license agreements."
     },
-    "semantic_digest": "71bc72e93bad6545f29ace93e836e188e79701e3f4f5cd0830ecb34d3905bb5b",
+    "semantic_digest": "da2c0af72d95fc526f52c8ba914f28bd440c94c157bbccec538cc894972dc4ae",
     "taxonomy_chain": []
    },
    {
@@ -1524,7 +1524,7 @@
      "evidence": [
       {
        "relevance": null,
-       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "source": "policy_examples/fs-isac.pdf",
        "text": "Since an actual human did not write the appraisal. That employee does not like their appraisal and files a complaint. Since an actual human did not write the appraisal, there is good reason to believe that the employee's grievances would be upheld."
       }
      ],
@@ -1746,7 +1746,7 @@
      "threat_source": "The inherent limitations in the capability or robustness of generative models like Stable Diffusion, Midjourney, or OpenAI's DALL-E.",
      "vulnerability": "The inability of these AI systems to maintain reliable performance or effective moral reasoning under varying or unexpected input conditions."
     },
-    "semantic_digest": "07ba34fc7fd88b06579a2bc9db5baafa525fe130b68c695015f39326f8798bbe",
+    "semantic_digest": "f29b0ca838ba67e56844827cc4a892e8ee661956dc224fe6eb4bf3ff465d0ab7",
     "taxonomy_chain": [
      {
       "id": "AML.T0051.001",
@@ -1853,7 +1853,7 @@
      "evidence": [
       {
        "relevance": null,
-       "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/fs-isac.pdf",
+       "source": "policy_examples/fs-isac.pdf",
        "text": "Although generative AI has the power to increase cyber crime through convincing mimicking of  existing  communications, excellent translation capabilities,  deep fake images, audio, and video, ease of finding code vulnerabilities, and much more, the kinds of threats still are the same as  when  using  other  third-party  systems.  For  instance,  phishing  emails  may  become  more personalized with generative AI, but the way these enter the organization still is the same."
       }
      ],
@@ -1930,7 +1930,7 @@
      "threat_source": "Malicious actors leveraging generative AI's capabilities for mimicking existing communications and creating synthetic media.",
      "vulnerability": "The inherent ability of generative AI to produce convincing, high-fidelity content that mimics legitimate communications."
     },
-    "semantic_digest": "408381d0fb3077166b92d2e33f05faf1ee27409edfb487311c3c2d38dd9d72f0",
+    "semantic_digest": "81c587993649c8396cf9015baa24b544689077a88193f10010bd9fc3a3986e23",
     "taxonomy_chain": [
      {
       "id": "AML.T0052.000",
@@ -2214,7 +2214,7 @@
    }
   ],
   "schema_version": "stpa-obligation-slot-request-v1",
-  "semantic_digest": "043246f4519ac686f348b31d93c4ad6cd5905d42fd4de48fb6f8d8e919adf1ea",
+  "semantic_digest": "7519c060d5900184cafdbdc067152b7b2be646b09566a89c5128f3096a1a7eb4",
   "slots": [
    {
     "action_temporality": "instantaneous",
@@ -2235,7 +2235,7 @@
   "model": "gemma-4-26b-a4b-it",
   "producer_commit": "fa33a907",
   "raw_response_sha256": "ec0d9081bba7b876e2471ce11171e5b953477b855cae62a0dcb376c64f177a73",
-  "request_semantic_digest": "043246f4519ac686f348b31d93c4ad6cd5905d42fd4de48fb6f8d8e919adf1ea",
+  "request_semantic_digest": "7519c060d5900184cafdbdc067152b7b2be646b09566a89c5128f3096a1a7eb4",
   "row": 81,
   "run": "miniklarna-2/output/calls.jsonl",
   "stage": "synthesis_obligation_aware_icas",

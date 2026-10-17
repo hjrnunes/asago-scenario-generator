@@ -77,7 +77,7 @@
     "evidence": [
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "The combined details of a local area, a rare disease and a very young age may enable a patient to be identified."
      }
     ],
@@ -98,7 +98,7 @@
     "threat_source": "AI systems developed or deployed by health and social care providers under the NHS Artificial Intelligence and Digital Regulations Service.",
     "vulnerability": "Inadequate data privacy controls or insufficient filtering of sensitive geographic identifiers within the model's training or inference processes."
    },
-   "semantic_digest": "473e3f9f2eb41240f26ac30ad2806932609483afb423a43d1037fbfd96296fc0",
+   "semantic_digest": "b7bbfd2271d6d04da44f575894f8ef2d1ce04e94cae363d9b421f8868a1aaaed",
    "taxonomy_chain": [
     {
      "id": "AML.T0053",
@@ -199,17 +199,17 @@
     "evidence": [
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "Ensure confidential patient information is processed legally, ethically and appropriately."
      },
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "It is important, however, that data is carefully assessed to determine if individuals can be identified using the contents of the information even if common identifiers such as name, address and phone number are removed."
      },
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "There are many potential positives with these tools, there are also risks which must be considered and managed to maintain patient safety and meet data protection requirements."
      }
     ],
@@ -291,7 +291,7 @@
     "threat_source": "The use of sensitive datasets during the model development lifecycle or within user prompts.",
     "vulnerability": "Insufficient oversight in the review of data protection impact assessments (DPIAs) or failure to apply digital technology assessment criteria (DTAC) during procurement."
    },
-   "semantic_digest": "14bfd02a240b05a9194d931b9229f2b87db003d27edca4bda412f6dc6bfbd2e3",
+   "semantic_digest": "591fcf13788a248e96be4dea6a76539174d5ae9167f91d7e42ef119f4a3ade7c",
    "taxonomy_chain": [
     {
      "id": "AML.T0057",
@@ -384,7 +384,7 @@
     "evidence": [
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "The combined details of a local area, a rare disease and a very young age may enable a patient to be identified."
      }
     ],
@@ -405,7 +405,7 @@
     "threat_source": "Generative AI capabilities used to find connections between disparate information or search records to find cohorts.",
     "vulnerability": "The model's ability to identify connections between disparate information and analyze records to find clinical variation."
    },
-   "semantic_digest": "bc4866c31c081321ec596b30a64bbcc9f2abf0b34edbb77cbd6aa900ecd74b9a",
+   "semantic_digest": "b082ade622cb973076def4d89af14750f204f29c97d55ad0a58cba4ed679bcbd",
    "taxonomy_chain": [
     {
      "id": "AML.T0057",
@@ -498,17 +498,17 @@
     "evidence": [
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "Ensure confidential patient information is processed legally, ethically and appropriately."
      },
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "Personal or sensitive patient information may be entered into Copilot but must not be entered into generative or publicly available artificial intelligence tools."
      },
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "it is important to use artificial intelligence appropriately to ensure that it does not compromise personal data, business sensitive information"
      }
     ],
@@ -575,7 +575,7 @@
     "threat_source": "The use of AI technologies, such as Microsoft Teams or Ambient Scribe, for recording patient information or supporting clinical practice.",
     "vulnerability": "The inclusion of identifiable patient data within the AI's data processing pipeline or prompt context."
    },
-   "semantic_digest": "6b1d37c4591cb4c553d7b7913c91ccbf372e36336cb50ecf0573ea5bbceedf98",
+   "semantic_digest": "5fed454a7cbe0be3849da098f50f5d1763fe2c087466a2a67aeaf17defaf8631",
    "taxonomy_chain": [
     {
      "id": "AML.T0057",
@@ -660,7 +660,7 @@
     "evidence": [
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "unpublished financial reports"
      }
     ],
@@ -681,7 +681,7 @@
     "threat_source": "Colleagues using AI features within applications like Microsoft Teams or external software like ChatGPT.",
     "vulnerability": "The use of freely available AI software that lacks the same data protection controls as internal enterprise applications."
    },
-   "semantic_digest": "f8b526a1021717d50ffea38f40697df756cdc3de0e61d723bfec93f146ca5b6d",
+   "semantic_digest": "b8ac1c39adad44ae8ec0deb25e2e7bdd0deb1bc37c7ac2212cff4cbf4d142c9e",
    "taxonomy_chain": [
     {
      "id": "AML.T0053",
@@ -1703,17 +1703,17 @@
     "evidence": [
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "Artificial intelligence (AI) may be considered for use as a supportive tool within clinical practice; however, it must not be used for: - making clinical decisions or determining diagnosis and treatment"
      },
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "Copilot must not be used for making clinical decisions or replacing professional judgment."
      },
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "Artificial intelligence can support clinical decision-making but must not replace professional judgment."
      }
     ],
@@ -1734,7 +1734,7 @@
     "threat_source": "AI tools deployed by NHS Artificial Intelligence adopters or digital health innovators within the research and clinical framework.",
     "vulnerability": "The complexity of understanding governance and clinical safety aspects of AI, combined with potentially unclear guidance for staff."
    },
-   "semantic_digest": "ed6a063a4f55eb4a95288a28b727489d17338657c63a583b4a4f413d0d1f5858",
+   "semantic_digest": "123f7d36dcb0f84dc7b90bfccfa7e4a81912167d23a1fdc8f0601199da05cec5",
    "taxonomy_chain": []
   },
   {
@@ -1780,7 +1780,7 @@
     "evidence": [
      {
       "relevance": null,
-      "source": "/Users/hjrnunes/workspace/redhat/project-concorde/concorde-policy-mapper/policy_examples/rdash-nhs.md",
+      "source": "policy_examples/rdash-nhs.md",
       "text": "Business sensitive data refers to any information that, if disclosed without proper authorisation, could negatively impact trust’s operations, reputation, financial standing, or strategic interests."
      }
     ],
@@ -1801,7 +1801,7 @@
     "threat_source": "Staff members using publicly available artificial intelligence for tasks like drafting documents or exploring queries.",
     "vulnerability": "The potential for AI products to produce inaccurate, biased, or harmful content and the risk of users entering queries that could be problematic if made public."
    },
-   "semantic_digest": "6665d63c775db9afdf69b38a6d3507b0d7cc466a2070efb75550f32944ae995d",
+   "semantic_digest": "6c703014004402dbaf1fa2f2439a0bfb5faf4d8cf440c09efadf3476fa2bf688",
    "taxonomy_chain": []
   }
  ],

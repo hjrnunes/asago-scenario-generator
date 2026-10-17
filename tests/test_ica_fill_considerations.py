@@ -5,6 +5,11 @@ The fixture is row 81 of a recorded MiniKlarna run's calls.jsonl
 and a reply that lists every handle three times with conflicting R4
 dispositions. The provider accepted it because it compared pair sets, and the
 contract rejected it after the request had ended, with no correction.
+
+The fixture names each evidence source by its path inside the policy
+repository rather than by the recording machine's absolute path. The routed
+briefs' digests and ``source.request_semantic_digest`` are recomputed for that
+change; the other ``source`` fields describe the recorded row.
 """
 
 from __future__ import annotations
