@@ -189,7 +189,7 @@ class _ContextAdversarialDraft(BaseModel):
 
     ``reaches_target_via`` is compiler-owned, so the provider wire does not
     carry it.  The historical wire derives the reach from the stimulus
-    category (Phase 3 deviation 7); the normal wire carries no stimulus, so
+    category; the normal wire carries no stimulus, so
     the reach derives from the adversary kind alone and stays null unless
     the kind is ``third_party_via_content``.
     """
