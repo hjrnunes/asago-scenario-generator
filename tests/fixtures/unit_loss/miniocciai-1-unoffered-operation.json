@@ -1,5 +1,5 @@
 {
-  "source": "b8-glm batch L1 occiai-r1, target_realization control_action_enrichment:map_control_action CA-3-3, request 79",
+  "source": "GLM 5.3 run on miniocciai-1, target_realization control_action_enrichment:map_control_action CA-3-3, request 79",
   "control_action_id": "CA-3-3",
   "offered_operations": [
     {

@@ -1,5 +1,5 @@
 {
-  "source": "b8-glm batch G2 klarna-r2, stage_1a hazard_graph_revision attempts 1 and 2",
+  "source": "Gemma 4 run on miniklarna-2, stage_1a hazard_graph_revision attempts 1 and 2",
   "prior_loss_analysis": {
     "risk_card_losses": [
       {

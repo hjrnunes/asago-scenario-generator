@@ -30,7 +30,7 @@ _RECORDED_EDIT = json.loads(
         Path(__file__).resolve().parents[1]
         / "fixtures"
         / "stpa"
-        / "revision_blank_applies_when_g2_klarna.json"
+        / "revision_blank_applies_when_klarna.json"
     ).read_text(encoding="utf-8")
 )["security_constraint_edit"]
 

@@ -34,7 +34,7 @@ _FIXTURE = json.loads(
         Path(__file__).resolve().parents[1]
         / "fixtures"
         / "unit_loss"
-        / "g2-klarna-r2-graph-revision.json"
+        / "miniklarna-2-graph-revision.json"
     ).read_text(encoding="utf-8")
 )
 _BLANK_ERROR = (

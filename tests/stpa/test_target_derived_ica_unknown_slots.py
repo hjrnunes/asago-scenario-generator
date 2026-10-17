@@ -41,7 +41,7 @@ _FIXTURE = json.loads(
         Path(__file__).resolve().parents[1]
         / "fixtures"
         / "unit_loss"
-        / "l1-klarna-r2-target-derived-icas.json"
+        / "miniklarna-2-target-derived-icas.json"
     ).read_text(encoding="utf-8")
 )
 _INCORRECT = "RESP-1:CA-1-4:INCORRECT"

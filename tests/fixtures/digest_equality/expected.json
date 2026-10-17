@@ -7,7 +7,7 @@
     "mapping_set_digest": "29ff3a15a86a194812e029ba407a97a757c98a2d887fb922ea4f0e0a8fd40ea6"
   },
   "units": {
-    "airbnb-r1": {
+    "miniairbnb-1": {
       "candidate_ids": [
         "cand:v2:018a1af53aaf1f395666e828758055f8",
         "cand:v2:022490dbd4f5baece51d2f0c541e759e",
@@ -40,10 +40,10 @@
       "plan_semantic_digest": "ab3ed0e8d5c479a3f53389687ff762796f4bf4d830829599bb05ede07dc866a4",
       "plan_sha256": "219d02dd1ccfb1306412c6fceddc0ec34f16dfb579d88b094711433a99b852f1",
       "semantic_digest_count": 199,
-      "target": "airbnb",
+      "target": "miniairbnb",
       "taxonomy_inputs_digest": "29b6f5e7c88b3dc9c748c72c2e649769b7a9b48f6120b5cdaa95414d4b6a7b5a"
     },
-    "airbnb-r2": {
+    "miniairbnb-2": {
       "candidate_ids": [
         "cand:v2:018a1af53aaf1f395666e828758055f8",
         "cand:v2:022490dbd4f5baece51d2f0c541e759e",
@@ -79,10 +79,10 @@
       "plan_semantic_digest": "02e045dad60f96e2e2da55bee534c5ee4c491aca375b6a3d2d0a108cd98ef07d",
       "plan_sha256": "8244d19902490e6d274e4e9aafc4e0a5d111d6d0df4f4c91b5aace5c4e97af34",
       "semantic_digest_count": 305,
-      "target": "airbnb",
+      "target": "miniairbnb",
       "taxonomy_inputs_digest": "2e24dead67862b509cde2950f13cbe44467676bc3c9be86a04d3e1f5120387bc"
     },
-    "klarna-r1": {
+    "miniklarna-1": {
       "candidate_ids": [
         "cand:v2:018a1af53aaf1f395666e828758055f8",
         "cand:v2:022490dbd4f5baece51d2f0c541e759e",
@@ -112,10 +112,10 @@
       "plan_semantic_digest": "9a45543d9b760d09197b294ffdc475f4c2976b2c1841fd8ecf162951e9576e8d",
       "plan_sha256": "c678592969597be8929643428161b500bbf333b735599166bfac613d3f9e4f45",
       "semantic_digest_count": 188,
-      "target": "klarna",
+      "target": "miniklarna",
       "taxonomy_inputs_digest": "060e0954112501cd1e67e10129b7611979e9d71a334dc33e553e4ec78c91cca7"
     },
-    "klarna-r2": {
+    "miniklarna-2": {
       "candidate_ids": [
         "cand:v2:018a1af53aaf1f395666e828758055f8",
         "cand:v2:022490dbd4f5baece51d2f0c541e759e",
@@ -145,10 +145,10 @@
       "plan_semantic_digest": "d862faf06f8a113aa2198bc34e4288b9d6d841d6ec9db23a9ea14c4872bd5b55",
       "plan_sha256": "1f9247239ca9c7a7a6648bae31516b1d5f242a7a8a68edebede294586f7988a3",
       "semantic_digest_count": 167,
-      "target": "klarna",
+      "target": "miniklarna",
       "taxonomy_inputs_digest": "da8fc3e514ede0b5b40d75f73e0b472fcfdd474e3b0193d7876381abed24d6f3"
     },
-    "occiai-r1": {
+    "miniocciai-1": {
       "candidate_ids": [
         "cand:v2:018a1af53aaf1f395666e828758055f8",
         "cand:v2:022490dbd4f5baece51d2f0c541e759e",
@@ -179,10 +179,10 @@
       "plan_semantic_digest": "286cb8bcd4475bfaba0367ebdf54e9c9322c4dc547ebf85cf4f4a6656f359a30",
       "plan_sha256": "a821fe0274bc27004e2db1bf0fa5bf085ffa2358f338583c2995d657529de398",
       "semantic_digest_count": 218,
-      "target": "occiai",
+      "target": "miniocciai",
       "taxonomy_inputs_digest": "def1c2468fb4dc8b6f9d9066d8a0598132c973a2244b07e169c038586b6bdd13"
     },
-    "occiai-r2": {
+    "miniocciai-2": {
       "candidate_ids": [
         "cand:v2:018a1af53aaf1f395666e828758055f8",
         "cand:v2:022490dbd4f5baece51d2f0c541e759e",
@@ -225,7 +225,7 @@
       "plan_semantic_digest": "73c35f6cbf2922e4235bded4ef4ad590f9a1577ee646e869ced9f5277ac36c00",
       "plan_sha256": "bea822fbeb698e43c683a058c2a017307dccb4456f453e8e9cdb5b939983990f",
       "semantic_digest_count": 122,
-      "target": "occiai",
+      "target": "miniocciai",
       "taxonomy_inputs_digest": "75ef183d5d94db1cd0d3b8fab3075d33545c0da36c2ba190b7e0dbe150c284b5"
     }
   }

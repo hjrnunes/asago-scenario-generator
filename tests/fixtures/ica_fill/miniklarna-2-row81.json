@@ -2237,7 +2237,7 @@
   "raw_response_sha256": "ec0d9081bba7b876e2471ce11171e5b953477b855cae62a0dcb376c64f177a73",
   "request_semantic_digest": "043246f4519ac686f348b31d93c4ad6cd5905d42fd4de48fb6f8d8e919adf1ea",
   "row": 81,
-  "run": "w5/pp-s11/klarna-r2/output/calls.jsonl",
+  "run": "miniklarna-2/output/calls.jsonl",
   "stage": "synthesis_obligation_aware_icas",
   "step": "RESP-1",
   "user_prompt_sha256": "1929a26eee258b6d75885393bbb04c8ac8b6724e3fe3fc44775e0f94a8f1313d"
