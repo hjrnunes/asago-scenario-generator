@@ -32,7 +32,7 @@ from asago_scenario_generator.stpa.obligation_aware.provider import (
 )
 from tests.helpers.obligation_aware import current_fill_reply, wire_pairs
 
-_FIXTURE = Path(__file__).parent / "fixtures" / "ica_fill" / "klarna-r2-row81.json"
+_FIXTURE = Path(__file__).parent / "fixtures" / "ica_fill" / "miniklarna-2-row81.json"
 
 
 def _fixture() -> tuple[SynthesisSlotRequest, dict[str, Any]]:

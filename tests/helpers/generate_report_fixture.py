@@ -18,7 +18,7 @@ import yaml
 from asago_scenario_generator.report_kit import read_metrics
 from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 
-FIXTURE = Path(__file__).parent.parent / "fixtures" / "generate_report" / "klarna-r1"
+FIXTURE = Path(__file__).parent.parent / "fixtures" / "generate_report" / "miniklarna-1"
 SCENARIOS = "SCN-001 SCN-002 SCN-003 SCN-004 SCN-006 SCN-011 SCN-012 SCN-023".split()
 
 
