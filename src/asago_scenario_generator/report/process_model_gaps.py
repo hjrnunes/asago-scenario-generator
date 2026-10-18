@@ -7,6 +7,12 @@ process-model variable: ``causal_factors[].process_model_variable`` is
 would need. This module lists the gaps per controller in
 ``report/process-model-gaps.yaml`` and in the report.
 
+The controller is the UCA's source. For a coordination link (``CL-n``),
+Stage 5 offered the process-model variables of both endpoint
+responsibilities, so the data cannot say which endpoint lacks the missing
+variable; a link entry names both endpoints and the owner of the link's
+shared variable instead.
+
 It reads the handoff YAML as plain data, so the list does not depend on the
 handoff model knowing the field. When no handoff carries the field it returns
 nothing, and the report and its files are unchanged.
@@ -28,6 +34,11 @@ from asago_scenario_generator.report_kit import (
     esc,
     section,
     table,
+)
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlStructure,
+    CoordinationLink,
+    coordination_process_model_owner,
 )
 
 GAPS_FILE = "process-model-gaps.yaml"
@@ -63,18 +74,48 @@ def _controller(document: dict[str, Any]) -> str:
     return str(lineage.get("controller_id") or "unknown")
 
 
-def _descriptions(run: RunData) -> dict[str, str]:
-    structure = run.structure
-    if structure is None:
-        return {}
-    found = {item.resp_id: item.description for item in structure.responsibilities}
-    found.update(
-        {item.link_id: item.description for item in structure.coordination_links}
-    )
-    found.update(
-        {item.cp_id: item.description for item in structure.controlled_processes}
-    )
-    return found
+def _link_details(
+    structure: ControlStructure, link: CoordinationLink
+) -> dict[str, Any]:
+    """Return a link's endpoints (source, then target) and its shared variable."""
+    responsibilities = {
+        item.resp_id: item.description for item in structure.responsibilities
+    }
+    try:
+        owner: str | None = coordination_process_model_owner(structure, link).resp_id
+    except ValueError:
+        owner = None
+    return {
+        "endpoints": [
+            {"id": endpoint, "description": responsibilities.get(endpoint)}
+            for endpoint in (link.source, link.target)
+        ],
+        "shared_variable": {"id": link.shared_pm, "owner": owner},
+    }
+
+
+def _controller_entry(
+    controller: str, structure: ControlStructure | None
+) -> dict[str, Any]:
+    """Return a controller's kind and description, with a link's details."""
+    if structure is not None:
+        for item in structure.responsibilities:
+            if item.resp_id == controller:
+                return {"kind": "responsibility", "description": item.description}
+        for link in structure.coordination_links:
+            if link.link_id == controller:
+                return {
+                    "kind": "coordination_link",
+                    "description": link.description,
+                    **_link_details(structure, link),
+                }
+        for process in structure.controlled_processes:
+            if process.cp_id == controller:
+                return {
+                    "kind": "controlled_process",
+                    "description": process.description,
+                }
+    return {"kind": "unknown", "description": None}
 
 
 def process_model_gaps(
@@ -102,7 +143,6 @@ def process_model_gaps(
                 "missing_variable": variable.get("description"),
             }
         )
-    descriptions = _descriptions(run)
     return {
         "format": GAPS_FORMAT,
         "summary": {
@@ -113,7 +153,7 @@ def process_model_gaps(
         "controllers": [
             {
                 "controller": controller,
-                "description": descriptions.get(controller),
+                **_controller_entry(controller, run.structure),
                 "gaps": sorted(
                     by_controller[controller],
                     key=lambda gap: natural_key(gap["scenario_id"]),
@@ -131,6 +171,29 @@ def write_process_model_gaps(report_dir: Path, gaps: dict[str, Any]) -> Path:
         yaml.safe_dump(gaps, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
     return path
+
+
+def _endpoint(endpoint: dict[str, Any]) -> str:
+    described = f" ({esc(endpoint['description'])})" if endpoint["description"] else ""
+    return f"{code_id(endpoint['id'])}{described}"
+
+
+def _description_cell(entry: dict[str, Any]) -> Markup | str:
+    """Describe a controller; a link names its endpoints and the variable owner."""
+    description = entry["description"] or "not in control-structure.yaml"
+    if entry.get("kind") != "coordination_link":
+        return description
+    source, target = entry["endpoints"]
+    shared = entry["shared_variable"]
+    owner = (
+        f"owned by {code_id(shared['owner'])}"
+        if shared["owner"]
+        else "owned by no single endpoint"
+    )
+    return Markup(
+        f"Link from {_endpoint(source)} to {_endpoint(target)}; shared variable "
+        f"{code_id(shared['id'])} {owner}. {esc(description)}"
+    )
 
 
 def gaps_section(gaps: dict[str, Any]) -> Markup:
@@ -155,7 +218,7 @@ def gaps_section(gaps: dict[str, Any]) -> Markup:
         Row(
             [
                 code_id(entry["controller"]),
-                entry["description"] or "not in control-structure.yaml",
+                _description_cell(entry),
                 Markup(
                     f'<a href="#{esc(gap["scenario_id"])}">{esc(gap["scenario_id"])}</a>'
                 ),
