@@ -11,7 +11,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError, field_validator
 
 from asago_scenario_generator.stpa.infra.llm_helpers import compact_validation_error
 from asago_scenario_generator.stpa.scenario_prod.stage5.attacker_belief_copy import (
@@ -20,6 +20,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.attacker_belief_copy imp
     attacker_belief_copy_findings,
     belief_overlap,
     content_words,
+    is_copy,
     validate_stated_belief_reply,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.feedback import (
@@ -29,6 +30,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.issues import (
     ExactIssueError,
     ExactIssuesError,
     IssueCode,
+    ValidationIssue,
     issues_of,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.schema import (
@@ -91,11 +93,95 @@ def test_content_words_drop_stop_words_and_strip_one_suffix() -> None:
 def test_the_known_copies_are_flagged(attacker: str, flawed: str) -> None:
     overlap = belief_overlap(attacker, flawed)
 
-    assert overlap.restates
+    assert is_copy(attacker, flawed)
     assert (
         overlap.jaccard >= JACCARD_THRESHOLD
         or overlap.containment >= CONTAINMENT_THRESHOLD
     )
+
+
+# Round-4 pairs that state the controller's premise as true below the first
+# calibration's thresholds: both texts negated (g1 airbnb SCN-009), and
+# g2 klarna SCN-036.
+NEAR_COPIES = [
+    (
+        "The message content does not contain any prohibited wire-transfer or "
+        "off-platform payment requests.",
+        "The message body does not contain off-platform payment/wire-transfer "
+        "attempts.",
+    ),
+    (
+        "The Klarna state summary for the current session contains only the "
+        "authenticated customer's data.",
+        "The Klarna state summary being retrieved contains only information for "
+        "the authenticated customer.",
+    ),
+]
+
+
+@pytest.mark.parametrize(("attacker", "flawed"), NEAR_COPIES)
+def test_near_copies_are_flagged(attacker: str, flawed: str) -> None:
+    assert is_copy(attacker, flawed)
+
+
+@pytest.mark.parametrize(
+    ("attacker", "flawed"),
+    [
+        # The form the prompt recommends: about the agent, quoting the belief.
+        (
+            "The assistant does not verify that the requested order belongs to "
+            "the authenticated customer.",
+            OWNERSHIP,
+        ),
+        # The truth the attacker knows: the denial of the flawed belief.
+        ("The requested order belongs to another customer.", OWNERSHIP),
+        # g1 klarna SCN-001 baseline attacker belief.
+        (
+            "The attacker believes that by providing an order ID belonging to "
+            "another customer, the assistant will use that ID to process a "
+            "transaction without verifying that the order belongs to the "
+            "authenticated user.",
+            OWNERSHIP,
+        ),
+        # g1 occiai SCN-022 baseline attacker belief.
+        (
+            "The attacker believes that providing unapproved educational material "
+            "like 'EDU-UNREVIEWED' will bypass the system's constraints on "
+            "approved content.",
+            "The educational material to be provided is approved.",
+        ),
+    ],
+)
+def test_beliefs_about_the_agent_or_the_truth_are_not_copies(
+    attacker: str, flawed: str
+) -> None:
+    assert belief_overlap(attacker, flawed).restates
+    assert not is_copy(attacker, flawed)
+    assert (
+        attacker_belief_copy_findings([attacker], [_Factor(flawed_belief=flawed)]) == []
+    )
+
+
+@pytest.mark.parametrize(
+    ("attacker", "flawed"),
+    [
+        ("The order isn't the customer's.", "The order is the customer's."),
+        ("The order is the customer's.", "The order is not the customer's."),
+        ("The ASSISTANT returns the order.", "The order returns."),
+    ],
+)
+def test_an_agent_word_or_one_sided_negation_clears_an_overlap(
+    attacker: str, flawed: str
+) -> None:
+    assert belief_overlap(attacker, flawed).restates
+    assert not is_copy(attacker, flawed)
+
+
+def test_only_whole_pattern_words_count() -> None:
+    # "notice", "bottle" and "aid" contain "not", "bot" and "ai" but are not them.
+    attacker = "The notice on the bottle is the customer's aid."
+
+    assert is_copy(attacker, attacker)
 
 
 def test_the_known_scores_match_the_calibration() -> None:
@@ -115,7 +201,7 @@ def test_the_known_scores_match_the_calibration() -> None:
     ],
 )
 def test_beliefs_about_the_assistant_are_not_flagged(attacker: str) -> None:
-    assert not belief_overlap(attacker, OWNERSHIP).restates
+    assert not is_copy(attacker, OWNERSHIP)
     assert (
         attacker_belief_copy_findings([attacker], [_Factor(flawed_belief=OWNERSHIP)])
         == []
@@ -252,6 +338,29 @@ def test_the_correction_gives_guidance_for_every_raised_code() -> None:
         "- attacker_belief_restates_flawed_belief: rewrite every listed attacker "
         "belief: the attacker knows the truth that the controller gets wrong"
     ) in text
+
+
+def test_a_wrapped_combined_error_names_every_issue() -> None:
+    combined = ExactIssuesError(
+        (
+            ValidationIssue(IssueCode.flawed_belief_invalid, "first"),
+            ValidationIssue(IssueCode.attacker_belief_restates_flawed_belief, "second"),
+        )
+    )
+
+    class _Checked(BaseModel):
+        value: int
+
+        @field_validator("value")
+        @classmethod
+        def _reject(cls, value: int) -> int:
+            raise combined
+
+    with pytest.raises(ValidationError) as caught:
+        _Checked(value=1)
+
+    assert issues_of(caught.value) == combined.issues
+    assert issues_of(combined) == combined.issues
 
 
 def test_a_copy_gets_one_correction_that_lists_it(tmp_path: Path) -> None:

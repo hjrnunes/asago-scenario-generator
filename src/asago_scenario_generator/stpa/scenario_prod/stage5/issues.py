@@ -134,24 +134,24 @@ def issues_of(error: BaseException | None) -> tuple[ValidationIssue, ...]:
     if isinstance(error, ValidationIssueError):
         return (error.issue,)
     if isinstance(error, ValidationError):
-        found = (
-            _issue_of_item(item)
+        return tuple(
+            issue
             for item in error.errors(include_url=False, include_input=False)
+            for issue in _issues_of_item(item)
         )
-        return tuple(issue for issue in found if issue is not None)
     return ()
 
 
-def _issue_of_item(item: dict) -> ValidationIssue | None:
-    """Return the issue behind one model error item, if it has one."""
+def _issues_of_item(item: dict) -> tuple[ValidationIssue, ...]:
+    """Return the issues behind one model error item, in order."""
     cause = item.get("ctx", {}).get("error")
     if isinstance(cause, ExactIssuesError):
-        return cause.issues[0]
+        return cause.issues
     if isinstance(cause, ValidationIssueError):
-        return cause.issue
+        return (cause.issue,)
     if isinstance(cause, SafeOutcomeClaimMissingError):
-        return ValidationIssue(IssueCode.safe_outcome_claim_missing, str(cause))
+        return (ValidationIssue(IssueCode.safe_outcome_claim_missing, str(cause)),)
     for part in item["loc"]:
         if part in _SCHEMA_FIELD_CODES:
-            return ValidationIssue(_SCHEMA_FIELD_CODES[part], item["msg"])
-    return None
+            return (ValidationIssue(_SCHEMA_FIELD_CODES[part], item["msg"]),)
+    return ()
