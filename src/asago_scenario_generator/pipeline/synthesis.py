@@ -409,7 +409,7 @@ def _run_synthesis(
         getattr(baseline, "risk_actionability", None),
     )
 
-    report_path = _render_report(output_dir)
+    report_path = _render_report(output_dir, inputs.hazard_view)
 
     artifact_paths = _artifact_paths(
         output_dir,

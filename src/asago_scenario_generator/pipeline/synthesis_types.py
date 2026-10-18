@@ -120,6 +120,9 @@ class SynthesisInputs:
     # stpa.scenario_prod.stage5.flawed_belief.FlawedBeliefMode); "stated"
     # needs v5.
     flawed_belief: str = "off"
+    # The report's hazard view: "off" or "report" (a hazard section and one
+    # Attack Flow file per hazard); "report" needs the and-or attack tree.
+    hazard_view: str = "off"
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
@@ -140,6 +143,10 @@ class SynthesisInputs:
             raise ValueError("flawed_belief must be off or stated")
         if self.flawed_belief == "stated" and self.handoff_format != "v5":
             raise ValueError("flawed_belief stated requires handoff_format v5")
+        if self.hazard_view not in ("off", "report"):
+            raise ValueError("hazard_view must be off or report")
+        if self.hazard_view == "report" and self.attack_tree_format != "and-or":
+            raise ValueError("hazard_view report requires attack_tree_format and-or")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         _normalize_request_values(self)
         _verify_request_target_inputs(self)

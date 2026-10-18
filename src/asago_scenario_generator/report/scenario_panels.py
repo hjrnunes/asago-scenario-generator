@@ -282,14 +282,15 @@ def _and_or_tags(node: dict) -> list[str]:
     return tags
 
 
-def _and_or_node(node: dict) -> TreeNode:
+def and_or_node(node: dict) -> TreeNode:
+    """Render one node of an and-or attack tree, with its subtree, as an outline node."""
     ids = [node.get("source_id"), *(node.get("source_ids") or [])]
     prefix = join([code_id(i) for i in dict.fromkeys(i for i in ids if i)], " ")
     label = esc(" ".join(str(node.get("label", "")).split()))
     if node.get("type") == "operator":
         label = Markup(f"<b>{label}</b>")
     children = [
-        _and_or_node(child)
+        and_or_node(child)
         for child in node.get("children") or []
         if isinstance(child, dict)
     ]
@@ -328,9 +329,9 @@ def _and_or_tree_panel(attack_tree: dict) -> Panel:
         *([str(uncertainty)] if uncertainty else []),
     ]
     intro = join(Markup(f'<p class="nm">{esc(line)}</p>') for line in lines)
-    head = _and_or_node({**root, "children": []}) if root else TreeNode("")
+    head = and_or_node({**root, "children": []}) if root else TreeNode("")
     children = [
-        _and_or_node(child)
+        and_or_node(child)
         for child in root.get("children") or []
         if isinstance(child, dict)
     ]
@@ -428,10 +429,11 @@ class PanelStats:
     single_leaf: int
     features: int
     matching: int
+    and_or: int = 0
 
 
 def panel_stats(run: RunData) -> PanelStats:
-    """Count flat trees, one-leaf trees, and feature files that match their YAML."""
+    """Count flat, AND/OR, and one-leaf trees, and feature files that match their YAML."""
     trees = [s.attack_tree for s in run.scenarios.values()]
     matching = sum(
         feature_matches(run.scenarios[s].gherkin, text)
@@ -444,4 +446,5 @@ def panel_stats(run: RunData) -> PanelStats:
         sum(len(t.get("leaves") or []) == 1 for t in trees),
         len(run.features),
         matching,
+        sum(isinstance(t.get("root"), dict) for t in trees),
     )

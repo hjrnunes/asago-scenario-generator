@@ -167,6 +167,17 @@ def generate_cmd(
             "causal_factors carry them). stated requires --handoff-format v5."
         ),
     ),
+    hazard_view: str = typer.Option(
+        "off",
+        "--hazard-view",
+        help=(
+            "Hazard view of the generate report: off, or report (a hazard "
+            "section that shows every published scenario under each hazard it "
+            "names, and one Attack Flow file per hazard under "
+            "report/attack-flow/). report requires --attack-tree-format and-or. "
+            "Code renders the view; the option changes no model request."
+        ),
+    ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_input_files(
@@ -209,6 +220,12 @@ def generate_cmd(
         "--flawed-belief",
         "stated requires --handoff-format v5",
     )
+    _require(hazard_view in ("off", "report"), "--hazard-view", "must be off or report")
+    _require(
+        hazard_view == "off" or attack_tree_format == "and-or",
+        "--hazard-view",
+        "report requires --attack-tree-format and-or",
+    )
     fill_policy = _replay_fill_policy(
         replay_fill=replay_fill,
         live_stage=live_stage,
@@ -244,6 +261,7 @@ def generate_cmd(
             handoff_format=handoff_format,
             model_gherkin=model_gherkin,
             flawed_belief=flawed_belief,
+            hazard_view=hazard_view,
         )
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=partial(
@@ -343,6 +361,7 @@ def _synthesis_inputs(
     handoff_format: str = "v4",
     model_gherkin: str = "off",
     flawed_belief: str = "off",
+    hazard_view: str = "off",
 ) -> Any:
     """Load and check the input files, then build the synthesis request."""
     from asago_scenario_generator.data.loaders import (
@@ -400,6 +419,7 @@ def _synthesis_inputs(
         handoff_format=handoff_format,
         model_gherkin=model_gherkin,
         flawed_belief=flawed_belief,
+        hazard_view=hazard_view,
     )
 
 
