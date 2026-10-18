@@ -1,0 +1,10 @@
+# Files a tool writes rather than a person. GitHub collapses their diffs in pull requests.
+uv.lock linguist-generated=true
+# Each contract directory's digest manifest.
+CONTRACT.lock linguist-generated=true
+# scripts/gen_handoff_kit.py
+data/contracts/scenario-handoff/handoff-v4/** linguist-generated=true
+# scripts/gen_tool_call_condition_vectors.py
+data/contracts/tool-call-condition/tool-call-condition-v1/vectors/** linguist-generated=true
+# report_kit.write_catalog()
+src/asago_scenario_generator/report_kit/catalog.html linguist-generated=true

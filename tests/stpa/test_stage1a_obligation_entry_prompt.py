@@ -6,7 +6,7 @@ offered ``provider_request`` as a ``realized_by`` value and omitted
 ``state``/``result`` from ``violated_via``, so the prompt permitted a
 combination the wire rejects and hid two combinations the wire accepts.
 These tests pin the prompt to the production :class:`Obligation` validators
-so the two surfaces cannot drift again (independent audit, 2026-09-11).
+so the two surfaces cannot drift again.
 """
 
 from __future__ import annotations
