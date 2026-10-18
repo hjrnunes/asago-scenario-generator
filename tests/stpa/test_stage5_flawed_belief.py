@@ -386,7 +386,10 @@ NAMES_ONLY = (
     [
         ("The patient's inquiry is a general educational inquiry.", []),
         ("The inquiry is a red-flag symptom identified.", []),
+        ("The patient's question is a general educational inquiry.", []),
         ("Nature of the patient's inquiry", [NAMES_ONLY]),
+        ("Nature of the patient's inquiry (evidence: the question)", [NAMES_ONLY]),
+        (INQUIRY.description, [NAMES_ONLY]),
         (
             "The patient's inquiry is a diagnostic/prescriptive request or a "
             "general educational inquiry.",
@@ -397,7 +400,11 @@ NAMES_ONLY = (
 def test_a_belief_may_pick_one_value_the_description_lists(
     belief: str, expected: list[str]
 ) -> None:
-    """The description spells out its values; picking one states a value."""
+    """The description spells out its values; picking one states a value.
+
+    A word only the evidence list holds ("question", from the argument path)
+    neither adds to the name nor picks a value.
+    """
     _, context, _ = _frame()
     frame = FlawedBeliefFrame(variables=(INQUIRY,), fixed=(("cause_1", "variable_1"),))
     choices = {choice.handle: choice for choice in _causal_source_choices(context)}

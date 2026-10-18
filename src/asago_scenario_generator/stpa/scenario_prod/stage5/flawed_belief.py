@@ -81,6 +81,7 @@ _FILLER_WORDS = frozenset(
 # Where a process-model description's value list or evidence list starts, as
 # in "Nature of the inquiry (values: ...; general inquiry) (evidence: ...)".
 _DESCRIPTION_LISTS = re.compile(r"\s*\((?:values|evidence):")
+_EVIDENCE_LIST = re.compile(r"\(evidence:[^)]*\)")
 
 
 @dataclass(frozen=True)
@@ -170,17 +171,21 @@ def _only_names_a_variable(
     """Return whether ``belief`` adds nothing to one description but its name.
 
     Each description comes with its variable's listed values, which the
-    description text also spells out after the name. A belief that repeats
-    the name and picks one value states a wrong value ("The patient's inquiry
-    is a general educational inquiry."); a belief whose words beyond the name
-    fit no single value only names the variable.
+    description text also spells out after the name, and then its evidence
+    list. A belief that repeats the name and picks one value states a wrong
+    value ("The patient's inquiry is a general educational inquiry."); a
+    belief whose words beyond the name fit no single value only names the
+    variable. A word that only the evidence list holds, such as "question"
+    from the argument path ``ask_clinical_question.question``, neither adds
+    to the name nor picks a value.
     """
     content = _words(belief) - _FILLER_WORDS
     for description, values in descriptions:
         if not content <= _words(description):
             continue
         name = _DESCRIPTION_LISTS.split(description, maxsplit=1)[0]
-        picked = content - _words(name)
+        meaning = _words(_EVIDENCE_LIST.sub(" ", description))
+        picked = (content & meaning) - _words(name)
         if not (picked and any(picked <= _words(value) for value in values)):
             return True
     return False
