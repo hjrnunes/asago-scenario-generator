@@ -516,6 +516,7 @@ def _default_scenarios(
     from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
         AttackTreeFormat,
     )
+    from asago_scenario_generator.stpa.scenario_prod.handoff import HandoffFormat
     from asago_scenario_generator.stpa.scenario_prod.narration import NarrationMode
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
     from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import (
@@ -566,6 +567,7 @@ def _default_scenarios(
         condition_families=condition_families,
         narration_mode=NarrationMode(inputs.narration_mode),
         attack_tree_format=AttackTreeFormat(inputs.attack_tree_format),
+        handoff_format=HandoffFormat(inputs.handoff_format),
     )
 
 

@@ -133,6 +133,18 @@ def generate_cmd(
             "the tree; the option changes no model request."
         ),
     ),
+    handoff_format: str = typer.Option(
+        "v4",
+        "--handoff-format",
+        help=(
+            "Published handoff version: v4 (scenario-handoff-v4) or v5 "
+            "(scenario-handoff-v5: v4 plus uca, actor, causal_factors, "
+            "preconditions, procedure and worst_case_threat; with "
+            "--model-narrative handoff its narrative is the accepted paragraph "
+            "alone). Code derives the fields; the option changes no model "
+            "request."
+        ),
+    ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_input_files(
@@ -158,6 +170,7 @@ def generate_cmd(
         "--attack-tree-format",
         "must be flat or and-or",
     )
+    _require(handoff_format in ("v4", "v5"), "--handoff-format", "must be v4 or v5")
     fill_policy = _replay_fill_policy(
         replay_fill=replay_fill,
         live_stage=live_stage,
@@ -190,6 +203,7 @@ def generate_cmd(
             replay_fill=fill_policy,
             narration_mode=model_narrative,
             attack_tree_format=attack_tree_format,
+            handoff_format=handoff_format,
         )
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=partial(
@@ -286,6 +300,7 @@ def _synthesis_inputs(
     replay_fill: Any = None,
     narration_mode: str = "off",
     attack_tree_format: str = "flat",
+    handoff_format: str = "v4",
 ) -> Any:
     """Load and check the input files, then build the synthesis request."""
     from asago_scenario_generator.data.loaders import (
@@ -340,6 +355,7 @@ def _synthesis_inputs(
         replay_fill=replay_fill,
         narration_mode=narration_mode,
         attack_tree_format=attack_tree_format,
+        handoff_format=handoff_format,
     )
 
 

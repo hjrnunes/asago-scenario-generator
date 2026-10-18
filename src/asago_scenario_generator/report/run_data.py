@@ -30,7 +30,10 @@ from asago_scenario_generator.models.target_realization import TargetRealization
 from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-from asago_scenario_generator.stpa.scenario_prod.handoff import ScenarioHandoffV4
+from asago_scenario_generator.stpa.scenario_prod.handoff import (
+    ScenarioHandoffV4,
+    handoff_model_for,
+)
 from asago_scenario_generator.stpa.system_model.risk_actionability import (
     RiskActionabilityRecord,
 )
@@ -248,11 +251,12 @@ def _read_calls(output: Path) -> tuple[CallRecord, ...]:
 def _read_scenarios(output: Path) -> dict[str, ScenarioHandoffV4]:
     folder = output / "scenarios"
     paths = sorted(folder.glob("SCN-*.yaml")) if folder.is_dir() else []
+    documents = {
+        path.stem: yaml.safe_load(path.read_text(encoding="utf-8")) for path in paths
+    }
     return {
-        path.stem: ScenarioHandoffV4.model_validate(
-            yaml.safe_load(path.read_text(encoding="utf-8"))
-        )
-        for path in paths
+        stem: handoff_model_for(document).model_validate(document)
+        for stem, document in documents.items()
     }
 
 

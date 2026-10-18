@@ -103,12 +103,14 @@ from .narration import (
     write_narratives,
 )
 from .handoff import (
+    HandoffFormat,
     ScenarioHandoffV4,
     Stage1aSource,
     build_scenario_handoff,
     handoff_ownership_violations,
     write_scenario_handoff,
 )
+from .handoff_v5 import build_scenario_handoff_v5
 from .target_observations import (
     TARGET_OBSERVATIONS_FILENAME,
     TargetObservationSnapshot,
@@ -233,6 +235,7 @@ def run_sp3(
     shape_config: ShapeStepConfig = ShapeStepConfig(),
     narration_mode: NarrationMode = NarrationMode.OFF,
     attack_tree_format: AttackTreeFormat = AttackTreeFormat.FLAT,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -296,6 +299,11 @@ def run_sp3(
             ``flat`` keeps the flat list; ``and-or`` renders
             ``and-or-tree-v1``, which names the run's other scenarios that
             share a hazard. Code renders both; no request depends on it.
+        handoff_format: The published handoff version. ``v4`` is the
+            default; ``v5`` adds the UCA, actor, causal factors,
+            preconditions, procedure and worst case threat, and with
+            ``narration_mode=handoff`` its narrative is the accepted
+            paragraph alone. No request depends on it.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -355,6 +363,7 @@ def run_sp3(
             shape_config=shape_config,
             narration_mode=narration_mode,
             attack_tree_format=attack_tree_format,
+            handoff_format=handoff_format,
         )
         scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
             inputs, stage_errors, candidate_builders
@@ -488,14 +497,19 @@ class _SP3Inputs:
     shape_config: ShapeStepConfig
     narration_mode: NarrationMode = NarrationMode.OFF
     attack_tree_format: AttackTreeFormat = AttackTreeFormat.FLAT
+    handoff_format: HandoffFormat = HandoffFormat.V4
 
 
-def _narrate(inputs: _SP3Inputs, specs: list[ScenarioSpec]) -> dict[str, str]:
+def _narrate(
+    inputs: _SP3Inputs, specs: list[ScenarioSpec], *, paragraph_only: bool = False
+) -> dict[str, str]:
     """Run the narrate step the mode asks for; return the handoff narratives.
 
     Every mode but ``off`` writes ``narratives.json``. Only ``handoff``
     returns write-ups, one per scenario whose reply code accepted; a scenario
-    that fell back keeps its deterministic narrative.
+    that fell back keeps its deterministic narrative. With ``paragraph_only``
+    each returned narrative is the accepted paragraph alone, without the
+    framing, title, steps or misuse-case fields of the write-up.
     """
     mode = inputs.narration_mode
     if mode is NarrationMode.OFF:
@@ -518,7 +532,11 @@ def _narrate(inputs: _SP3Inputs, specs: list[ScenarioSpec]) -> dict[str, str]:
         return {}
     by_id = {spec.scenario_id: spec for spec in specs}
     return {
-        scenario_id: render_writeup(by_id[scenario_id], facts, narration)
+        scenario_id: (
+            narration.paragraph
+            if paragraph_only
+            else render_writeup(by_id[scenario_id], facts, narration)
+        )
         for scenario_id, (facts, narration) in narrated.items()
         if narration.accepted
     }
@@ -595,7 +613,11 @@ def _run_stages_5_and_6(
         _write_condition_families(
             run_dir, candidate_builders, inputs.condition_families, scenario_specs
         )
-    narratives = _narrate(inputs, deduplicated_specs)
+    narratives = _narrate(
+        inputs,
+        deduplicated_specs,
+        paragraph_only=inputs.handoff_format is HandoffFormat.V5,
+    )
     tree_siblings = (
         build_sibling_index(deduplicated_specs)
         if inputs.attack_tree_format is AttackTreeFormat.AND_OR
@@ -614,6 +636,7 @@ def _run_stages_5_and_6(
         deduplication_by_scenario=deduplication_by_scenario,
         narratives=narratives,
         tree_siblings=tree_siblings,
+        handoff_format=inputs.handoff_format,
     )
     scenario_envelopes = _collect_stage6_artifacts(
         shaped_specs,
@@ -628,6 +651,7 @@ def _run_stages_5_and_6(
         deduplication_by_scenario=deduplication_by_scenario,
         narratives=narratives,
         tree_siblings=tree_siblings,
+        handoff_format=inputs.handoff_format,
     )
     return shaped_specs, scenario_envelopes, functional_test_specs
 
@@ -863,6 +887,7 @@ def _write_scenario_handoff_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> ScenarioHandoffV4:
     """Write the versioned scenario handoff for one published scenario.
 
@@ -870,9 +895,14 @@ def _write_scenario_handoff_artifacts(
     tree, Gherkin and necessary metadata, with the semantic failure criterion
     and the safe alternative retained. No execution projection, prepared text,
     delivery route, oracle selection, detector expression or judge prompt is
-    written.
+    written. ``handoff_format`` selects the published version.
     """
-    handoff = build_scenario_handoff(
+    build = (
+        build_scenario_handoff_v5
+        if handoff_format is HandoffFormat.V5
+        else build_scenario_handoff
+    )
+    handoff = build(
         envelope,
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
@@ -903,6 +933,7 @@ def _publish_stage6_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> None:
     """Write one scenario companion set and assign its publication status."""
     try:
@@ -915,6 +946,7 @@ def _publish_stage6_artifacts(
             observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
             deduplication=deduplication,
+            handoff_format=handoff_format,
         )
     except Exception as exc:  # noqa: BLE001 - isolate publication failure
         diagnostic = (
@@ -947,6 +979,7 @@ def _persist_functional_test_candidates(
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
     narratives: Mapping[str, str] | None = None,
     tree_siblings: SiblingIndex | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
@@ -986,6 +1019,7 @@ def _persist_functional_test_candidates(
                     if deduplication_by_scenario is not None
                     else None
                 ),
+                handoff_format=handoff_format,
             )
         except Exception as exc:  # noqa: BLE001 - isolate publication failure
             diagnostic = (
@@ -1019,6 +1053,7 @@ def _render_stage6_candidate(
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
     narrative: str | None = None,
     tree_siblings: SiblingIndex | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> ScenarioEnvelope | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
@@ -1051,6 +1086,7 @@ def _render_stage6_candidate(
             if deduplication_by_scenario is not None
             else None
         ),
+        handoff_format=handoff_format,
     )
     return envelope
 
@@ -1083,6 +1119,7 @@ def _collect_stage6_artifacts(
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
     narratives: Mapping[str, str] | None = None,
     tree_siblings: SiblingIndex | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> list[ScenarioEnvelope]:
     """Concretize specs and write each accepted scenario companion set."""
     envelopes: list[ScenarioEnvelope] = []
@@ -1100,6 +1137,7 @@ def _collect_stage6_artifacts(
             deduplication_by_scenario=deduplication_by_scenario,
             narrative=(narratives or {}).get(spec.scenario_id),
             tree_siblings=tree_siblings,
+            handoff_format=handoff_format,
         )
         if envelope is not None:
             envelopes.append(envelope)

@@ -16,8 +16,10 @@ exclusion is verified by :func:`handoff_ownership_violations`, which is the
 ownership boundary enforced by the negative tests.
 
 Schema version: the builder emits :class:`ScenarioHandoffV4`
-(:data:`HANDOFF_SCHEMA_VERSION_V4`), the only handoff model. Its kit lives in
-``data/contracts/scenario-handoff/handoff-v4/``, and the consumer vendors it
+(:data:`HANDOFF_SCHEMA_VERSION_V4`) by default. ``--handoff-format v5``
+publishes :class:`ScenarioHandoffV5`, which keeps every v4 field and adds the
+fields ``handoff_v5`` derives. Each kit lives in
+``data/contracts/scenario-handoff/handoff-v<N>/``, and the consumer vendors it
 byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
 """
 
@@ -26,8 +28,9 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from enum import Enum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import (
     BaseModel,
@@ -82,6 +85,8 @@ from asago_scenario_generator.stpa.tool_call_condition import (
 
 HANDOFF_SCHEMA_VERSION_V4 = "scenario-handoff-v4"
 HANDOFF_DIGEST_DOMAIN_V4 = "scenario-handoff-v4"
+HANDOFF_SCHEMA_VERSION_V5 = "scenario-handoff-v5"
+HANDOFF_DIGEST_DOMAIN_V5 = "scenario-handoff-v5"
 OPERATION_AUTHORITY_CRITERION = "criterion_observed_operation"
 OPERATION_AUTHORITY_ENRICHMENT = "verified_control_action_specialization"
 OPERATION_AUTHORITY_SAFE_OUTCOME = "safe_observable_outcome_operation"
@@ -124,6 +129,13 @@ def load_ownership_rules(
 
 
 _FORBIDDEN_KEYS, _FORBIDDEN_VALUE_PATTERNS = load_ownership_rules(OWNERSHIP_RULES_PATH)
+
+
+class HandoffFormat(str, Enum):
+    """Which handoff version a run publishes; ``v4`` is the default."""
+
+    V4 = "v4"
+    V5 = "v5"
 
 
 class HandoffModel(BaseModel):
@@ -388,12 +400,200 @@ class ScenarioHandoffV4(HandoffModel):
         return data
 
 
-def handoff_payload_digest(payload: dict[str, Any]) -> str:
-    """Return the framed content digest for a v4 handoff payload."""
+#: Handbook Table 2.3 column names (Leveson and Thomas 2018) for ``uca.type``.
+UcaType = Literal[
+    "not-providing-causes-hazard",
+    "providing-causes-hazard",
+    "too-early-too-late-or-out-of-order",
+    "stopped-too-soon-or-applied-too-long",
+]
+ProcedureChannel = Literal["tool_data", "user_turn", "forged_history"]
+HandoffText = Annotated[StrictStr, Field(min_length=1, pattern=r"\S")]
+StepId = Annotated[StrictStr, Field(pattern=r"^S\d{2}$")]
+
+
+class HandoffHazard(HandoffModel):
+    """One hazard the unsafe control action leads to."""
+
+    hazard_id: HandoffText
+    description: HandoffText
+
+
+class HandoffUca(HandoffModel):
+    """The unsafe control action in the STPA Handbook's five-part form."""
+
+    source: HandoffText
+    type: UcaType
+    control_action: HandoffText
+    context: HandoffText
+    statement: HandoffText
+    hazards: list[HandoffHazard] = Field(min_length=1)
+
+
+class HandoffActor(HandoffModel):
+    """The misuser of an adversarial scenario: who, and what they want."""
+
+    profile: HandoffText
+    goal: HandoffText
+
+
+class HandoffCausalFactor(HandoffModel):
+    """One causal factor: the flawed process-model belief and its flaw."""
+
+    source_id: HandoffText
+    process_model_belief: HandoffText | None
+    flaw: HandoffText
+
+
+class HandoffAtlasRef(HandoffModel):
+    """One MITRE ATLAS tactic or technique."""
+
+    id: Annotated[StrictStr, Field(pattern=r"^AML\.TA?\d{4}(\.\d{3})?$")]
+    name: HandoffText
+
+
+class HandoffProcedureStep(HandoffModel):
+    """One step of the attack procedure, with its ATLAS tactic and technique."""
+
+    step_id: StepId
+    leads_to: list[StepId] = Field(max_length=1)
+    tactic: HandoffAtlasRef | None
+    technique: HandoffAtlasRef | None
+    description: HandoffText
+    channel: ProcedureChannel
+
+
+class ScenarioHandoffV5(ScenarioHandoffV4):
+    """The versioned scenario handoff envelope (v5).
+
+    v5 keeps every v4 field and adds ``uca``, ``actor``, ``causal_factors``,
+    ``preconditions``, ``procedure`` and ``worst_case_threat``. ``actor`` is
+    an object for ``kind: adversarial`` and ``null`` for ``kind: functional``;
+    a functional scenario has no preconditions and no procedure.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        title="ScenarioHandoff",
+        json_schema_extra={
+            "allOf": [
+                _TOOL_CALL_CONDITION_PAIRING,
+                {
+                    "if": {
+                        "properties": {"kind": {"const": "adversarial"}},
+                        "required": ["kind"],
+                    },
+                    "then": {
+                        "properties": {
+                            "attack_shape": {"type": "object"},
+                            "actor": {"type": "object"},
+                            "procedure": {"minItems": 1},
+                        }
+                    },
+                    "else": {
+                        "properties": {
+                            "attack_shape": {"type": "null"},
+                            "actor": {"type": "null"},
+                            "procedure": {"maxItems": 0},
+                            "preconditions": {"maxItems": 0},
+                        }
+                    },
+                },
+            ]
+        },
+    )
+
+    schema_version: Literal["scenario-handoff-v5"] = HANDOFF_SCHEMA_VERSION_V5  # type: ignore[assignment]
+    uca: HandoffUca
+    actor: HandoffActor | None
+    causal_factors: list[HandoffCausalFactor] = Field(min_length=1)
+    preconditions: list[HandoffText]
+    procedure: list[HandoffProcedureStep]
+    worst_case_threat: HandoffText
+
+    @model_validator(mode="after")
+    def validate_v5_kind(self) -> "ScenarioHandoffV5":
+        """An adversarial scenario has an actor and a procedure; a functional one neither."""
+
+        if self.kind == "adversarial":
+            if self.actor is None or not self.procedure:
+                raise ValueError(
+                    "an adversarial v5 handoff has an actor and a procedure"
+                )
+        elif self.actor is not None or self.procedure or self.preconditions:
+            raise ValueError(
+                "a functional v5 handoff has a null actor, no preconditions "
+                "and no procedure"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_procedure_chain(self) -> "ScenarioHandoffV5":
+        """Number the steps S00, S01, ... and link each to the next."""
+
+        ids = [f"S{index:02d}" for index in range(len(self.procedure))]
+        for index, step in enumerate(self.procedure):
+            if step.step_id != ids[index]:
+                raise ValueError(f"procedure step {index} must be {ids[index]}")
+            expected = ids[index + 1 : index + 2]
+            if step.leads_to != expected:
+                raise ValueError(
+                    f"procedure step {step.step_id} must lead to {expected}"
+                )
+            if (step.tactic is None) != (step.technique is None):
+                raise ValueError(
+                    f"procedure step {step.step_id} names a tactic exactly when "
+                    "it names a technique"
+                )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_keeping_null_shape(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> dict[str, Any]:
+        """Keep v4's null ``attack_shape`` and v5's required nulls under ``exclude_none``."""
+
+        data = handler(self)
+        shape = self.attack_shape
+        data["attack_shape"] = (
+            None if shape is None else shape.model_dump(mode=info.mode)
+        )
+        data["actor"] = (
+            None if self.actor is None else self.actor.model_dump(mode=info.mode)
+        )
+        data["causal_factors"] = [
+            item.model_dump(mode=info.mode) for item in self.causal_factors
+        ]
+        data["procedure"] = [item.model_dump(mode=info.mode) for item in self.procedure]
+        return {name: data[name] for name in type(self).model_fields if name in data}
+
+
+_DIGEST_DOMAINS = {
+    HANDOFF_SCHEMA_VERSION_V4: HANDOFF_DIGEST_DOMAIN_V4,
+    HANDOFF_SCHEMA_VERSION_V5: HANDOFF_DIGEST_DOMAIN_V5,
+}
+_HANDOFF_MODELS: dict[str, type[ScenarioHandoffV4]] = {
+    HANDOFF_SCHEMA_VERSION_V4: ScenarioHandoffV4,
+    HANDOFF_SCHEMA_VERSION_V5: ScenarioHandoffV5,
+}
+
+
+def handoff_model_for(payload: Mapping[str, Any]) -> type[ScenarioHandoffV4]:
+    """Return the handoff model a payload's ``schema_version`` names."""
     version = payload.get("schema_version")
-    if version != HANDOFF_SCHEMA_VERSION_V4:
+    model = _HANDOFF_MODELS.get(version)  # type: ignore[arg-type]
+    if model is None:
         raise ValueError(f"unsupported scenario handoff schema_version: {version!r}")
-    return compute_framed_digest(HANDOFF_DIGEST_DOMAIN_V4, payload)
+    return model
+
+
+def handoff_payload_digest(payload: dict[str, Any]) -> str:
+    """Return the framed content digest for a v4 or v5 handoff payload."""
+    version = payload.get("schema_version")
+    domain = _DIGEST_DOMAINS.get(version)  # type: ignore[arg-type]
+    if domain is None:
+        raise ValueError(f"unsupported scenario handoff schema_version: {version!r}")
+    return compute_framed_digest(domain, payload)
 
 
 def finalize_handoff(handoff: ScenarioHandoffV4) -> ScenarioHandoffV4:
@@ -460,17 +660,18 @@ _OTHER_VERSION_VIOLATIONS = (
 
 
 def handoff_schema_violations(payload: dict[str, Any]) -> list[str]:
-    """Return ``schema_violation:<top-level field>`` codes for one v4 payload.
+    """Return ``schema_violation:<top-level field>`` codes for one v4 or v5 payload.
 
     A payload with any other ``schema_version`` gets
     :data:`_OTHER_VERSION_VIOLATIONS`, the codes the kit records for its
     unknown-version case. An empty list means the closed schema accepts
     the payload.
     """
-    if payload.get("schema_version") != HANDOFF_SCHEMA_VERSION_V4:
+    model = _HANDOFF_MODELS.get(payload.get("schema_version"))  # type: ignore[arg-type]
+    if model is None:
         return list(_OTHER_VERSION_VIOLATIONS)
     try:
-        ScenarioHandoffV4.model_validate(payload)
+        model.model_validate(payload)
     except ValidationError as exc:
         violations: list[str] = []
         for error in exc.errors():
@@ -750,6 +951,7 @@ def _sourced_facts(
     envelope: ScenarioEnvelope,
     loss_analysis: LossAnalysis | None,
     stage_1a_source: Stage1aSource | None = None,
+    version: str = HANDOFF_SCHEMA_VERSION_V4,
 ) -> list[HandoffFact]:
     spec = envelope.scenario_spec
     context = spec.scenario_context
@@ -776,7 +978,7 @@ def _sourced_facts(
                 "The unsafe outcome condition is expressed semantically; the "
                 "executable check is derived downstream."
             ),
-            source=(f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V4}"),
+            source=f"producer handoff contract {version}",
             authority="producer_contract",
         )
     )
@@ -872,10 +1074,40 @@ def build_scenario_handoff(
     constraint authorities derive from it and from the actual loss-analysis
     constraint records instead of asserting reviewed status.
     """
+    fields = scenario_handoff_fields(
+        envelope,
+        version=HANDOFF_SCHEMA_VERSION_V4,
+        loss_analysis=loss_analysis,
+        environment_bound=environment_bound,
+        enriched_operations=enriched_operations,
+        observed_operations=observed_operations,
+        stage_1a_source=stage_1a_source,
+        deduplication=deduplication,
+    )
+    return finalize_handoff(ScenarioHandoffV4(**fields))
+
+
+def scenario_handoff_fields(
+    envelope: ScenarioEnvelope,
+    *,
+    version: str,
+    loss_analysis: LossAnalysis | None = None,
+    environment_bound: bool = False,
+    enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
+    deduplication: ScenarioDeduplication | None = None,
+) -> dict[str, Any]:
+    """Return the v4 fields of one scenario's handoff, as model arguments.
+
+    ``version`` is the published schema version; the contract fact names it.
+    The Gherkin block is the envelope's Gherkin spec.
+    """
     gherkin_spec: GherkinSpec = envelope.gherkin_spec
     status, tool_call_condition = _tool_call_condition(envelope)
     kind = "functional" if envelope.scenario_spec.is_functional_test else "adversarial"
-    handoff = ScenarioHandoffV4(
+    return dict(
+        schema_version=version,
         scenario_id=envelope.scenario_id,
         kind=kind,
         attack_shape=_attack_shape(envelope, kind),
@@ -899,7 +1131,7 @@ def build_scenario_handoff(
         documented_operations=_documented_operations(
             envelope, enriched_operations, observed_operations
         ),
-        sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source),
+        sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source, version),
         assumptions_and_unknowns=_assumptions_and_unknowns(envelope, environment_bound),
         observation=_observation_metadata(envelope),
         discriminating_condition=envelope.scenario_spec.discriminating_condition,
@@ -908,7 +1140,6 @@ def build_scenario_handoff(
         tool_call_condition_status=status,
         tool_call_condition=tool_call_condition,
     )
-    return finalize_handoff(handoff)
 
 
 def _attack_shape(envelope: ScenarioEnvelope, kind: str) -> AttackShape | None:
@@ -962,26 +1193,38 @@ __all__ = [
     "AUTHORITY_SUPPLIED_REVIEWED",
     "AUTHORITY_UNSOURCED",
     "HANDOFF_DIGEST_DOMAIN_V4",
+    "HANDOFF_DIGEST_DOMAIN_V5",
     "HANDOFF_SCHEMA_VERSION_V4",
+    "HANDOFF_SCHEMA_VERSION_V5",
     "HYPOTHESIS_FRAMING",
     "OPERATION_AUTHORITY_CRITERION",
     "OPERATION_AUTHORITY_ENRICHMENT",
     "OPERATION_AUTHORITY_SAFE_OUTCOME",
     "OWNERSHIP_RULES_PATH",
+    "HandoffActor",
+    "HandoffAtlasRef",
+    "HandoffCausalFactor",
     "HandoffFact",
+    "HandoffFormat",
     "HandoffGherkin",
+    "HandoffHazard",
     "HandoffLineage",
     "HandoffObservation",
     "HandoffOperation",
+    "HandoffProcedureStep",
     "HandoffRule",
+    "HandoffUca",
     "ScenarioHandoffV4",
+    "ScenarioHandoffV5",
     "Stage1aSource",
     "build_scenario_handoff",
     "finalize_handoff",
     "handoff_ownership_violations",
+    "handoff_model_for",
     "handoff_payload_digest",
     "handoff_schema_violations",
     "load_ownership_rules",
+    "scenario_handoff_fields",
     "verify_handoff_digest",
     "write_scenario_handoff",
 ]

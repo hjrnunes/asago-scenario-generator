@@ -110,6 +110,9 @@ class SynthesisInputs:
     # Format of each handoff's attack_tree: "flat" or "and-or" (see
     # stpa.scenario_prod.and_or_tree.AttackTreeFormat).
     attack_tree_format: str = "flat"
+    # Published handoff version: "v4" or "v5" (see
+    # stpa.scenario_prod.handoff.HandoffFormat).
+    handoff_format: str = "v4"
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
@@ -120,6 +123,8 @@ class SynthesisInputs:
             raise ValueError("narration_mode must be off, report, or handoff")
         if self.attack_tree_format not in ("flat", "and-or"):
             raise ValueError("attack_tree_format must be flat or and-or")
+        if self.handoff_format not in ("v4", "v5"):
+            raise ValueError("handoff_format must be v4 or v5")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         _normalize_request_values(self)
         _verify_request_target_inputs(self)

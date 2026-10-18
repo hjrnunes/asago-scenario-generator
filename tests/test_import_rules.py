@@ -607,6 +607,9 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     # The AND/OR attack tree reuses the narrate step's plain wording and
     # attack steps.
     "and_or_tree": 2,
+    # The v5 handoff fields reuse the narrate step's plain wording and
+    # attack steps on top of the v4 handoff.
+    "handoff_v5": 2,
     "run": 3,
 }
 

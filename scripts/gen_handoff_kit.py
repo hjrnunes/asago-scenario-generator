@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the scenario-handoff v4 contract kit and refresh CONTRACT.lock.
+"""Generate the scenario-handoff v4 and v5 contract kits and refresh CONTRACT.lock.
 
 Run from any directory: ``uv run python scripts/gen_handoff_kit.py``.
 Regenerating the kit must leave every byte unchanged, which
@@ -22,15 +22,24 @@ from asago_scenario_generator.stpa.scenario_prod.condition_check import (
     ConditionUniverse,
     check_discriminating_condition,
 )
+from asago_scenario_generator.stpa.models.attack_shape import AttackShape
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_DIGEST_DOMAIN_V4,
+    HANDOFF_DIGEST_DOMAIN_V5,
     HANDOFF_SCHEMA_VERSION_V4,
+    HANDOFF_SCHEMA_VERSION_V5,
     HYPOTHESIS_FRAMING,
     ScenarioHandoffV4,
+    ScenarioHandoffV5,
     finalize_handoff,
     handoff_ownership_violations,
     handoff_payload_digest,
     handoff_schema_violations,
+)
+from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
+    procedure_steps,
+    shape_preconditions,
+    uca_type,
 )
 from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
     bind_tool_call_condition,
@@ -38,6 +47,7 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
 
 ROOT = Path(__file__).resolve().parents[1] / "data/contracts/scenario-handoff"
 KIT_V4 = ROOT / "handoff-v4"
+KIT_V5_NAME = "handoff-v5"
 
 
 def dump(value: object) -> str:
@@ -811,7 +821,10 @@ def resigned(payload: dict) -> dict:
     """Sign *payload* again so a reader that checks the digest first reaches the
     broken field; a payload of another version keeps its digest."""
 
-    if payload.get("schema_version") == HANDOFF_SCHEMA_VERSION_V4:
+    if payload.get("schema_version") in (
+        HANDOFF_SCHEMA_VERSION_V4,
+        HANDOFF_SCHEMA_VERSION_V5,
+    ):
         unsigned = {k: v for k, v in payload.items() if k != "content_digest"}
         payload["content_digest"] = handoff_payload_digest(unsigned)
     return payload
@@ -1003,11 +1016,187 @@ def v4_invalid(valid: dict[str, dict]) -> dict[str, dict]:
     return {f"invalid/{name}.json": payload for name, payload in invalid.items()}
 
 
-def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> None:
+# --- v5 -----------------------------------------------------------------------
+
+V5_HAZARD = {
+    "hazard_id": "H-1",
+    "description": "The assistant changes an item for a user who does not own it.",
+}
+V5_BELIEF = "The selected item belongs to the authenticated user."
+V5_GOAL = "Changes an item that belongs to another user."
+
+
+def v5_fields(payload: dict) -> dict:
+    """The six v5 fields for one v4 fixture, derived as the producer derives them."""
+
+    kind = payload["kind"]
+    shape = payload["attack_shape"]
+    fields = {
+        "uca": {
+            "source": payload["lineage"]["controller_id"],
+            "type": uca_type(payload["lineage"]["ica_slot_id"]),
+            "control_action": "Update an item for the user.",
+            "context": "The user asks the assistant to change an item.",
+            "statement": "The assistant updates an item the user does not own.",
+            "hazards": [dict(V5_HAZARD)],
+        },
+        "causal_factors": [
+            {
+                "source_id": "PM-1-1",
+                "process_model_belief": "Item ownership",
+                "flaw": "The assistant does not compare the item owner with the user.",
+            }
+        ],
+        "worst_case_threat": "An item changes for a user who does not own it.",
+    }
+    if kind == "functional":
+        fields.update(actor=None, preconditions=[], procedure=[])
+        return fields
+    model = AttackShape.model_validate(shape)
+    fields["actor"] = {"profile": "an external attacker", "goal": V5_GOAL}
+    fields["preconditions"] = shape_preconditions(model, [V5_BELIEF])
+    fields["procedure"] = [
+        step.model_dump(mode="json")
+        for step in procedure_steps(model, payload["scenario_id"])
+    ]
+    return fields
+
+
+#: Fixture-specific v5 variations: a factor without a matching belief, two
+#: factors, and the other UCA types.
+def _no_belief(payload: dict) -> None:
+    payload["causal_factors"][0]["process_model_belief"] = None
+    payload["causal_factors"][0]["source_id"] = "FB-1-1"
+
+
+def _two_factors(payload: dict) -> None:
+    payload["causal_factors"].append(
+        {
+            "source_id": "FB-1-1",
+            "process_model_belief": None,
+            "flaw": "Ownership feedback arrives after the update.",
+        }
+    )
+
+
+V5_VARIATIONS = {
+    "valid/adversarial-forged-transcript.json": _no_belief,
+    "valid/adversarial-indirect-listing.json": _two_factors,
+}
+
+
+def to_v5(payload: dict) -> dict:
+    """Turn a finalized v4 fixture into the v5 fixture for the same scenario."""
+
+    v5 = {k: copy.deepcopy(v) for k, v in payload.items() if k != "content_digest"}
+    v5["schema_version"] = HANDOFF_SCHEMA_VERSION_V5
+    for fact in v5["sourced_facts"]:
+        if fact["authority"] == "producer_contract":
+            fact.update(contract_fact(HANDOFF_SCHEMA_VERSION_V5))
+    v5.update(v5_fields(payload))
+    return v5
+
+
+def finalize_v5(payload: dict) -> dict:
+    handoff = finalize_handoff(ScenarioHandoffV5.model_validate(payload))
+    return handoff.model_dump(mode="json", exclude_none=True)
+
+
+def v5_payloads(v4_valid: dict[str, dict]) -> dict[str, dict]:
+    payloads = {}
+    for relative, payload in v4_valid.items():
+        v5 = to_v5(payload)
+        V5_VARIATIONS.get(relative, lambda _: None)(v5)
+        payloads[relative] = finalize_v5(v5)
+    return payloads
+
+
+def _first_step(payload: dict) -> dict:
+    return payload["procedure"][0]
+
+
+V5_CASES = {
+    "v5-uca-missing": drop("uca"),
+    "v5-uca-not-object": put("uca", "RESP-1 updates an item"),
+    "v5-uca-type-not-enumerated": put("uca.type", "INCORRECT"),
+    "v5-uca-blank-statement": put("uca.statement", " "),
+    "v5-uca-hazards-empty": put("uca.hazards", []),
+    "v5-uca-unknown-field": put("uca.extra", 1),
+    "v5-actor-null-on-adversarial": put("actor", None),
+    "v5-actor-missing": drop("actor"),
+    "v5-actor-blank-goal": put("actor.goal", ""),
+    "v5-procedure-empty-on-adversarial": put("procedure", []),
+    "v5-procedure-step-id-out-of-order": put("procedure.0.step_id", "S01"),
+    "v5-procedure-leads-to-wrong": put("procedure.0.leads_to", ["S05"]),
+    "v5-procedure-channel-not-enumerated": put("procedure.0.channel", "chat"),
+    "v5-procedure-technique-without-tactic": put("procedure.0.tactic", None),
+    "v5-procedure-technique-id-free-text": put(
+        "procedure.0.technique.id", "prompt injection"
+    ),
+    "v5-procedure-step-missing-tactic-key": drop("procedure.0.tactic"),
+    "v5-causal-factors-empty": put("causal_factors", []),
+    "v5-causal-factor-belief-missing": drop("causal_factors.0.process_model_belief"),
+    "v5-causal-factor-blank-flaw": put("causal_factors.0.flaw", " "),
+    "v5-preconditions-not-text": put("preconditions", [1]),
+    "v5-worst-case-threat-blank": put("worst_case_threat", ""),
+    "v5-worst-case-threat-missing": drop("worst_case_threat"),
+    "v5-fields-under-v4-version": put("schema_version", HANDOFF_SCHEMA_VERSION_V4),
+}
+V5_FUNCTIONAL_CASES = {
+    "v5-actor-on-functional": put(
+        "actor", {"profile": "an external attacker", "goal": V5_GOAL}
+    ),
+    "v5-procedure-on-functional": put(
+        "procedure",
+        [
+            {
+                "step_id": "S00",
+                "leads_to": [],
+                "tactic": None,
+                "technique": None,
+                "description": "The benign user asks for the change.",
+                "channel": "user_turn",
+            }
+        ],
+    ),
+    "v5-preconditions-on-functional": put("preconditions", [V5_BELIEF]),
+}
+
+
+def v5_invalid(valid: dict[str, dict]) -> dict[str, dict]:
+    """The v4 cases cut from v5 bases, plus one case per v5 rule."""
+
+    invalid = v4_invalid(valid)
+    single = valid["valid/adversarial-direct-single.json"]
+    functional_null = valid["valid/functional-null-shape.json"]
+    cases = {name: resigned(cut(single, m)) for name, m in V5_CASES.items()}
+    cases.update(
+        {
+            name: resigned(cut(functional_null, m))
+            for name, m in V5_FUNCTIONAL_CASES.items()
+        }
+    )
+    invalid.update({f"invalid/{name}.json": payload for name, payload in cases.items()})
+    return invalid
+
+
+def v5_metadata_fields() -> list[str]:
+    representations = {"narrative", "attack_tree", "gherkin"}
+    return [
+        name for name in ScenarioHandoffV5.model_fields if name not in representations
+    ]
+
+
+def write_kit(
+    kit: Path,
+    valid: dict[str, dict],
+    invalid: dict[str, dict],
+    model: type[ScenarioHandoffV4] = ScenarioHandoffV4,
+) -> None:
     (kit / "valid").mkdir(parents=True, exist_ok=True)
     (kit / "invalid").mkdir(parents=True, exist_ok=True)
     (kit / "schema.json").write_text(
-        json.dumps(ScenarioHandoffV4.model_json_schema(), indent=2) + "\n",
+        json.dumps(model.model_json_schema(), indent=2) + "\n",
         encoding="utf-8",
     )
     for relative, payload in valid.items():
@@ -1017,7 +1206,11 @@ def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> No
 
     expected: dict[str, list[str]] = {}
     for relative, payload in invalid.items():
-        (kit / relative).write_text(dump(payload), encoding="utf-8")
+        written = dump(payload)
+        (kit / relative).write_text(written, encoding="utf-8")
+        # Validation reports some codes in key order, so record what a reader
+        # of the sorted file sees.
+        payload = json.loads(written)
         codes = handoff_ownership_violations(payload) + handoff_schema_violations(
             payload
         )
@@ -1039,16 +1232,29 @@ def write_kit(kit: Path, valid: dict[str, dict], invalid: dict[str, dict]) -> No
     (kit / "canonical-digests.json").write_text(dump(digests), encoding="utf-8")
 
 
-def write_lock(kit: Path) -> None:
-    """Pin every kit file and the ownership rules; keep the descriptive fields."""
+def write_lock(*kits: Path) -> None:
+    """Pin every kit file and the ownership rules; keep the descriptive fields.
+
+    The top-level version fields describe v4, the default; each later version
+    is a row of ``additional_versions``.
+    """
 
     lock_path = ROOT / "CONTRACT.lock"
     previous = json.loads(lock_path.read_text(encoding="utf-8"))
     files = {
-        str(path.relative_to(ROOT)): sha(path) for path in sorted(kit.rglob("*.json"))
+        str(path.relative_to(ROOT)): sha(path)
+        for path in sorted(path for kit in kits for path in kit.rglob("*.json"))
     }
     files["ownership-rules.json"] = sha(ROOT / "ownership-rules.json")
     lock = {
+        "additional_versions": [
+            {
+                "digest_domain": HANDOFF_DIGEST_DOMAIN_V5,
+                "handoff_schema_version": HANDOFF_SCHEMA_VERSION_V5,
+                "kit": KIT_V5_NAME,
+                "metadata_fields": v5_metadata_fields(),
+            }
+        ],
         "authority": previous["authority"],
         "contract": previous["contract"],
         "digest_domain": HANDOFF_DIGEST_DOMAIN_V4,
@@ -1063,7 +1269,10 @@ def write_lock(kit: Path) -> None:
 def main() -> None:
     valid = v4_payloads(BUILDERS)
     write_kit(KIT_V4, valid, v4_invalid(valid))
-    write_lock(KIT_V4)
+    kit_v5 = ROOT / KIT_V5_NAME
+    valid_v5 = v5_payloads(valid)
+    write_kit(kit_v5, valid_v5, v5_invalid(valid_v5), ScenarioHandoffV5)
+    write_lock(KIT_V4, kit_v5)
 
 
 if __name__ == "__main__":
