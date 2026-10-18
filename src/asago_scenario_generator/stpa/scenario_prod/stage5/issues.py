@@ -55,6 +55,7 @@ class IssueCode(StrEnum):
     attacker_intentions_missing = "attacker_intentions_missing"
     no_content_surface = "no_content_surface"
     flawed_belief_invalid = "flawed_belief_invalid"
+    attacker_belief_restates_flawed_belief = "attacker_belief_restates_flawed_belief"
 
 
 # The codes of a condition that failed a check, in the order the publication
@@ -93,6 +94,21 @@ class ExactIssueError(ValidationIssueError, ExactFeedbackError):
     """An issue whose itemized detail reaches the model with its line breaks."""
 
 
+class ExactIssuesError(ExactIssueError):
+    """Several issues of one check, reported together in one correction.
+
+    ``issue`` is the first; ``issues`` holds all of them in order.
+    """
+
+    def __init__(self, issues: tuple[ValidationIssue, ...]) -> None:
+        if not issues:
+            raise ValueError("ExactIssuesError needs at least one issue")
+        first = issues[0]
+        super().__init__(first.code, first.detail)
+        self.issues = issues
+        ValueError.__init__(self, "\n".join(str(issue) for issue in issues))
+
+
 # Fields whose schema failure has its own repair guidance.  A response model
 # rejects these through its discriminated unions, which no check code can
 # annotate, so the field path in the error names the failure.
@@ -113,6 +129,8 @@ def issues_of(error: BaseException | None) -> tuple[ValidationIssue, ...]:
     wraps it.  A model error on a field with repair guidance carries the
     issue of that field.
     """
+    if isinstance(error, ExactIssuesError):
+        return error.issues
     if isinstance(error, ValidationIssueError):
         return (error.issue,)
     if isinstance(error, ValidationError):
@@ -127,6 +145,8 @@ def issues_of(error: BaseException | None) -> tuple[ValidationIssue, ...]:
 def _issue_of_item(item: dict) -> ValidationIssue | None:
     """Return the issue behind one model error item, if it has one."""
     cause = item.get("ctx", {}).get("error")
+    if isinstance(cause, ExactIssuesError):
+        return cause.issues[0]
     if isinstance(cause, ValidationIssueError):
         return cause.issue
     if isinstance(cause, SafeOutcomeClaimMissingError):

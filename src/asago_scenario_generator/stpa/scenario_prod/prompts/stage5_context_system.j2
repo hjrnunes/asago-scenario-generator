@@ -375,5 +375,15 @@ about and `missing_variable` to `null`. If no listed variable holds the
 belief, set `process_model_variable` to `none` and `missing_variable` to a
 short description, in domain words, of the variable the controller would need,
 for example "which member a loan record belongs to".
+
+Attacker beliefs are not flawed beliefs. `attacker_bdi.beliefs` states what the
+attacker believes about the target: what the attacker can reach, what the
+assistant does or fails to check, and what its tools return. The attacker
+knows the truth that the controller gets wrong, so an attacker belief never
+restates a factor's flawed belief as true. For example, when the controller
+wrongly believes "The loan record on screen belongs to the member who asked
+for it.", the attacker believes "The assistant shows a loan record without
+checking which member it belongs to.", not "The loan record belongs to the
+member who asked for it."
 {% endif %}
 Return only the schema-matching JSON object.
