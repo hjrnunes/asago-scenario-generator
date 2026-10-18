@@ -129,8 +129,9 @@ def generate_cmd(
         help=(
             "Format of each handoff's attack_tree: flat (today's flat list) or "
             "and-or (and-or-tree-v1: the hazard OR the scenarios that reach it, "
-            "each an AND, in order, of its conditions and steps). Code renders "
-            "the tree; the option changes no model request."
+            "each an AND, in order, of its conditions and steps; a v5 handoff "
+            "publishes the scenario's own part of it as attack_path). Code "
+            "renders the tree; the option changes no model request."
         ),
     ),
     handoff_format: str = typer.Option(
@@ -138,10 +139,12 @@ def generate_cmd(
         "--handoff-format",
         help=(
             "Published handoff version: v4 (scenario-handoff-v4) or v5 "
-            "(scenario-handoff-v5: v4 plus uca, actor, causal_factors, "
-            "preconditions, procedure and worst_case_threat; with "
-            "--model-narrative handoff its narrative is the accepted paragraph "
-            "alone). Code derives the fields; the option changes no model "
+            "(scenario-handoff-v5: the scenario's attack_path in place of its "
+            "attack_tree, plus uca, actor, causal_factors, preconditions, "
+            "procedure and worst_case_threat; with --model-narrative handoff "
+            "its narrative is the accepted paragraph alone). v5 requires "
+            "--attack-tree-format and-or, because the path reduces from the "
+            "and-or tree. Code derives the fields; the option changes no model "
             "request."
         ),
     ),
@@ -208,6 +211,11 @@ def generate_cmd(
         "must be flat or and-or",
     )
     _require(handoff_format in ("v4", "v5"), "--handoff-format", "must be v4 or v5")
+    _require(
+        handoff_format == "v4" or attack_tree_format == "and-or",
+        "--handoff-format",
+        "v5 requires --attack-tree-format and-or",
+    )
     _require(
         model_gherkin in ("off", "handoff"), "--model-gherkin", "must be off or handoff"
     )

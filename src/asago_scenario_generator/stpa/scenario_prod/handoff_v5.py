@@ -42,6 +42,7 @@ from .handoff import (
     finalize_handoff,
     scenario_handoff_fields,
 )
+from .attack_path import reduce_to_attack_path
 from .narration import ATLAS_TACTICS, attack_steps, plain
 from .presentation import ADVERSARY_WORDS, CONTROLLER_WORDS, item_kind
 
@@ -64,10 +65,11 @@ def build_scenario_handoff_v5(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
 ) -> ScenarioHandoffV5:
-    """Build the v5 handoff: every v4 field plus the six v5 fields.
+    """Build the v5 handoff: the v4 fields, with the attack path in the tree's place.
 
-    The narrative, attack tree and Gherkin come from the envelope unchanged,
-    as in v4; the caller decides what the envelope's narrative holds.
+    The narrative and Gherkin come from the envelope unchanged, as in v4; the
+    caller decides what the envelope's narrative holds. ``attack_path`` is the
+    envelope's and-or tree reduced to this scenario's own path.
     """
     fields = scenario_handoff_fields(
         envelope,
@@ -79,9 +81,13 @@ def build_scenario_handoff_v5(
         stage_1a_source=stage_1a_source,
         deduplication=deduplication,
     )
-    return finalize_handoff(
+    fields.pop("attack_tree")
+    fields["attack_path"] = reduce_to_attack_path(envelope.attack_tree)
+    handoff = finalize_handoff(
         ScenarioHandoffV5(**fields, **v5_fields(envelope.scenario_spec))
     )
+    assert isinstance(handoff, ScenarioHandoffV5)
+    return handoff
 
 
 def v5_fields(spec: ScenarioSpec) -> dict[str, Any]:

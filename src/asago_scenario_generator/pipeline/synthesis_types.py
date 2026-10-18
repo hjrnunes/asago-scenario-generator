@@ -111,7 +111,8 @@ class SynthesisInputs:
     # stpa.scenario_prod.and_or_tree.AttackTreeFormat).
     attack_tree_format: str = "flat"
     # Published handoff version: "v4" or "v5" (see
-    # stpa.scenario_prod.handoff.HandoffFormat).
+    # stpa.scenario_prod.handoff.HandoffFormat); "v5" needs the and-or attack
+    # tree, which it reduces to its attack path.
     handoff_format: str = "v4"
     # Model-written Gherkin: "off" or "handoff" (see
     # stpa.scenario_prod.model_gherkin.GherkinMode); "handoff" needs v5.
@@ -135,6 +136,8 @@ class SynthesisInputs:
             raise ValueError("attack_tree_format must be flat or and-or")
         if self.handoff_format not in ("v4", "v5"):
             raise ValueError("handoff_format must be v4 or v5")
+        if self.handoff_format == "v5" and self.attack_tree_format != "and-or":
+            raise ValueError("handoff_format v5 requires attack_tree_format and-or")
         if self.model_gherkin not in ("off", "handoff"):
             raise ValueError("model_gherkin must be off or handoff")
         if self.model_gherkin == "handoff" and self.handoff_format != "v5":

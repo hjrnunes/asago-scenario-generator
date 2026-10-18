@@ -1,7 +1,9 @@
-"""A scenario as authoring receives it: narrative, attack tree, and Gherkin.
+"""A scenario as authoring receives it: narrative, attack path or tree, and Gherkin.
 
 The producer writes the narrative and the Gherkin in fixed formats, so the
-renderers parse them. A line they do not recognize renders as plain text.
+renderers parse them. A line they do not recognize renders as plain text. A
+v5 handoff carries an attack path and a v4 and-or tree reduces to one, so both
+render as the "Attack path" panel; a flat v4 tree keeps the "Attack tree" panel.
 """
 
 from __future__ import annotations
@@ -11,6 +13,13 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
+from asago_scenario_generator.report.attack_path_view import (
+    other_scenarios,
+    path_body,
+    path_preview,
+    scenario_path,
+    weak_point_count,
+)
 from asago_scenario_generator.report.common import code_id, plural
 from asago_scenario_generator.report.run_data import RunData
 from asago_scenario_generator.report_kit import (
@@ -180,23 +189,30 @@ def narrative_preview(entries: list[Entry]) -> str:
     return f"{plural(sourced, 'sourced claim')} · factor: {_clip(factor or '')}"
 
 
+def _paragraphs(text: str) -> Markup:
+    blocks = [" ".join(block.split()) for block in re.split(r"\n\s*\n", text)]
+    return join(Markup(f"<p>{esc(block)}</p>") for block in blocks if block)
+
+
 def narrative_panel(text: str) -> Panel:
-    """Build the narrative panel from the producer's narrative text."""
-    framing, entries = parse_narrative(text)
+    """Build the narrative panel from the producer's narrative text.
+
+    The structured write-up opens with its ``Test hypothesis`` line, which the
+    panel leaves out; any other narrative, such as a v5 handoff's paragraph,
+    renders as that text with a clipped preview.
+    """
+    if not text.lstrip().startswith("Test hypothesis"):
+        preview = _clip(" ".join(text.split()))
+        return Panel("narrative", "Narrative", preview, _paragraphs(text))
+    _, entries = parse_narrative(text)
     notes = [e.line for e in entries if e.label.startswith(NOTES)]
     rows = [_row(e) for e in entries if not e.label.startswith(NOTES)]
-    hypotheses = (
-        " Claims without an authority note are proposed hypotheses."
-        if any(e.items for e in entries)
-        else ""
-    )
-    intro = Markup(f'<p class="nm">{esc(framing)}{hypotheses}</p>')
     foot = join(Markup(f'<p class="nm">{esc(n)}</p>') for n in notes)
     return Panel(
         "narrative",
         "Narrative",
         narrative_preview(entries),
-        join([intro, fields(rows), foot]),
+        join([fields(rows), foot]),
     )
 
 
@@ -323,7 +339,7 @@ def _and_or_tree_panel(attack_tree: dict) -> Panel:
     uncertainty = attack_tree.get("source_uncertainty")
     lines = [
         f"Loss scenario: {attack_tree.get('loss_scenario')}",
-        f"{attack_tree.get('framing')} Format {attack_tree.get('format')}: the root is "
+        f"Format {attack_tree.get('format')}: the root is "
         "the hazard, an OR joins the scenarios that reach it, and each scenario is "
         f"an AND of its conditions and steps ({attack_tree.get('relation_basis')}).",
         *([str(uncertainty)] if uncertainty else []),
@@ -360,7 +376,7 @@ def tree_panel(attack_tree: dict) -> Panel:
     uncertainty = attack_tree.get("source_uncertainty")
     lines = [
         f"Loss scenario: {attack_tree.get('loss_scenario')}",
-        f"{attack_tree.get('framing')} {note}",
+        note,
         *([str(uncertainty)] if uncertainty else []),
     ]
     intro = join(Markup(f'<p class="nm">{esc(line)}</p>') for line in lines)
@@ -410,19 +426,37 @@ def gherkin_panel(scenario_id: str, gherkin: Any, feature: str | None) -> Panel:
     return Panel("gherkin", "Gherkin", preview, body, differs)
 
 
+def path_panel(scenario: Any) -> Panel | None:
+    """Build the "Attack path" panel of a v5 handoff or a v4 and-or tree; None for a flat tree."""
+    path = scenario_path(scenario)
+    if path is None:
+        return None
+    return Panel(
+        "path",
+        "Attack path",
+        path_preview(path),
+        path_body(path, other_scenarios(scenario)),
+    )
+
+
 def scenario_panels(run: RunData, scenario_id: str) -> list[Panel]:
-    """Build the narrative, tree, and Gherkin panels of one scenario."""
+    """Build the narrative, attack path or tree, and Gherkin panels of one scenario."""
     scenario = run.scenarios[scenario_id]
     return [
         narrative_panel(scenario.narrative),
-        tree_panel(scenario.attack_tree),
+        path_panel(scenario) or tree_panel(scenario.attack_tree),
         gherkin_panel(scenario_id, scenario.gherkin, run.features.get(scenario_id)),
     ]
 
 
 @dataclass(frozen=True)
 class PanelStats:
-    """Counts across the run that show a change in the trees or feature files at a glance."""
+    """Counts across the run that show a change in the trees or feature files at a glance.
+
+    ``trees`` counts scenarios. ``paths`` counts those that carry an attack
+    path (a v5 handoff), and ``single_leaf`` counts the scenarios with exactly
+    one leaf of the tree, or one weak point of the path.
+    """
 
     trees: int
     flat: int
@@ -430,21 +464,26 @@ class PanelStats:
     features: int
     matching: int
     and_or: int = 0
+    paths: int = 0
 
 
 def panel_stats(run: RunData) -> PanelStats:
-    """Count flat, AND/OR, and one-leaf trees, and feature files that match their YAML."""
-    trees = [s.attack_tree for s in run.scenarios.values()]
+    """Count flat, AND/OR, path, and one-leaf scenarios, and feature files that match their YAML."""
+    scenarios = list(run.scenarios.values())
+    trees = [s.attack_tree for s in scenarios if hasattr(s, "attack_tree")]
+    paths = [s.attack_path for s in scenarios if hasattr(s, "attack_path")]
     matching = sum(
         feature_matches(run.scenarios[s].gherkin, text)
         for s, text in run.features.items()
         if s in run.scenarios
     )
     return PanelStats(
-        len(trees),
+        len(scenarios),
         sum(t.get("relation") == "flat" for t in trees),
-        sum(len(t.get("leaves") or []) == 1 for t in trees),
+        sum(len(t.get("leaves") or []) == 1 for t in trees)
+        + sum(weak_point_count(p.model_dump(mode="json")) == 1 for p in paths),
         len(run.features),
         matching,
         sum(isinstance(t.get("root"), dict) for t in trees),
+        len(paths),
     )

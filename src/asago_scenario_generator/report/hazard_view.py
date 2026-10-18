@@ -5,7 +5,8 @@ Membership is each scenario's ``lineage.hazard_ids``, so a scenario that names
 two hazards appears under both; the ``AT-ALT`` references inside a tree come
 from an index built before publication and do not decide membership. Each
 hazard is an OR of its scenarios, and each scenario is the ``AT-SCN`` subtree
-of its and-or attack tree: an ordered AND of its conditions and steps.
+of its and-or attack tree, or of its v5 attack path read in that shape: an
+ordered AND of its conditions and steps.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ import re
 from dataclasses import dataclass
 from typing import Any
 
+from asago_scenario_generator.report.attack_path_view import path_subtree
 from asago_scenario_generator.report.common import (
     code_id,
     code_ids,
@@ -116,14 +118,28 @@ def _tree_description(
 ) -> str | None:
     """Describe a hazard the loss analysis lacks from its scenarios' tree roots."""
     for scenario_id in scenario_ids:
-        root = run.scenarios[scenario_id].attack_tree.get("root") or {}
+        scenario = run.scenarios[scenario_id]
+        path = getattr(scenario, "attack_path", None)
+        root = (
+            path.hazard.model_dump(mode="json")
+            if path is not None
+            else scenario.attack_tree.get("root") or {}
+        )
         for item in root.get("hazards") or []:
             if isinstance(item, dict) and item.get("source_id") == hazard_id:
                 return item.get("label")
     return None
 
 
-def scenario_subtree(attack_tree: dict) -> dict:
+def scenario_subtree(scenario: Any) -> dict:
+    """Return a scenario's own AND: its ``AT-SCN`` node, or its v5 path in that shape."""
+    path = getattr(scenario, "attack_path", None)
+    if path is not None:
+        return path_subtree(path.model_dump(mode="json"))
+    return _tree_subtree(scenario.attack_tree)
+
+
+def _tree_subtree(attack_tree: dict) -> dict:
     """Return the ``AT-SCN`` node of an and-or attack tree: this scenario's AND."""
     stack = [attack_tree.get("root")]
     while stack:
@@ -182,7 +198,7 @@ def _dedup_badge(item: Disposition) -> Markup:
 
 def _branch(run: RunData, scenario_id: str) -> TreeNode:
     scenario = run.scenarios[scenario_id]
-    node = and_or_node(scenario_subtree(scenario.attack_tree))
+    node = and_or_node(scenario_subtree(scenario))
     source, kind, action = uca_parts(run, scenario_id)
     header = Markup(
         f'<a href="#{esc(scenario_id)}">{esc(scenario_id)}</a> '

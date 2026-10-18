@@ -176,6 +176,15 @@ def _tree_shapes(stats: PanelStats) -> str:
 
 def _intro(run: RunData) -> Markup:
     stats = panel_stats(run)
+    if stats.paths:
+        return Markup(
+            "<p>Each scenario holds the three artifacts the producer wrote, as authoring reads "
+            f"them. {stats.paths} of {stats.trees} scenarios carry an attack path, the "
+            "scenario's own route to its hazard: its conditions, attack steps in order, "
+            f"unsafe action, observable failure, and hazard; {stats.single_leaf} have "
+            f"exactly one weak point. {stats.matching} of {stats.features} "
+            "feature files match the gherkin block of their handoff YAML.</p>"
+        )
     return Markup(
         "<p>Each scenario holds the three artifacts the producer wrote, as authoring reads "
         f"them. {_tree_shapes(stats)}; "
