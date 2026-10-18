@@ -78,6 +78,10 @@ _FILLER_WORDS = frozenset(
     }
 )
 
+# Where a process-model description's value list or evidence list starts, as
+# in "Nature of the inquiry (values: ...; general inquiry) (evidence: ...)".
+_DESCRIPTION_LISTS = re.compile(r"\s*\((?:values|evidence):")
+
 
 @dataclass(frozen=True)
 class VariableChoice:
@@ -160,10 +164,26 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9']+", text.casefold()))
 
 
-def _only_names_a_variable(belief: str, descriptions: Sequence[str]) -> bool:
-    """Return whether ``belief`` adds no word beyond one description."""
+def _only_names_a_variable(
+    belief: str, descriptions: Sequence[tuple[str, Sequence[str]]]
+) -> bool:
+    """Return whether ``belief`` adds nothing to one description but its name.
+
+    Each description comes with its variable's listed values, which the
+    description text also spells out after the name. A belief that repeats
+    the name and picks one value states a wrong value ("The patient's inquiry
+    is a general educational inquiry."); a belief whose words beyond the name
+    fit no single value only names the variable.
+    """
     content = _words(belief) - _FILLER_WORDS
-    return any(content <= _words(description) for description in descriptions)
+    for description, values in descriptions:
+        if not content <= _words(description):
+            continue
+        name = _DESCRIPTION_LISTS.split(description, maxsplit=1)[0]
+        picked = content - _words(name)
+        if not (picked and any(picked <= _words(value) for value in values)):
+            return True
+    return False
 
 
 def flawed_belief_findings(
@@ -173,7 +193,8 @@ def flawed_belief_findings(
 ) -> list[str]:
     """Return one line per broken stated-belief rule, in factor order."""
     findings: list[str] = []
-    variable_descriptions = [item.description for item in frame.variables]
+    variables = [(item.description, item.values) for item in frame.variables]
+    values_of = dict(variables)
     choosable = ", ".join((*frame.variable_handles, VARIABLE_NONE))
     for index, factor in enumerate(factors):
         where = f"causal_factors[{index}] ({factor.source_handle})"
@@ -194,9 +215,15 @@ def flawed_belief_findings(
                     f"{found.group(0)}; state the belief in domain words."
                 )
             choice = choices.get(factor.source_handle)
+            # A process-model source shares its variable's description and so
+            # its values; other sources list none.
             descriptions = [
-                *variable_descriptions,
-                *([choice.description] if choice is not None else []),
+                *variables,
+                *(
+                    [(choice.description, values_of.get(choice.description, ()))]
+                    if choice is not None
+                    else []
+                ),
             ]
             if _only_names_a_variable(belief, descriptions):
                 findings.append(

@@ -12,6 +12,7 @@ is offline and uses synthetic replies.
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -254,17 +255,20 @@ def test_the_stated_schema_requires_the_belief_fields_on_every_branch() -> None:
 # --- validation ---------------------------------------------------------------
 
 
-def _findings(*factors: dict) -> list[str]:
-    frame, context, _ = _frame()
+def _draft_factors(*factors: dict) -> Any:
     model = _scenario_semantics_payload_type(4, belief_variable_count=1)
     payload = _stated_payload()
     payload["causal_factors"] = list(factors)
     payload["attacker_bdi"]["intentions"][0]["source_handles"] = [
         item["source_handle"] for item in factors
     ]
-    draft = model.model_validate(payload)
+    return model.model_validate(payload).causal_factors
+
+
+def _findings(*factors: dict) -> list[str]:
+    frame, context, _ = _frame()
     choices = {choice.handle: choice for choice in _causal_source_choices(context)}
-    return flawed_belief_findings(draft.causal_factors, frame, choices)
+    return flawed_belief_findings(_draft_factors(*factors), frame, choices)
 
 
 def _pm(belief: str, variable: str | None = None, missing: str | None = None):
@@ -356,6 +360,52 @@ def test_each_rule_names_the_factor_and_the_fix(factor: dict, expected: str) -> 
 )
 def test_a_value_that_agrees_with_code_breaks_no_rule(factor: dict) -> None:
     assert _findings(factor) == []
+
+
+INQUIRY = VariableChoice(
+    "variable_1",
+    "PM-1-1",
+    "Nature of the patient's inquiry (values: diagnostic/prescriptive request; "
+    "red-flag symptom identified; general educational inquiry) "
+    "(evidence: argument:ask_clinical_question.question)",
+    (
+        "diagnostic/prescriptive request",
+        "red-flag symptom identified",
+        "general educational inquiry",
+    ),
+)
+NAMES_ONLY = (
+    "causal_factors[0] (cause_1): flawed_belief only names a variable or source "
+    "description; state the wrong value the controller takes to be true in this "
+    "scenario."
+)
+
+
+@pytest.mark.parametrize(
+    ("belief", "expected"),
+    [
+        ("The patient's inquiry is a general educational inquiry.", []),
+        ("The inquiry is a red-flag symptom identified.", []),
+        ("Nature of the patient's inquiry", [NAMES_ONLY]),
+        (
+            "The patient's inquiry is a diagnostic/prescriptive request or a "
+            "general educational inquiry.",
+            [NAMES_ONLY],
+        ),
+    ],
+)
+def test_a_belief_may_pick_one_value_the_description_lists(
+    belief: str, expected: list[str]
+) -> None:
+    """The description spells out its values; picking one states a value."""
+    _, context, _ = _frame()
+    frame = FlawedBeliefFrame(variables=(INQUIRY,), fixed=(("cause_1", "variable_1"),))
+    choices = {choice.handle: choice for choice in _causal_source_choices(context)}
+    choices["cause_1"] = replace(choices["cause_1"], description=INQUIRY.description)
+
+    findings = flawed_belief_findings(_draft_factors(_pm(belief)), frame, choices)
+
+    assert findings == expected
 
 
 def test_one_error_names_every_broken_rule() -> None:
