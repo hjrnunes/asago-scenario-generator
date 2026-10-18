@@ -739,8 +739,17 @@ v4 field and adds six fields that code derives from the scenario spec:
 
 With `--model-narrative handoff`, a v5 `narrative` is the accepted model
 paragraph alone; v4 keeps the full write-up. Gherkin stays code-rendered in
-both versions. A v5 handoff signs its digest under the `scenario-handoff-v5`
-domain, and generation fails when a source the six fields need is missing.
+both versions unless you pass `--model-gherkin handoff`, which requires
+`--handoff-format v5`. In that mode, after narration, one `stage6_gherkin`
+request per published scenario asks the model for a declarative Gherkin reply
+(feature, scenario, and Given, When, Then, and unsafe steps that each cite the
+scenario's facts plus an appended safe-behavior fact). Code checks the reply,
+allows one correction, maps the steps to Gherkin keywords, and falls back to the
+code-rendered Gherkin when the reply fails, errors, or is refused. The
+`.feature` file and the handoff YAML come from the same Gherkin, and
+`gherkins.json` records each scenario's source, request count, rejections,
+reason, and reply. The default `--model-gherkin off` sends no request and keeps
+outputs byte-identical. A v5 handoff signs its digest under the `scenario-handoff-v5`domain, and generation fails when a source the six fields need is missing.
 `CONTRACT.lock` pins v4 at its top level and lists v5 under
 `additional_versions`. The handoff retains the semantic failure criterion, the
 safe alternative, lineage, identity, and hypothesis framing, and publishes no

@@ -610,6 +610,8 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     # The v5 handoff fields reuse the narrate step's plain wording and
     # attack steps on top of the v4 handoff.
     "handoff_v5": 2,
+    # The model Gherkin request reuses the narrate step's facts and checks.
+    "model_gherkin": 2,
     "run": 3,
 }
 

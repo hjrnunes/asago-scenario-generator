@@ -257,7 +257,7 @@ def build_facts(spec: ScenarioSpec) -> ScenarioFacts:
         scenario_id=spec.scenario_id,
         kind="adversarial" if adversarial else "everyday",
         facts=facts,
-        glossary=_glossary(spec, facts),
+        glossary=build_glossary(spec, facts),
         coverage=coverage,
         steps=steps,
     )
@@ -275,14 +275,14 @@ def _unique(entries: list[tuple[str, str]]) -> list[tuple[str, str]]:
 
 def belief_text(content: str, vulnerability: str, factor_texts: set[str]) -> str:
     """Name what the flawed belief is about; add its flaw unless a factor says it."""
-    text = f"The flawed belief concerns: {_lower_first(plain(content).rstrip('.'))}."
+    text = f"The flawed belief concerns: {lower_first(plain(content).rstrip('.'))}."
     flaw = plain(vulnerability)
     if flaw and flaw not in factor_texts and NOT_SELECTED not in flaw.lower():
         text += f" Flaw: {flaw}"
     return text
 
 
-def _lower_first(text: str) -> str:
+def lower_first(text: str) -> str:
     if len(text) > 1 and text[0].isupper() and not text[1].isupper():
         return text[0].lower() + text[1:]
     return text
@@ -341,7 +341,9 @@ def _sentence(text: str) -> str:
     return text[:1].upper() + text[1:] + ("" if text.endswith(".") else ".")
 
 
-def _glossary(spec: ScenarioSpec, facts: Sequence[Fact]) -> tuple[tuple[str, str], ...]:
+def build_glossary(
+    spec: ScenarioSpec, facts: Sequence[Fact]
+) -> tuple[tuple[str, str], ...]:
     """Explain each structural identifier the facts use, so the reply can avoid it."""
     meanings = _descriptions(spec)
     found: dict[str, str] = {}
@@ -400,18 +402,18 @@ def _descriptions(spec: ScenarioSpec) -> dict[str, str]:
     return found
 
 
-class _Wire(BaseModel):
+class WireModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CitedSentence(_Wire):
+class CitedSentence(WireModel):
     """One sentence of the lead paragraph and the facts it draws on."""
 
     text: str = Field(min_length=1)
     facts: list[str] = Field(min_length=1)
 
 
-class NarrationReply(_Wire):
+class NarrationReply(WireModel):
     """The model's title and lead paragraph for one scenario."""
 
     title: str = Field(min_length=1)
@@ -452,7 +454,7 @@ def narration_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[str]
         failures.append(
             f"the paragraph has {count} sentences; write 2 to {MAX_SENTENCES}"
         )
-    words = sum(_word_count(sentence.text) for sentence in reply.sentences)
+    words = sum(word_count(sentence.text) for sentence in reply.sentences)
     if words > MAX_WORDS:
         failures.append(f"the paragraph has {words} words; use at most {WORDS_ASKED}")
     cited: set[str] = set()
@@ -464,7 +466,7 @@ def narration_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[str]
                 f"{label} cites {', '.join(unknown)}, which the fact list does not have"
             )
         cited.update(item for item in sentence.facts if item in known)
-        failures.extend(_text_failures(label, sentence.text, source_text))
+        failures.extend(text_failures(label, sentence.text, source_text))
     for name, categories in facts.coverage:
         ids = facts.ids_in(categories)
         if not cited.intersection(ids):
@@ -479,20 +481,20 @@ def narration_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[str]
             'no sentence says why the agent acts, as in "because it incorrectly '
             'believes that ..."'
         )
-    title_words = _word_count(reply.title)
+    title_words = word_count(reply.title)
     if title_words > MAX_TITLE_WORDS:
         failures.append(
             f"the title has {title_words} words; use at most {MAX_TITLE_WORDS}"
         )
-    failures.extend(_text_failures("the title", reply.title, source_text))
+    failures.extend(text_failures("the title", reply.title, source_text))
     return failures
 
 
-def _word_count(text: str) -> int:
+def word_count(text: str) -> int:
     return len(text.split())
 
 
-def _text_failures(label: str, text: str, source_text: str) -> list[str]:
+def text_failures(label: str, text: str, source_text: str) -> list[str]:
     failures: list[str] = []
     structural = _STRUCTURAL_ID.findall(text)
     for identifier in dict.fromkeys(structural):
@@ -718,7 +720,7 @@ def narratives_payload(
                     {"text": text, "facts": list(cited)}
                     for text, cited in narration.sentences
                 ],
-                "words": sum(_word_count(text) for text, _ in narration.sentences),
+                "words": sum(word_count(text) for text, _ in narration.sentences),
                 "requests": narration.requests,
                 "rejected": [list(item) for item in narration.rejected],
                 "reason": narration.reason,

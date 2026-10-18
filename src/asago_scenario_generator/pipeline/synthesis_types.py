@@ -113,6 +113,9 @@ class SynthesisInputs:
     # Published handoff version: "v4" or "v5" (see
     # stpa.scenario_prod.handoff.HandoffFormat).
     handoff_format: str = "v4"
+    # Model-written Gherkin: "off" or "handoff" (see
+    # stpa.scenario_prod.model_gherkin.GherkinMode); "handoff" needs v5.
+    model_gherkin: str = "off"
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
@@ -125,6 +128,10 @@ class SynthesisInputs:
             raise ValueError("attack_tree_format must be flat or and-or")
         if self.handoff_format not in ("v4", "v5"):
             raise ValueError("handoff_format must be v4 or v5")
+        if self.model_gherkin not in ("off", "handoff"):
+            raise ValueError("model_gherkin must be off or handoff")
+        if self.model_gherkin == "handoff" and self.handoff_format != "v5":
+            raise ValueError("model_gherkin handoff requires handoff_format v5")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         _normalize_request_values(self)
         _verify_request_target_inputs(self)

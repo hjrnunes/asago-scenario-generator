@@ -27,7 +27,7 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
     Fact,
     NarrationMode,
     NarrationReply,
-    _glossary,
+    build_glossary,
     build_facts,
     narrate_scenario,
     narration_failures,
@@ -148,7 +148,9 @@ def test_facts_drop_annotations_and_the_glossary_names_responsibilities() -> Non
         plain("The agent calls operation:process_refund [structural sources: PM-1-1].")
         == "The agent calls process_refund."
     )
-    glossary = dict(_glossary(adversarial(), [Fact("F1", "situation", "RESP-1 acts")]))
+    glossary = dict(
+        build_glossary(adversarial(), [Fact("F1", "situation", "RESP-1 acts")])
+    )
     assert glossary["RESP-1"].startswith("a responsibility of the agent: ")
 
 

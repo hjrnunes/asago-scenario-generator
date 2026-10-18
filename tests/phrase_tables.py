@@ -65,6 +65,9 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
 from asago_scenario_generator.stpa.scenario_prod._constants import (
     PROMPTS_DIR as STAGE5_PROMPTS_DIR,
 )
+from asago_scenario_generator.stpa.scenario_prod.model_gherkin import (
+    render_gherkin_prompts,
+)
 from asago_scenario_generator.stpa.scenario_prod.narration import (
     Fact,
     ScenarioFacts,
@@ -119,6 +122,7 @@ PROMPT_DIRS = (
 
 _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
 _NARRATE_TEMPLATES = ("stage6_narrate_system.j2", "stage6_narrate_user.j2")
+_GHERKIN_TEMPLATES = ("stage6_gherkin_system.j2", "stage6_gherkin_user.j2")
 
 # Stage 1a user templates take the use case and the existing records; the
 # system templates ignore these arguments.
@@ -403,6 +407,25 @@ def _narrate() -> Callable[[str], str]:
     return render
 
 
+def _gherkin() -> Callable[[str], str]:
+    facts = ScenarioFacts(
+        scenario_id="SCN-001",
+        kind="adversarial",
+        facts=(
+            Fact("F1", "attack step", "The attacker asks for a refund."),
+            Fact("F2", "failure", "RESP-1 refunds the wrong customer."),
+            Fact("F3", "safe behavior", "The agent escalates the request."),
+        ),
+        glossary=(("RESP-1", "Handle customer service inquiries."),),
+        coverage=(),
+    )
+
+    def render(template: str) -> str:
+        return dict(zip(_GHERKIN_TEMPLATES, render_gherkin_prompts(facts)))[template]
+
+    return render
+
+
 # A case renders one template; the table that names it supplies the template.
 CASES: dict[str, Callable[[str], str]] = {
     "no-variables": _system_model(),
@@ -446,6 +469,7 @@ CASES: dict[str, Callable[[str], str]] = {
         }
     ),
     "narrate": _narrate(),
+    "gherkin": _gherkin(),
     "archive-item": _stage5(_archive_item_facts),
     "commit-operation": _stage5(_commit_operation_facts),
     "realistic-request": _stage5(_realistic_request_facts),

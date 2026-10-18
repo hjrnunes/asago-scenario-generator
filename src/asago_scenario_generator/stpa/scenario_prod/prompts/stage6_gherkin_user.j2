@@ -1,0 +1,16 @@
+Scenario kind: {{ kind }}
+
+Facts, in causal order:
+{% for fact in facts -%}
+- {{ fact.fact_id }} ({{ fact.category }}): {{ fact.text }}
+{% endfor %}
+{%- if glossary %}
+Glossary of the structural identifiers in the facts:
+{% for identifier, meaning in glossary -%}
+- {{ identifier }}: {{ meaning }}
+{% endfor %}
+{%- endif %}
+Required citations:
+{% for part, name, ids in citations -%}
+- "{{ part }}": at least one step cites {{ name }}: {{ ids }}
+{% endfor %}

@@ -145,6 +145,17 @@ def generate_cmd(
             "request."
         ),
     ),
+    model_gherkin: str = typer.Option(
+        "off",
+        "--model-gherkin",
+        help=(
+            "Model-written declarative Gherkin: off (no request; the Gherkin "
+            "stays code-rendered) or handoff (one request per published "
+            "scenario after the narrate step; each accepted Gherkin is "
+            "published in the handoff and its .feature file, and gherkins.json "
+            "records every outcome). handoff requires --handoff-format v5."
+        ),
+    ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_input_files(
@@ -171,6 +182,14 @@ def generate_cmd(
         "must be flat or and-or",
     )
     _require(handoff_format in ("v4", "v5"), "--handoff-format", "must be v4 or v5")
+    _require(
+        model_gherkin in ("off", "handoff"), "--model-gherkin", "must be off or handoff"
+    )
+    _require(
+        model_gherkin == "off" or handoff_format == "v5",
+        "--model-gherkin",
+        "handoff requires --handoff-format v5",
+    )
     fill_policy = _replay_fill_policy(
         replay_fill=replay_fill,
         live_stage=live_stage,
@@ -204,6 +223,7 @@ def generate_cmd(
             narration_mode=model_narrative,
             attack_tree_format=attack_tree_format,
             handoff_format=handoff_format,
+            model_gherkin=model_gherkin,
         )
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=partial(
@@ -301,6 +321,7 @@ def _synthesis_inputs(
     narration_mode: str = "off",
     attack_tree_format: str = "flat",
     handoff_format: str = "v4",
+    model_gherkin: str = "off",
 ) -> Any:
     """Load and check the input files, then build the synthesis request."""
     from asago_scenario_generator.data.loaders import (
@@ -356,6 +377,7 @@ def _synthesis_inputs(
         narration_mode=narration_mode,
         attack_tree_format=attack_tree_format,
         handoff_format=handoff_format,
+        model_gherkin=model_gherkin,
     )
 
 

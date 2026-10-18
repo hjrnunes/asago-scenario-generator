@@ -3,7 +3,8 @@
 Orchestrates the full SP3 pipeline:
   Stage 5: BDI generation (1 LLM call per scenario)
   Stage 6: Deterministic narrative, attack tree and Gherkin summary, then the
-    scenario handoff (0 LLM calls)
+    scenario handoff (0 LLM calls, or 1 per published scenario plus at most
+    one correction with --model-gherkin handoff)
   Stage 7: Validators + eval metrics + coverage gap analysis (0 LLM calls)
 
 All LLM calls are logged to ``calls.jsonl``. A run manifest is written
@@ -111,6 +112,12 @@ from .handoff import (
     write_scenario_handoff,
 )
 from .handoff_v5 import build_scenario_handoff_v5
+from .model_gherkin import (
+    GherkinMode,
+    gherkins_payload,
+    write_gherkins,
+    write_gherkins_file,
+)
 from .target_observations import (
     TARGET_OBSERVATIONS_FILENAME,
     TargetObservationSnapshot,
@@ -236,6 +243,7 @@ def run_sp3(
     narration_mode: NarrationMode = NarrationMode.OFF,
     attack_tree_format: AttackTreeFormat = AttackTreeFormat.FLAT,
     handoff_format: HandoffFormat = HandoffFormat.V4,
+    model_gherkin: GherkinMode = GherkinMode.OFF,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -304,10 +312,17 @@ def run_sp3(
             preconditions, procedure and worst case threat, and with
             ``narration_mode=handoff`` its narrative is the accepted
             paragraph alone. No request depends on it.
+        model_gherkin: Whether each published scenario's Gherkin is
+            model-written. ``off`` sends no request; ``handoff`` sends one
+            request per published scenario after the narrate step, publishes
+            each accepted Gherkin, and writes ``gherkins.json``. ``handoff``
+            requires ``handoff_format=v5``.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
     """
+    if model_gherkin is GherkinMode.HANDOFF and handoff_format is not HandoffFormat.V5:
+        raise ValueError("model_gherkin=handoff requires handoff_format=v5")
     run_dir.mkdir(parents=True, exist_ok=True)
     effective_observation_contract = (
         observation_contract or default_observation_contract()
@@ -364,6 +379,7 @@ def run_sp3(
             narration_mode=narration_mode,
             attack_tree_format=attack_tree_format,
             handoff_format=handoff_format,
+            model_gherkin=model_gherkin,
         )
         scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
             inputs, stage_errors, candidate_builders
@@ -498,6 +514,7 @@ class _SP3Inputs:
     narration_mode: NarrationMode = NarrationMode.OFF
     attack_tree_format: AttackTreeFormat = AttackTreeFormat.FLAT
     handoff_format: HandoffFormat = HandoffFormat.V4
+    model_gherkin: GherkinMode = GherkinMode.OFF
 
 
 def _narrate(
@@ -623,6 +640,14 @@ def _run_stages_5_and_6(
         if inputs.attack_tree_format is AttackTreeFormat.AND_OR
         else None
     )
+    gherkins = _model_gherkins(
+        inputs,
+        deduplicated_specs,
+        narratives=narratives,
+        tree_siblings=tree_siblings,
+        deduplication_by_scenario=deduplication_by_scenario,
+        observed_operations=observed_operations,
+    )
     _persist_functional_test_candidates(
         functional_test_specs,
         inputs.scenarios_dir,
@@ -637,6 +662,7 @@ def _run_stages_5_and_6(
         narratives=narratives,
         tree_siblings=tree_siblings,
         handoff_format=inputs.handoff_format,
+        gherkins=gherkins,
     )
     scenario_envelopes = _collect_stage6_artifacts(
         shaped_specs,
@@ -652,8 +678,72 @@ def _run_stages_5_and_6(
         narratives=narratives,
         tree_siblings=tree_siblings,
         handoff_format=inputs.handoff_format,
+        gherkins=gherkins,
     )
     return shaped_specs, scenario_envelopes, functional_test_specs
+
+
+def _model_gherkins(
+    inputs: _SP3Inputs,
+    specs: list[ScenarioSpec],
+    *,
+    narratives: Mapping[str, str],
+    tree_siblings: SiblingIndex | None,
+    deduplication_by_scenario: Mapping[str, ScenarioDeduplication],
+    observed_operations: tuple[str, ...] | None,
+) -> dict[str, GherkinSpec]:
+    """Request the model Gherkin of each publishable scenario; return the accepted.
+
+    A scenario is publishable when its code-rendered handoff builds; its
+    request carries that handoff's ``safe_alternative``. An accepted Gherkin
+    whose handoff does not build falls back too. Every mode but ``off``
+    writes ``gherkins.json``.
+    """
+    if inputs.model_gherkin is GherkinMode.OFF:
+        return {}
+
+    def handoff_for(spec: ScenarioSpec, gherkin: GherkinSpec | None) -> Any:
+        envelope = _run_stage6_for_spec(
+            spec, narratives.get(spec.scenario_id), tree_siblings, gherkin
+        )
+        return _checked_scenario_handoff(
+            envelope,
+            loss_analysis=inputs.loss_analysis,
+            environment_bound=inputs.execution_target_profile is not None,
+            enriched_operations=inputs.enriched_operations,
+            observed_operations=observed_operations,
+            stage_1a_source=inputs.stage_1a_source,
+            deduplication=deduplication_by_scenario.get(spec.scenario_id),
+            handoff_format=inputs.handoff_format,
+        )
+
+    publishable: list[tuple[ScenarioSpec, str]] = []
+    for spec in specs:
+        try:
+            handoff = handoff_for(spec, None)
+        except Exception:  # noqa: BLE001 - publication reports this failure
+            continue
+        publishable.append((spec, handoff.safe_alternative))
+    outcomes = write_gherkins(
+        publishable,
+        llm_client=inputs.llm_client,
+        run_dir=inputs.run_dir,
+        loader=inputs.loader,
+        temperature=inputs.temperature,
+    )
+    accepted: dict[str, GherkinSpec] = {}
+    for spec, _ in publishable:
+        outcome = outcomes[spec.scenario_id]
+        if outcome.gherkin is None:
+            continue
+        try:
+            handoff_for(spec, outcome.gherkin)
+        except Exception as exc:  # noqa: BLE001 - keep the code-rendered Gherkin
+            outcome.fall_back(f"the handoff with the model Gherkin failed: {exc}")
+            continue
+        accepted[spec.scenario_id] = outcome.gherkin
+    write_gherkins_file(inputs.run_dir, gherkins_payload(list(outcomes.values())))
+    return accepted
 
 
 def _candidate_outcome_builders(threats: list[Any]) -> list[_CandidateOutcomeBuilder]:
@@ -897,6 +987,32 @@ def _write_scenario_handoff_artifacts(
     delivery route, oracle selection, detector expression or judge prompt is
     written. ``handoff_format`` selects the published version.
     """
+    handoff = _checked_scenario_handoff(
+        envelope,
+        loss_analysis=loss_analysis,
+        environment_bound=environment_bound,
+        enriched_operations=enriched_operations,
+        observed_operations=observed_operations,
+        stage_1a_source=stage_1a_source,
+        deduplication=deduplication,
+        handoff_format=handoff_format,
+    )
+    write_scenario_handoff(handoff, scenarios_dir)
+    return handoff
+
+
+def _checked_scenario_handoff(
+    envelope: ScenarioEnvelope,
+    *,
+    loss_analysis: LossAnalysis | None,
+    environment_bound: bool,
+    enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
+    deduplication: ScenarioDeduplication | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
+) -> ScenarioHandoffV4:
+    """Build one scenario's handoff and reject artifact-design content."""
     build = (
         build_scenario_handoff_v5
         if handoff_format is HandoffFormat.V5
@@ -916,7 +1032,6 @@ def _write_scenario_handoff_artifacts(
         raise ValueError(
             "scenario handoff carries artifact-design content: " + "; ".join(violations)
         )
-    write_scenario_handoff(handoff, scenarios_dir)
     return handoff
 
 
@@ -980,6 +1095,7 @@ def _persist_functional_test_candidates(
     narratives: Mapping[str, str] | None = None,
     tree_siblings: SiblingIndex | None = None,
     handoff_format: HandoffFormat = HandoffFormat.V4,
+    gherkins: Mapping[str, GherkinSpec] | None = None,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
@@ -988,7 +1104,8 @@ def _persist_functional_test_candidates(
     execution projection, and never enters the bundle index.  A functional
     scenario is *not* rejected for lacking an attacker.  A scenario in
     ``narratives`` publishes that narrative instead of the rendered one.
-    With ``tree_siblings`` the tree is ``and-or-tree-v1``.
+    With ``tree_siblings`` the tree is ``and-or-tree-v1``. A scenario in
+    ``gherkins`` publishes that Gherkin instead of the rendered one.
     """
     for spec in specs:
         prior_error_count = len(stage_errors)
@@ -998,6 +1115,8 @@ def _persist_functional_test_candidates(
                 tree = render_and_or_tree(spec, tree, tree_siblings)
             if narratives and spec.scenario_id in narratives:
                 narrative = narratives[spec.scenario_id]
+            if gherkins and spec.scenario_id in gherkins:
+                gherkin = gherkins[spec.scenario_id]
             envelope = assemble_envelope(
                 scenario_id=spec.scenario_id,
                 scenario_spec=spec,
@@ -1054,11 +1173,12 @@ def _render_stage6_candidate(
     narrative: str | None = None,
     tree_siblings: SiblingIndex | None = None,
     handoff_format: HandoffFormat = HandoffFormat.V4,
+    gherkin: GherkinSpec | None = None,
 ) -> ScenarioEnvelope | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
     try:
-        envelope = _run_stage6_for_spec(spec, narrative, tree_siblings)
+        envelope = _run_stage6_for_spec(spec, narrative, tree_siblings, gherkin)
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
         stage_errors.append(diagnostic)
@@ -1120,6 +1240,7 @@ def _collect_stage6_artifacts(
     narratives: Mapping[str, str] | None = None,
     tree_siblings: SiblingIndex | None = None,
     handoff_format: HandoffFormat = HandoffFormat.V4,
+    gherkins: Mapping[str, GherkinSpec] | None = None,
 ) -> list[ScenarioEnvelope]:
     """Concretize specs and write each accepted scenario companion set."""
     envelopes: list[ScenarioEnvelope] = []
@@ -1138,6 +1259,7 @@ def _collect_stage6_artifacts(
             narrative=(narratives or {}).get(spec.scenario_id),
             tree_siblings=tree_siblings,
             handoff_format=handoff_format,
+            gherkin=(gherkins or {}).get(spec.scenario_id),
         )
         if envelope is not None:
             envelopes.append(envelope)
@@ -1453,6 +1575,7 @@ def _run_stage6_for_spec(
     spec: ScenarioSpec,
     narrative_override: str | None = None,
     tree_siblings: SiblingIndex | None = None,
+    gherkin_override: GherkinSpec | None = None,
 ) -> ScenarioEnvelope:
     """Render one scenario's deterministic summary into its envelope.
 
@@ -1460,11 +1583,14 @@ def _run_stage6_for_spec(
     one, so a scenario whose failure criterion has no downstream-compilable
     detector is still rendered and published, with the limitation reported
     downstream. ``narrative_override`` replaces the rendered narrative only.
-    With ``tree_siblings`` the tree is ``and-or-tree-v1``.
+    With ``tree_siblings`` the tree is ``and-or-tree-v1``. ``gherkin_override``
+    replaces the rendered Gherkin.
     """
     narrative, tree, gherkin = render_scenario_presentation(spec)
     if narrative_override is not None:
         narrative = narrative_override
+    if gherkin_override is not None:
+        gherkin = gherkin_override
     if tree_siblings is not None:
         tree = render_and_or_tree(spec, tree, tree_siblings)
     return assemble_envelope(
