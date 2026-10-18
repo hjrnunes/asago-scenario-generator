@@ -160,11 +160,15 @@ def generate_cmd(
         "off",
         "--flawed-belief",
         help=(
-            "Stated flawed beliefs: off (no change) or stated (each Stage 5 "
+            "Stated flawed beliefs: off (no change), stated (each Stage 5 "
             "causal factor states the controller's flawed belief and the "
             "process-model variable that holds it, or the variable it lacks; "
             "the agent-belief facts, the and-or weak points and the v5 "
-            "causal_factors carry them). stated requires --handoff-format v5."
+            "causal_factors carry them), or separate (Stage 5 sends what off "
+            "sends, then one request per Stage 5 scenario states each causal "
+            "factor's belief and variable; writes beliefs.json, and a scenario "
+            "whose request fails keeps no stated belief). stated and separate "
+            "require --handoff-format v5."
         ),
     ),
     hazard_view: str = typer.Option(
@@ -213,12 +217,14 @@ def generate_cmd(
         "handoff requires --handoff-format v5",
     )
     _require(
-        flawed_belief in ("off", "stated"), "--flawed-belief", "must be off or stated"
+        flawed_belief in ("off", "stated", "separate"),
+        "--flawed-belief",
+        "must be off, stated or separate",
     )
     _require(
         flawed_belief == "off" or handoff_format == "v5",
         "--flawed-belief",
-        "stated requires --handoff-format v5",
+        f"{flawed_belief} requires --handoff-format v5",
     )
     _require(hazard_view in ("off", "report"), "--hazard-view", "must be off or report")
     _require(

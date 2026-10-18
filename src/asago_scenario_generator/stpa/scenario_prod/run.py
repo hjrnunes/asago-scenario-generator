@@ -1,7 +1,8 @@
 """SP3 run orchestration — Stage 5 → Stage 6 → Stage 7.
 
 Orchestrates the full SP3 pipeline:
-  Stage 5: BDI generation (1 LLM call per scenario)
+  Stage 5: BDI generation (1 LLM call per scenario), then with
+    --flawed-belief separate one stated-belief request per Stage 5 spec
   Stage 6: Deterministic narrative, attack tree and Gherkin summary, then the
     scenario handoff (0 LLM calls, or 1 per published scenario plus at most
     one correction with --model-gherkin handoff)
@@ -112,6 +113,7 @@ from .handoff import (
     write_scenario_handoff,
 )
 from .handoff_v5 import build_scenario_handoff_v5
+from .stage5.belief_step import apply_belief_step
 from .stage5.flawed_belief import FlawedBeliefMode
 from .model_gherkin import (
     GherkinMode,
@@ -319,9 +321,12 @@ def run_sp3(
             request per published scenario after the narrate step, publishes
             each accepted Gherkin, and writes ``gherkins.json``. ``handoff``
             requires ``handoff_format=v5``.
-        flawed_belief: Whether Stage 5 asks each causal factor for the
-            controller's stated flawed belief and the process-model variable
-            that holds it. ``off`` changes no request; ``stated`` requires
+        flawed_belief: Whether each causal factor states the controller's
+            flawed belief and the process-model variable that holds it.
+            ``off`` changes no request; ``stated`` asks inside the Stage 5
+            request; ``separate`` keeps Stage 5 as ``off`` sends it and sends
+            one belief request per Stage 5 spec after it, writing
+            ``beliefs.json``. ``stated`` and ``separate`` require
             ``handoff_format=v5``.
 
     Returns:
@@ -330,10 +335,12 @@ def run_sp3(
     if model_gherkin is GherkinMode.HANDOFF and handoff_format is not HandoffFormat.V5:
         raise ValueError("model_gherkin=handoff requires handoff_format=v5")
     if (
-        flawed_belief is FlawedBeliefMode.STATED
+        flawed_belief is not FlawedBeliefMode.OFF
         and handoff_format is not HandoffFormat.V5
     ):
-        raise ValueError("flawed_belief=stated requires handoff_format=v5")
+        raise ValueError(
+            f"flawed_belief={flawed_belief.value} requires handoff_format=v5"
+        )
     run_dir.mkdir(parents=True, exist_ok=True)
     effective_observation_contract = (
         observation_contract or default_observation_contract()
@@ -605,6 +612,15 @@ def _run_stages_5_and_6(
         condition_families=inputs.condition_families,
         stated_beliefs=inputs.flawed_belief is FlawedBeliefMode.STATED,
     )
+    if inputs.flawed_belief is FlawedBeliefMode.SEPARATE:
+        scenario_specs = apply_belief_step(
+            scenario_specs,
+            llm_client=inputs.llm_client,
+            run_dir=run_dir,
+            control_structure=inputs.control_structure,
+            loader=inputs.loader,
+            temperature=inputs.temperature,
+        )
     functional_test_specs = [spec for spec in scenario_specs if spec.is_functional_test]
     shaped_specs = apply_shape_step(
         [spec for spec in scenario_specs if not spec.is_functional_test],

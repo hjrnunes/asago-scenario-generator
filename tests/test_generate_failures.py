@@ -151,6 +151,30 @@ def test_an_analytical_only_scenario_whose_writing_failed_is_lost(
     assert "analytical only" in chain.effect
 
 
+def test_a_failed_belief_request_degrades_its_scenario_by_its_belief(
+    tmp_path: Path,
+) -> None:
+    output = copy_run(tmp_path)
+    edit_calls(
+        output,
+        lambda calls: calls.append(
+            {
+                **call("belief", 1, False, scenario_id="SCN-002"),
+                "stage": "stage5_belief",
+            }
+        ),
+    )
+
+    chain = next(f for f in chains(output) if f.step == "belief")
+
+    assert chain.outcome == "degraded"
+    assert chain.effect == (
+        "SCN-002 was published without a stated belief; its factors keep "
+        "the deterministic process-model text."
+    )
+    assert chain.short == "the stated belief of SCN-002"
+
+
 def test_the_error_code_and_message_are_split_from_the_error_text(
     tmp_path: Path,
 ) -> None:

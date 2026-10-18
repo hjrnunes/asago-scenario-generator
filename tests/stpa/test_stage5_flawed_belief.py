@@ -693,7 +693,7 @@ def test_stated_requires_v5() -> None:
 @pytest.mark.parametrize(
     ("changes", "message"),
     [
-        ({"flawed_belief": "on"}, "flawed_belief must be off or stated"),
+        ({"flawed_belief": "on"}, "flawed_belief must be off, stated or separate"),
         ({"flawed_belief": "stated"}, "flawed_belief stated requires handoff_format"),
     ],
 )
