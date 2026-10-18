@@ -69,6 +69,7 @@ cases:
       - Clinical
       - flawed_belief
       - process_model_variable
+      - Attacker beliefs are not flawed beliefs
   operation:
     forbidden: &no-status-criterion
       - required status is not held
@@ -182,5 +183,20 @@ cases:
         set `process_model_variable` to `none` and `missing_variable` to a
         short description, in domain words, of the variable the controller
         would need
+      - Attacker beliefs are not flawed beliefs.
+      - >-
+        `attacker_bdi.beliefs` states what the attacker believes about the
+        target: what the attacker can reach, what the assistant does or fails
+        to check, and what its tools return.
+      - >-
+        The attacker knows the truth that the controller gets wrong, so an
+        attacker belief never restates a factor's flawed belief as true.
+      - >-
+        the attacker believes "The assistant shows a loan record without
+        checking which member it belongs to.", not "The loan record belongs to
+        the member who asked for it."
+    ordered:
+      - - set `process_model_variable` to `none`
+        - Attacker beliefs are not flawed beliefs.
     once:
       - "`flawed_belief`"

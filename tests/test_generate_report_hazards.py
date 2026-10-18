@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import json
 import re
 import shutil
@@ -317,6 +318,71 @@ def test_the_gap_list_is_written_and_rendered(tmp_path: Path) -> None:
     assert '<a href="#SCN-027">SCN-027</a>' in section
     assert section == str(gaps_section(gaps))
     assert str(html).index('id="gaps"') < str(html).index('<section id="scenarios"')
+
+
+def test_a_link_gap_names_both_endpoints_and_the_variable_owner(
+    tmp_path: Path,
+) -> None:
+    output = copy_and_or(tmp_path)
+    run = load_run(output)
+
+    gaps = process_model_gaps(run, linked(handoff_documents(output)))
+
+    link, responsibility = gaps["controllers"]
+    descriptions = {
+        item.resp_id: item.description for item in run.structure.responsibilities
+    }
+    (cl_1,) = run.structure.coordination_links
+    assert list(link) == [
+        "controller",
+        "kind",
+        "description",
+        "endpoints",
+        "shared_variable",
+        "gaps",
+    ]
+    assert link["kind"] == "coordination_link"
+    assert link["description"] == cl_1.description
+    assert link["endpoints"] == [
+        {"id": "RESP-1", "description": descriptions["RESP-1"]},
+        {"id": "RESP-2", "description": descriptions["RESP-2"]},
+    ]
+    assert link["shared_variable"] == {"id": "PM-2-2", "owner": "RESP-2"}
+    assert [gap["scenario_id"] for gap in link["gaps"]] == ["SCN-001"]
+    assert responsibility["kind"] == "responsibility"
+    assert "endpoints" not in responsibility
+    assert "shared_variable" not in responsibility
+
+
+def test_a_controller_missing_from_the_structure_is_unknown(tmp_path: Path) -> None:
+    output = copy_and_or(tmp_path)
+    documents = linked(handoff_documents(output))
+    documents["SCN-027"]["uca"]["source"] = "RESP-9"
+
+    gaps = process_model_gaps(load_run(output), documents)
+
+    unknown = next(c for c in gaps["controllers"] if c["controller"] == "RESP-9")
+    assert unknown["kind"] == "unknown" and unknown["description"] is None
+    assert "not in control-structure.yaml" in str(gaps_section(gaps))
+
+
+def test_a_link_row_names_the_endpoints_and_owner_before_the_link(
+    tmp_path: Path,
+) -> None:
+    output = copy_and_or(tmp_path)
+    run = load_run(output)
+    gaps = process_model_gaps(run, linked(handoff_documents(output)))
+
+    section = str(gaps_section(gaps))
+
+    start = section.index("Link from <code>RESP-1</code>")
+    cell = section[start : section.index("</td>", start)]
+    assert cell.index("to <code>RESP-2</code>") < cell.index(
+        "shared variable <code>PM-2-2</code> owned by <code>RESP-2</code>."
+    )
+    link_description = run.structure.coordination_links[0].description
+    assert cell.endswith(f". {html.escape(link_description, quote=True)}")
+    assert body_rows(section, "gaps-table") == 2
 
 
 # --- flag ----------------------------------------------------------------------

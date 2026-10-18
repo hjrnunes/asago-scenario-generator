@@ -61,7 +61,8 @@ from .conditions import (
     _resolve_temporal_condition,
 )
 from .condition_claims import ConditionClaim, condition_claim_findings
-from .flawed_belief import FlawedBeliefFrame, validate_flawed_beliefs
+from .attacker_belief_copy import validate_stated_belief_reply
+from .flawed_belief import FlawedBeliefFrame
 from .issues import ExactIssueError, IssueCode, ValidationIssueError
 from .records import (
     Stage5Normalization,
@@ -183,7 +184,9 @@ def _validate_normal_provider_payload(
         value.causal_factors, choices, context
     )
     if flawed_beliefs is not None:
-        validate_flawed_beliefs(value.causal_factors, flawed_beliefs, choices)
+        validate_stated_belief_reply(
+            value.attacker_bdi.beliefs, value.causal_factors, flawed_beliefs, choices
+        )
     condition_outcome = None
     condition_omitted_reason = None
     if observation_contract is not None:

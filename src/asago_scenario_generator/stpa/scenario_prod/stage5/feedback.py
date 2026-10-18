@@ -202,4 +202,12 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "missing_variable describing the variable the controller would "
             "need."
         ),
+        IssueCode.attacker_belief_restates_flawed_belief: (
+            "rewrite every listed attacker belief: the attacker knows the truth "
+            "that the controller gets wrong, so state what the attacker "
+            "believes about the target, such as what it can reach, what the "
+            "assistant does or fails to check, or what its tools return; never "
+            "restate a factor's flawed_belief as true. Keep each flawed_belief "
+            "unchanged."
+        ),
     }
