@@ -305,7 +305,12 @@ def test_a_valid_reply_breaks_no_rule() -> None:
             "true in this scenario.",
         ),
         (
-            _pm(BELIEF, "variable_1"),
+            _pm(BELIEF, "none"),
+            "causal_factors[0] (cause_1): code fills this factor's variable; set "
+            "process_model_variable and missing_variable to null.",
+        ),
+        (
+            _pm(BELIEF, "variable_1", GAP),
             "causal_factors[0] (cause_1): code fills this factor's variable; set "
             "process_model_variable and missing_variable to null.",
         ),
@@ -339,6 +344,18 @@ def test_a_valid_reply_breaks_no_rule() -> None:
 )
 def test_each_rule_names_the_factor_and_the_fix(factor: dict, expected: str) -> None:
     assert _findings(factor) == [expected]
+
+
+@pytest.mark.parametrize(
+    "factor",
+    [
+        _pm(BELIEF, "variable_1"),
+        _pm(BELIEF, None, " "),
+        _ca(CA_BELIEF, "variable_1", " "),
+    ],
+)
+def test_a_value_that_agrees_with_code_breaks_no_rule(factor: dict) -> None:
+    assert _findings(factor) == []
 
 
 def test_one_error_names_every_broken_rule() -> None:
@@ -402,7 +419,7 @@ def test_a_valid_reply_compiles_the_belief_and_variable_onto_each_factor(
 
 def test_a_broken_reply_gets_one_correction_with_every_rule(tmp_path: Path) -> None:
     broken = _stated_payload()
-    broken["causal_factors"][0]["process_model_variable"] = "variable_1"
+    broken["causal_factors"][0]["process_model_variable"] = "none"
     broken["causal_factors"][1]["flawed_belief"] = "Uses FB-1-1 data."
 
     client, (spec, error) = _generate(tmp_path, broken, _stated_payload())

@@ -204,8 +204,11 @@ def flawed_belief_findings(
                     "description; state the wrong value the controller takes "
                     "to be true in this scenario."
                 )
-        if frame.fixed_variable(factor.source_handle) is not None:
-            if variable is not None or missing is not None:
+        fixed = frame.fixed_variable(factor.source_handle)
+        if fixed is not None:
+            # Repeating the handle code assigns, or a blank missing_variable,
+            # agrees with code; only a conflicting value breaks the rule.
+            if variable not in (None, fixed.handle) or missing_text:
                 findings.append(
                     f"{where}: code fills this factor's variable; set "
                     "process_model_variable and missing_variable to null."
@@ -244,7 +247,7 @@ def flawed_belief_findings(
                         f"variable {listed.handle}; choose {listed.handle} "
                         "instead of none."
                     )
-        elif missing is not None:
+        elif missing_text:
             findings.append(
                 f"{where}: process_model_variable names a listed variable, so "
                 "set missing_variable to null."
