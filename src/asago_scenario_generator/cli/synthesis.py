@@ -156,6 +156,17 @@ def generate_cmd(
             "records every outcome). handoff requires --handoff-format v5."
         ),
     ),
+    hazard_view: str = typer.Option(
+        "off",
+        "--hazard-view",
+        help=(
+            "Hazard view of the generate report: off, or report (a hazard "
+            "section that shows every published scenario under each hazard it "
+            "names, and one Attack Flow file per hazard under "
+            "report/attack-flow/). report requires --attack-tree-format and-or. "
+            "Code renders the view; the option changes no model request."
+        ),
+    ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_input_files(
@@ -189,6 +200,12 @@ def generate_cmd(
         model_gherkin == "off" or handoff_format == "v5",
         "--model-gherkin",
         "handoff requires --handoff-format v5",
+    )
+    _require(hazard_view in ("off", "report"), "--hazard-view", "must be off or report")
+    _require(
+        hazard_view == "off" or attack_tree_format == "and-or",
+        "--hazard-view",
+        "report requires --attack-tree-format and-or",
     )
     fill_policy = _replay_fill_policy(
         replay_fill=replay_fill,
@@ -224,6 +241,7 @@ def generate_cmd(
             attack_tree_format=attack_tree_format,
             handoff_format=handoff_format,
             model_gherkin=model_gherkin,
+            hazard_view=hazard_view,
         )
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=partial(
@@ -322,6 +340,7 @@ def _synthesis_inputs(
     attack_tree_format: str = "flat",
     handoff_format: str = "v4",
     model_gherkin: str = "off",
+    hazard_view: str = "off",
 ) -> Any:
     """Load and check the input files, then build the synthesis request."""
     from asago_scenario_generator.data.loaders import (
@@ -378,6 +397,7 @@ def _synthesis_inputs(
         attack_tree_format=attack_tree_format,
         handoff_format=handoff_format,
         model_gherkin=model_gherkin,
+        hazard_view=hazard_view,
     )
 
 

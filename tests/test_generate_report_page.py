@@ -253,8 +253,8 @@ def test_a_summary_that_disagrees_with_the_page_is_not_written(
     output = copy_run(tmp_path)
     real = generate_report.build_report
 
-    def wrong(run):
-        html, summary = real(run)
+    def wrong(run, *args):
+        html, summary = real(run, *args)
         summary["headline"][0]["value"] += 1
         return html, summary
 

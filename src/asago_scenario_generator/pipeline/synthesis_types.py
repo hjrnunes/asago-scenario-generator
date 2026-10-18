@@ -116,6 +116,9 @@ class SynthesisInputs:
     # Model-written Gherkin: "off" or "handoff" (see
     # stpa.scenario_prod.model_gherkin.GherkinMode); "handoff" needs v5.
     model_gherkin: str = "off"
+    # The report's hazard view: "off" or "report" (a hazard section and one
+    # Attack Flow file per hazard); "report" needs the and-or attack tree.
+    hazard_view: str = "off"
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
@@ -132,6 +135,10 @@ class SynthesisInputs:
             raise ValueError("model_gherkin must be off or handoff")
         if self.model_gherkin == "handoff" and self.handoff_format != "v5":
             raise ValueError("model_gherkin handoff requires handoff_format v5")
+        if self.hazard_view not in ("off", "report"):
+            raise ValueError("hazard_view must be off or report")
+        if self.hazard_view == "report" and self.attack_tree_format != "and-or":
+            raise ValueError("hazard_view report requires attack_tree_format and-or")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         _normalize_request_values(self)
         _verify_request_target_inputs(self)
