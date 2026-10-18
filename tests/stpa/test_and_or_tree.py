@@ -431,6 +431,7 @@ def test_panel_stats_counts_an_and_or_tree_as_not_flat() -> None:
     )
 
     assert panel_stats(run).flat == 0
+    assert panel_stats(run).and_or == 1
 
 
 # --- handoff ------------------------------------------------------------------

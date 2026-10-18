@@ -12,6 +12,7 @@ from asago_scenario_generator.report.run_data import RunData
 from asago_scenario_generator.report.scenario_lineage import lineage_steps
 from asago_scenario_generator.report.scenario_panels import (
     Panel,
+    PanelStats,
     panel_stats,
     scenario_panels,
 )
@@ -159,12 +160,25 @@ def _detail(run: RunData, scenario_id: str) -> Markup:
     return disclosure(summary, body, scenario_id, level="scenario")
 
 
+def _tree_shapes(stats: PanelStats) -> str:
+    flat = f"{stats.flat} of {stats.trees} attack trees are flat"
+    if stats.flat == stats.trees:
+        return f"{flat}, with no AND or OR between nodes"
+    shapes = [
+        f"{stats.and_or} of {stats.trees} attack trees are AND/OR trees, an OR of "
+        "the scenarios that reach the hazard with each scenario an AND of its "
+        "conditions and steps"
+    ]
+    if stats.flat:
+        shapes.append(f"{stats.flat} are flat, with no AND or OR between nodes")
+    return "; ".join(shapes)
+
+
 def _intro(run: RunData) -> Markup:
     stats = panel_stats(run)
-    all_flat = f"{stats.flat} of {stats.trees}"
     return Markup(
         "<p>Each scenario holds the three artifacts the producer wrote, as authoring reads "
-        f"them. {all_flat} attack trees are flat, with no AND or OR between nodes; "
+        f"them. {_tree_shapes(stats)}; "
         f"{stats.single_leaf} have exactly one leaf. {stats.matching} of {stats.features} "
         "feature files match the gherkin block of their handoff YAML.</p>"
     )
