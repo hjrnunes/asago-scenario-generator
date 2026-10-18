@@ -12,7 +12,6 @@ is offline and uses synthetic replies.
 from __future__ import annotations
 
 import copy
-from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -266,9 +265,8 @@ def _draft_factors(*factors: dict) -> Any:
 
 
 def _findings(*factors: dict) -> list[str]:
-    frame, context, _ = _frame()
-    choices = {choice.handle: choice for choice in _causal_source_choices(context)}
-    return flawed_belief_findings(_draft_factors(*factors), frame, choices)
+    frame, _, _ = _frame()
+    return flawed_belief_findings(_draft_factors(*factors), frame)
 
 
 def _pm(belief: str, variable: str | None = None, missing: str | None = None):
@@ -297,16 +295,9 @@ def test_a_valid_reply_breaks_no_rule() -> None:
             "cause_2; state the belief in domain words.",
         ),
         (
-            _pm("The recent payment-action count."),
-            "causal_factors[0] (cause_1): flawed_belief only names a variable or "
-            "source description; state the wrong value the controller takes to be "
-            "true in this scenario.",
-        ),
-        (
-            _pm("The flawed belief concerns: recent payment-action count"),
-            "causal_factors[0] (cause_1): flawed_belief only names a variable or "
-            "source description; state the wrong value the controller takes to be "
-            "true in this scenario.",
+            _pm("The account holder approved response RESP-6."),
+            "causal_factors[0] (cause_1): flawed_belief contains the identifier "
+            "RESP-6; state the belief in domain words.",
         ),
         (
             _pm(BELIEF, "none"),
@@ -362,6 +353,12 @@ def test_a_value_that_agrees_with_code_breaks_no_rule(factor: dict) -> None:
     assert _findings(factor) == []
 
 
+RESERVATION = VariableChoice(
+    "variable_1",
+    "PM-1-1",
+    "Whether the authenticated actor has a reservation for this listing",
+    (),
+)
 INQUIRY = VariableChoice(
     "variable_1",
     "PM-1-1",
@@ -374,67 +371,61 @@ INQUIRY = VariableChoice(
         "general educational inquiry",
     ),
 )
-NAMES_ONLY = (
-    "causal_factors[0] (cause_1): flawed_belief only names a variable or source "
-    "description; state the wrong value the controller takes to be true in this "
-    "scenario."
-)
 
 
 @pytest.mark.parametrize(
-    ("belief", "expected"),
+    ("variable", "belief"),
     [
-        ("The patient's inquiry is a general educational inquiry.", []),
-        ("The inquiry is a red-flag symptom identified.", []),
-        ("The patient's question is a general educational inquiry.", []),
-        ("Nature of the patient's inquiry", [NAMES_ONLY]),
-        ("Nature of the patient's inquiry (evidence: the question)", [NAMES_ONLY]),
-        (INQUIRY.description, [NAMES_ONLY]),
+        # A whether-question variable lists no values; asserting the answer
+        # states the wrong value.
         (
-            "The patient's inquiry is a diagnostic/prescriptive request or a "
-            "general educational inquiry.",
-            [NAMES_ONLY],
+            RESERVATION,
+            "The authenticated actor has a reservation for this listing",
         ),
+        # "request" belongs to another listed value; the meaning is the
+        # model's to judge, not code's.
+        (INQUIRY, "The patient's inquiry is a general educational request."),
+        (RESERVATION, RESERVATION.description),
+        (INQUIRY, "Nature of the patient's inquiry"),
     ],
 )
-def test_a_belief_may_pick_one_value_the_description_lists(
-    belief: str, expected: list[str]
+def test_code_does_not_judge_whether_a_belief_states_a_value(
+    variable: VariableChoice, belief: str
 ) -> None:
-    """The description spells out its values; picking one states a value.
+    for fixed in ((("cause_1", "variable_1"),), ()):
+        frame = FlawedBeliefFrame(variables=(variable,), fixed=fixed)
+        factor = _pm(belief) if fixed else _pm(belief, "variable_1")
 
-    A word only the evidence list holds ("question", from the argument path)
-    neither adds to the name nor picks a value.
-    """
-    _, context, _ = _frame()
-    frame = FlawedBeliefFrame(variables=(INQUIRY,), fixed=(("cause_1", "variable_1"),))
-    choices = {choice.handle: choice for choice in _causal_source_choices(context)}
-    choices["cause_1"] = replace(choices["cause_1"], description=INQUIRY.description)
+        assert flawed_belief_findings(_draft_factors(factor), frame) == []
 
-    findings = flawed_belief_findings(_draft_factors(_pm(belief)), frame, choices)
 
-    assert findings == expected
+def test_an_identifier_in_a_belief_is_still_rejected() -> None:
+    frame = FlawedBeliefFrame(variables=(RESERVATION,), fixed=())
+    belief = "The authenticated actor has a reservation under RESP-6."
+
+    assert flawed_belief_findings(_draft_factors(_pm(belief, "variable_1")), frame) == [
+        "causal_factors[0] (cause_1): flawed_belief contains the identifier "
+        "RESP-6; state the belief in domain words."
+    ]
 
 
 def test_one_error_names_every_broken_rule() -> None:
-    frame, context, _ = _frame()
+    frame, _, _ = _frame()
     model = _scenario_semantics_payload_type(4, belief_variable_count=1)
     payload = _stated_payload()
-    payload["causal_factors"][0]["flawed_belief"] = "Recent payment-action count"
+    payload["causal_factors"][0]["flawed_belief"] = "The count for PM-1-1 is low."
     payload["causal_factors"][1]["process_model_variable"] = None
     draft = model.model_validate(payload)
 
     with pytest.raises(ExactIssueError) as caught:
-        validate_flawed_beliefs(
-            draft.causal_factors, frame, _causal_source_choices(context)
-        )
+        validate_flawed_beliefs(draft.causal_factors, frame)
 
     (issue,) = issues_of(caught.value)
     assert issue.code is IssueCode.flawed_belief_invalid
     assert issue.detail.splitlines() == [
         "stated flawed beliefs break these rules:",
-        "- causal_factors[0] (cause_1): flawed_belief only names a variable or "
-        "source description; state the wrong value the controller takes to be "
-        "true in this scenario.",
+        "- causal_factors[0] (cause_1): flawed_belief contains the identifier "
+        "PM-1-1; state the belief in domain words.",
         "- causal_factors[1] (cause_4): process_model_variable is null; choose "
         "one of variable_1, none.",
     ]
