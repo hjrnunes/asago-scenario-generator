@@ -151,8 +151,13 @@ def path_rows(path: dict[str, Any]) -> list[tuple[str, Any]]:
     if path.get("attacker"):
         rows.append(("Attacker", _attacker(path["attacker"])))
     rows.append(("1 Conditions", [_condition(n) for n in path["conditions"]]))
-    if path["steps"]:
-        rows.append(("2 Attack steps", [_step(n) for n in path["steps"]]))
+    # The numbering stays 1 to 5 for a scenario without steps (a functional one).
+    rows.append(
+        (
+            "2 Attack steps",
+            [_step(n) for n in path["steps"]] if path["steps"] else "None",
+        )
+    )
     rows.append(("3 Unsafe action", _unsafe_action(path["unsafe_action"])))
     rows.append(("4 Observable failure", _failure(path["observable_failure"])))
     rows.append(("5 Hazard", _hazard(path["hazard"])))

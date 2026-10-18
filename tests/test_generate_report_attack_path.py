@@ -112,17 +112,29 @@ def test_a_weak_point_shows_its_belief_and_evidence_status(tmp_path: Path) -> No
     assert "Evidence status:" in body and "structural failure" in body
 
 
-def test_a_functional_path_has_no_attacker_and_no_steps(tmp_path: Path) -> None:
+def test_a_functional_path_has_no_attacker_and_shows_none_for_its_steps(
+    tmp_path: Path,
+) -> None:
     p = panels(copy(tmp_path, "v5", "klarna-and-or"), "SCN-001")["path"]
 
-    labels = re.findall(r"<dt>(.*?)</dt>", str(p.body))
+    body = str(p.body)
+    labels = re.findall(r"<dt>(.*?)</dt>", body)
     assert labels == [
         "1 Conditions",
+        "2 Attack steps",
         "3 Unsafe action",
         "4 Observable failure",
         "5 Hazard",
     ]
+    assert "<dt>2 Attack steps</dt><dd>None</dd>" in body
     assert "0 attack steps" in p.preview
+
+
+def test_an_adversarial_path_keeps_its_steps_row_as_a_list(tmp_path: Path) -> None:
+    body = str(panels(copy(tmp_path, "v5", "klarna-and-or"), "SCN-027")["path"].body)
+
+    assert "<dt>2 Attack steps</dt><dd><ol><li>A third party plants" in body
+    assert "<dd>None</dd>" not in body
 
 
 def test_a_v4_and_or_tree_gets_the_same_panel_plus_the_other_scenarios(
