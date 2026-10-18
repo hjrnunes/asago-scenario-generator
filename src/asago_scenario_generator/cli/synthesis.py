@@ -156,6 +156,17 @@ def generate_cmd(
             "records every outcome). handoff requires --handoff-format v5."
         ),
     ),
+    flawed_belief: str = typer.Option(
+        "off",
+        "--flawed-belief",
+        help=(
+            "Stated flawed beliefs: off (no change) or stated (each Stage 5 "
+            "causal factor states the controller's flawed belief and the "
+            "process-model variable that holds it, or the variable it lacks; "
+            "the agent-belief facts, the and-or weak points and the v5 "
+            "causal_factors carry them). stated requires --handoff-format v5."
+        ),
+    ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_input_files(
@@ -189,6 +200,14 @@ def generate_cmd(
         model_gherkin == "off" or handoff_format == "v5",
         "--model-gherkin",
         "handoff requires --handoff-format v5",
+    )
+    _require(
+        flawed_belief in ("off", "stated"), "--flawed-belief", "must be off or stated"
+    )
+    _require(
+        flawed_belief == "off" or handoff_format == "v5",
+        "--flawed-belief",
+        "stated requires --handoff-format v5",
     )
     fill_policy = _replay_fill_policy(
         replay_fill=replay_fill,
@@ -224,6 +243,7 @@ def generate_cmd(
             attack_tree_format=attack_tree_format,
             handoff_format=handoff_format,
             model_gherkin=model_gherkin,
+            flawed_belief=flawed_belief,
         )
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=partial(
@@ -322,6 +342,7 @@ def _synthesis_inputs(
     attack_tree_format: str = "flat",
     handoff_format: str = "v4",
     model_gherkin: str = "off",
+    flawed_belief: str = "off",
 ) -> Any:
     """Load and check the input files, then build the synthesis request."""
     from asago_scenario_generator.data.loaders import (
@@ -378,6 +399,7 @@ def _synthesis_inputs(
         attack_tree_format=attack_tree_format,
         handoff_format=handoff_format,
         model_gherkin=model_gherkin,
+        flawed_belief=flawed_belief,
     )
 
 

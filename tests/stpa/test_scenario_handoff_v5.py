@@ -437,8 +437,9 @@ def test_the_v5_kit_holds_the_v4_fixture_names_and_more_invalid_cases() -> None:
     v4 = CONTRACT_ROOT / "handoff-v4"
     names = {path.name for path in (KIT / "valid").glob("*.json")}
     invalid = {path.name for path in (KIT / "invalid").glob("*.json")}
+    stated = {"adversarial-stated-beliefs.json", "functional-stated-belief.json"}
 
-    assert names == {path.name for path in (v4 / "valid").glob("*.json")}
+    assert names == {path.name for path in (v4 / "valid").glob("*.json")} | stated
     assert {path.name for path in (v4 / "invalid").glob("*.json")} < invalid
     assert set(_kit("expected-violations.json")) == {f"invalid/{n}" for n in invalid}
 

@@ -67,6 +67,8 @@ cases:
       - the route may remain parameterized
       - clinical
       - Clinical
+      - flawed_belief
+      - process_model_variable
   operation:
     forbidden: &no-status-criterion
       - required status is not held
@@ -164,3 +166,21 @@ cases:
         the agent made in the conversation
       - *call-precondition
       - *call-boundary
+  stated-beliefs:
+    required:
+      - >-
+        `flawed_belief` is what the controller wrongly takes to be true when it
+        issues the unsafe action, as one statement in domain words about this
+        scenario.
+      - "The loan record on screen belongs to the member who asked for it."
+      - Name the wrong value the controller holds, not the variable that holds it
+      - Do not put an ID or a local handle in it.
+      - >-
+        Where the user prompt says code fills a source's variable, set
+        `process_model_variable` and `missing_variable` to `null`.
+      - >-
+        set `process_model_variable` to `none` and `missing_variable` to a
+        short description, in domain words, of the variable the controller
+        would need
+    once:
+      - "`flawed_belief`"

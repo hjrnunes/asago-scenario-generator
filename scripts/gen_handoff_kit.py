@@ -1085,6 +1085,54 @@ V5_VARIATIONS = {
 }
 
 
+#: Fixtures that state flawed beliefs (`--flawed-belief stated`): each
+#: factor's process_model_belief is the stated belief, and
+#: process_model_variable names the variable that holds it, or a gap.
+def _stated_beliefs(payload: dict) -> None:
+    payload["causal_factors"] = [
+        {
+            "source_id": "PM-1-1",
+            "process_model_belief": "The item being changed belongs to the user.",
+            "flaw": "The assistant does not compare the item owner with the user.",
+            "process_model_variable": {"id": "PM-1-1", "description": "Item ownership"},
+        },
+        {
+            "source_id": "CA-1-1",
+            "process_model_belief": "The user has already confirmed the change.",
+            "flaw": "The assistant applies the update before the user confirms it.",
+            "process_model_variable": {
+                "id": None,
+                "description": "Whether the user confirmed the change",
+            },
+        },
+    ]
+
+
+def _stated_feedback_belief(payload: dict) -> None:
+    payload["causal_factors"] = [
+        {
+            "source_id": "FB-1-1",
+            "process_model_belief": "The item list shows only the user's items.",
+            "flaw": "Ownership feedback arrives after the update.",
+            "process_model_variable": {"id": "PM-1-1", "description": "Item ownership"},
+        }
+    ]
+
+
+V5_STATED = {
+    "valid/adversarial-stated-beliefs.json": (
+        "valid/adversarial-direct-single.json",
+        "SCN-108",
+        _stated_beliefs,
+    ),
+    "valid/functional-stated-belief.json": (
+        "valid/functional-null-shape.json",
+        "SCN-109",
+        _stated_feedback_belief,
+    ),
+}
+
+
 def to_v5(payload: dict) -> dict:
     """Turn a finalized v4 fixture into the v5 fixture for the same scenario."""
 
@@ -1104,11 +1152,17 @@ def finalize_v5(payload: dict) -> dict:
 
 def v5_payloads(v4_valid: dict[str, dict]) -> dict[str, dict]:
     payloads = {}
+    staged = {}
     for relative, payload in v4_valid.items():
         v5 = to_v5(payload)
         V5_VARIATIONS.get(relative, lambda _: None)(v5)
+        staged[relative] = v5
         payloads[relative] = finalize_v5(v5)
-    return payloads
+    for relative, (base, scenario_id, vary) in V5_STATED.items():
+        v5 = renumber(copy.deepcopy(staged[base]), scenario_id)
+        vary(v5)
+        payloads[relative] = finalize_v5(v5)
+    return dict(sorted(payloads.items()))
 
 
 def _first_step(payload: dict) -> dict:
@@ -1137,6 +1191,23 @@ V5_CASES = {
     "v5-causal-factors-empty": put("causal_factors", []),
     "v5-causal-factor-belief-missing": drop("causal_factors.0.process_model_belief"),
     "v5-causal-factor-blank-flaw": put("causal_factors.0.flaw", " "),
+    "v5-causal-factor-variable-id-not-pm": put(
+        "causal_factors.0.process_model_variable",
+        {"id": "FB-1-1", "description": "Item ownership"},
+    ),
+    "v5-causal-factor-variable-id-missing": put(
+        "causal_factors.0.process_model_variable", {"description": "Item ownership"}
+    ),
+    "v5-causal-factor-variable-blank-description": put(
+        "causal_factors.0.process_model_variable", {"id": None, "description": " "}
+    ),
+    "v5-causal-factor-variable-unknown-field": put(
+        "causal_factors.0.process_model_variable",
+        {"id": "PM-1-1", "description": "Item ownership", "pm_id": "PM-1-1"},
+    ),
+    "v5-causal-factor-variable-not-object": put(
+        "causal_factors.0.process_model_variable", "Item ownership"
+    ),
     "v5-preconditions-not-text": put("preconditions", [1]),
     "v5-worst-case-threat-blank": put("worst_case_threat", ""),
     "v5-worst-case-threat-missing": drop("worst_case_threat"),

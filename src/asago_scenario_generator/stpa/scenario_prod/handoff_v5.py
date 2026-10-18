@@ -19,6 +19,7 @@ from asago_scenario_generator.stpa.models.attack_shape import (
     IndirectShape,
     default_attack_shape,
 )
+from asago_scenario_generator.stpa.models.causal_factor import CausalFactor
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
@@ -34,6 +35,7 @@ from .handoff import (
     HandoffCausalFactor,
     HandoffHazard,
     HandoffProcedureStep,
+    HandoffProcessModelVariable,
     HandoffUca,
     ScenarioHandoffV5,
     Stage1aSource,
@@ -230,6 +232,9 @@ def _causal_factors(spec: ScenarioSpec) -> list[HandoffCausalFactor]:
     beliefs = {belief.pm_id: belief for belief in spec.defender_bdi.beliefs}
     factors = []
     for factor in spec.causal_factors:
+        if factor.flawed_belief:
+            factors.append(_stated_causal_factor(spec, factor))
+            continue
         belief = beliefs.get(factor.source_id)
         content = plain(belief.content) if belief is not None else ""
         factors.append(
@@ -240,6 +245,32 @@ def _causal_factors(spec: ScenarioSpec) -> list[HandoffCausalFactor]:
             )
         )
     return factors
+
+
+def _stated_causal_factor(
+    spec: ScenarioSpec, factor: CausalFactor
+) -> HandoffCausalFactor:
+    """Publish a factor's stated flawed belief and the variable that holds it."""
+    variable = factor.process_model_variable
+    return HandoffCausalFactor(
+        source_id=factor.source_id,
+        process_model_belief=_required(
+            spec, "causal_factors.process_model_belief", factor.flawed_belief
+        ),
+        flaw=_required(spec, "causal_factors.flaw", factor.description),
+        process_model_variable=(
+            HandoffProcessModelVariable(
+                id=variable.pm_id,
+                description=_required(
+                    spec,
+                    "causal_factors.process_model_variable.description",
+                    variable.description,
+                ),
+            )
+            if variable is not None
+            else None
+        ),
+    )
 
 
 def _worst_case_threat(spec: ScenarioSpec, context: ScenarioGenerationContext) -> str:

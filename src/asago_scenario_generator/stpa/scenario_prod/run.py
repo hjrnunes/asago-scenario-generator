@@ -112,6 +112,7 @@ from .handoff import (
     write_scenario_handoff,
 )
 from .handoff_v5 import build_scenario_handoff_v5
+from .stage5.flawed_belief import FlawedBeliefMode
 from .model_gherkin import (
     GherkinMode,
     gherkins_payload,
@@ -244,6 +245,7 @@ def run_sp3(
     attack_tree_format: AttackTreeFormat = AttackTreeFormat.FLAT,
     handoff_format: HandoffFormat = HandoffFormat.V4,
     model_gherkin: GherkinMode = GherkinMode.OFF,
+    flawed_belief: FlawedBeliefMode = FlawedBeliefMode.OFF,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -317,12 +319,21 @@ def run_sp3(
             request per published scenario after the narrate step, publishes
             each accepted Gherkin, and writes ``gherkins.json``. ``handoff``
             requires ``handoff_format=v5``.
+        flawed_belief: Whether Stage 5 asks each causal factor for the
+            controller's stated flawed belief and the process-model variable
+            that holds it. ``off`` changes no request; ``stated`` requires
+            ``handoff_format=v5``.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
     """
     if model_gherkin is GherkinMode.HANDOFF and handoff_format is not HandoffFormat.V5:
         raise ValueError("model_gherkin=handoff requires handoff_format=v5")
+    if (
+        flawed_belief is FlawedBeliefMode.STATED
+        and handoff_format is not HandoffFormat.V5
+    ):
+        raise ValueError("flawed_belief=stated requires handoff_format=v5")
     run_dir.mkdir(parents=True, exist_ok=True)
     effective_observation_contract = (
         observation_contract or default_observation_contract()
@@ -380,6 +391,7 @@ def run_sp3(
             attack_tree_format=attack_tree_format,
             handoff_format=handoff_format,
             model_gherkin=model_gherkin,
+            flawed_belief=flawed_belief,
         )
         scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
             inputs, stage_errors, candidate_builders
@@ -515,6 +527,7 @@ class _SP3Inputs:
     attack_tree_format: AttackTreeFormat = AttackTreeFormat.FLAT
     handoff_format: HandoffFormat = HandoffFormat.V4
     model_gherkin: GherkinMode = GherkinMode.OFF
+    flawed_belief: FlawedBeliefMode = FlawedBeliefMode.OFF
 
 
 def _narrate(
@@ -590,6 +603,7 @@ def _run_stages_5_and_6(
         candidate_builders=candidate_builders,
         content_surface=content_surface_facts(inputs.capability_profile),
         condition_families=inputs.condition_families,
+        stated_beliefs=inputs.flawed_belief is FlawedBeliefMode.STATED,
     )
     functional_test_specs = [spec for spec in scenario_specs if spec.is_functional_test]
     shaped_specs = apply_shape_step(
@@ -867,6 +881,7 @@ def _run_stage5_candidate(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
+    stated_beliefs: bool = False,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
     prior_error_count = len(stage_errors)
@@ -889,6 +904,7 @@ def _run_stage5_candidate(
             observation_contract=observation_contract,
             content_surface=content_surface,
             condition_family=condition_family,
+            stated_beliefs=stated_beliefs,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
@@ -921,6 +937,7 @@ def _collect_stage5_specs(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
+    stated_beliefs: bool = False,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
     specs: list[ScenarioSpec] = []
@@ -946,6 +963,7 @@ def _collect_stage5_specs(
             candidate_builders=candidate_builders,
             content_surface=content_surface,
             condition_family=plan.family if plan is not None else None,
+            stated_beliefs=stated_beliefs,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
@@ -1350,6 +1368,7 @@ def _run_stage5_for_threat(
     observation_contract: ObservationContract | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
+    stated_beliefs: bool = False,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -1389,6 +1408,7 @@ def _run_stage5_for_threat(
         observation_contract=observation_contract,
         content_surface=content_surface,
         condition_family=condition_family,
+        stated_beliefs=stated_beliefs,
     )
     if failure is not None:
         return failure
@@ -1414,6 +1434,7 @@ def _stage5_bdi(
     observation_contract: ObservationContract | None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
+    stated_beliefs: bool = False,
 ) -> tuple[ScenarioSpec | None, _Stage5ThreatResult | None]:
     """Generate one assembled ScenarioSpec or one typed local failure."""
     try:
@@ -1430,6 +1451,7 @@ def _stage5_bdi(
             content_surface=content_surface,
             condition_family=condition_family,
             assembly=assembly,
+            stated_beliefs=stated_beliefs,
         )
     except ScenarioAssemblyError as exc:
         stage_errors.append(f"Stage 5: {exc}")

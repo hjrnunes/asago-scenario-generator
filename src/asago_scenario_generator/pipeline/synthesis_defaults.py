@@ -518,6 +518,9 @@ def _default_scenarios(
     )
     from asago_scenario_generator.stpa.scenario_prod.handoff import HandoffFormat
     from asago_scenario_generator.stpa.scenario_prod.model_gherkin import GherkinMode
+    from asago_scenario_generator.stpa.scenario_prod.stage5.flawed_belief import (
+        FlawedBeliefMode,
+    )
     from asago_scenario_generator.stpa.scenario_prod.narration import NarrationMode
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
     from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import (
@@ -570,6 +573,7 @@ def _default_scenarios(
         attack_tree_format=AttackTreeFormat(inputs.attack_tree_format),
         handoff_format=HandoffFormat(inputs.handoff_format),
         model_gherkin=GherkinMode(inputs.model_gherkin),
+        flawed_belief=FlawedBeliefMode(inputs.flawed_belief),
     )
 
 

@@ -17,6 +17,7 @@ from pydantic import (
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactorKind,
+    ProcessModelVariable,
     validate_causal_evidence_shape,
 )
 from asago_scenario_generator.stpa.models.semantic_conditions import (
@@ -53,6 +54,8 @@ class CausalFactorDeclaration(BaseModel):
     capability_refs: tuple[str, ...] = ()
     access_refs: tuple[str, ...] = ()
     bounded_assumption: str | None = None
+    flawed_belief: str | None = None
+    process_model_variable: ProcessModelVariable | None = None
 
     @model_validator(mode="after")
     def validate_evidence_shape(self) -> "CausalFactorDeclaration":

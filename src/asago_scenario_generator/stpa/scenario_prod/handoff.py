@@ -437,12 +437,33 @@ class HandoffActor(HandoffModel):
     goal: HandoffText
 
 
+class HandoffProcessModelVariable(HandoffModel):
+    """The process-model variable that holds a stated flawed belief.
+
+    ``id`` is ``null`` for a gap: no variable of the selected path holds the
+    belief, and ``description`` describes the variable the controller would
+    need.
+    """
+
+    id: Annotated[StrictStr, Field(pattern=r"^PM-\d+-\d+$")] | None
+    description: HandoffText
+
+
 class HandoffCausalFactor(HandoffModel):
     """One causal factor: the flawed process-model belief and its flaw."""
 
     source_id: HandoffText
     process_model_belief: HandoffText | None
     flaw: HandoffText
+    process_model_variable: HandoffProcessModelVariable | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Present when process_model_belief states the controller's flawed "
+            "belief: the variable that holds it, or a gap (id null) whose "
+            "description names the variable the controller would need."
+        ),
+    )
 
 
 class HandoffAtlasRef(HandoffModel):

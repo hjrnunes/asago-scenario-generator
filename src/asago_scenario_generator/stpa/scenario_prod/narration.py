@@ -44,6 +44,7 @@ from asago_scenario_generator.stpa.models.attack_shape import (
     TurnSpeaker,
     default_attack_shape,
 )
+from asago_scenario_generator.stpa.models.causal_factor import CausalFactor
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from ._constants import PROMPTS_DIR
@@ -192,6 +193,9 @@ class ScenarioFacts:
     glossary: tuple[tuple[str, str], ...]
     coverage: tuple[tuple[str, tuple[str, ...]], ...]
     steps: tuple[AttackStep, ...] = ()
+    # True when the agent-belief facts state the factors' flawed beliefs; the
+    # sentence that says why the agent acts must then cite one of them.
+    stated_beliefs: bool = False
 
     def ids_in(self, categories: Sequence[str]) -> list[str]:
         return [fact.fact_id for fact in self.facts if fact.category in categories]
@@ -226,9 +230,13 @@ def build_facts(spec: ScenarioSpec) -> ScenarioFacts:
         entries.extend((ATTACK_STEP, step.text) for step in steps)
     beliefs = {belief.pm_id: belief for belief in spec.defender_bdi.beliefs}
     factor_texts = {plain(factor.description) for factor in spec.causal_factors}
+    stated = any(factor.flawed_belief for factor in spec.causal_factors)
     for factor in spec.causal_factors:
         belief = beliefs.get(factor.source_id)
-        if belief is not None and plain(belief.content):
+        if stated:
+            if factor.flawed_belief:
+                entries.append((AGENT_BELIEF, stated_belief_text(factor)))
+        elif belief is not None and plain(belief.content):
             entries.append(
                 (
                     AGENT_BELIEF,
@@ -260,6 +268,7 @@ def build_facts(spec: ScenarioSpec) -> ScenarioFacts:
         glossary=build_glossary(spec, facts),
         coverage=coverage,
         steps=steps,
+        stated_beliefs=stated,
     )
 
 
@@ -280,6 +289,36 @@ def belief_text(content: str, vulnerability: str, factor_texts: set[str]) -> str
     if flaw and flaw not in factor_texts and NOT_SELECTED not in flaw.lower():
         text += f" Flaw: {flaw}"
     return text
+
+
+def stated_belief_text(factor: CausalFactor) -> str:
+    """State a factor's flawed belief and the variable that holds it, if any."""
+    text = (
+        "The agent wrongly believes that "
+        f"{lower_first(plain(factor.flawed_belief or '').rstrip('.'))}."
+    )
+    variable = factor.process_model_variable
+    if variable is not None and variable.pm_id is not None:
+        text += (
+            " The belief concerns: "
+            f"{lower_first(plain(variable.description).rstrip('.'))}."
+        )
+    return text
+
+
+def weak_point_belief_text(factor: CausalFactor) -> str:
+    """State a factor's flawed belief and its variable, or the variable it lacks."""
+    text = (
+        "The agent wrongly believes that "
+        f"{lower_first(plain(factor.flawed_belief or '').rstrip('.'))}."
+    )
+    variable = factor.process_model_variable
+    if variable is None:
+        return text
+    description = lower_first(plain(variable.description).rstrip("."))
+    if variable.pm_id is None:
+        return f"{text} No process-model variable; missing: {description}."
+    return f"{text} Process-model variable: {description}."
 
 
 def lower_first(text: str) -> str:
@@ -440,6 +479,9 @@ def render_narration_prompts(
             (name, ", ".join(facts.ids_in(categories)))
             for name, categories in facts.coverage
         ],
+        belief_ids=(
+            ", ".join(facts.ids_in((AGENT_BELIEF,))) if facts.stated_beliefs else ""
+        ),
     )
     return system, user
 
@@ -473,13 +515,25 @@ def narration_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[str]
             failures.append(
                 f"no sentence cites {name}; cite at least one of {', '.join(ids)}"
             )
-    if not any(
-        "because" in text and "believe" in text
-        for text in (sentence.text.lower() for sentence in reply.sentences)
-    ):
+    reasons = [
+        sentence
+        for sentence in reply.sentences
+        if "because" in sentence.text.lower() and "believe" in sentence.text.lower()
+    ]
+    if not reasons:
         failures.append(
             'no sentence says why the agent acts, as in "because it incorrectly '
             'believes that ..."'
+        )
+    belief_ids = facts.ids_in((AGENT_BELIEF,)) if facts.stated_beliefs else []
+    if (
+        reasons
+        and belief_ids
+        and not any(set(sentence.facts) & set(belief_ids) for sentence in reasons)
+    ):
+        failures.append(
+            "the sentence that says why the agent acts cites no agent belief "
+            f"fact; cite the one whose belief it states: {', '.join(belief_ids)}"
         )
     title_words = word_count(reply.title)
     if title_words > MAX_TITLE_WORDS:

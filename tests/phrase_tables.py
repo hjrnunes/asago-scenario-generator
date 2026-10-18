@@ -73,8 +73,14 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
     ScenarioFacts,
     render_narration_prompts,
 )
+from asago_scenario_generator.stpa.scenario_prod.stage5.flawed_belief import (
+    build_flawed_belief_frame,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
+    _causal_source_choices,
 )
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservation,
@@ -93,6 +99,7 @@ from tests.helpers.normal_authoring_wire import (
     _record_observations,
     _target_operation,
     _tool_call_action_context,
+    _wrong_timing_assembly,
     _wrong_timing_context,
 )
 from tests.stpa.condition_prompt_fixture import (
@@ -386,6 +393,40 @@ def _stage5(
     return render
 
 
+def _stated_beliefs_facts() -> dict[str, object]:
+    context = _wrong_timing_context()
+    structure = _wrong_timing_assembly(context).control_structure
+    return {
+        "flawed_beliefs": build_flawed_belief_frame(
+            _causal_source_choices(context), context, structure
+        )
+    }
+
+
+def _narrate_stated() -> Callable[[str], str]:
+    facts = ScenarioFacts(
+        scenario_id="SCN-001",
+        kind="adversarial",
+        facts=(
+            Fact("F1", "situation", "RESP-1 receives a refund request"),
+            Fact(
+                "F2",
+                "agent belief",
+                "The agent wrongly believes that the refund is for the caller.",
+            ),
+            Fact("F3", "weak point", "Feedback is delayed."),
+        ),
+        glossary=(("RESP-1", "Handle customer service inquiries."),),
+        coverage=(("the weak point", ("weak point", "agent belief")),),
+        stated_beliefs=True,
+    )
+
+    def render(template: str) -> str:
+        return dict(zip(_NARRATE_TEMPLATES, render_narration_prompts(facts)))[template]
+
+    return render
+
+
 def _narrate() -> Callable[[str], str]:
     facts = ScenarioFacts(
         scenario_id="SCN-001",
@@ -469,6 +510,8 @@ CASES: dict[str, Callable[[str], str]] = {
         }
     ),
     "narrate": _narrate(),
+    "narrate-stated": _narrate_stated(),
+    "stated-beliefs": _stage5(_stated_beliefs_facts),
     "gherkin": _gherkin(),
     "archive-item": _stage5(_archive_item_facts),
     "commit-operation": _stage5(_commit_operation_facts),

@@ -21,7 +21,13 @@ from typing import Any
 from asago_scenario_generator.stpa.models.attack_shape import default_attack_shape
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
-from .narration import attack_steps, belief_text, plain, rule_text
+from .narration import (
+    attack_steps,
+    belief_text,
+    plain,
+    rule_text,
+    weak_point_belief_text,
+)
 from .presentation import (
     ADVERSARY_WORDS,
     HYPOTHESIS_AUTHORITY,
@@ -205,7 +211,9 @@ def _conditions_node(spec: ScenarioSpec, adversarial: bool) -> dict[str, Any]:
     for index, factor in enumerate(spec.causal_factors, 1):
         extras: dict[str, Any] = {"evidence_status": factor.evidence_status.value}
         belief = beliefs.get(factor.source_id)
-        if belief is not None and plain(belief.content):
+        if factor.flawed_belief:
+            extras["belief"] = weak_point_belief_text(factor)
+        elif belief is not None and plain(belief.content):
             # The belief's pm_id is the weak point's source_id, so the text
             # alone keeps everything.
             extras["belief"] = belief_text(

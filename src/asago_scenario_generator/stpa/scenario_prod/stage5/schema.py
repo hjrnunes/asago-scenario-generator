@@ -40,14 +40,23 @@ def _scenario_semantics_payload_type(
     duration_eligible: bool = False,
     observation_criteria_required: bool = False,
     condition_references_supplied: bool = False,
+    belief_variable_count: int | None = None,
 ) -> type[BaseModel]:
     """Return the normal-path response schema: semantics and evidence only.
 
     The payload closes the request-local causal handles to the exact supplied
     choices and keeps the evidence-status branches, but exposes no stimulus,
     execution route, factor-route binding or unsafe-outcome condition.
+
+    ``belief_variable_count`` asks every factor for a stated flawed belief and
+    a variable choice among that many ``variable_N`` handles or ``none``;
+    ``None`` keeps the schema without them.
     """
     _require_positive_schema_count(choice_count, "choice_count")
+    stated = belief_variable_count is not None
+    suffix = (
+        f"{choice_count}" if not stated else f"{choice_count}V{belief_variable_count}"
+    )
     handles = tuple(f"cause_{index}" for index in range(1, choice_count + 1))
     handle_type = Literal.__getitem__(handles)
     temporal_handles = ("target_action", *handles)
@@ -62,16 +71,18 @@ def _scenario_semantics_payload_type(
         temporal_union,
         base=_ContextSemanticFactorWireBase,
         model_prefix="_ContextSemantic",
+        belief_fields=(_belief_fields(belief_variable_count) if stated else None),
+        name_suffix=suffix,
     )
     factor_union = _discriminated_union(tuple(factor_types.values()), "evidence_status")
     source_handle_list = conlist(handle_type, min_length=1)
     intention_type = create_model(
-        f"_ContextSemanticIntentionDraft{choice_count}",
+        f"_ContextSemanticIntentionDraft{suffix}",
         __base__=_ContextAttackerIntentionDraft,
         source_handles=(source_handle_list, ...),
     )
     attacker_type = create_model(
-        f"_ContextSemanticAttackerBDIDraft{choice_count}",
+        f"_ContextSemanticAttackerBDIDraft{suffix}",
         __base__=_ContextAttackerBDIDraft,
         desires=(list[_ContextNonBlankText], ...),
         intentions=(list[intention_type], ...),
@@ -86,7 +97,7 @@ def _scenario_semantics_payload_type(
             else {}
         )
         outcome_type = create_model(
-            f"_ContextSemanticOutcomeDraft{choice_count}",
+            f"_ContextSemanticOutcomeDraft{suffix}",
             __base__=_ContextSemanticOutcomeDraft,
             observation_criteria=(
                 conlist(_ObservationCriterionDraft, min_length=1),
@@ -96,7 +107,7 @@ def _scenario_semantics_payload_type(
             **condition_field,
         )
     return create_model(
-        f"_ContextScenarioSemanticsPayload{choice_count}",
+        f"_ContextScenarioSemanticsPayload{suffix}",
         __base__=_ContextScenarioSemanticsPayload,
         attacker_bdi=(attacker_type, ...),
         causal_factors=(conlist(factor_union, min_length=1), ...),
@@ -183,22 +194,26 @@ def _context_causal_factor_wire_types(
     *,
     base: type[BaseModel],
     model_prefix: str,
+    belief_fields: dict[str, tuple[object, object]] | None = None,
+    name_suffix: str | None = None,
 ) -> dict[str, type[BaseModel]]:
     """Create evidence-status branches with status-specific requirements."""
     nonempty_refs = conlist(StrictStr, min_length=1)
+    suffix = name_suffix if name_suffix is not None else f"{choice_count}"
     common = {
         "source_handle": (handle_type, ...),
         "temporal_condition": (temporal_union | None, ...),
+        **(belief_fields or {}),
     }
     return {
         "structural_failure": create_model(
-            f"{model_prefix}CausalFactorDraft{choice_count}",
+            f"{model_prefix}CausalFactorDraft{suffix}",
             __base__=base,
             **common,
             evidence_status=(Literal["structural_failure"], ...),
         ),
         "reachable_capability": create_model(
-            f"{model_prefix}ReachableCausalFactorDraft{choice_count}",
+            f"{model_prefix}ReachableCausalFactorDraft{suffix}",
             __base__=base,
             **common,
             evidence_status=(Literal["reachable_capability"], ...),
@@ -206,12 +221,31 @@ def _context_causal_factor_wire_types(
             access_refs=(nonempty_refs, ...),
         ),
         "bounded_assumption": create_model(
-            f"{model_prefix}BoundedCausalFactorDraft{choice_count}",
+            f"{model_prefix}BoundedCausalFactorDraft{suffix}",
             __base__=base,
             **common,
             evidence_status=(Literal["bounded_assumption"], ...),
             bounded_assumption=(StrictStr, Field(min_length=1)),
         ),
+    }
+
+
+def _belief_fields(variable_count: int) -> dict[str, tuple[object, object]]:
+    """Return the stated-belief fields every factor branch carries.
+
+    The variable choice is nullable because code fills it for some sources;
+    validation names which factors must leave it null.
+    """
+    if type(variable_count) is not int or variable_count < 0:
+        raise ValueError("belief_variable_count must be a non-negative integer")
+    choices = (
+        *(f"variable_{index}" for index in range(1, variable_count + 1)),
+        "none",
+    )
+    return {
+        "flawed_belief": (StrictStr, Field(min_length=1)),
+        "process_model_variable": (Literal.__getitem__(choices) | None, ...),
+        "missing_variable": (StrictStr | None, ...),
     }
 
 

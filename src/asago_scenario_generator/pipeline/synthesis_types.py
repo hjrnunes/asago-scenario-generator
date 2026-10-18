@@ -116,6 +116,10 @@ class SynthesisInputs:
     # Model-written Gherkin: "off" or "handoff" (see
     # stpa.scenario_prod.model_gherkin.GherkinMode); "handoff" needs v5.
     model_gherkin: str = "off"
+    # Stated flawed beliefs: "off" or "stated" (see
+    # stpa.scenario_prod.stage5.flawed_belief.FlawedBeliefMode); "stated"
+    # needs v5.
+    flawed_belief: str = "off"
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
@@ -132,6 +136,10 @@ class SynthesisInputs:
             raise ValueError("model_gherkin must be off or handoff")
         if self.model_gherkin == "handoff" and self.handoff_format != "v5":
             raise ValueError("model_gherkin handoff requires handoff_format v5")
+        if self.flawed_belief not in ("off", "stated"):
+            raise ValueError("flawed_belief must be off or stated")
+        if self.flawed_belief == "stated" and self.handoff_format != "v5":
+            raise ValueError("flawed_belief stated requires handoff_format v5")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         _normalize_request_values(self)
         _verify_request_target_inputs(self)

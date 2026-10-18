@@ -146,7 +146,17 @@ valid source kind to one exact structural source. Do not return structural sourc
 IDs or invent another source category.
 
 {{ causal_source_choices_yaml }}
+{% if stated_beliefs %}
+---
+## Process-Model Variables
 
+The variables the selected controller holds on this path, under local
+`variable_handle` values. A factor whose `process_model_variable` is your
+choice names one of these handles, or `none` when no listed variable holds its
+flawed belief. Do not return structural IDs.
+
+{{ process_model_variables_yaml }}
+{% endif %}
 ---
 
 ## Temporal Reference Choices
@@ -191,7 +201,10 @@ unsafe-control-action category (UCA type) `{{ selected_uca_type }}`.
    for an existing structural condition; use `reachable_capability` only with
    exact supplied references; use `bounded_assumption` only with a short
    explicit assumption.
-
+{% if stated_beliefs %}   Every factor also returns `flawed_belief`, `process_model_variable` and
+   `missing_variable` as the system instructions describe; each allowed source
+   says whether code fills its variable or you choose it.
+{% endif %}
 4. Return one `unsafe_outcome` carrying one bounded plain
    `semantic_proposition` sentence that states exactly what makes the selected
    situation unsafe.
