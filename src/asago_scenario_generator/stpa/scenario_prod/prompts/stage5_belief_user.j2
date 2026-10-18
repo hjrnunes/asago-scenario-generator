@@ -1,0 +1,23 @@
+## Scenario account
+
+{{ account }}
+
+---
+## Causal Factors
+
+The scenario's causal factors, under local `source_handle` values. Each one
+gives its source type, the source's description, the factor's description in
+this scenario, and whether code fills its `process_model_variable` or you
+choose it. Give each listed factor one entry under its `source_handle`. Do not
+return structural IDs.
+
+{{ factors_yaml }}
+---
+## Process-Model Variables
+
+The variables the selected controller holds on this path, under local
+`variable_handle` values. A factor whose `process_model_variable` is your
+choice names one of these handles, or `none` when no listed variable holds its
+flawed belief. Do not return structural IDs.
+
+{{ process_model_variables_yaml }}

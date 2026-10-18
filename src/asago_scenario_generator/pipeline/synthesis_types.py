@@ -116,9 +116,9 @@ class SynthesisInputs:
     # Model-written Gherkin: "off" or "handoff" (see
     # stpa.scenario_prod.model_gherkin.GherkinMode); "handoff" needs v5.
     model_gherkin: str = "off"
-    # Stated flawed beliefs: "off" or "stated" (see
-    # stpa.scenario_prod.stage5.flawed_belief.FlawedBeliefMode); "stated"
-    # needs v5.
+    # Stated flawed beliefs: "off", "stated" or "separate" (see
+    # stpa.scenario_prod.stage5.flawed_belief.FlawedBeliefMode); both
+    # "stated" and "separate" need v5.
     flawed_belief: str = "off"
     # The report's hazard view: "off" or "report" (a hazard section and one
     # Attack Flow file per hazard); "report" needs the and-or attack tree.
@@ -139,10 +139,12 @@ class SynthesisInputs:
             raise ValueError("model_gherkin must be off or handoff")
         if self.model_gherkin == "handoff" and self.handoff_format != "v5":
             raise ValueError("model_gherkin handoff requires handoff_format v5")
-        if self.flawed_belief not in ("off", "stated"):
-            raise ValueError("flawed_belief must be off or stated")
-        if self.flawed_belief == "stated" and self.handoff_format != "v5":
-            raise ValueError("flawed_belief stated requires handoff_format v5")
+        if self.flawed_belief not in ("off", "stated", "separate"):
+            raise ValueError("flawed_belief must be off, stated or separate")
+        if self.flawed_belief != "off" and self.handoff_format != "v5":
+            raise ValueError(
+                f"flawed_belief {self.flawed_belief} requires handoff_format v5"
+            )
         if self.hazard_view not in ("off", "report"):
             raise ValueError("hazard_view must be off or report")
         if self.hazard_view == "report" and self.attack_tree_format != "and-or":

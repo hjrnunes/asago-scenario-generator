@@ -12,7 +12,7 @@ of the missing variable.
 from __future__ import annotations
 
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -36,6 +36,7 @@ class FlawedBeliefMode(StrEnum):
 
     OFF = "off"
     STATED = "stated"
+    SEPARATE = "separate"
 
 
 VARIABLE_NONE = "none"
@@ -195,14 +196,24 @@ def flawed_belief_findings(
     factors: Sequence[BaseModel],
     frame: FlawedBeliefFrame,
     choices: Mapping[str, _CausalSourceChoice],
+    *,
+    locate: Callable[[int, BaseModel], str] | None = None,
 ) -> list[str]:
-    """Return one line per broken stated-belief rule, in factor order."""
+    """Return one line per broken stated-belief rule, in factor order.
+
+    ``locate`` names a factor from its index and itself; by default it names
+    the factor's place in a Stage 5 reply's ``causal_factors``.
+    """
     findings: list[str] = []
     variables = [(item.description, item.values) for item in frame.variables]
     values_of = dict(variables)
     choosable = ", ".join((*frame.variable_handles, VARIABLE_NONE))
     for index, factor in enumerate(factors):
-        where = f"causal_factors[{index}] ({factor.source_handle})"
+        where = (
+            f"causal_factors[{index}] ({factor.source_handle})"
+            if locate is None
+            else locate(index, factor)
+        )
         belief = (getattr(factor, "flawed_belief", None) or "").strip()
         variable = getattr(factor, "process_model_variable", None)
         missing = getattr(factor, "missing_variable", None)
