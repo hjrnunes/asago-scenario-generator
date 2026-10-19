@@ -1,8 +1,6 @@
 """The attack path in the report: its panel, the hazard view, and the Attack Flow files.
 
-``klarna-and-or`` holds seven v5 handoffs that carry attack paths;
-``klarna-and-or-v4`` holds the same scenarios as v4 handoffs that carry the
-and-or trees the paths reduce from.
+``klarna-and-or`` holds seven v5 handoffs that carry attack paths.
 """
 
 from __future__ import annotations
@@ -13,9 +11,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-import pytest
 
-from asago_scenario_generator.report import attack_flow, hazard_view
 from asago_scenario_generator.report.generate_report import write_report
 from asago_scenario_generator.report.run_data import load_run
 from asago_scenario_generator.report.scenario_panels import scenario_panels
@@ -86,13 +82,13 @@ def test_the_path_reads_attacker_then_five_numbered_parts(tmp_path: Path) -> Non
 
 
 def test_the_path_shows_no_node_id_framing_or_format_note(tmp_path: Path) -> None:
-    for fixture in ("klarna-and-or", "klarna-and-or-v4"):
-        body = str(panels(copy(tmp_path, fixture, fixture), "SCN-027")["path"].body)
+    body = str(panels(copy(tmp_path, "v5", "klarna-and-or"), "SCN-027")["path"].body)
 
-        assert not re.search(r"\bA[TP]-[A-Z]", body)
-        assert "Proposed causal hypothesis" not in body
-        assert "Format " not in body
-        assert "proposed hypothesis" not in body
+    assert not re.search(r"\bA[TP]-[A-Z]", body)
+    assert "Proposed causal hypothesis" not in body
+    assert "Format " not in body
+    assert "proposed hypothesis" not in body
+    assert "Other scenarios" not in body
 
 
 def test_a_weak_point_shows_its_belief_and_evidence_status(tmp_path: Path) -> None:
@@ -135,40 +131,6 @@ def test_an_adversarial_path_keeps_its_steps_row_as_a_list(tmp_path: Path) -> No
 
     assert "<dt>2 Attack steps</dt><dd><ol><li>A third party plants" in body
     assert "<dd>None</dd>" not in body
-
-
-def test_a_v4_and_or_tree_gets_the_same_panel_plus_the_other_scenarios(
-    tmp_path: Path,
-) -> None:
-    v5 = panels(copy(tmp_path, "v5", "klarna-and-or"), "SCN-027")["path"]
-    v4 = panels(copy(tmp_path, "v4", "klarna-and-or-v4"), "SCN-027")["path"]
-
-    line = '<p class="nm">Other scenarios that reach the same hazard: SCN-042, SCN-043.</p>'
-    assert str(v4.body) == line + str(v5.body)
-    assert (v4.key, v4.title, v4.preview) == (v5.key, v5.title, v5.preview)
-    assert "Other scenarios" not in str(v5.body)
-
-
-def test_the_flat_tree_panel_loses_only_its_framing_sentence(tmp_path: Path) -> None:
-    body = str(panels(copy_run(tmp_path), "SCN-001")["tree"].body)
-
-    assert "Proposed causal hypothesis" not in body
-    assert "Loss scenario:" in body
-    assert "Relations are flat" in body
-
-
-def test_a_tree_the_reduction_cannot_read_falls_back_to_the_outline(
-    tmp_path: Path,
-) -> None:
-    output = copy(tmp_path, "v4", "klarna-and-or-v4")
-    edit_yaml(
-        output / "scenarios" / "SCN-027.yaml",
-        lambda y: y["attack_tree"]["root"].update(children=[]),
-    )
-
-    p = panels(output, "SCN-027")["tree"]
-
-    assert p.title == "Attack tree"
 
 
 # --- the narrative panel --------------------------------------------------------
@@ -229,72 +191,23 @@ def hazard_text(output: Path) -> str:
     return re.sub(r'<span class="nid">[^<]*</span>', "", html)
 
 
-def shape(bundle: dict[str, Any]) -> list[dict[str, Any]]:
-    """Return a bundle's objects with every id replaced by its position."""
-    objects = bundle["objects"]
-    position = {item["id"]: f"#{n}" for n, item in enumerate(objects)}
-    position[bundle["id"]] = "#bundle"
+def test_the_hazard_view_names_the_path_node_ids(tmp_path: Path) -> None:
+    output = copy(tmp_path, "v5", "klarna-and-or")
 
-    def swap(value: Any) -> Any:
-        if isinstance(value, str):
-            return position.get(value, value)
-        if isinstance(value, list):
-            return [swap(item) for item in value]
-        if isinstance(value, dict):
-            return {key: swap(item) for key, item in value.items()}
-        return value
+    write_report(output)
 
-    return [swap(item) for item in objects]
-
-
-def render_with_tree_subtrees(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> tuple[Path, Path]:
-    """Render the v5 run from its paths, then again from the trees they reduce from.
-
-    The second render swaps in the ``AT-SCN`` subtree of each scenario's v4
-    twin, so everything else (the unsafe control action, the ATLAS tactics)
-    stays the v5 run's own.
-    """
-    v5 = copy(tmp_path, "v5", "klarna-and-or")
-    trees = {
-        scenario_id: hazard_view._tree_subtree(scenario.attack_tree)
-        for scenario_id, scenario in load_run(
-            copy(tmp_path, "v4", "klarna-and-or-v4")
-        ).scenarios.items()
-    }
-    write_report(v5, "report")
-    from_trees = copy(tmp_path, "trees", "klarna-and-or")
-    with monkeypatch.context() as patch:
-        patch.setattr(hazard_view, "scenario_subtree", lambda s: trees[s.scenario_id])
-        patch.setattr(attack_flow, "scenario_subtree", lambda s: trees[s.scenario_id])
-        write_report(from_trees, "report")
-    return v5, from_trees
-
-
-def test_the_hazard_view_of_a_v5_run_differs_only_in_node_ids(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    v5, from_trees = render_with_tree_subtrees(tmp_path, monkeypatch)
-
-    assert hazard_text(v5) == hazard_text(from_trees)
     nodes = re.findall(
         r'<span class="nid">([^<]*)</span>',
-        section((v5 / "report/index.html").read_text(), "hazards"),
+        section((output / "report/index.html").read_text(), "hazards"),
     )
     assert nodes and all(node.startswith("AP-") for node in nodes)
+    assert hazard_text(output).count("Any one of these scenarios") == len(HAZARDS)
 
 
-def test_an_attack_flow_of_a_v5_run_equals_the_tree_flow_up_to_ids(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    v5, from_trees = render_with_tree_subtrees(tmp_path, monkeypatch)
+def test_each_reached_hazard_has_an_attack_flow(tmp_path: Path) -> None:
+    output = copy(tmp_path, "v5", "klarna-and-or")
 
-    changed = 0
+    write_report(output)
+
     for hazard_id in HAZARDS:
-        new, old = flow(v5, hazard_id), flow(from_trees, hazard_id)
-        assert shape(new) == shape(old), hazard_id
-        changed += {o["id"] for o in new["objects"]} != {
-            o["id"] for o in old["objects"]
-        }
-    assert changed == len(HAZARDS)
+        assert flow(output, hazard_id)["type"] == "bundle"

@@ -28,12 +28,8 @@ from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_DIGEST_DOMAIN_V5,
-    HANDOFF_SCHEMA_VERSION_V4,
     HANDOFF_SCHEMA_VERSION_V5,
-    ScenarioHandoffV4,
     ScenarioHandoffV5,
-    build_scenario_handoff,
-    handoff_model_for,
     handoff_ownership_violations,
     handoff_payload_digest,
     handoff_schema_violations,
@@ -381,47 +377,34 @@ def test_the_v5_digest_uses_its_own_domain() -> None:
     assert handoff_payload_digest(unsigned) == document["content_digest"]
 
 
-def test_v5_keeps_every_v4_field_and_value() -> None:
-    envelope = _envelope(adversarial())
-    v4 = build_scenario_handoff(envelope).model_dump(mode="json", exclude_none=True)
-    v5 = build_scenario_handoff_v5(envelope).model_dump(mode="json", exclude_none=True)
+def test_the_added_fields_follow_the_shared_envelope() -> None:
+    document = build_scenario_handoff_v5(_envelope(adversarial())).model_dump(
+        mode="json", exclude_none=True
+    )
 
-    # The attack path takes the attack tree's place; every other v4 key keeps
-    # its position and value.
-    assert list(v5)[: len(v4)] == [
-        "attack_path" if key == "attack_tree" else key for key in v4
-    ]
-    assert list(v5)[len(v4) :] == list(V5_KEYS)
-    assert {key for key in v4 if key != "attack_tree" and v4[key] != v5[key]} == {
-        "schema_version",
-        "sourced_facts",
-        "content_digest",
-    }
-    assert "attack_tree" not in v5
-    assert v5["sourced_facts"][-1]["source"] == (
+    assert list(document)[-len(V5_KEYS) :] == list(V5_KEYS)
+    assert "attack_tree" not in document
+    assert document["sourced_facts"][-1]["source"] == (
         f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V5}"
     )
 
 
-def test_the_schema_version_selects_the_model() -> None:
-    assert handoff_model_for({"schema_version": HANDOFF_SCHEMA_VERSION_V4}) is (
-        ScenarioHandoffV4
-    )
-    assert handoff_model_for({"schema_version": HANDOFF_SCHEMA_VERSION_V5}) is (
-        ScenarioHandoffV5
-    )
-    with pytest.raises(ValueError, match="unsupported"):
-        handoff_model_for({"schema_version": "scenario-handoff-v9"})
-
-
-def test_a_v4_document_with_v5_fields_is_rejected() -> None:
+@pytest.mark.parametrize("version", ["scenario-handoff-v4", "scenario-handoff-v9"])
+def test_a_document_of_another_version_is_rejected(version: str) -> None:
     document = build_scenario_handoff_v5(_envelope(adversarial())).model_dump(
         mode="json", exclude_none=True
     )
-    document["schema_version"] = HANDOFF_SCHEMA_VERSION_V4
+    document["schema_version"] = version
+    unsigned = {k: v for k, v in document.items() if k != "content_digest"}
 
     with pytest.raises(ValidationError):
-        ScenarioHandoffV4.model_validate(document)
+        ScenarioHandoffV5.model_validate(document)
+    assert handoff_schema_violations(document) == [
+        "schema_violation:schema_version",
+        "schema_violation:attack_shape",
+    ]
+    with pytest.raises(ValueError, match="unsupported"):
+        handoff_payload_digest(unsigned)
 
 
 # --- kit ----------------------------------------------------------------------

@@ -124,7 +124,7 @@ def _render_report(output_dir: Path) -> Path | None:
     try:
         from asago_scenario_generator.report.generate_report import write_report
 
-        return write_report(output_dir, "report").index
+        return write_report(output_dir).index
     except Exception as exc:  # noqa: BLE001 - report is read-only and non-fatal
         logger.warning("generate report failed: %s", exc)
         return None

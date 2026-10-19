@@ -22,9 +22,11 @@ from pydantic import ValidationError
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_SCHEMA_VERSION_V5,
     ScenarioHandoffV5,
-    build_scenario_handoff,
     handoff_ownership_violations,
     verify_handoff_digest,
+)
+from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
+    build_scenario_handoff_v5,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
@@ -416,7 +418,7 @@ def test_criterion_operation_requires_an_exact_observed_inventory_match(
     result = _publish([payload], tmp_path)
     envelope = result.scenario_envelopes[0]
 
-    handoff = build_scenario_handoff(
+    handoff = build_scenario_handoff_v5(
         envelope,
         observed_operations=("process_refund", "lookup_order"),
         environment_bound=True,
@@ -463,7 +465,7 @@ def test_generic_capability_labels_never_substitute_for_observed_operations(
     result = _publish([payload], tmp_path)
     envelope = result.scenario_envelopes[0]
 
-    handoff = build_scenario_handoff(
+    handoff = build_scenario_handoff_v5(
         envelope,
         observed_operations=("process_refund", "lookup_order"),
         environment_bound=True,
@@ -483,12 +485,12 @@ def test_ambiguous_or_unobserved_criterion_tokens_contribute_no_authority(
     result = _publish([payload], tmp_path)
     envelope = result.scenario_envelopes[0]
 
-    ambiguous = build_scenario_handoff(
+    ambiguous = build_scenario_handoff_v5(
         envelope,
         observed_operations=("process_refund", "schedule_payment"),
         environment_bound=True,
     )
-    absent = build_scenario_handoff(
+    absent = build_scenario_handoff_v5(
         envelope,
         observed_operations=("lookup_order",),
         environment_bound=True,
@@ -510,8 +512,8 @@ def test_unbound_handoff_records_the_operation_inventory_as_unknown(
         "observed operations."
     )
 
-    unbound = build_scenario_handoff(envelope, environment_bound=False)
-    bound = build_scenario_handoff(envelope, environment_bound=True)
+    unbound = build_scenario_handoff_v5(envelope, environment_bound=False)
+    bound = build_scenario_handoff_v5(envelope, environment_bound=True)
 
     assert unbound.assumptions_and_unknowns[-1] == unbound_unknown
     assert unbound.assumptions_and_unknowns[:-1] == bound.assumptions_and_unknowns

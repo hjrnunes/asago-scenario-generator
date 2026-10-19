@@ -37,8 +37,14 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
     is_bdi_length_retry_exhausted,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    build_scenario_handoff,
     handoff_ownership_violations,
+)
+from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
+    build_sibling_index,
+    render_and_or_tree,
+)
+from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
+    build_scenario_handoff_v5,
 )
 from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
@@ -559,11 +565,11 @@ def test_normal_draft_publishes_to_handoff_without_execution_content(tmp_path) -
         scenario_id=spec.scenario_id,
         scenario_spec=spec,
         narrative=narrative,
-        attack_tree=tree,
+        attack_tree=render_and_or_tree(spec, tree, build_sibling_index([spec])),
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
     )
-    handoff = build_scenario_handoff(envelope, loss_analysis=_loss_analysis())
+    handoff = build_scenario_handoff_v5(envelope, loss_analysis=_loss_analysis())
     payload = handoff.model_dump(mode="json")
     assert handoff.semantic_failure_criterion == PROPOSITION
     assert handoff.safe_alternative

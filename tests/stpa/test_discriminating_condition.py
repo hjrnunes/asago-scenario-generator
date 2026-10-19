@@ -58,8 +58,12 @@ from asago_scenario_generator.stpa.scenario_prod.condition_index import (
     StateIndex,
     id_prefix,
 )
-from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    build_scenario_handoff,
+from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
+    build_sibling_index,
+    render_and_or_tree,
+)
+from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
+    build_scenario_handoff_v5,
 )
 from asago_scenario_generator.stpa.scenario_prod.deduplication import (
     deduplicate_scenario_specs,
@@ -998,11 +1002,11 @@ def test_omitted_condition_reason_reaches_the_handoff(tmp_path) -> None:
         scenario_id=spec.scenario_id,
         scenario_spec=spec,
         narrative=narrative,
-        attack_tree=tree,
+        attack_tree=render_and_or_tree(spec, tree, build_sibling_index([spec])),
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
     )
-    handoff = build_scenario_handoff(
+    handoff = build_scenario_handoff_v5(
         envelope,
         loss_analysis=_loss_analysis(),
         observed_operations=("refund_payment",),

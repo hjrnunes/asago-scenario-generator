@@ -19,7 +19,6 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.cli import app
-from asago_scenario_generator.report.scenario_panels import panel_stats, tree_panel
 from asago_scenario_generator.stpa.models.attack_shape import AttackShape
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
@@ -399,31 +398,6 @@ def test_flat_factor_coverage_stays_strict() -> None:
     flat["branches"] = []
 
     assert not validate_tree_factor_evidence_coverage(flat, spec).passed
-
-
-# --- report -------------------------------------------------------------------
-
-
-def test_the_report_renders_an_and_or_tree_as_an_outline() -> None:
-    tree = tree_of(adversarial(), renamed(everyday(), "SCN-002", "Other."))
-
-    panel = tree_panel(tree)
-
-    assert panel.preview == "14 nodes · 1 other scenario · weak point FB-1-1"
-    body = str(panel.body)
-    for text in ("AT-SCN", "AT-STEP-1", "AT-ALT-1", "AND, in order", "OR", "AML.T0099"):
-        assert text in body
-    assert body.index("AT-COND") < body.index("AT-STEPS") < body.index("AT-FAIL")
-
-
-def test_panel_stats_counts_an_and_or_tree_as_not_flat() -> None:
-    run = SimpleNamespace(
-        scenarios={"SCN-001": SimpleNamespace(attack_tree=tree_of(adversarial()))},
-        features={},
-    )
-
-    assert panel_stats(run).flat == 0
-    assert panel_stats(run).and_or == 1
 
 
 # --- handoff ------------------------------------------------------------------

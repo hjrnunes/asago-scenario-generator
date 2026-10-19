@@ -53,7 +53,7 @@ def test_a_row_carries_the_facets_the_filters_use(tmp_path: Path) -> None:
 def test_a_scenario_opens_with_three_panels_with_their_anchors(tmp_path: Path) -> None:
     body = detail(shown(copy_run(tmp_path)), "SCN-001")
 
-    for panel in ("narrative", "tree", "gherkin"):
+    for panel in ("narrative", "path", "gherkin"):
         assert f'id="SCN-001-{panel}"' in body
 
 
@@ -107,13 +107,13 @@ def test_a_scenario_lists_its_own_requests_with_their_errors(tmp_path: Path) -> 
     assert "#155" in body and "#156" in body
 
 
-def test_the_introduction_counts_flat_trees_and_matching_features(
+def test_the_introduction_counts_attack_paths_and_matching_features(
     tmp_path: Path,
 ) -> None:
     html = shown(copy_run(tmp_path))
 
-    assert "8 of 8 attack trees are flat" in html
-    assert "6 have exactly one leaf" in html
+    assert "8 of 8 scenarios carry an attack path" in html
+    assert "6 have exactly one weak point" in html
     assert "8 of 8 feature files match" in html
 
 

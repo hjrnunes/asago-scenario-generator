@@ -8,7 +8,7 @@ import pytest
 
 from asago_scenario_generator.report.run_data import load_run
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
-from asago_scenario_generator.stpa.scenario_prod.handoff import ScenarioHandoffV4
+from asago_scenario_generator.stpa.scenario_prod.handoff import ScenarioHandoffV5
 from tests.helpers.generate_report_fixture import SCENARIOS, copy_run
 
 
@@ -16,7 +16,7 @@ def test_every_sidecar_loads_into_its_model(tmp_path: Path) -> None:
     run = load_run(copy_run(tmp_path))
 
     assert isinstance(run.loss, LossAnalysis)
-    assert all(isinstance(s, ScenarioHandoffV4) for s in run.scenarios.values())
+    assert all(isinstance(s, ScenarioHandoffV5) for s in run.scenarios.values())
     assert sorted(run.scenarios) == SCENARIOS
     assert run.manifest.run_status == "completed"
     assert run.testability is not None and len(run.testability) == len(SCENARIOS)
