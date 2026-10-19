@@ -117,7 +117,7 @@ qualification. Do not restore the retired command as a second semantic engine.
 
 The producer owns semantic scenario authority: STPA lineage, the selected
 failure criterion, safe alternatives, supported causal hypotheses, and the
-semantics-only `scenario-handoff-v4`. The producer does not publish concrete
+semantics-only `scenario-handoff-v5`. The producer does not publish concrete
 messages, setup instructions, detector expressions, or harness bindings.
 
 The consumer owns executable-artifact design through its target-free `generate`
@@ -249,10 +249,9 @@ generation failure.
 
 Each generated scenario is published as a versioned **scenario handoff**
 under `scenarios/` (`SCN-*.yaml` plus a matching `.feature` companion): the
-envelope over narrative, attack tree, Gherkin and necessary metadata defined
+envelope over narrative, attack path, Gherkin and necessary metadata defined
 by [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v4`; `--handoff-format v5` publishes
-`scenario-handoff-v5` instead, described below). `tool_call_condition_status` says whether
+(schema `scenario-handoff-v5`, described below). `tool_call_condition_status` says whether
 Stage 5 bound the discriminating condition to target facts, and, when it did,
 `tool_call_condition` carries the ready-to-evaluate condition. The required
 `attack_shape` key (closed enums, turn count 1-4 and identifiers, never attack
@@ -466,7 +465,9 @@ earlier failed one, its `calls.jsonl` line names that attempt in `retry_of`.
 report kit, with `report/stage-summary.json` beside it. `policy-coverage.json`
 (`data/contracts/policy-coverage/`) records where each policy risk stopped on
 its way to a scenario, and the report reads it. The report, the stage summary,
-and the coverage file are for people and for the orchestrator's run reports;
+and the coverage file are for people and for the orchestrator's run reports.
+The report's hazard section shows each hazard with the attack paths that reach
+it, and `report/attack-flow/` holds one Attack Flow bundle per reached hazard;
 the consumer reads none of them. A run no longer writes
 `synthesis-report.html`.
 
@@ -705,9 +706,14 @@ repair diagnostics. This is an additive schema change. Existing consumers may
 continue reading `stage_errors`, but successfully repaired SP1 diagnostics that
 were historically misclassified there now appear only in `stage_warnings`.
 
-Scenario publication renders narrative, attack-tree, and Gherkin summaries
-deterministically; it makes no model calls after Stage 5. These summaries
-describe test hypotheses, not observed outcomes.
+After Stage 5, each scenario passes through these model steps in order:
+`stage5_belief` states the controller's flawed belief for each causal factor,
+`stage5_shape` proposes the attack shape of an adversarial scenario,
+`stage6_narrative` writes the lead paragraph, and `stage6_gherkin` writes the
+Gherkin. Code checks every reply. The belief, narrative, and Gherkin steps
+each allow one correction and keep the deterministic text when a reply still
+fails; the shape step's fallback is described above. The narrative, attack
+path, and Gherkin describe test hypotheses, not observed outcomes.
 Stage 5 derives tool predicates from observed argument schemas and timing
 relationships from explained event handles. Missing quantitative facts stay
 unknown rather than receiving illustrative values.
@@ -715,17 +721,15 @@ unknown rather than receiving illustrative values.
 The artifact generator binds scenario meaning to a target during its own
 test design, as the handoff flow below describes.
 
-The normal product `generate` publishes the versioned **scenario handoff**: the envelope over narrative, attack tree, Gherkin and
+The normal product `generate` publishes the versioned **scenario handoff**: the envelope over narrative, attack path, Gherkin and
 necessary metadata defined by
 [`data/contracts/scenario-handoff/`](data/contracts/scenario-handoff/)
-(schema `scenario-handoff-v4`), written under `scenarios/` with its matching
-`.feature` companion.
-
-`--handoff-format v5` (default `v4`) publishes `scenario-handoff-v5` from the
-kit in `data/contracts/scenario-handoff/handoff-v5/`. It requires
-`--attack-tree-format and-or`. A v5 handoff carries `attack_path` (format
-`attack-path-v1`) where v4 carries `attack_tree`, keeps every other v4 field,
-and adds six fields that code derives from the scenario spec.
+(schema `scenario-handoff-v5`, kit in
+`data/contracts/scenario-handoff/handoff-v5/`), written under `scenarios/`
+with its matching `.feature` companion. Each run builds an AND/OR attack tree
+per scenario and publishes the scenario's `attack_path` (format
+`attack-path-v1`) reduced from it, beside the shared envelope fields and six
+fields that code derives from the scenario spec.
 
 `attack_path` is the scenario's own route to its hazard, reduced from the
 and-or tree by code (no request depends on it): `attacker` (absent for a
@@ -751,21 +755,18 @@ fields are:
   `forged_history`); empty for a functional scenario.
 - `worst_case_threat`: the scenario's losses.
 
-With `--model-narrative handoff`, a v5 `narrative` is the accepted model
-paragraph alone; v4 keeps the full write-up. Gherkin stays code-rendered in
-both versions unless you pass `--model-gherkin handoff`, which requires
-`--handoff-format v5`. In that mode, after narration, one `stage6_gherkin`
-request per published scenario asks the model for a declarative Gherkin reply
+The handoff `narrative` is the accepted model paragraph alone; `narratives.json`
+records each scenario's source, rejections, and reason. After narration, one
+`stage6_gherkin` request per published scenario asks the model for a declarative Gherkin reply
 (feature, scenario, and Given, When, Then, and unsafe steps that each cite the
 scenario's facts plus an appended safe-behavior fact). Code checks the reply,
 allows one correction, maps the steps to Gherkin keywords, and falls back to the
 code-rendered Gherkin when the reply fails, errors, or is refused. The
 `.feature` file and the handoff YAML come from the same Gherkin, and
 `gherkins.json` records each scenario's source, request count, rejections,
-reason, and reply. The default `--model-gherkin off` sends no request and keeps
-outputs byte-identical. A v5 handoff signs its digest under the `scenario-handoff-v5`domain, and generation fails when a source the six fields need is missing.
-`CONTRACT.lock` pins v4 at its top level and lists v5 under
-`additional_versions`. The handoff retains the semantic failure criterion, the
+reason, and reply. The handoff signs its digest under the `scenario-handoff-v5`
+domain, and generation fails when a source the six fields need is missing.
+`CONTRACT.lock` pins v5. The handoff retains the semantic failure criterion, the
 safe alternative, lineage, identity, and hypothesis framing, and publishes no
 prepared message, prepared history, delivery route, oracle selection, detector
 expression, judge prompt, or executable setup. The artifact generator reads
