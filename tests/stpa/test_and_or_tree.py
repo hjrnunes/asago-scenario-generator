@@ -69,12 +69,7 @@ from tests.stpa.sp1_helpers import MockLLMClient
 from tests.cli_helpers import PlainCliRunner
 from tests.stpa.test_narration import adversarial, everyday
 
-SCHEMA = json.loads(
-    (
-        Path(__file__).resolve().parents[2]
-        / "data/contracts/scenario-handoff/handoff-v4/schema.json"
-    ).read_text(encoding="utf-8")
-)
+SCHEMA = ScenarioHandoffV4.model_json_schema()
 DIRECT = AttackShape.model_validate(
     {
         **DIRECT_REPLY,

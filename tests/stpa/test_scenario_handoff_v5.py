@@ -8,7 +8,6 @@ scenario spec. v4 stays the default and byte-identical. Every test is offline.
 from __future__ import annotations
 
 import json
-import shutil
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -71,7 +70,6 @@ from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_and_or_tree import invoke_generate
-from tests.stpa.test_scenario_handoff_v4_kit import _generator
 from tests.stpa.test_narration import (
     INDIRECT,
     _inputs,
@@ -444,16 +442,10 @@ def test_the_v5_schema_file_is_the_models_schema_byte_for_byte() -> None:
     assert (KIT / "schema.json").read_text(encoding="utf-8") == rendered
 
 
-def test_the_v5_kit_holds_the_v4_fixture_names_and_more_invalid_cases() -> None:
-    v4 = CONTRACT_ROOT / "handoff-v4"
-    names = {path.name for path in (KIT / "valid").glob("*.json")}
+def test_the_kit_holds_the_attack_path_case_and_names_every_invalid_case() -> None:
     invalid = {path.name for path in (KIT / "invalid").glob("*.json")}
-    stated = {"adversarial-stated-beliefs.json", "functional-stated-belief.json"}
 
-    assert names == {path.name for path in (v4 / "valid").glob("*.json")} | stated
-    replaced = {"schema-attack-tree-not-object.json"}
-    assert {path.name for path in (v4 / "invalid").glob("*.json")} - replaced < invalid
-    assert replaced.isdisjoint(invalid)
+    assert "schema-attack-tree-not-object.json" not in invalid
     assert "schema-attack-path-not-object.json" in invalid
     assert set(_kit("expected-violations.json")) == {f"invalid/{n}" for n in invalid}
 
@@ -504,38 +496,21 @@ def test_the_v5_rules_reject_their_cases(name: str, codes: list[str]) -> None:
     assert handoff_schema_violations(payload) == codes
 
 
-def test_the_lock_pins_v4_at_the_top_and_lists_v5() -> None:
+def test_the_lock_pins_the_v5_kit_only() -> None:
     lock = json.loads((CONTRACT_ROOT / "CONTRACT.lock").read_text(encoding="utf-8"))
 
-    assert lock["handoff_schema_version"] == HANDOFF_SCHEMA_VERSION_V4
-    assert lock["additional_versions"] == [
-        {
-            "digest_domain": HANDOFF_DIGEST_DOMAIN_V5,
-            "handoff_schema_version": HANDOFF_SCHEMA_VERSION_V5,
-            "kit": "handoff-v5",
-            "metadata_fields": [
-                name
-                for name in ScenarioHandoffV5.model_fields
-                if name not in {"narrative", "attack_path", "gherkin"}
-            ],
-        }
+    assert lock["handoff_schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    assert lock["digest_domain"] == HANDOFF_DIGEST_DOMAIN_V5
+    assert "additional_versions" not in lock
+    assert lock["metadata_fields"] == [
+        name
+        for name in ScenarioHandoffV5.model_fields
+        if name not in {"narrative", "attack_path", "gherkin"}
     ]
-    assert any(name.startswith("handoff-v5/") for name in lock["files"])
-
-
-def test_the_generator_rebuilds_the_v5_kit_byte_for_byte(tmp_path: Path) -> None:
-    module = _generator(tmp_path)
-    shutil.rmtree(module.ROOT / "handoff-v5")
-
-    module.main()
-
-    for path in sorted(KIT.rglob("*")):
-        if path.is_file():
-            rebuilt = module.ROOT / "handoff-v5" / path.relative_to(KIT)
-            assert rebuilt.read_bytes() == path.read_bytes(), path.name
-    assert (module.ROOT / "CONTRACT.lock").read_bytes() == (
-        CONTRACT_ROOT / "CONTRACT.lock"
-    ).read_bytes()
+    assert {name.split("/")[0] for name in lock["files"]} == {
+        "handoff-v5",
+        "ownership-rules.json",
+    }
 
 
 # --- run ----------------------------------------------------------------------

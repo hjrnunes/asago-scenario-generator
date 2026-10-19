@@ -22,6 +22,7 @@ from pydantic import ValidationError
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_SCHEMA_VERSION_V4,
     ScenarioHandoffV4,
+    ScenarioHandoffV5,
     build_scenario_handoff,
     handoff_ownership_violations,
     verify_handoff_digest,
@@ -291,18 +292,18 @@ def test_handoff_without_failure_criterion_or_safe_alternative_is_rejected() -> 
     alternative fails validation — the ownership boundary requires both."""
     fixture_path = (
         Path(__file__).resolve().parents[2]
-        / "data/contracts/scenario-handoff/handoff-v4/valid/"
+        / "data/contracts/scenario-handoff/handoff-v5/valid/"
         "adversarial-observed-record.json"
     )
     document = json.loads(fixture_path.read_text(encoding="utf-8"))
-    ScenarioHandoffV4.model_validate(document)
+    ScenarioHandoffV5.model_validate(document)
 
     for missing_field in ("semantic_failure_criterion", "safe_alternative"):
         incomplete = {
             key: value for key, value in document.items() if key != missing_field
         }
         with pytest.raises(ValidationError):
-            ScenarioHandoffV4.model_validate(incomplete)
+            ScenarioHandoffV5.model_validate(incomplete)
 
 
 def test_handoff_digest_detects_tampering(tmp_path: Path) -> None:

@@ -1,4 +1,4 @@
-"""The scenario-handoff-v4 contract kit: fixtures, codes and reproducibility.
+"""The scenario-handoff-v5 contract kit: fixtures, codes and reproducibility.
 
 Every invalid fixture breaks one thing. The table below names the typed codes
 the kit records, the cross-field rule or field error the model reports, and
@@ -19,7 +19,7 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV4,
+    ScenarioHandoffV5,
     handoff_ownership_violations,
     handoff_schema_violations,
     verify_handoff_digest,
@@ -27,7 +27,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 
 ROOT = Path(__file__).resolve().parents[2]
 CONTRACT_ROOT = ROOT / "data/contracts/scenario-handoff"
-KIT = CONTRACT_ROOT / "handoff-v4"
+KIT = CONTRACT_ROOT / "handoff-v5"
 
 VALID = {
     "adversarial-condition-omitted.json",
@@ -38,13 +38,16 @@ VALID = {
     "adversarial-indirect-listing.json",
     "adversarial-indirect-policy-operator.json",
     "adversarial-observed-record.json",
+    "adversarial-stated-beliefs.json",
     "analytical-only.json",
     "functional-not-called.json",
     "functional-null-shape.json",
     "functional-record-unavailable.json",
+    "functional-stated-belief.json",
 }
 
 SHAPE = "schema_violation:attack_shape"
+PATH = "schema_violation:attack_path"
 ROOT_CODE = "schema_violation:<root>"
 
 # fixture -> (typed codes, rule named by the model error or None, schema rejects)
@@ -80,19 +83,19 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
         False,
     ),
     "ownership-oracle-kind-key.json": (
-        ["artifact_design_field:oracle_kind"],
+        ["artifact_design_field:oracle_kind", PATH],
         None,
-        False,
+        True,
     ),
     "ownership-oracle-observes-key.json": (
-        ["artifact_design_field:oracle_observes"],
+        ["artifact_design_field:oracle_observes", PATH],
         None,
-        False,
+        True,
     ),
     "ownership-oracle-basis-key.json": (
-        ["artifact_design_field:oracle_basis"],
+        ["artifact_design_field:oracle_basis", PATH],
         None,
-        False,
+        True,
     ),
     "ownership-deliver-this-message.json": (
         ["prose_hiding:ready_to_send_instruction"],
@@ -106,11 +109,11 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
     ),
     "ownership-judge-prompt.json": (["prose_hiding:judge_prompt"], None, False),
     "ownership-key-name-pattern.json": (
-        ["prose_hiding:detector_expression"],
+        ["prose_hiding:detector_expression", PATH],
         None,
-        False,
+        True,
     ),
-    "ownership-dotted-key.json": (["artifact_design_field:role"], None, False),
+    "ownership-dotted-key.json": (["artifact_design_field:role", PATH], None, True),
     "prepared-message-field.json": (
         ["prose_hiding:prepared_message_field"],
         None,
@@ -123,9 +126,9 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
         False,
     ),
     "stimulus-turn-field.json": (
-        ["artifact_design_field:stimulus_turns", "artifact_design_field:role"],
+        ["artifact_design_field:stimulus_turns", "artifact_design_field:role", PATH],
         None,
-        False,
+        True,
     ),
 }
 
@@ -140,11 +143,12 @@ def _validator() -> Draft202012Validator:
 
 def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
     assert {path.name for path in (KIT / "valid").glob("*.json")} == VALID
-    # The schema-* cases are listed in test_scenario_handoff_contract_kit.py.
+    # The schema-* cases are listed in test_scenario_handoff_contract_kit.py
+    # and the v5-* cases in test_scenario_handoff_v5.py.
     listed = {
         path.name
         for path in (KIT / "invalid").glob("*.json")
-        if not path.name.startswith("schema-")
+        if not path.name.startswith(("schema-", "v5-"))
     }
     assert listed == set(INVALID)
     assert len(INVALID) == 38
@@ -154,11 +158,11 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
 def test_valid_fixtures_pass_every_check_and_keep_their_digest(name: str) -> None:
     payload = _load(f"valid/{name}")
 
-    assert payload["schema_version"] == "scenario-handoff-v4"
+    assert payload["schema_version"] == "scenario-handoff-v5"
     assert list(_validator().iter_errors(payload)) == []
     assert handoff_schema_violations(payload) == []
     assert handoff_ownership_violations(payload) == []
-    verify_handoff_digest(ScenarioHandoffV4.model_validate(payload))
+    verify_handoff_digest(ScenarioHandoffV5.model_validate(payload))
     assert "attack_shape" in payload
 
 
@@ -192,19 +196,19 @@ def test_each_invalid_fixture_is_rejected_with_its_recorded_codes(name: str) -> 
     assert bool(list(_validator().iter_errors(payload))) is schema_rejects
     if rule is not None:
         with pytest.raises(ValidationError, match=rf"\b{rule}\b"):
-            ScenarioHandoffV4.model_validate(payload)
+            ScenarioHandoffV5.model_validate(payload)
 
 
 def test_every_invalid_fixture_breaks_one_thing_in_a_valid_base() -> None:
     names = {name for name in INVALID if name.startswith("shape-")}
     assert len(names) == 24
     for name in INVALID:
-        assert _load(f"invalid/{name}")["schema_version"] == "scenario-handoff-v4"
+        assert _load(f"invalid/{name}")["schema_version"] == "scenario-handoff-v5"
 
 
-def test_the_ownership_scan_still_catches_prose_in_a_v4_payload() -> None:
+def test_the_ownership_scan_still_catches_prose_in_a_payload() -> None:
     assert "turns:" in _load("invalid/narrative-turn-array.json")["narrative"]
-    leaf = json.dumps(_load("invalid/narrative-role-serialization.json")["attack_tree"])
+    leaf = json.dumps(_load("invalid/narrative-role-serialization.json")["attack_path"])
     assert "role: user" in leaf
 
 
@@ -217,7 +221,6 @@ def _generator(tmp: Path) -> ModuleType:
     spec.loader.exec_module(module)
     root = tmp / "scenario-handoff"
     shutil.copytree(CONTRACT_ROOT, root)
-    module.KIT_V4 = root / "handoff-v4"
     module.ROOT = root
     return module
 
@@ -226,7 +229,7 @@ def test_the_generator_reproduces_every_committed_kit_byte_for_byte(
     tmp_path: Path,
 ) -> None:
     module = _generator(tmp_path)
-    shutil.rmtree(module.KIT_V4)
+    shutil.rmtree(module.ROOT / module.KIT_NAME)
 
     module.main()
 

@@ -42,7 +42,6 @@ from tests.stpa.test_scenario_handoff_v5 import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-V4_SCHEMA = ROOT / "data/contracts/scenario-handoff/handoff-v4/schema.json"
 
 
 def _tree(spec: Any) -> dict[str, Any]:
@@ -272,12 +271,6 @@ def test_the_published_document_passes_the_schema_and_ownership_scan() -> None:
     assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
     assert handoff_schema_violations(document) == []
     assert handoff_ownership_violations(document) == []
-
-
-def test_the_v4_schema_is_still_the_v4_models_schema() -> None:
-    assert V4_SCHEMA.read_text(encoding="utf-8") == (
-        json.dumps(ScenarioHandoffV4.model_json_schema(), indent=2) + "\n"
-    )
 
 
 def test_the_kit_holds_the_path_cases() -> None:

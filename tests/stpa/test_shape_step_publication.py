@@ -6,7 +6,6 @@ replies first, then one shape reply per adversarial scenario.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -39,12 +38,7 @@ from tests.helpers.scenario_handoff_publication import (
 from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets
 
-SCHEMA = json.loads(
-    (
-        Path(__file__).resolve().parents[2]
-        / "data/contracts/scenario-handoff/handoff-v4/schema.json"
-    ).read_text(encoding="utf-8")
-)
+SCHEMA = ScenarioHandoffV4.model_json_schema()
 
 
 def publish(
