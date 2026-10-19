@@ -61,6 +61,8 @@ from .conditions import (
     _resolve_temporal_condition,
 )
 from .condition_claims import ConditionClaim, condition_claim_findings
+from .attacker_belief_copy import validate_stated_belief_reply
+from .flawed_belief import FlawedBeliefFrame
 from .issues import ExactIssueError, IssueCode, ValidationIssueError
 from .records import (
     Stage5Normalization,
@@ -122,6 +124,7 @@ def _validate_normal_provider_payload(
     target_observations: TargetObservationSnapshot | None = None,
     condition_required: bool = True,
     condition_universe: ConditionUniverse | None = None,
+    flawed_beliefs: FlawedBeliefFrame | None = None,
 ) -> _NormalDraftCheck:
     """Validate normal-path scenario semantics; never artifact feasibility.
 
@@ -180,6 +183,10 @@ def _validate_normal_provider_payload(
     _validate_context_condition_reference_closure(
         value.causal_factors, choices, context
     )
+    if flawed_beliefs is not None:
+        validate_stated_belief_reply(
+            value.attacker_bdi.beliefs, value.causal_factors, flawed_beliefs
+        )
     condition_outcome = None
     condition_omitted_reason = None
     if observation_contract is not None:

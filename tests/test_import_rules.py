@@ -587,6 +587,9 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "presentation": 1,
     # Tree-source collectors shared by presentation and validators.
     "tree_sources": 0,
+    # The v5 attack path reduces an and-or tree; the v5 handoff and the
+    # report read it.
+    "attack_path": 1,
     "_constants": 0,
     "context": 0,
     # Phase 3 content-surface facts: a pure leaf over the IO capability model.
@@ -601,6 +604,17 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "deduplication": 1,
     # Target-profile publication is an atomic IO writer over the profile model.
     "target_profile_publication": 2,
+    # The narrate step's model request and write-up reuse presentation's
+    # wording and the handoff's ownership check.
+    "narration": 2,
+    # The AND/OR attack tree reuses the narrate step's plain wording and
+    # attack steps.
+    "and_or_tree": 2,
+    # The v5 handoff fields reuse the narrate step's plain wording and
+    # attack steps on top of the v4 handoff.
+    "handoff_v5": 2,
+    # The model Gherkin request reuses the narrate step's facts and checks.
+    "model_gherkin": 2,
     "run": 3,
 }
 

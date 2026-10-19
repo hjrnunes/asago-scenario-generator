@@ -218,6 +218,8 @@ def _materialize_causal_factors(
             access_refs=declaration.access_refs,
             bounded_assumption=declaration.bounded_assumption,
             temporal_condition=declaration.temporal_condition,
+            flawed_belief=declaration.flawed_belief,
+            process_model_variable=declaration.process_model_variable,
         )
         for declaration in declarations
     ]

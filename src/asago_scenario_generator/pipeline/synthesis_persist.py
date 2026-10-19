@@ -119,12 +119,12 @@ def _persist_manifest(output_dir: Path, manifest: Any) -> Path:
     return path
 
 
-def _render_report(output_dir: Path) -> Path | None:
+def _render_report(output_dir: Path, hazard_view: str = "off") -> Path | None:
     """Render the generate report from the published sidecars; a failure never fails the run."""
     try:
         from asago_scenario_generator.report.generate_report import write_report
 
-        return write_report(output_dir).index
+        return write_report(output_dir, hazard_view).index
     except Exception as exc:  # noqa: BLE001 - report is read-only and non-fatal
         logger.warning("generate report failed: %s", exc)
         return None

@@ -1,9 +1,11 @@
 """SP3 run orchestration — Stage 5 → Stage 6 → Stage 7.
 
 Orchestrates the full SP3 pipeline:
-  Stage 5: BDI generation (1 LLM call per scenario)
+  Stage 5: BDI generation (1 LLM call per scenario), then with
+    --flawed-belief separate one stated-belief request per Stage 5 spec
   Stage 6: Deterministic narrative, attack tree and Gherkin summary, then the
-    scenario handoff (0 LLM calls)
+    scenario handoff (0 LLM calls, or 1 per published scenario plus at most
+    one correction with --model-gherkin handoff)
   Stage 7: Validators + eval metrics + coverage gap analysis (0 LLM calls)
 
 All LLM calls are logged to ``calls.jsonl``. A run manifest is written
@@ -89,12 +91,36 @@ from .context import build_scenario_generation_context
 from .realized_operation import realized_operation
 from .target_profile_publication import publish_execution_target_profile
 from .presentation import render_scenario_presentation
+from .attack_path import attack_path_errors, reduce_to_attack_path
+from .and_or_tree import (
+    AttackTreeFormat,
+    SiblingIndex,
+    build_sibling_index,
+    render_and_or_tree,
+)
+from .narration import (
+    NarrationMode,
+    narrate_scenarios,
+    narratives_payload,
+    render_writeup,
+    write_narratives,
+)
 from .handoff import (
-    ScenarioHandoffV4,
+    HandoffFormat,
+    ScenarioHandoff,
     Stage1aSource,
     build_scenario_handoff,
     handoff_ownership_violations,
     write_scenario_handoff,
+)
+from .handoff_v5 import build_scenario_handoff_v5
+from .stage5.belief_step import apply_belief_step
+from .stage5.flawed_belief import FlawedBeliefMode
+from .model_gherkin import (
+    GherkinMode,
+    gherkins_payload,
+    write_gherkins,
+    write_gherkins_file,
 )
 from .target_observations import (
     TARGET_OBSERVATIONS_FILENAME,
@@ -112,6 +138,7 @@ from .validators import (
     validate_bdi_grounding,
     validate_loss_hazard_id_references,
     validate_traceability,
+    validate_and_or_tree_structure,
     validate_tree_factor_evidence_coverage,
     validate_vulnerability_completeness,
 )
@@ -217,6 +244,11 @@ def run_sp3(
     stage_1a_source: Stage1aSource | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
     shape_config: ShapeStepConfig = ShapeStepConfig(),
+    narration_mode: NarrationMode = NarrationMode.OFF,
+    attack_tree_format: AttackTreeFormat = AttackTreeFormat.FLAT,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
+    model_gherkin: GherkinMode = GherkinMode.OFF,
+    flawed_belief: FlawedBeliefMode = FlawedBeliefMode.OFF,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -272,10 +304,54 @@ def run_sp3(
         shape_config: Switches for the shape step that runs after Stage 5
             compiles each adversarial spec. The default keeps the
             forged-transcript channel out of the shape request.
+        narration_mode: Where the model-written write-up goes. ``off``
+            sends no narrate request; ``report`` writes ``narratives.json``
+            and leaves the handoff unchanged; ``handoff`` also publishes each
+            accepted write-up as the handoff narrative.
+        attack_tree_format: The format of each handoff's ``attack_tree``.
+            ``flat`` keeps the flat list; ``and-or`` renders
+            ``and-or-tree-v1``, which names the run's other scenarios that
+            share a hazard. Code renders both; no request depends on it.
+        handoff_format: The published handoff version. ``v4`` is the
+            default; ``v5`` publishes the scenario's ``attack_path`` in place
+            of its ``attack_tree`` (so it requires ``attack_tree_format``
+            ``and-or``), adds the UCA, actor, causal factors,
+            preconditions, procedure and worst case threat, and with
+            ``narration_mode=handoff`` its narrative is the accepted
+            paragraph alone. No request depends on it.
+        model_gherkin: Whether each published scenario's Gherkin is
+            model-written. ``off`` sends no request; ``handoff`` sends one
+            request per published scenario after the narrate step, publishes
+            each accepted Gherkin, and writes ``gherkins.json``. ``handoff``
+            requires ``handoff_format=v5``.
+        flawed_belief: Whether each causal factor states the controller's
+            flawed belief and the process-model variable that holds it.
+            ``off`` changes no request; ``stated`` asks inside the Stage 5
+            request; ``separate`` keeps Stage 5 as ``off`` sends it and sends
+            one belief request per Stage 5 spec after it, writing
+            ``beliefs.json``. ``stated`` and ``separate`` require
+            ``handoff_format=v5``.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
     """
+    if (
+        handoff_format is HandoffFormat.V5
+        and attack_tree_format is not AttackTreeFormat.AND_OR
+    ):
+        raise ValueError(
+            "handoff_format=v5 requires attack_tree_format=and-or: the v5 "
+            "attack path reduces from the and-or tree"
+        )
+    if model_gherkin is GherkinMode.HANDOFF and handoff_format is not HandoffFormat.V5:
+        raise ValueError("model_gherkin=handoff requires handoff_format=v5")
+    if (
+        flawed_belief is not FlawedBeliefMode.OFF
+        and handoff_format is not HandoffFormat.V5
+    ):
+        raise ValueError(
+            f"flawed_belief={flawed_belief.value} requires handoff_format=v5"
+        )
     run_dir.mkdir(parents=True, exist_ok=True)
     effective_observation_contract = (
         observation_contract or default_observation_contract()
@@ -329,6 +405,11 @@ def run_sp3(
             stage_1a_source=stage_1a_source,
             condition_families=condition_families,
             shape_config=shape_config,
+            narration_mode=narration_mode,
+            attack_tree_format=attack_tree_format,
+            handoff_format=handoff_format,
+            model_gherkin=model_gherkin,
+            flawed_belief=flawed_belief,
         )
         scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
             inputs, stage_errors, candidate_builders
@@ -342,6 +423,7 @@ def run_sp3(
         enriched_threat_set,
         control_structure,
         loss_analysis,
+        handoff_format,
     )
 
     _write_manifest(
@@ -460,6 +542,53 @@ class _SP3Inputs:
     stage_1a_source: Stage1aSource | None
     condition_families: Sequence[CandidateFamilyPlan] | None
     shape_config: ShapeStepConfig
+    narration_mode: NarrationMode = NarrationMode.OFF
+    attack_tree_format: AttackTreeFormat = AttackTreeFormat.FLAT
+    handoff_format: HandoffFormat = HandoffFormat.V4
+    model_gherkin: GherkinMode = GherkinMode.OFF
+    flawed_belief: FlawedBeliefMode = FlawedBeliefMode.OFF
+
+
+def _narrate(
+    inputs: _SP3Inputs, specs: list[ScenarioSpec], *, paragraph_only: bool = False
+) -> dict[str, str]:
+    """Run the narrate step the mode asks for; return the handoff narratives.
+
+    Every mode but ``off`` writes ``narratives.json``. Only ``handoff``
+    returns write-ups, one per scenario whose reply code accepted; a scenario
+    that fell back keeps its deterministic narrative. With ``paragraph_only``
+    each returned narrative is the accepted paragraph alone, without the
+    framing, title, steps or misuse-case fields of the write-up.
+    """
+    mode = inputs.narration_mode
+    if mode is NarrationMode.OFF:
+        return {}
+    narrated = narrate_scenarios(
+        specs,
+        llm_client=inputs.llm_client,
+        run_dir=inputs.run_dir,
+        loader=inputs.loader,
+        temperature=inputs.temperature,
+    )
+    deterministic = {
+        spec.scenario_id: render_scenario_presentation(spec)[0] for spec in specs
+    }
+    write_narratives(
+        inputs.run_dir,
+        narratives_payload(specs, narrated, mode=mode, deterministic=deterministic),
+    )
+    if mode is not NarrationMode.HANDOFF:
+        return {}
+    by_id = {spec.scenario_id: spec for spec in specs}
+    return {
+        scenario_id: (
+            narration.paragraph
+            if paragraph_only
+            else render_writeup(by_id[scenario_id], facts, narration)
+        )
+        for scenario_id, (facts, narration) in narrated.items()
+        if narration.accepted
+    }
 
 
 def _run_stages_5_and_6(
@@ -493,7 +622,17 @@ def _run_stages_5_and_6(
         candidate_builders=candidate_builders,
         content_surface=content_surface_facts(inputs.capability_profile),
         condition_families=inputs.condition_families,
+        stated_beliefs=inputs.flawed_belief is FlawedBeliefMode.STATED,
     )
+    if inputs.flawed_belief is FlawedBeliefMode.SEPARATE:
+        scenario_specs = apply_belief_step(
+            scenario_specs,
+            llm_client=inputs.llm_client,
+            run_dir=run_dir,
+            control_structure=inputs.control_structure,
+            loader=inputs.loader,
+            temperature=inputs.temperature,
+        )
     functional_test_specs = [spec for spec in scenario_specs if spec.is_functional_test]
     shaped_specs = apply_shape_step(
         [spec for spec in scenario_specs if not spec.is_functional_test],
@@ -533,6 +672,24 @@ def _run_stages_5_and_6(
         _write_condition_families(
             run_dir, candidate_builders, inputs.condition_families, scenario_specs
         )
+    narratives = _narrate(
+        inputs,
+        deduplicated_specs,
+        paragraph_only=inputs.handoff_format is HandoffFormat.V5,
+    )
+    tree_siblings = (
+        build_sibling_index(deduplicated_specs)
+        if inputs.attack_tree_format is AttackTreeFormat.AND_OR
+        else None
+    )
+    gherkins = _model_gherkins(
+        inputs,
+        deduplicated_specs,
+        narratives=narratives,
+        tree_siblings=tree_siblings,
+        deduplication_by_scenario=deduplication_by_scenario,
+        observed_operations=observed_operations,
+    )
     _persist_functional_test_candidates(
         functional_test_specs,
         inputs.scenarios_dir,
@@ -544,6 +701,10 @@ def _run_stages_5_and_6(
         observed_operations=observed_operations,
         stage_1a_source=inputs.stage_1a_source,
         deduplication_by_scenario=deduplication_by_scenario,
+        narratives=narratives,
+        tree_siblings=tree_siblings,
+        handoff_format=inputs.handoff_format,
+        gherkins=gherkins,
     )
     scenario_envelopes = _collect_stage6_artifacts(
         shaped_specs,
@@ -556,8 +717,75 @@ def _run_stages_5_and_6(
         observed_operations=observed_operations,
         stage_1a_source=inputs.stage_1a_source,
         deduplication_by_scenario=deduplication_by_scenario,
+        narratives=narratives,
+        tree_siblings=tree_siblings,
+        handoff_format=inputs.handoff_format,
+        gherkins=gherkins,
     )
     return shaped_specs, scenario_envelopes, functional_test_specs
+
+
+def _model_gherkins(
+    inputs: _SP3Inputs,
+    specs: list[ScenarioSpec],
+    *,
+    narratives: Mapping[str, str],
+    tree_siblings: SiblingIndex | None,
+    deduplication_by_scenario: Mapping[str, ScenarioDeduplication],
+    observed_operations: tuple[str, ...] | None,
+) -> dict[str, GherkinSpec]:
+    """Request the model Gherkin of each publishable scenario; return the accepted.
+
+    A scenario is publishable when its code-rendered handoff builds; its
+    request carries that handoff's ``safe_alternative``. An accepted Gherkin
+    whose handoff does not build falls back too. Every mode but ``off``
+    writes ``gherkins.json``.
+    """
+    if inputs.model_gherkin is GherkinMode.OFF:
+        return {}
+
+    def handoff_for(spec: ScenarioSpec, gherkin: GherkinSpec | None) -> Any:
+        envelope = _run_stage6_for_spec(
+            spec, narratives.get(spec.scenario_id), tree_siblings, gherkin
+        )
+        return _checked_scenario_handoff(
+            envelope,
+            loss_analysis=inputs.loss_analysis,
+            environment_bound=inputs.execution_target_profile is not None,
+            enriched_operations=inputs.enriched_operations,
+            observed_operations=observed_operations,
+            stage_1a_source=inputs.stage_1a_source,
+            deduplication=deduplication_by_scenario.get(spec.scenario_id),
+            handoff_format=inputs.handoff_format,
+        )
+
+    publishable: list[tuple[ScenarioSpec, str]] = []
+    for spec in specs:
+        try:
+            handoff = handoff_for(spec, None)
+        except Exception:  # noqa: BLE001 - publication reports this failure
+            continue
+        publishable.append((spec, handoff.safe_alternative))
+    outcomes = write_gherkins(
+        publishable,
+        llm_client=inputs.llm_client,
+        run_dir=inputs.run_dir,
+        loader=inputs.loader,
+        temperature=inputs.temperature,
+    )
+    accepted: dict[str, GherkinSpec] = {}
+    for spec, _ in publishable:
+        outcome = outcomes[spec.scenario_id]
+        if outcome.gherkin is None:
+            continue
+        try:
+            handoff_for(spec, outcome.gherkin)
+        except Exception as exc:  # noqa: BLE001 - keep the code-rendered Gherkin
+            outcome.fall_back(f"the handoff with the model Gherkin failed: {exc}")
+            continue
+        accepted[spec.scenario_id] = outcome.gherkin
+    write_gherkins_file(inputs.run_dir, gherkins_payload(list(outcomes.values())))
+    return accepted
 
 
 def _candidate_outcome_builders(threats: list[Any]) -> list[_CandidateOutcomeBuilder]:
@@ -681,6 +909,7 @@ def _run_stage5_candidate(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
+    stated_beliefs: bool = False,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
     prior_error_count = len(stage_errors)
@@ -703,6 +932,7 @@ def _run_stage5_candidate(
             observation_contract=observation_contract,
             content_surface=content_surface,
             condition_family=condition_family,
+            stated_beliefs=stated_beliefs,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
@@ -735,6 +965,7 @@ def _collect_stage5_specs(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
+    stated_beliefs: bool = False,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
     specs: list[ScenarioSpec] = []
@@ -760,6 +991,7 @@ def _collect_stage5_specs(
             candidate_builders=candidate_builders,
             content_surface=content_surface,
             condition_family=plan.family if plan is not None else None,
+            stated_beliefs=stated_beliefs,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
@@ -791,16 +1023,48 @@ def _write_scenario_handoff_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
-) -> ScenarioHandoffV4:
+    handoff_format: HandoffFormat = HandoffFormat.V4,
+) -> ScenarioHandoff:
     """Write the versioned scenario handoff for one published scenario.
 
     The normal product run publishes scenario meaning only: narrative, attack
     tree, Gherkin and necessary metadata, with the semantic failure criterion
     and the safe alternative retained. No execution projection, prepared text,
     delivery route, oracle selection, detector expression or judge prompt is
-    written.
+    written. ``handoff_format`` selects the published version.
     """
-    handoff = build_scenario_handoff(
+    handoff = _checked_scenario_handoff(
+        envelope,
+        loss_analysis=loss_analysis,
+        environment_bound=environment_bound,
+        enriched_operations=enriched_operations,
+        observed_operations=observed_operations,
+        stage_1a_source=stage_1a_source,
+        deduplication=deduplication,
+        handoff_format=handoff_format,
+    )
+    write_scenario_handoff(handoff, scenarios_dir)
+    return handoff
+
+
+def _checked_scenario_handoff(
+    envelope: ScenarioEnvelope,
+    *,
+    loss_analysis: LossAnalysis | None,
+    environment_bound: bool,
+    enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
+    deduplication: ScenarioDeduplication | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
+) -> ScenarioHandoff:
+    """Build one scenario's handoff and reject artifact-design content."""
+    build = (
+        build_scenario_handoff_v5
+        if handoff_format is HandoffFormat.V5
+        else build_scenario_handoff
+    )
+    handoff = build(
         envelope,
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
@@ -814,7 +1078,6 @@ def _write_scenario_handoff_artifacts(
         raise ValueError(
             "scenario handoff carries artifact-design content: " + "; ".join(violations)
         )
-    write_scenario_handoff(handoff, scenarios_dir)
     return handoff
 
 
@@ -831,6 +1094,7 @@ def _publish_stage6_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> None:
     """Write one scenario companion set and assign its publication status."""
     try:
@@ -843,6 +1107,7 @@ def _publish_stage6_artifacts(
             observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
             deduplication=deduplication,
+            handoff_format=handoff_format,
         )
     except Exception as exc:  # noqa: BLE001 - isolate publication failure
         diagnostic = (
@@ -873,18 +1138,31 @@ def _persist_functional_test_candidates(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
+    narratives: Mapping[str, str] | None = None,
+    tree_siblings: SiblingIndex | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
+    gherkins: Mapping[str, GherkinSpec] | None = None,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
     A functional test is retained in the run for the owner's information.
     It renders deterministically (no provider calls), never prepares an
     execution projection, and never enters the bundle index.  A functional
-    scenario is *not* rejected for lacking an attacker.
+    scenario is *not* rejected for lacking an attacker.  A scenario in
+    ``narratives`` publishes that narrative instead of the rendered one.
+    With ``tree_siblings`` the tree is ``and-or-tree-v1``. A scenario in
+    ``gherkins`` publishes that Gherkin instead of the rendered one.
     """
     for spec in specs:
         prior_error_count = len(stage_errors)
         try:
             narrative, tree, gherkin = render_scenario_presentation(spec)
+            if tree_siblings is not None:
+                tree = render_and_or_tree(spec, tree, tree_siblings)
+            if narratives and spec.scenario_id in narratives:
+                narrative = narratives[spec.scenario_id]
+            if gherkins and spec.scenario_id in gherkins:
+                gherkin = gherkins[spec.scenario_id]
             envelope = assemble_envelope(
                 scenario_id=spec.scenario_id,
                 scenario_spec=spec,
@@ -906,6 +1184,7 @@ def _persist_functional_test_candidates(
                     if deduplication_by_scenario is not None
                     else None
                 ),
+                handoff_format=handoff_format,
             )
         except Exception as exc:  # noqa: BLE001 - isolate publication failure
             diagnostic = (
@@ -937,11 +1216,15 @@ def _render_stage6_candidate(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
+    narrative: str | None = None,
+    tree_siblings: SiblingIndex | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
+    gherkin: GherkinSpec | None = None,
 ) -> ScenarioEnvelope | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
     try:
-        envelope = _run_stage6_for_spec(spec)
+        envelope = _run_stage6_for_spec(spec, narrative, tree_siblings, gherkin)
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         diagnostic = f"Stage 6 rendering failed for {spec.scenario_id}: {exc}"
         stage_errors.append(diagnostic)
@@ -969,6 +1252,7 @@ def _render_stage6_candidate(
             if deduplication_by_scenario is not None
             else None
         ),
+        handoff_format=handoff_format,
     )
     return envelope
 
@@ -999,6 +1283,10 @@ def _collect_stage6_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
+    narratives: Mapping[str, str] | None = None,
+    tree_siblings: SiblingIndex | None = None,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
+    gherkins: Mapping[str, GherkinSpec] | None = None,
 ) -> list[ScenarioEnvelope]:
     """Concretize specs and write each accepted scenario companion set."""
     envelopes: list[ScenarioEnvelope] = []
@@ -1014,6 +1302,10 @@ def _collect_stage6_artifacts(
             observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
             deduplication_by_scenario=deduplication_by_scenario,
+            narrative=(narratives or {}).get(spec.scenario_id),
+            tree_siblings=tree_siblings,
+            handoff_format=handoff_format,
+            gherkin=(gherkins or {}).get(spec.scenario_id),
         )
         if envelope is not None:
             envelopes.append(envelope)
@@ -1069,11 +1361,14 @@ def _stage7_outputs(
     enriched_threat_set: EnrichedThreatSet,
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> list[str]:
     """Validate accepted scenarios and their traceability."""
     validation_errors: list[str] = []
     for envelope in scenario_envelopes:
-        _validate_envelope_stage7(envelope, loss_analysis, validation_errors)
+        _validate_envelope_stage7(
+            envelope, loss_analysis, validation_errors, handoff_format
+        )
     trace_errors = validate_traceability(
         scenario_envelopes, enriched_threat_set, control_structure, loss_analysis
     )
@@ -1104,6 +1399,7 @@ def _run_stage5_for_threat(
     observation_contract: ObservationContract | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
+    stated_beliefs: bool = False,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -1143,6 +1439,7 @@ def _run_stage5_for_threat(
         observation_contract=observation_contract,
         content_surface=content_surface,
         condition_family=condition_family,
+        stated_beliefs=stated_beliefs,
     )
     if failure is not None:
         return failure
@@ -1168,6 +1465,7 @@ def _stage5_bdi(
     observation_contract: ObservationContract | None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
+    stated_beliefs: bool = False,
 ) -> tuple[ScenarioSpec | None, _Stage5ThreatResult | None]:
     """Generate one assembled ScenarioSpec or one typed local failure."""
     try:
@@ -1184,6 +1482,7 @@ def _stage5_bdi(
             content_surface=content_surface,
             condition_family=condition_family,
             assembly=assembly,
+            stated_beliefs=stated_beliefs,
         )
     except ScenarioAssemblyError as exc:
         stage_errors.append(f"Stage 5: {exc}")
@@ -1325,15 +1624,28 @@ def _validate_stage5_spec(
     )
 
 
-def _run_stage6_for_spec(spec: ScenarioSpec) -> ScenarioEnvelope:
+def _run_stage6_for_spec(
+    spec: ScenarioSpec,
+    narrative_override: str | None = None,
+    tree_siblings: SiblingIndex | None = None,
+    gherkin_override: GherkinSpec | None = None,
+) -> ScenarioEnvelope:
     """Render one scenario's deterministic summary into its envelope.
 
     No execution projection is prepared: the scenario handoff does not carry
     one, so a scenario whose failure criterion has no downstream-compilable
     detector is still rendered and published, with the limitation reported
-    downstream.
+    downstream. ``narrative_override`` replaces the rendered narrative only.
+    With ``tree_siblings`` the tree is ``and-or-tree-v1``. ``gherkin_override``
+    replaces the rendered Gherkin.
     """
     narrative, tree, gherkin = render_scenario_presentation(spec)
+    if narrative_override is not None:
+        narrative = narrative_override
+    if gherkin_override is not None:
+        gherkin = gherkin_override
+    if tree_siblings is not None:
+        tree = render_and_or_tree(spec, tree, tree_siblings)
     return assemble_envelope(
         scenario_id=spec.scenario_id,
         scenario_spec=spec,
@@ -1348,22 +1660,43 @@ def _validate_envelope_stage7(
     envelope: ScenarioEnvelope,
     loss_analysis: LossAnalysis,
     validation_errors: list[str],
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> None:
-    """Run stage-local validators for a single envelope in Stage 7."""
+    """Run stage-local validators for a single envelope in Stage 7.
+
+    The tree checks run first. A v5 handoff publishes the tree's reduction, so
+    its path gets its own checks too.
+    """
     _extend_validation_errors(
         (
             validate_tree_factor_evidence_coverage(
                 envelope.attack_tree, envelope.scenario_spec
             ),
+            validate_and_or_tree_structure(envelope.attack_tree, envelope.scenario_id),
         ),
         validation_errors,
     )
+    if handoff_format is HandoffFormat.V5:
+        validation_errors.extend(_attack_path_errors(envelope))
 
     id_text = _envelope_gherkin_text(envelope)
     if id_text:
         id_result = validate_loss_hazard_id_references(id_text, loss_analysis)
         if not id_result.passed:
             validation_errors.extend(id_result.errors)
+
+
+def _attack_path_errors(envelope: ScenarioEnvelope) -> list[str]:
+    """Return the problems with the path a v5 handoff publishes for *envelope*."""
+    try:
+        path = reduce_to_attack_path(envelope.attack_tree)
+    except ValueError as exc:
+        return [f"{envelope.scenario_id}: {exc}"]
+    factor_ids = [factor.source_id for factor in envelope.scenario_spec.causal_factors]
+    return [
+        f"{envelope.scenario_id}: {error}"
+        for error in attack_path_errors(path, factor_ids)
+    ]
 
 
 def _extend_validation_errors(

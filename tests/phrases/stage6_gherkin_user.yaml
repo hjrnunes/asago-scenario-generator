@@ -1,0 +1,13 @@
+template: stage6_gherkin_user.j2
+cases:
+  gherkin:
+    required:
+      - '- F3 (safe behavior): The agent escalates the request.'
+      - '- "then": at least one step cites the safe behavior: F3'
+      - '- "unsafe": at least one step cites the failure: F2'
+      - '- "when": at least one step cites an attack step: F1'
+    ordered:
+      - - "Scenario kind: adversarial"
+        - "Facts, in causal order:"
+        - "Glossary of the structural identifiers in the facts:"
+        - "Required citations:"

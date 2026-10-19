@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Any, Iterable
 
 from asago_scenario_generator.report.run_data import RunData
@@ -48,6 +49,14 @@ def sendable(run: RunData, scenario_id: str) -> bool:
     """Tell whether authoring takes the scenario (testable and not a duplicate)."""
     row = None if run.testability is None else run.testability.get(scenario_id)
     return row is not None and row.status == "canonical"
+
+
+def natural_key(value: str) -> tuple[tuple[int, int, str], ...]:
+    """Sort key that orders the numbers inside an id by value: H-2 before H-10."""
+    return tuple(
+        (0, int(part), "") if part.isdigit() else (1, 0, part)
+        for part in re.split(r"(\d+)", value)
+    )
 
 
 def plural(count: int, singular: str, many: str | None = None) -> str:

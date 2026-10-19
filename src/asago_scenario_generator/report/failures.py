@@ -24,6 +24,7 @@ from asago_scenario_generator.report.slot_view import ICA_STAGE, SlotView
 
 OUTCOME_ORDER = {"lost": 0, "degraded": 1, "repaired": 2, "recovered": 3}
 REVIEW_STEP = "risk_coverage_review"
+BELIEF_STAGE = "stage5_belief"
 
 
 @dataclass(frozen=True)
@@ -165,6 +166,13 @@ def _classify(
         )
     if first.stage == ICA_STAGE:
         return _lost_slot_effect(chain, slots)
+    if first.stage == BELIEF_STAGE and first.scenario_id:
+        return (
+            "degraded",
+            f"{first.scenario_id} was published without a stated belief; its factors keep "
+            "the deterministic process-model text.",
+            f"the stated belief of {first.scenario_id}",
+        )
     if first.scenario_id:
         return _scenario_effect(run, first.scenario_id)
     return "lost", "No later request replaced this one.", ""

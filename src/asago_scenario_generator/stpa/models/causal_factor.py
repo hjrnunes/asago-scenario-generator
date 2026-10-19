@@ -107,6 +107,28 @@ def namespace_for(kind: CausalFactorKind) -> str:
     return _NAMESPACE_BY_KIND[kind]
 
 
+class ProcessModelVariable(BaseModel):
+    """The process-model variable that holds a factor's stated flawed belief.
+
+    ``pm_id`` names a variable of the selected control path; ``None`` records
+    a gap, where ``description`` describes the variable the controller would
+    need.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    pm_id: str | None
+    description: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_pm_namespace(self) -> ProcessModelVariable:
+        if self.pm_id is not None and not self.pm_id.startswith("PM-"):
+            raise ValueError(
+                f"process-model variable '{self.pm_id}' must use the PM namespace"
+            )
+        return self
+
+
 class CausalFactor(BaseModel):
     """A structural causal factor explaining an unsafe control action.
 
@@ -132,6 +154,14 @@ class CausalFactor(BaseModel):
     # condition leaf.  ``None`` explicitly means
     # that no separately supported temporal constraint was evidenced.
     temporal_condition: SemanticCondition | None = None
+    # Set only by a Stage 5 request that asks for stated flawed beliefs; left
+    # out when unset so earlier specs keep their bytes.
+    flawed_belief: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+    process_model_variable: ProcessModelVariable | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def validate_source_namespace(self) -> CausalFactor:
@@ -208,6 +238,7 @@ __all__ = [
     "CausalFactor",
     "CausalEvidenceStatus",
     "CausalFactorKind",
+    "ProcessModelVariable",
     "collect_source_ids",
     "namespace_for",
     "validate_causal_evidence_shape",

@@ -48,6 +48,9 @@ cases:
       - A negative or empty feedback result can be valid
       - clinical
       - Clinical
+      - flawed_belief
+      - Process-Model Variables
+      - variable_handle
   commit-operation:
     required:
       - *role-guidance
@@ -300,3 +303,24 @@ cases:
       - *call-precondition
       - *call-boundary
       - "`not_called` on a lookup"
+  stated-beliefs:
+    required:
+      - "## Process-Model Variables"
+      - "variable_handle: variable_1"
+      - "filled by code (variable_1); set process_model_variable and missing_variable to null"
+      - "your choice: the handle of the listed variable that holds the belief, or none with missing_variable"
+      - "Select only when the flawed belief is about this variable"
+      - >-
+        Select for failure or distortion while executing the selected control
+        action, or for a decision the controller makes on a belief that no
+        listed process-model variable holds.
+      - >-
+        Every factor also returns `flawed_belief`, `process_model_variable` and
+        `missing_variable` as the system instructions describe
+    forbidden:
+      - "Select only for an incorrect, missing, or stale controller belief/state."
+      - "Select only for failure or distortion while executing the selected control action."
+    ordered:
+      - - "## Allowed Causal-Factor Sources"
+        - "## Process-Model Variables"
+        - "## Temporal Reference Choices"

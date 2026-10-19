@@ -16,8 +16,11 @@ exclusion is verified by :func:`handoff_ownership_violations`, which is the
 ownership boundary enforced by the negative tests.
 
 Schema version: the builder emits :class:`ScenarioHandoffV4`
-(:data:`HANDOFF_SCHEMA_VERSION_V4`), the only handoff model. Its kit lives in
-``data/contracts/scenario-handoff/handoff-v4/``, and the consumer vendors it
+(:data:`HANDOFF_SCHEMA_VERSION_V4`) by default. ``--handoff-format v5``
+publishes :class:`ScenarioHandoffV5`, which carries ``attack_path`` in place of
+``attack_tree``, keeps every other v4 field, and adds the fields ``handoff_v5``
+derives. Each kit lives in
+``data/contracts/scenario-handoff/handoff-v<N>/``, and the consumer vendors it
 byte-for-byte, the same discipline as ``data/contracts/target-profile/``.
 """
 
@@ -26,8 +29,9 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from enum import Enum
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Self
 
 from pydantic import (
     BaseModel,
@@ -82,6 +86,8 @@ from asago_scenario_generator.stpa.tool_call_condition import (
 
 HANDOFF_SCHEMA_VERSION_V4 = "scenario-handoff-v4"
 HANDOFF_DIGEST_DOMAIN_V4 = "scenario-handoff-v4"
+HANDOFF_SCHEMA_VERSION_V5 = "scenario-handoff-v5"
+HANDOFF_DIGEST_DOMAIN_V5 = "scenario-handoff-v5"
 OPERATION_AUTHORITY_CRITERION = "criterion_observed_operation"
 OPERATION_AUTHORITY_ENRICHMENT = "verified_control_action_specialization"
 OPERATION_AUTHORITY_SAFE_OUTCOME = "safe_observable_outcome_operation"
@@ -124,6 +130,13 @@ def load_ownership_rules(
 
 
 _FORBIDDEN_KEYS, _FORBIDDEN_VALUE_PATTERNS = load_ownership_rules(OWNERSHIP_RULES_PATH)
+
+
+class HandoffFormat(str, Enum):
+    """Which handoff version a run publishes; ``v4`` is the default."""
+
+    V4 = "v4"
+    V5 = "v5"
 
 
 class HandoffModel(BaseModel):
@@ -232,46 +245,39 @@ _TOOL_CALL_CONDITION_PAIRING: dict[str, Any] = {
 }
 
 
-class ScenarioHandoffV4(HandoffModel):
-    """The versioned scenario handoff envelope (v4).
+class _HandoffHead(HandoffModel):
+    """The handoff fields before the attack representation, shared by v4 and v5.
 
-    v4 adds ``attack_shape``: the structure of an adversarial scenario's
-    attack (channel, planned turns, planted item), made only of closed enums,
-    bounded integers and identifiers, never attack text. The key is required;
-    its value is an object for ``kind: adversarial`` and ``null`` for
-    ``kind: functional``.
+    The v4 and v5 envelopes differ in one field: v4 carries the scenario's
+    ``attack_tree`` and v5 its ``attack_path``, each at the same position.
+    Pydantic orders inherited fields by base class, so the envelope is built
+    from this head, one attack representation, and ``_HandoffTail``.
     """
 
-    # The committed schema.json is this model's JSON schema, byte for byte, so
-    # the field order, this title, and the docstring above are contract.
-    # One schema object allows one if/then/else, so the two pairings move into
-    # allOf. Readers that use only the schema's required and properties keys
-    # are unaffected.
-    model_config = ConfigDict(
-        extra="forbid",
-        title="ScenarioHandoff",
-        json_schema_extra={
-            "allOf": [
-                _TOOL_CALL_CONDITION_PAIRING,
-                {
-                    "if": {
-                        "properties": {"kind": {"const": "adversarial"}},
-                        "required": ["kind"],
-                    },
-                    "then": {"properties": {"attack_shape": {"type": "object"}}},
-                    "else": {"properties": {"attack_shape": {"type": "null"}}},
-                },
-            ]
-        },
-    )
-
-    schema_version: Literal["scenario-handoff-v4"] = HANDOFF_SCHEMA_VERSION_V4
+    schema_version: str
     scenario_id: str
     scenario_version: int = 1
     kind: Literal["adversarial", "functional"]
     hypothesis_framing: str
     narrative: str
+
+    @field_validator("narrative", "hypothesis_framing")
+    @classmethod
+    def _require_text(cls, value: str) -> str:
+        if not value or not value.strip():
+            raise ValueError("handoff text field must not be blank")
+        return value
+
+
+class _HandoffTree(HandoffModel):
+    """The v4 attack representation: the flat or and-or attack tree."""
+
     attack_tree: dict
+
+
+class _HandoffTail(HandoffModel):
+    """The handoff fields after the attack representation, shared by v4 and v5."""
+
     gherkin: HandoffGherkin
     semantic_failure_criterion: StrictStr
     safe_alternative: StrictStr
@@ -318,20 +324,15 @@ class ScenarioHandoffV4(HandoffModel):
         ),
     )
 
-    @field_validator(
-        "semantic_failure_criterion",
-        "safe_alternative",
-        "narrative",
-        "hypothesis_framing",
-    )
+    @field_validator("semantic_failure_criterion", "safe_alternative")
     @classmethod
-    def _require_text(cls, value: str) -> str:
+    def _require_criterion_text(cls, value: str) -> str:
         if not value or not value.strip():
             raise ValueError("handoff text field must not be blank")
         return value
 
     @model_validator(mode="after")
-    def validate_condition_fields(self) -> "ScenarioHandoffV4":
+    def validate_condition_fields(self) -> Self:
         """Keep the condition, its check, and an omission note consistent."""
 
         if (self.discriminating_condition is None) != (self.condition_check is None):
@@ -348,7 +349,7 @@ class ScenarioHandoffV4(HandoffModel):
         return self
 
     @model_validator(mode="after")
-    def validate_tool_call_condition(self) -> "ScenarioHandoffV4":
+    def validate_tool_call_condition(self) -> Self:
         """Publish a tool-call condition exactly when the status is bound."""
 
         bound = self.tool_call_condition_status.status == TOOL_CALL_CONDITION_BOUND
@@ -360,7 +361,7 @@ class ScenarioHandoffV4(HandoffModel):
         return self
 
     @model_validator(mode="after")
-    def validate_attack_shape_kind(self) -> "ScenarioHandoffV4":
+    def validate_attack_shape_kind(self) -> Self:
         """R7: an adversarial scenario has a shape and a functional one has none."""
 
         if (self.kind == "adversarial") != (self.attack_shape is not None):
@@ -388,15 +389,363 @@ class ScenarioHandoffV4(HandoffModel):
         return data
 
 
-def handoff_payload_digest(payload: dict[str, Any]) -> str:
-    """Return the framed content digest for a v4 handoff payload."""
+class ScenarioHandoffV4(_HandoffTail, _HandoffTree, _HandoffHead):
+    """The versioned scenario handoff envelope (v4).
+
+    v4 adds ``attack_shape``: the structure of an adversarial scenario's
+    attack (channel, planned turns, planted item), made only of closed enums,
+    bounded integers and identifiers, never attack text. The key is required;
+    its value is an object for ``kind: adversarial`` and ``null`` for
+    ``kind: functional``.
+    """
+
+    # The committed schema.json is this model's JSON schema, byte for byte, so
+    # the field order, this title, and the docstring above are contract.
+    # One schema object allows one if/then/else, so the two pairings move into
+    # allOf. Readers that use only the schema's required and properties keys
+    # are unaffected.
+    model_config = ConfigDict(
+        extra="forbid",
+        title="ScenarioHandoff",
+        json_schema_extra={
+            "allOf": [
+                _TOOL_CALL_CONDITION_PAIRING,
+                {
+                    "if": {
+                        "properties": {"kind": {"const": "adversarial"}},
+                        "required": ["kind"],
+                    },
+                    "then": {"properties": {"attack_shape": {"type": "object"}}},
+                    "else": {"properties": {"attack_shape": {"type": "null"}}},
+                },
+            ]
+        },
+    )
+
+    schema_version: Literal["scenario-handoff-v4"] = HANDOFF_SCHEMA_VERSION_V4  # type: ignore[assignment]
+
+
+#: Handbook Table 2.3 column names (Leveson and Thomas 2018) for ``uca.type``.
+UcaType = Literal[
+    "not-providing-causes-hazard",
+    "providing-causes-hazard",
+    "too-early-too-late-or-out-of-order",
+    "stopped-too-soon-or-applied-too-long",
+]
+ProcedureChannel = Literal["tool_data", "user_turn", "forged_history"]
+HandoffText = Annotated[StrictStr, Field(min_length=1, pattern=r"\S")]
+StepId = Annotated[StrictStr, Field(pattern=r"^S\d{2}$")]
+
+
+class HandoffHazard(HandoffModel):
+    """One hazard the unsafe control action leads to."""
+
+    hazard_id: HandoffText
+    description: HandoffText
+
+
+class HandoffUca(HandoffModel):
+    """The unsafe control action in the STPA Handbook's five-part form."""
+
+    source: HandoffText
+    type: UcaType
+    control_action: HandoffText
+    context: HandoffText
+    statement: HandoffText
+    hazards: list[HandoffHazard] = Field(min_length=1)
+
+
+class HandoffActor(HandoffModel):
+    """The misuser of an adversarial scenario: who, and what they want."""
+
+    profile: HandoffText
+    goal: HandoffText
+
+
+class HandoffProcessModelVariable(HandoffModel):
+    """The process-model variable that holds a stated flawed belief.
+
+    ``id`` is ``null`` for a gap: no variable of the selected path holds the
+    belief, and ``description`` describes the variable the controller would
+    need.
+    """
+
+    id: Annotated[StrictStr, Field(pattern=r"^PM-\d+-\d+$")] | None
+    description: HandoffText
+
+
+class HandoffCausalFactor(HandoffModel):
+    """One causal factor: the flawed process-model belief and its flaw."""
+
+    source_id: HandoffText
+    process_model_belief: HandoffText | None
+    flaw: HandoffText
+    process_model_variable: HandoffProcessModelVariable | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Present when process_model_belief states the controller's flawed "
+            "belief: the variable that holds it, or a gap (id null) whose "
+            "description names the variable the controller would need."
+        ),
+    )
+
+
+class HandoffAtlasRef(HandoffModel):
+    """One MITRE ATLAS tactic or technique."""
+
+    id: Annotated[StrictStr, Field(pattern=r"^AML\.TA?\d{4}(\.\d{3})?$")]
+    name: HandoffText
+
+
+class HandoffProcedureStep(HandoffModel):
+    """One step of the attack procedure, with its ATLAS tactic and technique."""
+
+    step_id: StepId
+    leads_to: list[StepId] = Field(max_length=1)
+    tactic: HandoffAtlasRef | None
+    technique: HandoffAtlasRef | None
+    description: HandoffText
+    channel: ProcedureChannel
+
+
+PathNodeId = Annotated[StrictStr, Field(pattern=r"^AP-[A-Z]+(-[1-9]\d*)?$")]
+PathCategory = Literal["situation", "attacker_assumption", "weak_point"]
+PathEvidenceStatus = Literal[
+    "structural_failure", "reachable_capability", "bounded_assumption"
+]
+
+
+def _omit_none(**extra: Any) -> Any:
+    """Return a field that is absent from the published object when it is None."""
+    return Field(default=None, exclude_if=lambda value: value is None, **extra)
+
+
+class AttackPathAttacker(HandoffModel):
+    """Who the attacker is, what they want, and their plan."""
+
+    profile: HandoffText
+    goal: HandoffText | None = _omit_none()
+    plan: list[HandoffText]
+
+
+class AttackPathCondition(HandoffModel):
+    """One condition that must hold: the situation, an assumption, or a weak point."""
+
+    node_id: PathNodeId
+    category: PathCategory
+    label: HandoffText
+    source_ids: list[HandoffText]
+    evidence_status: PathEvidenceStatus | None = _omit_none()
+    belief: HandoffText | None = _omit_none()
+
+
+class AttackPathStep(HandoffModel):
+    """One attack step, with its ATLAS technique and the asset it touches."""
+
+    node_id: Annotated[StrictStr, Field(pattern=r"^AP-STEP-[1-9]\d*$")]
+    label: HandoffText
+    technique_id: HandoffText | None = _omit_none()
+    technique: HandoffText | None = _omit_none()
+    asset: HandoffText | None = _omit_none()
+
+
+class AttackPathSource(HandoffModel):
+    """A source id and its text: a violated constraint, a hazard, or a loss."""
+
+    source_id: HandoffText
+    label: HandoffText
+
+
+class AttackPathUnsafeAction(HandoffModel):
+    """The unsafe control action and the constraints it violates."""
+
+    node_id: Literal["AP-UCA"]
+    label: HandoffText
+    source_ids: list[HandoffText]
+    violates: list[AttackPathSource]
+
+
+class AttackPathFailure(HandoffModel):
+    """The observable failure and the outcome that would have been safe."""
+
+    node_id: Literal["AP-FAIL"]
+    label: HandoffText
+    safe_outcome: HandoffText | None = _omit_none()
+
+
+class AttackPathHazard(HandoffModel):
+    """The hazard the scenario reaches, with the losses it leads to."""
+
+    node_id: Literal["AP-HAZ"]
+    label: HandoffText
+    source_ids: list[HandoffText]
+    hazards: list[AttackPathSource]
+    losses: list[AttackPathSource]
+
+
+class AttackPath(HandoffModel):
+    """One scenario's route to its hazard, in the order it happens.
+
+    An adversarial scenario names its attacker and steps; a functional one has
+    neither. The node ids are what the authoring model cites.
+    """
+
+    format: Literal["attack-path-v1"]
+    attacker: AttackPathAttacker | None = _omit_none()
+    conditions: list[AttackPathCondition]
+    steps: list[AttackPathStep]
+    unsafe_action: AttackPathUnsafeAction
+    observable_failure: AttackPathFailure
+    hazard: AttackPathHazard
+    source_uncertainty: HandoffText | None = _omit_none()
+
+
+class _HandoffPath(HandoffModel):
+    """The v5 attack representation: the scenario's attack path."""
+
+    attack_path: AttackPath
+
+
+class ScenarioHandoffV5(_HandoffTail, _HandoffPath, _HandoffHead):
+    """The versioned scenario handoff envelope (v5).
+
+    v5 carries the scenario's ``attack_path`` where v4 carries its
+    ``attack_tree``, keeps every other v4 field, and adds ``uca``, ``actor``,
+    ``causal_factors``, ``preconditions``, ``procedure`` and
+    ``worst_case_threat``. ``actor`` is an object for ``kind: adversarial`` and
+    ``null`` for ``kind: functional``; a functional scenario has no
+    preconditions and no procedure.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        title="ScenarioHandoff",
+        json_schema_extra={
+            "allOf": [
+                _TOOL_CALL_CONDITION_PAIRING,
+                {
+                    "if": {
+                        "properties": {"kind": {"const": "adversarial"}},
+                        "required": ["kind"],
+                    },
+                    "then": {
+                        "properties": {
+                            "attack_shape": {"type": "object"},
+                            "actor": {"type": "object"},
+                            "procedure": {"minItems": 1},
+                        }
+                    },
+                    "else": {
+                        "properties": {
+                            "attack_shape": {"type": "null"},
+                            "actor": {"type": "null"},
+                            "procedure": {"maxItems": 0},
+                            "preconditions": {"maxItems": 0},
+                        }
+                    },
+                },
+            ]
+        },
+    )
+
+    schema_version: Literal["scenario-handoff-v5"] = HANDOFF_SCHEMA_VERSION_V5  # type: ignore[assignment]
+    uca: HandoffUca
+    actor: HandoffActor | None
+    causal_factors: list[HandoffCausalFactor] = Field(min_length=1)
+    preconditions: list[HandoffText]
+    procedure: list[HandoffProcedureStep]
+    worst_case_threat: HandoffText
+
+    @model_validator(mode="after")
+    def validate_v5_kind(self) -> "ScenarioHandoffV5":
+        """An adversarial scenario has an actor and a procedure; a functional one neither."""
+
+        if self.kind == "adversarial":
+            if self.actor is None or not self.procedure:
+                raise ValueError(
+                    "an adversarial v5 handoff has an actor and a procedure"
+                )
+        elif self.actor is not None or self.procedure or self.preconditions:
+            raise ValueError(
+                "a functional v5 handoff has a null actor, no preconditions "
+                "and no procedure"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def validate_procedure_chain(self) -> "ScenarioHandoffV5":
+        """Number the steps S00, S01, ... and link each to the next."""
+
+        ids = [f"S{index:02d}" for index in range(len(self.procedure))]
+        for index, step in enumerate(self.procedure):
+            if step.step_id != ids[index]:
+                raise ValueError(f"procedure step {index} must be {ids[index]}")
+            expected = ids[index + 1 : index + 2]
+            if step.leads_to != expected:
+                raise ValueError(
+                    f"procedure step {step.step_id} must lead to {expected}"
+                )
+            if (step.tactic is None) != (step.technique is None):
+                raise ValueError(
+                    f"procedure step {step.step_id} names a tactic exactly when "
+                    "it names a technique"
+                )
+        return self
+
+    @model_serializer(mode="wrap")
+    def _serialize_keeping_null_shape(
+        self, handler: SerializerFunctionWrapHandler, info: SerializationInfo
+    ) -> dict[str, Any]:
+        """Keep v4's null ``attack_shape`` and v5's required nulls under ``exclude_none``."""
+
+        data = handler(self)
+        shape = self.attack_shape
+        data["attack_shape"] = (
+            None if shape is None else shape.model_dump(mode=info.mode)
+        )
+        data["actor"] = (
+            None if self.actor is None else self.actor.model_dump(mode=info.mode)
+        )
+        data["causal_factors"] = [
+            item.model_dump(mode=info.mode) for item in self.causal_factors
+        ]
+        data["procedure"] = [item.model_dump(mode=info.mode) for item in self.procedure]
+        return {name: data[name] for name in type(self).model_fields if name in data}
+
+
+#: Either published handoff version.
+ScenarioHandoff = ScenarioHandoffV4 | ScenarioHandoffV5
+
+_DIGEST_DOMAINS = {
+    HANDOFF_SCHEMA_VERSION_V4: HANDOFF_DIGEST_DOMAIN_V4,
+    HANDOFF_SCHEMA_VERSION_V5: HANDOFF_DIGEST_DOMAIN_V5,
+}
+_HANDOFF_MODELS: dict[str, type[ScenarioHandoff]] = {
+    HANDOFF_SCHEMA_VERSION_V4: ScenarioHandoffV4,
+    HANDOFF_SCHEMA_VERSION_V5: ScenarioHandoffV5,
+}
+
+
+def handoff_model_for(payload: Mapping[str, Any]) -> type[ScenarioHandoff]:
+    """Return the handoff model a payload's ``schema_version`` names."""
     version = payload.get("schema_version")
-    if version != HANDOFF_SCHEMA_VERSION_V4:
+    model = _HANDOFF_MODELS.get(version)  # type: ignore[arg-type]
+    if model is None:
         raise ValueError(f"unsupported scenario handoff schema_version: {version!r}")
-    return compute_framed_digest(HANDOFF_DIGEST_DOMAIN_V4, payload)
+    return model
 
 
-def finalize_handoff(handoff: ScenarioHandoffV4) -> ScenarioHandoffV4:
+def handoff_payload_digest(payload: dict[str, Any]) -> str:
+    """Return the framed content digest for a v4 or v5 handoff payload."""
+    version = payload.get("schema_version")
+    domain = _DIGEST_DOMAINS.get(version)  # type: ignore[arg-type]
+    if domain is None:
+        raise ValueError(f"unsupported scenario handoff schema_version: {version!r}")
+    return compute_framed_digest(domain, payload)
+
+
+def finalize_handoff(handoff: ScenarioHandoff) -> ScenarioHandoff:
     """Return the handoff with its content digest computed and verified."""
     payload = handoff.model_dump(mode="json", exclude_none=True)
     payload.pop("content_digest", None)
@@ -406,7 +755,7 @@ def finalize_handoff(handoff: ScenarioHandoffV4) -> ScenarioHandoffV4:
     return handoff.model_copy(update={"content_digest": digest})
 
 
-def verify_handoff_digest(handoff: ScenarioHandoffV4) -> None:
+def verify_handoff_digest(handoff: ScenarioHandoff) -> None:
     """Fail closed when a handoff's recorded digest does not match its bytes."""
     payload = handoff.model_dump(mode="json", exclude_none=True)
     payload.pop("content_digest", None)
@@ -460,17 +809,18 @@ _OTHER_VERSION_VIOLATIONS = (
 
 
 def handoff_schema_violations(payload: dict[str, Any]) -> list[str]:
-    """Return ``schema_violation:<top-level field>`` codes for one v4 payload.
+    """Return ``schema_violation:<top-level field>`` codes for one v4 or v5 payload.
 
     A payload with any other ``schema_version`` gets
     :data:`_OTHER_VERSION_VIOLATIONS`, the codes the kit records for its
     unknown-version case. An empty list means the closed schema accepts
     the payload.
     """
-    if payload.get("schema_version") != HANDOFF_SCHEMA_VERSION_V4:
+    model = _HANDOFF_MODELS.get(payload.get("schema_version"))  # type: ignore[arg-type]
+    if model is None:
         return list(_OTHER_VERSION_VIOLATIONS)
     try:
-        ScenarioHandoffV4.model_validate(payload)
+        model.model_validate(payload)
     except ValidationError as exc:
         violations: list[str] = []
         for error in exc.errors():
@@ -750,6 +1100,7 @@ def _sourced_facts(
     envelope: ScenarioEnvelope,
     loss_analysis: LossAnalysis | None,
     stage_1a_source: Stage1aSource | None = None,
+    version: str = HANDOFF_SCHEMA_VERSION_V4,
 ) -> list[HandoffFact]:
     spec = envelope.scenario_spec
     context = spec.scenario_context
@@ -776,7 +1127,7 @@ def _sourced_facts(
                 "The unsafe outcome condition is expressed semantically; the "
                 "executable check is derived downstream."
             ),
-            source=(f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V4}"),
+            source=f"producer handoff contract {version}",
             authority="producer_contract",
         )
     )
@@ -872,10 +1223,40 @@ def build_scenario_handoff(
     constraint authorities derive from it and from the actual loss-analysis
     constraint records instead of asserting reviewed status.
     """
+    fields = scenario_handoff_fields(
+        envelope,
+        version=HANDOFF_SCHEMA_VERSION_V4,
+        loss_analysis=loss_analysis,
+        environment_bound=environment_bound,
+        enriched_operations=enriched_operations,
+        observed_operations=observed_operations,
+        stage_1a_source=stage_1a_source,
+        deduplication=deduplication,
+    )
+    return finalize_handoff(ScenarioHandoffV4(**fields))
+
+
+def scenario_handoff_fields(
+    envelope: ScenarioEnvelope,
+    *,
+    version: str,
+    loss_analysis: LossAnalysis | None = None,
+    environment_bound: bool = False,
+    enriched_operations: Mapping[str, str] | None = None,
+    observed_operations: tuple[str, ...] | None = None,
+    stage_1a_source: Stage1aSource | None = None,
+    deduplication: ScenarioDeduplication | None = None,
+) -> dict[str, Any]:
+    """Return the v4 fields of one scenario's handoff, as model arguments.
+
+    ``version`` is the published schema version; the contract fact names it.
+    The Gherkin block is the envelope's Gherkin spec.
+    """
     gherkin_spec: GherkinSpec = envelope.gherkin_spec
     status, tool_call_condition = _tool_call_condition(envelope)
     kind = "functional" if envelope.scenario_spec.is_functional_test else "adversarial"
-    handoff = ScenarioHandoffV4(
+    return dict(
+        schema_version=version,
         scenario_id=envelope.scenario_id,
         kind=kind,
         attack_shape=_attack_shape(envelope, kind),
@@ -899,7 +1280,7 @@ def build_scenario_handoff(
         documented_operations=_documented_operations(
             envelope, enriched_operations, observed_operations
         ),
-        sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source),
+        sourced_facts=_sourced_facts(envelope, loss_analysis, stage_1a_source, version),
         assumptions_and_unknowns=_assumptions_and_unknowns(envelope, environment_bound),
         observation=_observation_metadata(envelope),
         discriminating_condition=envelope.scenario_spec.discriminating_condition,
@@ -908,7 +1289,6 @@ def build_scenario_handoff(
         tool_call_condition_status=status,
         tool_call_condition=tool_call_condition,
     )
-    return finalize_handoff(handoff)
 
 
 def _attack_shape(envelope: ScenarioEnvelope, kind: str) -> AttackShape | None:
@@ -943,7 +1323,7 @@ def _tool_call_condition(
 
 
 def write_scenario_handoff(
-    handoff: ScenarioHandoffV4,
+    handoff: ScenarioHandoff,
     scenarios_dir: Path,
 ) -> tuple[Path, Path]:
     """Write the handoff YAML and its declarative ``.feature`` companion."""
@@ -961,27 +1341,41 @@ __all__ = [
     "AUTHORITY_SUPPLIED_PROPOSED",
     "AUTHORITY_SUPPLIED_REVIEWED",
     "AUTHORITY_UNSOURCED",
+    "AttackPath",
     "HANDOFF_DIGEST_DOMAIN_V4",
+    "HANDOFF_DIGEST_DOMAIN_V5",
     "HANDOFF_SCHEMA_VERSION_V4",
+    "HANDOFF_SCHEMA_VERSION_V5",
     "HYPOTHESIS_FRAMING",
     "OPERATION_AUTHORITY_CRITERION",
     "OPERATION_AUTHORITY_ENRICHMENT",
     "OPERATION_AUTHORITY_SAFE_OUTCOME",
     "OWNERSHIP_RULES_PATH",
+    "HandoffActor",
+    "HandoffAtlasRef",
+    "HandoffCausalFactor",
     "HandoffFact",
+    "HandoffFormat",
     "HandoffGherkin",
+    "HandoffHazard",
     "HandoffLineage",
     "HandoffObservation",
     "HandoffOperation",
+    "HandoffProcedureStep",
     "HandoffRule",
+    "HandoffUca",
+    "ScenarioHandoff",
     "ScenarioHandoffV4",
+    "ScenarioHandoffV5",
     "Stage1aSource",
     "build_scenario_handoff",
     "finalize_handoff",
     "handoff_ownership_violations",
+    "handoff_model_for",
     "handoff_payload_digest",
     "handoff_schema_violations",
     "load_ownership_rules",
+    "scenario_handoff_fields",
     "verify_handoff_digest",
     "write_scenario_handoff",
 ]

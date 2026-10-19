@@ -6,6 +6,9 @@ from typing import Any
 
 from asago_scenario_generator.stpa.models.scenario_spec import DefenderBDI
 
+# The ``format`` value of an AND/OR attack tree; a flat tree has no ``format``.
+AND_OR_TREE_FORMAT = "and-or-tree-v1"
+
 
 def defender_tree_sources(defender: DefenderBDI) -> set[str]:
     """Collect exact source IDs grounded by defender BDI."""

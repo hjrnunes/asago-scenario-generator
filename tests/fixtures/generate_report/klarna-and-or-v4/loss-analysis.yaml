@@ -1,0 +1,373 @@
+risk_card_losses:
+- loss_id: L-3
+  description: Execution of fraudulent or unauthorized financial transactions, such
+    as unauthorized refunds or modified payment schedules, facilitated by AI manipulation
+    or errors.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-dangerous-use
+  - atlas-hallucination
+  - credo-risk-026
+  - mit-ai-risk-subdomain-4.3
+- loss_id: L-6
+  description: Violations of financial services regulations, leading to legal penalties
+    or fines due to incorrect information regarding fees, policies, or payment terms.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-over-or-under-reliance
+  - credo-risk-021
+  - credo-risk-023
+  - mit-ai-risk-subdomain-3.1
+  - mit-ai-risk-subdomain-7.3
+- loss_id: L-5
+  description: Unauthorized disclosure or distribution of customer Personally Identifiable
+    Information (PII) through the conversational interface.
+  provenance: risk_card
+  source_risk_cards:
+  - ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+  - ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+  - atlas-revealing-confidential-information
+  - credo-risk-038
+- loss_id: L-2
+  description: Unauthorized or erroneous processing of sensitive financial records,
+    such as transaction histories or payment plans.
+  provenance: risk_card
+  source_risk_cards:
+  - ai-risk-taxonomy-unauthorized-processing---financial-records
+  - credo-risk-038
+- loss_id: L-1
+  description: Implementation of unfair or biased business practices resulting from
+    biased AI outputs across demographic groups.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-output-bias
+  - credo-risk-010
+  - mit-ai-risk-subdomain-1.1
+- loss_id: L-4
+  description: Legal challenges or invalidation of proprietary claims due to copyright
+    infringement in generated content.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-copyright-infringement
+  - atlas-non-disclosure
+  - credo-risk-023
+  - credo-risk-024
+  - credo-risk-034
+- loss_id: L-7
+  description: Transmission of confidential organizational data or sensitive personal
+    information to the third-party model provider via prompts.
+  provenance: risk_card
+  source_risk_cards:
+  - atlas-confidential-data-in-prompt
+use_case_losses:
+- loss_id: L-8
+  description: Failure to hand over complex or regulated customer queries to a human
+    agent, leading to unresolved or non-compliant customer issues.
+  provenance: use_case
+  source_risk_cards: []
+- loss_id: L-9
+  description: Unauthorized or incorrect modification of customer payment schedules
+    (installments), causing financial distress or plan misalignment.
+  provenance: use_case
+  source_risk_cards: []
+hazards:
+- hazard_id: H-6
+  description: The assistant executes the `process_refund` operation with incorrect
+    amounts or for ineligible orders due to hallucination or manipulation.
+  related_losses:
+  - L-3
+- hazard_id: H-2
+  description: The assistant provides incorrect or ungrounded information about fees
+    or policies via the `retrieve_policy` RAG system.
+  related_losses:
+  - L-6
+- hazard_id: H-7
+  description: The assistant reveals the `session:authenticated_customer_id` or other
+    PII in its response to an unauthorized recipient or through improper data retrieval.
+  related_losses:
+  - L-5
+- hazard_id: H-5
+  description: The assistant accesses or modifies financial records in the Klarna
+    backend that do not belong to the `session:authenticated_customer_id`.
+  related_losses:
+  - L-2
+  - L-5
+- hazard_id: H-1
+  description: The foundation model generates responses that reinforce stereotypes
+    or show disparate error rates during customer interactions.
+  related_losses:
+  - L-1
+- hazard_id: H-4
+  description: The assistant generates conversational text or structured data that
+    constitutes an unauthorized reproduction of protected works.
+  related_losses:
+  - L-4
+- hazard_id: H-3
+  description: Sensitive Klarna internal data is included in the prompt sent to the
+    OpenAI foundation model.
+  related_losses:
+  - L-7
+- hazard_id: H-8
+  description: The assistant fails to trigger the `operation:escalate_to_human` when
+    a query involves regulated topics or high ambiguity, despite policy requirements.
+  related_losses:
+  - L-8
+- hazard_id: H-9
+  description: The assistant executes `operation:schedule_payment` with incorrect
+    `next_due` dates or `plan_id` parameters that do not align with the customer's
+    actual plan.
+  related_losses:
+  - L-9
+- hazard_id: H-10
+  description: The assistant provides details or information that are not on the approved
+    information whitelist.
+  related_losses:
+  - L-6
+security_constraints:
+- constraint_id: SC-6
+  rule: The assistant must only process refunds where the amount does not exceed the
+    remaining balance on the order.
+  related_hazards:
+  - H-6
+  applies_when:
+  - a refund is requested
+  - the order is eligible
+  behavior_class: unauthorized_write
+  description: 'The assistant must only process refunds where the amount does not
+    exceed the remaining balance on the order. Applies when: a refund is requested;
+    the order is eligible.'
+  obligations:
+  - obligation_id: O1
+    kind: forbidden
+    behavior: processing a refund exceeding the remaining balance
+    rule_span: amount does not exceed the remaining balance on the order
+    violated_via: unknown
+  direction_authority: proposed
+- constraint_id: SC-5
+  rule: The assistant must only provide policy information derived from the `retrieve_policy`
+    tool and must escalate if no approved snippet is found.
+  related_hazards:
+  - H-2
+  applies_when:
+  - the query concerns fees, payments, or eligibility
+  - no snippet is returned
+  behavior_class: wrong_information
+  description: 'The assistant must only provide policy information derived from the
+    `retrieve_policy` tool and must escalate if no approved snippet is found. Applies
+    when: the query concerns fees, payments, or eligibility; no snippet is returned.'
+  obligations:
+  - obligation_id: O1
+    kind: required
+    behavior: escalate regulated topics instead of improvising
+    rule_span: must escalate if no approved snippet is found
+    realized_by: unknown
+  direction_authority: proposed
+- constraint_id: SC-3
+  rule: The assistant must only access account details or order history where the
+    `state:orders.customer_id` matches the `session:authenticated_customer_id`.
+  related_hazards:
+  - H-7
+  - H-5
+  applies_when:
+  - the assistant performs a lookup or read operation
+  behavior_class: disclosure
+  description: 'The assistant must only access account details or order history where
+    the `state:orders.customer_id` matches the `session:authenticated_customer_id`.
+    Applies when: the assistant performs a lookup or read operation.'
+  obligations:
+  - obligation_id: O1
+    kind: forbidden
+    behavior: returning data for a non-authenticated customer
+    rule_span: matches the `session:authenticated_customer_id`
+    violated_via: unknown
+  direction_authority: proposed
+- constraint_id: SC-1
+  rule: The assistant must produce neutral and non-discriminatory responses.
+  related_hazards:
+  - H-1
+  applies_when: []
+  behavior_class: harmful_or_discriminatory_output
+  description: The assistant must produce neutral and non-discriminatory responses.
+- constraint_id: SC-4
+  rule: The assistant must not generate content that reproduces protected copyrighted
+    works.
+  related_hazards:
+  - H-4
+  applies_when: []
+  behavior_class: wrong_information
+  description: The assistant must not generate content that reproduces protected copyrighted
+    works.
+  obligations:
+  - obligation_id: O1
+    kind: forbidden
+    behavior: reproducing protected works
+    rule_span: not generate content that reproduces protected copyrighted works
+    violated_via: unknown
+  direction_authority: proposed
+- constraint_id: SC-2
+  rule: The assistant must not include sensitive organizational data in prompts sent
+    to the third-party model.
+  related_hazards:
+  - H-3
+  applies_when:
+  - a prompt is constructed for the foundation model
+  behavior_class: disclosure
+  description: 'The assistant must not include sensitive organizational data in prompts
+    sent to the third-party model. Applies when: a prompt is constructed for the foundation
+    model.'
+  obligations:
+  - obligation_id: O1
+    kind: forbidden
+    behavior: including sensitive data in the prompt
+    rule_span: must not include sensitive organizational data in prompts
+    violated_via: unknown
+  direction_authority: proposed
+- constraint_id: SC-7
+  rule: The assistant must trigger an escalation to a human agent when the query involves
+    regulated topics or when no approved policy snippet is retrieved.
+  related_hazards:
+  - H-8
+  applies_when:
+  - the query concerns fees, payments, or eligibility
+  - the retrieved policy snippet is empty
+  behavior_class: missed_escalation
+  description: 'The assistant must trigger an escalation to a human agent when the
+    query involves regulated topics or when no approved policy snippet is retrieved.
+    Applies when: the query concerns fees, payments, or eligibility; the retrieved
+    policy snippet is empty.'
+  obligations:
+  - obligation_id: O1
+    kind: required
+    behavior: trigger an escalation to a human agent
+    rule_span: must trigger an escalation to a human agent
+    realized_by: tool_call
+  direction_authority: proposed
+- constraint_id: SC-8
+  rule: The assistant must only modify payments using a `plan_id` and `next_due` date
+    that correspond to the `session:authenticated_customer_id`'s existing `payment_plans`.
+  related_hazards:
+  - H-9
+  applies_when:
+  - the assistant executes `operation:schedule_payment`
+  behavior_class: unauthorized_write
+  description: 'The assistant must only modify payments using a `plan_id` and `next_due`
+    date that correspond to the `session:authenticated_customer_id`''s existing `payment_plans`.
+    Applies when: the assistant executes `operation:schedule_payment`.'
+  obligations:
+  - obligation_id: O1
+    kind: required
+    behavior: use a `plan_id` and `next_due` date that correspond to the authenticated
+      customer's existing plans
+    rule_span: must only modify payments using a `plan_id` and `next_due` date that
+      correspond to the `session:authenticated_customer_id`'s existing `payment_plans`
+    realized_by: tool_call
+  direction_authority: proposed
+- constraint_id: SC-9
+  rule: The system must not go into details that are not on the approved information
+    whitelist.
+  related_hazards:
+  - H-10
+  applies_when: []
+  behavior_class: wrong_information
+  description: The system must not go into details that are not on the approved information
+    whitelist.
+risk_dispositions:
+- risk_ref: credo-risk-026
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: atlas-hallucination
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: credo-risk-010
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: credo-risk-021
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: credo-risk-016
+  disposition: not_applicable
+  loss_ids: []
+  reason: The risk describes user behavior patterns rather than direct system-level
+    losses in this context.
+- risk_ref: ai-risk-taxonomy-unauthorized-processing---pii-(personal-identifiable-information)
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: ai-risk-taxonomy-unauthorized-processing---financial-records
+  disposition: cited
+  loss_ids:
+  - L-2
+- risk_ref: ai-risk-taxonomy-unauthorized-distribution---pii-(personal-identifiable-information)
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: mit-ai-risk-subdomain-5.1
+  disposition: not_applicable
+  loss_ids: []
+  reason: This describes social/psychological risks to users which are not direct
+    system-level security losses.
+- risk_ref: atlas-copyright-infringement
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: atlas-revealing-confidential-information
+  disposition: cited
+  loss_ids:
+  - L-5
+- risk_ref: credo-risk-024
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: mit-ai-risk-subdomain-3.1
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: mit-ai-risk-subdomain-4.3
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: credo-risk-023
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: atlas-non-disclosure
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: atlas-dangerous-use
+  disposition: cited
+  loss_ids:
+  - L-3
+- risk_ref: credo-risk-038
+  disposition: cited
+  loss_ids:
+  - L-5
+  - L-2
+- risk_ref: atlas-output-bias
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: mit-ai-risk-subdomain-1.1
+  disposition: cited
+  loss_ids:
+  - L-1
+- risk_ref: credo-risk-034
+  disposition: cited
+  loss_ids:
+  - L-4
+- risk_ref: mit-ai-risk-subdomain-7.3
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: atlas-over-or-under-reliance
+  disposition: cited
+  loss_ids:
+  - L-6
+- risk_ref: atlas-confidential-data-in-prompt
+  disposition: cited
+  loss_ids:
+  - L-7

@@ -29,6 +29,7 @@ GROUPS: tuple[tuple[str, str, Callable[[str], bool]], ...] = (
     ),
     ("verification", "Finding verification", lambda s: "ica_hazard" in s),
     ("scenario-writing", "Scenario writing", lambda s: s == "stage_5"),
+    ("stated-beliefs", "Stated beliefs", lambda s: s == "stage5_belief"),
     ("attack-shape", "Attack shape", lambda s: s == "stage5_shape"),
 )
 

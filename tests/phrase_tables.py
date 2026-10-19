@@ -27,6 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
 from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 
 import yaml
@@ -65,8 +66,26 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
 from asago_scenario_generator.stpa.scenario_prod._constants import (
     PROMPTS_DIR as STAGE5_PROMPTS_DIR,
 )
+from asago_scenario_generator.stpa.scenario_prod.model_gherkin import (
+    render_gherkin_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.narration import (
+    Fact,
+    ScenarioFacts,
+    render_narration_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.belief_step import (
+    belief_request,
+    render_belief_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.flawed_belief import (
+    build_flawed_belief_frame,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
+    _causal_source_choices,
 )
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservation,
@@ -81,10 +100,12 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 from asago_scenario_generator.stpa.target_realization.provider import (
     PROMPTS_DIR as TARGET_REALIZATION_PROMPTS_DIR,
 )
+from tests.helpers.belief_step import belief_spec
 from tests.helpers.normal_authoring_wire import (
     _record_observations,
     _target_operation,
     _tool_call_action_context,
+    _wrong_timing_assembly,
     _wrong_timing_context,
 )
 from tests.stpa.condition_prompt_fixture import (
@@ -113,6 +134,9 @@ PROMPT_DIRS = (
 )
 
 _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
+_NARRATE_TEMPLATES = ("stage6_narrate_system.j2", "stage6_narrate_user.j2")
+_GHERKIN_TEMPLATES = ("stage6_gherkin_system.j2", "stage6_gherkin_user.j2")
+_BELIEF_TEMPLATES = ("stage5_belief_system.j2", "stage5_belief_user.j2")
 
 # Stage 1a user templates take the use case and the existing records; the
 # system templates ignore these arguments.
@@ -376,6 +400,93 @@ def _stage5(
     return render
 
 
+def _stated_beliefs_facts() -> dict[str, object]:
+    context = _wrong_timing_context()
+    structure = _wrong_timing_assembly(context).control_structure
+    return {
+        "flawed_beliefs": build_flawed_belief_frame(
+            _causal_source_choices(context), context, structure
+        )
+    }
+
+
+def _narrate_stated() -> Callable[[str], str]:
+    facts = ScenarioFacts(
+        scenario_id="SCN-001",
+        kind="adversarial",
+        facts=(
+            Fact("F1", "situation", "RESP-1 receives a refund request"),
+            Fact(
+                "F2",
+                "agent belief",
+                "The agent wrongly believes that the refund is for the caller.",
+            ),
+            Fact("F3", "weak point", "Feedback is delayed."),
+        ),
+        glossary=(("RESP-1", "Handle customer service inquiries."),),
+        coverage=(("the weak point", ("weak point", "agent belief")),),
+        stated_beliefs=True,
+    )
+
+    def render(template: str) -> str:
+        return dict(zip(_NARRATE_TEMPLATES, render_narration_prompts(facts)))[template]
+
+    return render
+
+
+def _narrate() -> Callable[[str], str]:
+    facts = ScenarioFacts(
+        scenario_id="SCN-001",
+        kind="adversarial",
+        facts=(
+            Fact("F1", "situation", "RESP-1 receives a refund request"),
+            Fact("F2", "weak point", "Feedback is delayed."),
+        ),
+        glossary=(("RESP-1", "Handle customer service inquiries."),),
+        coverage=(
+            ("the situation", ("situation",)),
+            ("the weak point", ("weak point",)),
+        ),
+    )
+
+    def render(template: str) -> str:
+        return dict(zip(_NARRATE_TEMPLATES, render_narration_prompts(facts)))[template]
+
+    return render
+
+
+def _gherkin() -> Callable[[str], str]:
+    facts = ScenarioFacts(
+        scenario_id="SCN-001",
+        kind="adversarial",
+        facts=(
+            Fact("F1", "attack step", "The attacker asks for a refund."),
+            Fact("F2", "failure", "RESP-1 refunds the wrong customer."),
+            Fact("F3", "safe behavior", "The agent escalates the request."),
+        ),
+        glossary=(("RESP-1", "Handle customer service inquiries."),),
+        coverage=(),
+    )
+
+    def render(template: str) -> str:
+        return dict(zip(_GHERKIN_TEMPLATES, render_gherkin_prompts(facts)))[template]
+
+    return render
+
+
+def _separate_beliefs() -> Callable[[str], str]:
+    """Render the belief request of a spec with a code-filled and a chosen factor."""
+
+    def render(template: str) -> str:
+        # Compiling the Stage 5 spec writes its call log into a run directory.
+        with tempfile.TemporaryDirectory() as run_dir:
+            spec, structure = belief_spec(Path(run_dir))
+        prompts = render_belief_prompts(spec, belief_request(spec, structure))
+        return dict(zip(_BELIEF_TEMPLATES, prompts))[template]
+
+    return render
+
+
 # A case renders one template; the table that names it supplies the template.
 CASES: dict[str, Callable[[str], str]] = {
     "no-variables": _system_model(),
@@ -418,6 +529,11 @@ CASES: dict[str, Callable[[str], str]] = {
             "target_observations": _record_observations(),
         }
     ),
+    "narrate": _narrate(),
+    "narrate-stated": _narrate_stated(),
+    "stated-beliefs": _stage5(_stated_beliefs_facts),
+    "gherkin": _gherkin(),
+    "separate-beliefs": _separate_beliefs(),
     "archive-item": _stage5(_archive_item_facts),
     "commit-operation": _stage5(_commit_operation_facts),
     "realistic-request": _stage5(_realistic_request_facts),

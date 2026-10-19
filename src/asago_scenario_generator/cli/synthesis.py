@@ -113,6 +113,78 @@ def generate_cmd(
             "Requires --replay-fill."
         ),
     ),
+    model_narrative: str = typer.Option(
+        "off",
+        "--model-narrative",
+        help=(
+            "Model-written scenario write-up: off (no request), report (one "
+            "request per scenario, written to narratives.json; the handoff is "
+            "unchanged), or handoff (also published as each accepted "
+            "scenario's handoff narrative)."
+        ),
+    ),
+    attack_tree_format: str = typer.Option(
+        "flat",
+        "--attack-tree-format",
+        help=(
+            "Format of each handoff's attack_tree: flat (today's flat list) or "
+            "and-or (and-or-tree-v1: the hazard OR the scenarios that reach it, "
+            "each an AND, in order, of its conditions and steps; a v5 handoff "
+            "publishes the scenario's own part of it as attack_path). Code "
+            "renders the tree; the option changes no model request."
+        ),
+    ),
+    handoff_format: str = typer.Option(
+        "v4",
+        "--handoff-format",
+        help=(
+            "Published handoff version: v4 (scenario-handoff-v4) or v5 "
+            "(scenario-handoff-v5: the scenario's attack_path in place of its "
+            "attack_tree, plus uca, actor, causal_factors, preconditions, "
+            "procedure and worst_case_threat; with --model-narrative handoff "
+            "its narrative is the accepted paragraph alone). v5 requires "
+            "--attack-tree-format and-or, because the path reduces from the "
+            "and-or tree. Code derives the fields; the option changes no model "
+            "request."
+        ),
+    ),
+    model_gherkin: str = typer.Option(
+        "off",
+        "--model-gherkin",
+        help=(
+            "Model-written declarative Gherkin: off (no request; the Gherkin "
+            "stays code-rendered) or handoff (one request per published "
+            "scenario after the narrate step; each accepted Gherkin is "
+            "published in the handoff and its .feature file, and gherkins.json "
+            "records every outcome). handoff requires --handoff-format v5."
+        ),
+    ),
+    flawed_belief: str = typer.Option(
+        "off",
+        "--flawed-belief",
+        help=(
+            "Stated flawed beliefs: off (no change), stated (each Stage 5 "
+            "causal factor states the controller's flawed belief and the "
+            "process-model variable that holds it, or the variable it lacks; "
+            "the agent-belief facts, the and-or weak points and the v5 "
+            "causal_factors carry them), or separate (Stage 5 sends what off "
+            "sends, then one request per Stage 5 scenario states each causal "
+            "factor's belief and variable; writes beliefs.json, and a scenario "
+            "whose request fails keeps no stated belief). stated and separate "
+            "require --handoff-format v5."
+        ),
+    ),
+    hazard_view: str = typer.Option(
+        "off",
+        "--hazard-view",
+        help=(
+            "Hazard view of the generate report: off, or report (a hazard "
+            "section that shows every published scenario under each hazard it "
+            "names, and one Attack Flow file per hazard under "
+            "report/attack-flow/). report requires --attack-tree-format and-or. "
+            "Code renders the view; the option changes no model request."
+        ),
+    ),
 ) -> None:
     """Run taxonomy-obligation planning, STPA scenarios, and verification."""
     _validate_input_files(
@@ -128,6 +200,46 @@ def generate_cmd(
     )
     if max_workers < 1:
         raise typer.BadParameter("must be positive", param_hint="--max-workers")
+    _require(
+        model_narrative in ("off", "report", "handoff"),
+        "--model-narrative",
+        "must be off, report, or handoff",
+    )
+    _require(
+        attack_tree_format in ("flat", "and-or"),
+        "--attack-tree-format",
+        "must be flat or and-or",
+    )
+    _require(handoff_format in ("v4", "v5"), "--handoff-format", "must be v4 or v5")
+    _require(
+        handoff_format == "v4" or attack_tree_format == "and-or",
+        "--handoff-format",
+        "v5 requires --attack-tree-format and-or",
+    )
+    _require(
+        model_gherkin in ("off", "handoff"), "--model-gherkin", "must be off or handoff"
+    )
+    _require(
+        model_gherkin == "off" or handoff_format == "v5",
+        "--model-gherkin",
+        "handoff requires --handoff-format v5",
+    )
+    _require(
+        flawed_belief in ("off", "stated", "separate"),
+        "--flawed-belief",
+        "must be off, stated or separate",
+    )
+    _require(
+        flawed_belief == "off" or handoff_format == "v5",
+        "--flawed-belief",
+        f"{flawed_belief} requires --handoff-format v5",
+    )
+    _require(hazard_view in ("off", "report"), "--hazard-view", "must be off or report")
+    _require(
+        hazard_view == "off" or attack_tree_format == "and-or",
+        "--hazard-view",
+        "report requires --attack-tree-format and-or",
+    )
     fill_policy = _replay_fill_policy(
         replay_fill=replay_fill,
         live_stage=live_stage,
@@ -158,6 +270,12 @@ def generate_cmd(
             max_workers=max_workers,
             replay_calls=replay_calls,
             replay_fill=fill_policy,
+            narration_mode=model_narrative,
+            attack_tree_format=attack_tree_format,
+            handoff_format=handoff_format,
+            model_gherkin=model_gherkin,
+            flawed_belief=flawed_belief,
+            hazard_view=hazard_view,
         )
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=partial(
@@ -252,6 +370,12 @@ def _synthesis_inputs(
     max_workers: int,
     replay_calls: Path | None,
     replay_fill: Any = None,
+    narration_mode: str = "off",
+    attack_tree_format: str = "flat",
+    handoff_format: str = "v4",
+    model_gherkin: str = "off",
+    flawed_belief: str = "off",
+    hazard_view: str = "off",
 ) -> Any:
     """Load and check the input files, then build the synthesis request."""
     from asago_scenario_generator.data.loaders import (
@@ -304,6 +428,12 @@ def _synthesis_inputs(
         max_workers=max_workers,
         replay_calls_dir=replay_calls,
         replay_fill=replay_fill,
+        narration_mode=narration_mode,
+        attack_tree_format=attack_tree_format,
+        handoff_format=handoff_format,
+        model_gherkin=model_gherkin,
+        flawed_belief=flawed_belief,
+        hazard_view=hazard_view,
     )
 
 

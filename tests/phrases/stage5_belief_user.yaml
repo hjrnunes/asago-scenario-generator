@@ -1,0 +1,31 @@
+template: stage5_belief_user.j2
+cases:
+  separate-beliefs:
+    required:
+      - "## Scenario account"
+      - "Test hypothesis — not an observed execution result."
+      - "## Causal Factors"
+      - >-
+        The scenario's causal factors, under local `source_handle` values. Each
+        one gives its source type, the source's description, the factor's
+        description in this scenario, and whether code fills its
+        `process_model_variable` or you choose it.
+      - >-
+        Give each listed factor one entry under its `source_handle`. Do not
+        return structural IDs.
+      - "process_model_variable: filled by code (variable_1); give only flawed_belief"
+      - >-
+        your choice: the handle of the listed variable that holds the belief,
+        or none with missing_variable
+      - "## Process-Model Variables"
+      - >-
+        A factor whose `process_model_variable` is your choice names one of
+        these handles, or `none` when no listed variable holds its flawed
+        belief.
+    ordered:
+      - - "## Scenario account"
+        - "## Causal Factors"
+        - "## Process-Model Variables"
+    forbidden:
+      - "## Scenario SCN-"
+      - Allowed channels
