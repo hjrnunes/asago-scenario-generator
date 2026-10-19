@@ -2,15 +2,18 @@
 
 from __future__ import annotations
 
+import copy
 import html
 import json
 import re
 import shutil
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
 import pytest
 import yaml
+from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.pipeline.synthesis_persist import _render_report
 from asago_scenario_generator.report import attack_flow, hazard_view
@@ -32,6 +35,9 @@ from asago_scenario_generator.report.run_data import load_run
 from tests.helpers.generate_report_fixture import body_rows, copy_run
 
 AND_OR = Path(__file__).parent / "fixtures" / "generate_report" / "klarna-and-or"
+FLOW_CONTRACT = (
+    Path(__file__).resolve().parents[1] / "data/contracts/attack-flow/attack-flow-2.0.0"
+)
 REACHED = {
     "H-2": ("SCN-001", "SCN-032"),
     "H-5": ("SCN-020", "SCN-021"),
@@ -51,6 +57,12 @@ def section_html(html: str, section_id: str) -> str:
     match = re.search(rf'<section id="{section_id}">.*?</section>', html, re.S)
     assert match is not None, section_id
     return match.group(0)
+
+
+def flow_validator() -> Draft202012Validator:
+    return Draft202012Validator(
+        json.loads((FLOW_CONTRACT / "schema.json").read_text(encoding="utf-8"))
+    )
 
 
 def flow(output: Path, hazard_id: str) -> dict[str, Any]:
@@ -256,6 +268,58 @@ def test_a_hazard_without_a_scenario_has_no_flow(tmp_path: Path) -> None:
 
     with pytest.raises(ValueError, match="H-1 has no published scenario"):
         attack_flow_bundle(run, empty)
+
+
+def test_written_attack_flows_validate_against_the_contract_schema(
+    tmp_path: Path,
+) -> None:
+    output = copy_and_or(tmp_path)
+    write_report(output)
+
+    written = sorted((output / "report" / "attack-flow").iterdir())
+
+    assert [path.name for path in written] == sorted(f"{h}.json" for h in REACHED)
+    for path in written:
+        document = json.loads(path.read_text(encoding="utf-8"))
+        assert list(flow_validator().iter_errors(document)) == [], path.name
+
+
+def test_the_contract_example_is_a_hazard_bundle_the_writer_still_produces(
+    tmp_path: Path,
+) -> None:
+    run = load_run(copy_and_or(tmp_path))
+    (group,) = [g for g in hazard_groups(run) if g.hazard_id == "H-9"]
+    example = json.loads((FLOW_CONTRACT / "valid/hazard.json").read_text("utf-8"))
+
+    assert list(flow_validator().iter_errors(example)) == []
+    assert example == attack_flow_bundle(run, replace(group, scenario_ids=("SCN-027",)))
+
+
+def test_the_contract_schema_rejects_a_tree_the_renderers_cannot_read() -> None:
+    example = json.loads((FLOW_CONTRACT / "valid/hazard.json").read_text("utf-8"))
+
+    def broken(edit: Any) -> list[str]:
+        document = copy.deepcopy(example)
+        edit(document["objects"])
+        return [error.json_path for error in flow_validator().iter_errors(document)]
+
+    def two_effects(objects: list[dict]) -> None:
+        operator = next(o for o in objects if o["type"] == "attack-operator")
+        operator["effect_refs"].append(operator["effect_refs"][0])
+
+    def other_scope(objects: list[dict]) -> None:
+        next(o for o in objects if o["type"] == "attack-flow")["scope"] = "incident"
+
+    def second_flow(objects: list[dict]) -> None:
+        objects.append(next(o for o in objects if o["type"] == "attack-flow"))
+
+    def no_extension(objects: list[dict]) -> None:
+        next(o for o in objects if o["type"] == "attack-action").pop("extensions")
+
+    assert broken(two_effects) != []
+    assert broken(other_scope) != []
+    assert broken(second_flow) != []
+    assert broken(no_extension) != []
 
 
 # --- process-model gaps --------------------------------------------------------

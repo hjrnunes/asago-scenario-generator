@@ -31,6 +31,7 @@ LOCKS = {
     },
     "tool-call-condition": {"version": "tool-call-condition-v1"},
     "policy-coverage": {"schema_version": "policy-coverage-v2"},
+    "attack-flow": {"schema_version": "attack-flow-2.0.0"},
     "model-profile": {"version": "model-profile-v1"},
 }
 

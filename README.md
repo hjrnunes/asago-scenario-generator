@@ -469,9 +469,9 @@ losses loss analysis relates it to and the scenarios that name it. The report
 reads it, and still reads a version 1 file. The report, the stage summary,
 and the coverage file are for people and for the orchestrator's run reports.
 The report's hazard section shows each hazard with the attack paths that reach
-it, and `report/attack-flow/` holds one Attack Flow bundle per reached hazard;
-the consumer reads none of them. A run no longer writes
-`synthesis-report.html`.
+it, and `report/attack-flow/` holds one Attack Flow bundle per reached hazard
+(`attack-flow-2.0.0` in `data/contracts/attack-flow/`); the consumer reads none
+of them. A run no longer writes `synthesis-report.html`.
 
 `generate` also writes `provider-calls.jsonl` to the output directory: one line per
 provider request, with the request exactly as sent (messages, response format,
