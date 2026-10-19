@@ -91,6 +91,7 @@ from .context import build_scenario_generation_context
 from .realized_operation import realized_operation
 from .target_profile_publication import publish_execution_target_profile
 from .presentation import render_scenario_presentation
+from .attack_path import attack_path_errors, reduce_to_attack_path
 from .and_or_tree import (
     AttackTreeFormat,
     SiblingIndex,
@@ -106,7 +107,7 @@ from .narration import (
 )
 from .handoff import (
     HandoffFormat,
-    ScenarioHandoffV4,
+    ScenarioHandoff,
     Stage1aSource,
     build_scenario_handoff,
     handoff_ownership_violations,
@@ -312,7 +313,9 @@ def run_sp3(
             ``and-or-tree-v1``, which names the run's other scenarios that
             share a hazard. Code renders both; no request depends on it.
         handoff_format: The published handoff version. ``v4`` is the
-            default; ``v5`` adds the UCA, actor, causal factors,
+            default; ``v5`` publishes the scenario's ``attack_path`` in place
+            of its ``attack_tree`` (so it requires ``attack_tree_format``
+            ``and-or``), adds the UCA, actor, causal factors,
             preconditions, procedure and worst case threat, and with
             ``narration_mode=handoff`` its narrative is the accepted
             paragraph alone. No request depends on it.
@@ -332,6 +335,14 @@ def run_sp3(
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
     """
+    if (
+        handoff_format is HandoffFormat.V5
+        and attack_tree_format is not AttackTreeFormat.AND_OR
+    ):
+        raise ValueError(
+            "handoff_format=v5 requires attack_tree_format=and-or: the v5 "
+            "attack path reduces from the and-or tree"
+        )
     if model_gherkin is GherkinMode.HANDOFF and handoff_format is not HandoffFormat.V5:
         raise ValueError("model_gherkin=handoff requires handoff_format=v5")
     if (
@@ -412,6 +423,7 @@ def run_sp3(
         enriched_threat_set,
         control_structure,
         loss_analysis,
+        handoff_format,
     )
 
     _write_manifest(
@@ -1012,7 +1024,7 @@ def _write_scenario_handoff_artifacts(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
     handoff_format: HandoffFormat = HandoffFormat.V4,
-) -> ScenarioHandoffV4:
+) -> ScenarioHandoff:
     """Write the versioned scenario handoff for one published scenario.
 
     The normal product run publishes scenario meaning only: narrative, attack
@@ -1045,7 +1057,7 @@ def _checked_scenario_handoff(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
     handoff_format: HandoffFormat = HandoffFormat.V4,
-) -> ScenarioHandoffV4:
+) -> ScenarioHandoff:
     """Build one scenario's handoff and reject artifact-design content."""
     build = (
         build_scenario_handoff_v5
@@ -1349,11 +1361,14 @@ def _stage7_outputs(
     enriched_threat_set: EnrichedThreatSet,
     control_structure: ControlStructure,
     loss_analysis: LossAnalysis,
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> list[str]:
     """Validate accepted scenarios and their traceability."""
     validation_errors: list[str] = []
     for envelope in scenario_envelopes:
-        _validate_envelope_stage7(envelope, loss_analysis, validation_errors)
+        _validate_envelope_stage7(
+            envelope, loss_analysis, validation_errors, handoff_format
+        )
     trace_errors = validate_traceability(
         scenario_envelopes, enriched_threat_set, control_structure, loss_analysis
     )
@@ -1645,8 +1660,13 @@ def _validate_envelope_stage7(
     envelope: ScenarioEnvelope,
     loss_analysis: LossAnalysis,
     validation_errors: list[str],
+    handoff_format: HandoffFormat = HandoffFormat.V4,
 ) -> None:
-    """Run stage-local validators for a single envelope in Stage 7."""
+    """Run stage-local validators for a single envelope in Stage 7.
+
+    The tree checks run first. A v5 handoff publishes the tree's reduction, so
+    its path gets its own checks too.
+    """
     _extend_validation_errors(
         (
             validate_tree_factor_evidence_coverage(
@@ -1656,12 +1676,27 @@ def _validate_envelope_stage7(
         ),
         validation_errors,
     )
+    if handoff_format is HandoffFormat.V5:
+        validation_errors.extend(_attack_path_errors(envelope))
 
     id_text = _envelope_gherkin_text(envelope)
     if id_text:
         id_result = validate_loss_hazard_id_references(id_text, loss_analysis)
         if not id_result.passed:
             validation_errors.extend(id_result.errors)
+
+
+def _attack_path_errors(envelope: ScenarioEnvelope) -> list[str]:
+    """Return the problems with the path a v5 handoff publishes for *envelope*."""
+    try:
+        path = reduce_to_attack_path(envelope.attack_tree)
+    except ValueError as exc:
+        return [f"{envelope.scenario_id}: {exc}"]
+    factor_ids = [factor.source_id for factor in envelope.scenario_spec.causal_factors]
+    return [
+        f"{envelope.scenario_id}: {error}"
+        for error in attack_path_errors(path, factor_ids)
+    ]
 
 
 def _extend_validation_errors(

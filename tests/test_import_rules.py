@@ -587,6 +587,9 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "presentation": 1,
     # Tree-source collectors shared by presentation and validators.
     "tree_sources": 0,
+    # The v5 attack path reduces an and-or tree; the v5 handoff and the
+    # report read it.
+    "attack_path": 1,
     "_constants": 0,
     "context": 0,
     # Phase 3 content-surface facts: a pure leaf over the IO capability model.

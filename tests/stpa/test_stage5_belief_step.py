@@ -656,8 +656,8 @@ def test_a_separate_run_publishes_the_beliefs_through_to_the_handoff(
             assert factor["process_model_variable"]["description"]
         weak_points = [
             node
-            for node in nodes(document["attack_tree"]).values()
-            if node["node_id"].startswith("AT-WP-")
+            for node in document["attack_path"]["conditions"]
+            if node["category"] == "weak_point"
         ]
         assert weak_points and all(
             node["belief"].startswith("The agent wrongly believes that ")
@@ -738,14 +738,26 @@ def test_the_inputs_check_the_separate_value(tmp_path: Path) -> None:
             use_case="u", output_dir=tmp_path, flawed_belief="separate"
         )
     inputs = synthesis.SynthesisInputs(
-        use_case="u", output_dir=tmp_path, handoff_format="v5", flawed_belief="separate"
+        use_case="u",
+        output_dir=tmp_path,
+        handoff_format="v5",
+        attack_tree_format="and-or",
+        flawed_belief="separate",
     )
     assert FlawedBeliefMode(inputs.flawed_belief) is FlawedBeliefMode.SEPARATE
 
 
 def test_the_cli_separate_reaches_the_inputs(tmp_path: Path) -> None:
     result, captured = invoke_generate(
-        tmp_path, ["--handoff-format", "v5", "--flawed-belief", "separate"]
+        tmp_path,
+        [
+            "--handoff-format",
+            "v5",
+            "--attack-tree-format",
+            "and-or",
+            "--flawed-belief",
+            "separate",
+        ],
     )
 
     assert result.exit_code == 0, result.output

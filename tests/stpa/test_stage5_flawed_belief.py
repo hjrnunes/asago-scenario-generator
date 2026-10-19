@@ -669,8 +669,8 @@ def test_a_stated_run_publishes_the_beliefs_through_to_the_handoff(
             assert factor["process_model_variable"]["id"].startswith("PM-")
         weak_points = [
             node
-            for node in nodes(document["attack_tree"]).values()
-            if node["node_id"].startswith("AT-WP-")
+            for node in document["attack_path"]["conditions"]
+            if node["category"] == "weak_point"
         ]
         assert weak_points and all(
             node["belief"].startswith("The agent wrongly believes that ")

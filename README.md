@@ -722,8 +722,22 @@ necessary metadata defined by
 `.feature` companion.
 
 `--handoff-format v5` (default `v4`) publishes `scenario-handoff-v5` from the
-kit in `data/contracts/scenario-handoff/handoff-v5/`. A v5 handoff keeps every
-v4 field and adds six fields that code derives from the scenario spec:
+kit in `data/contracts/scenario-handoff/handoff-v5/`. It requires
+`--attack-tree-format and-or`. A v5 handoff carries `attack_path` (format
+`attack-path-v1`) where v4 carries `attack_tree`, keeps every other v4 field,
+and adds six fields that code derives from the scenario spec.
+
+`attack_path` is the scenario's own route to its hazard, reduced from the
+and-or tree by code (no request depends on it): `attacker` (absent for a
+functional scenario), `conditions` (situation, attacker assumptions, and one
+weak point per causal factor with its evidence status and belief), `steps` (in
+order, with technique and asset; empty for a functional scenario),
+`unsafe_action` (with the constraints it violates), `observable_failure` (with
+the safe outcome), and `hazard` (with its hazards and losses). It drops the
+OR, the other scenarios' IDs, and the tree's repeated top-level keys. Node IDs
+start with `AP-` (`AP-SIT`, `AP-ASM-n`, `AP-WP-n`, `AP-STEP-n`, `AP-UCA`,
+`AP-FAIL`, `AP-HAZ`), because the authoring model cites them. The six added
+fields are:
 
 - `uca`: the selected unsafe control action, its handbook type (from the ICA
   slot suffix), control action, context, statement, and hazards.

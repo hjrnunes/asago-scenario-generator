@@ -33,6 +33,7 @@ from tests.helpers.generate_report_fixture import body_rows, copy_run, edit_yaml
 from tests.stpa.test_and_or_tree import invoke_generate
 
 AND_OR = Path(__file__).parent / "fixtures" / "generate_report" / "klarna-and-or"
+AND_OR_V4 = Path(__file__).parent / "fixtures" / "generate_report" / "klarna-and-or-v4"
 REACHED = {
     "H-2": ("SCN-001", "SCN-032"),
     "H-5": ("SCN-020", "SCN-021"),
@@ -42,8 +43,16 @@ REACHED = {
 
 
 def copy_and_or(tmp_path: Path, name: str = "output") -> Path:
+    """Copy the v5 run, whose scenarios carry attack paths."""
     target = tmp_path / name
     shutil.copytree(AND_OR, target)
+    return target
+
+
+def copy_and_or_v4(tmp_path: Path, name: str = "output") -> Path:
+    """Copy the same run as v4 handoffs, whose scenarios carry and-or trees."""
+    target = tmp_path / name
+    shutil.copytree(AND_OR_V4, target)
     return target
 
 
@@ -113,7 +122,7 @@ def test_the_report_view_shows_a_tree_per_reached_hazard(tmp_path: Path) -> None
 
 
 def test_one_broken_tree_costs_only_its_hazards(tmp_path: Path) -> None:
-    output = copy_and_or(tmp_path)
+    output = copy_and_or_v4(tmp_path)
 
     def drop_scenario_node(handoff: dict) -> None:
         handoff["attack_tree"]["root"]["children"] = []
@@ -131,7 +140,7 @@ def test_one_broken_tree_costs_only_its_hazards(tmp_path: Path) -> None:
 
 
 def test_the_scenario_intro_counts_and_or_trees(tmp_path: Path) -> None:
-    output = copy_and_or(tmp_path)
+    output = copy_and_or_v4(tmp_path)
 
     write_report(output)
 
@@ -140,6 +149,19 @@ def test_the_scenario_intro_counts_and_or_trees(tmp_path: Path) -> None:
     )
     assert "7 of 7 attack trees are AND/OR trees" in scenarios
     assert "are flat" not in scenarios
+
+
+def test_the_scenario_intro_counts_attack_paths_in_a_v5_run(tmp_path: Path) -> None:
+    output = copy_and_or(tmp_path)
+
+    write_report(output)
+
+    scenarios = section_html(
+        (output / "report" / "index.html").read_text(encoding="utf-8"), "scenarios"
+    )
+    assert "7 of 7 scenarios carry an attack path" in scenarios
+    assert "have exactly one weak point" in scenarios
+    assert "attack trees are" not in scenarios
 
 
 def test_the_flat_scenario_intro_is_unchanged(tmp_path: Path) -> None:

@@ -39,9 +39,11 @@ commands.
 
 The normal producer `generate` publishes one semantics-only `scenario-handoff-v4`
 through its handoff model, `ScenarioHandoffV4`. `--handoff-format v5` publishes
-`scenario-handoff-v5` through `ScenarioHandoffV5`, which adds the UCA, actor,
-causal factors, preconditions, ATLAS procedure, and worst case threat that
-`handoff_v5.py` derives from the scenario spec. With `--model-gherkin handoff`
+`scenario-handoff-v5` through `ScenarioHandoffV5`, which carries the scenario's
+`attack_path` (`attack_path.py` reduces the and-or tree to it; the flag
+requires `--attack-tree-format and-or`) in place of `attack_tree`, and adds the
+UCA, actor, causal factors, preconditions, ATLAS procedure, and worst case threat
+that `handoff_v5.py` derives from the scenario spec. With `--model-gherkin handoff`
 (v5 only), `model_gherkin.py` asks the model for a declarative Gherkin per
 published scenario and code falls back to the rendered Gherkin when the reply
 fails its checks. The envelope carries theStage 5 `discriminating_condition`, its code-owned `condition_check`, and an

@@ -1,4 +1,4 @@
-"""The scenario as written: narrative, attack tree, and Gherkin panels."""
+"""The scenario as written: narrative, attack tree or path, and Gherkin panels."""
 
 from __future__ import annotations
 
@@ -61,12 +61,12 @@ def test_an_unselected_vulnerability_reads_as_not_a_causal_factor(
     assert "fails to verify if the target order" in body
 
 
-def test_the_default_authority_is_stated_once_not_on_every_claim(
+def test_the_default_authority_is_not_repeated_on_every_claim(
     tmp_path: Path,
 ) -> None:
     body = str(panels(copy_run(tmp_path), "SCN-004")["narrative"].body)
 
-    assert body.count("Claims without an authority note are proposed hypotheses.") == 1
+    assert "Claims without an authority note" not in body
     assert "authority proposed_hypothesis" not in body
 
 

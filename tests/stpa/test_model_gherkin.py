@@ -66,6 +66,7 @@ from tests.helpers.sp3_run import _make_ets
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
+from asago_scenario_generator.stpa.scenario_prod.and_or_tree import AttackTreeFormat
 from tests.stpa.test_and_or_tree import invoke_generate
 from tests.stpa.test_narration import adversarial, everyday, valid_reply
 
@@ -455,7 +456,11 @@ def _publish(run_dir: Path, client: MockLLMClient | None = None, **kwargs: Any) 
 
 
 SCENARIOS = ("SCN-001", "SCN-002")
-V5_GHERKIN = {"handoff_format": HandoffFormat.V5, "model_gherkin": GherkinMode.HANDOFF}
+V5 = {
+    "handoff_format": HandoffFormat.V5,
+    "attack_tree_format": AttackTreeFormat.AND_OR,
+}
+V5_GHERKIN = {**V5, "model_gherkin": GherkinMode.HANDOFF}
 
 
 def _files(run_dir: Path) -> dict[str, bytes]:
@@ -569,7 +574,7 @@ def test_the_gherkin_requests_follow_narrate_with_its_identity_and_temperature(
 def test_a_run_whose_gherkin_calls_fail_publishes_the_code_gherkin(
     tmp_path: Path, error: Exception
 ) -> None:
-    _publish(tmp_path / "off", handoff_format=HandoffFormat.V5)
+    _publish(tmp_path / "off", **V5)
     client = GherkinClient()
     client.set_exception_for(GherkinReply, error)
 
@@ -587,7 +592,7 @@ def test_a_run_whose_gherkin_calls_fail_publishes_the_code_gherkin(
 def test_a_run_whose_replies_fail_twice_publishes_the_code_gherkin(
     tmp_path: Path,
 ) -> None:
-    _publish(tmp_path / "off", handoff_format=HandoffFormat.V5)
+    _publish(tmp_path / "off", **V5)
     client = GherkinClient(gherkin=lambda _: {"feature": "x"})
 
     _publish(tmp_path / "broken", client, **V5_GHERKIN)
@@ -598,14 +603,12 @@ def test_a_run_whose_replies_fail_twice_publishes_the_code_gherkin(
     assert [entry["requests"] for entry in sidecar["scenarios"]] == [2, 2]
 
 
-@pytest.mark.parametrize("handoff_format", [HandoffFormat.V4, HandoffFormat.V5])
+@pytest.mark.parametrize("formats", [{"handoff_format": HandoffFormat.V4}, V5])
 def test_off_sends_no_request_and_changes_no_output(
-    tmp_path: Path, handoff_format: HandoffFormat
+    tmp_path: Path, formats: dict
 ) -> None:
-    _, default_client = _publish(tmp_path / "default", handoff_format=handoff_format)
-    _, off_client = _publish(
-        tmp_path / "off", handoff_format=handoff_format, model_gherkin=GherkinMode.OFF
-    )
+    _, default_client = _publish(tmp_path / "default", **formats)
+    _, off_client = _publish(tmp_path / "off", **formats, model_gherkin=GherkinMode.OFF)
 
     assert default_client.calls == off_client.calls
     assert not any(call.response_format is GherkinReply for call in off_client.calls)
@@ -658,7 +661,11 @@ def test_the_inputs_model_gherkin_reaches_run_sp3(
         lambda *a, **k: (MockLLMClient(), "test-profile"),
     )
     inputs = synthesis.SynthesisInputs(
-        use_case="u", output_dir=tmp_path, handoff_format="v5", model_gherkin=value
+        use_case="u",
+        output_dir=tmp_path,
+        handoff_format="v5",
+        attack_tree_format="and-or",
+        model_gherkin=value,
     )
     _default_scenarios(
         ica_enumeration=final_ica_result(),
@@ -677,7 +684,17 @@ def test_the_inputs_model_gherkin_reaches_run_sp3(
     ("arguments", "expected"),
     [
         ([], "off"),
-        (["--handoff-format", "v5", "--model-gherkin", "handoff"], "handoff"),
+        (
+            [
+                "--handoff-format",
+                "v5",
+                "--attack-tree-format",
+                "and-or",
+                "--model-gherkin",
+                "handoff",
+            ],
+            "handoff",
+        ),
     ],
     ids=["default", "handoff"],
 )

@@ -24,6 +24,11 @@ from asago_scenario_generator.pipeline.synthesis_defaults import _default_scenar
 from asago_scenario_generator.report.run_data import _read_scenarios
 from asago_scenario_generator.stpa.models.attack_shape import AttackShape, TurnPurpose
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
+from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
+    AttackTreeFormat,
+    build_sibling_index,
+    render_and_or_tree,
+)
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_DIGEST_DOMAIN_V5,
@@ -142,6 +147,7 @@ V5_KEYS = (
 
 def _envelope(spec: ScenarioSpec, narrative: str | None = None) -> Any:
     rendered, tree, gherkin = render_scenario_presentation(spec)
+    tree = render_and_or_tree(spec, tree, build_sibling_index([spec]))
     return assemble_envelope(
         scenario_id=spec.scenario_id,
         scenario_spec=spec,
@@ -387,13 +393,18 @@ def test_v5_keeps_every_v4_field_and_value() -> None:
     v4 = build_scenario_handoff(envelope).model_dump(mode="json", exclude_none=True)
     v5 = build_scenario_handoff_v5(envelope).model_dump(mode="json", exclude_none=True)
 
-    assert list(v5)[: len(v4)] == list(v4)
+    # The attack path takes the attack tree's place; every other v4 key keeps
+    # its position and value.
+    assert list(v5)[: len(v4)] == [
+        "attack_path" if key == "attack_tree" else key for key in v4
+    ]
     assert list(v5)[len(v4) :] == list(V5_KEYS)
-    assert {key for key in v4 if v4[key] != v5[key]} == {
+    assert {key for key in v4 if key != "attack_tree" and v4[key] != v5[key]} == {
         "schema_version",
         "sourced_facts",
         "content_digest",
     }
+    assert "attack_tree" not in v5
     assert v5["sourced_facts"][-1]["source"] == (
         f"producer handoff contract {HANDOFF_SCHEMA_VERSION_V5}"
     )
@@ -440,7 +451,10 @@ def test_the_v5_kit_holds_the_v4_fixture_names_and_more_invalid_cases() -> None:
     stated = {"adversarial-stated-beliefs.json", "functional-stated-belief.json"}
 
     assert names == {path.name for path in (v4 / "valid").glob("*.json")} | stated
-    assert {path.name for path in (v4 / "invalid").glob("*.json")} < invalid
+    replaced = {"schema-attack-tree-not-object.json"}
+    assert {path.name for path in (v4 / "invalid").glob("*.json")} - replaced < invalid
+    assert replaced.isdisjoint(invalid)
+    assert "schema-attack-path-not-object.json" in invalid
     assert set(_kit("expected-violations.json")) == {f"invalid/{n}" for n in invalid}
 
 
@@ -502,7 +516,7 @@ def test_the_lock_pins_v4_at_the_top_and_lists_v5() -> None:
             "metadata_fields": [
                 name
                 for name in ScenarioHandoffV5.model_fields
-                if name not in lock["representations"]
+                if name not in {"narrative", "attack_path", "gherkin"}
             ],
         }
     ]
@@ -527,6 +541,14 @@ def test_the_generator_rebuilds_the_v5_kit_byte_for_byte(tmp_path: Path) -> None
 # --- run ----------------------------------------------------------------------
 
 
+def _publish_v5(run_dir: Path) -> Any:
+    return _publish(
+        run_dir,
+        handoff_format=HandoffFormat.V5,
+        attack_tree_format=AttackTreeFormat.AND_OR,
+    )
+
+
 def _publish(run_dir: Path, **kwargs: Any) -> Any:
     client = MockLLMClient()
     client.set_response_queue([_normal_semantics_payload(), _functional_payload()])
@@ -543,7 +565,7 @@ def _publish(run_dir: Path, **kwargs: Any) -> Any:
 
 
 def test_a_v5_run_publishes_valid_v5_handoffs(tmp_path: Path) -> None:
-    result, _ = _publish(tmp_path, handoff_format=HandoffFormat.V5)
+    result, _ = _publish_v5(tmp_path)
 
     assert result.stage_errors == []
     kinds = set()
@@ -557,12 +579,16 @@ def test_a_v5_run_publishes_valid_v5_handoffs(tmp_path: Path) -> None:
     assert kinds == {"adversarial", "functional"}
     scenarios = _read_scenarios(tmp_path)
     assert all(isinstance(item, ScenarioHandoffV5) for item in scenarios.values())
+    for scenario_id in ("SCN-001", "SCN-002"):
+        document = _published_handoff(tmp_path, scenario_id)
+        assert "attack_tree" not in document
+        assert document["attack_path"]["format"] == "attack-path-v1"
 
 
 def test_the_default_format_is_v4_byte_for_byte(tmp_path: Path) -> None:
     _, default_client = _publish(tmp_path / "default")
     _publish(tmp_path / "v4", handoff_format=HandoffFormat.V4)
-    _, v5_client = _publish(tmp_path / "v5", handoff_format=HandoffFormat.V5)
+    _, v5_client = _publish_v5(tmp_path / "v5")
 
     assert default_client.calls == v5_client.calls
     for scenario_id in ("SCN-001", "SCN-002"):
@@ -577,7 +603,13 @@ def test_the_default_format_is_v4_byte_for_byte(tmp_path: Path) -> None:
         v5 = _published_handoff(tmp_path / "v5", scenario_id)
         assert v4["schema_version"] == HANDOFF_SCHEMA_VERSION_V4
         # A functional actor is null, which reads the same as v4's absent key.
-        expected = {"schema_version", "sourced_facts", "content_digest", *V5_KEYS}
+        expected = {
+            "schema_version",
+            "sourced_facts",
+            "content_digest",
+            "attack_path",
+            *V5_KEYS,
+        }
         if v5["kind"] == "functional":
             expected.discard("actor")
         assert {key for key in v5 if v4.get(key) != v5[key]} == expected
@@ -649,7 +681,10 @@ def test_the_inputs_handoff_format_reaches_run_sp3(
         lambda *a, **k: (MockLLMClient(), "test-profile"),
     )
     inputs = synthesis.SynthesisInputs(
-        use_case="u", output_dir=tmp_path, handoff_format=value
+        use_case="u",
+        output_dir=tmp_path,
+        handoff_format=value,
+        attack_tree_format="and-or",
     )
     _default_scenarios(
         ica_enumeration=final_ica_result(),
@@ -666,7 +701,10 @@ def test_the_inputs_handoff_format_reaches_run_sp3(
 
 @pytest.mark.parametrize(
     ("arguments", "expected"),
-    [([], "v4"), (["--handoff-format", "v5"], "v5")],
+    [
+        ([], "v4"),
+        (["--handoff-format", "v5", "--attack-tree-format", "and-or"], "v5"),
+    ],
     ids=["default", "v5"],
 )
 def test_the_cli_handoff_format_reaches_the_inputs(
@@ -676,6 +714,28 @@ def test_the_cli_handoff_format_reaches_the_inputs(
 
     assert result.exit_code == 0, result.output
     assert captured[0].handoff_format == expected
+
+
+def test_the_inputs_reject_v5_without_the_and_or_tree(tmp_path: Path) -> None:
+    for tree_format in ("flat", None):
+        kwargs = {} if tree_format is None else {"attack_tree_format": tree_format}
+        with pytest.raises(ValueError, match="and-or"):
+            synthesis.SynthesisInputs(
+                use_case="u", output_dir=tmp_path, handoff_format="v5", **kwargs
+            )
+
+
+def test_run_sp3_rejects_v5_without_the_and_or_tree(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="and-or"):
+        _publish(tmp_path, handoff_format=HandoffFormat.V5)
+
+
+def test_the_cli_rejects_v5_without_the_and_or_tree(tmp_path: Path) -> None:
+    result, captured = invoke_generate(tmp_path, ["--handoff-format", "v5"])
+
+    assert result.exit_code != 0
+    assert "--attack-tree-format and-or" in result.output
+    assert captured == []
 
 
 def test_the_cli_rejects_an_unknown_handoff_format(tmp_path: Path) -> None:

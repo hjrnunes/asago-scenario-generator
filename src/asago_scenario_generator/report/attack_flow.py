@@ -174,7 +174,10 @@ def _condition_text(node: dict) -> str:
     word = CONDITION_WORDS.get(
         str(node.get("category")), str(node.get("category", "")).replace("_", " ")
     )
-    source = f" {node['source_id']}" if node.get("source_id") else ""
+    ids = dict.fromkeys(
+        i for i in [node.get("source_id"), *(node.get("source_ids") or [])] if i
+    )
+    source = "".join(f" {i}" for i in ids)
     text = _sentence(f"{word}{source}: {node.get('label', '')}")
     if node.get("belief"):
         text += f" Belief: {_sentence(node['belief'])}"
@@ -232,7 +235,7 @@ def _unsafe_action(
     )
     return _sdo(
         "attack-action",
-        ids("attack-action", scenario_id, "AT-UCA"),
+        ids("attack-action", scenario_id, str((node or {}).get("node_id", "AT-UCA"))),
         name=f"{scenario_id} unsafe control action: {source} {action}",
         description=description,
     )
@@ -256,12 +259,12 @@ def _scenario_objects(
 ) -> list[dict[str, Any]]:
     """Return a scenario's action, its AND, its conditions, and its step chain."""
     scenario = run.scenarios[scenario_id]
-    node = scenario_subtree(scenario.attack_tree)
+    node = scenario_subtree(scenario)
     criterion = str(node.get("label") or scenario.semantic_failure_criterion)
     and_id = ids("attack-operator", scenario_id, "AND")
     action = _sdo(
         "attack-action",
-        ids("attack-action", scenario_id, "AT-SCN"),
+        ids("attack-action", scenario_id, str(node.get("node_id"))),
         name=f"{scenario_id}: {scenario.gherkin.scenario}",
         description=_scenario_text(run, scenario_id, criterion),
         effect_refs=[choice_id],
