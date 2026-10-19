@@ -1,11 +1,9 @@
 """A scenario's attack path as the report shows it.
 
-A v5 handoff carries ``attack_path``; a v4 handoff with an and-or tree carries
-the same route inside the tree, and the reduction the producer uses for v5
-recovers it. The panel reads the path in the order it happens and hides node
-ids. The hazard view and the Attack Flow files read the same path as the
-scenario's own subtree of an and-or tree, so their text stays what the tree
-gave them.
+The panel reads the handoff's ``attack_path`` in the order it happens and
+hides node ids. The hazard view and the Attack Flow files read the same path
+as the scenario's own subtree of an and-or tree, so their text stays what the
+tree gave them.
 """
 
 from __future__ import annotations
@@ -14,10 +12,6 @@ from typing import Any
 
 from asago_scenario_generator.report.common import plural
 from asago_scenario_generator.report_kit import Markup, chip, esc, fields, join
-from asago_scenario_generator.stpa.scenario_prod.attack_path import (
-    other_scenario_ids,
-    reduce_to_attack_path,
-)
 
 CONDITION_WORD = {
     "situation": "Situation",
@@ -29,31 +23,6 @@ STEPS_LABEL = "Attack steps, in order"
 SCENARIO_NODE = "AP-SCN"
 CONDITIONS_NODE = "AP-COND"
 STEPS_NODE = "AP-STEPS"
-
-
-def scenario_path(scenario: Any) -> dict[str, Any] | None:
-    """Return a scenario's attack path, or None when its tree is not an and-or tree.
-
-    A tree the reduction cannot read also returns None, so a report that finds
-    one falls back to the plain outline.
-    """
-    path = getattr(scenario, "attack_path", None)
-    if path is not None:
-        return path.model_dump(mode="json")
-    tree = scenario.attack_tree
-    if not isinstance(tree.get("root"), dict):
-        return None
-    try:
-        return reduce_to_attack_path(tree)
-    except ValueError:
-        return None
-
-
-def other_scenarios(scenario: Any) -> list[str] | None:
-    """Return the other scenarios a v4 and-or tree names; None for a v5 handoff."""
-    if getattr(scenario, "attack_path", None) is not None:
-        return None
-    return other_scenario_ids(scenario.attack_tree)
 
 
 def _chips(source_ids: list[str]) -> Markup:
@@ -181,12 +150,9 @@ def path_preview(path: dict[str, Any]) -> str:
     )
 
 
-def path_body(path: dict[str, Any], others: list[str] | None = None) -> Markup:
-    """Render a path as its rows, with the other scenarios of a v4 tree above them."""
+def path_body(path: dict[str, Any]) -> Markup:
+    """Render a path as its rows, below its source-uncertainty note."""
     notes = []
-    if others is not None:
-        named = ", ".join(others) if others else "none"
-        notes.append(f"Other scenarios that reach the same hazard: {named}.")
     if path.get("source_uncertainty"):
         notes.append(str(path["source_uncertainty"]))
     intro = join(Markup(f'<p class="nm">{esc(line)}</p>') for line in notes)

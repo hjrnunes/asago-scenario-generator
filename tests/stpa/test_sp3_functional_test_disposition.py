@@ -16,7 +16,7 @@ from asago_scenario_generator.stpa.scenario_prod.run import (
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
 
-from tests.helpers.sp3_run import _make_ets, _semantics_wire
+from tests.helpers.sp3_run import _make_ets, _semantics_wire, stage5_and_shape_calls
 
 
 def _functional_adversary() -> dict:
@@ -107,7 +107,7 @@ def test_functional_test_candidate_is_persisted_for_the_owner(
         run_dir=tmp_path,
     )
 
-    assert client.call_count == 1
+    assert len(stage5_and_shape_calls(client)) == 1
     assert result.scenario_specs == []
     assert len(result.functional_test_specs) == 1
     assert result.functional_test_specs[0].adversary is not None

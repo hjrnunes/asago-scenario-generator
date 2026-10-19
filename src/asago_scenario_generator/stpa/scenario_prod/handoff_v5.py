@@ -1,4 +1,4 @@
-"""The fields scenario-handoff-v5 adds to v4, derived from the scenario spec.
+"""The scenario-handoff-v5 fields beyond the shared envelope, from the spec.
 
 Each field traces to a published vocabulary: the unsafe control action in the
 STPA Handbook's form (Leveson and Thomas 2018, Table 2.3), the misuse case's
@@ -29,7 +29,6 @@ from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from .deduplication import ScenarioDeduplication
 from .handoff import (
-    HANDOFF_SCHEMA_VERSION_V5,
     HandoffActor,
     HandoffAtlasRef,
     HandoffCausalFactor,
@@ -65,15 +64,27 @@ def build_scenario_handoff_v5(
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
 ) -> ScenarioHandoffV5:
-    """Build the v5 handoff: the v4 fields, with the attack path in the tree's place.
+    """Build the v5 handoff from one published scenario envelope.
 
-    The narrative and Gherkin come from the envelope unchanged, as in v4; the
-    caller decides what the envelope's narrative holds. ``attack_path`` is the
+    The narrative and Gherkin come from the envelope unchanged; the caller
+    decides what the envelope's narrative holds. ``attack_path`` is the
     envelope's and-or tree reduced to this scenario's own path.
+
+    The builder is deterministic and consumes only the producer's own
+    scenario meaning. It never copies artifact-design content: the spec's
+    ``unsafe_outcome_condition`` is deliberately not read.
+    ``enriched_operations`` is the verified view of the run's
+    ``control-action-enrichment.yaml`` sidecar (control-action id to
+    documented operation identity); only those verified rows contribute an
+    operation identity. ``observed_operations`` is the exact inventory from
+    the run's observed target profile. A criterion token is binding only on an
+    exact token match against that inventory; generic capability labels never
+    contribute. ``stage_1a_source`` is the run's Stage 1a acceptance record;
+    the published constraint authorities derive from it and from the actual
+    loss-analysis constraint records instead of asserting reviewed status.
     """
     fields = scenario_handoff_fields(
         envelope,
-        version=HANDOFF_SCHEMA_VERSION_V5,
         loss_analysis=loss_analysis,
         environment_bound=environment_bound,
         enriched_operations=enriched_operations,
@@ -81,7 +92,6 @@ def build_scenario_handoff_v5(
         stage_1a_source=stage_1a_source,
         deduplication=deduplication,
     )
-    fields.pop("attack_tree")
     fields["attack_path"] = reduce_to_attack_path(envelope.attack_tree)
     handoff = finalize_handoff(
         ScenarioHandoffV5(**fields, **v5_fields(envelope.scenario_spec))
@@ -91,7 +101,7 @@ def build_scenario_handoff_v5(
 
 
 def v5_fields(spec: ScenarioSpec) -> dict[str, Any]:
-    """Return the six fields v5 adds, derived from one scenario spec."""
+    """Return the six fields beyond the shared envelope, from one scenario spec."""
     context = _context(spec)
     if spec.is_functional_test:
         actor = None

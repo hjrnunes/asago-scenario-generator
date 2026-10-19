@@ -1,23 +1,18 @@
-"""A scenario as authoring receives it: narrative, attack path or tree, and Gherkin.
+"""A scenario as authoring receives it: narrative, attack path, and Gherkin.
 
 The producer writes the narrative and the Gherkin in fixed formats, so the
-renderers parse them. A line they do not recognize renders as plain text. A
-v5 handoff carries an attack path and a v4 and-or tree reduces to one, so both
-render as the "Attack path" panel; a flat v4 tree keeps the "Attack tree" panel.
+renderers parse them. A line they do not recognize renders as plain text.
 """
 
 from __future__ import annotations
 
 import re
-from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Any
 
 from asago_scenario_generator.report.attack_path_view import (
-    other_scenarios,
     path_body,
     path_preview,
-    scenario_path,
     weak_point_count,
 )
 from asago_scenario_generator.report.common import code_id, plural
@@ -29,7 +24,6 @@ from asago_scenario_generator.report_kit import (
     esc,
     fields,
     join,
-    tree,
 )
 
 DEFAULT_AUTHORITY = "proposed_hypothesis"
@@ -38,19 +32,6 @@ NOTES = ("Causal relations", "The account remains semantics-only")
 ID_TOKEN = re.compile(r"\b[A-Z]{1,6}-\d+(?:-\d+)*\b")
 VULNERABILITY = " Vulnerability: "
 PREVIEW_LIMIT = 110
-CATEGORY_WORD = {
-    "defender_belief": "Belief",
-    "defender_desire": "Desire",
-    "defender_intention": "Intention",
-    "unsafe_action": "Unsafe action",
-    "constraint": "Constraint",
-    "hazard": "Hazard",
-    "loss": "Loss",
-    "causal_factor": "Causal factor",
-    "actor_belief": "Actor belief",
-    "actor_desire": "Actor desire",
-    "actor_intention": "Actor intention",
-}
 
 
 @dataclass(frozen=True)
@@ -216,72 +197,6 @@ def narrative_panel(text: str) -> Panel:
     )
 
 
-def _node_tags(node: dict, leaves: set[str], leaf_sources: set[str]) -> list[str]:
-    tags = []
-    if f"{node.get('source_id')}: {node['label']}" in leaves:
-        tags.append("leaf")
-    elif node.get("source_id") in leaf_sources:
-        tags.append("named by the causal factor")
-    if node.get("evidence_status"):
-        tags.append(node["evidence_status"].replace("_", " "))
-    if node.get("authority", DEFAULT_AUTHORITY) != DEFAULT_AUTHORITY:
-        tags.append(f"authority {node['authority']}")
-    if node.get("source_uncertainty"):
-        tags.append(f"source uncertainty: {node['source_uncertainty']}")
-    return tags
-
-
-def _tree_node(
-    node: dict, leaves: set[str], leaf_sources: set[str], seen: dict[str, str]
-) -> TreeNode:
-    ids = list(
-        dict.fromkeys(
-            i for i in [node.get("source_id"), *(node.get("source_ids") or [])] if i
-        )
-    )
-    label = " ".join(node["label"].split())
-    first = seen.setdefault(label, node["node_id"])
-    tags = _node_tags(node, leaves, leaf_sources)
-    prefix = join([code_id(i) for i in ids], " ")
-    if first != node["node_id"]:
-        text = Markup(f'{prefix} <span class="dup">{esc(label)}</span>')
-        tags.append(f"same text as {first}")
-    else:
-        text = Markup(f"{prefix} {esc(label)}")
-    return TreeNode(text, node["node_id"], tags)
-
-
-def _category_word(category: str, count: int) -> str:
-    word = CATEGORY_WORD.get(category, category.replace("_", " ").capitalize())
-    if count == 1:
-        return word
-    return "Losses" if word == "Loss" else word + "s"
-
-
-def _branch(
-    branch: dict, leaves: set[str], leaf_sources: set[str], seen: dict[str, str]
-) -> TreeNode:
-    groups: dict[str, list[dict]] = defaultdict(list)
-    for node in branch["children"]:
-        groups[node["category"]].append(node)
-    children = [
-        TreeNode(
-            _category_word(category, len(nodes)),
-            None,
-            (),
-            [_tree_node(n, leaves, leaf_sources, seen) for n in nodes],
-        )
-        for category, nodes in groups.items()
-    ]
-    count = len(branch["children"])
-    tags = [f"{branch['category'].replace('_', ' ')} · {plural(count, 'node')}"]
-    if branch.get("authority", DEFAULT_AUTHORITY) != DEFAULT_AUTHORITY:
-        tags.append(f"authority {branch['authority']}")
-    return TreeNode(
-        Markup(f"<b>{esc(branch['label'])}</b>"), branch["node_id"], tags, children
-    )
-
-
 def _and_or_tags(node: dict) -> list[str]:
     tags = []
     if node.get("operator"):
@@ -313,74 +228,6 @@ def and_or_node(node: dict) -> TreeNode:
     return TreeNode(
         Markup(f"{prefix} {label}"), node.get("node_id"), _and_or_tags(node), children
     )
-
-
-def _and_or_tree_panel(attack_tree: dict) -> Panel:
-    """Render an AND/OR tree as an indented outline of its nodes."""
-    root = attack_tree.get("root") or {}
-    nodes: list[dict] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        nodes.append(node)
-        stack.extend(c for c in node.get("children") or [] if isinstance(c, dict))
-    others = sum(node.get("type") == "reference" for node in nodes)
-    weak = sorted(
-        {
-            n["source_id"]
-            for n in nodes
-            if n.get("category") == "weak_point" and n.get("source_id")
-        }
-    )
-    preview = (
-        f"{plural(len(nodes), 'node')} · "
-        f"{plural(others, 'other scenario')} · weak point {', '.join(weak) or 'none'}"
-    )
-    uncertainty = attack_tree.get("source_uncertainty")
-    lines = [
-        f"Loss scenario: {attack_tree.get('loss_scenario')}",
-        f"Format {attack_tree.get('format')}: the root is "
-        "the hazard, an OR joins the scenarios that reach it, and each scenario is "
-        f"an AND of its conditions and steps ({attack_tree.get('relation_basis')}).",
-        *([str(uncertainty)] if uncertainty else []),
-    ]
-    intro = join(Markup(f'<p class="nm">{esc(line)}</p>') for line in lines)
-    head = and_or_node({**root, "children": []}) if root else TreeNode("")
-    children = [
-        and_or_node(child)
-        for child in root.get("children") or []
-        if isinstance(child, dict)
-    ]
-    return Panel("tree", "Attack tree", preview, join([intro, tree(head, children)]))
-
-
-def tree_panel(attack_tree: dict) -> Panel:
-    """Build the attack-tree panel: nodes grouped by category, as authoring projects them."""
-    if isinstance(attack_tree.get("root"), dict):
-        return _and_or_tree_panel(attack_tree)
-    leaves = set(attack_tree.get("leaves") or [])
-    leaf_sources = {leaf.split(": ", 1)[0] for leaf in leaves}
-    seen: dict[str, str] = {}
-    branches = [_branch(b, leaves, leaf_sources, seen) for b in attack_tree["branches"]]
-    total = sum(len(b["children"]) for b in attack_tree["branches"])
-    preview = (
-        f"{plural(total, 'node')} in {plural(len(branches), 'branch', 'branches')} · leaf "
-        + ", ".join(sorted(leaf_sources))
-    )
-    root = TreeNode(attack_tree["root"])
-    note = (
-        f"Relations are {attack_tree.get('relation')} ({attack_tree.get('relation_evidence')}): "
-        "the tree names no AND or OR, so nodes are grouped by category, the projection "
-        "authoring receives."
-    )
-    uncertainty = attack_tree.get("source_uncertainty")
-    lines = [
-        f"Loss scenario: {attack_tree.get('loss_scenario')}",
-        note,
-        *([str(uncertainty)] if uncertainty else []),
-    ]
-    intro = join(Markup(f'<p class="nm">{esc(line)}</p>') for line in lines)
-    return Panel("tree", "Attack tree", preview, join([intro, tree(root, branches)]))
 
 
 def feature_matches(gherkin: Any, text: str) -> bool:
@@ -426,52 +273,38 @@ def gherkin_panel(scenario_id: str, gherkin: Any, feature: str | None) -> Panel:
     return Panel("gherkin", "Gherkin", preview, body, differs)
 
 
-def path_panel(scenario: Any) -> Panel | None:
-    """Build the "Attack path" panel of a v5 handoff or a v4 and-or tree; None for a flat tree."""
-    path = scenario_path(scenario)
-    if path is None:
-        return None
-    return Panel(
-        "path",
-        "Attack path",
-        path_preview(path),
-        path_body(path, other_scenarios(scenario)),
-    )
+def path_panel(scenario: Any) -> Panel:
+    """Build the "Attack path" panel of one handoff."""
+    path = scenario.attack_path.model_dump(mode="json")
+    return Panel("path", "Attack path", path_preview(path), path_body(path))
 
 
 def scenario_panels(run: RunData, scenario_id: str) -> list[Panel]:
-    """Build the narrative, attack path or tree, and Gherkin panels of one scenario."""
+    """Build the narrative, attack path, and Gherkin panels of one scenario."""
     scenario = run.scenarios[scenario_id]
     return [
         narrative_panel(scenario.narrative),
-        path_panel(scenario) or tree_panel(scenario.attack_tree),
+        path_panel(scenario),
         gherkin_panel(scenario_id, scenario.gherkin, run.features.get(scenario_id)),
     ]
 
 
 @dataclass(frozen=True)
 class PanelStats:
-    """Counts across the run that show a change in the trees or feature files at a glance.
+    """Counts across the run that show a change in the paths or feature files at a glance.
 
-    ``trees`` counts scenarios. ``paths`` counts those that carry an attack
-    path (a v5 handoff), and ``single_leaf`` counts the scenarios with exactly
-    one leaf of the tree, or one weak point of the path.
+    ``single_leaf`` counts the scenarios whose path has exactly one weak point.
     """
 
-    trees: int
-    flat: int
+    scenarios: int
     single_leaf: int
     features: int
     matching: int
-    and_or: int = 0
-    paths: int = 0
 
 
 def panel_stats(run: RunData) -> PanelStats:
-    """Count flat, AND/OR, path, and one-leaf scenarios, and feature files that match their YAML."""
+    """Count scenarios, one-weak-point paths, and feature files that match their YAML."""
     scenarios = list(run.scenarios.values())
-    trees = [s.attack_tree for s in scenarios if hasattr(s, "attack_tree")]
-    paths = [s.attack_path for s in scenarios if hasattr(s, "attack_path")]
     matching = sum(
         feature_matches(run.scenarios[s].gherkin, text)
         for s, text in run.features.items()
@@ -479,11 +312,10 @@ def panel_stats(run: RunData) -> PanelStats:
     )
     return PanelStats(
         len(scenarios),
-        sum(t.get("relation") == "flat" for t in trees),
-        sum(len(t.get("leaves") or []) == 1 for t in trees)
-        + sum(weak_point_count(p.model_dump(mode="json")) == 1 for p in paths),
+        sum(
+            weak_point_count(s.attack_path.model_dump(mode="json")) == 1
+            for s in scenarios
+        ),
         len(run.features),
         matching,
-        sum(isinstance(t.get("root"), dict) for t in trees),
-        len(paths),
     )

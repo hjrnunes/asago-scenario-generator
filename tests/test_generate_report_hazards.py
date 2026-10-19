@@ -12,8 +12,8 @@ from typing import Any
 import pytest
 import yaml
 
-from asago_scenario_generator.pipeline import synthesis
 from asago_scenario_generator.pipeline.synthesis_persist import _render_report
+from asago_scenario_generator.report import attack_flow, hazard_view
 from asago_scenario_generator.report.attack_flow import (
     EXTENSION_DEFINITION,
     EXTENSION_ID,
@@ -29,11 +29,9 @@ from asago_scenario_generator.report.process_model_gaps import (
     write_process_model_gaps,
 )
 from asago_scenario_generator.report.run_data import load_run
-from tests.helpers.generate_report_fixture import body_rows, copy_run, edit_yaml
-from tests.stpa.test_and_or_tree import invoke_generate
+from tests.helpers.generate_report_fixture import body_rows, copy_run
 
 AND_OR = Path(__file__).parent / "fixtures" / "generate_report" / "klarna-and-or"
-AND_OR_V4 = Path(__file__).parent / "fixtures" / "generate_report" / "klarna-and-or-v4"
 REACHED = {
     "H-2": ("SCN-001", "SCN-032"),
     "H-5": ("SCN-020", "SCN-021"),
@@ -46,13 +44,6 @@ def copy_and_or(tmp_path: Path, name: str = "output") -> Path:
     """Copy the v5 run, whose scenarios carry attack paths."""
     target = tmp_path / name
     shutil.copytree(AND_OR, target)
-    return target
-
-
-def copy_and_or_v4(tmp_path: Path, name: str = "output") -> Path:
-    """Copy the same run as v4 handoffs, whose scenarios carry and-or trees."""
-    target = tmp_path / name
-    shutil.copytree(AND_OR_V4, target)
     return target
 
 
@@ -70,22 +61,14 @@ def flow(output: Path, hazard_id: str) -> dict[str, Any]:
 # --- hazard view ---------------------------------------------------------------
 
 
-def test_the_view_is_off_by_default(tmp_path: Path) -> None:
-    default = copy_and_or(tmp_path, "default")
-    explicit = copy_and_or(tmp_path, "explicit")
+def test_every_report_has_the_view_and_its_flow_files(tmp_path: Path) -> None:
+    output = copy_run(tmp_path)
 
-    write_report(default)
-    write_report(explicit, "off")
+    write_report(output)
 
-    html = (default / "report" / "index.html").read_text(encoding="utf-8")
-    assert 'id="hazards"' not in html
-    assert not (default / "report" / "attack-flow").exists()
-    assert html == (explicit / "report" / "index.html").read_text(encoding="utf-8")
-
-
-def test_an_unknown_view_is_rejected(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="hazard_view must be one of off, report"):
-        write_report(copy_and_or(tmp_path), "hazards")
+    html = (output / "report" / "index.html").read_text(encoding="utf-8")
+    assert 'id="hazards"' in html
+    assert any((output / "report" / "attack-flow").iterdir())
 
 
 def test_each_scenario_appears_under_every_hazard_it_names(tmp_path: Path) -> None:
@@ -100,7 +83,7 @@ def test_each_scenario_appears_under_every_hazard_it_names(tmp_path: Path) -> No
 def test_the_report_view_shows_a_tree_per_reached_hazard(tmp_path: Path) -> None:
     output = copy_and_or(tmp_path)
 
-    write_report(output, "report")
+    write_report(output)
 
     html = (output / "report" / "index.html").read_text(encoding="utf-8")
     hazards = section_html(html, "hazards")
@@ -121,14 +104,20 @@ def test_the_report_view_shows_a_tree_per_reached_hazard(tmp_path: Path) -> None
     assert "analytical only" in hazards
 
 
-def test_one_broken_tree_costs_only_its_hazards(tmp_path: Path) -> None:
-    output = copy_and_or_v4(tmp_path)
+def test_one_broken_path_costs_only_its_hazards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    output = copy_and_or(tmp_path)
+    subtree = hazard_view.scenario_subtree
 
-    def drop_scenario_node(handoff: dict) -> None:
-        handoff["attack_tree"]["root"]["children"] = []
+    def break_scn_027(scenario: Any) -> dict:
+        if scenario.scenario_id == "SCN-027":
+            raise ValueError("SCN-027 path cannot be read")
+        return subtree(scenario)
 
-    edit_yaml(output / "scenarios" / "SCN-027.yaml", drop_scenario_node)
-    write_report(output, "report")
+    monkeypatch.setattr(hazard_view, "scenario_subtree", break_scn_027)
+    monkeypatch.setattr(attack_flow, "scenario_subtree", break_scn_027)
+    write_report(output)
 
     hazards = section_html(
         (output / "report" / "index.html").read_text(encoding="utf-8"), "hazards"
@@ -137,18 +126,6 @@ def test_one_broken_tree_costs_only_its_hazards(tmp_path: Path) -> None:
     assert 'id="hazard-H-2"' in hazards
     written = sorted(p.name for p in (output / "report" / "attack-flow").iterdir())
     assert written == ["H-10.json", "H-2.json", "H-5.json"]
-
-
-def test_the_scenario_intro_counts_and_or_trees(tmp_path: Path) -> None:
-    output = copy_and_or_v4(tmp_path)
-
-    write_report(output)
-
-    scenarios = section_html(
-        (output / "report" / "index.html").read_text(encoding="utf-8"), "scenarios"
-    )
-    assert "7 of 7 attack trees are AND/OR trees" in scenarios
-    assert "are flat" not in scenarios
 
 
 def test_the_scenario_intro_counts_attack_paths_in_a_v5_run(tmp_path: Path) -> None:
@@ -164,19 +141,20 @@ def test_the_scenario_intro_counts_attack_paths_in_a_v5_run(tmp_path: Path) -> N
     assert "attack trees are" not in scenarios
 
 
-def test_the_flat_scenario_intro_is_unchanged(tmp_path: Path) -> None:
+def test_the_scenario_intro_counts_one_weak_point_paths(tmp_path: Path) -> None:
     output = copy_run(tmp_path)
 
     write_report(output)
 
     html = (output / "report" / "index.html").read_text(encoding="utf-8")
-    assert "8 of 8 attack trees are flat, with no AND or OR between nodes" in html
+    assert "8 of 8 scenarios carry an attack path" in html
+    assert "hazard; 6 have exactly one weak point" in html
 
 
 def test_the_page_stays_within_its_size_budget(tmp_path: Path) -> None:
     output = copy_and_or(tmp_path)
 
-    write_report(output, "report")
+    write_report(output)
 
     html = (output / "report" / "index.html").read_text(encoding="utf-8")
     assert len(html.encode()) / 7 * 100 <= 5_000_000
@@ -188,7 +166,7 @@ def test_the_page_stays_within_its_size_budget(tmp_path: Path) -> None:
 def test_one_flow_file_per_reached_hazard(tmp_path: Path) -> None:
     output = copy_and_or(tmp_path)
 
-    write_report(output, "report")
+    write_report(output)
 
     written = sorted(p.name for p in (output / "report" / "attack-flow").iterdir())
     assert written == sorted(f"{h}.json" for h in REACHED)
@@ -196,7 +174,7 @@ def test_one_flow_file_per_reached_hazard(tmp_path: Path) -> None:
 
 def test_a_flow_is_a_well_formed_attack_tree(tmp_path: Path) -> None:
     output = copy_and_or(tmp_path)
-    write_report(output, "report")
+    write_report(output)
 
     bundle = flow(output, "H-10")
 
@@ -242,7 +220,7 @@ def test_a_flow_is_a_well_formed_attack_tree(tmp_path: Path) -> None:
 
 def test_a_flow_chains_the_steps_to_the_unsafe_action(tmp_path: Path) -> None:
     output = copy_and_or(tmp_path)
-    write_report(output, "report")
+    write_report(output)
 
     objects = {item["id"]: item for item in flow(output, "H-9")["objects"]}
 
@@ -263,8 +241,8 @@ def test_a_flow_is_the_same_on_every_render(tmp_path: Path) -> None:
     first = copy_and_or(tmp_path, "first")
     second = copy_and_or(tmp_path, "second")
 
-    write_report(first, "report")
-    write_report(second, "report")
+    write_report(first)
+    write_report(second)
 
     for hazard_id in REACHED:
         name = f"report/attack-flow/{hazard_id}.json"
@@ -298,7 +276,7 @@ def linked(documents: dict[str, dict]) -> dict[str, dict]:
 def test_no_gap_list_without_the_field(tmp_path: Path) -> None:
     output = copy_and_or(tmp_path)
 
-    write_report(output, "report")
+    write_report(output)
 
     assert process_model_gaps(load_run(output), handoff_documents(output)) is None
     assert not (output / "report" / GAPS_FILE).exists()
@@ -332,7 +310,7 @@ def test_the_gap_list_is_written_and_rendered(tmp_path: Path) -> None:
     (output / "report").mkdir()
 
     path = write_process_model_gaps(output / "report", gaps)
-    html, _ = build_report(run, "off", gaps)
+    html, _ = build_report(run, gaps)
 
     assert yaml.safe_load(path.read_text(encoding="utf-8")) == gaps
     section = section_html(str(html), "gaps")
@@ -407,62 +385,13 @@ def test_a_link_row_names_the_endpoints_and_owner_before_the_link(
     assert body_rows(section, "gaps-table") == 2
 
 
-# --- flag ----------------------------------------------------------------------
-
-
-def test_the_inputs_validate_the_view(tmp_path: Path) -> None:
-    assert (
-        synthesis.SynthesisInputs(use_case="u", output_dir=tmp_path).hazard_view
-        == "off"
-    )
-    with pytest.raises(ValueError, match="hazard_view must be off or report"):
-        synthesis.SynthesisInputs(use_case="u", output_dir=tmp_path, hazard_view="x")
-    with pytest.raises(ValueError, match="requires attack_tree_format and-or"):
-        synthesis.SynthesisInputs(
-            use_case="u", output_dir=tmp_path, hazard_view="report"
-        )
+# --- publication ---------------------------------------------------------------
 
 
 def test_the_published_report_carries_the_view(tmp_path: Path) -> None:
     output = copy_and_or(tmp_path)
 
-    index = _render_report(output, "report")
+    index = _render_report(output)
 
     assert index is not None and 'id="hazards"' in index.read_text(encoding="utf-8")
     assert (output / "report" / "attack-flow" / "H-9.json").exists()
-
-
-@pytest.mark.parametrize(
-    ("arguments", "expected"),
-    [
-        ([], "off"),
-        (["--attack-tree-format", "and-or", "--hazard-view", "report"], "report"),
-    ],
-    ids=["default", "report"],
-)
-def test_the_cli_view_reaches_the_inputs(
-    tmp_path: Path, arguments: list[str], expected: str
-) -> None:
-    result, captured = invoke_generate(tmp_path, arguments)
-
-    assert result.exit_code == 0, result.output
-    assert captured[0].hazard_view == expected
-
-
-@pytest.mark.parametrize(
-    ("arguments", "message"),
-    [
-        (["--hazard-view", "report"], "report requires --attack-tree-format and-or"),
-        (["--hazard-view", "tree"], "must be off or report"),
-    ],
-    ids=["flat", "unknown"],
-)
-def test_the_cli_rejects_a_bad_view(
-    tmp_path: Path, arguments: list[str], message: str
-) -> None:
-    result, captured = invoke_generate(tmp_path, arguments)
-
-    assert result.exit_code != 0
-    assert "--hazard-view" in result.output
-    assert message in " ".join(result.output.split())
-    assert captured == []

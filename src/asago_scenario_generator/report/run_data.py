@@ -32,7 +32,6 @@ from asago_scenario_generator.stpa.models.control_structure import ControlStruct
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     ScenarioHandoff,
-    handoff_model_for,
 )
 from asago_scenario_generator.stpa.system_model.risk_actionability import (
     RiskActionabilityRecord,
@@ -255,7 +254,7 @@ def _read_scenarios(output: Path) -> dict[str, ScenarioHandoff]:
         path.stem: yaml.safe_load(path.read_text(encoding="utf-8")) for path in paths
     }
     return {
-        stem: handoff_model_for(document).model_validate(document)
+        stem: ScenarioHandoff.model_validate(document)
         for stem, document in documents.items()
     }
 

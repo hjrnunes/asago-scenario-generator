@@ -47,7 +47,6 @@ from .wire import (
 from .conditions import (
     _resolve_temporal_condition,
 )
-from .flawed_belief import FlawedBeliefFrame, resolve_process_model_variable
 from .validate import (
     FUNCTIONAL_TEST_GAIN,
     _normalize_provider_semantic_proposition,
@@ -124,7 +123,6 @@ def compile_scenario_spec(
     condition_universe: ConditionUniverse | None = None,
     condition_omitted_reason: str | None = None,
     condition_outcome: ConditionCheckOutcome | None = None,
-    flawed_beliefs: FlawedBeliefFrame | None = None,
 ) -> ScenarioSpec:
     """Compile a normal-path draft into the published ScenarioSpec.
 
@@ -140,9 +138,7 @@ def compile_scenario_spec(
     """
     choices_by_handle = {choice.handle: choice for choice in choices}
     attacker_bdi = _materialize_context_attacker_bdi(draft, choices_by_handle)
-    factors = _materialize_context_factors(
-        draft, choices, choices_by_handle, context, flawed_beliefs
-    )
+    factors = _materialize_context_factors(draft, choices, choices_by_handle, context)
     outcome = draft.unsafe_outcome
     _normalize_provider_semantic_proposition(outcome, context)
     adversary = _materialize_adversary(draft.adversary)
@@ -231,7 +227,6 @@ def _materialize_context_factors(
     choices: tuple[_CausalSourceChoice, ...],
     choices_by_handle: Mapping[str, _CausalSourceChoice],
     context: ScenarioGenerationContext,
-    flawed_beliefs: FlawedBeliefFrame | None = None,
 ) -> list[CausalFactorDeclaration]:
     """Compile causal factors and close their temporal references."""
     factor_order = {
@@ -250,7 +245,6 @@ def _materialize_context_factors(
                 factor_order=factor_order,
                 binding_scope=f"factor-{factor_order[item.source_handle]}",
             ),
-            flawed_beliefs=flawed_beliefs,
         )
         for item in draft.causal_factors
     ]
@@ -295,7 +289,6 @@ def _materialize_causal_factor(
     choices: dict[str, _CausalSourceChoice],
     *,
     temporal_condition: SemanticCondition | None = None,
-    flawed_beliefs: FlawedBeliefFrame | None = None,
 ) -> CausalFactorDeclaration:
     """Compile one local causal-source handle into the closed domain record."""
     choice = choices[draft.source_handle]
@@ -323,12 +316,4 @@ def _materialize_causal_factor(
         capability_refs=capability_refs,
         access_refs=access_refs,
         bounded_assumption=bounded_assumption,
-        flawed_belief=(
-            draft.flawed_belief.strip() if flawed_beliefs is not None else None
-        ),
-        process_model_variable=(
-            resolve_process_model_variable(draft, flawed_beliefs)
-            if flawed_beliefs is not None
-            else None
-        ),
     )

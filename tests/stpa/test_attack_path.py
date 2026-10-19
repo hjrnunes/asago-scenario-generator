@@ -25,9 +25,7 @@ from asago_scenario_generator.stpa.scenario_prod.attack_path import (
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     AttackPath,
-    ScenarioHandoffV4,
     ScenarioHandoffV5,
-    build_scenario_handoff,
     handoff_ownership_violations,
     handoff_schema_violations,
 )
@@ -42,7 +40,6 @@ from tests.stpa.test_scenario_handoff_v5 import (
 )
 
 ROOT = Path(__file__).resolve().parents[2]
-V4_SCHEMA = ROOT / "data/contracts/scenario-handoff/handoff-v4/schema.json"
 
 
 def _tree(spec: Any) -> dict[str, Any]:
@@ -215,14 +212,13 @@ def _document() -> dict[str, Any]:
     )
 
 
-def test_a_v5_handoff_carries_the_path_where_v4_carries_the_tree() -> None:
+def test_a_handoff_carries_the_path_its_tree_reduces_to() -> None:
     envelope = _envelope(adversarial())
-    v4 = build_scenario_handoff(envelope).model_dump(mode="json", exclude_none=True)
-    v5 = _document()
+    document = _document()
 
-    assert list(v4).index("attack_tree") == list(v5).index("attack_path")
-    assert "attack_tree" not in v5
-    assert v5["attack_path"] == reduce_to_attack_path(envelope.attack_tree)
+    assert list(document).index("attack_path") == list(document).index("narrative") + 1
+    assert "attack_tree" not in document
+    assert document["attack_path"] == reduce_to_attack_path(envelope.attack_tree)
 
 
 def test_the_path_model_is_closed_and_typed() -> None:
@@ -258,26 +254,12 @@ def test_a_v5_document_with_a_tree_or_without_a_path_is_rejected() -> None:
             ScenarioHandoffV5.model_validate(broken)
 
 
-def test_a_v4_document_with_a_path_is_rejected() -> None:
-    document = _document()
-    document["schema_version"] = "scenario-handoff-v4"
-
-    with pytest.raises(ValidationError):
-        ScenarioHandoffV4.model_validate(document)
-
-
 def test_the_published_document_passes_the_schema_and_ownership_scan() -> None:
     document = _document()
 
     assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
     assert handoff_schema_violations(document) == []
     assert handoff_ownership_violations(document) == []
-
-
-def test_the_v4_schema_is_still_the_v4_models_schema() -> None:
-    assert V4_SCHEMA.read_text(encoding="utf-8") == (
-        json.dumps(ScenarioHandoffV4.model_json_schema(), indent=2) + "\n"
-    )
 
 
 def test_the_kit_holds_the_path_cases() -> None:

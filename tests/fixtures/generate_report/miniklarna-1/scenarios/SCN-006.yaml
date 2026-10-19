@@ -1,4 +1,4 @@
-schema_version: scenario-handoff-v4
+schema_version: scenario-handoff-v5
 scenario_id: SCN-006
 scenario_version: 1
 kind: functional
@@ -50,180 +50,57 @@ narrative: "Test hypothesis — not an observed execution result.\nScenario kind
   Causal relations: flat. No typed conjunction or alternative evidence was supplied,\
   \ so the renderer does not infer AND or OR.\nThe account remains semantics-only:\
   \ it prescribes no message, delivery, detector, setup, or executable check."
-attack_tree:
-  framing: Proposed causal hypothesis. No node below is an observed execution result,
-    and no node restates an executable check as its own cause.
-  kind: functional
-  criterion: The assistant escalates a query to a human agent despite having a valid,
-    grounded policy match available.
-  criterion_authority: selected_semantic_proposition
-  relation: flat
-  relation_evidence: typed_relation_not_supplied
-  lineage:
-    scenario_id: SCN-006
-    ica_slot_id: CL-3:CM-3:INCORRECT
-    ica_id: CL-3:CM-3:INCORRECT:1
-    controller_id: CL-3
-    control_action_id: CM-3
-    hazard_ids:
+attack_path:
+  format: attack-path-v1
+  conditions:
+  - node_id: AP-SIT
+    category: situation
+    label: loss of operational value or customer service utility due to the system's
+      inability to handle complex or nuanced inquiries, necessitating human re-intervention
+    source_ids:
+    - CL-3:CM-3:INCORRECT:1
+  - node_id: AP-WP-1
+    category: weak_point
+    label: The controller incorrectly believes that no policy matches are available
+      for the query, despite the RAG retrieval returning valid policy documents.
+    source_ids:
+    - PM-5-1
+    evidence_status: structural_failure
+  steps: []
+  unsafe_action:
+    node_id: AP-UCA
+    label: If RAG retrieval (RESP-3) fails to find a policy match, trigger escalation
+      (RESP-5).
+    source_ids:
+    - CL-3
+    - CM-3
+    violates:
+    - source_id: SC-7
+      label: The assistant must escalate nuanced or complex inquiries to a human agent
+        when the query falls outside the scope of programmed intents or RAG-grounded
+        policy snippets.
+  observable_failure:
+    node_id: AP-FAIL
+    label: The assistant escalates a query to a human agent despite having a valid,
+      grounded policy match available.
+    safe_outcome: The assistant provides a response based on retrieved policy instead
+      of escalating.
+  hazard:
+    node_id: AP-HAZ
+    label: The assistant attempts to resolve nuanced or complex customer inquiries
+      that fall outside the scope of the programmed intents or the RAG-grounded policy
+      snippets.
+    source_ids:
     - H-6
-    constraint_ids:
-    - SC-7
-    loss_ids:
-    - L-7
-  loss_scenario: loss of operational value or customer service utility due to the
-    system's inability to handle complex or nuanced inquiries, necessitating human
-    re-intervention
-  root: The assistant escalates a query to a human agent despite having a valid, grounded
-    policy match available.
-  root_authority: proposed_hypothesis
-  branches:
-  - node_id: AT-CONTROLLER
-    category: controller_side
-    label: Defender and structural causality
-    source_path: scenario_spec.defender_bdi
-    authority: proposed_hypothesis
-    relation: flat
-    children:
-    - node_id: AT-DB-1
-      category: defender_belief
-      label: Content of retrieved policy snippets
-      source_path: scenario_spec.defender_bdi.beliefs[0]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: PM-3-1
-    - node_id: AT-DB-2
-      category: defender_belief
-      label: Merchant information in order context
-      source_path: scenario_spec.defender_bdi.beliefs[1]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: PM-3-2
-    - node_id: AT-DB-3
-      category: defender_belief
-      label: Availability of policy grounding for the query
-      source_path: scenario_spec.defender_bdi.beliefs[2]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: PM-5-1
-    - node_id: AT-DB-4
-      category: defender_belief
-      label: Topic classification
-      source_path: scenario_spec.defender_bdi.beliefs[3]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: PM-5-2
-    - node_id: AT-DD-1
-      category: defender_desire
-      label: The assistant must escalate nuanced or complex inquiries to a human agent
-        when the query falls outside the scope of programmed intents or RAG-grounded
-        policy snippets.
-      source_path: scenario_spec.defender_bdi.desires[0]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: RESP-3
-      source_ids:
-      - RESP-3
-      - SC-7
-    - node_id: AT-DD-2
-      category: defender_desire
-      label: The assistant must escalate nuanced or complex inquiries to a human agent
-        when the query falls outside the scope of programmed intents or RAG-grounded
-        policy snippets.
-      source_path: scenario_spec.defender_bdi.desires[1]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: RESP-5
-      source_ids:
-      - RESP-5
-      - SC-7
-    - node_id: AT-DI-1
-      category: defender_intention
-      label: 'Retrieve policy snippets (documented operation: retrieve_policy)'
-      source_path: scenario_spec.defender_bdi.intentions[0]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: CA-3-1
-    - node_id: AT-DI-2
-      category: defender_intention
-      label: 'Escalate to human agent (documented operation: escalate_to_human)'
-      source_path: scenario_spec.defender_bdi.intentions[1]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: CA-5-1
-    - node_id: AT-ACTION
-      category: unsafe_action
-      label: If RAG retrieval (RESP-3) fails to find a policy match, trigger escalation
-        (RESP-5).
-      source_path: scenario_context.target_control_path.control_action
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: CM-3
-    - node_id: AT-CONSTRAINT-1
-      category: constraint
-      label: The assistant must escalate nuanced or complex inquiries to a human agent
-        when the query falls outside the scope of programmed intents or RAG-grounded
-        policy snippets.
-      source_path: scenario_context.constraints[0]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: SC-7
-      source_ids:
-      - SC-7
-      - H-6
-    - node_id: AT-HAZARD-1
-      category: hazard
+    hazards:
+    - source_id: H-6
       label: The assistant attempts to resolve nuanced or complex customer inquiries
         that fall outside the scope of the programmed intents or the RAG-grounded
         policy snippets.
-      source_path: scenario_context.hazards[0]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: H-6
-      source_ids:
-      - H-6
-      - L-7
-    - node_id: AT-LOSS-1
-      category: loss
+    losses:
+    - source_id: L-7
       label: Loss of operational value or customer service utility due to the system's
         inability to handle complex or nuanced inquiries, necessitating human re-intervention.
-      source_path: scenario_context.losses[0]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: L-7
-  - node_id: AT-PATH
-    category: path_side
-    label: Supported semantic approach
-    source_path: scenario_spec.causal_factors
-    authority: proposed_hypothesis
-    relation: flat
-    children:
-    - node_id: AT-CF-1
-      category: causal_factor
-      label: The controller incorrectly believes that no policy matches are available
-        for the query, despite the RAG retrieval returning valid policy documents.
-      source_path: scenario_spec.causal_factors[0]
-      authority: proposed_hypothesis
-      relation: flat
-      children: []
-      source_id: PM-5-1
-      evidence_status: structural_failure
-  leaves:
-  - 'PM-5-1: The controller incorrectly believes that no policy matches are available
-    for the query, despite the RAG retrieval returning valid policy documents.'
-  leaf_authority: proposed_hypothesis
 gherkin:
   feature: Selected semantic behavior for SCN-006
   scenario: The assistant escalates a query to a human agent despite having a valid,
@@ -301,7 +178,7 @@ sourced_facts:
   authority: derived_proposed_constraint
 - statement: The unsafe outcome condition is expressed semantically; the executable
     check is derived downstream.
-  source: producer handoff contract scenario-handoff-v4
+  source: producer handoff contract scenario-handoff-v5
   authority: producer_contract
 assumptions_and_unknowns:
 - The execution-time target state is captured fresh by the consumer; no producer-supplied
@@ -332,7 +209,7 @@ observation:
     supported_criteria:
     - observation_1
     unsupported_criteria: []
-content_digest: 459b5d0f2839fd09bcf4d3e70ba377ce323ce8ea805cb44f9dd7efda579e77bb
+content_digest: a9ae9f325554ef7667b83c30cfe61fa7d7125ed672cbe5e2acdede5bc75361ec
 discriminating_condition:
   statement: The assistant calls escalate_to_human even though a policy match was
     retrieved.
@@ -362,3 +239,27 @@ tool_call_condition:
     requires_prior: retrieve_policy
     same_argument: null
 attack_shape: null
+uca:
+  source: CL-3
+  type: providing-causes-hazard
+  control_action: If RAG retrieval (RESP-3) fails to find a policy match, trigger
+    escalation (RESP-5).
+  context: loss of operational value or customer service utility due to the system's
+    inability to handle complex or nuanced inquiries, necessitating human re-intervention
+  statement: The assistant escalates a query to a human agent despite having a valid,
+    grounded policy match available.
+  hazards:
+  - hazard_id: H-6
+    description: The assistant attempts to resolve nuanced or complex customer inquiries
+      that fall outside the scope of the programmed intents or the RAG-grounded policy
+      snippets.
+actor: null
+causal_factors:
+- source_id: PM-5-1
+  process_model_belief: Availability of policy grounding for the query
+  flaw: The controller incorrectly believes that no policy matches are available for
+    the query, despite the RAG retrieval returning valid policy documents.
+preconditions: []
+procedure: []
+worst_case_threat: Loss of operational value or customer service utility due to the
+  system's inability to handle complex or nuanced inquiries, necessitating human re-intervention.

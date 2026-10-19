@@ -37,16 +37,14 @@ commands.
 
 ## Current ownership and historical seams
 
-The normal producer `generate` publishes one semantics-only `scenario-handoff-v4`
-through its handoff model, `ScenarioHandoffV4`. `--handoff-format v5` publishes
-`scenario-handoff-v5` through `ScenarioHandoffV5`, which carries the scenario's
-`attack_path` (`attack_path.py` reduces the and-or tree to it; the flag
-requires `--attack-tree-format and-or`) in place of `attack_tree`, and adds the
+The normal producer `generate` publishes one semantics-only `scenario-handoff-v5`
+through its handoff model, `ScenarioHandoffV5`, which carries the scenario's
+`attack_path` (`attack_path.py` reduces the and-or tree to it) and adds the
 UCA, actor, causal factors, preconditions, ATLAS procedure, and worst case threat
-that `handoff_v5.py` derives from the scenario spec. With `--model-gherkin handoff`
-(v5 only), `model_gherkin.py` asks the model for a declarative Gherkin per
-published scenario and code falls back to the rendered Gherkin when the reply
-fails its checks. The envelope carries theStage 5 `discriminating_condition`, its code-owned `condition_check`, and an
+that `handoff_v5.py` derives from the scenario spec. `model_gherkin.py` asks
+the model for a declarative Gherkin per published scenario, and code falls back
+to the rendered Gherkin when the reply fails its checks. The envelope carries
+the Stage 5 `discriminating_condition`, its code-owned `condition_check`, and an
 optional `condition_omitted_reason` for a scenario published without its
 condition. It carries the binding of that condition against the
 target-observation facts: the required `tool_call_condition_status` (`bound`,
@@ -88,7 +86,7 @@ the frozen content, immediate pre-dispatch dependency checks, command/reply
 receipts, and separate backend/state observations. A command-level detector
 does not establish a completed backend effect.
 
-The current workflow is producer `generate` → `scenario-handoff-v4` →
+The current workflow is producer `generate` → `scenario-handoff-v5` →
 consumer `generate` → consumer `check`.
 
 ## Taxonomy obligation planning (observational Phase 1)
@@ -649,7 +647,9 @@ scenarios publish a narrative and Gherkin rendered from the attack shape over
 the same tree. The structured handoff fields and the tree retain the selected
 causal evidence; every rendering describes a hypothesis, not an observed test
 result.
-The run makes no model calls to render them.
+The `stage6_narrative` and `stage6_gherkin` model steps then replace the
+narrative paragraph and the Gherkin with checked model replies; a scenario
+whose reply fails keeps the deterministic rendering.
 Stage 5 prompt views teach condition field semantics without supplying invented
 request-specific values. Temporal outcomes reuse the factor-condition local
 handle resolver, and target-backed action-value predicates must name an observed

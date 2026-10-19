@@ -2,11 +2,9 @@
 
 The view reads the published scenarios and ``loss-analysis.yaml`` only.
 Membership is each scenario's ``lineage.hazard_ids``, so a scenario that names
-two hazards appears under both; the ``AT-ALT`` references inside a tree come
-from an index built before publication and do not decide membership. Each
-hazard is an OR of its scenarios, and each scenario is the ``AT-SCN`` subtree
-of its and-or attack tree, or of its v5 attack path read in that shape: an
-ordered AND of its conditions and steps.
+two hazards appears under both. Each hazard is an OR of its scenarios, and
+each scenario is its attack path read as an and-or subtree: an ordered AND
+of its conditions and steps.
 """
 
 from __future__ import annotations
@@ -43,13 +41,11 @@ from asago_scenario_generator.report_kit import (
     tree,
 )
 
-HAZARD_VIEWS = ("off", "report")
 QUESTION = (
     "Which scenarios reach each hazard, and how? A hazard is reached when any one "
     "of its scenarios holds; open a hazard for each scenario's conditions and steps."
 )
 OR_LABEL = "Any one of these scenarios reaches the hazard"
-SCENARIO_NODE = "AT-SCN"
 ATTACK_FLOW_DIR = "attack-flow"
 
 
@@ -116,43 +112,17 @@ def hazard_groups(run: RunData) -> list[HazardGroup]:
 def _tree_description(
     run: RunData, hazard_id: str, scenario_ids: list[str]
 ) -> str | None:
-    """Describe a hazard the loss analysis lacks from its scenarios' tree roots."""
+    """Describe a hazard the loss analysis lacks from its scenarios' paths."""
     for scenario_id in scenario_ids:
-        scenario = run.scenarios[scenario_id]
-        path = getattr(scenario, "attack_path", None)
-        root = (
-            path.hazard.model_dump(mode="json")
-            if path is not None
-            else scenario.attack_tree.get("root") or {}
-        )
-        for item in root.get("hazards") or []:
-            if isinstance(item, dict) and item.get("source_id") == hazard_id:
-                return item.get("label")
+        for item in run.scenarios[scenario_id].attack_path.hazard.hazards:
+            if item.source_id == hazard_id:
+                return item.label
     return None
 
 
 def scenario_subtree(scenario: Any) -> dict:
-    """Return a scenario's own AND: its ``AT-SCN`` node, or its v5 path in that shape."""
-    path = getattr(scenario, "attack_path", None)
-    if path is not None:
-        return path_subtree(path.model_dump(mode="json"))
-    return _tree_subtree(scenario.attack_tree)
-
-
-def _tree_subtree(attack_tree: dict) -> dict:
-    """Return the ``AT-SCN`` node of an and-or attack tree: this scenario's AND."""
-    stack = [attack_tree.get("root")]
-    while stack:
-        node = stack.pop()
-        if not isinstance(node, dict):
-            continue
-        if node.get("node_id") == SCENARIO_NODE:
-            return node
-        stack.extend(reversed(node.get("children") or []))
-    raise ValueError(
-        f"the attack tree has no {SCENARIO_NODE} node; the hazard view needs "
-        "and-or attack trees"
-    )
+    """Return a scenario's own AND: its attack path in the and-or subtree shape."""
+    return path_subtree(scenario.attack_path.model_dump(mode="json"))
 
 
 def disposition(run: RunData, scenario_id: str) -> Disposition:
@@ -168,16 +138,8 @@ def disposition(run: RunData, scenario_id: str) -> Disposition:
 
 def uca_parts(run: RunData, scenario_id: str) -> tuple[str, str, str]:
     """Return the unsafe control action's source controller, type, and action."""
-    scenario = run.scenarios[scenario_id]
-    uca = getattr(scenario, "uca", None)
-    if uca is not None:
-        return uca.source, uca.type, uca.control_action
-    lineage = scenario.lineage
-    return (
-        lineage.controller_id,
-        lineage.ica_slot_id.rsplit(":", 1)[-1],
-        lineage.control_action_id,
-    )
+    uca = run.scenarios[scenario_id].uca
+    return uca.source, uca.type, uca.control_action
 
 
 def flow_file_name(hazard_id: str) -> str:

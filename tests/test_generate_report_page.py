@@ -29,7 +29,7 @@ SCHEMA = (
     / "stage-summary-v1.schema.json"
 )
 SECTIONS = (
-    "answer how risks slots testability obligations failed warnings scenarios "
+    "answer how risks slots testability obligations failed warnings hazards scenarios "
     "target handoff effort"
 ).split()
 
@@ -181,7 +181,7 @@ def test_the_handoff_lists_files_with_schema_versions(tmp_path: Path) -> None:
 
     handoff = html.split('<section id="handoff">')[1].split("</section>")[0]
     for text in (
-        "scenario-handoff-v4",
+        "scenario-handoff-v5",
         "scenario-testability-v1",
         "execution-target-profile-v1",
         "testability.yaml",

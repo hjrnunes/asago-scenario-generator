@@ -1,12 +1,12 @@
 """Acceptance tests for the producer-owned scenario-handoff contract kit.
 
-The kit is the producer's versioned handoff envelope: narrative, attack tree,
+The kit is the producer's versioned handoff envelope: narrative, attack path,
 Gherkin and necessary metadata, with a lock/digest record the consumer vendors
 byte-for-byte. These tests assert the kit's content, its schema, its canonical
 digests, and the exact ownership-boundary violations the invalid fixtures
 retain. They also assert the kit introduces no fourth authoritative scenario
 representation. The invalid shape fixtures are checked in
-``test_scenario_handoff_v4_kit.py``.
+``test_scenario_handoff_kit.py``.
 """
 
 from __future__ import annotations
@@ -20,9 +20,9 @@ from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.models.canonical import canonical_json_bytes
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION_V4,
+    HANDOFF_SCHEMA_VERSION_V5,
     HandoffGherkin,
-    ScenarioHandoffV4,
+    ScenarioHandoffV5,
     _FORBIDDEN_KEYS,
     _FORBIDDEN_VALUE_PATTERNS,
     handoff_ownership_violations,
@@ -32,7 +32,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 )
 
 CONTRACT_ROOT = Path(__file__).resolve().parents[2] / "data/contracts/scenario-handoff"
-KIT = CONTRACT_ROOT / "handoff-v4"
+KIT = CONTRACT_ROOT / "handoff-v5"
 
 
 def _lock() -> dict:
@@ -55,22 +55,22 @@ def _valid_fixtures() -> list[Path]:
     return sorted((KIT / "valid").glob("*.json"))
 
 
-def test_v4_schema_matches_the_producer_model() -> None:
-    assert _schema() == ScenarioHandoffV4.model_json_schema()
+def test_schema_matches_the_producer_model() -> None:
+    assert _schema() == ScenarioHandoffV5.model_json_schema()
 
 
-def test_v4_schema_file_is_the_models_schema_byte_for_byte() -> None:
+def test_schema_file_is_the_models_schema_byte_for_byte() -> None:
     committed = (KIT / "schema.json").read_text(encoding="utf-8")
 
-    rendered = json.dumps(ScenarioHandoffV4.model_json_schema(), indent=2) + "\n"
+    rendered = json.dumps(ScenarioHandoffV5.model_json_schema(), indent=2) + "\n"
 
     assert rendered == committed
-    assert list(ScenarioHandoffV4.model_fields) == list(_schema()["properties"])
+    assert list(ScenarioHandoffV5.model_fields) == list(_schema()["properties"])
 
 
 def test_kit_introduces_no_fourth_scenario_representation() -> None:
     lock = _lock()
-    assert lock["representations"] == ["narrative", "attack_tree", "gherkin"]
+    assert lock["representations"] == ["narrative", "attack_path", "gherkin"]
     # Every top-level schema property is one of the three representations or a
     # named metadata field; the envelope adds nothing else.
     declared = set(lock["representations"]) | set(lock["metadata_fields"])
@@ -86,7 +86,7 @@ def test_valid_handoff_fixtures_round_trip_with_digests(fixture: Path) -> None:
 
     assert not list(Draft202012Validator(_schema()).iter_errors(payload))
     assert handoff_schema_violations(payload) == []
-    verify_handoff_digest(ScenarioHandoffV4.model_validate(payload))
+    verify_handoff_digest(ScenarioHandoffV5.model_validate(payload))
     assert handoff_ownership_violations(payload) == []
     # The semantic failure criterion and the safe alternative are retained.
     assert payload["semantic_failure_criterion"].strip()
@@ -95,7 +95,7 @@ def test_valid_handoff_fixtures_round_trip_with_digests(fixture: Path) -> None:
     # The three representations are all present, and the .feature companion
     # renders from the handoff alone.
     assert payload["narrative"].strip()
-    assert payload["attack_tree"]
+    assert payload["attack_path"]
     gherkin = HandoffGherkin.model_validate(payload["gherkin"])
     assert gherkin.feature.strip()
     assert gherkin.to_feature_text().startswith("Feature: ")
@@ -126,7 +126,7 @@ def test_valid_fixtures_cover_every_condition_shape() -> None:
     shapes = set()
     for fixture in _valid_fixtures():
         payload = json.loads(fixture.read_text(encoding="utf-8"))
-        assert payload["schema_version"] == HANDOFF_SCHEMA_VERSION_V4
+        assert payload["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
         condition = payload.get("discriminating_condition")
         if condition is None:
             assert "condition_check" not in payload
@@ -204,14 +204,29 @@ OWNERSHIP_CASES: dict[str, list[str]] = {
 }
 
 
+# Ownership cases that add a key to the closed attack path, which the schema
+# rejects as well.
+ATTACK_PATH_KEY_CASES = {
+    "ownership-oracle-kind-key.json",
+    "ownership-oracle-observes-key.json",
+    "ownership-oracle-basis-key.json",
+    "ownership-key-name-pattern.json",
+    "ownership-dotted-key.json",
+    "stimulus-turn-field.json",
+}
+
+
 @pytest.mark.parametrize("name", list(OWNERSHIP_CASES))
 def test_ownership_cases_are_rejected_for_the_producers_reason(name: str) -> None:
     expected = OWNERSHIP_CASES[name]
     payload = json.loads((KIT / "invalid" / name).read_text(encoding="utf-8"))
+    in_path = name in ATTACK_PATH_KEY_CASES
 
     assert handoff_ownership_violations(payload) == expected
-    assert _expected_violations()[f"invalid/{name}"] == expected
-    assert not list(Draft202012Validator(_schema()).iter_errors(payload))
+    assert _expected_violations()[f"invalid/{name}"] == expected + (
+        [SCHEMA + "attack_path"] if in_path else []
+    )
+    assert bool(list(Draft202012Validator(_schema()).iter_errors(payload))) is in_path
 
 
 def test_the_kit_exercises_every_prose_pattern_and_oracle_key() -> None:
@@ -246,7 +261,7 @@ SCHEMA_CASES: dict[str, list[str]] = {
     "schema-safe-alternative-not-text": [SCHEMA + "safe_alternative"],
     "schema-scenario-version-not-integer": [SCHEMA + "scenario_version"],
     "schema-unknown-not-text": [SCHEMA + "assumptions_and_unknowns"],
-    "schema-attack-tree-not-object": [SCHEMA + "attack_tree"],
+    "schema-attack-path-not-object": [SCHEMA + "attack_path"],
     "schema-lineage-not-object": [SCHEMA + "lineage"],
     "schema-lineage-detector-field": [KEY + "detector", SCHEMA + "lineage"],
     "schema-gherkin-not-object": [SCHEMA + "gherkin"],

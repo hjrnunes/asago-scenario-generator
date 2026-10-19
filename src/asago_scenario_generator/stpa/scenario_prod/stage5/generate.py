@@ -77,7 +77,6 @@ from .validate import (
 from .feedback import (
     _normal_validation_retry_feedback,
 )
-from .flawed_belief import FlawedBeliefFrame, build_flawed_belief_frame
 from .issues import CONDITION_FAILURE_CODES, IssueCode, ValidationIssue, issues_of
 from .prompt_view import (
     build_context_bdi_prompts,
@@ -124,7 +123,6 @@ def generate_bdi_for_context(
     condition_family: ConditionFamily | None = None,
     *,
     assembly: ScenarioAssembly,
-    stated_beliefs: bool = False,
 ) -> tuple[ScenarioSpec | None, str | None]:
     """Generate one Stage 5 ScenarioSpec, or the error that prevented it.
 
@@ -134,8 +132,6 @@ def generate_bdi_for_context(
     code-derived hint rendered with the discriminating-condition
     instructions; it never enters the context. ``assembly`` is the
     deterministic authority the compiled reply is assembled against.
-    ``stated_beliefs`` asks every causal factor for the controller's flawed
-    belief and the process-model variable that holds it.
 
     Raises:
         ScenarioAssemblyError: When that authority rejects the compiled reply.
@@ -170,13 +166,6 @@ def generate_bdi_for_context(
         observation_contract=observation_contract,
         condition_family=condition_family,
         assembly=assembly,
-        flawed_beliefs=(
-            build_flawed_belief_frame(
-                choices, scenario_context, assembly.control_structure
-            )
-            if stated_beliefs
-            else None
-        ),
     )
 
 
@@ -224,7 +213,6 @@ def _generate_semantics(
     observation_contract: ObservationContract | None,
     condition_family: ConditionFamily | None,
     assembly: ScenarioAssembly,
-    flawed_beliefs: FlawedBeliefFrame | None = None,
 ) -> tuple[ScenarioSpec | None, str | None]:
     """Request, validate, and compile scenario semantics and evidence only.
 
@@ -247,7 +235,6 @@ def _generate_semantics(
         observation_contract=observation_contract,
         condition_family=condition_family,
         condition_universe=condition_universe,
-        flawed_beliefs=flawed_beliefs,
     )
     response_format = _scenario_semantics_payload_type(
         len(choices),
@@ -256,9 +243,6 @@ def _generate_semantics(
         ),
         observation_criteria_required=observation_contract is not None,
         condition_references_supplied=condition_universe.grounded,
-        belief_variable_count=(
-            len(flawed_beliefs.variables) if flawed_beliefs is not None else None
-        ),
     )
     checks: list[_NormalDraftCheck] = []
 
@@ -273,7 +257,6 @@ def _generate_semantics(
             target_observations=target_observations,
             condition_required=condition_required,
             condition_universe=condition_universe,
-            flawed_beliefs=flawed_beliefs,
         )
         checks.append(check)
         return check.draft
@@ -365,7 +348,6 @@ def _generate_semantics(
                 condition_outcome=(
                     published.condition_outcome if published is not None else None
                 ),
-                flawed_beliefs=flawed_beliefs,
             )
         except ScenarioAssemblyError:
             # The draft compiled, so its normalizations are recorded even
@@ -411,7 +393,6 @@ def _generate_semantics(
         scenario_context,
         choices,
         target_observations=target_observations,
-        flawed_beliefs=flawed_beliefs,
     )
     first = _call_bdi_with_bounded_length_retry(
         llm_client,
@@ -450,7 +431,6 @@ def _finish_normal_context_bdi(
     condition_universe: ConditionUniverse | None = None,
     condition_omitted_reason: str | None = None,
     condition_outcome: ConditionCheckOutcome | None = None,
-    flawed_beliefs: FlawedBeliefFrame | None = None,
 ) -> tuple[ScenarioSpec | None, str | None]:
     """Compile one normal-path draft without any execution materialization.
 
@@ -470,7 +450,6 @@ def _finish_normal_context_bdi(
                 condition_universe=condition_universe,
                 condition_omitted_reason=condition_omitted_reason,
                 condition_outcome=condition_outcome,
-                flawed_beliefs=flawed_beliefs,
             ),
             None,
         )

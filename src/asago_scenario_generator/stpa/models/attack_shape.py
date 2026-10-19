@@ -1,6 +1,6 @@
 """Attack shape: how an adversarial scenario reaches the agent, as structure.
 
-The shape is part of scenario-handoff-v4. It holds closed enums, bounded
+The shape is part of scenario-handoff-v5. It holds closed enums, bounded
 integers and identifiers only, so attack text cannot fit in it: the artifact
 generator writes every turn and every planted item. An identifier admits no
 whitespace, which keeps a sentence out of the identifier fields.

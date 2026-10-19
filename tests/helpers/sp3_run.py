@@ -2,12 +2,35 @@
 
 from __future__ import annotations
 
+from typing import Any
+
 from asago_scenario_generator.stpa.models.enriched_threat_set import (
     CoverageAnalysis,
     EnrichedThreatSet,
     StructuralThreat,
 )
+from asago_scenario_generator.stpa.scenario_prod.model_gherkin import GherkinReply
+from asago_scenario_generator.stpa.scenario_prod.narration import NarrationReply
+from asago_scenario_generator.stpa.scenario_prod.stage5.belief_step import (
+    StatedBeliefReply,
+)
 from tests.stpa.sp1_helpers import MockLLMClient
+
+#: The replies of the belief, narrate and Gherkin steps every run sends after
+#: Stage 5 and of which the shape step is independent.
+_PRESENTATION_REPLIES = (StatedBeliefReply, NarrationReply, GherkinReply)
+
+
+def stage5_and_shape_calls(client: MockLLMClient) -> list[Any]:
+    """Return the client's Stage 5 and shape calls, in order."""
+    return [
+        call
+        for call in client.calls
+        if not (
+            isinstance(call.response_format, type)
+            and issubclass(call.response_format, _PRESENTATION_REPLIES)
+        )
+    ]
 
 
 def _make_ets(num_threats: int = 2) -> EnrichedThreatSet:

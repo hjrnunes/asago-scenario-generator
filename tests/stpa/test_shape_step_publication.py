@@ -1,12 +1,12 @@
-"""A run publishes scenario-handoff-v4 with the shape the shape step produced.
+"""A run publishes scenario-handoff-v5 with the shape the shape step produced.
 
 The offline end-to-end tests drive ``run_sp3`` with a fake client: Stage 5
-replies first, then one shape reply per adversarial scenario.
+replies first, then one shape reply per adversarial scenario. The counts
+leave out the belief, narrate and Gherkin requests that follow Stage 5.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import pytest
@@ -18,8 +18,8 @@ from asago_scenario_generator.stpa.models.attack_shape import (
     ShapeSource,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HANDOFF_SCHEMA_VERSION_V4,
-    ScenarioHandoffV4,
+    HANDOFF_SCHEMA_VERSION_V5,
+    ScenarioHandoffV5,
     handoff_ownership_violations,
     verify_handoff_digest,
 )
@@ -37,14 +37,9 @@ from tests.helpers.scenario_handoff_publication import (
     _published_handoff,
 )
 from tests.helpers.shape_step_call import DIRECT_REPLY
-from tests.helpers.sp3_run import _make_ets
+from tests.helpers.sp3_run import _make_ets, stage5_and_shape_calls
 
-SCHEMA = json.loads(
-    (
-        Path(__file__).resolve().parents[2]
-        / "data/contracts/scenario-handoff/handoff-v4/schema.json"
-    ).read_text(encoding="utf-8")
-)
+SCHEMA = ScenarioHandoffV5.model_json_schema()
 
 
 def publish(
@@ -71,28 +66,29 @@ def publish(
     return result, client
 
 
-def assert_valid_v4(document: dict) -> ScenarioHandoffV4:
+def assert_valid(document: dict) -> ScenarioHandoffV5:
     errors = list(Draft202012Validator(SCHEMA).iter_errors(document))
     assert errors == []
     assert handoff_ownership_violations(document) == []
-    handoff = ScenarioHandoffV4.model_validate(document)
+    handoff = ScenarioHandoffV5.model_validate(document)
     verify_handoff_digest(handoff)
     return handoff
 
 
-def test_an_adversarial_run_publishes_v4_with_the_validated_shape(
+def test_an_adversarial_run_publishes_the_validated_shape(
     tmp_path: Path,
 ) -> None:
     result, client = publish([_normal_semantics_payload()], tmp_path)
 
     document = _published_handoff(tmp_path)
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V4
-    handoff = assert_valid_v4(document)
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
+    handoff = assert_valid(document)
     assert handoff.attack_shape is not None
     assert handoff.attack_shape.source is ShapeSource.STAGE5_VALIDATED
     assert handoff.attack_shape.turn_count == 2
-    assert [call.response_format for call in client.calls][1:] == [ShapeProposal]
-    assert client.call_count == 2
+    calls = stage5_and_shape_calls(client)
+    assert [call.response_format for call in calls][1:] == [ShapeProposal]
+    assert len(calls) == 2
     assert result.stage_errors == []
     assert result.scenario_specs[0].attack_shape == handoff.attack_shape
 
@@ -102,13 +98,13 @@ def test_a_failing_shape_request_publishes_the_code_default(tmp_path: Path) -> N
         [_normal_semantics_payload()], tmp_path, shape_error=RuntimeError("transport")
     )
 
-    handoff = assert_valid_v4(_published_handoff(tmp_path))
+    handoff = assert_valid(_published_handoff(tmp_path))
     shape = handoff.attack_shape
     assert shape is not None
     assert shape.source is ShapeSource.CODE_DEFAULT
     assert shape.downgrade_reason is ShapeDowngradeReason.SHAPE_CALL_FAILED
     assert shape.turn_count == 1
-    assert client.call_count == 2
+    assert len(stage5_and_shape_calls(client)) == 2
     assert result.stage_errors == []
 
 
@@ -118,11 +114,11 @@ def test_a_functional_scenario_publishes_a_null_shape_and_costs_no_request(
     result, client = publish([_functional_payload()], tmp_path)
 
     document = _published_handoff(tmp_path)
-    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V4
+    assert document["schema_version"] == HANDOFF_SCHEMA_VERSION_V5
     assert document["kind"] == "functional"
     assert "attack_shape" in document and document["attack_shape"] is None
-    assert_valid_v4(document)
-    assert client.call_count == 1
+    assert_valid(document)
+    assert len(stage5_and_shape_calls(client)) == 1
     assert result.functional_test_specs[0].attack_shape is None
 
 
@@ -131,9 +127,9 @@ def test_a_mixed_run_makes_one_shape_request_per_adversarial_scenario(
 ) -> None:
     _, client = publish([_normal_semantics_payload(), _functional_payload()], tmp_path)
 
-    assert client.call_count == 3
-    adversarial = assert_valid_v4(_published_handoff(tmp_path, "SCN-001"))
-    functional = assert_valid_v4(_published_handoff(tmp_path, "SCN-002"))
+    assert len(stage5_and_shape_calls(client)) == 3
+    adversarial = assert_valid(_published_handoff(tmp_path, "SCN-001"))
+    functional = assert_valid(_published_handoff(tmp_path, "SCN-002"))
     assert adversarial.attack_shape is not None
     assert functional.attack_shape is None
 
@@ -148,8 +144,8 @@ def test_duplicates_keep_the_scenario_whose_shape_the_model_proposed(
         shape_reply=[invalid_reply, invalid_reply, DIRECT_REPLY],
     )
 
-    first = assert_valid_v4(_published_handoff(tmp_path, "SCN-001"))
-    second = assert_valid_v4(_published_handoff(tmp_path, "SCN-002"))
+    first = assert_valid(_published_handoff(tmp_path, "SCN-001"))
+    second = assert_valid(_published_handoff(tmp_path, "SCN-002"))
     assert first.attack_shape.source is ShapeSource.CODE_DEFAULT
     assert second.attack_shape.source is ShapeSource.STAGE5_VALIDATED
     assert first.deduplication.status == "duplicate"
@@ -175,7 +171,7 @@ def test_the_forged_channel_stays_off_unless_the_run_enables_it(
         "indirect": None,
     }
     publish([_normal_semantics_payload()], tmp_path / "off", shape_reply=forged_reply)
-    off = assert_valid_v4(_published_handoff(tmp_path / "off"))
+    off = assert_valid(_published_handoff(tmp_path / "off"))
     assert off.attack_shape.downgrade_reason is ShapeDowngradeReason.SHAPE_CALL_FAILED
 
     client = MockLLMClient()
@@ -189,7 +185,7 @@ def test_the_forged_channel_stays_off_unless_the_run_enables_it(
         run_dir=tmp_path / "on",
         shape_config=ShapeStepConfig(allow_forged_transcript=True),
     )
-    on = assert_valid_v4(_published_handoff(tmp_path / "on"))
+    on = assert_valid(_published_handoff(tmp_path / "on"))
     assert on.attack_shape.channel.value == "forged_transcript"
     assert on.attack_shape.threat_label == "forged_transcript_threat"
 
@@ -202,4 +198,4 @@ def test_the_request_count_is_stage5_plus_one_shape_request_per_adversary(
         [_normal_semantics_payload() for _ in range(scenario_count)], tmp_path
     )
 
-    assert client.call_count == 2 * scenario_count
+    assert len(stage5_and_shape_calls(client)) == 2 * scenario_count

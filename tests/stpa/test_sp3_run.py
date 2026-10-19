@@ -17,7 +17,7 @@ from asago_scenario_generator.stpa.models.enriched_threat_set import (
 )
 from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV4,
+    ScenarioHandoffV5,
     verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.wire import (
@@ -41,7 +41,20 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservationSnapshot,
 )
 from asago_scenario_generator.pipeline.target_realization import TargetRealizationResult
-from tests.helpers.sp3_run import _make_ets, _setup_mock_client
+from tests.helpers.sp3_run import (
+    _make_ets,
+    _setup_mock_client,
+    stage5_and_shape_calls,
+)
+
+#: The calls.jsonl stages of one adversarial scenario's requests.
+RUN_STAGES = (
+    "stage_5",
+    "stage5_belief",
+    "stage5_shape",
+    "stage6_narrative",
+    "stage6_gherkin",
+)
 
 
 def _run_sp3(client, ets, cs, la, run_dir, **overrides):
@@ -97,7 +110,7 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
     )
     assert len(result.scenario_envelopes) == 1
     # One Stage 5 request and one shape request.
-    assert client.call_count == 2
+    assert len(stage5_and_shape_calls(client)) == 2
     assert result.stage_errors == []
     assert (tmp_path / "scenarios" / "SCN-001.yaml").is_file()
     envelope = result.scenario_envelopes[0]
@@ -226,11 +239,11 @@ class TestFullRun:
 
         context = result.scenario_specs[0].scenario_context
         assert context is not None
-        assert len(client.calls) == 2
+        assert len(stage5_and_shape_calls(client)) == 2
         stage5_prompt = client.calls[0].user_prompt
         assert context.context_digest not in stage5_prompt
         assert "source_pins" not in stage5_prompt
-        handoff = read_yaml(run_dir / "scenarios/SCN-001.yaml", ScenarioHandoffV4)
+        handoff = read_yaml(run_dir / "scenarios/SCN-001.yaml", ScenarioHandoffV5)
         verify_handoff_digest(handoff)
         assert handoff.scenario_id == "SCN-001"
 
@@ -286,10 +299,8 @@ class TestFullRun:
         with TemporaryDirectory() as tmpdir:
             _run_sp3(client, ets, cs, la, Path(tmpdir))
             calls = read_calls_jsonl(Path(tmpdir))
-            stage_5 = [c for c in calls if c["stage"] == "stage_5"]
-            shape = [c for c in calls if c["stage"] == "stage5_shape"]
-            assert len(stage_5) == len(shape) == 2  # 1 each per threat
-            assert len(calls) == 4
+            # One request of each stage per threat.
+            assert sorted(c["stage"] for c in calls) == sorted(RUN_STAGES * 2)
 
     def test_stage_7_makes_no_llm_calls(self):
         cs = make_cs()
@@ -336,7 +347,7 @@ class TestFullRun:
             yaml_files = sorted(Path(tmpdir).glob("scenarios/*.yaml"))
             assert len(yaml_files) == 2
             for yaml_file in yaml_files:
-                handoff = read_yaml(yaml_file, ScenarioHandoffV4)
+                handoff = read_yaml(yaml_file, ScenarioHandoffV5)
                 verify_handoff_digest(handoff)
 
     def test_scenario_count_equals_threats(self):
@@ -359,7 +370,7 @@ class TestFullRun:
             _run_sp3(client, ets, cs, la, Path(tmpdir), max_workers=2)
             calls = read_calls_jsonl(Path(tmpdir))
             manifest = yaml.safe_load((Path(tmpdir) / "run-manifest.yaml").read_text())
-            assert len(calls) == 4  # Stage 5 and shape, per threat
+            assert sorted(c["stage"] for c in calls) == sorted(RUN_STAGES * 2)
             assert manifest["max_workers"] == 2
 
 

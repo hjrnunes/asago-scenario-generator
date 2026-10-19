@@ -17,7 +17,7 @@ from asago_scenario_generator.report.attack_flow import write_attack_flows
 from asago_scenario_generator.report.effort_section import effort_section
 from asago_scenario_generator.report.failure_section import failure_section
 from asago_scenario_generator.report.handoff_section import handoff_section
-from asago_scenario_generator.report.hazard_view import HAZARD_VIEWS, hazard_section
+from asago_scenario_generator.report.hazard_view import hazard_section
 from asago_scenario_generator.report.obligation_section import obligation_section
 from asago_scenario_generator.report.overview_section import (
     Counts,
@@ -87,10 +87,8 @@ def _identity(run: RunData, n: Counts) -> list[tuple[str, Any]]:
     ]
 
 
-def _sections(
-    run: RunData, hazard_view: str, gaps: dict[str, Any] | None
-) -> list[Markup]:
-    views = [hazard_section(run)] if hazard_view == "report" else []
+def _sections(run: RunData, gaps: dict[str, Any] | None) -> list[Markup]:
+    views = [hazard_section(run)]
     if gaps is not None:
         views.append(gaps_section(gaps))
     return [
@@ -195,51 +193,41 @@ def _summary(run: RunData, n: Counts) -> dict[str, Any]:
     }
 
 
-def _check_view(hazard_view: str) -> None:
-    if hazard_view not in HAZARD_VIEWS:
-        raise ValueError(f"hazard_view must be one of {', '.join(HAZARD_VIEWS)}")
-
-
 def build_report(
-    run: RunData, hazard_view: str = "off", gaps: dict[str, Any] | None = None
+    run: RunData, gaps: dict[str, Any] | None = None
 ) -> tuple[Markup, dict[str, Any]]:
     """Render the page and its stage summary from one loaded run.
 
-    *hazard_view* ``report`` adds the hazard section; *gaps*, the
-    ``process-model-gaps-v1`` document, adds the gap section.
+    *gaps*, the ``process-model-gaps-v1`` document, adds the gap section.
     """
-    _check_view(hazard_view)
     n = counts(run)
     html = page(
         "Generate report",
         "developer",
         _identity(run, n),
-        _sections(run, hazard_view, gaps),
+        _sections(run, gaps),
         footer="Reads the generate stage output only.",
         extra_css=EXTRA_CSS,
     )
     return html, _summary(run, n)
 
 
-def write_report(output_dir: Path | str, hazard_view: str = "off") -> Written:
+def write_report(output_dir: Path | str) -> Written:
     """Write ``report/index.html`` and ``report/stage-summary.json`` under *output_dir*.
 
-    With *hazard_view* ``report`` it also writes one Attack Flow file per
-    hazard under ``report/attack-flow/``. When a published handoff links a
-    causal factor to a process-model variable, it writes
-    ``report/process-model-gaps.yaml``.
+    It also writes one Attack Flow file per hazard under
+    ``report/attack-flow/``. When a published handoff links a causal factor
+    to a process-model variable, it writes ``report/process-model-gaps.yaml``.
     """
-    _check_view(hazard_view)
     output = Path(output_dir)
     report_dir = output / REPORT_DIR
     report_dir.mkdir(exist_ok=True)
     run = load_run(output)
-    if hazard_view == "report":
-        write_attack_flows(run, report_dir)
+    write_attack_flows(run, report_dir)
     gaps = process_model_gaps(run, handoff_documents(output))
     if gaps is not None:
         write_process_model_gaps(report_dir, gaps)
-    html, summary = build_report(run, hazard_view, gaps)
+    html, summary = build_report(run, gaps)
     Draft202012Validator(json.loads(SCHEMA.read_text(encoding="utf-8"))).validate(
         summary
     )

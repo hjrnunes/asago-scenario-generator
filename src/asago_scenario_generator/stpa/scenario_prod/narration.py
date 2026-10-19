@@ -21,7 +21,6 @@ from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
-from enum import Enum
 import json
 from pathlib import Path
 import re
@@ -68,20 +67,6 @@ WORDS_ASKED = 75
 MAX_WORDS = 100
 MAX_TITLE_WORDS = 12
 FRAMING = "Test hypothesis, not an observed execution result."
-
-
-class NarrationMode(str, Enum):
-    """Where a run publishes the model-written write-up.
-
-    ``off`` sends no request. ``report`` writes the write-up beside the
-    handoff, which stays byte-identical to ``off``. ``handoff`` also puts it
-    in the handoff's ``narrative`` field. The request does not depend on the
-    mode, so a ``handoff`` run can replay a ``report`` run's recording.
-    """
-
-    OFF = "off"
-    REPORT = "report"
-    HANDOFF = "handoff"
 
 
 SITUATION = "situation"
@@ -754,7 +739,6 @@ def narratives_payload(
     specs: Sequence[ScenarioSpec],
     narrated: Mapping[str, tuple[ScenarioFacts, Narration]],
     *,
-    mode: NarrationMode,
     deterministic: Mapping[str, str],
 ) -> dict[str, Any]:
     """Return the run's ``narratives.json`` document."""
@@ -801,7 +785,7 @@ def narratives_payload(
         )
     return {
         "schema": "scenario-narratives-v1",
-        "mode": mode.value,
+        "mode": "handoff",
         "stage": NARRATION_STAGE,
         "scenarios": scenarios,
     }

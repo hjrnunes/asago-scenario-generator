@@ -1,8 +1,8 @@
-"""Structural rules of the scenario-handoff-v4 ``attack_shape``.
+"""Structural rules of the scenario-handoff-v5 ``attack_shape``.
 
 The shape holds closed enums, bounded integers and identifiers, so attack text
 cannot fit in it. Each rule (R1-R6, R9) has a test that breaks exactly that
-rule; R7 and the envelope belong to ``test_scenario_handoff_v4.py``.
+rule; R7 and the envelope belong to ``test_scenario_handoff_envelope.py``.
 """
 
 from __future__ import annotations

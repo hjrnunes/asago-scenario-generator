@@ -3,7 +3,7 @@ uv.lock linguist-generated=true
 # Each contract directory's digest manifest.
 CONTRACT.lock linguist-generated=true
 # scripts/gen_handoff_kit.py
-data/contracts/scenario-handoff/handoff-v4/** linguist-generated=true
+data/contracts/scenario-handoff/handoff-v5/** linguist-generated=true
 # scripts/gen_tool_call_condition_vectors.py
 data/contracts/tool-call-condition/tool-call-condition-v1/vectors/** linguist-generated=true
 # report_kit.write_catalog()

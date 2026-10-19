@@ -54,8 +54,6 @@ class IssueCode(StrEnum):
     intention_handle_undeclared = "intention_handle_undeclared"
     attacker_intentions_missing = "attacker_intentions_missing"
     no_content_surface = "no_content_surface"
-    flawed_belief_invalid = "flawed_belief_invalid"
-    attacker_belief_restates_flawed_belief = "attacker_belief_restates_flawed_belief"
 
 
 # The codes of a condition that failed a check, in the order the publication
