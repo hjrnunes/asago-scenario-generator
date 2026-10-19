@@ -26,7 +26,6 @@ from pydantic import BaseModel
 
 from .flawed_belief import FlawedBeliefFrame, flawed_belief_findings
 from .issues import ExactIssueError, ExactIssuesError, IssueCode, ValidationIssue
-from .wire import _CausalSourceChoice
 
 # Calibrated on the attacker-belief preconditions of the six round-4
 # stated-belief generations (klarna, airbnb and occiai, two models each) and
@@ -159,7 +158,6 @@ def validate_stated_belief_reply(
     attacker_beliefs: Sequence[str],
     factors: Sequence[BaseModel],
     frame: FlawedBeliefFrame,
-    choices: Sequence[_CausalSourceChoice],
 ) -> None:
     """Reject a reply that breaks a stated-belief rule, naming every one.
 
@@ -167,9 +165,7 @@ def validate_stated_belief_reply(
     correction lists both.
     """
     issues: list[ValidationIssue] = []
-    factor_findings = flawed_belief_findings(
-        factors, frame, {choice.handle: choice for choice in choices}
-    )
+    factor_findings = flawed_belief_findings(factors, frame)
     if factor_findings:
         issues.append(
             ValidationIssue(

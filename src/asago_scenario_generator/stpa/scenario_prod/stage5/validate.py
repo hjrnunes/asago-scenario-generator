@@ -185,7 +185,7 @@ def _validate_normal_provider_payload(
     )
     if flawed_beliefs is not None:
         validate_stated_belief_reply(
-            value.attacker_bdi.beliefs, value.causal_factors, flawed_beliefs, choices
+            value.attacker_bdi.beliefs, value.causal_factors, flawed_beliefs
         )
     condition_outcome = None
     condition_omitted_reason = None

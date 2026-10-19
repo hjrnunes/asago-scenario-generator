@@ -252,7 +252,6 @@ def belief_failures(reply: BaseModel, request: BeliefRequest) -> list[str]:
     return flawed_belief_findings(
         _entries(reply, request),
         request.frame,
-        {choice.handle: choice for choice in request.choices},
         locate=lambda _, factor: factor.source_handle,
     )
 

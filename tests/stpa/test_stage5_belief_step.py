@@ -289,12 +289,6 @@ def _ca(belief: str, variable: str, missing: str | None) -> dict:
     }
 
 
-NAMES_ONLY = (
-    "flawed_belief only names a variable or source description; state the "
-    "wrong value the controller takes to be true in this scenario."
-)
-
-
 @pytest.mark.parametrize(
     ("entries", "expected"),
     [
@@ -314,21 +308,9 @@ NAMES_ONLY = (
             "takes to be true when it issues the unsafe action.",
         ),
         (
-            {"cause_1": {"flawed_belief": "The recent payment-action count."}},
-            f"cause_1: {NAMES_ONLY}",
-        ),
-        (
-            {
-                "cause_1": {
-                    "flawed_belief": "The flawed belief concerns: recent "
-                    "payment-action count"
-                }
-            },
-            f"cause_1: {NAMES_ONLY}",
-        ),
-        (
-            _ca("Authorize a bounded batch of payment actions", "none", GAP),
-            f"cause_4: {NAMES_ONLY}",
+            {"cause_1": {"flawed_belief": "The account holder approved RESP-6."}},
+            "cause_1: flawed_belief contains the identifier RESP-6; state the "
+            "belief in domain words.",
         ),
         (
             _ca(CA_BELIEF, "none", " "),
@@ -361,6 +343,19 @@ def test_each_stated_rule_names_the_handle_and_the_fix(
     spec_and_structure, entries: dict, expected: str
 ) -> None:
     assert _failures(spec_and_structure, **entries) == [expected]
+
+
+@pytest.mark.parametrize(
+    "entries",
+    [
+        {"cause_1": {"flawed_belief": "The recent payment-action count."}},
+        _ca("Authorize a bounded batch of payment actions", "none", GAP),
+    ],
+)
+def test_code_leaves_to_the_model_whether_a_belief_states_a_value(
+    spec_and_structure, entries: dict
+) -> None:
+    assert _failures(spec_and_structure, **entries) == []
 
 
 @pytest.mark.parametrize(

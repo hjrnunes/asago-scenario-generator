@@ -12,7 +12,7 @@ of the missing variable.
 from __future__ import annotations
 
 import re
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -52,37 +52,6 @@ _STRUCTURAL_OR_HANDLE = re.compile(
     r"[A-Za-z0-9_-]+(?:\.[A-Za-z0-9_-]+)*\b"
     r"|\b(?:cause|variable)_\d+\b"
 )
-
-# Words that add nothing to a variable description, so a belief made of a
-# description plus these words still only names the variable.
-_FILLER_WORDS = frozenset(
-    {
-        "a",
-        "about",
-        "an",
-        "and",
-        "belief",
-        "concerns",
-        "controller",
-        "controller's",
-        "flawed",
-        "for",
-        "in",
-        "is",
-        "its",
-        "of",
-        "on",
-        "or",
-        "the",
-        "their",
-        "to",
-    }
-)
-
-# Where a process-model description's value list or evidence list starts, as
-# in "Nature of the inquiry (values: ...; general inquiry) (evidence: ...)".
-_DESCRIPTION_LISTS = re.compile(r"\s*\((?:values|evidence):")
-_EVIDENCE_LIST = re.compile(r"\(evidence:[^)]*\)")
 
 
 @dataclass(frozen=True)
@@ -166,47 +135,22 @@ def _words(text: str) -> set[str]:
     return set(re.findall(r"[a-z0-9']+", text.casefold()))
 
 
-def _only_names_a_variable(
-    belief: str, descriptions: Sequence[tuple[str, Sequence[str]]]
-) -> bool:
-    """Return whether ``belief`` adds nothing to one description but its name.
-
-    Each description comes with its variable's listed values, which the
-    description text also spells out after the name, and then its evidence
-    list. A belief that repeats the name and picks one value states a wrong
-    value ("The patient's inquiry is a general educational inquiry."); a
-    belief whose words beyond the name fit no single value only names the
-    variable. A word that only the evidence list holds, such as "question"
-    from the argument path ``ask_clinical_question.question``, neither adds
-    to the name nor picks a value.
-    """
-    content = _words(belief) - _FILLER_WORDS
-    for description, values in descriptions:
-        if not content <= _words(description):
-            continue
-        name = _DESCRIPTION_LISTS.split(description, maxsplit=1)[0]
-        meaning = _words(_EVIDENCE_LIST.sub(" ", description))
-        picked = (content & meaning) - _words(name)
-        if not (picked and any(picked <= _words(value) for value in values)):
-            return True
-    return False
-
-
 def flawed_belief_findings(
     factors: Sequence[BaseModel],
     frame: FlawedBeliefFrame,
-    choices: Mapping[str, _CausalSourceChoice],
     *,
     locate: Callable[[int, BaseModel], str] | None = None,
 ) -> list[str]:
     """Return one line per broken stated-belief rule, in factor order.
 
+    Code checks structure only: whether a belief says what the controller
+    wrongly takes to be true, rather than only naming a variable, is a
+    judgement of meaning that the rules leave to the model.
+
     ``locate`` names a factor from its index and itself; by default it names
     the factor's place in a Stage 5 reply's ``causal_factors``.
     """
     findings: list[str] = []
-    variables = [(item.description, item.values) for item in frame.variables]
-    values_of = dict(variables)
     choosable = ", ".join((*frame.variable_handles, VARIABLE_NONE))
     for index, factor in enumerate(factors):
         where = (
@@ -229,23 +173,6 @@ def flawed_belief_findings(
                 findings.append(
                     f"{where}: flawed_belief contains the identifier "
                     f"{found.group(0)}; state the belief in domain words."
-                )
-            choice = choices.get(factor.source_handle)
-            # A process-model source shares its variable's description and so
-            # its values; other sources list none.
-            descriptions = [
-                *variables,
-                *(
-                    [(choice.description, values_of.get(choice.description, ()))]
-                    if choice is not None
-                    else []
-                ),
-            ]
-            if _only_names_a_variable(belief, descriptions):
-                findings.append(
-                    f"{where}: flawed_belief only names a variable or source "
-                    "description; state the wrong value the controller takes "
-                    "to be true in this scenario."
                 )
         fixed = frame.fixed_variable(factor.source_handle)
         if fixed is not None:
@@ -299,14 +226,10 @@ def flawed_belief_findings(
 
 
 def validate_flawed_beliefs(
-    factors: Sequence[BaseModel],
-    frame: FlawedBeliefFrame,
-    choices: Sequence[_CausalSourceChoice],
+    factors: Sequence[BaseModel], frame: FlawedBeliefFrame
 ) -> None:
     """Reject a reply that breaks any stated-belief rule, naming every one."""
-    findings = flawed_belief_findings(
-        factors, frame, {choice.handle: choice for choice in choices}
-    )
+    findings = flawed_belief_findings(factors, frame)
     if findings:
         raise ExactIssueError(
             IssueCode.flawed_belief_invalid,

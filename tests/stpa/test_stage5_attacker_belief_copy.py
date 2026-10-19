@@ -264,13 +264,12 @@ def _model_and_payload():
 
 def _validate(payload: dict) -> None:
     model, _ = _model_and_payload()
-    frame, context, _ = _frame()
+    frame, _, _ = _frame()
     draft = model.model_validate(payload)
     validate_stated_belief_reply(
         draft.attacker_bdi.beliefs,
         draft.causal_factors,
         frame,
-        _causal_source_choices(context),
     )
 
 
