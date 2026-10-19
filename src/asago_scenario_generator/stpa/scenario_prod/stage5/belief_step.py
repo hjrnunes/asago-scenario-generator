@@ -1,17 +1,17 @@
-"""The stated-belief step behind ``--flawed-belief separate``.
+"""The stated-belief step that follows Stage 5.
 
-Stage 5 writes each scenario exactly as it does with stated beliefs off. This
-step then sends one request per Stage 5 spec, in spec order: the scenario
+Stage 5 asks for no stated belief. This step then sends one request per
+Stage 5 spec, in spec order: the scenario
 account, the spec's causal factors under the local source handles Stage 5
 used, and the selected path's process-model variables under local handles.
 The reply states one flawed belief per listed factor and, where code does not
 fill the factor's variable, names the variable that holds the belief or the
 variable the controller lacks.
 
-Code checks the reply with the rules ``--flawed-belief stated`` applies and
-never repairs it. A reply that breaks a rule, or does not decode, earns one
-correction. A reply that still fails, and any failed or refused call, leaves
-the spec unchanged, so its later requests stay the ones ``off`` sends.
+Code checks the reply with the stated-belief rules and never repairs it. A
+reply that breaks a rule, or does not decode, earns one correction. A reply
+that still fails, and any failed or refused call, leaves the spec without a
+stated belief.
 """
 
 from __future__ import annotations

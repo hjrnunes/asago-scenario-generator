@@ -25,7 +25,6 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
     ATLAS_TOOL_DATA_POISONING,
     NARRATIVES_FILENAME,
     Fact,
-    NarrationMode,
     NarrationReply,
     build_glossary,
     build_facts,
@@ -308,11 +307,8 @@ def test_the_writeup_states_a_long_rule_in_full_without_its_applicability() -> N
     assert "Applies when" not in text
 
 
-def _inputs(
-    mode: NarrationMode, client: MockLLMClient, run_dir: Path
-) -> SimpleNamespace:
+def _inputs(client: MockLLMClient, run_dir: Path) -> SimpleNamespace:
     return SimpleNamespace(
-        narration_mode=mode,
         llm_client=client,
         run_dir=run_dir,
         loader=None,
@@ -320,42 +316,23 @@ def _inputs(
     )
 
 
-def test_off_sends_nothing_and_writes_nothing(tmp_path: Path) -> None:
-    client = MockLLMClient()
-
-    assert _narrate(_inputs(NarrationMode.OFF, client, tmp_path), [adversarial()]) == {}
-    assert client.calls == []
-    assert not (tmp_path / NARRATIVES_FILENAME).exists()
-
-
-def test_report_writes_the_sidecar_and_leaves_the_handoff_narrative(
+def test_narrate_writes_the_sidecar_and_returns_accepted_paragraphs_only(
     tmp_path: Path,
 ) -> None:
-    spec = adversarial()
-    client = MockLLMClient()
-    client.set_response_for(NarrationReply, valid_reply(spec))
-
-    published = _narrate(_inputs(NarrationMode.REPORT, client, tmp_path), [spec])
-
-    assert published == {}
-    sidecar = json.loads((tmp_path / NARRATIVES_FILENAME).read_text(encoding="utf-8"))
-    assert sidecar["mode"] == "report"
-    entry = sidecar["scenarios"][0]
-    assert entry["source"] == "model"
-    assert entry["writeup"].startswith("Test hypothesis")
-    assert entry["deterministic_narrative"].startswith("Test hypothesis")
-
-
-def test_handoff_publishes_accepted_writeups_only(tmp_path: Path) -> None:
     accepted = adversarial()
     failed = everyday().model_copy(update={"scenario_id": "SCN-002"})
     broken = {"title": "x", "sentences": [{"text": "It fails.", "facts": ["F1"]}]}
     client = MockLLMClient()
     client.set_response_for(NarrationReply, [valid_reply(accepted), broken, broken])
 
-    published = _narrate(
-        _inputs(NarrationMode.HANDOFF, client, tmp_path), [accepted, failed]
-    )
+    published = _narrate(_inputs(client, tmp_path), [accepted, failed])
 
     assert list(published) == ["SCN-001"]
     assert "because it incorrectly believes" in published["SCN-001"]
+    assert not published["SCN-001"].startswith("Test hypothesis")
+    sidecar = json.loads((tmp_path / NARRATIVES_FILENAME).read_text(encoding="utf-8"))
+    assert sidecar["mode"] == "handoff"
+    entries = {entry["scenario_id"]: entry for entry in sidecar["scenarios"]}
+    assert entries["SCN-001"]["source"] == "model"
+    assert entries["SCN-001"]["writeup"].startswith("Test hypothesis")
+    assert entries["SCN-002"]["deterministic_narrative"].startswith("Test hypothesis")

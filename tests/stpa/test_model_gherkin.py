@@ -1,4 +1,4 @@
-"""The model Gherkin step behind ``--model-gherkin handoff``.
+"""The model Gherkin step that writes each published scenario's Gherkin.
 
 Every test is offline and uses a fake client. Code checks each reply; a reply
 that breaks a rule earns one correction naming every broken rule, and a reply
@@ -11,14 +11,10 @@ from __future__ import annotations
 import json
 import re
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any, Callable
 
 import pytest
 
-from asago_scenario_generator.pipeline import synthesis
-from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
-from asago_scenario_generator.pipeline.synthesis_defaults import _default_scenarios
 from asago_scenario_generator.report.scenario_panels import feature_matches
 from asago_scenario_generator.stpa.infra.provider_record import (
     LiveRequestBudgetError,
@@ -27,7 +23,6 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
     render_feature_text,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HandoffFormat,
     HandoffGherkin,
     ScenarioHandoffV5,
     verify_handoff_digest,
@@ -37,7 +32,6 @@ from asago_scenario_generator.stpa.scenario_prod.model_gherkin import (
     GHERKIN_STEP,
     GHERKINS_FILENAME,
     SAFE_BEHAVIOR,
-    GherkinMode,
     GherkinReply,
     gherkin_facts,
     gherkin_failures,
@@ -46,11 +40,13 @@ from asago_scenario_generator.stpa.scenario_prod.model_gherkin import (
     write_gherkin,
 )
 from asago_scenario_generator.stpa.scenario_prod.narration import (
-    NarrationMode,
     NarrationReply,
     build_facts,
     plain,
     render_narration_prompts,
+)
+from asago_scenario_generator.stpa.scenario_prod.presentation import (
+    render_scenario_presentation,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
@@ -64,10 +60,7 @@ from tests.helpers.scenario_handoff_publication import (
 from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
-from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
-from asago_scenario_generator.stpa.scenario_prod.and_or_tree import AttackTreeFormat
-from tests.stpa.test_and_or_tree import invoke_generate
 from tests.stpa.test_narration import adversarial, everyday, valid_reply
 
 SAFE = "The agent refuses the refund until the operation:verify_customer check passes."
@@ -456,11 +449,29 @@ def _publish(run_dir: Path, client: MockLLMClient | None = None, **kwargs: Any) 
 
 
 SCENARIOS = ("SCN-001", "SCN-002")
-V5 = {
-    "handoff_format": HandoffFormat.V5,
-    "attack_tree_format": AttackTreeFormat.AND_OR,
-}
-V5_GHERKIN = {**V5, "model_gherkin": GherkinMode.HANDOFF}
+
+
+def _code_gherkin_run(run_dir: Path) -> Any:
+    client = GherkinClient()
+    client.set_exception_for(GherkinReply, RuntimeError("no model Gherkin"))
+    result, _ = _publish(run_dir, client)
+    return result
+
+
+def test_a_scenario_without_a_model_gherkin_publishes_the_code_gherkin(
+    tmp_path: Path,
+) -> None:
+    result = _code_gherkin_run(tmp_path)
+
+    specs = {
+        spec.scenario_id: spec
+        for spec in (*result.scenario_specs, *result.functional_test_specs)
+    }
+    for scenario_id in SCENARIOS:
+        expected = render_scenario_presentation(specs[scenario_id])[2]
+        document = _published_handoff(tmp_path, scenario_id)
+        assert document["gherkin"]["feature"] == expected.feature
+        assert document["gherkin"]["scenario"] == expected.scenario
 
 
 def _files(run_dir: Path) -> dict[str, bytes]:
@@ -473,7 +484,7 @@ def _files(run_dir: Path) -> dict[str, bytes]:
 def test_a_run_publishes_each_accepted_gherkin_in_the_handoff_and_feature(
     tmp_path: Path,
 ) -> None:
-    result, client = _publish(tmp_path, **V5_GHERKIN)
+    result, client = _publish(tmp_path)
 
     assert result.stage_errors == []
     requests = [call for call in client.calls if call.response_format is GherkinReply]
@@ -529,7 +540,7 @@ def test_the_gherkin_requests_follow_narrate_with_its_identity_and_temperature(
     client = GherkinClient()
     client.set_response_for(NarrationReply, valid_reply(adversarial()))
 
-    _publish(tmp_path, client, narration_mode=NarrationMode.HANDOFF, **V5_GHERKIN)
+    _publish(tmp_path, client)
 
     kinds = [
         call.response_format
@@ -574,14 +585,14 @@ def test_the_gherkin_requests_follow_narrate_with_its_identity_and_temperature(
 def test_a_run_whose_gherkin_calls_fail_publishes_the_code_gherkin(
     tmp_path: Path, error: Exception
 ) -> None:
-    _publish(tmp_path / "off", **V5)
+    _code_gherkin_run(tmp_path / "code")
     client = GherkinClient()
     client.set_exception_for(GherkinReply, error)
 
-    result, _ = _publish(tmp_path / "failed", client, **V5_GHERKIN)
+    result, _ = _publish(tmp_path / "failed", client)
 
     assert result.stage_errors == []
-    assert _files(tmp_path / "failed") == _files(tmp_path / "off")
+    assert _files(tmp_path / "failed") == _files(tmp_path / "code")
     sidecar = json.loads(
         (tmp_path / "failed" / GHERKINS_FILENAME).read_text(encoding="utf-8")
     )
@@ -592,139 +603,12 @@ def test_a_run_whose_gherkin_calls_fail_publishes_the_code_gherkin(
 def test_a_run_whose_replies_fail_twice_publishes_the_code_gherkin(
     tmp_path: Path,
 ) -> None:
-    _publish(tmp_path / "off", **V5)
+    _code_gherkin_run(tmp_path / "code")
     client = GherkinClient(gherkin=lambda _: {"feature": "x"})
 
-    _publish(tmp_path / "broken", client, **V5_GHERKIN)
+    _publish(tmp_path / "broken", client)
 
-    assert _files(tmp_path / "broken") == _files(tmp_path / "off")
+    assert _files(tmp_path / "broken") == _files(tmp_path / "code")
     sidecar = json.loads((tmp_path / "broken" / GHERKINS_FILENAME).read_text())
     assert [entry["source"] for entry in sidecar["scenarios"]] == ["fallback"] * 2
     assert [entry["requests"] for entry in sidecar["scenarios"]] == [2, 2]
-
-
-@pytest.mark.parametrize("formats", [{"handoff_format": HandoffFormat.V4}, V5])
-def test_off_sends_no_request_and_changes_no_output(
-    tmp_path: Path, formats: dict
-) -> None:
-    _, default_client = _publish(tmp_path / "default", **formats)
-    _, off_client = _publish(tmp_path / "off", **formats, model_gherkin=GherkinMode.OFF)
-
-    assert default_client.calls == off_client.calls
-    assert not any(call.response_format is GherkinReply for call in off_client.calls)
-    assert _files(tmp_path / "off") == _files(tmp_path / "default")
-    assert not (tmp_path / "off" / GHERKINS_FILENAME).exists()
-
-
-# --- flags ---------------------------------------------------------------------
-
-
-def test_run_sp3_refuses_model_gherkin_with_v4(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="requires handoff_format=v5"):
-        _publish(tmp_path, model_gherkin=GherkinMode.HANDOFF)
-
-
-def test_the_inputs_check_the_model_gherkin_value(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="model_gherkin must be off or handoff"):
-        synthesis.SynthesisInputs(use_case="u", output_dir=tmp_path, model_gherkin="x")
-    with pytest.raises(ValueError, match="requires handoff_format v5"):
-        synthesis.SynthesisInputs(
-            use_case="u", output_dir=tmp_path, model_gherkin="handoff"
-        )
-
-
-@pytest.mark.parametrize("value", ["off", "handoff"])
-def test_the_inputs_model_gherkin_reaches_run_sp3(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
-) -> None:
-    captured: dict = {}
-
-    def _fake_run_sp3(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(
-            stage_errors=[],
-            scenario_specs=[],
-            scenario_envelopes=[],
-            candidate_outcomes=(),
-            functional_test_specs=[],
-        )
-
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.scenario_prod.run.run_sp3", _fake_run_sp3
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment.enrich_threats",
-        lambda *a, **k: SimpleNamespace(structural_threats=[]),
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.pipeline.llm_config.resolve_llm_client",
-        lambda *a, **k: (MockLLMClient(), "test-profile"),
-    )
-    inputs = synthesis.SynthesisInputs(
-        use_case="u",
-        output_dir=tmp_path,
-        handoff_format="v5",
-        attack_tree_format="and-or",
-        model_gherkin=value,
-    )
-    _default_scenarios(
-        ica_enumeration=final_ica_result(),
-        control_structure=SimpleNamespace(),
-        loss_analysis=make_loss_analysis(),
-        inputs=inputs,
-        capability_profile=None,
-        output_dir=tmp_path,
-        model_runtime=ModelRuntime.for_inputs(inputs),
-    )
-
-    assert captured["model_gherkin"] is GherkinMode(value)
-
-
-@pytest.mark.parametrize(
-    ("arguments", "expected"),
-    [
-        ([], "off"),
-        (
-            [
-                "--handoff-format",
-                "v5",
-                "--attack-tree-format",
-                "and-or",
-                "--model-gherkin",
-                "handoff",
-            ],
-            "handoff",
-        ),
-    ],
-    ids=["default", "handoff"],
-)
-def test_the_cli_model_gherkin_reaches_the_inputs(
-    tmp_path: Path, arguments: list[str], expected: str
-) -> None:
-    result, captured = invoke_generate(tmp_path, arguments)
-
-    assert result.exit_code == 0, result.output
-    assert captured[0].model_gherkin == expected
-
-
-@pytest.mark.parametrize(
-    ("arguments", "message"),
-    [
-        (["--model-gherkin", "handoff"], "handoff requires --handoff-format v5"),
-        (
-            ["--handoff-format", "v4", "--model-gherkin", "handoff"],
-            "handoff requires --handoff-format v5",
-        ),
-        (["--model-gherkin", "report"], "must be off or handoff"),
-    ],
-    ids=["default-format", "v4", "unknown"],
-)
-def test_the_cli_rejects_a_bad_model_gherkin(
-    tmp_path: Path, arguments: list[str], message: str
-) -> None:
-    result, captured = invoke_generate(tmp_path, arguments)
-
-    assert result.exit_code != 0
-    assert "--model-gherkin" in result.output
-    assert message in " ".join(result.output.split())
-    assert captured == []

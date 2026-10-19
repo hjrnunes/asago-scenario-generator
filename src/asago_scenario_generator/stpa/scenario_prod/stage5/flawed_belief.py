@@ -14,7 +14,6 @@ from __future__ import annotations
 import re
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from enum import StrEnum
 
 from pydantic import BaseModel
 
@@ -29,14 +28,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
 
 from .issues import ExactIssueError, IssueCode
 from .wire import _CausalSourceChoice
-
-
-class FlawedBeliefMode(StrEnum):
-    """Whether Stage 5 asks each causal factor for a stated flawed belief."""
-
-    OFF = "off"
-    STATED = "stated"
-    SEPARATE = "separate"
 
 
 VARIABLE_NONE = "none"

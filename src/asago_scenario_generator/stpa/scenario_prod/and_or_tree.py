@@ -15,7 +15,6 @@ the whole tree from the scenario spec; no model request depends on it.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from enum import Enum
 from typing import Any
 
 from asago_scenario_generator.stpa.models.attack_shape import default_attack_shape
@@ -59,17 +58,6 @@ SOURCE_UNCERTAINTY = (
 
 # hazard id -> ids of every scenario that names it
 SiblingIndex = Mapping[str, Sequence[str]]
-
-
-class AttackTreeFormat(str, Enum):
-    """The format Stage 6 renders each handoff's ``attack_tree`` in.
-
-    ``flat`` is the flat list of evidence nodes. ``and-or`` is
-    ``and-or-tree-v1``. Code renders both, so the format changes no request.
-    """
-
-    FLAT = "flat"
-    AND_OR = "and-or"
 
 
 def scenario_hazard_ids(spec: ScenarioSpec) -> list[str]:

@@ -12,7 +12,6 @@ from typing import Any
 import pytest
 import yaml
 
-from asago_scenario_generator.pipeline import synthesis
 from asago_scenario_generator.pipeline.synthesis_persist import _render_report
 from asago_scenario_generator.report.attack_flow import (
     EXTENSION_DEFINITION,
@@ -30,7 +29,6 @@ from asago_scenario_generator.report.process_model_gaps import (
 )
 from asago_scenario_generator.report.run_data import load_run
 from tests.helpers.generate_report_fixture import body_rows, copy_run, edit_yaml
-from tests.stpa.test_and_or_tree import invoke_generate
 
 AND_OR = Path(__file__).parent / "fixtures" / "generate_report" / "klarna-and-or"
 AND_OR_V4 = Path(__file__).parent / "fixtures" / "generate_report" / "klarna-and-or-v4"
@@ -407,62 +405,13 @@ def test_a_link_row_names_the_endpoints_and_owner_before_the_link(
     assert body_rows(section, "gaps-table") == 2
 
 
-# --- flag ----------------------------------------------------------------------
-
-
-def test_the_inputs_validate_the_view(tmp_path: Path) -> None:
-    assert (
-        synthesis.SynthesisInputs(use_case="u", output_dir=tmp_path).hazard_view
-        == "off"
-    )
-    with pytest.raises(ValueError, match="hazard_view must be off or report"):
-        synthesis.SynthesisInputs(use_case="u", output_dir=tmp_path, hazard_view="x")
-    with pytest.raises(ValueError, match="requires attack_tree_format and-or"):
-        synthesis.SynthesisInputs(
-            use_case="u", output_dir=tmp_path, hazard_view="report"
-        )
+# --- publication ---------------------------------------------------------------
 
 
 def test_the_published_report_carries_the_view(tmp_path: Path) -> None:
     output = copy_and_or(tmp_path)
 
-    index = _render_report(output, "report")
+    index = _render_report(output)
 
     assert index is not None and 'id="hazards"' in index.read_text(encoding="utf-8")
     assert (output / "report" / "attack-flow" / "H-9.json").exists()
-
-
-@pytest.mark.parametrize(
-    ("arguments", "expected"),
-    [
-        ([], "off"),
-        (["--attack-tree-format", "and-or", "--hazard-view", "report"], "report"),
-    ],
-    ids=["default", "report"],
-)
-def test_the_cli_view_reaches_the_inputs(
-    tmp_path: Path, arguments: list[str], expected: str
-) -> None:
-    result, captured = invoke_generate(tmp_path, arguments)
-
-    assert result.exit_code == 0, result.output
-    assert captured[0].hazard_view == expected
-
-
-@pytest.mark.parametrize(
-    ("arguments", "message"),
-    [
-        (["--hazard-view", "report"], "report requires --attack-tree-format and-or"),
-        (["--hazard-view", "tree"], "must be off or report"),
-    ],
-    ids=["flat", "unknown"],
-)
-def test_the_cli_rejects_a_bad_view(
-    tmp_path: Path, arguments: list[str], message: str
-) -> None:
-    result, captured = invoke_generate(tmp_path, arguments)
-
-    assert result.exit_code != 0
-    assert "--hazard-view" in result.output
-    assert message in " ".join(result.output.split())
-    assert captured == []

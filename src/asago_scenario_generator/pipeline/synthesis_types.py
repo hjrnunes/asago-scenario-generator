@@ -104,54 +104,12 @@ class SynthesisInputs:
     # With replay_calls_dir, send the requests that record lacks live instead of
     # ending the run in a replay miss, within a live-request budget.
     replay_fill: ReplayFill | None = None
-    # Where the model-written scenario write-up goes: "off", "report", or
-    # "handoff" (see stpa.scenario_prod.narration.NarrationMode).
-    narration_mode: str = "off"
-    # Format of each handoff's attack_tree: "flat" or "and-or" (see
-    # stpa.scenario_prod.and_or_tree.AttackTreeFormat).
-    attack_tree_format: str = "flat"
-    # Published handoff version: "v4" or "v5" (see
-    # stpa.scenario_prod.handoff.HandoffFormat); "v5" needs the and-or attack
-    # tree, which it reduces to its attack path.
-    handoff_format: str = "v4"
-    # Model-written Gherkin: "off" or "handoff" (see
-    # stpa.scenario_prod.model_gherkin.GherkinMode); "handoff" needs v5.
-    model_gherkin: str = "off"
-    # Stated flawed beliefs: "off", "stated" or "separate" (see
-    # stpa.scenario_prod.stage5.flawed_belief.FlawedBeliefMode); both
-    # "stated" and "separate" need v5.
-    flawed_belief: str = "off"
-    # The report's hazard view: "off" or "report" (a hazard section and one
-    # Attack Flow file per hazard); "report" needs the and-or attack tree.
-    hazard_view: str = "off"
 
     def __post_init__(self) -> None:
         if not isinstance(self.use_case, str) or not self.use_case.strip():
             raise ValueError("use_case must be a non-empty string")
         if self.max_workers < 1:
             raise ValueError("max_workers must be positive")
-        if self.narration_mode not in ("off", "report", "handoff"):
-            raise ValueError("narration_mode must be off, report, or handoff")
-        if self.attack_tree_format not in ("flat", "and-or"):
-            raise ValueError("attack_tree_format must be flat or and-or")
-        if self.handoff_format not in ("v4", "v5"):
-            raise ValueError("handoff_format must be v4 or v5")
-        if self.handoff_format == "v5" and self.attack_tree_format != "and-or":
-            raise ValueError("handoff_format v5 requires attack_tree_format and-or")
-        if self.model_gherkin not in ("off", "handoff"):
-            raise ValueError("model_gherkin must be off or handoff")
-        if self.model_gherkin == "handoff" and self.handoff_format != "v5":
-            raise ValueError("model_gherkin handoff requires handoff_format v5")
-        if self.flawed_belief not in ("off", "stated", "separate"):
-            raise ValueError("flawed_belief must be off, stated or separate")
-        if self.flawed_belief != "off" and self.handoff_format != "v5":
-            raise ValueError(
-                f"flawed_belief {self.flawed_belief} requires handoff_format v5"
-            )
-        if self.hazard_view not in ("off", "report"):
-            raise ValueError("hazard_view must be off or report")
-        if self.hazard_view == "report" and self.attack_tree_format != "and-or":
-            raise ValueError("hazard_view report requires attack_tree_format and-or")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         _normalize_request_values(self)
         _verify_request_target_inputs(self)

@@ -1,15 +1,14 @@
-"""scenario-handoff-v5 behind ``--handoff-format v5``.
+"""scenario-handoff-v5, the producer's only published handoff.
 
-v5 keeps every v4 field and adds the UCA, actor, causal factors,
-preconditions, procedure and worst case threat, each derived by code from the
-scenario spec. v4 stays the default and byte-identical. Every test is offline.
+v5 carries the scenario's attack path and adds the UCA, actor, causal
+factors, preconditions, procedure and worst case threat, each derived by code
+from the scenario spec. Every test is offline.
 """
 
 from __future__ import annotations
 
 import json
 from pathlib import Path
-from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -17,14 +16,12 @@ from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.cli import app
 from asago_scenario_generator.pipeline import synthesis
-from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
-from asago_scenario_generator.pipeline.synthesis_defaults import _default_scenarios
 from asago_scenario_generator.report.run_data import _read_scenarios
 from asago_scenario_generator.stpa.models.attack_shape import AttackShape, TurnPurpose
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
-    AttackTreeFormat,
     build_sibling_index,
     render_and_or_tree,
 )
@@ -33,7 +30,6 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_DIGEST_DOMAIN_V5,
     HANDOFF_SCHEMA_VERSION_V4,
     HANDOFF_SCHEMA_VERSION_V5,
-    HandoffFormat,
     ScenarioHandoffV4,
     ScenarioHandoffV5,
     build_scenario_handoff,
@@ -49,7 +45,6 @@ from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     v5_fields,
 )
 from asago_scenario_generator.stpa.scenario_prod.narration import (
-    NarrationMode,
     NarrationReply,
 )
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
@@ -67,7 +62,7 @@ from tests.helpers.scenario_handoff_publication import (
 from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
-from tests.helpers.synthesis_fixture import final_ica_result
+from tests.cli_helpers import PlainCliRunner
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_and_or_tree import invoke_generate
 from tests.stpa.test_narration import (
@@ -516,14 +511,6 @@ def test_the_lock_pins_the_v5_kit_only() -> None:
 # --- run ----------------------------------------------------------------------
 
 
-def _publish_v5(run_dir: Path) -> Any:
-    return _publish(
-        run_dir,
-        handoff_format=HandoffFormat.V5,
-        attack_tree_format=AttackTreeFormat.AND_OR,
-    )
-
-
 def _publish(run_dir: Path, **kwargs: Any) -> Any:
     client = MockLLMClient()
     client.set_response_queue([_normal_semantics_payload(), _functional_payload()])
@@ -539,8 +526,8 @@ def _publish(run_dir: Path, **kwargs: Any) -> Any:
     return result, client
 
 
-def test_a_v5_run_publishes_valid_v5_handoffs(tmp_path: Path) -> None:
-    result, _ = _publish_v5(tmp_path)
+def test_a_run_publishes_valid_v5_handoffs(tmp_path: Path) -> None:
+    result, _ = _publish(tmp_path)
 
     assert result.stage_errors == []
     kinds = set()
@@ -551,171 +538,68 @@ def test_a_v5_run_publishes_valid_v5_handoffs(tmp_path: Path) -> None:
         assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
         assert handoff_ownership_violations(document) == []
         verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+        assert "attack_tree" not in document
+        assert document["attack_path"]["format"] == "attack-path-v1"
     assert kinds == {"adversarial", "functional"}
     scenarios = _read_scenarios(tmp_path)
     assert all(isinstance(item, ScenarioHandoffV5) for item in scenarios.values())
-    for scenario_id in ("SCN-001", "SCN-002"):
-        document = _published_handoff(tmp_path, scenario_id)
-        assert "attack_tree" not in document
-        assert document["attack_path"]["format"] == "attack-path-v1"
 
 
-def test_the_default_format_is_v4_byte_for_byte(tmp_path: Path) -> None:
-    _, default_client = _publish(tmp_path / "default")
-    _publish(tmp_path / "v4", handoff_format=HandoffFormat.V4)
-    _, v5_client = _publish_v5(tmp_path / "v5")
-
-    assert default_client.calls == v5_client.calls
-    for scenario_id in ("SCN-001", "SCN-002"):
-        for name in (f"{scenario_id}.yaml", f"{scenario_id}.feature"):
-            assert (tmp_path / "default/scenarios" / name).read_bytes() == (
-                tmp_path / "v4/scenarios" / name
-            ).read_bytes()
-        assert (tmp_path / "v5/scenarios" / f"{scenario_id}.feature").read_bytes() == (
-            tmp_path / "default/scenarios" / f"{scenario_id}.feature"
-        ).read_bytes()
-        v4 = _published_handoff(tmp_path / "default", scenario_id)
-        v5 = _published_handoff(tmp_path / "v5", scenario_id)
-        assert v4["schema_version"] == HANDOFF_SCHEMA_VERSION_V4
-        # A functional actor is null, which reads the same as v4's absent key.
-        expected = {
-            "schema_version",
-            "sourced_facts",
-            "content_digest",
-            "attack_path",
-            *V5_KEYS,
-        }
-        if v5["kind"] == "functional":
-            expected.discard("actor")
-        assert {key for key in v5 if v4.get(key) != v5[key]} == expected
-
-
-def test_a_v5_handoff_narrative_is_the_accepted_paragraph_alone(
+def test_the_handoff_narrative_is_the_accepted_paragraph_alone(
     tmp_path: Path,
 ) -> None:
     spec = adversarial()
     client = MockLLMClient()
     client.set_response_for(NarrationReply, valid_reply(spec))
 
-    published = _narrate(
-        _inputs(NarrationMode.HANDOFF, client, tmp_path / "v5"),
-        [spec],
-        paragraph_only=True,
-    )
+    published = _narrate(_inputs(client, tmp_path), [spec])
 
     paragraph = " ".join(item["text"] for item in valid_reply(spec)["sentences"])
     assert published == {"SCN-001": paragraph}
 
 
-def test_v4_keeps_the_full_writeup_as_the_handoff_narrative(tmp_path: Path) -> None:
-    spec = adversarial()
-    client = MockLLMClient()
-    client.set_response_for(NarrationReply, valid_reply(spec))
-
-    published = _narrate(_inputs(NarrationMode.HANDOFF, client, tmp_path), [spec])
-
-    assert published["SCN-001"].startswith("Test hypothesis")
-    assert "Steps (ATLAS case-study procedure):" in published["SCN-001"]
-
-
 # --- plumbing -----------------------------------------------------------------
 
-
-def test_the_inputs_reject_an_unknown_handoff_format(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="handoff_format"):
-        synthesis.SynthesisInputs(
-            use_case="u", output_dir=tmp_path, handoff_format="v6"
-        )
-
-
-@pytest.mark.parametrize("value", ["v4", "v5"])
-def test_the_inputs_handoff_format_reaches_run_sp3(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
-) -> None:
-    captured: dict = {}
-
-    def _fake_run_sp3(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(
-            stage_errors=[],
-            scenario_specs=[],
-            scenario_envelopes=[],
-            candidate_outcomes=(),
-            functional_test_specs=[],
-        )
-
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.scenario_prod.run.run_sp3", _fake_run_sp3
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment.enrich_threats",
-        lambda *a, **k: SimpleNamespace(structural_threats=[]),
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.pipeline.llm_config.resolve_llm_client",
-        lambda *a, **k: (MockLLMClient(), "test-profile"),
-    )
-    inputs = synthesis.SynthesisInputs(
-        use_case="u",
-        output_dir=tmp_path,
-        handoff_format=value,
-        attack_tree_format="and-or",
-    )
-    _default_scenarios(
-        ica_enumeration=final_ica_result(),
-        control_structure=SimpleNamespace(),
-        loss_analysis=make_loss_analysis(),
-        inputs=inputs,
-        capability_profile=None,
-        output_dir=tmp_path,
-        model_runtime=ModelRuntime.for_inputs(inputs),
-    )
-
-    assert captured["handoff_format"] is HandoffFormat(value)
+REMOVED_OPTIONS = (
+    ("--handoff-format", "v5"),
+    ("--attack-tree-format", "and-or"),
+    ("--model-narrative", "handoff"),
+    ("--model-gherkin", "handoff"),
+    ("--flawed-belief", "separate"),
+    ("--hazard-view", "report"),
+)
 
 
 @pytest.mark.parametrize(
-    ("arguments", "expected"),
-    [
-        ([], "v4"),
-        (["--handoff-format", "v5", "--attack-tree-format", "and-or"], "v5"),
-    ],
-    ids=["default", "v5"],
+    "option", REMOVED_OPTIONS, ids=[name for name, _ in REMOVED_OPTIONS]
 )
-def test_the_cli_handoff_format_reaches_the_inputs(
-    tmp_path: Path, arguments: list[str], expected: str
-) -> None:
-    result, captured = invoke_generate(tmp_path, arguments)
+def test_generate_has_no_format_option(tmp_path: Path, option: tuple[str, str]) -> None:
+    result, captured = invoke_generate(tmp_path, list(option))
 
-    assert result.exit_code == 0, result.output
-    assert captured[0].handoff_format == expected
-
-
-def test_the_inputs_reject_v5_without_the_and_or_tree(tmp_path: Path) -> None:
-    for tree_format in ("flat", None):
-        kwargs = {} if tree_format is None else {"attack_tree_format": tree_format}
-        with pytest.raises(ValueError, match="and-or"):
-            synthesis.SynthesisInputs(
-                use_case="u", output_dir=tmp_path, handoff_format="v5", **kwargs
-            )
-
-
-def test_run_sp3_rejects_v5_without_the_and_or_tree(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="and-or"):
-        _publish(tmp_path, handoff_format=HandoffFormat.V5)
-
-
-def test_the_cli_rejects_v5_without_the_and_or_tree(tmp_path: Path) -> None:
-    result, captured = invoke_generate(tmp_path, ["--handoff-format", "v5"])
-
-    assert result.exit_code != 0
-    assert "--attack-tree-format and-or" in result.output
+    assert result.exit_code == 2
+    assert "No such option" in result.output
     assert captured == []
 
 
-def test_the_cli_rejects_an_unknown_handoff_format(tmp_path: Path) -> None:
-    result, captured = invoke_generate(tmp_path, ["--handoff-format", "v6"])
+def test_generate_help_lists_no_format_option() -> None:
+    result = PlainCliRunner().invoke(app, ["generate", "--help"])
 
-    assert result.exit_code != 0
-    assert "--handoff-format" in result.output
-    assert captured == []
+    assert result.exit_code == 0
+    for name, _ in REMOVED_OPTIONS:
+        assert name not in result.stdout
+
+
+@pytest.mark.parametrize(
+    "field",
+    [
+        "narration_mode",
+        "attack_tree_format",
+        "handoff_format",
+        "model_gherkin",
+        "flawed_belief",
+        "hazard_view",
+    ],
+)
+def test_the_inputs_have_no_format_field(tmp_path: Path, field: str) -> None:
+    with pytest.raises(TypeError, match=field):
+        synthesis.SynthesisInputs(use_case="u", output_dir=tmp_path, **{field: "x"})

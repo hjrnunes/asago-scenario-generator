@@ -1,4 +1,4 @@
-"""The and-or-tree-v1 attack tree behind ``--attack-tree-format and-or``.
+"""The and-or-tree-v1 attack tree each scenario's attack path reduces from.
 
 Code renders the tree from the scenario spec: the root is the hazard, an OR
 joins this scenario to the run's other scenarios that share a hazard, and
@@ -19,22 +19,20 @@ import pytest
 from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.cli import app
-from asago_scenario_generator.pipeline import synthesis
-from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
-from asago_scenario_generator.pipeline.synthesis_defaults import _default_scenarios
 from asago_scenario_generator.report.scenario_panels import panel_stats, tree_panel
 from asago_scenario_generator.stpa.models.attack_shape import AttackShape
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.scenario_prod.and_or_tree import (
-    AttackTreeFormat,
     build_sibling_index,
     render_and_or_tree,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    ScenarioHandoffV4,
-    build_scenario_handoff,
+    ScenarioHandoffV5,
     handoff_ownership_violations,
     verify_handoff_digest,
+)
+from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
+    build_scenario_handoff_v5,
 )
 from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelope
 from asago_scenario_generator.stpa.scenario_prod.narration import (
@@ -64,12 +62,11 @@ from tests.helpers.scenario_handoff_publication import (
 from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
-from tests.helpers.synthesis_fixture import final_ica_result
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.cli_helpers import PlainCliRunner
 from tests.stpa.test_narration import adversarial, everyday
 
-SCHEMA = ScenarioHandoffV4.model_json_schema()
+SCHEMA = ScenarioHandoffV5.model_json_schema()
 DIRECT = AttackShape.model_validate(
     {
         **DIRECT_REPLY,
@@ -442,7 +439,7 @@ def _handoff(spec: ScenarioSpec, tree: dict[str, Any]) -> dict[str, Any]:
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
     )
-    return build_scenario_handoff(envelope).model_dump(mode="json")
+    return build_scenario_handoff_v5(envelope).model_dump(mode="json")
 
 
 @pytest.mark.parametrize(
@@ -454,19 +451,16 @@ def test_an_and_or_handoff_passes_ownership_model_and_schema(make) -> None:
 
     assert handoff_ownership_violations(document) == []
     assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
-    verify_handoff_digest(ScenarioHandoffV4.model_validate(document))
+    verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
 
 
-def test_the_digest_covers_the_and_or_tree() -> None:
+def test_the_other_scenarios_in_the_tree_leave_the_handoff_unchanged() -> None:
     spec = adversarial()
-    flat = _handoff(spec, render_scenario_presentation(spec)[1])
-    and_or = _handoff(spec, tree_of(spec))
+    alone = _handoff(spec, tree_of(spec))
+    with_sibling = _handoff(spec, tree_of(spec, renamed(everyday(), "SCN-002", "x")))
 
-    assert flat["content_digest"] != and_or["content_digest"]
-    assert {key for key in flat if flat[key] != and_or[key]} == {
-        "attack_tree",
-        "content_digest",
-    }
+    assert alone == with_sibling
+    assert "attack_tree" not in alone
 
 
 # --- run ----------------------------------------------------------------------
@@ -487,102 +481,30 @@ def _publish(run_dir: Path, **kwargs: Any) -> Any:
     return result, client
 
 
-def test_an_and_or_run_publishes_valid_trees_that_name_each_other(
+def test_a_run_renders_trees_that_name_each_other_and_publishes_paths(
     tmp_path: Path,
 ) -> None:
-    result, client = _publish(tmp_path, attack_tree_format=AttackTreeFormat.AND_OR)
+    result, _ = _publish(tmp_path)
 
     assert result.stage_errors == []
     assert result.validation_errors == []
-    assert client.call_count == 3
-    for own, other in (("SCN-001", "SCN-002"), ("SCN-002", "SCN-001")):
-        document = _published_handoff(tmp_path, own)
+    (envelope,) = result.scenario_envelopes
+    tree = envelope.attack_tree
+    assert tree["format"] == AND_OR_TREE_FORMAT
+    assert validate_and_or_tree_structure(tree, "SCN-001").passed
+    references = [
+        node["scenario_id"]
+        for node in nodes(tree).values()
+        if node["type"] == "reference"
+    ]
+    assert references == ["SCN-002"]
+    for scenario_id in ("SCN-001", "SCN-002"):
+        document = _published_handoff(tmp_path, scenario_id)
         assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
         assert handoff_ownership_violations(document) == []
-        verify_handoff_digest(ScenarioHandoffV4.model_validate(document))
-        tree = document["attack_tree"]
-        assert tree["format"] == AND_OR_TREE_FORMAT
-        assert validate_and_or_tree_structure(tree, own).passed
-        references = [
-            node["scenario_id"]
-            for node in nodes(tree).values()
-            if node["type"] == "reference"
-        ]
-        assert references == [other]
-
-
-def test_the_format_changes_only_the_tree_and_the_digest(tmp_path: Path) -> None:
-    _, flat_client = _publish(tmp_path / "flat")
-    _, and_or_client = _publish(
-        tmp_path / "and-or", attack_tree_format=AttackTreeFormat.AND_OR
-    )
-    _publish(tmp_path / "explicit-flat", attack_tree_format=AttackTreeFormat.FLAT)
-
-    assert flat_client.calls == and_or_client.calls
-    for scenario_id in ("SCN-001", "SCN-002"):
-        flat = _published_handoff(tmp_path / "flat", scenario_id)
-        and_or = _published_handoff(tmp_path / "and-or", scenario_id)
-        assert {key for key in flat if flat[key] != and_or[key]} == {
-            "attack_tree",
-            "content_digest",
-        }
-        for name in (f"{scenario_id}.yaml", f"{scenario_id}.feature"):
-            assert (tmp_path / "flat" / "scenarios" / name).read_bytes() == (
-                tmp_path / "explicit-flat" / "scenarios" / name
-            ).read_bytes()
-
-
-# --- plumbing -----------------------------------------------------------------
-
-
-def test_the_inputs_reject_an_unknown_tree_format(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="attack_tree_format"):
-        synthesis.SynthesisInputs(
-            use_case="u", output_dir=tmp_path, attack_tree_format="tree"
-        )
-
-
-@pytest.mark.parametrize("value", ["flat", "and-or"])
-def test_the_inputs_format_reaches_run_sp3(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, value: str
-) -> None:
-    captured: dict = {}
-
-    def _fake_run_sp3(**kwargs):
-        captured.update(kwargs)
-        return SimpleNamespace(
-            stage_errors=[],
-            scenario_specs=[],
-            scenario_envelopes=[],
-            candidate_outcomes=(),
-            functional_test_specs=[],
-        )
-
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.scenario_prod.run.run_sp3", _fake_run_sp3
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment.enrich_threats",
-        lambda *a, **k: SimpleNamespace(structural_threats=[]),
-    )
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.pipeline.llm_config.resolve_llm_client",
-        lambda *a, **k: (MockLLMClient(), "test-profile"),
-    )
-    inputs = synthesis.SynthesisInputs(
-        use_case="u", output_dir=tmp_path, attack_tree_format=value
-    )
-    _default_scenarios(
-        ica_enumeration=final_ica_result(),
-        control_structure=SimpleNamespace(),
-        loss_analysis=make_loss_analysis(),
-        inputs=inputs,
-        capability_profile=None,
-        output_dir=tmp_path,
-        model_runtime=ModelRuntime.for_inputs(inputs),
-    )
-
-    assert captured["attack_tree_format"] is AttackTreeFormat(value)
+        verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+        assert "attack_tree" not in document
+        assert document["attack_path"]["format"] == "attack-path-v1"
 
 
 def invoke_generate(tmp_path: Path, extra: list[str]) -> tuple[Any, list[Any]]:
@@ -624,35 +546,6 @@ def invoke_generate(tmp_path: Path, extra: list[str]) -> tuple[Any, list[Any]]:
         ),
     ):
         return PlainCliRunner().invoke(app, arguments), captured
-
-
-@pytest.mark.parametrize(
-    ("arguments", "expected"),
-    [([], "flat"), (["--attack-tree-format", "and-or"], "and-or")],
-    ids=["default", "and-or"],
-)
-def test_the_cli_flag_reaches_the_inputs(
-    tmp_path: Path, arguments: list[str], expected: str
-) -> None:
-    result, captured = invoke_generate(tmp_path, arguments)
-
-    assert result.exit_code == 0, result.output
-    assert captured[0].attack_tree_format == expected
-
-
-def test_the_cli_rejects_an_unknown_tree_format(tmp_path: Path) -> None:
-    result, captured = invoke_generate(tmp_path, ["--attack-tree-format", "tree"])
-
-    assert result.exit_code != 0
-    assert "--attack-tree-format" in result.output
-    assert captured == []
-
-
-def test_generate_help_lists_the_tree_format_flag() -> None:
-    result = PlainCliRunner().invoke(app, ["generate", "--help"])
-
-    assert result.exit_code == 0
-    assert "--attack-tree-format" in result.stdout
 
 
 def test_a_belief_flaw_that_repeats_the_weak_point_is_left_out() -> None:

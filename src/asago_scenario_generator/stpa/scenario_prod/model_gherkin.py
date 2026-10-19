@@ -17,7 +17,6 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field, replace
-from enum import Enum
 import json
 from pathlib import Path
 import re
@@ -75,18 +74,6 @@ _TURN_NUMBER = re.compile(
     rf"\bturns?\s+(?:\d+|{_NUMBER_WORDS})\b|\b(?:{_ORDINALS})\s+turns?\b",
     re.IGNORECASE,
 )
-
-
-class GherkinMode(str, Enum):
-    """Whether a run asks the model for each handoff's Gherkin.
-
-    ``off`` sends no request and keeps the code-rendered Gherkin. ``handoff``
-    publishes each accepted model Gherkin in the v5 handoff and its
-    ``.feature`` companion.
-    """
-
-    OFF = "off"
-    HANDOFF = "handoff"
 
 
 class GherkinStepReply(WireModel):

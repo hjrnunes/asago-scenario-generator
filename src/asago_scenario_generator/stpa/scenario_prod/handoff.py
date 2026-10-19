@@ -29,7 +29,6 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
-from enum import Enum
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
@@ -130,13 +129,6 @@ def load_ownership_rules(
 
 
 _FORBIDDEN_KEYS, _FORBIDDEN_VALUE_PATTERNS = load_ownership_rules(OWNERSHIP_RULES_PATH)
-
-
-class HandoffFormat(str, Enum):
-    """Which handoff version a run publishes; ``v4`` is the default."""
-
-    V4 = "v4"
-    V5 = "v5"
 
 
 class HandoffModel(BaseModel):
@@ -1355,7 +1347,6 @@ __all__ = [
     "HandoffAtlasRef",
     "HandoffCausalFactor",
     "HandoffFact",
-    "HandoffFormat",
     "HandoffGherkin",
     "HandoffHazard",
     "HandoffLineage",

@@ -1,6 +1,6 @@
-"""The stated-belief step behind ``--flawed-belief separate``.
+"""The stated-belief step that follows Stage 5.
 
-Stage 5 sends what ``off`` sends; then one request per Stage 5 spec states
+After Stage 5, one request per Stage 5 spec states
 each causal factor's flawed belief and, where code does not fill it, the
 process-model variable that holds it or the variable the controller lacks.
 Code checks the reply with the ``stated`` rules and never repairs it; a reply
@@ -19,15 +19,12 @@ import pytest
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
-from asago_scenario_generator.pipeline import synthesis
 from asago_scenario_generator.stpa.infra.llm import _json_schema_response_format
 from asago_scenario_generator.stpa.infra.provider_record import (
     LiveRequestBudgetError,
 )
 from asago_scenario_generator.stpa.models.causal_factor import ProcessModelVariable
-from asago_scenario_generator.stpa.scenario_prod.and_or_tree import AttackTreeFormat
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
-    HandoffFormat,
     ScenarioHandoffV5,
     handoff_ownership_violations,
     verify_handoff_digest,
@@ -54,9 +51,6 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.belief_step import (
     render_belief_prompts,
     state_beliefs,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.flawed_belief import (
-    FlawedBeliefMode,
-)
 from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
     ShapeProposal,
 )
@@ -70,7 +64,7 @@ from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.sp1_helpers import MockLLMClient
-from tests.stpa.test_and_or_tree import invoke_generate, nodes, tree_of
+from tests.stpa.test_and_or_tree import nodes, tree_of
 from tests.stpa.test_scenario_handoff_v5 import SCHEMA
 
 BELIEF = "The payment batch was already approved by the account holder."
@@ -589,8 +583,6 @@ def _run(run_dir: Path, client: MockLLMClient | None = None, **kwargs: Any):
         control_structure=make_cs(),
         loss_analysis=make_loss_analysis(),
         run_dir=run_dir,
-        handoff_format=HandoffFormat.V5,
-        attack_tree_format=AttackTreeFormat.AND_OR,
         **kwargs,
     )
     return result, client
@@ -604,25 +596,12 @@ def _requests(client: MockLLMClient, *, beliefs: bool = False) -> list[Any]:
     ]
 
 
-def _files(run_dir: Path) -> dict[str, bytes]:
-    return {
-        path.name: path.read_bytes()
-        for path in sorted((run_dir / "scenarios").glob("SCN-*"))
-    }
-
-
-SEPARATE = {"flawed_belief": FlawedBeliefMode.SEPARATE}
-
-
-def test_a_separate_run_publishes_the_beliefs_through_to_the_handoff(
+def test_a_run_publishes_the_beliefs_through_to_the_handoff(
     tmp_path: Path,
 ) -> None:
-    _, off_client = _run(tmp_path / "off")
-    result, client = _run(tmp_path / "separate", **SEPARATE)
+    result, client = _run(tmp_path)
 
     assert result.stage_errors == []
-    # Stage 5 and the shape step send exactly what off sends.
-    assert _requests(client) == _requests(off_client)
     beliefs = _requests(client, beliefs=True)
     assert len(beliefs) == 2
     # Both Stage 5 requests, then one belief request per spec, then shape.
@@ -634,7 +613,7 @@ def test_a_separate_run_publishes_the_beliefs_through_to_the_handoff(
         True,
     ]
     assert kinds[4] is ShapeProposal
-    run_dir = tmp_path / "separate"
+    run_dir = tmp_path
     sidecar = json.loads((run_dir / BELIEFS_FILENAME).read_text(encoding="utf-8"))
     assert [entry["scenario_id"] for entry in sidecar["scenarios"]] == [
         "SCN-001",
@@ -681,99 +660,20 @@ def test_a_separate_run_publishes_the_beliefs_through_to_the_handoff(
     ],
     ids=["provider-error", "budget-refusal"],
 )
-def test_a_separate_run_whose_belief_calls_fail_publishes_what_off_publishes(
+def test_a_run_whose_belief_calls_fail_publishes_no_stated_belief(
     tmp_path: Path, error: Exception
 ) -> None:
-    _, off_client = _run(tmp_path / "off")
     client = BeliefClient(belief=None)
     client.set_exception_for(StatedBeliefReply, error)
 
-    result, _ = _run(tmp_path / "failed", client, **SEPARATE)
+    result, _ = _run(tmp_path, client)
 
     assert result.stage_errors == []
-    assert _requests(client) == _requests(off_client)
-    assert _files(tmp_path / "failed") == _files(tmp_path / "off")
-    for name in ("testability.yaml", "condition-families.yaml"):
-        off_path = tmp_path / "off" / name
-        if off_path.exists():
-            assert (tmp_path / "failed" / name).read_bytes() == off_path.read_bytes()
-    sidecar = json.loads((tmp_path / "failed" / BELIEFS_FILENAME).read_text())
+    sidecar = json.loads((tmp_path / BELIEFS_FILENAME).read_text())
     assert [entry["source"] for entry in sidecar["scenarios"]] == ["none"] * 2
     assert all(str(error) in entry["reason"] for entry in sidecar["scenarios"])
-
-
-@pytest.mark.parametrize("mode", [FlawedBeliefMode.OFF, FlawedBeliefMode.STATED])
-def test_off_and_stated_send_no_belief_request_and_write_no_sidecar(
-    tmp_path: Path, mode: FlawedBeliefMode
-) -> None:
-    _, client = _run(tmp_path, flawed_belief=mode)
-
-    assert _requests(client, beliefs=True) == []
-    assert not (tmp_path / BELIEFS_FILENAME).exists()
-
-
-# --- flags --------------------------------------------------------------------
-
-
-def test_separate_requires_v5() -> None:
-    with pytest.raises(ValueError, match="flawed_belief=separate requires"):
-        run_sp3(
-            llm_client=MockLLMClient(),
-            enriched_threat_set=_make_ets(num_threats=1),
-            control_structure=make_cs(),
-            loss_analysis=make_loss_analysis(),
-            run_dir=Path("/nonexistent"),
-            flawed_belief=FlawedBeliefMode.SEPARATE,
-        )
-
-
-def test_the_inputs_check_the_separate_value(tmp_path: Path) -> None:
-    with pytest.raises(ValueError, match="flawed_belief separate requires"):
-        synthesis.SynthesisInputs(
-            use_case="u", output_dir=tmp_path, flawed_belief="separate"
-        )
-    inputs = synthesis.SynthesisInputs(
-        use_case="u",
-        output_dir=tmp_path,
-        handoff_format="v5",
-        attack_tree_format="and-or",
-        flawed_belief="separate",
-    )
-    assert FlawedBeliefMode(inputs.flawed_belief) is FlawedBeliefMode.SEPARATE
-
-
-def test_the_cli_separate_reaches_the_inputs(tmp_path: Path) -> None:
-    result, captured = invoke_generate(
-        tmp_path,
-        [
-            "--handoff-format",
-            "v5",
-            "--attack-tree-format",
-            "and-or",
-            "--flawed-belief",
-            "separate",
-        ],
-    )
-
-    assert result.exit_code == 0, result.output
-    assert captured[0].flawed_belief == "separate"
-
-
-@pytest.mark.parametrize(
-    ("arguments", "message"),
-    [
-        (["--flawed-belief", "separate"], "separate requires --handoff-format v5"),
-        (["--flawed-belief", "stated"], "stated requires --handoff-format v5"),
-        (["--flawed-belief", "on"], "must be off, stated or separate"),
-    ],
-    ids=["separate-v4", "stated-v4", "unknown"],
-)
-def test_the_cli_rejects_a_bad_flawed_belief(
-    tmp_path: Path, arguments: list[str], message: str
-) -> None:
-    result, captured = invoke_generate(tmp_path, arguments)
-
-    assert result.exit_code != 0
-    assert "--flawed-belief" in result.output
-    assert message in " ".join(result.output.split())
-    assert captured == []
+    for scenario_id in ("SCN-001", "SCN-002"):
+        document = _published_handoff(tmp_path, scenario_id)
+        for factor in document["causal_factors"]:
+            assert factor.get("process_model_belief") not in (BELIEF, CA_BELIEF)
+            assert "process_model_variable" not in factor
