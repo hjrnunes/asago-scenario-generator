@@ -463,8 +463,10 @@ earlier failed one, its `calls.jsonl` line names that attempt in `retry_of`.
 
 `generate` writes its report to `report/index.html`, built on the shared
 report kit, with `report/stage-summary.json` beside it. `policy-coverage.json`
-(`data/contracts/policy-coverage/`) records where each policy risk stopped on
-its way to a scenario, and the report reads it. The report, the stage summary,
+(`policy-coverage-v2` in `data/contracts/policy-coverage/`) records where each
+policy risk stopped on its way to a scenario, and lists each hazard with the
+losses loss analysis relates it to and the scenarios that name it. The report
+reads it, and still reads a version 1 file. The report, the stage summary,
 and the coverage file are for people and for the orchestrator's run reports.
 The report's hazard section shows each hazard with the attack paths that reach
 it, and `report/attack-flow/` holds one Attack Flow bundle per reached hazard;

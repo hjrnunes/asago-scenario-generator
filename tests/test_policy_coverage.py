@@ -46,19 +46,28 @@ def card(
     )
 
 
-def analysis(losses: list[Loss], dispositions: list[RiskDisposition]) -> LossAnalysis:
+def analysis(
+    losses: list[Loss],
+    dispositions: list[RiskDisposition],
+    hazards: list[Hazard] | None = None,
+) -> LossAnalysis:
     anchor = Loss(
         loss_id="L-99", description="Anchor.", provenance=LossProvenance.use_case
     )
     kept = [*losses] or [anchor]
+    hazards = hazards or [
+        Hazard(hazard_id="H-1", description="h", related_losses=[kept[0].loss_id])
+    ]
     return LossAnalysis(
         risk_card_losses=[x for x in kept if x.provenance == LossProvenance.risk_card],
         use_case_losses=[x for x in kept if x.provenance != LossProvenance.risk_card],
-        hazards=[
-            Hazard(hazard_id="H-1", description="h", related_losses=[kept[0].loss_id])
-        ],
+        hazards=hazards,
         security_constraints=[
-            SecurityConstraint(constraint_id="SC-1", rule="r", related_hazards=["H-1"])
+            SecurityConstraint(
+                constraint_id="SC-1",
+                rule="r",
+                related_hazards=[hazards[0].hazard_id],
+            )
         ],
         risk_dispositions=dispositions,
     )
@@ -122,6 +131,7 @@ def build(**overrides: Any) -> dict[str, Any]:
             ],
         ),
         "scenario_ids_by_loss": {"L-1": ["SCN-002", "SCN-001"]},
+        "scenario_ids_by_hazard": {},
         "source": None,
     }
     values.update(overrides)
@@ -342,7 +352,7 @@ def test_the_policy_block_counts_entries_and_names_the_document() -> None:
         }
     )
 
-    assert document["schema_version"] == SCHEMA_VERSION == "policy-coverage-v1"
+    assert document["schema_version"] == SCHEMA_VERSION == "policy-coverage-v2"
     assert document["rule"] == "loss-source-risk-cards"
     assert document["policy"] == {
         "risk_extraction": "extraction.json",
@@ -361,18 +371,95 @@ def test_harm_title_is_the_first_clause_of_the_description() -> None:
     assert harm_title("Plain sentence.") == "Plain sentence"
 
 
+def hazard(hazard_id: str, description: str, *losses: str) -> Hazard:
+    return Hazard(
+        hazard_id=hazard_id, description=description, related_losses=list(losses)
+    )
+
+
+def hazard_analysis() -> LossAnalysis:
+    """Three hazards in loss order H-2, H-3, H-10; H-3 leads to both losses."""
+    return analysis(
+        [
+            risk_loss("L-1", "Customers lose money due to errors", ["r-a"]),
+            risk_loss("L-2", "Data leaks via the chat", ["r-b"]),
+        ],
+        [],
+        hazards=[
+            hazard("H-10", "The chat reveals another customer's data", "L-2"),
+            hazard("H-2", "The assistant states a wrong refund amount", "L-1"),
+            hazard("H-3", "The assistant answers outside its policy", "L-2", "L-1"),
+        ],
+    )
+
+
+def test_hazards_list_every_loss_analysis_hazard_with_its_losses_and_scenarios() -> (
+    None
+):
+    document = build(
+        loss_analysis=hazard_analysis(),
+        scenario_ids_by_hazard={"H-2": ["SCN-002", "SCN-001"], "H-10": ["SCN-003"]},
+    )
+
+    assert document["hazards"] == [
+        {
+            "hazard_id": "H-2",
+            "description": "The assistant states a wrong refund amount",
+            "loss_ids": ["L-1"],
+            "scenario_ids": ["SCN-001", "SCN-002"],
+        },
+        {
+            "hazard_id": "H-3",
+            "description": "The assistant answers outside its policy",
+            "loss_ids": ["L-1", "L-2"],
+            "scenario_ids": [],
+        },
+        {
+            "hazard_id": "H-10",
+            "description": "The chat reveals another customer's data",
+            "loss_ids": ["L-2"],
+            "scenario_ids": ["SCN-003"],
+        },
+    ]
+
+
+def test_a_scenario_naming_a_hazard_that_loss_analysis_lacks_is_ignored() -> None:
+    document = build(
+        loss_analysis=hazard_analysis(),
+        scenario_ids_by_hazard={"H-99": ["SCN-004"], "H-2": ["SCN-001"]},
+    )
+
+    assert [h["hazard_id"] for h in document["hazards"]] == ["H-2", "H-3", "H-10"]
+    assert [h["scenario_ids"] for h in document["hazards"]] == [["SCN-001"], [], []]
+
+
+def test_each_harm_lists_the_hazards_that_lead_to_it() -> None:
+    harms = {
+        harm["loss_id"]: harm
+        for harm in build(loss_analysis=hazard_analysis())["harms"]
+    }
+
+    assert harms["L-1"]["hazard_ids"] == ["H-2", "H-3"]
+    assert harms["L-2"]["hazard_ids"] == ["H-3", "H-10"]
+
+
+def test_a_harm_no_hazard_leads_to_lists_no_hazards() -> None:
+    harms = {harm["loss_id"]: harm for harm in build()["harms"]}
+
+    assert harms["L-2"]["hazard_ids"] == []
+    assert harms["L-1"]["hazard_ids"] == ["H-1"]
+
+
 def test_the_document_is_the_same_on_every_build() -> None:
     assert build() == build()
 
 
-CONTRACT = (
-    Path(__file__).resolve().parents[1]
-    / "data/contracts/policy-coverage/policy-coverage-v1"
-)
+CONTRACTS = Path(__file__).resolve().parents[1] / "data/contracts/policy-coverage"
+CONTRACT = CONTRACTS / "policy-coverage-v2"
 
 
-def validator() -> Draft202012Validator:
-    return Draft202012Validator(json.loads((CONTRACT / "schema.json").read_text()))
+def validator(contract: Path = CONTRACT) -> Draft202012Validator:
+    return Draft202012Validator(json.loads((contract / "schema.json").read_text()))
 
 
 def test_a_built_document_validates_against_the_contract_schema() -> None:
@@ -381,6 +468,36 @@ def test_a_built_document_validates_against_the_contract_schema() -> None:
     )
 
     assert list(validator().iter_errors(document)) == []
+
+
+def test_a_built_document_with_hazards_validates_against_the_v2_contract_schema() -> (
+    None
+):
+    document = build(
+        loss_analysis=hazard_analysis(),
+        scenario_ids_by_hazard={"H-2": ["SCN-001"]},
+    )
+
+    assert list(validator().iter_errors(document)) == []
+
+
+def test_the_v2_schema_requires_hazards_and_each_harms_hazard_ids() -> None:
+    document = build()
+    del document["hazards"]
+    del document["harms"][0]["hazard_ids"]
+
+    messages = {error.message for error in validator().iter_errors(document)}
+
+    assert "'hazards' is a required property" in messages
+    assert "'hazard_ids' is a required property" in messages
+
+
+def test_the_v1_schema_still_validates_its_minimal_example() -> None:
+    v1 = CONTRACTS / "policy-coverage-v1"
+    example = json.loads((v1 / "valid/minimal.json").read_text())
+
+    assert example["schema_version"] == "policy-coverage-v1"
+    assert list(validator(v1).iter_errors(example)) == []
 
 
 def test_a_document_without_a_source_validates_with_null_provenance() -> None:
@@ -404,9 +521,14 @@ def _write_run(tmp_path: Path) -> dict[str, Any]:
     """A run directory with two scenarios and a risk extraction beside it."""
     out = tmp_path / "out"
     (out / "scenarios").mkdir(parents=True)
-    for scn, losses in (("SCN-001", ["L-1"]), ("SCN-002", ["L-1", "L-2"])):
+    # SCN-002 cites every loss but names only H-1: lineage losses are not hazard losses.
+    for scn, losses, hazards in (
+        ("SCN-001", ["L-1"], ["H-1"]),
+        ("SCN-002", ["L-1", "L-2"], ["H-1"]),
+    ):
         (out / "scenarios" / f"{scn}.yaml").write_text(
             f"scenario_id: {scn}\nlineage:\n  loss_ids: {json.dumps(losses)}\n"
+            f"  hazard_ids: {json.dumps(hazards)}\n"
         )
     extraction = tmp_path / "inputs" / "risks.json"
     extraction.parent.mkdir()
@@ -450,6 +572,10 @@ def test_publishing_reads_scenarios_from_disk_and_names_inputs_by_basename(
                 risk_loss("L-2", "Data leaks", ["r-b"]),
             ],
             [],
+            hazards=[
+                hazard("H-1", "Money is lost", "L-1"),
+                hazard("H-2", "Data leaks", "L-2"),
+            ],
         ),
         actionability=None,
     )
@@ -466,3 +592,35 @@ def test_publishing_reads_scenarios_from_disk_and_names_inputs_by_basename(
     harms = {h["loss_id"]: h["scenario_ids"] for h in document["harms"]}
     assert harms == {"L-1": ["SCN-001", "SCN-002"], "L-2": ["SCN-002"]}
     assert str(tmp_path) not in path.read_text()
+
+
+def test_a_scenario_naming_every_loss_does_not_widen_a_hazards_losses(
+    tmp_path: Path,
+) -> None:
+    """SCN-002 cites L-1 and L-2 but names only H-1; H-1 keeps its own loss."""
+    run = _write_run(tmp_path)
+
+    path = publish_policy_coverage(
+        **run,
+        sssom=None,
+        loss_analysis=analysis(
+            [
+                risk_loss("L-1", "Money lost due to errors", ["r-a"]),
+                risk_loss("L-2", "Data leaks", ["r-b"]),
+            ],
+            [],
+            hazards=[
+                hazard("H-1", "Money is lost", "L-1"),
+                hazard("H-2", "Data leaks", "L-2"),
+            ],
+        ),
+        actionability=None,
+    )
+
+    document = json.loads(path.read_text())
+    by_hazard = {h["hazard_id"]: h for h in document["hazards"]}
+    assert by_hazard["H-1"]["loss_ids"] == ["L-1"]
+    assert by_hazard["H-1"]["scenario_ids"] == ["SCN-001", "SCN-002"]
+    assert by_hazard["H-2"]["loss_ids"] == ["L-2"]
+    assert by_hazard["H-2"]["scenario_ids"] == []
+    assert not [e.json_path for e in validator().iter_errors(document)]
