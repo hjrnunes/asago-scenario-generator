@@ -78,14 +78,8 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.belief_step import (
     belief_request,
     render_belief_prompts,
 )
-from asago_scenario_generator.stpa.scenario_prod.stage5.flawed_belief import (
-    build_flawed_belief_frame,
-)
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
-)
-from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
-    _causal_source_choices,
 )
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TargetObservation,
@@ -105,7 +99,6 @@ from tests.helpers.normal_authoring_wire import (
     _record_observations,
     _target_operation,
     _tool_call_action_context,
-    _wrong_timing_assembly,
     _wrong_timing_context,
 )
 from tests.stpa.condition_prompt_fixture import (
@@ -400,16 +393,6 @@ def _stage5(
     return render
 
 
-def _stated_beliefs_facts() -> dict[str, object]:
-    context = _wrong_timing_context()
-    structure = _wrong_timing_assembly(context).control_structure
-    return {
-        "flawed_beliefs": build_flawed_belief_frame(
-            _causal_source_choices(context), context, structure
-        )
-    }
-
-
 def _narrate_stated() -> Callable[[str], str]:
     facts = ScenarioFacts(
         scenario_id="SCN-001",
@@ -531,7 +514,6 @@ CASES: dict[str, Callable[[str], str]] = {
     ),
     "narrate": _narrate(),
     "narrate-stated": _narrate_stated(),
-    "stated-beliefs": _stage5(_stated_beliefs_facts),
     "gherkin": _gherkin(),
     "separate-beliefs": _separate_beliefs(),
     "archive-item": _stage5(_archive_item_facts),

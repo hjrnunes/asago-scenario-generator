@@ -823,7 +823,6 @@ def _run_stage5_candidate(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
-    stated_beliefs: bool = False,
 ) -> _Stage5ThreatResult:
     """Run one isolated Stage 5 candidate and record its outcome evidence."""
     prior_error_count = len(stage_errors)
@@ -846,7 +845,6 @@ def _run_stage5_candidate(
             observation_contract=observation_contract,
             content_surface=content_surface,
             condition_family=condition_family,
-            stated_beliefs=stated_beliefs,
         )
     except Exception as exc:  # noqa: BLE001 - isolate one candidate
         stage_errors.append(f"Stage 5 candidate failed for SCN-{index + 1:03d}: {exc}")
@@ -879,7 +877,6 @@ def _collect_stage5_specs(
     candidate_builders: list[_CandidateOutcomeBuilder] | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
-    stated_beliefs: bool = False,
 ) -> list[ScenarioSpec]:
     """Generate and retain the valid Stage 5 specs in threat order."""
     specs: list[ScenarioSpec] = []
@@ -905,7 +902,6 @@ def _collect_stage5_specs(
             candidate_builders=candidate_builders,
             content_surface=content_surface,
             condition_family=plan.family if plan is not None else None,
-            stated_beliefs=stated_beliefs,
         )
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
@@ -1286,7 +1282,6 @@ def _run_stage5_for_threat(
     observation_contract: ObservationContract | None = None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
-    stated_beliefs: bool = False,
 ) -> _Stage5ThreatResult:
     """Run Stage 5 BDI generation for a single threat."""
     slot_parts = parse_ica_slot_id(threat.ica_slot_id)
@@ -1326,7 +1321,6 @@ def _run_stage5_for_threat(
         observation_contract=observation_contract,
         content_surface=content_surface,
         condition_family=condition_family,
-        stated_beliefs=stated_beliefs,
     )
     if failure is not None:
         return failure
@@ -1352,7 +1346,6 @@ def _stage5_bdi(
     observation_contract: ObservationContract | None,
     content_surface: ContentSurfaceFacts | None = None,
     condition_family: ConditionFamily | None = None,
-    stated_beliefs: bool = False,
 ) -> tuple[ScenarioSpec | None, _Stage5ThreatResult | None]:
     """Generate one assembled ScenarioSpec or one typed local failure."""
     try:
@@ -1369,7 +1362,6 @@ def _stage5_bdi(
             content_surface=content_surface,
             condition_family=condition_family,
             assembly=assembly,
-            stated_beliefs=stated_beliefs,
         )
     except ScenarioAssemblyError as exc:
         stage_errors.append(f"Stage 5: {exc}")

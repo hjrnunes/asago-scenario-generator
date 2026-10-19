@@ -40,13 +40,11 @@ def two_factor_payload() -> dict[str, Any]:
 
 
 def belief_spec(run_dir: Path) -> tuple[ScenarioSpec, ControlStructure]:
-    """Compile the two-factor reply with stated beliefs off."""
+    """Compile the two-factor reply; Stage 5 states no belief."""
     client = MockLLMClient()
     client.set_response_queue([two_factor_payload()])
     context = _wrong_timing_context()
     assembly = _wrong_timing_assembly(context)
-    spec, error = generate_bdi_for_context(
-        client, context, run_dir, assembly=assembly, stated_beliefs=False
-    )
+    spec, error = generate_bdi_for_context(client, context, run_dir, assembly=assembly)
     assert error is None and spec is not None, error
     return spec, assembly.control_structure

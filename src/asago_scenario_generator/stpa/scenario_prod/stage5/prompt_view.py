@@ -30,7 +30,7 @@ from ..condition_check import (
     condition_fact_listing,
 )
 from ..target_observations import TargetObservationSnapshot
-from .flawed_belief import VARIABLE_NONE, FlawedBeliefFrame
+from .flawed_belief import FlawedBeliefFrame
 from .wire import (
     _CausalSourceChoice,
 )
@@ -55,15 +55,12 @@ def build_context_bdi_prompts(
     observation_contract: ObservationContract | None = None,
     condition_family: ConditionFamily | None = None,
     condition_universe: ConditionUniverse | None = None,
-    flawed_beliefs: FlawedBeliefFrame | None = None,
 ) -> tuple[str, str]:
     """Render Stage 5 from only the immutable context and output contract.
 
     The prompt requests scenario semantics and causal evidence only and
     carries no stimulus, delivery or executable-condition demands. A
     ``condition_family`` hint renders only where the condition is requested.
-    ``flawed_beliefs`` adds the stated-belief fields and the path's
-    variables under local handles.
     """
     scenario_context_yaml = _yaml_dump(
         _stage5_prompt_context(scenario_context),
@@ -71,7 +68,7 @@ def build_context_bdi_prompts(
     source_choices = _causal_source_choices(scenario_context)
     if not source_choices:
         raise ValueError("selected scenario context has no valid causal-factor sources")
-    source_choices_yaml = _context_source_choices_yaml(source_choices, flawed_beliefs)
+    source_choices_yaml = _context_source_choices_yaml(source_choices)
     temporal_reference_choices_yaml = _temporal_reference_choices_yaml(
         scenario_context, source_choices
     )
@@ -124,7 +121,6 @@ def build_context_bdi_prompts(
             available_observation_kinds=available_observation_kinds,
             unsupported_observation_claims=unsupported_observation_claims,
             has_condition_references=has_condition_references,
-            stated_beliefs=flawed_beliefs is not None,
         ),
         loader.render_prompt(
             "stage5_context_user.j2",
@@ -153,8 +149,6 @@ def build_context_bdi_prompts(
                 if has_condition_references
                 else None
             ),
-            stated_beliefs=flawed_beliefs is not None,
-            process_model_variables_yaml=_process_model_variables_yaml(flawed_beliefs),
         ),
     )
 
@@ -279,7 +273,6 @@ def _plain_prompt_json(value: object) -> object:
 
 def _context_source_choices_yaml(
     source_choices: Sequence[_CausalSourceChoice],
-    flawed_beliefs: FlawedBeliefFrame | None = None,
 ) -> str:
     """Render local causal handles and their selection guidance."""
     rendered_choices: list[dict[str, object]] = []
@@ -288,41 +281,17 @@ def _context_source_choices_yaml(
             "source_handle": choice.handle,
             "source_type": _source_type_explanation(choice.kind),
             "description": choice.description,
-            "select_when": (
-                _stated_belief_selection_guidance(choice.kind)
-                if flawed_beliefs is not None
-                else _source_selection_guidance(choice.kind)
-            ),
+            "select_when": _source_selection_guidance(choice.kind),
         }
         if choice.source_kind is not None:
             rendered_choice["feedback_source_kind"] = choice.source_kind
             rendered_choice["untrusted"] = choice.source_kind in _UNTRUSTED_SOURCE_KINDS
-        if flawed_beliefs is not None:
-            rendered_choice["process_model_variable"] = _variable_rule(
-                choice, flawed_beliefs
-            )
         rendered_choices.append(rendered_choice)
     return _yaml_dump(rendered_choices)
 
 
-def _variable_rule(choice: _CausalSourceChoice, frame: FlawedBeliefFrame) -> str:
-    """Say whether code fills a source's variable or the model chooses it."""
-    fixed = frame.fixed_variable(choice.handle)
-    if fixed is not None:
-        return (
-            f"filled by code ({fixed.handle}); set process_model_variable and "
-            "missing_variable to null"
-        )
-    return (
-        "your choice: the handle of the listed variable that holds the belief, "
-        f"or {VARIABLE_NONE} with missing_variable"
-    )
-
-
-def _process_model_variables_yaml(frame: FlawedBeliefFrame | None) -> str:
+def _process_model_variables_yaml(frame: FlawedBeliefFrame) -> str:
     """Render the selected path's variables under their local handles."""
-    if frame is None:
-        return ""
     if not frame.variables:
         return "The selected control path lists no process-model variable.\n"
     return _yaml_dump(
@@ -518,22 +487,6 @@ def _source_type_explanation(kind: CausalFactorKind) -> str:
         CausalFactorKind.sensor_anomaly: "a feedback observation anomaly",
         CausalFactorKind.actuator_anomaly: "a control-action execution condition",
     }[kind]
-
-
-def _stated_belief_selection_guidance(kind: CausalFactorKind) -> str:
-    """Explain a source category when every factor states a flawed belief."""
-    if kind is CausalFactorKind.process_model_flaw:
-        return (
-            "Select only when the flawed belief is about this variable: the "
-            "controller holds an incorrect, missing, or stale value of it."
-        )
-    if kind is CausalFactorKind.actuator_anomaly:
-        return (
-            "Select for failure or distortion while executing the selected "
-            "control action, or for a decision the controller makes on a "
-            "belief that no listed process-model variable holds."
-        )
-    return _source_selection_guidance(kind)
 
 
 def _source_selection_guidance(kind: CausalFactorKind) -> str:

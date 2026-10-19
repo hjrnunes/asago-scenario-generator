@@ -1,8 +1,7 @@
 """Stated flawed beliefs: the variable frame, the reply rules, and the variable.
 
-With stated beliefs on, every Stage 5 causal factor states what the controller
-wrongly takes to be true and names the process-model variable that holds the
-belief. Code fills the variable where the structure fixes it: a process-model
+The belief step asks, for every Stage 5 causal factor, what the controller
+wrongly takes to be true and which process-model variable holds the belief. Code fills the variable where the structure fixes it: a process-model
 factor's own source, and a feedback factor's updated variable when that
 variable is on the selected path. The model chooses for every other factor,
 from the path's variables under local handles, or ``none`` with a description
@@ -26,7 +25,6 @@ from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
 
-from .issues import ExactIssueError, IssueCode
 from .wire import _CausalSourceChoice
 
 
@@ -214,19 +212,6 @@ def flawed_belief_findings(
                 "set missing_variable to null."
             )
     return findings
-
-
-def validate_flawed_beliefs(
-    factors: Sequence[BaseModel], frame: FlawedBeliefFrame
-) -> None:
-    """Reject a reply that breaks any stated-belief rule, naming every one."""
-    findings = flawed_belief_findings(factors, frame)
-    if findings:
-        raise ExactIssueError(
-            IssueCode.flawed_belief_invalid,
-            "stated flawed beliefs break these rules:\n"
-            + "\n".join(f"- {line}" for line in findings),
-        )
 
 
 def resolve_process_model_variable(
