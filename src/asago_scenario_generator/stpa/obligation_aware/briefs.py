@@ -163,6 +163,18 @@ def order_by_brief(
     )
 
 
+def order_by_brief_then_id(
+    ids: Iterable[str],
+    briefs: Mapping[str, NeutralObligationBrief],
+) -> tuple[str, ...]:
+    """Order the distinct *ids* by brief, then any ID without a brief by itself."""
+    unique = set(ids)
+    return (
+        *order_by_brief(unique.intersection(briefs), briefs),
+        *sorted(unique.difference(briefs)),
+    )
+
+
 def require_batch_size(max_batch_size: int) -> None:
     """Require a positive integer batch size."""
     if type(max_batch_size) is not int:

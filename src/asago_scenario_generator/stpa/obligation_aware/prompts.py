@@ -41,7 +41,7 @@ from asago_scenario_generator.pipeline.risk_pattern_crosswalk import (
 )
 from asago_scenario_generator.stpa.obligation_aware.briefs import (
     obligation_order_key,
-    order_by_brief,
+    order_by_brief_then_id,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     PromptReference,
@@ -1293,11 +1293,7 @@ def local_obligation_handles(
     A route without a brief, which only a hand-built request carries, comes
     after them in obligation-ID order.
     """
-    ids = {route.obligation_id for route in routes}
-    ordered = (
-        *order_by_brief(ids.intersection(briefs), briefs),
-        *sorted(ids.difference(briefs)),
-    )
+    ordered = order_by_brief_then_id((route.obligation_id for route in routes), briefs)
     return {
         obligation_id: f"R{index}" for index, obligation_id in enumerate(ordered, 1)
     }

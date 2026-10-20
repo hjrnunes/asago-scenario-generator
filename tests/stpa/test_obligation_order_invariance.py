@@ -29,9 +29,14 @@ from asago_scenario_generator.stpa.obligation_aware.briefs import (
     create_obligation_batches,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
-from asago_scenario_generator.stpa.obligation_aware import slot_filling
+from asago_scenario_generator.stpa.obligation_aware import (
+    provider,
+    routing,
+    slot_filling,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     StructuralRoutingRequest,
+    StructuralRoutingResponse,
     SynthesisSlotRequest,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
@@ -153,6 +158,82 @@ def test_routing_batches_do_not_depend_on_obligation_ids() -> None:
     assert before[1] == tuple(product(("risk-c",), sorted(PATTERNS)))
 
 
+def test_budgeted_routing_batches_do_not_depend_on_obligation_ids() -> None:
+    briefs = _briefs()
+    renamed = _renamed(briefs, _rename(briefs))
+    structure = _control_structure()
+
+    def batches(values: Sequence[NeutralObligationBrief]) -> tuple:
+        # Each question costs one token, so a batch holds at most five.
+        budget = SimpleNamespace(
+            usable_input_tokens=5,
+            count=lambda text: sum(item.obligation_id in text for item in values),
+        )
+        split = _budgeted_obligation_batches(
+            values,
+            max_batch_size=8,
+            budget=budget,
+            loss_analysis=_loss_analysis(),
+            control_structure=structure,
+            slots=create_slots(structure),
+        )
+        return tuple(tuple(_identity(item) for item in batch) for batch in split)
+
+    before = batches(briefs)
+
+    assert batches(renamed) == before
+    ordered = tuple(product(sorted(RISKS), sorted(PATTERNS)))
+    assert before == (ordered[:5], ordered[5:10], ordered[10:])
+
+
+def _routing_request(values: Sequence[NeutralObligationBrief]):
+    structure = _control_structure()
+    return StructuralRoutingRequest(
+        batch_id="initial-batch-1",
+        briefs=tuple(values),
+        loss_analysis=_loss_analysis(),
+        control_structure=structure,
+        slots=tuple(create_slots(structure)),
+        controls=_controls(),
+    )
+
+
+def test_routing_retry_feedback_does_not_depend_on_obligation_ids() -> None:
+    briefs = _briefs()
+    rename = _rename(briefs)
+
+    def feedback(values: Sequence[NeutralObligationBrief]) -> tuple[str, str]:
+        request = _routing_request(values)
+        records = {
+            item.obligation_id: ValueError(
+                f"bad rationale for {item.attack_pattern_id}"
+            )
+            for item in values
+            if item.risk_ref.risk_id != "risk-b"
+        }
+        partial = routing._record_errors_text(records, values)
+        candidate = StructuralRoutingResponse(
+            request_digest=request.semantic_digest,
+            routes=tuple(
+                route
+                for route, item in zip(_routes(values), values, strict=True)
+                if item.risk_ref.risk_id == "risk-b"
+            ),
+            adapter_kind="fake",
+        )
+        with pytest.raises(ValueError) as caught:
+            routing._require_batch_identity(candidate, request, values)
+        return (
+            routing._routing_validation_feedback(ValueError(partial)),
+            routing._routing_validation_feedback(caught.value),
+        )
+
+    before = feedback(briefs)
+    after = feedback(_renamed(briefs, rename))
+
+    assert tuple(_restore(item, rename) for item in after) == before
+
+
 def test_routing_prompt_order_does_not_depend_on_obligation_ids() -> None:
     briefs = _briefs()
     rename = _rename(briefs)
@@ -258,6 +339,68 @@ def test_ica_budget_parts_do_not_depend_on_obligation_ids(
     assert parts(renamed) == before
     ordered = tuple(product(sorted(RISKS), sorted(PATTERNS)))
     assert before == (ordered[:5], ordered[5:10], ordered[10:])
+
+
+def test_ica_fill_correction_does_not_depend_on_obligation_ids() -> None:
+    briefs = _briefs()
+    rename = _rename(briefs)
+    structure = _control_structure()
+
+    def correction(values: Sequence[NeutralObligationBrief]) -> str:
+        routes = _routes(values)
+        request = SynthesisSlotRequest(
+            target_id=TARGET,
+            target_kind="responsibility",
+            slots=tuple(
+                item
+                for item in create_slots(structure)
+                if item.slot_id in routes[0].slot_ids
+            ),
+            routed_briefs=tuple(values),
+            routed_routes=routes,
+            loss_analysis=_loss_analysis(),
+            control_structure=structure,
+            controls=_controls(),
+        )
+        # Each risk-a obligation is answered twice; the others are missing.
+        repeated = sorted(
+            (item for item in values if item.risk_ref.risk_id == "risk-a"),
+            key=_identity,
+        )
+        result = {
+            "disposition": "proposed_not_applicable",
+            "rationale": "No complete structural property applies.",
+        }
+        payload = provider._SlotProviderPayload.model_validate(
+            {
+                "filled_slots": [
+                    {
+                        "slot_id": request.slots[0].slot_id,
+                        "is_na": True,
+                        "na_rationale": "No complete structural property applies.",
+                        "findings": [],
+                        "consideration_results": [
+                            {**result, "obligation_handle": item.obligation_id}
+                            for item in (*repeated, *repeated)
+                        ],
+                    }
+                ]
+            }
+        )
+        with pytest.raises(ValueError) as caught:
+            provider._validate_slot_provider_payload(
+                payload,
+                expected_slot_ids=frozenset(slot.slot_id for slot in request.slots),
+                expected_pair_keys=provider._required_pair_keys(request),
+                request=request,
+            )
+        return provider._localized_slot_error(str(caught.value), request)
+
+    before = correction(briefs)
+
+    assert _restore(correction(_renamed(briefs, rename)), rename) == before
+    assert "more than once" in before
+    assert "missing=" in before
 
 
 class _RecordingClient:

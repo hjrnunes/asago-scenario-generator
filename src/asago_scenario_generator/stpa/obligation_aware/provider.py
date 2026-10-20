@@ -8,7 +8,7 @@ revision compilation, and slot/reference validation remain local pure seams.
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from functools import lru_cache, partial
 from pathlib import Path
 from typing import Annotated, Any, Literal, Mapping, Sequence, Union
@@ -1331,7 +1331,7 @@ def _validate_slot_provider_payload(
                 expected_slot_ids,
                 "slot response must contain exactly the supplied slot IDs",
             ),
-            *_pair_errors(payload, expected_pair_keys),
+            *_pair_errors(payload, expected_pair_keys, request),
             *_slot_payload_errors(payload, request),
         ]
     )
@@ -1455,11 +1455,34 @@ def _consideration_error(
     return None
 
 
+def _pair_order(
+    request: SynthesisSlotRequest,
+) -> Callable[[tuple[str, str, str]], tuple[int, str, str, str]]:
+    """Order ``(route_id, obligation_id, slot_id)`` keys by local handle, then slot.
+
+    Route IDs and obligation IDs are hashes, so ordering by them would change
+    the correction text whenever the obligation IDs are renamed.
+    """
+    handles = local_obligation_handles(
+        request.routed_routes,
+        {brief.obligation_id: brief for brief in request.routed_briefs},
+    )
+    rank = {obligation_id: index for index, obligation_id in enumerate(handles)}
+
+    def key(pair: tuple[str, str, str]) -> tuple[int, str, str, str]:
+        route_id, obligation_id, slot_id = pair
+        return (rank.get(obligation_id, len(rank)), obligation_id, slot_id, route_id)
+
+    return key
+
+
 def _pair_errors(
     payload: _Model,
     expected_pair_keys: frozenset[tuple[str, str, str]],
+    request: SynthesisSlotRequest,
 ) -> list[str]:
     """Name each routed pair given more than once, then any missing or extra."""
+    order = _pair_order(request)
     route_by_pair = {
         (obligation_id, slot_id): route_id
         for route_id, obligation_id, slot_id in expected_pair_keys
@@ -1472,7 +1495,9 @@ def _pair_errors(
                 counts[(route_id, result.obligation_handle, entry.slot_id)] += 1
     repeated = [
         f"{obligation_id} on {slot_id} ({count} results)"
-        for (_route, obligation_id, slot_id), count in sorted(counts.items())
+        for (_route, obligation_id, slot_id), count in sorted(
+            counts.items(), key=lambda item: order(item[0])
+        )
         if count > 1
     ]
     errors = (
@@ -1484,15 +1509,22 @@ def _pair_errors(
         frozenset(counts),
         expected_pair_keys,
         "slot response must contain exactly the required routed pair keys",
+        key=order,
     )
 
 
-def _id_set_errors(actual: frozenset, expected: frozenset, message: str) -> list[str]:
+def _id_set_errors(
+    actual: frozenset,
+    expected: frozenset,
+    message: str,
+    *,
+    key: Callable[[Any], Any] | None = None,
+) -> list[str]:
     """Return one stable diagnostic for a closed identity-set mismatch."""
     if actual == expected:
         return []
-    missing = sorted(expected - actual)
-    unexpected = sorted(actual - expected)
+    missing = sorted(expected - actual, key=key)
+    unexpected = sorted(actual - expected, key=key)
     return [f"{message} (missing={missing}, unexpected={unexpected})"]
 
 
