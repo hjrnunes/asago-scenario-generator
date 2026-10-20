@@ -270,3 +270,51 @@ def test_the_handoff_references_reuse_the_rows_checked_at_load(
 
     taxonomy = captured["handoff_taxonomy"]
     assert [ref.id for ref in taxonomy.references_by_loss[loss.loss_id]] == ["LLM03"]
+
+
+@pytest.mark.parametrize("missing", ["sssom", "risk_cards"])
+def test_without_sssom_rows_or_risk_cards_no_handoff_carries_a_taxonomy_block(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, missing: str
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment.enrich_threats",
+        lambda *a, **k: SimpleNamespace(structural_threats=[]),
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.scenario_prod.run.run_sp3",
+        lambda **kwargs: captured.update(kwargs) or "sp3",
+    )
+    sssom = _sssom_file(
+        tmp_path / "risks.sssom.tsv", [("r-1", EXCESSIVE_AGENCY, "owasp-llm-2026")]
+    )
+    # Without risk cards SP1 falls back to the risk-extraction file, which the
+    # references do not read: they would claim "no reference" for every loss.
+    inputs = synthesis.SynthesisInputs(
+        use_case="u",
+        output_dir=tmp_path,
+        risk_cards=()
+        if missing == "risk_cards"
+        else ({"risk_id": "r-1", "risk_name": "One"},),
+        sssom_path=None if missing == "sssom" else sssom,
+        risk_extraction_path=tmp_path / "risk-extraction.json",
+    )
+    loss = (
+        make_loss_analysis()
+        .risk_card_losses[0]
+        .model_copy(update={"source_risk_cards": ["r-1"]})
+    )
+
+    _default_scenarios(
+        ica_enumeration=final_ica_result(),
+        control_structure=SimpleNamespace(),
+        loss_analysis=make_loss_analysis().model_copy(
+            update={"risk_card_losses": [loss]}
+        ),
+        inputs=inputs,
+        capability_profile=None,
+        output_dir=tmp_path,
+        model_runtime=_runtime(object()),
+    )
+
+    assert captured["handoff_taxonomy"] is None
