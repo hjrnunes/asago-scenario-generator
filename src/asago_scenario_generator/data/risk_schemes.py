@@ -8,6 +8,7 @@ vocabulary raises ``ValueError``.  Nothing is skipped silently.
 from __future__ import annotations
 
 import functools
+import re
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
@@ -110,6 +111,32 @@ def scheme_label(scheme: str, object_id: str) -> str:
     return f"{prefix} {entry.code}:{EDITION} {entry.title}"
 
 
+_FAMILY_WORD = re.compile(r"(?<![a-z])(asi|agentic|llm)")
+
+
+def scheme_family(source: str) -> str | None:
+    """The edition-bearing OWASP family ``source`` names, in any spelling.
+
+    Case, ``-``/``_``/space separators and URLs do not matter:
+    ``owasp-llm-2026``, ``OWASP-LLM-2.0``, ``owasp_llm_2025`` and
+    ``https://genai.owasp.org/llm-top-10/2025`` all name ``owasp-llm``; an
+    ``asi`` or ``agentic`` word names ``owasp-asi``. Any other source that
+    mentions OWASP is the family ``owasp``; a source without OWASP is None.
+    """
+    text = source.lower()
+    if "owasp" not in text:
+        return None
+    word = _FAMILY_WORD.search(text.replace("owasp", " "))
+    if word is None:
+        return "owasp"
+    return "owasp-llm" if word.group(1) == "llm" else "owasp-asi"
+
+
 def is_edition_scheme(source: str) -> bool:
-    """Whether ``source`` is an edition-bearing OWASP scheme name."""
-    return source.startswith(("owasp-llm", "owasp-asi"))
+    """Whether ``source`` names an edition-bearing OWASP scheme, in any spelling."""
+    return scheme_family(source) is not None
+
+
+def is_no_match(predicate_id: str) -> bool:
+    """Whether a mapping predicate asserts that there is no match."""
+    return "nomatch" in predicate_id.lower()

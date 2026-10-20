@@ -15,6 +15,7 @@ from typing import Protocol
 from asago_scenario_generator.data.risk_schemes import (
     SCHEMES,
     is_edition_scheme,
+    is_no_match,
     scheme_label,
 )
 from asago_scenario_generator.data.sssom import SSSOMMapping
@@ -47,8 +48,9 @@ def normalized_name(name: str) -> str:
 def mapped_tags(sssom: Sequence[SSSOMMapping]) -> dict[str, list[dict[str, str]]]:
     """Each subject's own tags, sorted by scheme and id.
 
-    Rows of other schemes are ignored. An OWASP row of another edition raises
-    ``ValueError``, as does an object id outside the scheme's vocabulary.
+    ``noMatch`` rows and rows of other schemes give no tag. An OWASP row of
+    another edition, in any spelling, raises ``ValueError``, as does an object
+    id outside the scheme's vocabulary.
     """
     found: dict[str, list[dict[str, str]]] = {}
     for mapping in sssom:
@@ -58,6 +60,8 @@ def mapped_tags(sssom: Sequence[SSSOMMapping]) -> dict[str, list[dict[str, str]]
                     f"mapping source {mapping.object_source!r} is not a current "
                     f"scheme; expected one of {sorted(TAG_SCHEMES)}"
                 )
+            continue
+        if is_no_match(mapping.predicate_id):
             continue
         tag = {
             "scheme": mapping.object_source,

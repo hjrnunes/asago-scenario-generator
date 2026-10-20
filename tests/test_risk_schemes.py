@@ -98,3 +98,37 @@ def test_is_edition_scheme():
         assert is_edition_scheme(source)
     for source in ("nist-ai-rmf", "ailuminate-v1.0"):
         assert not is_edition_scheme(source)
+
+
+@pytest.mark.parametrize(
+    ("source", "family"),
+    [
+        ("owasp-llm-2026", "owasp-llm"),
+        ("owasp-llm-2.0", "owasp-llm"),
+        ("OWASP-LLM-2.0", "owasp-llm"),
+        ("OWASP-LLM-2026", "owasp-llm"),
+        ("owasp_llm_2025", "owasp-llm"),
+        ("Owasp LLM 2025", "owasp-llm"),
+        ("https://genai.owasp.org/llm-top-10/2025", "owasp-llm"),
+        ("owasp-asi-2026", "owasp-asi"),
+        ("owasp-asi", "owasp-asi"),
+        ("OWASP_ASI_2025", "owasp-asi"),
+        (
+            "https://genai.owasp.org/initiatives/agentic-security-initiative/",
+            "owasp-asi",
+        ),
+        ("nist-ai-rmf", None),
+        ("ailuminate-v1.0", None),
+    ],
+)
+def test_scheme_family_ignores_case_separators_and_url_spellings(source, family):
+    assert risk_schemes.scheme_family(source) == family
+    assert is_edition_scheme(source) == (family is not None)
+
+
+@pytest.mark.parametrize(
+    "predicate", ["skos:noMatch", "semapv:NoMatch", "SKOS:NOMATCH"]
+)
+def test_no_match_predicates(predicate):
+    assert risk_schemes.is_no_match(predicate)
+    assert not risk_schemes.is_no_match("skos:relatedMatch")

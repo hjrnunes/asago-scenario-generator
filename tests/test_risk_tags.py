@@ -86,6 +86,34 @@ def test_policy_coverage_tags_equal_merged_risk_tags() -> None:
     assert merged["r-z"] == ()
 
 
+def test_a_no_match_row_gives_no_tag() -> None:
+    cards = [card("one", "One")]
+    denied = _row("one", EXCESSIVE_AGENCY, "owasp-llm-2026").model_copy(
+        update={"predicate_id": "skos:noMatch"}
+    )
+    no_term = _row("one", "sssom:NoTermFound", "owasp-llm-2026").model_copy(
+        update={"predicate_id": "skos:noMatch"}
+    )
+
+    assert merged_risk_tags(cards, [denied, no_term]) == {"one": ()}
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "OWASP-LLM-2.0",
+        "owasp_llm_2025",
+        "https://genai.owasp.org/llm-top-10/2025",
+        "OWASP-ASI-2025",
+    ],
+)
+def test_a_differently_spelled_stale_owasp_source_is_refused(source: str) -> None:
+    with pytest.raises(ValueError, match="not a current scheme") as caught:
+        merged_risk_tags([card("one", "One")], [_row("one", "x", source)])
+
+    assert source in str(caught.value)
+
+
 def _sssom_file(path: Path, rows: list[tuple[str, str, str]]) -> Path:
     header = (
         "subject_id\tsubject_source\tpredicate_id\tobject_id\tobject_source\t"

@@ -16,9 +16,10 @@ from typing import Any
 from asago_scenario_generator.data.risk_schemes import (
     EDITION,
     OWASP_LLM_SCHEME,
-    is_edition_scheme,
+    is_no_match,
     load_vocabulary,
     parse_object_id,
+    scheme_family,
 )
 from asago_scenario_generator.pipeline.obligation_contracts import (
     TaxonomyObligationInputs,
@@ -93,9 +94,10 @@ def reviewed_owasp_llm_rows(
 ) -> list[dict]:
     """Return reviewed risks' OWASP LLM 2026 matches with their LLM codes.
 
-    A row of another OWASP LLM edition, or an ``owasp-llm-2026`` row whose
-    object ID is not in the pinned vocabulary, raises ``ValueError``. Rows of
-    other schemes are skipped.
+    A row of another OWASP LLM edition, in any spelling, or an
+    ``owasp-llm-2026`` match whose object ID is not in the pinned vocabulary,
+    raises ``ValueError``. ``noMatch`` rows and rows of other schemes are
+    skipped.
     """
     risk_ids = {str(item.risk_id) for item in risk_cards}
     rows = []
@@ -103,10 +105,10 @@ def reviewed_owasp_llm_rows(
         row = mapping.model_dump(mode="json")
         if not _is_current_owasp_llm_row(row):
             continue
+        if is_no_match(str(row["predicate_id"])):
+            continue
         code = parse_object_id(OWASP_LLM_SCHEME, str(row["object_id"])).code
         if row["subject_id"] not in risk_ids:
-            continue
-        if "nomatch" in str(row["predicate_id"]).lower():
             continue
         row["object_id"] = code
         rows.append(row)
@@ -118,7 +120,7 @@ def _is_current_owasp_llm_row(row: dict) -> bool:
     source = str(row["object_source"])
     if source == OWASP_LLM_SCHEME:
         return True
-    if is_edition_scheme(source) and source.startswith("owasp-llm"):
+    if scheme_family(source) == "owasp-llm":
         raise ValueError(
             f"SSSOM row for {row['subject_id']!r} has object_source {source!r}; "
             f"expected {OWASP_LLM_SCHEME!r}"

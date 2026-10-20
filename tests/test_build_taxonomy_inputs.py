@@ -102,6 +102,36 @@ def test_a_2025_owasp_row_stops_the_planner(tmp_path) -> None:
     assert "owasp-llm-2.0" in str(caught.value)
 
 
+@pytest.mark.parametrize(
+    "source",
+    [
+        "OWASP-LLM-2.0",
+        "OWASP-LLM-2026",
+        "owasp_llm_2025",
+        "https://genai.owasp.org/llm-top-10/2025",
+    ],
+)
+def test_a_differently_spelled_owasp_llm_source_stops_the_planner(
+    tmp_path, source: str
+) -> None:
+    variant = (
+        f"risk-a\tcredo-ucf\tskos:relatedMatch\tllm092025-misinformation\t{source}\tj"
+    )
+
+    with pytest.raises(ValueError, match="owasp-llm-2026") as caught:
+        _build(tmp_path, rows=(*_ROWS, variant))
+
+    assert source in str(caught.value)
+
+
+def test_a_no_match_row_is_skipped_before_its_object_is_read(tmp_path) -> None:
+    no_term = "risk-a\tcredo-ucf\tskos:noMatch\tsssom:NoTermFound\towasp-llm-2026\tj"
+
+    value, _ = _build(tmp_path, rows=(*_ROWS, no_term))
+
+    assert [row.object_id for row in value.sssom_mappings] == ["LLM01", "LLM02"]
+
+
 def test_a_stale_slug_stops_the_planner(tmp_path) -> None:
     stale = (
         "risk-a\tcredo-ucf\tskos:relatedMatch\t"
