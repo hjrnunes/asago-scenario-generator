@@ -25,6 +25,11 @@ from typing import Any
 import yaml
 
 from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
+from asago_scenario_generator.data.risk_schemes import (
+    SCHEMES,
+    is_edition_scheme,
+    scheme_label,
+)
 from asago_scenario_generator.data.sssom import SSSOMMapping, load_sssom
 from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.risk_card import RiskCard
@@ -43,14 +48,12 @@ from asago_scenario_generator.stpa.system_model.risk_actionability import (
 SCHEMA_VERSION = "policy-coverage-v2"
 FILENAME = "policy-coverage.json"
 RULE = "loss-source-risk-cards"
-TAG_SCHEMES = ("nist-ai-rmf", "owasp-llm-2.0")
+TAG_SCHEMES = SCHEMES
 # Best first: a merged risk takes the coverage of its best entry.
 COVERAGE_ORDER = ("scenarios", "not_reached", "not_applicable", "outside_boundary")
 
 _CITATION = re.compile(r"\s*\([^()]*\d{4}[^()]*\)\s*$")
 _CLAUSE_BREAK = re.compile(r" due to |, such as | via | through ")
-_WORDS = {"ai": "AI", "cbrn": "CBRN"}
-_OWASP_ID = re.compile(r"llm(\d\d)(?:2025)?-(.*)")
 _LOSS_NUMBER = re.compile(r"(\d+)$")
 
 
@@ -62,21 +65,6 @@ def display_name(name: str) -> str:
 def harm_title(description: str) -> str:
     """Return the description's first clause, the version 1 stand-in for a title."""
     return _CLAUSE_BREAK.split(description, maxsplit=1)[0].strip().rstrip(".")
-
-
-def _words(text: str) -> str:
-    parts = text.replace("-", " ").split()
-    return " ".join(_WORDS.get(part, part) for part in parts).capitalize()
-
-
-def tag_label(scheme: str, tag_id: str) -> str:
-    """Return the reader's label for a NIST or OWASP mapping target."""
-    if scheme == "nist-ai-rmf":
-        return "NIST " + _words(tag_id.removeprefix("nist-"))
-    match = _OWASP_ID.match(tag_id)
-    if match:
-        return f"OWASP LLM{match[1]} {_words(match[2])}"
-    return tag_id
 
 
 def _normalized(name: str) -> str:
@@ -102,11 +90,16 @@ def _tags(sssom: Sequence[SSSOMMapping]) -> dict[str, list[dict[str, str]]]:
     found: dict[str, list[dict[str, str]]] = {}
     for mapping in sssom:
         if mapping.object_source not in TAG_SCHEMES:
+            if is_edition_scheme(mapping.object_source):
+                raise ValueError(
+                    f"mapping source {mapping.object_source!r} is not a current "
+                    f"scheme; expected one of {sorted(TAG_SCHEMES)}"
+                )
             continue
         tag = {
             "scheme": mapping.object_source,
             "id": mapping.object_id,
-            "label": tag_label(mapping.object_source, mapping.object_id),
+            "label": scheme_label(mapping.object_source, mapping.object_id),
         }
         known = found.setdefault(mapping.subject_id, [])
         if tag not in known:

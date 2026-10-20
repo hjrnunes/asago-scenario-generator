@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from jsonschema import Draft202012Validator
 
 from asago_scenario_generator.data.sssom import SSSOMMapping
@@ -279,32 +280,22 @@ def test_display_name_drops_a_trailing_citation_only() -> None:
     assert display_name("Misuse (of tools)") == "Misuse (of tools)"
 
 
+def mapping(object_id: str, object_source: str) -> SSSOMMapping:
+    return SSSOMMapping(
+        subject_id="r-a",
+        subject_source="ibm",
+        predicate_id="skos:relatedMatch",
+        object_id=object_id,
+        object_source=object_source,
+        mapping_justification="x",
+    )
+
+
 def test_tags_come_from_nist_and_owasp_mappings_only() -> None:
     sssom = [
-        SSSOMMapping(
-            subject_id="r-a",
-            subject_source="ibm",
-            predicate_id="skos:relatedMatch",
-            object_id="llm092025-misinformation",
-            object_source="owasp-llm-2.0",
-            mapping_justification="x",
-        ),
-        SSSOMMapping(
-            subject_id="r-a",
-            subject_source="ibm",
-            predicate_id="skos:relatedMatch",
-            object_id="nist-confabulation",
-            object_source="nist-ai-rmf",
-            mapping_justification="x",
-        ),
-        SSSOMMapping(
-            subject_id="r-a",
-            subject_source="ibm",
-            predicate_id="skos:relatedMatch",
-            object_id="ail-hate",
-            object_source="ailuminate-v1.0",
-            mapping_justification="x",
-        ),
+        mapping("llm072026-misinformation", "owasp-llm-2026"),
+        mapping("nist-confabulation", "nist-ai-rmf"),
+        mapping("ail-hate", "ailuminate-v1.0"),
     ]
 
     tags = by_id(build(sssom=sssom))["r-a"]["tags"]
@@ -313,14 +304,68 @@ def test_tags_come_from_nist_and_owasp_mappings_only() -> None:
         {
             "scheme": "nist-ai-rmf",
             "id": "nist-confabulation",
-            "label": "NIST Confabulation",
+            "label": "NIST AI 600-1 Confabulation",
         },
         {
-            "scheme": "owasp-llm-2.0",
-            "id": "llm092025-misinformation",
-            "label": "OWASP LLM09 Misinformation",
+            "scheme": "owasp-llm-2026",
+            "id": "llm072026-misinformation",
+            "label": "OWASP LLM07:2026 Misinformation",
         },
     ]
+
+
+def test_agentic_tags_are_kept_with_their_label() -> None:
+    sssom = [mapping("asi02-tool-misuse-and-exploitation", "owasp-asi-2026")]
+
+    tags = by_id(build(sssom=sssom))["r-a"]["tags"]
+
+    assert tags == [
+        {
+            "scheme": "owasp-asi-2026",
+            "id": "asi02-tool-misuse-and-exploitation",
+            "label": "OWASP ASI02:2026 Tool Misuse & Exploitation",
+        }
+    ]
+
+
+def test_nist_labels_keep_their_capitals() -> None:
+    sssom = [
+        mapping("nist-human-ai-configuration", "nist-ai-rmf"),
+        mapping("nist-cbrn-information-or-capabilities", "nist-ai-rmf"),
+    ]
+
+    labels = [t["label"] for t in by_id(build(sssom=sssom))["r-a"]["tags"]]
+
+    assert labels == [
+        "NIST AI 600-1 CBRN Information or Capabilities",
+        "NIST AI 600-1 Human-AI Configuration",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("object_id", "source"),
+    [
+        ("llm092025-misinformation", "owasp-llm-2.0"),
+        ("asi01-agent-goal-hijack", "owasp-asi"),
+        ("llm092025-misinformation", "owasp-llm-2026"),
+    ],
+)
+def test_a_2025_scheme_row_is_refused(object_id: str, source: str) -> None:
+    with pytest.raises(ValueError):
+        build(sssom=[mapping(object_id, source)])
+
+
+def test_a_built_document_with_tags_validates_against_v2() -> None:
+    sssom = [
+        mapping("llm072026-misinformation", "owasp-llm-2026"),
+        mapping("asi02-tool-misuse-and-exploitation", "owasp-asi-2026"),
+        mapping("nist-confabulation", "nist-ai-rmf"),
+    ]
+
+    document = build(sssom=sssom)
+
+    assert len(by_id(document)["r-a"]["tags"]) == 3
+    assert list(validator().iter_errors(document)) == []
 
 
 def test_mitigations_keep_their_ids_sources_and_text() -> None:
