@@ -1,9 +1,9 @@
 """Contract tests for the single-session conversational attack patterns.
 
-The four patterns cover OWASP LLM categories that no other catalog record
-realizes without persistent memory or tools: sensitive-data elicitation
-(LLM02), system prompt extraction (LLM07), jailbreak for prohibited content
-(LLM01), and hallucinated-reference elicitation (LLM09).
+The four patterns cover OWASP LLM 2026 categories that no other catalog
+record realizes without persistent memory or tools: sensitive-data
+elicitation (LLM02), system prompt extraction (LLM08), jailbreak for
+prohibited content (LLM01), and hallucinated-reference elicitation (LLM07).
 """
 
 from __future__ import annotations
@@ -31,9 +31,9 @@ _CATALOG_FILE = (
 # pattern id -> (threat, exact ATLAS ids at chain scope, OWASP LLM categories)
 EXPECTED = {
     "AP-T6-08": ("T6", {"AML.T0057"}, ["LLM02"]),
-    "AP-T6-09": ("T6", {"AML.T0056"}, ["LLM07"]),
+    "AP-T6-09": ("T6", {"AML.T0056"}, ["LLM08"]),
     "AP-T6-10": ("T6", {"AML.T0054"}, ["LLM01"]),
-    "AP-T5-05": ("T5", {"AML.T0062"}, ["LLM09"]),
+    "AP-T5-05": ("T5", {"AML.T0062"}, ["LLM07"]),
 }
 
 

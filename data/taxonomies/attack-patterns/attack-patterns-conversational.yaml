@@ -4,9 +4,9 @@
 # through a direct conversational entry point: no tools, retrieval, or
 # persistent memory. They fill OWASP LLM categories that no other catalog
 # record realizes without those capabilities: sensitive-information
-# disclosure (LLM02), system prompt leakage (LLM07), jailbreak for
-# prohibited content (LLM01), and misinformation through fabricated
-# references (LLM09). The reviewed category pairing for each record lives in
+# disclosure (LLM02:2025), system prompt leakage (LLM07:2025), jailbreak for
+# prohibited content (LLM01:2025), and misinformation through fabricated
+# references (LLM09:2025). The reviewed category pairing for each record lives in
 # data/taxonomies/mappings/llm-to-attack-pattern.yaml.
 #
 # These records have no legacy source and no entry in catalog-lineage.yaml.

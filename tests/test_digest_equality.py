@@ -16,6 +16,12 @@ data exists. The recordings at ``8e108133`` predate that commit and hold
 different values for the same inputs, because the planner input model dropped
 its ``compatibility_policy`` field; their plan digests are unchanged.
 
+The SSSOM file is now orch's OWASP LLM 2026 translation, and the planner
+reads the 2026 LLM-to-attack-pattern table. The plan and input digests were
+recomputed from these fixtures after an offline check that each rebuilt plan
+equals the recorded one once LLM codes are renamed 2025 -> 2026. The
+candidate IDs did not change.
+
 A change to canonical JSON, NFC normalization or digest framing that alters
 any recorded byte fails here. Update the expected values only for an
 intended contract change, never to make a refactor pass.

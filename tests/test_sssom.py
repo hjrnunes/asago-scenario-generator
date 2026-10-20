@@ -1,36 +1,12 @@
-"""Tests for SSSOM loading, CURIE splitting, and OWASP LLM ID normalization."""
+"""Tests for SSSOM loading and CURIE splitting."""
 
 from __future__ import annotations
 
 
 from asago_scenario_generator.data.sssom import (
-    SSSOMMapping,
     _split_curie,
     load_sssom,
-    normalize_llm_id,
 )
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-
-def _mapping(
-    subject_id: str = "atlas-prompt-injection",
-    predicate_id: str = "skos:exactMatch",
-    object_id: str = "llm012025-prompt-injection",
-    object_source: str = "owasp-llm-top10-2025",
-) -> SSSOMMapping:
-    """Build a minimal SSSOMMapping with sensible defaults."""
-    return SSSOMMapping(
-        subject_id=subject_id,
-        subject_source="mitre-atlas",
-        predicate_id=predicate_id,
-        object_id=object_id,
-        object_source=object_source,
-        mapping_justification="semapv:ManualMappingCuration",
-    )
 
 
 class TestLoadSssomAndCurieSplitting:
@@ -74,13 +50,3 @@ class TestLoadSssomAndCurieSplitting:
         assert mappings[0].object_id == "llm012025-excessive-agency"
         assert mappings[1].subject_source == ""
         assert mappings[1].subject_id == "plain-id"
-
-
-# ---------------------------------------------------------------------------
-# Tests: non-owasp-llm rows are still filtered by object_source
-# ---------------------------------------------------------------------------
-
-
-class TestNormalizeLlmId:
-    def test_exact_match_object_normalizes_to_owasp_code(self) -> None:
-        assert normalize_llm_id(_mapping().object_id) == "LLM01"

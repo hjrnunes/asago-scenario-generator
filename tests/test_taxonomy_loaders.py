@@ -251,10 +251,12 @@ class TestLlmToAttackPatternTable:
         assert len(ids) == len(set(ids))
         assert set(ids) == set(load_attack_patterns())
 
-    def test_entries_name_owasp_2025_categories_and_a_rationale(self):
+    def test_entries_name_owasp_2026_categories_and_a_rationale(self):
         categories = {f"LLM{number:02d}" for number in range(1, 11)}
+        table = self._table()
 
-        for entry in self._table()["patterns"]:
+        assert table["edition"] == "2026"
+        for entry in table["patterns"]:
             assert set(entry["llm"]) <= categories, entry["id"]
             assert len(entry["llm"]) == len(set(entry["llm"])), entry["id"]
             assert entry["rationale"].strip(), entry["id"]

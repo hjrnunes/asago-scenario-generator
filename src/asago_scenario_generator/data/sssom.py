@@ -1,14 +1,13 @@
-"""SSSOM TSV parser and ID normalization for asago-scenario-generator.
+"""SSSOM TSV parser for asago-scenario-generator.
 
-Parses Simple Standard for Sharing Ontological Mappings (SSSOM) TSV files
-and provides utilities for normalizing OWASP LLM Top 10 IDs from the
-SSSOM format to our internal format.
+Parses Simple Standard for Sharing Ontological Mappings (SSSOM) TSV files.
+Object IDs are resolved against the pinned vocabularies in
+:mod:`asago_scenario_generator.data.risk_schemes`.
 """
 
 from __future__ import annotations
 
 import csv
-import re
 from pathlib import Path
 
 from pydantic import BaseModel
@@ -96,37 +95,3 @@ def _mapping_from_row(row: dict[str, str], has_source_cols: bool) -> SSSOMMappin
         object_source=object_source,
         mapping_justification=row["mapping_justification"],
     )
-
-
-# Pattern: "llm" followed by 1-2 digits, then optionally a year suffix
-# and a slug. E.g. "llm062025-excessive-agency" -> "06",
-# "llm01-prompt-injection" -> "01"
-_LLM_ID_RE = re.compile(r"^llm(\d{2})")
-
-
-def normalize_llm_id(raw_id: str) -> str:
-    """Convert an SSSOM-format LLM ID to our internal format.
-
-    Examples:
-        "llm062025-excessive-agency"  -> "LLM06"
-        "llm01-prompt-injection"      -> "LLM01"
-        "llm102025-unbounded-consumption" -> "LLM10"
-
-    Args:
-        raw_id: The raw SSSOM object_id (e.g. "llm062025-excessive-agency").
-
-    Returns:
-        Normalized ID string (e.g. "LLM06").
-
-    Raises:
-        ValueError: If the raw_id doesn't match the expected pattern.
-    """
-    match = _LLM_ID_RE.match(raw_id)
-    if not match:
-        raise ValueError(f"Cannot normalize LLM ID from: {raw_id!r}")
-    num = int(match.group(1))
-    if not (1 <= num <= 10):
-        raise ValueError(
-            f"LLM ID numeric part out of range (1-10): {num} from {raw_id!r}"
-        )
-    return f"LLM{match.group(1)}"

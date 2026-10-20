@@ -90,7 +90,7 @@ _COVERAGE: tuple[tuple[str, tuple[str, ...], bool], ...] = (
     ("the harm", (HAZARD, LOSS), False),
 )
 
-# ATLAS 2026.09 techniques (mitre-atlas/atlas-data dist/v6/ATLAS-2026.09.yaml).
+# ATLAS 2026.05 techniques (the pinned data/taxonomies/atlas/ATLAS-2026.05.yaml).
 ATLAS_TOOL_DATA_POISONING = ("AML.T0099", "AI Agent Tool Data Poisoning")
 ATLAS_INDIRECT_INJECTION = ("AML.T0051.001", "LLM Prompt Injection: Indirect")
 ATLAS_DIRECT_INJECTION = ("AML.T0051.000", "LLM Prompt Injection: Direct")

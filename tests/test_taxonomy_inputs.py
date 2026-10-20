@@ -36,6 +36,7 @@ def test_closure_keeps_only_complete_risk_llm_pattern_paths() -> None:
 
 def _table(*entries: tuple[str, list[str]]) -> dict:
     return {
+        "edition": "2026",
         "predicate": "realized_by",
         "patterns": [
             {"id": pattern, "llm": llm, "rationale": "r"} for pattern, llm in entries
@@ -65,6 +66,28 @@ def test_llm_pattern_edges_cover_in_scope_patterns_only() -> None:
     assert {tuple(e["evidence"]) for e in edges} == {("llm-to-attack-pattern.yaml",)}
     with pytest.raises(ValueError, match="must contain an object"):
         llm_pattern_edges(["not an object"], profile)
+
+
+@pytest.mark.parametrize("edition", ["2025", None], ids=["2025", "missing"])
+def test_a_table_of_another_edition_is_refused(edition: str | None) -> None:
+    profile = make_inputs().capability_snapshot.profile
+    table = _table(("AP-T8-01", []))
+    if edition is None:
+        del table["edition"]
+    else:
+        table["edition"] = edition
+
+    with pytest.raises(ValueError, match="2026") as caught:
+        llm_pattern_edges(table, profile)
+
+    assert repr(edition) in str(caught.value)
+
+
+def test_a_table_code_outside_the_llm_vocabulary_is_refused() -> None:
+    profile = make_inputs().capability_snapshot.profile
+
+    with pytest.raises(ValueError, match="LLM11"):
+        llm_pattern_edges(_table(("AP-T8-01", ["LLM01", "LLM11"])), profile)
 
 
 def test_planner_inputs_pin_the_closed_bundle_from_loaded_values() -> None:
