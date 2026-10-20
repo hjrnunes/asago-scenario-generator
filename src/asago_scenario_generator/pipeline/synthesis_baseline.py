@@ -101,6 +101,7 @@ def _prepare_taxonomy_inputs(
         capability_snapshot=snapshot,
         risk_cards=inputs.risk_cards,
         qualification_facts=inputs.qualification_facts,
+        sssom_mappings=inputs.sssom_mappings,
         output_dir=inputs.output_dir,
     )
     if value is None:

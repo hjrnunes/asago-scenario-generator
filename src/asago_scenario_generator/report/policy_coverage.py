@@ -25,7 +25,7 @@ from typing import Any
 import yaml
 
 from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
-from asago_scenario_generator.data.sssom import SSSOMMapping, load_sssom
+from asago_scenario_generator.data.sssom import SSSOMMapping
 from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.report.common import natural_key
@@ -340,15 +340,19 @@ def publish_policy_coverage(
     *,
     output_dir: Path,
     risk_extraction: Path,
-    sssom: Path | None,
+    sssom_mappings: Sequence[SSSOMMapping],
     loss_analysis: LossAnalysis,
     actionability: RiskActionabilityRecord | None,
 ) -> Path:
-    """Write ``policy-coverage.json`` beside the scenarios it describes."""
+    """Write ``policy-coverage.json`` beside the scenarios it describes.
+
+    ``sssom_mappings`` are the rows the synthesis request checked, the same
+    rows the planner and the scenario handoff read.
+    """
     by_loss, by_hazard = _written_scenarios(output_dir)
     document = build_policy_coverage(
         cards=load_reviewed_risk_extraction(risk_extraction),
-        sssom=load_sssom(sssom) if sssom is not None else [],
+        sssom=list(sssom_mappings),
         actionability=actionability,
         loss_analysis=loss_analysis,
         scenario_ids_by_loss=by_loss,
