@@ -2057,6 +2057,8 @@ def test_synthesis_contexts_carry_each_finding_to_every_named_ica(
     briefs = tuple(
         SimpleNamespace(
             obligation_id=obligation_id,
+            kind="pattern",
+            risk_ref=SimpleNamespace(risk_id="risk-1"),
             attack_pattern_id=f"AP-{obligation_id}",
             attack_pattern_name=f"Pattern {obligation_id}",
             attack_pattern_description=f"Concern {obligation_id}",

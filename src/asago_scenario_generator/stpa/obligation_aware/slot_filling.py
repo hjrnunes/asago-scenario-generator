@@ -56,6 +56,7 @@ from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_synthesis_slot_prompts,
+    local_obligation_handles,
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     SlotPlaceholder,
@@ -129,12 +130,23 @@ def _split_target_routes(
     request: SynthesisSlotRequest,
     budget: PromptBudget,
 ) -> tuple[SynthesisSlotRequest, ...] | None:
-    """Greedily split routed obligations while retaining every target slot."""
+    """Greedily split routed obligations while retaining every target slot.
+
+    Routes are taken in the order of their local handles, which follows
+    ``obligation_order_key``, so renaming obligation IDs keeps the parts.
+    """
     if not request.routed_routes:
         return None
+    handles = local_obligation_handles(
+        request.routed_routes,
+        {brief.obligation_id: brief for brief in request.routed_briefs},
+    )
+    rank = {obligation_id: index for index, obligation_id in enumerate(handles)}
     parts: list[SynthesisSlotRequest] = []
     current: list[ObligationRoute] = []
-    for route in request.routed_routes:
+    for route in sorted(
+        request.routed_routes, key=lambda item: rank[item.obligation_id]
+    ):
         candidate_routes = (*current, route)
         candidate = _slot_request_with_parts(
             request,

@@ -39,6 +39,10 @@ from asago_scenario_generator.request_schema import flat_example_for
 from asago_scenario_generator.pipeline.risk_pattern_crosswalk import (
     resolve_risk_pattern_mapping_strength,
 )
+from asago_scenario_generator.stpa.obligation_aware.briefs import (
+    obligation_order_key,
+    order_by_brief,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     PromptReference,
     ProviderApplicability,
@@ -1111,10 +1115,8 @@ def project_obligation_routing_context(
 ) -> ProviderRoutingContext:
     """Build the compact provider view for one routing batch."""
     questions = tuple(
-        sorted(
-            (project_obligation_question(brief) for brief in briefs),
-            key=lambda item: item.obligation_handle,
-        )
+        project_obligation_question(brief)
+        for brief in sorted(briefs, key=obligation_order_key)
     )
     if not questions:
         raise ValueError("routing context requires at least one obligation question")
@@ -1238,12 +1240,14 @@ def project_ica_target_context(
         constraint_ids=offer.constraint_ids,
     )
     brief_map = {brief.obligation_id: brief for brief in routed_briefs}
-    handles = local_obligation_handles(routed_routes)
+    handles = local_obligation_handles(routed_routes, brief_map)
+    rank = {obligation_id: index for index, obligation_id in enumerate(handles)}
+    ordered = sorted(routed_routes, key=lambda item: rank[item.obligation_id])
     questions = tuple(
         _slot_question(brief_map[route.obligation_id]).model_copy(
             update={"obligation_handle": handles[route.obligation_id]}
         )
-        for route in sorted(routed_routes, key=lambda item: item.obligation_id)
+        for route in ordered
         if route.obligation_id in brief_map
     )
     routes = tuple(
@@ -1253,19 +1257,29 @@ def project_ica_target_context(
                 "obligation_handle": handles[route.obligation_id],
             }
         )
-        for route in sorted(routed_routes, key=lambda item: item.obligation_id)
+        for route in ordered
     )
     return target_index, questions, routes
 
 
-def local_obligation_handles(routes: Iterable[ObligationRoute]) -> dict[str, str]:
+def local_obligation_handles(
+    routes: Iterable[ObligationRoute],
+    briefs: Mapping[str, NeutralObligationBrief],
+) -> dict[str, str]:
     """Name each routed obligation ``R1``..``Rn`` for one slot request.
 
     The model copies handles back, and a content-addressed 64-hex handle is
     easy to corrupt by one character, so the prompt carries these short names
-    and the caller maps them back to obligation identifiers.
+    and the caller maps them back to obligation identifiers.  The handles
+    follow ``obligation_order_key``, so renaming obligation IDs keeps them.
+    A route without a brief, which only a hand-built request carries, comes
+    after them in obligation-ID order.
     """
-    ordered = sorted({route.obligation_id for route in routes})
+    ids = {route.obligation_id for route in routes}
+    ordered = (
+        *order_by_brief(ids.intersection(briefs), briefs),
+        *sorted(ids.difference(briefs)),
+    )
     return {
         obligation_id: f"R{index}" for index, obligation_id in enumerate(ordered, 1)
     }

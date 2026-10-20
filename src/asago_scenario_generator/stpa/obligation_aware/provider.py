@@ -52,6 +52,9 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICASlot,
     classify_ica_semantics,
 )
+from asago_scenario_generator.stpa.obligation_aware.briefs import (
+    obligation_order_key,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     DEVIATION_FIELD_BY_UCA_TYPE,
     AnalysisControls,
@@ -235,7 +238,10 @@ def _resolve_slot_handles(payload: _Model, by_local: Mapping[str, str]) -> _Mode
 
 def _localized_slot_error(message: str, request: SynthesisSlotRequest) -> str:
     """Say each route and obligation identity in a message as its local handle."""
-    handles = local_obligation_handles(request.routed_routes)
+    handles = local_obligation_handles(
+        request.routed_routes,
+        {brief.obligation_id: brief for brief in request.routed_briefs},
+    )
     for route in request.routed_routes:
         handle = handles[route.obligation_id]
         if route.route_id:
@@ -1740,8 +1746,18 @@ class ObligationAwareLLMAdapter:
         request: StructuralRoutingRequest,
         routes: Sequence[ObligationRoute],
     ) -> tuple[ObligationRoute, ...]:
-        """Check credited routes against a compact mechanism-only prompt."""
-        candidates = _verification_candidates(routes)
+        """Check credited routes against a compact mechanism-only prompt.
+
+        The items are shown in ``obligation_order_key`` order, whatever order
+        the caller passes the routes in.
+        """
+        briefs = {brief.obligation_id: brief for brief in request.briefs}
+        candidates = tuple(
+            sorted(
+                _verification_candidates(routes),
+                key=lambda route: obligation_order_key(briefs[route.obligation_id]),
+            )
+        )
         if not candidates:
             return tuple(routes)
         verified, published = _run_mechanism_verifier(self, request, candidates)
@@ -1987,7 +2003,8 @@ class ObligationAwareLLMAdapter:
         by_local = {
             handle: obligation_id
             for obligation_id, handle in local_obligation_handles(
-                request.routed_routes
+                request.routed_routes,
+                {brief.obligation_id: brief for brief in request.routed_briefs},
             ).items()
         }
 

@@ -6,7 +6,7 @@ use it without an import cycle.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, TypeVar
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
@@ -134,6 +134,35 @@ def build_neutral_briefs(
     return tuple(sorted(briefs, key=lambda item: item.obligation_id))
 
 
+def obligation_order_key(brief: NeutralObligationBrief) -> tuple[str, str, str, str]:
+    """Order a brief by its risk and pattern, so an ID rename keeps the order.
+
+    Obligation IDs hash the whole plan, so they change whenever the taxonomy
+    is translated.  Everything a model sees in sequence uses this key; the
+    trailing obligation ID only separates briefs that share the rest.
+    """
+    return (
+        brief.risk_ref.risk_id,
+        brief.attack_pattern_id or "",
+        brief.kind,
+        brief.obligation_id,
+    )
+
+
+def order_by_brief(
+    ids: Iterable[str],
+    briefs: Mapping[str, NeutralObligationBrief],
+) -> tuple[str, ...]:
+    """Return the distinct *ids* in the ``obligation_order_key`` of their briefs."""
+    unique = set(ids)
+    missing = sorted(unique.difference(briefs))
+    if missing:
+        raise ValueError("obligations have no neutral brief: " + ", ".join(missing))
+    return tuple(
+        sorted(unique, key=lambda identity: obligation_order_key(briefs[identity]))
+    )
+
+
 def require_batch_size(max_batch_size: int) -> None:
     """Require a positive integer batch size."""
     if type(max_batch_size) is not int:
@@ -146,11 +175,11 @@ def create_obligation_batches(
     briefs: Sequence[NeutralObligationBrief],
     max_batch_size: int,
 ) -> tuple[tuple[NeutralObligationBrief, ...], ...]:
-    """Partition briefs into stable, canonical batches."""
+    """Partition briefs into stable batches in ``obligation_order_key`` order."""
     require_batch_size(max_batch_size)
-    ordered = tuple(sorted(briefs, key=lambda item: item.obligation_id))
-    if any(not isinstance(item, NeutralObligationBrief) for item in ordered):
+    if any(not isinstance(item, NeutralObligationBrief) for item in briefs):
         raise TypeError("briefs must contain NeutralObligationBrief values")
+    ordered = tuple(sorted(briefs, key=obligation_order_key))
     ids = tuple(item.obligation_id for item in ordered)
     if len(ids) != len(set(ids)):
         raise ValueError("briefs must contain unique obligation IDs")

@@ -33,6 +33,7 @@ from asago_scenario_generator.stpa.obligation_aware.briefs import (
     build_neutral_brief,
     build_neutral_briefs,
     create_obligation_batches,
+    obligation_order_key,
     split_by_budget,
 )
 from asago_scenario_generator.stpa.obligation_aware.calls import (
@@ -92,8 +93,8 @@ def _budgeted_obligation_batches(
     control_structure: ControlStructure,
     slots: Sequence[SlotPlaceholder],
 ) -> tuple[tuple[NeutralObligationBrief, ...], ...]:
-    """Split routing batches by rendered compact prompt size, preserving order."""
-    ordered = tuple(sorted(briefs, key=lambda item: item.obligation_id))
+    """Split routing batches by prompt size, in ``obligation_order_key`` order."""
+    ordered = tuple(sorted(briefs, key=obligation_order_key))
     if budget is None:
         return create_obligation_batches(ordered, max_batch_size)
 

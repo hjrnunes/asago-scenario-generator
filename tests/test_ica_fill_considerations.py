@@ -70,7 +70,8 @@ def _validate(request: SynthesisSlotRequest, payload: Any) -> None:
     by_local = {
         handle: obligation_id
         for obligation_id, handle in local_obligation_handles(
-            request.routed_routes
+            request.routed_routes,
+            {brief.obligation_id: brief for brief in request.routed_briefs},
         ).items()
     }
     _validate_slot_provider_payload(
