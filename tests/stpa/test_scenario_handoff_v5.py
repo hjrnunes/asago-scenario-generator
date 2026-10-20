@@ -507,6 +507,19 @@ def test_unsorted_or_duplicate_references_are_rejected(
         HandoffTaxonomy(atlas_release="2026.05", references=references)
 
 
+@pytest.mark.parametrize(
+    ("scheme", "code"), [("owasp-asi", "LLM03"), ("owasp-llm", "ASI02")]
+)
+def test_a_reference_id_must_belong_to_its_scheme(scheme: str, code: str) -> None:
+    with pytest.raises(ValidationError, match="does not belong to scheme"):
+        HandoffTaxonomyRef(scheme=scheme, edition="2026", id=code, name="Some entry")
+    reference = {"scheme": scheme, "edition": "2026", "id": code, "name": "x"}
+    ref_schema = {"$defs": SCHEMA["$defs"], **SCHEMA["$defs"]["HandoffTaxonomyRef"]}
+    assert list(Draft202012Validator(ref_schema).iter_errors(reference))
+    for good in (LLM03, ASI02):
+        assert not list(Draft202012Validator(ref_schema).iter_errors(good.model_dump()))
+
+
 def test_a_run_publishes_the_taxonomy_block_it_is_given(tmp_path: Path) -> None:
     taxonomy = HandoffTaxonomyInputs(
         atlas_release="2026.05", references_by_loss={"L-1": (LLM03,)}

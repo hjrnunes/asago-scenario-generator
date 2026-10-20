@@ -260,13 +260,48 @@ class _HandoffHead(HandoffModel):
 HandoffText = Annotated[StrictStr, Field(min_length=1, pattern=r"\S")]
 
 
+#: Each handoff taxonomy scheme and the ids that belong to it.
+_TAXONOMY_ID_PATTERNS = {"owasp-llm": r"^LLM\d{2}$", "owasp-asi": r"^ASI\d{2}$"}
+
+
 class HandoffTaxonomyRef(HandoffModel):
-    """One OWASP Top 10 entry a scenario's losses map to, in its edition."""
+    """One OWASP Top 10 entry a scenario's losses map to, in its edition.
+
+    The id belongs to the scheme: ``LLMnn`` under ``owasp-llm``, ``ASInn``
+    under ``owasp-asi``. The schema states the pairing with one if/then block
+    per scheme.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {"scheme": {"const": scheme}},
+                        "required": ["scheme"],
+                    },
+                    "then": {"properties": {"id": {"pattern": pattern}}},
+                }
+                for scheme, pattern in _TAXONOMY_ID_PATTERNS.items()
+            ]
+        },
+    )
 
     scheme: Literal["owasp-llm", "owasp-asi"]
     edition: Annotated[StrictStr, Field(pattern=r"^\d{4}$")]
     id: Annotated[StrictStr, Field(pattern=r"^(LLM|ASI)\d{2}$")]
     name: HandoffText
+
+    @model_validator(mode="after")
+    def validate_scheme_id(self) -> Self:
+        """Keep each id under the scheme it belongs to."""
+
+        if not re.match(_TAXONOMY_ID_PATTERNS[self.scheme], self.id):
+            raise ValueError(
+                f"taxonomy id {self.id!r} does not belong to scheme {self.scheme!r}"
+            )
+        return self
 
 
 class HandoffTaxonomy(HandoffModel):

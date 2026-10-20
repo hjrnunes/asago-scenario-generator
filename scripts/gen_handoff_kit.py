@@ -1389,6 +1389,9 @@ TAXONOMY_CASES = {
     "taxonomy-unknown-scheme": put("taxonomy.references.0.scheme", "nist-ai-rmf"),
     "taxonomy-bad-edition": put("taxonomy.references.0.edition", "v2026"),
     "taxonomy-extra-key": put("taxonomy.extra", 1),
+    # An id of the other scheme, keeping the references sorted and unique.
+    "taxonomy-asi-scheme-llm-id": put("taxonomy.references.0.id", "LLM03"),
+    "taxonomy-llm-scheme-asi-id": put("taxonomy.references.1.id", "ASI02"),
     "taxonomy-unsorted-references": put(
         "taxonomy.references", list(reversed(TAXONOMY["references"]))
     ),

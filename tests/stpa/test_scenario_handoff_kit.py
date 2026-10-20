@@ -135,6 +135,8 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
     "taxonomy-unknown-scheme.json": ([TAXONOMY], None, True),
     "taxonomy-bad-edition.json": ([TAXONOMY], None, True),
     "taxonomy-extra-key.json": ([TAXONOMY], None, True),
+    "taxonomy-asi-scheme-llm-id.json": ([TAXONOMY], "belong", True),
+    "taxonomy-llm-scheme-asi-id.json": ([TAXONOMY], "belong", True),
     # The schema cannot state the order; the model and the consumer's hand rule do.
     "taxonomy-unsorted-references.json": ([TAXONOMY], "sorted", False),
 }
@@ -158,7 +160,7 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
         if not path.name.startswith(("schema-", "v5-"))
     }
     assert listed == set(INVALID)
-    assert len(INVALID) == 42
+    assert len(INVALID) == 44
 
 
 @pytest.mark.parametrize("name", sorted(VALID))
