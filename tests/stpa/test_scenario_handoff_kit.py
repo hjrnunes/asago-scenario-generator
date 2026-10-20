@@ -44,11 +44,13 @@ VALID = {
     "functional-null-shape.json",
     "functional-record-unavailable.json",
     "functional-stated-belief.json",
+    "taxonomy-block.json",
 }
 
 SHAPE = "schema_violation:attack_shape"
 PATH = "schema_violation:attack_path"
 ROOT_CODE = "schema_violation:<root>"
+TAXONOMY = "schema_violation:taxonomy"
 
 # fixture -> (typed codes, rule named by the model error or None, schema rejects)
 INVALID: dict[str, tuple[list[str], str | None, bool]] = {
@@ -130,6 +132,11 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
         None,
         True,
     ),
+    "taxonomy-unknown-scheme.json": ([TAXONOMY], None, True),
+    "taxonomy-bad-edition.json": ([TAXONOMY], None, True),
+    "taxonomy-extra-key.json": ([TAXONOMY], None, True),
+    # The schema cannot state the order; the model and the consumer's hand rule do.
+    "taxonomy-unsorted-references.json": ([TAXONOMY], "sorted", False),
 }
 
 
@@ -151,7 +158,7 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
         if not path.name.startswith(("schema-", "v5-"))
     }
     assert listed == set(INVALID)
-    assert len(INVALID) == 38
+    assert len(INVALID) == 42
 
 
 @pytest.mark.parametrize("name", sorted(VALID))
@@ -182,6 +189,17 @@ def test_valid_fixtures_cover_each_channel_and_the_downgrade_and_null_cases() ->
     forged = shapes["adversarial-forged-transcript.json"]
     assert forged["threat_label"] == "forged_transcript_threat"
     assert forged["turn_plan"][-1]["speaker"] == "attacker_user"
+
+
+def test_only_the_taxonomy_fixture_carries_the_optional_block() -> None:
+    carrying = {name for name in VALID if "taxonomy" in _load(f"valid/{name}")}
+
+    assert carrying == {"taxonomy-block.json"}
+    block = _load("valid/taxonomy-block.json")["taxonomy"]
+    assert [(ref["scheme"], ref["id"]) for ref in block["references"]] == [
+        ("owasp-asi", "ASI02"),
+        ("owasp-llm", "LLM03"),
+    ]
 
 
 @pytest.mark.parametrize("name", sorted(INVALID))

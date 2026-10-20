@@ -104,6 +104,7 @@ from .narration import (
     write_narratives,
 )
 from .handoff import (
+    HandoffTaxonomyInputs,
     ScenarioHandoff,
     Stage1aSource,
     handoff_ownership_violations,
@@ -238,6 +239,7 @@ def run_sp3(
     stage_1a_source: Stage1aSource | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
     shape_config: ShapeStepConfig = ShapeStepConfig(),
+    handoff_taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -303,6 +305,9 @@ def run_sp3(
         shape_config: Switches for the shape step that runs after Stage 5
             compiles each adversarial spec. The default keeps the
             forged-transcript channel out of the shape request.
+        handoff_taxonomy: The run's ATLAS release and each loss's OWASP
+            references. Every published handoff then carries the ``taxonomy``
+            block for its lineage losses; ``None`` publishes none.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -360,6 +365,7 @@ def run_sp3(
             stage_1a_source=stage_1a_source,
             condition_families=condition_families,
             shape_config=shape_config,
+            handoff_taxonomy=handoff_taxonomy,
         )
         scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
             inputs, stage_errors, candidate_builders
@@ -491,6 +497,7 @@ class _SP3Inputs:
     stage_1a_source: Stage1aSource | None
     condition_families: Sequence[CandidateFamilyPlan] | None
     shape_config: ShapeStepConfig
+    handoff_taxonomy: HandoffTaxonomyInputs | None = None
 
 
 def _narrate(inputs: _SP3Inputs, specs: list[ScenarioSpec]) -> dict[str, str]:
@@ -624,6 +631,7 @@ def _run_stages_5_and_6(
         narratives=narratives,
         tree_siblings=tree_siblings,
         gherkins=gherkins,
+        taxonomy=inputs.handoff_taxonomy,
     )
     scenario_envelopes = _collect_stage6_artifacts(
         shaped_specs,
@@ -639,6 +647,7 @@ def _run_stages_5_and_6(
         narratives=narratives,
         tree_siblings=tree_siblings,
         gherkins=gherkins,
+        taxonomy=inputs.handoff_taxonomy,
     )
     return shaped_specs, scenario_envelopes, functional_test_specs
 
@@ -671,6 +680,7 @@ def _model_gherkins(
             observed_operations=observed_operations,
             stage_1a_source=inputs.stage_1a_source,
             deduplication=deduplication_by_scenario.get(spec.scenario_id),
+            taxonomy=inputs.handoff_taxonomy,
         )
 
     publishable: list[tuple[ScenarioSpec, str]] = []
@@ -933,6 +943,7 @@ def _write_scenario_handoff_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
+    taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> ScenarioHandoff:
     """Write the versioned scenario handoff for one published scenario.
 
@@ -950,6 +961,7 @@ def _write_scenario_handoff_artifacts(
         observed_operations=observed_operations,
         stage_1a_source=stage_1a_source,
         deduplication=deduplication,
+        taxonomy=taxonomy,
     )
     write_scenario_handoff(handoff, scenarios_dir)
     return handoff
@@ -964,6 +976,7 @@ def _checked_scenario_handoff(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
+    taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> ScenarioHandoff:
     """Build one scenario's handoff and reject artifact-design content."""
     handoff = build_scenario_handoff_v5(
@@ -974,6 +987,7 @@ def _checked_scenario_handoff(
         observed_operations=observed_operations,
         stage_1a_source=stage_1a_source,
         deduplication=deduplication,
+        taxonomy=taxonomy,
     )
     violations = handoff_ownership_violations(handoff.model_dump(mode="json"))
     if violations:
@@ -996,6 +1010,7 @@ def _publish_stage6_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
+    taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> None:
     """Write one scenario companion set and assign its publication status."""
     try:
@@ -1008,6 +1023,7 @@ def _publish_stage6_artifacts(
             observed_operations=observed_operations,
             stage_1a_source=stage_1a_source,
             deduplication=deduplication,
+            taxonomy=taxonomy,
         )
     except Exception as exc:  # noqa: BLE001 - isolate publication failure
         diagnostic = (
@@ -1041,6 +1057,7 @@ def _persist_functional_test_candidates(
     narratives: Mapping[str, str] | None = None,
     tree_siblings: SiblingIndex | None = None,
     gherkins: Mapping[str, GherkinSpec] | None = None,
+    taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> None:
     """Persist ``kind: none`` candidates without any execution projection.
 
@@ -1075,6 +1092,7 @@ def _persist_functional_test_candidates(
                     if deduplication_by_scenario is not None
                     else None
                 ),
+                taxonomy=taxonomy,
             )
         except Exception as exc:  # noqa: BLE001 - isolate publication failure
             diagnostic = (
@@ -1109,6 +1127,7 @@ def _render_stage6_candidate(
     narrative: str | None = None,
     tree_siblings: SiblingIndex | None = None,
     gherkin: GherkinSpec | None = None,
+    taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> ScenarioEnvelope | None:
     """Render and persist one Stage 6 candidate, isolating all failure kinds."""
     prior_error_count = len(stage_errors)
@@ -1141,6 +1160,7 @@ def _render_stage6_candidate(
             if deduplication_by_scenario is not None
             else None
         ),
+        taxonomy=taxonomy,
     )
     return envelope
 
@@ -1174,6 +1194,7 @@ def _collect_stage6_artifacts(
     narratives: Mapping[str, str] | None = None,
     tree_siblings: SiblingIndex | None = None,
     gherkins: Mapping[str, GherkinSpec] | None = None,
+    taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> list[ScenarioEnvelope]:
     """Concretize specs and write each accepted scenario companion set."""
     envelopes: list[ScenarioEnvelope] = []
@@ -1192,6 +1213,7 @@ def _collect_stage6_artifacts(
             narrative=(narratives or {}).get(spec.scenario_id),
             tree_siblings=tree_siblings,
             gherkin=(gherkins or {}).get(spec.scenario_id),
+            taxonomy=taxonomy,
         )
         if envelope is not None:
             envelopes.append(envelope)

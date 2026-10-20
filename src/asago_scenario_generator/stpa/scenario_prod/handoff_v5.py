@@ -35,6 +35,8 @@ from .handoff import (
     HandoffHazard,
     HandoffProcedureStep,
     HandoffProcessModelVariable,
+    HandoffTaxonomy,
+    HandoffTaxonomyInputs,
     HandoffUca,
     ScenarioHandoffV5,
     Stage1aSource,
@@ -63,6 +65,7 @@ def build_scenario_handoff_v5(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication: ScenarioDeduplication | None = None,
+    taxonomy: HandoffTaxonomyInputs | None = None,
 ) -> ScenarioHandoffV5:
     """Build the v5 handoff from one published scenario envelope.
 
@@ -82,6 +85,9 @@ def build_scenario_handoff_v5(
     contribute. ``stage_1a_source`` is the run's Stage 1a acceptance record;
     the published constraint authorities derive from it and from the actual
     loss-analysis constraint records instead of asserting reviewed status.
+    ``taxonomy``, when given, adds the ``taxonomy`` block: the ATLAS release
+    and the union of the OWASP references of the scenario's lineage losses.
+    Without it the handoff has no block.
     """
     fields = scenario_handoff_fields(
         envelope,
@@ -93,11 +99,28 @@ def build_scenario_handoff_v5(
         deduplication=deduplication,
     )
     fields["attack_path"] = reduce_to_attack_path(envelope.attack_tree)
+    if taxonomy is not None:
+        fields["taxonomy"] = taxonomy_block(taxonomy, fields["lineage"].loss_ids)
     handoff = finalize_handoff(
         ScenarioHandoffV5(**fields, **v5_fields(envelope.scenario_spec))
     )
     assert isinstance(handoff, ScenarioHandoffV5)
     return handoff
+
+
+def taxonomy_block(
+    taxonomy: HandoffTaxonomyInputs, loss_ids: Sequence[str]
+) -> HandoffTaxonomy:
+    """The ATLAS release and the references of ``loss_ids``, sorted, each once."""
+    references = {
+        (ref.scheme, ref.id): ref
+        for loss_id in loss_ids
+        for ref in taxonomy.references_by_loss.get(loss_id, ())
+    }
+    return HandoffTaxonomy(
+        atlas_release=taxonomy.atlas_release,
+        references=tuple(references[key] for key in sorted(references)),
+    )
 
 
 def v5_fields(spec: ScenarioSpec) -> dict[str, Any]:
