@@ -1,0 +1,14 @@
+scheme: owasp-asi-2026
+edition: "2026"
+source: https://genai.owasp.org/resource/owasp-top-10-for-agentic-applications-for-2026/
+entries:
+  - {object_id: asi01-agent-goal-hijack, code: ASI01, title: Agent Goal Hijack}
+  - {object_id: asi02-tool-misuse-and-exploitation, code: ASI02, title: "Tool Misuse & Exploitation"}
+  - {object_id: asi03-identity-and-privilege-abuse, code: ASI03, title: "Identity & Privilege Abuse"}
+  - {object_id: asi04-agentic-supply-chain-vulnerabilities, code: ASI04, title: Agentic Supply Chain Vulnerabilities}
+  - {object_id: asi05-unexpected-code-execution, code: ASI05, title: Unexpected Code Execution (RCE)}
+  - {object_id: asi06-memory-and-context-poisoning, code: ASI06, title: "Memory & Context Poisoning"}
+  - {object_id: asi07-insecure-inter-agent-communication, code: ASI07, title: Insecure Inter-Agent Communication}
+  - {object_id: asi08-cascading-failures, code: ASI08, title: Cascading Failures}
+  - {object_id: asi09-human-agent-trust-exploitation, code: ASI09, title: Human-Agent Trust Exploitation}
+  - {object_id: asi10-rogue-agents, code: ASI10, title: Rogue Agents}
