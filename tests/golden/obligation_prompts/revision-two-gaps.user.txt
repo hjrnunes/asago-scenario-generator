@@ -1,6 +1,19 @@
 Compact revision gaps:
-- expected_concept_kind: responsibility
+- expected_concept_kind: constraint
   gap_handle: revision-gap-1
+  plain_description: A governing constraint is missing.
+  related_existing_context:
+  - description: An unsafe request is accepted.
+    id: H-1
+  - description: A protected operation is harmed.
+    id: L-1
+  - description: Requests must satisfy policy.
+    id: SC-1
+  trigger_obligation_handle: unattributed-obligation
+  why_the_concept_is_needed: The supplied evidence says this concept is needed before
+    STPA can decide how the obligation relates to the system.
+- expected_concept_kind: responsibility
+  gap_handle: revision-gap-2
   plain_description: A reviewing responsibility is needed.
   related_existing_context:
   - description: Validate request.
@@ -15,19 +28,6 @@ Compact revision gaps:
     id: RC-1-1
   - description: Validate incoming requests.
     id: RESP-1
-  trigger_obligation_handle: unattributed-obligation
-  why_the_concept_is_needed: The supplied evidence says this concept is needed before
-    STPA can decide how the obligation relates to the system.
-- expected_concept_kind: constraint
-  gap_handle: revision-gap-2
-  plain_description: A governing constraint is missing.
-  related_existing_context:
-  - description: An unsafe request is accepted.
-    id: H-1
-  - description: A protected operation is harmed.
-    id: L-1
-  - description: Requests must satisfy policy.
-    id: SC-1
   trigger_obligation_handle: unattributed-obligation
   why_the_concept_is_needed: The supplied evidence says this concept is needed before
     STPA can decide how the obligation relates to the system.

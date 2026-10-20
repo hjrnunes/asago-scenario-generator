@@ -560,6 +560,59 @@ def _default_scenarios(
             "pinned" if inputs.loss_analysis_path is not None else "derived"
         ),
         condition_families=condition_families,
+        handoff_taxonomy=_handoff_taxonomy(inputs, loss_analysis),
+    )
+
+
+def _handoff_taxonomy(inputs: SynthesisInputs, loss_analysis: Any) -> Any:
+    """The ATLAS release and each loss's OWASP 2026 references, for the handoffs.
+
+    A loss's references are the OWASP tags of the risks it came from
+    (``source_risk_cards``), each risk carrying the tags of its name-merged
+    group, as policy coverage reports them. They read the SSSOM rows the
+    request checked when it loaded them. Without SSSOM rows, or without the
+    request's risk cards (SP1's risk-extraction fallback), the references are
+    unknown rather than empty: this returns None and no handoff carries a
+    ``taxonomy`` block.
+    """
+    from asago_scenario_generator.data.risk_schemes import (
+        EDITION,
+        OWASP_ASI_SCHEME,
+        OWASP_LLM_SCHEME,
+        parse_object_id,
+    )
+    from asago_scenario_generator.data.taxonomy_pins import load_atlas_pin
+    from asago_scenario_generator.report.risk_tags import merged_risk_tags
+    from asago_scenario_generator.stpa.scenario_prod.handoff import (
+        HandoffTaxonomyInputs,
+        HandoffTaxonomyRef,
+    )
+
+    if inputs.sssom_mappings is None or not inputs.risk_cards:
+        return None
+    handoff_schemes = {OWASP_LLM_SCHEME: "owasp-llm", OWASP_ASI_SCHEME: "owasp-asi"}
+    tags = merged_risk_tags(inputs.risk_cards, inputs.sssom_mappings)
+    references_by_loss = {}
+    for loss in [*loss_analysis.risk_card_losses, *loss_analysis.use_case_losses]:
+        references = {}
+        for risk_id in loss.source_risk_cards:
+            for tag in tags.get(risk_id, ()):
+                if tag["scheme"] not in handoff_schemes:
+                    continue
+                entry = parse_object_id(tag["scheme"], tag["id"])
+                ref = HandoffTaxonomyRef(
+                    scheme=handoff_schemes[tag["scheme"]],
+                    edition=EDITION,
+                    id=entry.code,
+                    name=entry.title,
+                )
+                references[(ref.scheme, ref.id)] = ref
+        references_by_loss[loss.loss_id] = tuple(
+            references[key] for key in sorted(references)
+        )
+    return HandoffTaxonomyInputs(
+        atlas_release=load_atlas_pin().release,
+        references_by_loss=references_by_loss,
     )
 
 

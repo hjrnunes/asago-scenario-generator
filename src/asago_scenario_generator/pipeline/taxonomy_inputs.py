@@ -13,6 +13,14 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from typing import Any
 
+from asago_scenario_generator.data.risk_schemes import (
+    EDITION,
+    OWASP_LLM_SCHEME,
+    is_no_match,
+    load_vocabulary,
+    parse_object_id,
+    scheme_family,
+)
 from asago_scenario_generator.pipeline.obligation_contracts import (
     TaxonomyObligationInputs,
     compute_mapping_bundle_digest,
@@ -84,30 +92,69 @@ def taxonomy_obligation_inputs(
 def reviewed_owasp_llm_rows(
     sssom_mappings: Iterable[Any], risk_cards: Any
 ) -> list[dict]:
-    """Return reviewed risks' OWASP LLM matches with normalized LLM IDs."""
-    from asago_scenario_generator.data.sssom import normalize_llm_id
+    """Return reviewed risks' OWASP LLM 2026 matches with their LLM codes.
 
+    A row of another OWASP LLM edition, in any spelling, or an
+    ``owasp-llm-2026`` match whose object ID is not in the pinned vocabulary,
+    raises ``ValueError``. ``noMatch`` rows and rows of other schemes are
+    skipped.
+    """
     risk_ids = {str(item.risk_id) for item in risk_cards}
     rows = []
     for mapping in sssom_mappings:
         row = mapping.model_dump(mode="json")
+        if not _is_current_owasp_llm_row(row):
+            continue
+        if is_no_match(str(row["predicate_id"])):
+            continue
+        try:
+            code = parse_object_id(OWASP_LLM_SCHEME, str(row["object_id"])).code
+        except ValueError as exc:
+            raise ValueError(f"SSSOM row for {row['subject_id']!r}: {exc}") from None
         if row["subject_id"] not in risk_ids:
             continue
-        if "owasp-llm" not in str(row["object_source"]):
-            continue
-        if "nomatch" in str(row["predicate_id"]).lower():
-            continue
-        row["object_id"] = normalize_llm_id(str(row["object_id"]))
+        row["object_id"] = code
         rows.append(row)
     return rows
 
 
+def _is_current_owasp_llm_row(row: dict) -> bool:
+    """Whether ``row`` is an OWASP LLM 2026 row; raise for another edition."""
+    source = str(row["object_source"])
+    if source == OWASP_LLM_SCHEME:
+        return True
+    if scheme_family(source) == "owasp-llm":
+        raise ValueError(
+            f"SSSOM row for {row['subject_id']!r} has object_source {source!r}; "
+            f"expected {OWASP_LLM_SCHEME!r}"
+        )
+    return False
+
+
 def llm_pattern_edges(llm_pattern_table: Any, capability_profile: Any) -> list[dict]:
-    """Return the LLM-to-attack-pattern edges of the in-scope patterns."""
+    """Return the LLM-to-attack-pattern edges of the in-scope patterns.
+
+    The table must declare ``edition: "2026"`` and list only OWASP LLM 2026
+    codes; anything else raises ``ValueError``.
+    """
     from asago_scenario_generator.data.threat_gating import in_scope_attack_pattern_ids
 
     if not isinstance(llm_pattern_table, dict):
         raise ValueError("LLM-to-attack-pattern table must contain an object")
+    edition = llm_pattern_table.get("edition")
+    if edition != EDITION:
+        raise ValueError(
+            f"LLM-to-attack-pattern table declares edition {edition!r}; "
+            f"expected {EDITION!r}"
+        )
+    codes = {entry.code for entry in load_vocabulary(OWASP_LLM_SCHEME).values()}
+    for entry in llm_pattern_table["patterns"]:
+        unknown = sorted(set(entry["llm"]) - codes)
+        if unknown:
+            raise ValueError(
+                f"LLM-to-attack-pattern entry {entry['id']!r} lists {unknown}; "
+                f"expected codes of {OWASP_LLM_SCHEME!r}: {sorted(codes)}"
+            )
     in_scope = set(in_scope_attack_pattern_ids(capability_profile))
     relation = llm_pattern_table["predicate"]
     return [

@@ -41,7 +41,7 @@
       "name": "Hallucination",
       "display_name": "Hallucination",
       "description": "The assistant states false information.",
-      "tags": [{"scheme": "owasp-llm-2.0", "id": "llm092025-misinformation", "label": "OWASP LLM09 Misinformation"}],
+      "tags": [{"scheme": "owasp-llm-2026", "id": "llm072026-misinformation", "label": "OWASP LLM07:2026 Misinformation"}],
       "coverage": "scenarios",
       "reason": null,
       "loss_ids": ["L-1"],

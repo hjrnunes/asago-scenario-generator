@@ -57,7 +57,7 @@
       "additionalProperties": false,
       "required": ["scheme", "id", "label"],
       "properties": {
-        "scheme": {"enum": ["nist-ai-rmf", "owasp-llm-2.0"]},
+        "scheme": {"enum": ["nist-ai-rmf", "owasp-asi-2026", "owasp-llm-2026"]},
         "id": {"$ref": "#/$defs/text"},
         "label": {"$ref": "#/$defs/text"}
       }

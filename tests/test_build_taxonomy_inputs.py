@@ -30,26 +30,26 @@ _HEADER = (
 )
 _ROWS = (
     # Kept: a reviewed risk, an OWASP LLM object, and a pattern path (LLM01).
-    "risk-a\tcredo-ucf\tskos:relatedMatch\tllm012025-prompt-injection\towasp-llm-2.0\tj",
+    "risk-a\tcredo-ucf\tskos:relatedMatch\tllm012026-prompt-injection\towasp-llm-2026\tj",
     # Kept: LLM02 has in-scope patterns in the bundled table.
     "risk-a\tcredo-ucf\tskos:relatedMatch\t"
-    "llm022025-sensitive-information-disclosure\towasp-llm-2.0\tj",
+    "llm022026-sensitive-information-disclosure\towasp-llm-2026\tj",
     # Dropped: not an OWASP LLM object.
     "risk-a\tcredo-ucf\tskos:relatedMatch\tail-hate\tailuminate-v1.0\tj",
     # Dropped: a no-match predicate.
-    "risk-a\tcredo-ucf\tsemapv:NoMatch\tllm062025-excessive-agency\towasp-llm-2.0\tj",
+    "risk-a\tcredo-ucf\tsemapv:NoMatch\tllm032026-excessive-agency\towasp-llm-2026\tj",
     # Dropped: not a reviewed risk card.
-    "risk-z\tcredo-ucf\tskos:relatedMatch\tllm092025-misinformation\towasp-llm-2.0\tj",
+    "risk-z\tcredo-ucf\tskos:relatedMatch\tllm072026-misinformation\towasp-llm-2026\tj",
 )
 
 
-def _sssom(tmp_path: Path) -> Path:
+def _sssom(tmp_path: Path, rows: tuple[str, ...]) -> Path:
     path = tmp_path / "risk-to-llm.sssom.tsv"
-    path.write_text("\n".join(("# reviewed", _HEADER, *_ROWS)) + "\n")
+    path.write_text("\n".join(("# reviewed", _HEADER, *rows)) + "\n")
     return path
 
 
-def _build(tmp_path: Path, *, profile=None, llm_pattern_path=None):
+def _build(tmp_path: Path, *, profile=None, llm_pattern_path=None, rows=_ROWS):
     base = make_inputs()
     if profile is None:
         profile = base.capability_snapshot.profile.model_copy(
@@ -61,7 +61,7 @@ def _build(tmp_path: Path, *, profile=None, llm_pattern_path=None):
             capability_snapshot=base.capability_snapshot,
             risk_cards=base.risk_cards,
             qualification_facts=base.qualification_facts,
-            sssom_path=_sssom(tmp_path),
+            sssom_path=_sssom(tmp_path, rows),
             llm_pattern_path=llm_pattern_path or _DEFAULT_LLM_PATTERN_TABLE,
             output_dir=tmp_path,
         ),
@@ -84,9 +84,64 @@ def test_only_reviewed_owasp_llm_rows_with_a_pattern_path_are_kept(
         (row.subject_id, row.object_id, row.object_source)
         for row in value.sssom_mappings
     ] == [
-        ("risk-a", "LLM01", "owasp-llm-2.0"),
-        ("risk-a", "LLM02", "owasp-llm-2.0"),
+        ("risk-a", "LLM01", "owasp-llm-2026"),
+        ("risk-a", "LLM02", "owasp-llm-2026"),
     ]
+
+
+def test_a_2025_owasp_row_stops_the_planner(tmp_path) -> None:
+    stale = (
+        "risk-a\tcredo-ucf\tskos:relatedMatch\t"
+        "llm092025-misinformation\towasp-llm-2.0\tj"
+    )
+
+    with pytest.raises(ValueError, match="owasp-llm-2026") as caught:
+        _build(tmp_path, rows=(*_ROWS, stale))
+
+    assert "risk-a" in str(caught.value)
+    assert "owasp-llm-2.0" in str(caught.value)
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "OWASP-LLM-2.0",
+        "OWASP-LLM-2026",
+        "owasp_llm_2025",
+        "https://genai.owasp.org/llm-top-10/2025",
+    ],
+)
+def test_a_differently_spelled_owasp_llm_source_stops_the_planner(
+    tmp_path, source: str
+) -> None:
+    variant = (
+        f"risk-a\tcredo-ucf\tskos:relatedMatch\tllm092025-misinformation\t{source}\tj"
+    )
+
+    with pytest.raises(ValueError, match="owasp-llm-2026") as caught:
+        _build(tmp_path, rows=(*_ROWS, variant))
+
+    assert source in str(caught.value)
+
+
+def test_a_no_match_row_is_skipped_before_its_object_is_read(tmp_path) -> None:
+    no_term = "risk-a\tcredo-ucf\tskos:noMatch\tsssom:NoTermFound\towasp-llm-2026\tj"
+
+    value, _ = _build(tmp_path, rows=(*_ROWS, no_term))
+
+    assert [row.object_id for row in value.sssom_mappings] == ["LLM01", "LLM02"]
+
+
+def test_a_stale_slug_stops_the_planner(tmp_path) -> None:
+    stale = (
+        "risk-a\tcredo-ucf\tskos:relatedMatch\t"
+        "llm062026-excessive-agency\towasp-llm-2026\tj"
+    )
+
+    with pytest.raises(ValueError, match="llm062026-excessive-agency") as caught:
+        _build(tmp_path, rows=(*_ROWS, stale))
+
+    assert "'risk-a'" in str(caught.value)
 
 
 def test_llm_pattern_edges_close_over_risk_llm_pattern_paths(default_build) -> None:

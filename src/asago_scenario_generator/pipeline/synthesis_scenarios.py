@@ -369,11 +369,19 @@ def _build_synthesis_scenario_contexts(
     Contexts are keyed by scenario ID because one ICA can yield several
     candidates, one per condition family.
     """
+    from asago_scenario_generator.stpa.obligation_aware.briefs import (
+        obligation_order_key,
+    )
     from asago_scenario_generator.stpa.scenario_prod.context import (
         build_scenario_generation_context,
     )
 
     by_ica = _findings_by_ica(briefs, ica_considerations)
+    brief_by_id = {
+        brief.obligation_id: brief
+        for brief in briefs
+        if getattr(brief, "obligation_id", None) is not None
+    }
     result: dict[str, Any] = {}
     for index, threat in enumerate(threats):
         if threat.ica_id is None:
@@ -381,7 +389,7 @@ def _build_synthesis_scenario_contexts(
         considerations = tuple(
             sorted(
                 by_ica.get(threat.ica_id, ()),
-                key=lambda item: item.obligation_id,
+                key=lambda item: obligation_order_key(brief_by_id[item.obligation_id]),
             )
         )
         scenario_id = f"SCN-{index + 1:03d}"

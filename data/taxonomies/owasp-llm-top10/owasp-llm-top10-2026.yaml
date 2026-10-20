@@ -1,0 +1,14 @@
+scheme: owasp-llm-2026
+edition: "2026"
+source: https://github.com/GenAI-Security-Project/GenAI-LLM-Top10/tree/9253e38ade58e959b531c0c5c9a4842272c9cd0e/2026/final
+entries:
+  - {object_id: llm012026-prompt-injection, code: LLM01, title: Prompt Injection}
+  - {object_id: llm022026-sensitive-information-disclosure, code: LLM02, title: Sensitive Information Disclosure}
+  - {object_id: llm032026-excessive-agency, code: LLM03, title: Excessive Agency}
+  - {object_id: llm042026-supply-chain, code: LLM04, title: Supply Chain}
+  - {object_id: llm052026-data-and-model-poisoning, code: LLM05, title: Data and Model Poisoning}
+  - {object_id: llm062026-unbounded-consumption, code: LLM06, title: Unbounded Consumption}
+  - {object_id: llm072026-misinformation, code: LLM07, title: Misinformation}
+  - {object_id: llm082026-hidden-context-exposure, code: LLM08, title: Hidden Context Exposure}
+  - {object_id: llm092026-vector-and-embedding-weaknesses, code: LLM09, title: Vector and Embedding Weaknesses}
+  - {object_id: llm102026-improper-output-handling, code: LLM10, title: Improper Output Handling}

@@ -88,7 +88,8 @@ def routed_handles(request: SynthesisSlotRequest) -> tuple[str, ...]:
     return tuple(
         handle
         for obligation_id, handle in local_obligation_handles(
-            request.routed_routes
+            request.routed_routes,
+            {brief.obligation_id: brief for brief in request.routed_briefs},
         ).items()
         if obligation_id in routed
     )

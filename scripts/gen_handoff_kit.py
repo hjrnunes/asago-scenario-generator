@@ -1112,6 +1112,40 @@ V5_STATED = {
 }
 
 
+#: The optional taxonomy block: the ATLAS release and the scenario's OWASP
+#: 2026 references, sorted by scheme and id. Only its own fixture carries it.
+TAXONOMY = {
+    "atlas_release": "2026.05",
+    "references": [
+        {
+            "scheme": "owasp-asi",
+            "edition": "2026",
+            "id": "ASI02",
+            "name": "Tool Misuse & Exploitation",
+        },
+        {
+            "scheme": "owasp-llm",
+            "edition": "2026",
+            "id": "LLM03",
+            "name": "Excessive Agency",
+        },
+    ],
+}
+
+
+def _taxonomy_block(payload: dict) -> None:
+    payload["taxonomy"] = copy.deepcopy(TAXONOMY)
+
+
+V5_TAXONOMY = {
+    "valid/taxonomy-block.json": (
+        "valid/adversarial-direct-single.json",
+        "SCN-110",
+        _taxonomy_block,
+    ),
+}
+
+
 def attack_path(payload: dict) -> dict:
     """The attack path of a v5 fixture, built from the fixture's own v5 fields."""
 
@@ -1236,7 +1270,7 @@ def valid_payloads(shaped: dict[str, dict]) -> dict[str, dict]:
         payloads[relative] = finalize(
             with_path(relative, copy.deepcopy(staged_payload))
         )
-    for relative, (base, scenario_id, vary) in V5_STATED.items():
+    for relative, (base, scenario_id, vary) in {**V5_STATED, **V5_TAXONOMY}.items():
         payload = renumber(copy.deepcopy(staged[base]), scenario_id)
         vary(payload)
         payloads[relative] = finalize(with_path(relative, payload))
@@ -1351,6 +1385,19 @@ V5_FUNCTIONAL_CASES = {
 }
 
 
+TAXONOMY_CASES = {
+    "taxonomy-unknown-scheme": put("taxonomy.references.0.scheme", "nist-ai-rmf"),
+    "taxonomy-bad-edition": put("taxonomy.references.0.edition", "v2026"),
+    "taxonomy-extra-key": put("taxonomy.extra", 1),
+    # An id of the other scheme, keeping the references sorted and unique.
+    "taxonomy-asi-scheme-llm-id": put("taxonomy.references.0.id", "LLM03"),
+    "taxonomy-llm-scheme-asi-id": put("taxonomy.references.1.id", "ASI02"),
+    "taxonomy-unsorted-references": put(
+        "taxonomy.references", list(reversed(TAXONOMY["references"]))
+    ),
+}
+
+
 def invalid_payloads(valid: dict[str, dict]) -> dict[str, dict]:
     """The shape, ownership and schema cases, plus one case per v5 rule."""
 
@@ -1366,6 +1413,10 @@ def invalid_payloads(valid: dict[str, dict]) -> dict[str, dict]:
             name: resigned(cut(functional_null, m))
             for name, m in V5_FUNCTIONAL_CASES.items()
         }
+    )
+    taxonomy = valid["valid/taxonomy-block.json"]
+    cases.update(
+        {name: resigned(cut(taxonomy, m)) for name, m in TAXONOMY_CASES.items()}
     )
     invalid.update({f"invalid/{name}.json": payload for name, payload in cases.items()})
     return invalid

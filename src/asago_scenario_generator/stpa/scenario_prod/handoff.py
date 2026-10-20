@@ -27,6 +27,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
 
@@ -256,6 +257,87 @@ class _HandoffHead(HandoffModel):
         return value
 
 
+HandoffText = Annotated[StrictStr, Field(min_length=1, pattern=r"\S")]
+
+
+#: Each handoff taxonomy scheme and the ids that belong to it.
+_TAXONOMY_ID_PATTERNS = {"owasp-llm": r"^LLM\d{2}$", "owasp-asi": r"^ASI\d{2}$"}
+
+
+class HandoffTaxonomyRef(HandoffModel):
+    """One OWASP Top 10 entry a scenario's losses map to, in its edition.
+
+    The id belongs to the scheme: ``LLMnn`` under ``owasp-llm``, ``ASInn``
+    under ``owasp-asi``. The schema states the pairing with one if/then block
+    per scheme.
+    """
+
+    model_config = ConfigDict(
+        extra="forbid",
+        json_schema_extra={
+            "allOf": [
+                {
+                    "if": {
+                        "properties": {"scheme": {"const": scheme}},
+                        "required": ["scheme"],
+                    },
+                    "then": {"properties": {"id": {"pattern": pattern}}},
+                }
+                for scheme, pattern in _TAXONOMY_ID_PATTERNS.items()
+            ]
+        },
+    )
+
+    scheme: Literal["owasp-llm", "owasp-asi"]
+    edition: Annotated[StrictStr, Field(pattern=r"^\d{4}$")]
+    id: Annotated[StrictStr, Field(pattern=r"^(LLM|ASI)\d{2}$")]
+    name: HandoffText
+
+    @model_validator(mode="after")
+    def validate_scheme_id(self) -> Self:
+        """Keep each id under the scheme it belongs to."""
+
+        if not re.match(_TAXONOMY_ID_PATTERNS[self.scheme], self.id):
+            raise ValueError(
+                f"taxonomy id {self.id!r} does not belong to scheme {self.scheme!r}"
+            )
+        return self
+
+
+class HandoffTaxonomy(HandoffModel):
+    """The ATLAS release the procedure cites and the scenario's OWASP references.
+
+    The references are the OWASP tags of the policy risks the scenario's
+    lineage losses came from, sorted by scheme and id, each once.
+    """
+
+    atlas_release: Annotated[StrictStr, Field(pattern=r"^\d{4}\.\d{2}$")]
+    references: tuple[HandoffTaxonomyRef, ...] = ()
+
+    @model_validator(mode="after")
+    def validate_reference_order(self) -> Self:
+        """Keep one reference per entry, in (scheme, id) order."""
+
+        keys = [(ref.scheme, ref.id) for ref in self.references]
+        if keys != sorted(set(keys)):
+            raise ValueError(
+                "taxonomy references must be sorted by scheme and id, each once"
+            )
+        return self
+
+
+@dataclass(frozen=True)
+class HandoffTaxonomyInputs:
+    """What the pipeline knows about a run's taxonomies, for each handoff.
+
+    ``references_by_loss`` maps each loss id to the OWASP references of the
+    risks it came from; a handoff takes the union over its lineage losses.
+    """
+
+    atlas_release: str
+    references_by_loss: Mapping[str, tuple[HandoffTaxonomyRef, ...]]
+
+
 class _HandoffTail(HandoffModel):
     """The handoff fields after the attack path."""
 
@@ -302,6 +384,14 @@ class _HandoffTail(HandoffModel):
         description=(
             "Object for adversarial scenarios; null for functional scenarios. "
             "Required, so a producer must decide."
+        ),
+    )
+    taxonomy: HandoffTaxonomy | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The ATLAS release and the OWASP 2026 references of the scenario's "
+            "lineage losses. Absent when the producer did not supply them."
         ),
     )
 
@@ -360,7 +450,6 @@ UcaType = Literal[
     "stopped-too-soon-or-applied-too-long",
 ]
 ProcedureChannel = Literal["tool_data", "user_turn", "forged_history"]
-HandoffText = Annotated[StrictStr, Field(min_length=1, pattern=r"\S")]
 StepId = Annotated[StrictStr, Field(pattern=r"^S\d{2}$")]
 
 

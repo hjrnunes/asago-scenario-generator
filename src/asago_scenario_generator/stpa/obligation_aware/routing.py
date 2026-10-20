@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import functools
 from typing import Any, Literal
@@ -33,6 +33,8 @@ from asago_scenario_generator.stpa.obligation_aware.briefs import (
     build_neutral_brief,
     build_neutral_briefs,
     create_obligation_batches,
+    obligation_order_key,
+    order_by_brief_then_id,
     split_by_budget,
 )
 from asago_scenario_generator.stpa.obligation_aware.calls import (
@@ -92,8 +94,8 @@ def _budgeted_obligation_batches(
     control_structure: ControlStructure,
     slots: Sequence[SlotPlaceholder],
 ) -> tuple[tuple[NeutralObligationBrief, ...], ...]:
-    """Split routing batches by rendered compact prompt size, preserving order."""
-    ordered = tuple(sorted(briefs, key=lambda item: item.obligation_id))
+    """Split routing batches by prompt size, in ``obligation_order_key`` order."""
+    ordered = tuple(sorted(briefs, key=obligation_order_key))
     if budget is None:
         return create_obligation_batches(ordered, max_batch_size)
 
@@ -825,11 +827,13 @@ def _route_batch(
                 )
             candidate = _typed_response(raw)
             _require_batch_identity(candidate, request, batch)
-            attempt_partial = _partial_routing(candidate, "routing records", validate)
+            attempt_partial = _partial_routing(
+                candidate, "routing records", validate, batch
+            )
             if attempt_partial is None:
                 candidate = _apply_mechanism_verification(adapter, request, candidate)
                 attempt_partial = _partial_routing(
-                    candidate, "verified routing records", validate
+                    candidate, "verified routing records", validate, batch
                 )
             if attempt_partial is not None:
                 partial = attempt_partial
@@ -878,10 +882,22 @@ class _PartialRouting:
     error: ValueError
 
 
-def _record_errors_text(record_errors: dict[str, BaseException]) -> str:
+def _in_batch_order(
+    ids: Iterable[str], batch: Sequence[NeutralObligationBrief]
+) -> tuple[str, ...]:
+    """Order IDs as the batch's questions are shown; unknown IDs come last."""
+    return order_by_brief_then_id(ids, {item.obligation_id: item for item in batch})
+
+
+def _record_errors_text(
+    record_errors: dict[str, BaseException],
+    batch: Sequence[NeutralObligationBrief],
+) -> str:
+    """Join the record errors in the order the batch's questions are shown."""
     return "; ".join(
-        f"{obligation_id}: {type(record_error).__name__}: {record_error}"
-        for obligation_id, record_error in sorted(record_errors.items())
+        f"{obligation_id}: {type(record_errors[obligation_id]).__name__}: "
+        f"{record_errors[obligation_id]}"
+        for obligation_id in _in_batch_order(record_errors, batch)
     )
 
 
@@ -899,7 +915,8 @@ def _require_batch_identity(
         raise ValueError(
             "routing response must account for every batch obligation exactly "
             "once; copied opaque obligation identity mismatch "
-            f"(expected={sorted(expected_ids)}, actual={sorted(actual_ids)})"
+            f"(expected={list(_in_batch_order(expected_ids, batch))}, "
+            f"actual={list(_in_batch_order(actual_ids, batch))})"
         )
 
 
@@ -907,6 +924,7 @@ def _partial_routing(
     candidate: StructuralRoutingResponse,
     label: str,
     validate: Any,
+    batch: Sequence[NeutralObligationBrief],
 ) -> _PartialRouting | None:
     """Return the partial result when any route record fails validation."""
     valid_routes, record_errors = validate(candidate)
@@ -917,7 +935,8 @@ def _partial_routing(
         routes=valid_routes,
         errors=record_errors,
         error=ValueError(
-            f"{label} failed local validation: " + _record_errors_text(record_errors)
+            f"{label} failed local validation: "
+            + _record_errors_text(record_errors, batch)
         ),
     )
 
@@ -956,7 +975,7 @@ def _retained_partial_result(
     )
     detail = (
         f"{request.batch_id} retained valid sibling routes; unresolved "
-        "record(s): " + _record_errors_text(partial.errors)
+        "record(s): " + _record_errors_text(partial.errors, batch)
     )
     return (
         request,

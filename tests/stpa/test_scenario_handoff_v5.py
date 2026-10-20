@@ -29,6 +29,9 @@ from asago_scenario_generator.stpa.scenario_prod.assembly import assemble_envelo
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HANDOFF_DIGEST_DOMAIN_V5,
     HANDOFF_SCHEMA_VERSION_V5,
+    HandoffTaxonomy,
+    HandoffTaxonomyInputs,
+    HandoffTaxonomyRef,
     ScenarioHandoffV5,
     handoff_ownership_violations,
     handoff_payload_digest,
@@ -405,6 +408,134 @@ def test_a_document_of_another_version_is_rejected(version: str) -> None:
     ]
     with pytest.raises(ValueError, match="unsupported"):
         handoff_payload_digest(unsigned)
+
+
+# --- taxonomy -----------------------------------------------------------------
+
+LLM03 = HandoffTaxonomyRef(
+    scheme="owasp-llm", edition="2026", id="LLM03", name="Excessive Agency"
+)
+ASI02 = HandoffTaxonomyRef(
+    scheme="owasp-asi", edition="2026", id="ASI02", name="Tool Misuse & Exploitation"
+)
+LLM01 = HandoffTaxonomyRef(
+    scheme="owasp-llm", edition="2026", id="LLM01", name="Prompt Injection"
+)
+#: The content digest of ``build_scenario_handoff_v5(_envelope(adversarial()))``
+#: before the taxonomy block existed.
+BLOCKLESS_DIGEST = "1fc8be80a7dd7b387e4b27298c46bbdd11ab52799d3f103c8f33dd10f3bc5cb6"
+
+
+def _two_losses(spec: ScenarioSpec) -> ScenarioSpec:
+    context = spec.scenario_context
+    assert context is not None
+    second = context.losses[0].model_copy(update={"loss_id": "L-2"})
+    return spec.model_copy(
+        update={
+            "scenario_context": context.model_copy(
+                update={"losses": (*context.losses, second)}
+            )
+        }
+    )
+
+
+def test_taxonomy_block_unions_the_lineage_losses_references() -> None:
+    taxonomy = HandoffTaxonomyInputs(
+        atlas_release="2026.05",
+        references_by_loss={"L-1": (LLM03,), "L-2": (ASI02, LLM03), "L-9": (LLM01,)},
+    )
+
+    handoff = build_scenario_handoff_v5(
+        _envelope(_two_losses(adversarial())), taxonomy=taxonomy
+    )
+    document = handoff.model_dump(mode="json", exclude_none=True)
+
+    assert handoff.lineage.loss_ids == ["L-1", "L-2"]
+    assert document["taxonomy"] == {
+        "atlas_release": "2026.05",
+        "references": [
+            {
+                "scheme": "owasp-asi",
+                "edition": "2026",
+                "id": "ASI02",
+                "name": "Tool Misuse & Exploitation",
+            },
+            {
+                "scheme": "owasp-llm",
+                "edition": "2026",
+                "id": "LLM03",
+                "name": "Excessive Agency",
+            },
+        ],
+    }
+    assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
+    assert handoff_schema_violations(document) == []
+    assert handoff_ownership_violations(document) == []
+    verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+
+
+def test_a_scenario_with_no_mapped_risk_gets_an_empty_reference_list() -> None:
+    taxonomy = HandoffTaxonomyInputs(
+        atlas_release="2026.05", references_by_loss={"L-9": (LLM01,)}
+    )
+
+    handoff = build_scenario_handoff_v5(_envelope(everyday()), taxonomy=taxonomy)
+    document = handoff.model_dump(mode="json", exclude_none=True)
+
+    assert document["taxonomy"] == {"atlas_release": "2026.05", "references": []}
+    assert list(Draft202012Validator(SCHEMA).iter_errors(document)) == []
+
+
+def test_a_handoff_without_taxonomy_omits_the_key_and_keeps_its_digest() -> None:
+    handoff = build_scenario_handoff_v5(_envelope(adversarial()))
+
+    assert handoff.taxonomy is None
+    assert "taxonomy" not in handoff.model_dump(mode="json")
+    assert "taxonomy" not in handoff.model_dump(mode="json", exclude_none=True)
+    assert handoff.content_digest == BLOCKLESS_DIGEST
+
+
+@pytest.mark.parametrize(
+    "references",
+    [(LLM03, ASI02), (ASI02, ASI02), (ASI02, LLM03, LLM01)],
+    ids=["unsorted", "duplicate", "unsorted-within-scheme"],
+)
+def test_unsorted_or_duplicate_references_are_rejected(
+    references: tuple[HandoffTaxonomyRef, ...],
+) -> None:
+    with pytest.raises(ValidationError, match="sorted by scheme and id"):
+        HandoffTaxonomy(atlas_release="2026.05", references=references)
+
+
+@pytest.mark.parametrize(
+    ("scheme", "code"), [("owasp-asi", "LLM03"), ("owasp-llm", "ASI02")]
+)
+def test_a_reference_id_must_belong_to_its_scheme(scheme: str, code: str) -> None:
+    with pytest.raises(ValidationError, match="does not belong to scheme"):
+        HandoffTaxonomyRef(scheme=scheme, edition="2026", id=code, name="Some entry")
+    reference = {"scheme": scheme, "edition": "2026", "id": code, "name": "x"}
+    ref_schema = {"$defs": SCHEMA["$defs"], **SCHEMA["$defs"]["HandoffTaxonomyRef"]}
+    assert list(Draft202012Validator(ref_schema).iter_errors(reference))
+    for good in (LLM03, ASI02):
+        assert not list(Draft202012Validator(ref_schema).iter_errors(good.model_dump()))
+
+
+def test_a_run_publishes_the_taxonomy_block_it_is_given(tmp_path: Path) -> None:
+    taxonomy = HandoffTaxonomyInputs(
+        atlas_release="2026.05", references_by_loss={"L-1": (LLM03,)}
+    )
+
+    result, _ = _publish(tmp_path, handoff_taxonomy=taxonomy)
+
+    assert result.stage_errors == []
+    blocks = {}
+    for scenario_id in ("SCN-001", "SCN-002"):
+        document = _published_handoff(tmp_path, scenario_id)
+        assert document["lineage"]["loss_ids"] == ["L-1"]
+        blocks[document["kind"]] = document["taxonomy"]
+        verify_handoff_digest(ScenarioHandoffV5.model_validate(document))
+    block = {"atlas_release": "2026.05", "references": [LLM03.model_dump()]}
+    assert blocks == {"adversarial": block, "functional": block}
 
 
 # --- kit ----------------------------------------------------------------------

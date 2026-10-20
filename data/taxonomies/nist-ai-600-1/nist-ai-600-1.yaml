@@ -1,0 +1,16 @@
+scheme: nist-ai-rmf
+edition: "AI 600-1 (July 2024)"
+source: https://nvlpubs.nist.gov/nistpubs/ai/NIST.AI.600-1.pdf
+entries:
+  - {object_id: nist-cbrn-information-or-capabilities, code: null, title: CBRN Information or Capabilities}
+  - {object_id: nist-confabulation, code: null, title: Confabulation}
+  - {object_id: nist-dangerous-violent-or-hateful-content, code: null, title: "Dangerous, Violent, or Hateful Content"}
+  - {object_id: nist-data-privacy, code: null, title: Data Privacy}
+  - {object_id: nist-environmental-impacts, code: null, title: Environmental Impacts}
+  - {object_id: nist-harmful-bias-or-homogenization, code: null, title: Harmful Bias or Homogenization}
+  - {object_id: nist-human-ai-configuration, code: null, title: Human-AI Configuration}
+  - {object_id: nist-information-integrity, code: null, title: Information Integrity}
+  - {object_id: nist-information-security, code: null, title: Information Security}
+  - {object_id: nist-intellectual-property, code: null, title: Intellectual Property}
+  - {object_id: nist-obscene-degrading-and-or-abusive-content, code: null, title: "Obscene, Degrading, and/or Abusive Content"}
+  - {object_id: nist-value-chain-and-component-integration, code: null, title: Value Chain and Component Integration}

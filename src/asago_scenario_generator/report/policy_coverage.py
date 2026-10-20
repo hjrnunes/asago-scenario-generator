@@ -29,6 +29,11 @@ from asago_scenario_generator.data.sssom import SSSOMMapping, load_sssom
 from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.report.common import natural_key
+from asago_scenario_generator.report.risk_tags import (
+    display_name,
+    merged_risk_tags,
+    normalized_name,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import (
     Hazard,
     Loss,
@@ -43,44 +48,16 @@ from asago_scenario_generator.stpa.system_model.risk_actionability import (
 SCHEMA_VERSION = "policy-coverage-v2"
 FILENAME = "policy-coverage.json"
 RULE = "loss-source-risk-cards"
-TAG_SCHEMES = ("nist-ai-rmf", "owasp-llm-2.0")
 # Best first: a merged risk takes the coverage of its best entry.
 COVERAGE_ORDER = ("scenarios", "not_reached", "not_applicable", "outside_boundary")
 
-_CITATION = re.compile(r"\s*\([^()]*\d{4}[^()]*\)\s*$")
 _CLAUSE_BREAK = re.compile(r" due to |, such as | via | through ")
-_WORDS = {"ai": "AI", "cbrn": "CBRN"}
-_OWASP_ID = re.compile(r"llm(\d\d)(?:2025)?-(.*)")
 _LOSS_NUMBER = re.compile(r"(\d+)$")
-
-
-def display_name(name: str) -> str:
-    """Drop a trailing literature citation such as ``(Slattery et al., 2024)``."""
-    return _CITATION.sub("", name).strip()
 
 
 def harm_title(description: str) -> str:
     """Return the description's first clause, the version 1 stand-in for a title."""
     return _CLAUSE_BREAK.split(description, maxsplit=1)[0].strip().rstrip(".")
-
-
-def _words(text: str) -> str:
-    parts = text.replace("-", " ").split()
-    return " ".join(_WORDS.get(part, part) for part in parts).capitalize()
-
-
-def tag_label(scheme: str, tag_id: str) -> str:
-    """Return the reader's label for a NIST or OWASP mapping target."""
-    if scheme == "nist-ai-rmf":
-        return "NIST " + _words(tag_id.removeprefix("nist-"))
-    match = _OWASP_ID.match(tag_id)
-    if match:
-        return f"OWASP LLM{match[1]} {_words(match[2])}"
-    return tag_id
-
-
-def _normalized(name: str) -> str:
-    return " ".join(display_name(name).lower().split())
 
 
 @dataclass
@@ -96,25 +73,6 @@ class _Risk:
     coverage: str
     reason: dict[str, str] | None
     extra: dict[str, Any] = field(default_factory=dict)
-
-
-def _tags(sssom: Sequence[SSSOMMapping]) -> dict[str, list[dict[str, str]]]:
-    found: dict[str, list[dict[str, str]]] = {}
-    for mapping in sssom:
-        if mapping.object_source not in TAG_SCHEMES:
-            continue
-        tag = {
-            "scheme": mapping.object_source,
-            "id": mapping.object_id,
-            "label": tag_label(mapping.object_source, mapping.object_id),
-        }
-        known = found.setdefault(mapping.subject_id, [])
-        if tag not in known:
-            known.append(tag)
-    return {
-        rid: sorted(tags, key=lambda t: (t["scheme"], t["id"]))
-        for rid, tags in found.items()
-    }
 
 
 def _reason(code: str, text: str, step: str) -> dict[str, str]:
@@ -178,7 +136,6 @@ def _mitigations(card: RiskCard) -> list[dict[str, Any]]:
 def _merge_into(base: _Risk, other: _Risk) -> None:
     base.merged_ids.extend(other.merged_ids)
     base.sources.extend(s for s in other.sources if s not in base.sources)
-    base.tags.extend(t for t in other.tags if t not in base.tags)
     base.mitigations.extend(m for m in other.mitigations if m not in base.mitigations)
     base.loss_ids |= other.loss_ids
     if COVERAGE_ORDER.index(other.coverage) < COVERAGE_ORDER.index(base.coverage):
@@ -187,12 +144,14 @@ def _merge_into(base: _Risk, other: _Risk) -> None:
 
 def _risks(
     cards: Sequence[RiskCard],
-    tags: Mapping[str, list[dict[str, str]]],
+    sssom: Sequence[SSSOMMapping],
     cited: Mapping[str, list[str]],
     dispositions: Mapping[str, RiskDisposition],
     decisions: Mapping[str, RiskActionabilityEntry],
     written: Mapping[str, Sequence[str]],
 ) -> list[_Risk]:
+    # Every member of a name-merged group already carries the group's tags.
+    tags = merged_risk_tags(cards, sssom)
     merged: dict[str, _Risk] = {}
     for card in cards:
         coverage, reason = _entry_coverage(
@@ -204,13 +163,13 @@ def _risks(
             description=card.risk_description,
             merged_ids=[card.risk_id],
             sources=[card.taxonomy],
-            tags=list(tags.get(card.risk_id, [])),
+            tags=list(tags[card.risk_id]),
             mitigations=_mitigations(card),
             loss_ids=set(cited.get(card.risk_id, [])),
             coverage=coverage,
             reason=reason,
         )
-        key = _normalized(card.risk_name)
+        key = normalized_name(card.risk_name)
         if key in merged:
             _merge_into(merged[key], risk)
         else:
@@ -319,7 +278,7 @@ def build_policy_coverage(
     cited = _cited_losses(losses)
     risks = _risks(
         cards,
-        _tags(sssom),
+        sssom,
         cited,
         {item.risk_ref: item for item in loss_analysis.risk_dispositions},
         {

@@ -207,7 +207,13 @@ for the required serving argument and rollout guidance.
 
 `generate` is the sole normal scenario-generation command. It requires the use
 case, complete reviewed risk extraction, explicit qualification facts, an
-output directory, and a reviewed risk-to-OWASP-LLM SSSOM file. Planning
+output directory, and a reviewed risk-to-OWASP SSSOM file. Its OWASP rows must
+use the `owasp-llm-2026` scheme (IDs `llm{NN}2026-{slug}`) and the
+`owasp-asi-2026` scheme (IDs `asi{NN}-{slug}`), and its NIST rows
+`nist-ai-rmf`. Before any model call, `generate` checks every such row, for
+every risk in the file, against the pinned vocabularies, and stops on another
+OWASP edition in any spelling or an unknown ID, naming the line, the risk, and
+the object ID; `noMatch` rows give no tag. Planning
 always uses the bundled LLM-to-attack-pattern table, infers the capability profile,
 and routes obligations in batches of eight:
 
@@ -756,6 +762,16 @@ fields are:
   its ATLAS tactic and technique and its channel (`tool_data`, `user_turn`,
   `forged_history`); empty for a functional scenario.
 - `worst_case_threat`: the scenario's losses.
+
+A handoff may also carry an optional `taxonomy` block: `atlas_release`, the
+pinned MITRE ATLAS release its procedure cites (`YYYY.MM`), and `references`,
+the OWASP LLM and Agentic Top 10 2026 entries of the policy risks its lineage
+losses came from. Each reference has `scheme` (`owasp-llm` or `owasp-asi`),
+`edition`, `id` (`LLMnn` under `owasp-llm`, `ASInn` under `owasp-asi`), and
+`name`; the references are sorted by scheme and id, each once. Code fills the
+block from the same SSSOM tags that policy coverage reports, and it never
+enters a prompt. A run without an SSSOM file or risk cards omits the block, and
+a handoff without it keeps its bytes and digest.
 
 The handoff `narrative` is the accepted model paragraph alone; `narratives.json`
 records each scenario's source, rejections, and reason. After narration, one

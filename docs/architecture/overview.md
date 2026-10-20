@@ -52,7 +52,14 @@ or `not_executable` with a reason code and detail) and, only when bound, the
 `tool_call_condition`, whose comparisons hold only `argument` and `literal`
 operands. The required `attack_shape` is an object for an adversarial scenario
 and `null` for a functional one, made only of closed enums, a turn count from
-1 to 4 and identifiers (see [The shape step](#the-shape-step)). The ownership
+1 to 4 and identifiers (see [The shape step](#the-shape-step)). The optional
+`taxonomy` block carries the pinned ATLAS release and the scenario's OWASP LLM
+and Agentic Top 10 2026 references (`scheme`, `edition`, `id`, `name`, with the
+id matching the scheme), sorted by scheme and id, each once.
+`synthesis_defaults._handoff_taxonomy` builds it from the SSSOM rows that
+`SynthesisInputs` loads and checks once, before any stage, through
+`report.risk_tags.merged_risk_tags`, the tags policy coverage reports. It
+reaches no prompt, and a run without SSSOM rows or risk cards omits it. The ownership
 scan reads its forbidden keys and prose patterns from `ownership-rules.json`
 beside the kit; the lock pins that file and the consumer mirrors it, so both
 sides enforce one list. `scripts/gen_handoff_kit.py` regenerates the kit and

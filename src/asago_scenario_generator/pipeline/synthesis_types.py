@@ -8,6 +8,11 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Mapping, NamedTuple
 
+from asago_scenario_generator.data.sssom import (
+    SSSOMMapping,
+    check_sssom,
+    load_checked_sssom,
+)
 from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
 from asago_scenario_generator.pipeline.obligation_contracts import (
     QualificationFactsInput,
@@ -69,7 +74,9 @@ class SynthesisInputs:
 
     The pure composition root accepts already parsed values.  File paths are
     retained as optional metadata for the CLI adapter and are never opened by
-    the planner or consideration seams.  The capability profile, its snapshot
+    the planner or consideration seams.  The request itself reads one file:
+    it loads and checks ``sssom_path`` once, into ``sssom_mappings``, before
+    any stage runs.  The capability profile, its snapshot
     and the closed Phase 1 input graph come from the ``prepare_capability``
     and ``build_taxonomy_inputs`` adapters, never from this request.
     """
@@ -81,6 +88,11 @@ class SynthesisInputs:
     execution_target_profile: ExecutionTargetProfile | None = None
     target_observations: TargetObservationSnapshot | None = None
     observation_contract: ObservationContract | None = None
+    # The rows of ``sssom_path``, every NIST and OWASP row checked against the
+    # pinned vocabularies.  Loaded from ``sssom_path`` when not given, so a bad
+    # row stops the request before any stage runs.  A ``replace`` that changes
+    # ``sssom_path`` must pass ``sssom_mappings=None`` to reload.
+    sssom_mappings: tuple[SSSOMMapping, ...] | None = None
 
     # CLI/source metadata.  These are not read by pure planning seams.
     risk_extraction_path: Path | None = None
@@ -112,6 +124,7 @@ class SynthesisInputs:
             raise ValueError("max_workers must be positive")
         object.__setattr__(self, "output_dir", Path(self.output_dir))
         _normalize_request_values(self)
+        _load_request_sssom(self)
         _verify_request_target_inputs(self)
         _resolve_request_observation_contract(self)
 
@@ -139,6 +152,17 @@ def _normalize_request_values(inputs: SynthesisInputs) -> None:
             "qualification_facts",
             QualificationFactsInput.model_validate(inputs.qualification_facts),
         )
+
+
+def _load_request_sssom(inputs: SynthesisInputs) -> None:
+    """Check the given SSSOM rows, or load and check ``sssom_path`` once."""
+    if inputs.sssom_mappings is not None:
+        mappings = check_sssom(inputs.sssom_mappings)
+    elif inputs.sssom_path is not None:
+        mappings = load_checked_sssom(inputs.sssom_path)
+    else:
+        return
+    object.__setattr__(inputs, "sssom_mappings", mappings)
 
 
 def _verify_request_target_inputs(inputs: SynthesisInputs) -> None:

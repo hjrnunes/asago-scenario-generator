@@ -6,8 +6,8 @@
     "policy-coverage-v1/schema.json": "a4f7f87f764103955196ea3b280e124dd34407f3867522c07a55bfe2125c0b6b",
     "policy-coverage-v1/valid/minimal.json": "0228bdae3989d07ef657676ac52381e1dd8fe0abf6fd4a15f5b10d83d9dfd8a4",
     "policy-coverage-v2/README.md": "a25d0eb324590a1a04ea673e5eb5c9f593a0d48692aa3e2cfc2e1db3142d8ef9",
-    "policy-coverage-v2/schema.json": "a70afedf93f857bad9a010d1704d28dd7ccb54786d621a21ed72ca16f8c9ac88",
-    "policy-coverage-v2/valid/minimal.json": "8cea59cf80d49b830b56f1de40f5d5c4b983f87df7af6a0755a9cb59f669ee7f"
+    "policy-coverage-v2/schema.json": "5c2e9c6f13f6e05bf310035a96fedf9bc695c73c87e8b397a5e872cff330bf3c",
+    "policy-coverage-v2/valid/minimal.json": "5f7188d83614de51fb17f95899390c01cda0585d3d066d2d9a9e3c3b309c273f"
   },
   "schema_version": "policy-coverage-v2"
 }

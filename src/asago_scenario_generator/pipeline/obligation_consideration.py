@@ -112,7 +112,12 @@ def batch_neutral_obligation_briefs(
     briefs: Iterable[NeutralObligationBrief],
     max_batch_size: int,
 ) -> tuple[tuple[NeutralObligationBrief, ...], ...]:
-    """Partition briefs by canonical obligation identity and fixed batch size."""
+    """Partition briefs into fixed-size batches in ``obligation_order_key`` order.
+
+    Each brief is checked first; the batches then follow risk and pattern, as
+    ``create_obligation_batches`` orders every model-facing batch, not the
+    obligation ID.
+    """
     require_batch_size(max_batch_size)
     return _chunk_briefs(_typed_briefs(briefs), max_batch_size)
 
