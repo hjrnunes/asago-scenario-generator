@@ -16,6 +16,7 @@ condition that named the operator would render detached from the tree.
 
 The file is plain JSON. The producer depends on no STIX or Attack Flow
 package, so these dictionaries follow the published schema by hand.
+``data/contracts/attack-flow/`` states the shape this module writes.
 """
 
 from __future__ import annotations

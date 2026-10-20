@@ -1,10 +1,15 @@
-"""The ``policy-coverage-v1`` document: which policy risks reached scenarios.
+"""The ``policy-coverage-v2`` document: which policy risks reached scenarios.
 
 The producer owns the rule that maps a policy risk to its scenarios and
 publishes the result once, so the run reports (this producer's, the
 consumer's, and the orchestrator's) do not each re-derive it. A loss
 lists the risks it came from (``source_risk_cards``) and a scenario
 cites losses, so a risk reaches scenarios only through its harms.
+
+Version 2 adds the hazards. A hazard leads to the losses loss analysis
+relates it to (``Hazard.related_losses``) and is reached by the scenarios
+whose lineage names it. The losses never come from scenario lineage: a
+scenario can cite every loss of the run at once.
 """
 
 from __future__ import annotations
@@ -23,7 +28,9 @@ from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
 from asago_scenario_generator.data.sssom import SSSOMMapping, load_sssom
 from asago_scenario_generator.manifest import write_text_atomically
 from asago_scenario_generator.models.risk_card import RiskCard
+from asago_scenario_generator.report.common import natural_key
 from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
     Loss,
     LossAnalysis,
     RiskDisposition,
@@ -33,7 +40,7 @@ from asago_scenario_generator.stpa.system_model.risk_actionability import (
     RiskActionabilityRecord,
 )
 
-SCHEMA_VERSION = "policy-coverage-v1"
+SCHEMA_VERSION = "policy-coverage-v2"
 FILENAME = "policy-coverage.json"
 RULE = "loss-source-risk-cards"
 TAG_SCHEMES = ("nist-ai-rmf", "owasp-llm-2.0")
@@ -240,8 +247,30 @@ def _risk_json(risk: _Risk) -> dict[str, Any]:
     }
 
 
+def _hazard_json(
+    hazard: Hazard, written: Mapping[str, Sequence[str]]
+) -> dict[str, Any]:
+    return {
+        "hazard_id": hazard.hazard_id,
+        "description": hazard.description,
+        "loss_ids": sorted(set(hazard.related_losses), key=natural_key),
+        "scenario_ids": sorted(set(written.get(hazard.hazard_id, ())), key=natural_key),
+    }
+
+
+def _hazards_json(
+    hazards: Sequence[Hazard], written: Mapping[str, Sequence[str]]
+) -> list[dict[str, Any]]:
+    """List every loss-analysis hazard; a scenario naming any other hazard is ignored."""
+    ordered = sorted(hazards, key=lambda hazard: natural_key(hazard.hazard_id))
+    return [_hazard_json(hazard, written) for hazard in ordered]
+
+
 def _harm_json(
-    loss: Loss, alias: Mapping[str, str], written: Mapping[str, Sequence[str]]
+    loss: Loss,
+    alias: Mapping[str, str],
+    written: Mapping[str, Sequence[str]],
+    hazards: Sequence[Mapping[str, Any]],
 ) -> dict[str, Any]:
     risk_ids = list(
         dict.fromkeys(alias[rid] for rid in loss.source_risk_cards if rid in alias)
@@ -252,6 +281,11 @@ def _harm_json(
         "text": loss.description,
         "provenance": loss.provenance.value,
         "risk_ids": risk_ids,
+        "hazard_ids": [
+            hazard["hazard_id"]
+            for hazard in hazards
+            if loss.loss_id in hazard["loss_ids"]
+        ],
         "scenario_ids": sorted(written.get(loss.loss_id, ())),
     }
 
@@ -263,15 +297,20 @@ def build_policy_coverage(
     actionability: RiskActionabilityRecord | None,
     loss_analysis: LossAnalysis,
     scenario_ids_by_loss: Mapping[str, Sequence[str]],
+    scenario_ids_by_hazard: Mapping[str, Sequence[str]],
     source: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Return the ``policy-coverage-v1`` document for one generate run.
+    """Return the ``policy-coverage-v2`` document for one generate run.
 
     ``coverage`` follows this order: a loss that cites the risk decides
     (``scenarios`` when a written scenario carries the loss, else
     ``not_reached``); otherwise a loss-analysis ``not_applicable`` disposition;
     otherwise the boundary decision. Risks that several taxonomies list under
     one normalized name merge into one entry that keeps every id and source.
+
+    ``hazards`` lists every loss-analysis hazard with the losses it is related
+    to there and the scenarios whose lineage names it; each harm lists the
+    hazards that lead to it.
     """
     losses = sorted(
         [*loss_analysis.risk_card_losses, *loss_analysis.use_case_losses],
@@ -290,6 +329,7 @@ def build_policy_coverage(
         scenario_ids_by_loss,
     )
     alias = {rid: risk.risk_id for risk in risks for rid in risk.merged_ids}
+    hazards = _hazards_json(loss_analysis.hazards, scenario_ids_by_hazard)
     given = source or {}
     return {
         "schema_version": SCHEMA_VERSION,
@@ -301,19 +341,28 @@ def build_policy_coverage(
             "risk_count": len(risks),
         },
         "rule": RULE,
-        "harms": [_harm_json(loss, alias, scenario_ids_by_loss) for loss in losses],
+        "harms": [
+            _harm_json(loss, alias, scenario_ids_by_loss, hazards) for loss in losses
+        ],
+        "hazards": hazards,
         "risks": [_risk_json(risk) for risk in risks],
     }
 
 
-def _written_scenarios(output_dir: Path) -> dict[str, list[str]]:
-    """Map each loss to the handoff scenarios that cite it in their lineage."""
+def _written_scenarios(
+    output_dir: Path,
+) -> tuple[dict[str, list[str]], dict[str, list[str]]]:
+    """Map each loss and each hazard to the handoff scenarios that cite it in their lineage."""
     by_loss: dict[str, list[str]] = {}
+    by_hazard: dict[str, list[str]] = {}
     for path in sorted((output_dir / "scenarios").glob("SCN-*.yaml")):
         handoff = yaml.safe_load(path.read_text(encoding="utf-8"))
-        for loss_id in handoff["lineage"]["loss_ids"]:
+        lineage = handoff["lineage"]
+        for loss_id in lineage["loss_ids"]:
             by_loss.setdefault(loss_id, []).append(handoff["scenario_id"])
-    return by_loss
+        for hazard_id in lineage["hazard_ids"]:
+            by_hazard.setdefault(hazard_id, []).append(handoff["scenario_id"])
+    return by_loss, by_hazard
 
 
 def _policy_source(risk_extraction: Path) -> dict[str, Any]:
@@ -337,12 +386,14 @@ def publish_policy_coverage(
     actionability: RiskActionabilityRecord | None,
 ) -> Path:
     """Write ``policy-coverage.json`` beside the scenarios it describes."""
+    by_loss, by_hazard = _written_scenarios(output_dir)
     document = build_policy_coverage(
         cards=load_reviewed_risk_extraction(risk_extraction),
         sssom=load_sssom(sssom) if sssom is not None else [],
         actionability=actionability,
         loss_analysis=loss_analysis,
-        scenario_ids_by_loss=_written_scenarios(output_dir),
+        scenario_ids_by_loss=by_loss,
+        scenario_ids_by_hazard=by_hazard,
         source=_policy_source(risk_extraction),
     )
     return write_text_atomically(

@@ -391,7 +391,7 @@ def test_a_run_with_a_risk_extraction_publishes_policy_coverage(tmp_path):
 
     path = result.artifact_paths["policy-coverage.json"]
     document = json.loads(path.read_text())
-    assert document["schema_version"] == "policy-coverage-v1"
+    assert document["schema_version"] == "policy-coverage-v2"
     assert document["policy"]["risk_extraction"] == "risks.json"
 
 

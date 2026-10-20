@@ -1,0 +1,179 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "attack-flow-2.0.0/schema.json",
+  "title": "Asago Attack Flow 2.0.0 attack tree",
+  "description": "What the producer writes to generate/output/report/attack-flow/<hazard-id>.json: a STIX 2.1 bundle in the attack-tree scope of Attack Flow 2.0.0, one per hazard that has a published scenario. This is the subset of the published Attack Flow schema (https://center-for-threat-informed-defense.github.io/attack-flow/stix/attack-flow-schema-2.0.0.json) that the producer writes, with the STIX common properties it needs, so the file validates without fetching either schema. References between objects must resolve inside the bundle; JSON Schema cannot state that, and the README does.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["type", "id", "objects"],
+  "properties": {
+    "type": {"const": "bundle"},
+    "id": {"$ref": "#/$defs/id-bundle"},
+    "objects": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "oneOf": [
+          {"$ref": "#/$defs/extension-definition"},
+          {"$ref": "#/$defs/identity"},
+          {"$ref": "#/$defs/attack-flow"},
+          {"$ref": "#/$defs/attack-action"},
+          {"$ref": "#/$defs/attack-operator"},
+          {"$ref": "#/$defs/attack-condition"}
+        ]
+      },
+      "contains": {"properties": {"type": {"const": "attack-flow"}}, "required": ["type"]},
+      "minContains": 1,
+      "maxContains": 1,
+      "description": "Exactly one attack-flow object, plus the extension definition, the identities and the tree's actions, operators and conditions."
+    }
+  },
+  "$defs": {
+    "stix-id": {"type": "string", "pattern": "^[a-z][a-z0-9-]*--[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"},
+    "id-bundle": {"allOf": [{"$ref": "#/$defs/stix-id"}, {"pattern": "^bundle--"}]},
+    "id-identity": {"allOf": [{"$ref": "#/$defs/stix-id"}, {"pattern": "^identity--"}]},
+    "id-attack-flow": {"allOf": [{"$ref": "#/$defs/stix-id"}, {"pattern": "^attack-flow--"}]},
+    "id-attack-action": {"allOf": [{"$ref": "#/$defs/stix-id"}, {"pattern": "^attack-action--"}]},
+    "id-attack-operator": {"allOf": [{"$ref": "#/$defs/stix-id"}, {"pattern": "^attack-operator--"}]},
+    "id-attack-condition": {"allOf": [{"$ref": "#/$defs/stix-id"}, {"pattern": "^attack-condition--"}]},
+    "id-effect": {"allOf": [{"$ref": "#/$defs/stix-id"}, {"pattern": "^(attack-action|attack-operator|attack-condition)--"}]},
+    "id-start": {"allOf": [{"$ref": "#/$defs/stix-id"}, {"pattern": "^(attack-action|attack-condition)--"}]},
+    "timestamp": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\\.[0-9]+)?Z$"},
+    "text": {"type": "string", "minLength": 1},
+    "extensions": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4"],
+      "properties": {
+        "extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["extension_type"],
+          "properties": {"extension_type": {"const": "new-sdo"}}
+        }
+      },
+      "description": "Every Attack Flow object names the Attack Flow extension definition."
+    },
+    "extension-definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "spec_version", "id", "created_by_ref", "created", "modified", "name", "schema", "version", "extension_types"],
+      "properties": {
+        "type": {"const": "extension-definition"},
+        "spec_version": {"const": "2.1"},
+        "id": {"const": "extension-definition--fb9c968a-745b-4ade-9b25-c324172197f4"},
+        "created_by_ref": {"$ref": "#/$defs/id-identity"},
+        "created": {"$ref": "#/$defs/timestamp"},
+        "modified": {"$ref": "#/$defs/timestamp"},
+        "name": {"const": "Attack Flow"},
+        "description": {"type": "string"},
+        "schema": {"$ref": "#/$defs/text"},
+        "version": {"const": "2.0.0"},
+        "extension_types": {"type": "array", "minItems": 1, "items": {"const": "new-sdo"}},
+        "external_references": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["source_name"],
+            "properties": {
+              "source_name": {"$ref": "#/$defs/text"},
+              "description": {"type": "string"},
+              "url": {"$ref": "#/$defs/text"}
+            }
+          }
+        }
+      },
+      "description": "The Attack Flow 2.0.0 extension definition, which every bundle carries."
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "spec_version", "id", "created_by_ref", "created", "modified", "name", "identity_class"],
+      "properties": {
+        "type": {"const": "identity"},
+        "spec_version": {"const": "2.1"},
+        "id": {"$ref": "#/$defs/id-identity"},
+        "created_by_ref": {"$ref": "#/$defs/id-identity"},
+        "created": {"$ref": "#/$defs/timestamp"},
+        "modified": {"$ref": "#/$defs/timestamp"},
+        "name": {"$ref": "#/$defs/text"},
+        "identity_class": {"$ref": "#/$defs/text"}
+      },
+      "description": "The identity that created the extension definition, and the producer identity that created every other object."
+    },
+    "attack-flow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "spec_version", "id", "created", "modified", "created_by_ref", "extensions", "name", "description", "scope", "start_refs"],
+      "properties": {
+        "type": {"const": "attack-flow"},
+        "spec_version": {"const": "2.1"},
+        "id": {"$ref": "#/$defs/id-attack-flow"},
+        "created": {"$ref": "#/$defs/timestamp"},
+        "modified": {"$ref": "#/$defs/timestamp"},
+        "created_by_ref": {"$ref": "#/$defs/id-identity"},
+        "extensions": {"$ref": "#/$defs/extensions"},
+        "name": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/text"},
+        "scope": {"const": "attack-tree"},
+        "start_refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/id-start"}, "description": "The leaves of the tree: every action and condition that no other object points at."}
+      },
+      "description": "The one flow of the bundle: the hazard and the scenarios that reach it."
+    },
+    "attack-action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "spec_version", "id", "created", "modified", "created_by_ref", "extensions", "name", "description"],
+      "properties": {
+        "type": {"const": "attack-action"},
+        "spec_version": {"const": "2.1"},
+        "id": {"$ref": "#/$defs/id-attack-action"},
+        "created": {"$ref": "#/$defs/timestamp"},
+        "modified": {"$ref": "#/$defs/timestamp"},
+        "created_by_ref": {"$ref": "#/$defs/id-identity"},
+        "extensions": {"$ref": "#/$defs/extensions"},
+        "name": {"$ref": "#/$defs/text"},
+        "description": {"$ref": "#/$defs/text"},
+        "technique_id": {"$ref": "#/$defs/text"},
+        "tactic_id": {"$ref": "#/$defs/text"},
+        "effect_refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/id-effect"}, "description": "The parent: the object this action leads to. The hazard, the root action, has none."}
+      },
+      "description": "The hazard (the root), a scenario, one attack step, or a scenario's unsafe control action."
+    },
+    "attack-operator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "spec_version", "id", "created", "modified", "created_by_ref", "extensions", "operator", "effect_refs"],
+      "properties": {
+        "type": {"const": "attack-operator"},
+        "spec_version": {"const": "2.1"},
+        "id": {"$ref": "#/$defs/id-attack-operator"},
+        "created": {"$ref": "#/$defs/timestamp"},
+        "modified": {"$ref": "#/$defs/timestamp"},
+        "created_by_ref": {"$ref": "#/$defs/id-identity"},
+        "extensions": {"$ref": "#/$defs/extensions"},
+        "operator": {"enum": ["AND", "OR"]},
+        "effect_refs": {"type": "array", "minItems": 1, "maxItems": 1, "items": {"$ref": "#/$defs/id-attack-action"}, "description": "The one attack-action the operator joins into."}
+      },
+      "description": "An OR over the scenarios that reach the hazard, or an AND over one scenario's conditions and steps."
+    },
+    "attack-condition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "spec_version", "id", "created", "modified", "created_by_ref", "extensions", "description", "on_true_refs"],
+      "properties": {
+        "type": {"const": "attack-condition"},
+        "spec_version": {"const": "2.1"},
+        "id": {"$ref": "#/$defs/id-attack-condition"},
+        "created": {"$ref": "#/$defs/timestamp"},
+        "modified": {"$ref": "#/$defs/timestamp"},
+        "created_by_ref": {"$ref": "#/$defs/id-identity"},
+        "extensions": {"$ref": "#/$defs/extensions"},
+        "description": {"$ref": "#/$defs/text"},
+        "on_true_refs": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/id-effect"}, "description": "The scenario's action the condition must hold for."}
+      },
+      "description": "A situation, attacker assumption or weak point of one scenario."
+    }
+  }
+}
