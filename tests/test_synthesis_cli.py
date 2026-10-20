@@ -115,6 +115,33 @@ def test_product_cli_builds_taxonomy_inputs_from_the_bundled_llm_pattern_table(
     assert builder.keywords["sssom_path"] == tmp_path / "mapping.tsv"
 
 
+def test_product_cli_refuses_a_bad_sssom_row_before_running_any_stage(
+    tmp_path: Path,
+) -> None:
+    argv = _generate_argv(tmp_path)
+    (tmp_path / "mapping.tsv").write_text(
+        "subject_id\tsubject_source\tpredicate_id\tobject_id\tobject_source\t"
+        "mapping_justification\n"
+        "other-target-risk\tcredo-ucf\tskos:relatedMatch\tnist-confabulations\t"
+        "nist-ai-rmf\tj\n",
+        encoding="utf-8",
+    )
+    with (
+        patch(
+            "asago_scenario_generator.data.loaders.load_reviewed_risk_extraction",
+            return_value=(),
+        ),
+        patch("asago_scenario_generator.pipeline.synthesis.run_synthesis") as run,
+    ):
+        result = PlainCliRunner().invoke(app, argv)
+
+    assert result.exit_code == 1
+    run.assert_not_called()
+    assert "mapping.tsv:2:" in result.stderr
+    assert "'other-target-risk'" in result.stderr
+    assert "'nist-confabulations'" in result.stderr
+
+
 def test_product_cli_returns_nonzero_after_printing_artifacts_for_zero_yield(
     tmp_path: Path,
 ) -> None:

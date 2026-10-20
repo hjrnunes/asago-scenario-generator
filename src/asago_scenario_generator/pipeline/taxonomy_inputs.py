@@ -107,7 +107,10 @@ def reviewed_owasp_llm_rows(
             continue
         if is_no_match(str(row["predicate_id"])):
             continue
-        code = parse_object_id(OWASP_LLM_SCHEME, str(row["object_id"])).code
+        try:
+            code = parse_object_id(OWASP_LLM_SCHEME, str(row["object_id"])).code
+        except ValueError as exc:
+            raise ValueError(f"SSSOM row for {row['subject_id']!r}: {exc}") from None
         if row["subject_id"] not in risk_ids:
             continue
         row["object_id"] = code

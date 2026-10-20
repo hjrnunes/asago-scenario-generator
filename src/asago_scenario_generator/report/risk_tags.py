@@ -57,17 +57,18 @@ def mapped_tags(sssom: Sequence[SSSOMMapping]) -> dict[str, list[dict[str, str]]
         if mapping.object_source not in TAG_SCHEMES:
             if is_edition_scheme(mapping.object_source):
                 raise ValueError(
-                    f"mapping source {mapping.object_source!r} is not a current "
-                    f"scheme; expected one of {sorted(TAG_SCHEMES)}"
+                    f"SSSOM row for {mapping.subject_id!r}: mapping source "
+                    f"{mapping.object_source!r} is not a current scheme; "
+                    f"expected one of {sorted(TAG_SCHEMES)}"
                 )
             continue
         if is_no_match(mapping.predicate_id):
             continue
-        tag = {
-            "scheme": mapping.object_source,
-            "id": mapping.object_id,
-            "label": scheme_label(mapping.object_source, mapping.object_id),
-        }
+        try:
+            label = scheme_label(mapping.object_source, mapping.object_id)
+        except ValueError as exc:
+            raise ValueError(f"SSSOM row for {mapping.subject_id!r}: {exc}") from None
+        tag = {"scheme": mapping.object_source, "id": mapping.object_id, "label": label}
         known = found.setdefault(mapping.subject_id, [])
         if tag not in known:
             known.append(tag)

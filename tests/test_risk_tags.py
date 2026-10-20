@@ -20,8 +20,8 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     HandoffTaxonomyRef,
 )
 from tests.helpers.stpa_builders import make_loss_analysis
-from tests.helpers.synthesis import _runtime
-from tests.helpers.synthesis_fixture import final_ica_result
+from tests.helpers.synthesis import _FakeAdapters, _runtime
+from tests.helpers.synthesis_fixture import final_ica_result, synthesis_inputs
 from tests.test_policy_coverage import analysis, build, by_id, card, mapping, risk_loss
 
 EXCESSIVE_AGENCY = "llm032026-excessive-agency"
@@ -114,6 +114,16 @@ def test_a_differently_spelled_stale_owasp_source_is_refused(source: str) -> Non
     assert source in str(caught.value)
 
 
+def test_an_unknown_object_id_names_its_risk() -> None:
+    with pytest.raises(ValueError, match="'nist-confabulations'") as caught:
+        merged_risk_tags(
+            [card("one", "One")],
+            [_row("other-risk", "nist-confabulations", "nist-ai-rmf")],
+        )
+
+    assert "'other-risk'" in str(caught.value)
+
+
 def _sssom_file(path: Path, rows: list[tuple[str, str, str]]) -> Path:
     header = (
         "subject_id\tsubject_source\tpredicate_id\tobject_id\tobject_source\t"
@@ -191,3 +201,72 @@ def test_default_scenarios_hand_sp3_each_losss_owasp_references(
         ),
     )
     assert taxonomy.references_by_loss["L-2"] == ()
+
+
+def test_a_bad_row_for_another_targets_risk_stops_the_run_before_any_model_call(
+    tmp_path: Path,
+) -> None:
+    sssom = _sssom_file(
+        tmp_path / "shared.sssom.tsv",
+        [
+            ("risk-a", EXCESSIVE_AGENCY, "owasp-llm-2026"),
+            ("other-target-risk", "nist-confabulations", "nist-ai-rmf"),
+        ],
+    )
+    adapters = _FakeAdapters(calls=[])
+
+    with pytest.raises(ValueError) as caught:
+        synthesis.run_synthesis(
+            synthesis_inputs(tmp_path / "run", sssom_path=sssom), adapters
+        )
+
+    assert adapters.calls == []
+    assert not (tmp_path / "run" / "provider-calls.jsonl").exists()
+    message = str(caught.value)
+    assert f"{sssom}:3:" in message
+    assert "'other-target-risk'" in message
+    assert "'nist-confabulations'" in message
+
+
+def test_the_handoff_references_reuse_the_rows_checked_at_load(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.threat_enum.catalog_enrichment.enrich_threats",
+        lambda *a, **k: SimpleNamespace(structural_threats=[]),
+    )
+    monkeypatch.setattr(
+        "asago_scenario_generator.stpa.scenario_prod.run.run_sp3",
+        lambda **kwargs: captured.update(kwargs) or "sp3",
+    )
+    sssom = _sssom_file(
+        tmp_path / "risks.sssom.tsv", [("r-1", EXCESSIVE_AGENCY, "owasp-llm-2026")]
+    )
+    inputs = synthesis.SynthesisInputs(
+        use_case="u",
+        output_dir=tmp_path,
+        risk_cards=({"risk_id": "r-1", "risk_name": "One"},),
+        sssom_path=sssom,
+    )
+    sssom.unlink()
+    loss = (
+        make_loss_analysis()
+        .risk_card_losses[0]
+        .model_copy(update={"source_risk_cards": ["r-1"]})
+    )
+
+    _default_scenarios(
+        ica_enumeration=final_ica_result(),
+        control_structure=SimpleNamespace(),
+        loss_analysis=make_loss_analysis().model_copy(
+            update={"risk_card_losses": [loss]}
+        ),
+        inputs=inputs,
+        capability_profile=None,
+        output_dir=tmp_path,
+        model_runtime=_runtime(object()),
+    )
+
+    taxonomy = captured["handoff_taxonomy"]
+    assert [ref.id for ref in taxonomy.references_by_loss[loss.loss_id]] == ["LLM03"]

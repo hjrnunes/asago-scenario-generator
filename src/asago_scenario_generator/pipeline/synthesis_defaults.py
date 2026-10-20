@@ -569,7 +569,8 @@ def _handoff_taxonomy(inputs: SynthesisInputs, loss_analysis: Any) -> Any:
 
     A loss's references are the OWASP tags of the risks it came from
     (``source_risk_cards``), each risk carrying the tags of its name-merged
-    group, as policy coverage reports them. Without an SSSOM file every loss
+    group, as policy coverage reports them. They read the SSSOM rows the
+    request checked when it loaded them. Without an SSSOM file every loss
     maps to no reference.
     """
     from asago_scenario_generator.data.risk_schemes import (
@@ -578,7 +579,6 @@ def _handoff_taxonomy(inputs: SynthesisInputs, loss_analysis: Any) -> Any:
         OWASP_LLM_SCHEME,
         parse_object_id,
     )
-    from asago_scenario_generator.data.sssom import load_sssom
     from asago_scenario_generator.data.taxonomy_pins import load_atlas_pin
     from asago_scenario_generator.report.risk_tags import merged_risk_tags
     from asago_scenario_generator.stpa.scenario_prod.handoff import (
@@ -587,8 +587,7 @@ def _handoff_taxonomy(inputs: SynthesisInputs, loss_analysis: Any) -> Any:
     )
 
     handoff_schemes = {OWASP_LLM_SCHEME: "owasp-llm", OWASP_ASI_SCHEME: "owasp-asi"}
-    sssom = load_sssom(inputs.sssom_path) if inputs.sssom_path is not None else []
-    tags = merged_risk_tags(inputs.risk_cards, sssom)
+    tags = merged_risk_tags(inputs.risk_cards, inputs.sssom_mappings or ())
     references_by_loss = {}
     for loss in [*loss_analysis.risk_card_losses, *loss_analysis.use_case_losses]:
         references = {}

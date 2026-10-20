@@ -138,8 +138,10 @@ def test_a_stale_slug_stops_the_planner(tmp_path) -> None:
         "llm062026-excessive-agency\towasp-llm-2026\tj"
     )
 
-    with pytest.raises(ValueError, match="llm062026-excessive-agency"):
+    with pytest.raises(ValueError, match="llm062026-excessive-agency") as caught:
         _build(tmp_path, rows=(*_ROWS, stale))
+
+    assert "'risk-a'" in str(caught.value)
 
 
 def test_llm_pattern_edges_close_over_risk_llm_pattern_paths(default_build) -> None:
