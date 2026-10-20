@@ -6,6 +6,7 @@ scenario handoff reads the same tags, so the two cannot disagree.
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -13,6 +14,7 @@ import pytest
 
 from asago_scenario_generator.pipeline import synthesis
 from asago_scenario_generator.pipeline.synthesis_defaults import _default_scenarios
+from asago_scenario_generator.pipeline.synthesis_persist import _write_policy_coverage
 from asago_scenario_generator.report.risk_tags import merged_risk_tags
 from asago_scenario_generator.stpa.models.loss_analysis import RiskDisposition
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
@@ -22,7 +24,16 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
 from tests.helpers.stpa_builders import make_loss_analysis
 from tests.helpers.synthesis import _FakeAdapters, _runtime
 from tests.helpers.synthesis_fixture import final_ica_result, synthesis_inputs
-from tests.test_policy_coverage import analysis, build, by_id, card, mapping, risk_loss
+from tests.test_policy_coverage import (
+    _write_run,
+    analysis,
+    build,
+    by_id,
+    card,
+    hazard,
+    mapping,
+    risk_loss,
+)
 
 EXCESSIVE_AGENCY = "llm032026-excessive-agency"
 TOOL_MISUSE = "asi02-tool-misuse-and-exploitation"
@@ -318,3 +329,40 @@ def test_without_sssom_rows_or_risk_cards_no_handoff_carries_a_taxonomy_block(
     )
 
     assert captured["handoff_taxonomy"] is None
+
+
+@pytest.mark.parametrize("given", ["path", "rows"])
+def test_policy_coverage_reads_the_rows_checked_at_load(
+    tmp_path: Path, given: str
+) -> None:
+    run = _write_run(tmp_path)
+    sssom = _sssom_file(
+        tmp_path / "risks.sssom.tsv", [("r-a", EXCESSIVE_AGENCY, "owasp-llm-2026")]
+    )
+    source = (
+        {"sssom_path": sssom}
+        if given == "path"
+        else {"sssom_mappings": (_row("r-a", EXCESSIVE_AGENCY, "owasp-llm-2026"),)}
+    )
+    inputs = synthesis.SynthesisInputs(
+        use_case="u",
+        output_dir=run["output_dir"],
+        risk_extraction_path=run["risk_extraction"],
+        **source,
+    )
+    sssom.unlink()
+
+    path = _write_policy_coverage(
+        run["output_dir"],
+        inputs,
+        analysis(
+            [risk_loss("L-1", "Money lost due to errors", ["r-a"])],
+            [],
+            hazards=[hazard("H-1", "Money is lost", "L-1")],
+        ),
+        None,
+    )
+
+    assert path is not None
+    tags = by_id(json.loads(path.read_text()))["r-a"]["tags"]
+    assert [tag["id"] for tag in tags] == [EXCESSIVE_AGENCY]

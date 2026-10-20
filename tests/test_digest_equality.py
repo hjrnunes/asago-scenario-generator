@@ -49,6 +49,7 @@ from asago_scenario_generator.cli.synthesis import (
     build_taxonomy_inputs,
 )
 from asago_scenario_generator.data.loaders import load_reviewed_risk_extraction
+from asago_scenario_generator.data.sssom import load_sssom
 from asago_scenario_generator.data.taxonomy_pins import (
     compute_mapping_set_digest,
     load_atlas_pin,
@@ -124,7 +125,7 @@ def _taxonomy_inputs(unit: str, inputs_root: Path) -> TaxonomyObligationInputs:
         ),
         risk_cards=risks,
         qualification_facts=facts,
-        sssom_path=inputs_root / "risk-to-llm.sssom.tsv",
+        sssom_mappings=tuple(load_sssom(inputs_root / "risk-to-llm.sssom.tsv")),
         llm_pattern_path=_DEFAULT_LLM_PATTERN_TABLE,
     )
 

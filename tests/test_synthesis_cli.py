@@ -112,7 +112,8 @@ def test_product_cli_builds_taxonomy_inputs_from_the_bundled_llm_pattern_table(
     assert result.exit_code == 0
     builder = adapters[0].build_taxonomy_inputs
     assert builder.keywords["llm_pattern_path"] == _DEFAULT_LLM_PATTERN_TABLE
-    assert builder.keywords["sssom_path"] == tmp_path / "mapping.tsv"
+    # The adapter plans from the rows the request checked, never the file.
+    assert "sssom_path" not in builder.keywords
 
 
 def test_product_cli_refuses_a_bad_sssom_row_before_running_any_stage(

@@ -610,7 +610,7 @@ def test_publishing_reads_scenarios_from_disk_and_names_inputs_by_basename(
 
     path = publish_policy_coverage(
         **run,
-        sssom=None,
+        sssom_mappings=(),
         loss_analysis=analysis(
             [
                 risk_loss("L-1", "Money lost due to errors", ["r-a"]),
@@ -647,7 +647,7 @@ def test_a_scenario_naming_every_loss_does_not_widen_a_hazards_losses(
 
     path = publish_policy_coverage(
         **run,
-        sssom=None,
+        sssom_mappings=(),
         loss_analysis=analysis(
             [
                 risk_loss("L-1", "Money lost due to errors", ["r-a"]),

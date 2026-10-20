@@ -147,7 +147,7 @@ def _write_policy_coverage(
         return publish_policy_coverage(
             output_dir=output_dir,
             risk_extraction=inputs.risk_extraction_path,
-            sssom=inputs.sssom_path,
+            sssom_mappings=inputs.sssom_mappings or (),
             loss_analysis=loss_analysis,
             actionability=risk_actionability,
         )

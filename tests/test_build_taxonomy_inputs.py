@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -10,9 +11,17 @@ from asago_scenario_generator.cli.synthesis import (
     _DEFAULT_LLM_PATTERN_TABLE,
     build_taxonomy_inputs,
 )
+from asago_scenario_generator.data.sssom import load_sssom
 from asago_scenario_generator.data.threat_gating import in_scope_attack_pattern_ids
 from asago_scenario_generator.pipeline.obligation_contracts import (
     compute_mapping_bundle_digest,
+)
+from asago_scenario_generator.pipeline.synthesis_baseline import (
+    _prepare_taxonomy_inputs,
+)
+from asago_scenario_generator.pipeline.synthesis_types import (
+    SynthesisAdapters,
+    SynthesisInputs,
 )
 from tests.helpers.obligation_factory import make_inputs
 
@@ -61,7 +70,7 @@ def _build(tmp_path: Path, *, profile=None, llm_pattern_path=None, rows=_ROWS):
             capability_snapshot=base.capability_snapshot,
             risk_cards=base.risk_cards,
             qualification_facts=base.qualification_facts,
-            sssom_path=_sssom(tmp_path, rows),
+            sssom_mappings=tuple(load_sssom(_sssom(tmp_path, rows))),
             llm_pattern_path=llm_pattern_path or _DEFAULT_LLM_PATTERN_TABLE,
             output_dir=tmp_path,
         ),
@@ -198,3 +207,44 @@ def test_empty_bundled_catalog_is_rejected(tmp_path, monkeypatch) -> None:
 
     with pytest.raises(ValueError, match="bundled attack-pattern catalog is empty"):
         _build(tmp_path)
+
+
+def test_the_taxonomy_adapter_plans_from_the_requests_checked_rows(
+    tmp_path: Path,
+) -> None:
+    base = make_inputs()
+    sssom = _sssom(tmp_path, _ROWS[:2])
+    inputs = SynthesisInputs(
+        use_case="u",
+        risk_cards=base.risk_cards,
+        qualification_facts=base.qualification_facts,
+        sssom_path=sssom,
+    )
+    sssom.unlink()
+    adapters = SynthesisAdapters(
+        build_taxonomy_inputs=partial(
+            build_taxonomy_inputs, llm_pattern_path=_DEFAULT_LLM_PATTERN_TABLE
+        )
+    )
+
+    value = _prepare_taxonomy_inputs(
+        inputs, base.capability_snapshot.profile, base.capability_snapshot, adapters
+    ).value
+
+    assert [row.object_id for row in value.sssom_mappings] == ["LLM01", "LLM02"]
+
+
+def test_the_taxonomy_adapter_refuses_a_request_without_sssom_rows(
+    tmp_path: Path,
+) -> None:
+    base = make_inputs()
+
+    with pytest.raises(ValueError, match="SSSOM rows"):
+        build_taxonomy_inputs(
+            capability_profile=base.capability_snapshot.profile,
+            capability_snapshot=base.capability_snapshot,
+            risk_cards=base.risk_cards,
+            qualification_facts=base.qualification_facts,
+            sssom_mappings=None,
+            llm_pattern_path=_DEFAULT_LLM_PATTERN_TABLE,
+        )

@@ -90,8 +90,10 @@ class SynthesisInputs:
     observation_contract: ObservationContract | None = None
     # The rows of ``sssom_path``, every NIST and OWASP row checked against the
     # pinned vocabularies.  Loaded from ``sssom_path`` when not given, so a bad
-    # row stops the request before any stage runs.  A ``replace`` that changes
-    # ``sssom_path`` must pass ``sssom_mappings=None`` to reload.
+    # row stops the request before any stage runs.  The planner, policy
+    # coverage and the handoff all read these rows, never the file again; a
+    # ``replace`` that changes ``sssom_path`` must pass ``sssom_mappings=None``
+    # to reload.
     sssom_mappings: tuple[SSSOMMapping, ...] | None = None
 
     # CLI/source metadata.  These are not read by pure planning seams.

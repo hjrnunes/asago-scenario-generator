@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -162,7 +163,6 @@ def generate_cmd(
         adapter = SynthesisAdapters(
             build_taxonomy_inputs=partial(
                 build_taxonomy_inputs,
-                sssom_path=sssom,
                 llm_pattern_path=_DEFAULT_LLM_PATTERN_TABLE,
             )
         )
@@ -380,16 +380,17 @@ def build_taxonomy_inputs(
     capability_snapshot: Any,
     risk_cards: Any,
     qualification_facts: Any,
-    sssom_path: Path,
+    sssom_mappings: Sequence[Any] | None,
     llm_pattern_path: Path,
     **_: Any,
 ) -> Any:
-    """Load the reviewed mapping files and build the closed planner graph.
+    """Build the closed planner graph from the request's checked SSSOM rows.
 
+    The rows are the ones ``SynthesisInputs`` checked before any stage ran, so
+    the planner, policy coverage and the handoff read one copy of the file.
     This typed CLI adapter keeps the composition root executing the planner
     itself; it never accepts a preassembled plan as a bypass.
     """
-    from asago_scenario_generator.data.sssom import load_sssom
     from asago_scenario_generator.pipeline.taxonomy_inputs import (
         bundled_attack_pattern_catalog,
         taxonomy_obligation_inputs,
@@ -399,8 +400,11 @@ def build_taxonomy_inputs(
         raise TypeError(
             "production taxonomy adapter requires a typed capability profile"
         )
+    if sssom_mappings is None:
+        raise ValueError(
+            "production taxonomy adapter requires the request's SSSOM rows"
+        )
     catalog, catalog_pin = bundled_attack_pattern_catalog()
-    sssom_mappings = load_sssom(sssom_path)
     return taxonomy_obligation_inputs(
         capability_profile=capability_profile,
         capability_snapshot=capability_snapshot,
