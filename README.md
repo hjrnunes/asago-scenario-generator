@@ -211,9 +211,12 @@ output directory, and a reviewed risk-to-OWASP SSSOM file. Its OWASP rows must
 use the `owasp-llm-2026` scheme (IDs `llm{NN}2026-{slug}`) and the
 `owasp-asi-2026` scheme (IDs `asi{NN}-{slug}`), and its NIST rows
 `nist-ai-rmf`. Before any model call, `generate` checks every such row, for
-every risk in the file, against the pinned vocabularies, and stops on another
-OWASP edition in any spelling or an unknown ID, naming the line, the risk, and
-the object ID; `noMatch` rows give no tag. Planning
+every risk in the file, against the pinned vocabularies, and stops on any
+OWASP source other than those two exact schemes (another edition, a current
+edition spelled another way such as `OWASP-LLM-2026`, or another OWASP list
+such as the Web Top 10) and on an unknown ID, naming the line, the risk, and
+the object ID; `noMatch` rows give no tag. Planning, policy coverage and the
+scenario handoff all read the rows checked here. Planning
 always uses the bundled LLM-to-attack-pattern table, infers the capability profile,
 and routes obligations in batches of eight:
 
