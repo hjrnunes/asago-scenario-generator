@@ -18,6 +18,7 @@ from typing import Any
 import pytest
 
 from asago_scenario_generator.models.obligation_consideration import (
+    MissingStructuralConcept,
     NeutralObligationBrief,
     ObligationRoute,
 )
@@ -34,6 +35,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotRequest,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    build_structural_revision_prompts,
     build_structural_routing_prompts,
     build_synthesis_slot_prompts,
     local_obligation_handles,
@@ -354,3 +356,60 @@ def test_stage5_consideration_order_does_not_depend_on_obligation_ids(
 
     assert considered(renamed) == before
     assert list(before) == list(product(sorted(RISKS), sorted(PATTERNS)))
+
+
+_GAP_CONTENT = (
+    ("hazard", "An unbounded tool call has no hazard.", "CA-1-1"),
+    ("loss", "Leaked records are not a named loss.", "RESP-1"),
+    ("responsibility", "No controller reviews the plan.", "CA-1-1"),
+)
+
+
+def _gaps(obligation_ids: Sequence[str]) -> tuple[MissingStructuralConcept, ...]:
+    return tuple(
+        MissingStructuralConcept(
+            concept_type=concept_type,
+            description=description,
+            evidence_refs=(ref,),
+            obligation_id=obligation_id,
+        )
+        for (concept_type, description, ref), obligation_id in zip(
+            _GAP_CONTENT, obligation_ids, strict=True
+        )
+    )
+
+
+def _gap_rename(old: Sequence[str]) -> dict[str, str]:
+    """Rename the trigger obligations so the gap IDs sort in reverse."""
+    before = [item.gap_id for item in _gaps(old)]
+    for start in range(1000):
+        new = [
+            "ob:v1:" + sha256(f"{start + n}".encode()).hexdigest()
+            for n in range(len(old))
+        ]
+        after = [item.gap_id for item in _gaps(new)]
+        if sorted(range(len(old)), key=after.__getitem__) == sorted(
+            range(len(old)), key=before.__getitem__, reverse=True
+        ):
+            return dict(zip(old, new, strict=True))
+    raise AssertionError("no rename reverses the gap order")
+
+
+def test_revision_gap_order_does_not_depend_on_obligation_ids() -> None:
+    old = [item.obligation_id for item in _briefs()[: len(_GAP_CONTENT)]]
+    rename = _gap_rename(old)
+
+    def render(obligation_ids: Sequence[str]) -> tuple[str, str]:
+        return build_structural_revision_prompts(
+            gaps=_gaps(obligation_ids),
+            loss_analysis=_loss_analysis(),
+            control_structure=_control_structure(),
+        )
+
+    system, user = render(old)
+    renamed_system, renamed_user = render([rename[item] for item in old])
+
+    assert _restore(renamed_user, rename) == user
+    assert _restore(renamed_system, rename) == system
+    positions = [user.index(description) for _, description, _ in _GAP_CONTENT]
+    assert positions == sorted(positions)

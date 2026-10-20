@@ -1167,14 +1167,32 @@ def _revision_related_context(
     return tuple(unique[key] for key in sorted(unique))
 
 
+def _revision_gap_order_key(
+    gap: MissingStructuralConcept,
+) -> tuple[str, str, str, tuple[str, ...], str]:
+    """Order a gap by what it asks for, not by its trigger obligation."""
+    return (
+        gap.concept_type,
+        gap.concept_id or "",
+        gap.description,
+        gap.evidence_refs,
+        gap.gap_id or "",
+    )
+
+
 def project_revision_context(
     *,
     gaps: Sequence[MissingStructuralConcept],
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
 ) -> ProviderRevisionContext:
-    """Build one atomic revision view using request-local gap handles."""
-    ordered = tuple(sorted(gaps, key=lambda item: item.gap_id or ""))
+    """Build one atomic revision view using request-local gap handles.
+
+    The gaps are numbered in the order of their content.  Their ``gap_id``
+    hashes the trigger obligation ID, so it only breaks ties; renaming
+    obligation IDs keeps the handles.
+    """
+    ordered = tuple(sorted(gaps, key=_revision_gap_order_key))
     if not ordered:
         raise ValueError("revision context requires at least one gap")
     projected: list[ProviderRevisionGap] = []
