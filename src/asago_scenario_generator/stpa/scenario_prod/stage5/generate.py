@@ -86,6 +86,10 @@ from .compile import (
 )
 
 
+#: Cap on the first Stage 5 request. A complete reply runs to about 2,000
+#: tokens, so a reply that reaches this cap is almost always a repetition loop;
+#: the cap bounds what one costs before the length retry.
+_BDI_MAX_COMPLETION_TOKENS = 4096
 _LENGTH_RETRY_MAX_COMPLETION_TOKENS = 2048
 _LENGTH_RETRY_PROMPT = (
     "\n\nThe prior response was truncated. Return only a concise "
@@ -93,6 +97,9 @@ _LENGTH_RETRY_PROMPT = (
 )
 _LENGTH_RETRY_EXHAUSTED_PREFIX = (
     "BDI generation retry exhausted after LengthFinishReasonError:"
+)
+_TRUNCATED_RETRY_FAILED_PREFIX = (
+    "BDI generation failed after a truncated reply and its concise retry:"
 )
 
 
@@ -375,6 +382,7 @@ def _generate_semantics(
             slot_id=scenario_context.scenario_identity.ica_slot_id,
             scenario_id=scenario_context.scenario_identity.scenario_id,
             temperature=temperature,
+            max_completion_tokens=_BDI_MAX_COMPLETION_TOKENS,
             feedback=feedback,
             failure=first.failure,
             prior_result=first.result,
@@ -481,6 +489,13 @@ def _call_bdi_with_bounded_length_retry(
     failure carried. A call that ended after its one validation correction
     also returns that failure and its attempt number; a call that went
     through the length retry never does.
+
+    The length retry follows a reply that stopped at the completion cap,
+    whether it came back empty (``LengthFinishReasonError``) or with partial
+    content that failed to parse. Only the empty case reports the exhausted
+    prefix that stops the remaining Stage 5 candidates: an empty reply points
+    at the serving runtime, while a partial one is one scenario's repetition
+    loop.
     """
     policy = CorrectionPolicy(
         validation_retries=1,
@@ -509,8 +524,9 @@ def _call_bdi_with_bounded_length_retry(
             ),
         )
 
-    first = call(user_prompt, None)
-    if not _is_length_finish_reason_error(first.error):
+    first = call(user_prompt, _BDI_MAX_COMPLETION_TOKENS)
+    truncated = _is_truncated_reply(first.error, first.result)
+    if not (truncated or _is_length_finish_reason_error(first.error)):
         return _BdiCall(
             first.value,
             first.error,
@@ -524,9 +540,12 @@ def _call_bdi_with_bounded_length_retry(
     )
     if retry.error is None:
         return _BdiCall(retry.value, None, retry.result, ())
+    prefix = (
+        _TRUNCATED_RETRY_FAILED_PREFIX if truncated else _LENGTH_RETRY_EXHAUSTED_PREFIX
+    )
     return _BdiCall(
         None,
-        f"{_LENGTH_RETRY_EXHAUSTED_PREFIX} {retry.error}",
+        f"{prefix} {retry.error}",
         retry.result,
         issues_of(retry.failure),
     )
@@ -673,6 +692,11 @@ def _is_length_finish_reason_error(error: str | None) -> bool:
         return False
     error_type, _, _message = error.partition(":")
     return error_type == "LengthFinishReasonError"
+
+
+def _is_truncated_reply(error: str | None, result: object) -> bool:
+    """Return whether a failed call's last reply stopped at the completion cap."""
+    return error is not None and getattr(result, "finish_reason", None) == "length"
 
 
 def is_bdi_length_retry_exhausted(error: str | None) -> bool:

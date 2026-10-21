@@ -628,7 +628,7 @@ def test_repeated_length_failure_retries_once_with_a_shorter_request(
     )
     assert is_bdi_length_retry_exhausted(error)
     first, retry = client.calls
-    assert first.max_completion_tokens is None
+    assert first.max_completion_tokens == 4096
     assert retry.max_completion_tokens == 2048
     assert retry.user_prompt == first.user_prompt + (
         "\n\nThe prior response was truncated. Return only a concise "
