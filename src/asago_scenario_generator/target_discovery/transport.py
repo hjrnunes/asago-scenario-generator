@@ -103,7 +103,9 @@ class FileMcpInventoryAdapter:
     cursor, each page's ``nextCursor`` is the cursor that requests the page
     after it, and only the last page omits ``nextCursor``.  The whole file and
     its cursor chain are checked on construction, so a bad file fails before
-    discovery runs.  Tool rows are passed through unchanged.
+    discovery runs.  Each tool row is given the shape the live adapter
+    receives from the MCP SDK (see :func:`sdk_shaped_tool_row`), so a sparse
+    file and a live scan of the same tools observe the same inventory.
     """
 
     def __init__(self, path: Path) -> None:
@@ -151,7 +153,7 @@ def _pages_by_cursor(
     by_cursor: dict[str | None, McpInventoryPage] = {None: pages[0]}
     named_page: dict[str, int] = {}
     for index, page in enumerate(pages):
-        next_cursor = None if page.complete else page.next_cursor
+        next_cursor = page.next_cursor
         following = len(pages) - index - 1
         if next_cursor is None:
             if following:
@@ -179,9 +181,15 @@ def _file_page(path: Path, index: int, raw_page: Any) -> McpInventoryPage:
     problem = _tools_list_problem(raw_page)
     if problem is None:
         try:
-            return _normalize_page_mapping(raw_page)
+            page = _normalize_page_mapping(raw_page)
         except ValueError as exc:
             problem = str(exc)
+        else:
+            return McpInventoryPage(
+                tools=tuple(sdk_shaped_tool_row(tool) for tool in page.tools),
+                next_cursor=page.next_cursor,
+                complete=page.complete,
+            )
     raise McpToolsListFileError(
         f"{path}: page {index} is not a tools/list result: {problem}"
     )
@@ -194,12 +202,91 @@ def _tools_list_problem(raw_page: Any) -> str | None:
     payload = raw_page.get("result")
     if not isinstance(payload, Mapping):
         payload = raw_page
-    if not isinstance(payload.get("tools"), list):
+    tools = payload.get("tools")
+    if not isinstance(tools, list):
         return "missing a tools list"
+    for index, tool in enumerate(tools):
+        if not isinstance(tool, Mapping):
+            return f"tool {index} is not a JSON object"
     next_cursor = payload.get("nextCursor", payload.get("next_cursor"))
     if next_cursor is not None and not (isinstance(next_cursor, str) and next_cursor):
         return "nextCursor must be a non-empty string"
+    if next_cursor is not None and payload.get("complete") is True:
+        return "complete is true but nextCursor names another page"
     return None
+
+
+# How the MCP SDK pinned in uv.lock (mcp 1.29.1) shapes a live tools/list row:
+# the live adapter receives ``Tool.model_validate(row).model_dump(mode="python")``,
+# which lists every declared field in this order, fills an absent optional one
+# with None, emits ``_meta`` under its field name ``meta`` and keeps extra
+# fields after them.  Nested ``ToolAnnotations``, ``Icon`` and ``ToolExecution``
+# mappings are filled the same way.  Re-check these when the pin moves:
+# test_file_inventory compares them with the SDK whenever the
+# target-discovery extra is installed.
+SDK_TOOL_FIELDS = (
+    "name",
+    "title",
+    "description",
+    "inputSchema",
+    "outputSchema",
+    "icons",
+    "annotations",
+    "meta",
+    "execution",
+)
+SDK_TOOL_REQUIRED_FIELDS = frozenset({"name", "inputSchema"})
+SDK_TOOL_FIELD_ALIASES = {"_meta": "meta"}
+SDK_TOOL_ANNOTATION_FIELDS = (
+    "title",
+    "readOnlyHint",
+    "destructiveHint",
+    "idempotentHint",
+    "openWorldHint",
+)
+SDK_ICON_FIELDS = ("src", "mimeType", "sizes")
+SDK_TOOL_EXECUTION_FIELDS = ("taskSupport",)
+
+
+def sdk_shaped_tool_row(raw_tool: Mapping[str, Any]) -> dict[str, Any]:
+    """Shape one declared tool row as the live adapter receives it from the SDK.
+
+    Explicit values and extra fields are preserved; a missing required field
+    stays missing so discovery reports the row as malformed.
+    """
+    source = dict(raw_tool)
+    for alias, field in SDK_TOOL_FIELD_ALIASES.items():
+        if alias in source:
+            source[field] = source.pop(alias)
+    row = {
+        field: source.pop(field, None)
+        for field in SDK_TOOL_FIELDS
+        if field in source or field not in SDK_TOOL_REQUIRED_FIELDS
+    }
+    row.update(source)
+    for field, nested_fields in (
+        ("annotations", SDK_TOOL_ANNOTATION_FIELDS),
+        ("execution", SDK_TOOL_EXECUTION_FIELDS),
+    ):
+        if isinstance(row[field], Mapping):
+            row[field] = _sdk_shaped_fields(row[field], nested_fields)
+    if isinstance(row["icons"], list):
+        row["icons"] = [
+            _sdk_shaped_fields(icon, SDK_ICON_FIELDS)
+            if isinstance(icon, Mapping)
+            else icon
+            for icon in row["icons"]
+        ]
+    return row
+
+
+def _sdk_shaped_fields(
+    source: Mapping[str, Any], fields: Sequence[str]
+) -> dict[str, Any]:
+    """Fill absent declared fields with None, keeping extra fields after them."""
+    shaped = {field: source.get(field) for field in fields}
+    shaped.update((key, value) for key, value in source.items() if key not in shaped)
+    return shaped
 
 
 def _run_sync(awaitable: Any) -> Any:
@@ -348,9 +435,14 @@ __all__ = [
     "HttpMcpInventoryAdapter",
     "McpToolsListFileError",
     "McpTransportError",
+    "SDK_ICON_FIELDS",
+    "SDK_TOOL_ANNOTATION_FIELDS",
+    "SDK_TOOL_EXECUTION_FIELDS",
+    "SDK_TOOL_FIELDS",
     "canonical_tool_fields",
     "looks_like_incomplete_page",
     "normalize_page",
+    "sdk_shaped_tool_row",
     "tool_digest_payload",
     "tool_name_hint",
 ]

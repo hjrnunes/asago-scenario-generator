@@ -345,11 +345,16 @@ profile's interpretation calls. The file holds one `tools/list` result
 (`{"tools": [...]}`, optionally wrapped in a JSON-RPC `result`) or a JSON list
 of result pages. Pages are served in file order: the first page answers the
 request without a cursor, each page's `nextCursor` requests the page after it,
-and only the last page omits `nextCursor`. Tool rows, annotations included,
-pass through exactly as a live server's would. The command checks the whole
-file first; a missing, unreadable or invalid-JSON file, a page that is not a
-`tools/list` result, or a cursor that repeats or names a missing page exits
-with code 2 and a message naming the file, and writes nothing. The profile
+and only the last page omits `nextCursor`. Each tool row is given the shape the
+live scan receives from the pinned MCP SDK: absent optional tool fields and
+annotation hints become `null`, `_meta` becomes `meta`, and explicit values and
+extra fields are kept. A sparse file therefore yields the same inventory,
+digests included, as a live scan of the same tools. The command checks the
+whole file first; a missing, unreadable or invalid-JSON file, a page that is
+not a `tools/list` result (including a tool row that is not an object, or
+`complete: true` beside a `nextCursor`), or a cursor that repeats or names a
+missing page exits with code 2 and a message naming the file, and writes
+nothing. The profile
 still records `observed` inventory authority; whether the inventory was
 declared or scanned is recorded by the orchestrator, not the profile.
 

@@ -17,11 +17,11 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
     InventoryAuthority,
     InventoryCompleteness,
-    McpInventoryObservation,
 )
 from asago_scenario_generator.target_discovery import (
     McpInventoryPage,
     McpTargetDiscoveryInputs,
+    TargetDiscoveryResult,
     discover_mcp_target,
     write_target_discovery,
 )
@@ -30,6 +30,7 @@ from asago_scenario_generator.target_discovery.transport import (
     FileMcpInventoryAdapter,
     HttpMcpInventoryAdapter,
     McpToolsListFileError,
+    sdk_shaped_tool_row,
 )
 from tests.cli_helpers import PlainCliRunner
 from tests.helpers.target_discovery import FakeMcpSdk, install_fake_mcp_sdk
@@ -48,6 +49,35 @@ ANNOTATIONS = {
         "openWorldHint": True,
     },
 }
+
+
+# How mcp 1.29.1 dumps a Tool row: every absent optional field and every absent
+# annotation hint comes back as None.  Written out here, apart from the
+# product field list, so the parity tests model the SDK independently.
+TOOL_NULLS = {
+    "title": None,
+    "description": None,
+    "outputSchema": None,
+    "icons": None,
+    "annotations": None,
+    "meta": None,
+    "execution": None,
+}
+ANNOTATION_NULLS = {
+    "title": None,
+    "readOnlyHint": None,
+    "destructiveHint": None,
+    "idempotentHint": None,
+    "openWorldHint": None,
+}
+
+
+def _sdk_expanded(row: dict[str, Any]) -> dict[str, Any]:
+    """Model the SDK's default expansion of a row with no meta, icons or execution."""
+    expanded = {**TOOL_NULLS, **copy.deepcopy(row)}
+    if isinstance(expanded["annotations"], dict):
+        expanded["annotations"] = {**ANNOTATION_NULLS, **expanded["annotations"]}
+    return expanded
 
 
 def _recorded_tools() -> list[dict[str, Any]]:
@@ -88,7 +118,7 @@ class TestFileAdapter:
 
         page = adapter.list_tools()
 
-        assert page.tools == tuple(tools)
+        assert page.tools == tuple(_sdk_expanded(tool) for tool in tools)
         assert page.next_cursor is None
         assert page.complete is True
 
@@ -99,7 +129,9 @@ class TestFileAdapter:
             {"jsonrpc": "2.0", "id": 1, "result": {"tools": tools}},
         )
 
-        assert FileMcpInventoryAdapter(path).list_tools().tools == tuple(tools)
+        assert FileMcpInventoryAdapter(path).list_tools().tools == tuple(
+            _sdk_expanded(tool) for tool in tools
+        )
 
     def test_pages_are_served_in_order_by_the_previous_next_cursor(
         self, tmp_path: Path
@@ -111,9 +143,64 @@ class TestFileAdapter:
         second = adapter.list_tools(first.next_cursor)
         third = adapter.list_tools(second.next_cursor)
 
-        assert first.tools + second.tools + third.tools == tuple(tools)
+        assert first.tools + second.tools + third.tools == tuple(
+            _sdk_expanded(tool) for tool in tools
+        )
         assert (first.next_cursor, second.next_cursor) == ("page-2", "page-3")
         assert third.complete is True
+
+    def test_sparse_row_takes_the_sdk_shape(self):
+        assert sdk_shaped_tool_row({"name": "t", "inputSchema": {}}) == {
+            "name": "t",
+            "title": None,
+            "description": None,
+            "inputSchema": {},
+            "outputSchema": None,
+            "icons": None,
+            "annotations": None,
+            "meta": None,
+            "execution": None,
+        }
+
+    def test_explicit_values_aliases_and_extra_fields_are_kept(self):
+        row = {
+            "name": "t",
+            "description": "d",
+            "inputSchema": {"type": "object"},
+            "annotations": {"destructiveHint": True, "x-review": "manual"},
+            "icons": [{"src": "https://example.test/i.png"}],
+            "execution": {},
+            "_meta": {"k": 1},
+            "x-owner": "payments",
+        }
+
+        assert sdk_shaped_tool_row(row) == {
+            "name": "t",
+            "title": None,
+            "description": "d",
+            "inputSchema": {"type": "object"},
+            "outputSchema": None,
+            "icons": [
+                {"src": "https://example.test/i.png", "mimeType": None, "sizes": None}
+            ],
+            "annotations": {
+                "title": None,
+                "readOnlyHint": None,
+                "destructiveHint": True,
+                "idempotentHint": None,
+                "openWorldHint": None,
+                "x-review": "manual",
+            },
+            "meta": {"k": 1},
+            "execution": {"taskSupport": None},
+            "x-owner": "payments",
+        }
+
+    def test_missing_required_field_stays_missing(self):
+        shaped = sdk_shaped_tool_row({"name": "t"})
+
+        assert "inputSchema" not in shaped
+        assert shaped["title"] is None
 
     def test_unknown_cursor_names_the_file(self, tmp_path: Path):
         path = _write(tmp_path / "t.json", {"tools": []})
@@ -199,6 +286,23 @@ BAD_FILES = {
     "single_page_missing_cursor": (
         _content({"tools": [], "nextCursor": "more"}),
         "page 0 nextCursor 'more' names a missing page",
+    ),
+    "tool_not_object": (
+        _content({"tools": ["not-an-object"]}),
+        "page 0 is not a tools/list result: tool 0 is not a JSON object",
+    ),
+    "complete_with_missing_page_cursor": (
+        _content({"tools": [], "nextCursor": "ghost", "complete": True}),
+        "page 0 is not a tools/list result: complete is true but nextCursor",
+    ),
+    "complete_hides_repeated_cursor": (
+        _content(
+            [
+                {"tools": [], "nextCursor": "a"},
+                {"tools": [], "nextCursor": "a", "complete": True},
+            ]
+        ),
+        "page 1 is not a tools/list result: complete is true but nextCursor",
     ),
     "unreachable_page": (
         _content([{"tools": []}, {"tools": []}]),
@@ -291,7 +395,10 @@ def test_cli_file_scan_writes_an_observed_profile_offline(tmp_path: Path, paged:
     by_name = {tool.name: tool for tool in profile.inventory.tools}
     assert sorted(by_name) == sorted(tool["name"] for tool in tools)
     assert by_name["process_refund"].annotations == ANNOTATIONS["process_refund"]
-    assert by_name["lookup_order"].annotations == ANNOTATIONS["lookup_order"]
+    assert by_name["lookup_order"].annotations == {
+        **ANNOTATION_NULLS,
+        **ANNOTATIONS["lookup_order"],
+    }
     serialized = "\n".join(p.read_text(encoding="utf-8") for p in output_dir.iterdir())
     assert str(path) not in serialized
 
@@ -357,61 +464,94 @@ def test_cli_file_help_documents_the_page_rule():
 
 
 class _SdkResult:
-    """SDK-shaped response: ``model_dump`` returns the result payload."""
+    """SDK-shaped response: ``model_dump`` expands every tool as the SDK does."""
 
     def __init__(self, payload: dict[str, Any]) -> None:
         self._payload = payload
 
     def model_dump(self, mode: str) -> dict[str, Any]:
         assert mode == "python"
-        return copy.deepcopy(self._payload)
+        return {
+            **copy.deepcopy(self._payload),
+            "tools": [_sdk_expanded(tool) for tool in self._payload["tools"]],
+        }
 
 
 class _LivePages:
     """Live adapter over the fake SDK, answering each request with the next page."""
 
-    def __init__(self, sdk: FakeMcpSdk, pages: list[dict[str, Any]]) -> None:
+    def __init__(self, sdk: FakeMcpSdk, responses: list[Any]) -> None:
         self._sdk = sdk
-        self._pages = iter(pages)
+        self._responses = iter(responses)
         self._adapter = HttpMcpInventoryAdapter("http://host/sse")
 
     def list_tools(self, cursor: str | None = None) -> McpInventoryPage:
-        self._sdk.response = _SdkResult(next(self._pages))
+        self._sdk.response = next(self._responses)
         return self._adapter.list_tools(cursor)
 
 
-def _live_inventory(
-    monkeypatch: pytest.MonkeyPatch, pages: list[dict[str, Any]]
-) -> McpInventoryObservation:
+def _live_scan(
+    monkeypatch: pytest.MonkeyPatch,
+    pages: list[dict[str, Any]],
+    responses: list[Any],
+) -> TargetDiscoveryResult:
     sdk = FakeMcpSdk()
     install_fake_mcp_sdk(monkeypatch, sdk)
-    inventory = discover_mcp_target(_inputs(), _LivePages(sdk, pages)).inventory
+    result = discover_mcp_target(_inputs(), _LivePages(sdk, responses))
     assert [call["params"].cursor for call in sdk.list_calls[1:]] == [
         page["nextCursor"] for page in pages[:-1]
     ]
-    assert inventory is not None
-    return inventory
+    return result
+
+
+def _assert_same_scan(
+    declared: TargetDiscoveryResult, live: TargetDiscoveryResult
+) -> None:
+    assert declared.inventory is not None
+    assert live.inventory is not None
+    assert declared.profile is not None
+    assert live.profile is not None
+    assert [tool.model_dump(mode="json") for tool in declared.inventory.tools] == [
+        tool.model_dump(mode="json") for tool in live.inventory.tools
+    ]
+    assert [tool.source_observation_sha256 for tool in declared.inventory.tools] == [
+        tool.source_observation_sha256 for tool in live.inventory.tools
+    ]
+    assert declared.inventory.semantic_digest == live.inventory.semantic_digest
+    assert declared.profile.semantic_digest == live.profile.semantic_digest
+    assert declared.inventory.model_dump(mode="json") == live.inventory.model_dump(
+        mode="json"
+    )
 
 
 @pytest.mark.parametrize(
     "tools", [_recorded_tools(), _annotated_tools()], ids=["recorded", "annotated"]
 )
 @pytest.mark.parametrize("paged", [False, True], ids=["single", "paged"])
-def test_file_inventory_matches_a_live_scan_of_the_same_tools(
+def test_sparse_file_scans_like_a_live_sdk_expanded_scan(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, tools, paged: bool
 ):
     pages = _paged(tools) if paged else [{"tools": tools}]
     path = _write(tmp_path / "t.json", pages)
 
-    live = _live_inventory(monkeypatch, pages)
-    declared = discover_mcp_target(_inputs(), FileMcpInventoryAdapter(path)).inventory
-    assert declared is not None
+    live = _live_scan(monkeypatch, pages, [_SdkResult(page) for page in pages])
+    declared = discover_mcp_target(_inputs(), FileMcpInventoryAdapter(path))
 
-    assert [tool.model_dump(mode="json") for tool in declared.tools] == [
-        tool.model_dump(mode="json") for tool in live.tools
-    ]
-    assert declared.semantic_digest == live.semantic_digest
-    assert declared.model_dump(mode="json") == live.model_dump(mode="json")
+    _assert_same_scan(declared, live)
+
+
+def test_sparse_file_scan_differs_from_an_unexpanded_payload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    tools = _annotated_tools()
+    path = _write(tmp_path / "t.json", {"tools": tools})
+
+    unexpanded = _live_scan(monkeypatch, [{"tools": tools}], [{"tools": tools}])
+    declared = discover_mcp_target(_inputs(), FileMcpInventoryAdapter(path))
+
+    assert declared.inventory is not None
+    assert unexpanded.inventory is not None
+    assert declared.inventory.semantic_digest != unexpanded.inventory.semantic_digest
 
 
 def test_file_scan_persists_like_a_live_scan(
@@ -430,3 +570,63 @@ def test_file_scan_persists_like_a_live_scan(
     assert {name: p.read_bytes() for name, p in declared_files.items()} == {
         name: p.read_bytes() for name, p in live_files.items()
     }
+
+
+SDK_ROWS = [
+    {"name": "minimal", "inputSchema": {"type": "object"}},
+    {
+        "name": "full",
+        "title": "Full",
+        "description": "Every field.",
+        "inputSchema": {"type": "object", "properties": {"a": {"type": "string"}}},
+        "outputSchema": {"type": "object"},
+        "icons": [{"src": "https://example.test/i.png", "sizes": ["16x16"]}],
+        "annotations": {
+            "title": "Full",
+            "readOnlyHint": True,
+            "destructiveHint": False,
+            "idempotentHint": True,
+            "openWorldHint": False,
+        },
+        "_meta": {"k": 1},
+        "execution": {"taskSupport": "optional"},
+    },
+    {
+        "name": "partial",
+        "inputSchema": {},
+        "annotations": {"destructiveHint": True, "x-review": "manual"},
+        "execution": {},
+        "x-owner": "payments",
+    },
+    {"name": "null_annotations", "inputSchema": {}, "annotations": None},
+]
+
+
+def test_file_rows_match_the_installed_sdk_dump():
+    mcp_types = pytest.importorskip("mcp.types")
+
+    live_rows = mcp_types.ListToolsResult.model_validate(
+        {"tools": copy.deepcopy(SDK_ROWS)}
+    ).model_dump(mode="python")["tools"]
+
+    assert [sdk_shaped_tool_row(row) for row in SDK_ROWS] == live_rows
+
+
+def test_file_scan_matches_a_live_scan_through_the_installed_sdk(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    mcp_types = pytest.importorskip("mcp.types")
+    tools = [
+        {key: value for key, value in tool.items() if key != "outputSchema"}
+        for tool in _annotated_tools()
+    ] + SDK_ROWS
+    pages = _paged(tools)
+    path = _write(tmp_path / "t.json", pages)
+    responses = [
+        mcp_types.ListToolsResult.model_validate(copy.deepcopy(page)) for page in pages
+    ]
+
+    live = _live_scan(monkeypatch, pages, responses)
+    declared = discover_mcp_target(_inputs(), FileMcpInventoryAdapter(path))
+
+    _assert_same_scan(declared, live)
