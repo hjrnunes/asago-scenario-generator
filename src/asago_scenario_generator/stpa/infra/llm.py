@@ -469,6 +469,10 @@ class LLMResult(BaseModel):
         default=None,
         description="Exact provider message content before local parsing.",
     )
+    finish_reason: str | None = Field(
+        default=None,
+        description="Provider finish reason, such as stop or length, when reported.",
+    )
     request_controls: dict[str, Any] = Field(
         default_factory=dict,
         description="Nonsecret provider controls used for this request.",
@@ -765,6 +769,7 @@ class LLMClient:
             system_prompt=system_prompt,
             user_prompt=effective_user_prompt,
             raw_response=_response_content(response),
+            finish_reason=_response_finish_reason(response),
             request_controls=self._request_controls(
                 effective_temp,
                 effective_max,

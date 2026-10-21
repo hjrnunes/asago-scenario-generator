@@ -79,9 +79,11 @@ with unit tests under `tests/` and prompt text with rows in
   retries. The one retry the client makes after a transport error (HTTP 5xx or
   a connection error that is not a timeout) is not hidden: it is recorded in
   `provider-calls.jsonl` and counts as a request. Nothing else retries, with
-  one stated exception: the Stage 1a risk-coverage review repeats a batch once
-  when its reply decodes but carries no row (`{"rows": []}`); the repeat is a
-  recorded request and counts too.
+  two stated exceptions, each a recorded request that counts: the Stage 1a
+  risk-coverage review repeats a batch once when its reply decodes but carries
+  no row (`{"rows": []}`), and Stage 5 repeats a scenario request once, asking
+  for a concise reply under a 2,048-token cap, when the reply stopped at its
+  completion cap.
 - For execution, use the orchestrator's existing stage runner. Consumer
   authoring does not start services or perform setup.
 - Keep frozen inputs, packages, and historical evidence unchanged; write new
