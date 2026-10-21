@@ -25,7 +25,12 @@ from .persistence import (
     TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION,
     write_target_discovery,
 )
-from .transport import HttpMcpInventoryAdapter, McpTransportError
+from .transport import (
+    FileMcpInventoryAdapter,
+    HttpMcpInventoryAdapter,
+    McpToolsListFileError,
+    McpTransportError,
+)
 
 __all__ = [
     "InventoryAdapterResponse",
@@ -50,6 +55,8 @@ __all__ = [
     "PROFILE_FILENAME",
     "TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION",
     "write_target_discovery",
+    "FileMcpInventoryAdapter",
     "HttpMcpInventoryAdapter",
+    "McpToolsListFileError",
     "McpTransportError",
 ]

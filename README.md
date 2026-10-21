@@ -335,6 +335,33 @@ uv run asago-scenario-generator generate \
   build/target-discovery/my-agent/execution-target-profile.json
 ```
 
+A planned agent with no running server is profiled from a declared MCP
+`tools/list` result with `asago-target-scan file --tools-list PATH`. It takes
+the same `--target-id`, `--authorization-scope`, `--output-dir`, `--profile`,
+`--profiles-file`, `--mode` and `--interpretation-batch-size` options as `mcp`,
+runs the same discovery and interpretation, and writes the same four artifacts.
+It needs no extra and makes no network call apart from the named model
+profile's interpretation calls. The file holds one `tools/list` result
+(`{"tools": [...]}`, optionally wrapped in a JSON-RPC `result`) or a JSON list
+of result pages. Pages are served in file order: the first page answers the
+request without a cursor, each page's `nextCursor` requests the page after it,
+and only the last page omits `nextCursor`. Tool rows, annotations included,
+pass through exactly as a live server's would. The command checks the whole
+file first; a missing, unreadable or invalid-JSON file, a page that is not a
+`tools/list` result, or a cursor that repeats or names a missing page exits
+with code 2 and a message naming the file, and writes nothing. The profile
+still records `observed` inventory authority; whether the inventory was
+declared or scanned is recorded by the orchestrator, not the profile.
+
+```bash
+uv run asago-target-scan file \
+  --tools-list planned-agent/tools-list.json \
+  --target-id my-planned-agent \
+  --authorization-scope local-test \
+  --profile <profile-name> \
+  --output-dir build/target-discovery/my-planned-agent
+```
+
 The ordinary STPA baseline is completed without the profile. The profile is
 used only afterward by a separately attested target-realization step, which
 may select exact observed operations and add narrowly verified target-specific
