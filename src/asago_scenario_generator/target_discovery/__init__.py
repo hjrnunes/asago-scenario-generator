@@ -25,6 +25,7 @@ from .persistence import (
     TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION,
     write_target_discovery,
 )
+from .runtime_contract import PLANTED_ITEM, declared_runtime_contract
 from .transport import (
     FileMcpInventoryAdapter,
     HttpMcpInventoryAdapter,
@@ -55,6 +56,8 @@ __all__ = [
     "PROFILE_FILENAME",
     "TARGET_DISCOVERY_MANIFEST_SCHEMA_VERSION",
     "write_target_discovery",
+    "PLANTED_ITEM",
+    "declared_runtime_contract",
     "FileMcpInventoryAdapter",
     "HttpMcpInventoryAdapter",
     "McpToolsListFileError",
