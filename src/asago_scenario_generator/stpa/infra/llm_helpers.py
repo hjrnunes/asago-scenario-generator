@@ -913,7 +913,7 @@ def compact_validation_error(error: Exception) -> str:
 
 def _validation_error_lines(error: ValidationError) -> list[str]:
     """Describe at most eight failed fields, without input values or URLs."""
-    items = error.errors(include_url=False, include_context=False, include_input=False)
+    items = error.errors(include_url=False, include_context=False)
     return [
         f"- {'.'.join(str(part) for part in item['loc']) or 'response'}: "
         f"{_model_facing_message(item)} ({item['type']})"
@@ -926,10 +926,25 @@ def _model_facing_message(item: Mapping[str, Any]) -> str:
 
     Pydantic words a ``model_type`` failure as "... or instance of <Class>",
     and the class is an internal wire model the response never mentions.
+    A type failure on a null says so, since the message alone reads the
+    same for any wrong value.
     """
-    if item["type"] == "model_type":
-        return "Input should be an object"
-    return str(item["msg"])
+    message = (
+        "Input should be an object"
+        if item["type"] == "model_type"
+        else str(item["msg"])
+    )
+    if item.get("input", _NO_INPUT) is None and _is_type_failure(item["type"]):
+        return f"{message}, not null"
+    return message
+
+
+_NO_INPUT = object()
+
+
+def _is_type_failure(error_type: str) -> bool:
+    """Whether a Pydantic error type rejects the kind of value given."""
+    return error_type.endswith("_type") or error_type in ("literal_error", "enum")
 
 
 def _truncated(message: str, limit: int) -> str:

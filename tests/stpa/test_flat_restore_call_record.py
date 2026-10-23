@@ -116,12 +116,8 @@ def test_a_failed_call_records_the_drops_made_before_it_failed(
     assert outcome.value is None
     [entry] = read_calls_jsonl(tmp_path)
     assert entry["success"] is False
+    # targeted requires targeting, so its null stays and fails validation.
     assert entry["flat_restore_drops"] == [
-        {
-            "path": "/routes/0/targeting",
-            "branch": "targeted",
-            "reason": "null_to_default",
-        },
         {
             "path": "/routes/0/missing_concepts",
             "branch": "targeted",
