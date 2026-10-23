@@ -63,7 +63,10 @@ class CallRecord(_Read):
 
     ``response_content`` is the reply text.  A call log written before calls
     named their provider records holds it; for a newer log the report reads
-    a successful call's reply from the record of its last request.
+    a successful call's reply from the record of its last request.  The old
+    log stored a reply the client had parsed against its response model as
+    that model's JSON dump; ``response_parsed`` marks such a reply, whose raw
+    text a reader must normalize as the model did.
     """
 
     n: int = 0
@@ -82,6 +85,7 @@ class CallRecord(_Read):
     duration_ms: int = 0
     retry_of: str | None = None
     provider_requests: list[ProviderRequest] = Field(default_factory=list)
+    response_parsed: bool = False
     response_content: str | None = None
 
     @property

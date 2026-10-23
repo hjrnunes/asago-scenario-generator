@@ -22,13 +22,16 @@ Call log entry format (Section 6 of the STPA-Sec foundation spec):
       "provider_requests": [{"sequence": 7, "request_sha256": "sha256..."}]
     }
 
-An entry logged through a provider-call session holds no prompt or response
-text: ``provider-calls.jsonl`` keeps each request exactly as sent and each
-response exactly as returned, and ``provider_requests`` names the records of
-the requests the call sent (their ``sequence`` and ``request_sha256``), in
-the order sent; a call that sent none has an empty list.  Without a session
-the call log is the only record, so its entries keep the prompt text and the
-raw, cleaned and stringified response.
+An entry whose call wrote ``provider-calls.jsonl`` records holds no prompt or
+response text: those records keep each request exactly as sent and each
+response exactly as returned, and ``provider_requests`` names them (their
+``sequence`` and ``request_sha256``) in the order sent.  ``response_parsed``
+then says whether the client returned the reply parsed against its response
+model rather than as text, which is how the reply used to be stored.  An entry
+whose call wrote no record (no session, a session that records nothing, or a
+call stopped before dispatch) has an empty ``provider_requests`` and keeps the
+prompt text and the raw, cleaned and stringified response instead.  Entries
+written before calls named their records have no ``provider_requests``.
 
 Publishing a call appends one event line, ``{"kind": "call-published",
 "attempt_id": ...}``, instead of rewriting the file.  :func:`call_entries`
@@ -286,7 +289,8 @@ def make_call_log_entry(
     terminal_error_codes: tuple[str, ...] = (),
     prompt_template_hashes: Mapping[str, str] | None = None,
     retry_of: str | None = None,
-    provider_requests: Sequence[Mapping[str, Any]] | None = None,
+    provider_requests: Sequence[Mapping[str, Any]] = (),
+    response_parsed: bool = False,
 ) -> dict[str, Any]:
     """Build a call-log entry dict following the STPA format (Section 6).
 
@@ -314,15 +318,18 @@ def make_call_log_entry(
         flat_restore_drops: The drops the flat-reply restore made (path,
             branch, reason); the dropped values stay in the raw response.
         provider_requests: The ``sequence`` and ``request_sha256`` of each
-            ``provider-calls.jsonl`` record the call sent, when the run keeps
-            that record.  The entry then holds no prompt or response text,
-            only these keys; ``None`` keeps the text in the entry instead.
+            ``provider-calls.jsonl`` record the call wrote.  With any, the
+            entry holds these keys instead of the prompt and response text;
+            with none it keeps the text.
+        response_parsed: Whether the client returned the reply parsed
+            against its response model rather than as text; stored with
+            *provider_requests*.
 
     Returns:
         A dict suitable for JSONL serialization.
     """
     _timestamp = timestamp or datetime.now(timezone.utc).isoformat()
-    keep_text = provider_requests is None
+    keep_text = not provider_requests
     entry: dict[str, Any] = {
         "stage": stage,
         "step": step,
@@ -331,17 +338,15 @@ def make_call_log_entry(
         "system_prompt_hash": _sha256(system_prompt) if system_prompt else "",
         "user_prompt_hash": _sha256(user_prompt) if user_prompt else "",
     }
+    entry["provider_requests"] = [
+        {"sequence": request["sequence"], "request_sha256": request["request_sha256"]}
+        for request in provider_requests
+    ]
     if keep_text:
         entry["system_prompt_text"] = system_prompt
         entry["user_prompt_text"] = user_prompt
     else:
-        entry["provider_requests"] = [
-            {
-                "sequence": request["sequence"],
-                "request_sha256": request["request_sha256"],
-            }
-            for request in provider_requests or ()
-        ]
+        entry["response_parsed"] = response_parsed
     entry |= {
         "model": model,
         "call_category": "producer_provider",
@@ -456,6 +461,8 @@ def call_entries(text: str) -> list[dict[str, Any]]:
 
     Each publication event marks the latest entry before it with its
     ``attempt_id`` as compiled and published, and is not itself returned.
+    An event with no such entry (it names no call, or precedes its call)
+    marks nothing.
     Entries of logs written before publication events load unchanged.
     """
     entries: list[dict[str, Any]] = []

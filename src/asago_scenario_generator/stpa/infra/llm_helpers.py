@@ -1035,10 +1035,9 @@ def log_llm_call(
         run_dir: Directory where ``calls.jsonl`` is appended.
         stage: Pipeline stage identifier (e.g. ``"stage_1a"``).
         step: Sub-step within the stage (e.g. ``"loss_analysis"``).
-        call_log: The call log of the provider-call session the call went
-            through.  With one, ``provider-calls.jsonl`` holds the request
-            and response, so the entry keeps only *provider_requests*, the
-            records the call sent; without one it keeps the text.
+        provider_requests: The ``provider-calls.jsonl`` records the call
+            wrote.  With any, the entry names them instead of holding the
+            prompt and response text; with none it keeps the text.
     """
     _success = True
     _response_content = _stringify_response_content(result.content)
@@ -1082,7 +1081,8 @@ def log_llm_call(
         published=False,
         prompt_template_hashes=prompt_template_hashes,
         retry_of=retry_of,
-        provider_requests=None if call_log is None else provider_requests,
+        provider_requests=provider_requests,
+        response_parsed=isinstance(result.content, BaseModel),
     )
     entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir, call_log)
@@ -1136,8 +1136,8 @@ def log_llm_call_failure(
         prompt_tokens: Prompt tokens consumed (0 if call failed before completion).
         completion_tokens: Completion tokens generated (0 if call failed before completion).
         duration_ms: Wall-clock duration in milliseconds (0 if not measured).
-        call_log: As for :func:`log_llm_call`; *provider_requests* names the
-            records the call sent, none when it failed before dispatch.
+        provider_requests: As for :func:`log_llm_call`; none when the call
+            failed before dispatch.
     """
     _success = False
     entry = make_call_log_entry(
@@ -1169,7 +1169,7 @@ def log_llm_call_failure(
         terminal_error_codes=terminal_error_codes,
         prompt_template_hashes=prompt_template_hashes,
         retry_of=retry_of,
-        provider_requests=None if call_log is None else provider_requests,
+        provider_requests=provider_requests,
     )
     entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir, call_log)

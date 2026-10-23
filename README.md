@@ -501,13 +501,16 @@ reasons against the full applicable-obligation denominator, while
 `calls.jsonl` distinguishes a returned provider response from parsing,
 semantic validation, compilation, and publication. When an attempt repeats an
 earlier failed one, its `calls.jsonl` line names that attempt in `retry_of`.
-`calls.jsonl` holds no prompt or response text (`provider-calls.jsonl`, below,
-has it): each line's `provider_requests` lists the `sequence` and `request_sha256` of the
-`provider-calls.jsonl` records the call sent, in order (empty when it sent
-none). Publishing a call appends a `{"kind": "call-published", "attempt_id":
-...}` line that marks the latest earlier line with that `attempt_id`; earlier
-lines are never rewritten. Logs written before these changes, with the text
-and with publication marked in place, still load.
+Each `calls.jsonl` line's `provider_requests` lists the `sequence` and
+`request_sha256` of the `provider-calls.jsonl` records (below) the call wrote,
+in order. A line with records holds no prompt or response text; its
+`response_parsed` says whether the client parsed the reply against its
+response model. A line whose call wrote no record (it was stopped before
+dispatch, or nothing records the run's requests) has an empty list and keeps
+the text. Publishing a call appends a `{"kind": "call-published",
+"attempt_id": ...}` line that marks the latest earlier line with that
+`attempt_id`; earlier lines are never rewritten. Logs written before these
+changes, with the text and with publication marked in place, still load.
 
 `generate` writes its report to `report/index.html`, built on the shared
 report kit, with `report/stage-summary.json` beside it. `policy-coverage.json`

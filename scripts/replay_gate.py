@@ -92,20 +92,6 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
         "the attempt a retry repeats lacks retry_of",
     ),
     AllowedDifference(
-        CALLS_FILENAME,
-        (
-            "system_prompt_text",
-            "user_prompt_text",
-            "raw_response",
-            "cleaned_response",
-            "response_content",
-            "provider_requests",
-        ),
-        "a recording made before calls.jsonl named its provider-calls.jsonl "
-        "records holds the prompt and response text instead; the record "
-        "sequence numbers follow the arrival order of concurrent requests",
-    ),
-    AllowedDifference(
         "run-manifest.yaml",
         ("created_at",),
         "wall-clock time of the run",
@@ -192,6 +178,25 @@ ALLOWED_FILE_CHANGES: tuple[AllowedFileChange, ...] = (
         "policy-coverage.json", "replay", "the policy funnel the report reads"
     ),
 )
+
+# A calls.jsonl entry names the provider-calls.jsonl records its call wrote
+# (``provider_requests``, with ``response_parsed``), or has an empty list and
+# holds the prompt and response text when it wrote none.  An entry logged
+# before entries named their records has no ``provider_requests`` and holds
+# the text.  Only such an entry compares with a current one without the text
+# and link fields; two current entries compare their request digests, after
+# each side's links are checked against its own record.  Sequence numbers
+# follow the arrival order of concurrent requests, so only that check reads
+# them.
+_CALL_TEXT_FIELDS = (
+    "system_prompt_text",
+    "user_prompt_text",
+    "raw_response",
+    "cleaned_response",
+    "response_content",
+)
+_CALL_LINK_FIELDS = ("provider_requests", "response_parsed")
+_CALL_IDENTITY_FIELDS = ("stage", "step", "slot_id", "scenario_id", "attempt_number")
 
 # Files that carry a framed digest over their own payload.  The gate checks
 # that each side's digest matches its payload, then compares the payloads.
@@ -549,6 +554,54 @@ def _provider_record_order(record: dict[str, Any]) -> str:
     )
 
 
+def _pair_call_forms(left: list[Any], right: list[Any]) -> None:
+    """Make each pair of call entries comparable on what both forms hold."""
+    for a, b in zip(left, right):
+        if not (isinstance(a, dict) and isinstance(b, dict)):
+            continue
+        if ("provider_requests" in a) != ("provider_requests" in b):
+            for entry in (a, b):
+                for name in _CALL_TEXT_FIELDS + _CALL_LINK_FIELDS:
+                    entry.pop(name, None)
+        elif "provider_requests" in a:
+            for entry in (a, b):
+                entry["provider_requests"] = [
+                    link.get("request_sha256") for link in entry["provider_requests"]
+                ]
+
+
+def _provider_records(directory: Path) -> dict[Any, dict[str, Any]]:
+    path = directory / RECORD_FILENAME
+    if not path.is_file():
+        return {}
+    records = (json.loads(line) for line in jsonl_lines(path.read_text("utf-8")))
+    return {record.get("sequence"): record for record in records}
+
+
+def _call_link_problem(calls: Path, side: str) -> str | None:
+    """Check that each call names records of its own ``provider-calls.jsonl``.
+
+    A link must give the sequence and request digest of one record whose call
+    identity is the entry's.
+    """
+    entries = call_entries(calls.read_text(encoding="utf-8"))
+    records = _provider_records(calls.parent)
+    for index, entry in enumerate(entries):
+        for link in entry.get("provider_requests", ()):
+            where = f"{side} $[{index}].provider_requests {_short(link)}"
+            record = records.get(link.get("sequence"))
+            if record is None or record.get("request_sha256") != link.get(
+                "request_sha256"
+            ):
+                return f"{where} names no record of {RECORD_FILENAME}"
+            identity = record.get("identity")
+            if identity is not None and any(
+                identity.get(name) != entry.get(name) for name in _CALL_IDENTITY_FIELDS
+            ):
+                return f"{where} names the record of another call"
+    return None
+
+
 def _self_digest_difference(document: Any, side: str) -> str | None:
     from asago_scenario_generator.pipeline.synthesis_manifest import (
         _MANIFEST_DOMAIN,
@@ -581,8 +634,14 @@ def compare_file(
     added to *removed_templates*.  Self-digested files check their digest
     over the full recorded payload first, and the digest itself is an allowed
     difference, so dropping a template entry never leaves a stale digest in
-    the comparison.
+    the comparison.  ``calls.jsonl`` first checks each side's links against
+    that side's own ``provider-calls.jsonl``.
     """
+    if relative == CALLS_FILENAME:
+        for path, side in ((recorded, "recording"), (replayed, "replay")):
+            problem = _call_link_problem(path, side)
+            if problem:
+                return problem
     left = recorded.read_bytes()
     right = replayed.read_bytes()
     if left == right:
@@ -611,6 +670,8 @@ def compare_file(
     if relative == RECORD_FILENAME:
         left_data = sorted(left_data, key=_provider_record_order)
         right_data = sorted(right_data, key=_provider_record_order)
+    if relative == CALLS_FILENAME:
+        _pair_call_forms(left_data, right_data)
     jsonl = suffix == ".jsonl"
     left_data = _normalise(left_data, relative, jsonl=jsonl)
     right_data = _normalise(right_data, relative, jsonl=jsonl)

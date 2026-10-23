@@ -27,7 +27,11 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     log_llm_call_failure,
 )
 from asago_scenario_generator.stpa.infra.manifest_helpers import count_calls_by_stage
-from asago_scenario_generator.stpa.infra.provider_record import ProviderCallSession
+from asago_scenario_generator.stpa.infra.provider_record import (
+    RECORD_FILENAME,
+    ProviderCallReplayer,
+    ProviderCallSession,
+)
 from tests.helpers.provider_call_record import (
     _Answer,
     _answer,
@@ -118,7 +122,14 @@ def test_a_failed_session_call_names_the_record_it_sent(tmp_path: Path) -> None:
     assert entry["provider_requests"] == _joins(_records(tmp_path))
 
 
-def test_a_failure_logged_before_dispatch_names_no_record(tmp_path: Path) -> None:
+def _keeps_its_text(entry: dict[str, Any]) -> None:
+    assert entry["provider_requests"] == []
+    assert "response_parsed" not in entry
+    assert entry["system_prompt_text"] == SYSTEM_PROMPT
+    assert entry["user_prompt_text"] == USER_PROMPT
+
+
+def test_a_failure_logged_before_dispatch_keeps_its_text(tmp_path: Path) -> None:
     log_llm_call_failure(
         "m",
         tmp_path,
@@ -131,19 +142,47 @@ def test_a_failure_logged_before_dispatch_names_no_record(tmp_path: Path) -> Non
     )
 
     (entry,) = _entries(tmp_path)
-    assert entry["provider_requests"] == []
-    assert TEXT_FIELDS.isdisjoint(entry)
-    assert entry["system_prompt_hash"]
+    _keeps_its_text(entry)
 
 
 def test_a_call_without_a_session_keeps_its_text(tmp_path: Path) -> None:
     _call(_client(_Provider(_answer)), tmp_path)
 
     (entry,) = _entries(tmp_path)
-    assert "provider_requests" not in entry
-    assert entry["system_prompt_text"] == SYSTEM_PROMPT
-    assert entry["user_prompt_text"] == USER_PROMPT
+    _keeps_its_text(entry)
     assert json.loads(entry["response_content"]) == {"answer": "42"}
+
+
+def test_a_session_that_records_nothing_keeps_the_text(tmp_path: Path) -> None:
+    recorded, run_dir = tmp_path / "recorded", tmp_path / "run"
+    _call(
+        _client(_Provider(_answer), session=ProviderCallSession(record_dir=recorded)),
+        recorded,
+    )
+    replay = ProviderCallSession(
+        record_dir=None, replayer=ProviderCallReplayer(recorded)
+    )
+
+    _call(_client(_Provider(_answer), session=replay), run_dir)
+
+    assert not (run_dir / RECORD_FILENAME).exists()
+    (line,) = (run_dir / "calls.jsonl").read_text(encoding="utf-8").splitlines()
+    entry = json.loads(line)
+    assert entry["success"] is True
+    _keeps_its_text(entry)
+    assert json.loads(entry["response_content"]) == {"answer": "42"}
+
+
+def test_a_publication_event_naming_no_earlier_call_marks_nothing() -> None:
+    entry = make_call_log_entry(stage="s", step="x", model="m", compiled=False)
+    early = {"kind": "call-published", "attempt_id": entry["attempt_id"]}
+    orphan = {"kind": "call-published", "attempt_id": "elsewhere"}
+    text = "".join(json.dumps(r) + "\n" for r in (early, entry, orphan))
+
+    (folded,) = call_entries(text)
+
+    assert folded["published"] is False
+    assert folded["compiled"] is False
 
 
 def _validated(step: str) -> dict[str, Any]:

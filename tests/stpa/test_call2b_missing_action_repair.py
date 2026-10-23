@@ -17,7 +17,6 @@ from typing import Any
 
 import pytest
 
-from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
@@ -26,6 +25,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     _call_2b_control_elements,
     _MissingActionProviderSet,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.sp1_control_structure import _responsibilities
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -100,10 +100,7 @@ def _client(*replies: Any) -> MockLLMClient:
 
 
 def _attempts(run_dir: Path) -> list[dict[str, Any]]:
-    rows = [
-        json.loads(line) for line in jsonl_lines((run_dir / "calls.jsonl").read_text())
-    ]
-    return [row for row in rows if row["step"] == STEP]
+    return [row for row in read_calls_jsonl(run_dir) if row["step"] == STEP]
 
 
 def _normalized(text: str) -> str:

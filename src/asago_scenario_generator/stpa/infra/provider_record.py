@@ -584,13 +584,15 @@ class ProviderCallSession:
             self._local.scope_requests = [
                 {"sequence": attempt.sequence, "request_sha256": attempt.digest}
                 for attempt in pending
+                if self.record_dir is not None
             ]
 
     def scope_requests(self) -> list[dict[str, Any]]:
-        """Return the records of the requests this thread's latest scope sent.
+        """Return the records this thread's latest scope wrote.
 
         Each is the ``sequence`` and ``request_sha256`` of one record, in the
-        order sent; a call log entry names them to join its records.
+        order sent; a call log entry names them to join its records.  A
+        session without a record directory writes none.
         """
         return list(getattr(self._local, "scope_requests", None) or ())
 

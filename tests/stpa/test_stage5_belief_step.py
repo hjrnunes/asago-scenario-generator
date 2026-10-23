@@ -55,6 +55,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
     ShapeProposal,
 )
 from tests.helpers.belief_step import CA_EVIDENCE, belief_spec
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.scenario_handoff_publication import (
     _functional_payload,
     _normal_semantics_payload,
@@ -391,9 +392,7 @@ def test_a_valid_reply_states_each_factor_belief_and_variable(
     (call,) = client.calls
     assert call.max_completion_tokens == BELIEF_MAX_COMPLETION_TOKENS
     assert issubclass(call.response_format, StatedBeliefReply)
-    (record,) = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    (record,) = read_calls_jsonl(tmp_path)
     assert (record["stage"], record["step"]) == (BELIEF_STAGE, BELIEF_STEP)
     assert record["scenario_id"] == spec.scenario_id
     assert record["slot_id"] == spec.threat_source.ica_slot_id
