@@ -191,8 +191,10 @@ ALLOWED_FILE_CHANGES: tuple[AllowedFileChange, ...] = (
 # each side's links are checked against its own record.  Sequence numbers
 # follow the arrival order of concurrent requests, so only that check reads
 # them: within an entry the links must rise without repeats (a transport
-# retry's records share their digest and identity), no record may be named
-# twice, and when every entry is current each record must be named once.
+# retry's records share their digest and identity), and no record may be
+# named twice.  A record need not be named at all: an interrupted call or a
+# direct client request writes one without a call entry, and the gate
+# compares provider-calls.jsonl itself.
 _CALL_TEXT_FIELDS = (
     "system_prompt_text",
     "user_prompt_text",
@@ -603,8 +605,7 @@ def _call_link_problem(calls: Path, side: str) -> str | None:
 
     Each link must give the sequence and request digest of one record whose
     call identity is the entry's.  An entry's links rise in sequence without
-    repeats, and no record is named by two entries.  When every entry is
-    current, every record is named by one.
+    repeats, and no record is named by two entries.
     """
     entries = call_entries(calls.read_text(encoding="utf-8"))
     records = _provider_records(calls.parent)
@@ -626,12 +627,6 @@ def _call_link_problem(calls: Path, side: str) -> str | None:
                     f"$[{claimed[sequence]}] names too"
                 )
             claimed[sequence] = index
-    if entries and all("provider_requests" in entry for entry in entries):
-        unclaimed = sorted(set(records) - set(claimed))
-        if unclaimed:
-            return (
-                f"{side} {RECORD_FILENAME} records {unclaimed[:5]} are named by no call"
-            )
     return None
 
 

@@ -320,7 +320,40 @@ def test_a_corrupted_link_in_the_recording_fails_the_gate(trees) -> None:
 def test_a_missing_link_between_new_entries_is_a_difference(trees) -> None:
     assert _call_differences(
         trees, _recorded_calls(), [_new_call("A"), _new_call("B", 1)]
-    ) == ["calls.jsonl: replay provider-calls.jsonl records [2] are named by no call"]
+    ) == ["calls.jsonl: $[0].provider_requests: length 1 != 0"]
+
+
+def test_a_provider_record_that_no_call_names_passes(trees) -> None:
+    recorded, replayed, _ = trees
+    for root, order in ((recorded, ("A", "B")), (replayed, ("B", "A"))):
+        records = [
+            _provider_call(n, scenario, f"for {scenario}")
+            for n, scenario in enumerate(order, 1)
+        ]
+        records.append(_provider_call(3, "C", "interrupted"))
+        _jsonl(root / RECORD_FILENAME, records)
+
+    assert _call_differences(trees, _recorded_calls(), _replayed_calls()) == []
+
+
+def test_a_log_mixing_old_and_current_entries_passes(trees) -> None:
+    assert (
+        _call_differences(
+            trees,
+            [_old_call("A"), _new_call("B", 2)],
+            [_old_call("A"), _new_call("B", 1)],
+        )
+        == []
+    )
+
+
+def test_an_unlinked_entry_without_a_provider_record_passes(trees) -> None:
+    recorded, replayed, _ = trees
+    for root in (recorded, replayed):
+        (root / RECORD_FILENAME).unlink()
+    unlinked = dict(_old_call("A"), provider_requests=[])
+
+    assert _call_differences(trees, [unlinked], [unlinked]) == []
 
 
 def test_a_record_named_by_two_calls_is_a_difference(trees) -> None:
@@ -338,9 +371,7 @@ def test_a_replay_that_kept_text_instead_of_links_is_a_difference(trees) -> None
         trees, _recorded_calls(), [unlinked, _new_call("B", 1)]
     )
 
-    assert differences == [
-        "calls.jsonl: replay provider-calls.jsonl records [2] are named by no call"
-    ]
+    assert differences == ["calls.jsonl: $[0].cleaned_response: only in replay"]
 
 
 def test_a_changed_parse_flag_between_new_entries_is_a_difference(trees) -> None:
