@@ -151,24 +151,43 @@ _MECHANISM_VERIFICATION_REPAIRS = 1
 def _reference_pairs(value: Any) -> tuple[tuple[str, str], ...]:
     """Collect explained ``id``/``description`` pairs from a prompt view."""
     pairs: dict[str, str] = {}
-    _visit_reference_pairs(value, pairs)
+    _visit_records(value, partial(_record_reference_pair, pairs=pairs))
     return tuple(sorted(pairs.items()))
 
 
-def _visit_reference_pairs(item: Any, pairs: dict[str, str]) -> None:
-    """Walk one closed prompt view and retain its explained identities."""
+def _listed_ids(value: Any) -> tuple[str, ...]:
+    """Collect the ``id`` of every record a prompt view lists.
+
+    Code projects each record from the loss analysis or control structure, so
+    its ID is an exact identity of the request even when the analysis gave it
+    a blank description.
+    """
+    ids: set[str] = set()
+    _visit_records(value, partial(_record_id, ids=ids))
+    return tuple(sorted(ids))
+
+
+def _visit_records(item: Any, visit: Callable[[dict], None]) -> None:
+    """Walk one closed prompt view and pass each record to *visit*."""
     if hasattr(item, "model_dump"):
-        _visit_reference_pairs(item.model_dump(mode="python"), pairs)
+        _visit_records(item.model_dump(mode="python"), visit)
         return
     if isinstance(item, dict):
-        _record_reference_pair(item, pairs)
+        visit(item)
         children = item.values()
     elif isinstance(item, (list, tuple, set, frozenset)):
         children = item
     else:
         return
     for child in children:
-        _visit_reference_pairs(child, pairs)
+        _visit_records(child, visit)
+
+
+def _record_id(item: dict, ids: set[str]) -> None:
+    """Retain one record's non-empty ID when present."""
+    identifier = item.get("id")
+    if isinstance(identifier, str) and identifier:
+        ids.add(identifier)
 
 
 def _record_reference_pair(item: dict, pairs: dict[str, str]) -> None:
@@ -292,7 +311,9 @@ def _preflight(
             input_handles=handles,
             accounted_handles=handles,
             selectable_references=pairs,
-            authoritative_references=pairs,
+            # The slice holds every record the view lists; only a selectable
+            # reference must carry a description.
+            authoritative_references=_listed_ids(view),
             prohibited_fields=PROHIBITED_PROMPT_WORDS,
             prohibited_exact_keys=PROHIBITED_PROMPT_KEYS,
             output_schema=output_schema,
