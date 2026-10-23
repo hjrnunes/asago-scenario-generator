@@ -4,9 +4,10 @@ The request carries every union as one flat object, so a reply lists every
 property and sets the ones its branch does not use to null.  Before the
 reply is validated against its response type, each discriminated union
 position keeps only the keys the selected branch defines and drops a null
-that one of the branch's own fields rejects, so the field's default applies.
-Each drop that is not a foreign null is recorded with its path, branch, and
-reason.
+that one of the branch's own optional fields rejects, so the field's default
+applies.  A null in a field the branch requires stays, so validation reports
+the null at that field.  Each drop that is not a foreign null is recorded with
+its path, branch, and reason.
 """
 
 from __future__ import annotations
@@ -663,6 +664,59 @@ def test_a_null_in_an_optional_field_of_the_branch_takes_its_default() -> None:
     assert restored == model.model_validate(reply)
 
 
+_TEMPORAL = "causal_factors__0__temporal_condition"
+
+# Each case sets a field its selected branch requires, with no default, to null.
+_REQUIRED_NULLS = [
+    ("routing-upstream-gap", "routes__0__missing_concepts"),
+    ("routing-targeted", "routes__0__targeting"),
+    ("stage5-adversary-attacker", "adversary__gain"),
+    ("stage5-temporal-ordering", f"{_TEMPORAL}__reference_handle"),
+    ("stage5-temporal-ordering", f"{_TEMPORAL}__relation"),
+    ("stage5-temporal-delay", f"{_TEMPORAL}__delay_ms"),
+    ("stage5-temporal-window", f"{_TEMPORAL}__window_to_ms"),
+    ("stage5-temporal-absence", f"{_TEMPORAL}__until_step_handle"),
+    ("stage5-factor-reachable", "causal_factors__0__capability_refs"),
+]
+
+
+@pytest.mark.parametrize(("name", "path"), _REQUIRED_NULLS)
+def test_a_null_in_a_required_field_of_the_branch_fails_as_a_null(
+    name: str, path: str
+) -> None:
+    _, model, reply = next(c for c in _CASES if c[0] == name)
+    flat = _flat_case(model, reply)
+    keys = path.split("__")
+    _set(flat, keys, None)
+    restored = restore_flat_reply_for(model, flat)
+    parent = restored
+    for key in keys[:-1]:
+        parent = parent[int(key)] if isinstance(parent, list) else parent[key]
+    assert keys[-1] in parent and parent[keys[-1]] is None
+    assert flat_restore_drops(model, flat) == []
+    with pytest.raises(ValidationError) as caught:
+        model.model_validate(restored)
+    # A field of several value types fails once per type, each at the field.
+    errors = caught.value.errors(include_url=False)
+    assert errors
+    for error in errors:
+        assert keys[-1] in error["loc"]
+        assert error["input"] is None
+        assert error["type"] != "missing"
+
+
+def test_a_null_in_a_field_with_a_default_still_takes_the_default() -> None:
+    schema = {
+        **_SCHEMA,
+        "$defs": {**_SCHEMA["$defs"], "A": {**_SCHEMA["$defs"]["A"], "required": []}},
+    }
+    reply = {"items": [{"kind": "a", "n": None, "s": None}]}
+    assert restore_flat_reply(reply, schema) == {"items": [{"kind": "a"}]}
+    required = {**schema["$defs"]["A"], "required": ["kind", "n"]}
+    schema["$defs"] = {**schema["$defs"], "A": required}
+    assert restore_flat_reply(reply, schema) == {"items": [{"kind": "a", "n": None}]}
+
+
 def test_the_drops_of_a_production_reply_name_the_selected_branch() -> None:
     flat = _flat_case(_ROUTING, _ROUTING_REPLIES["targeted"])
     route = flat["routes"][0]
@@ -670,11 +724,6 @@ def test_the_drops_of_a_production_reply_name_the_selected_branch() -> None:
     route["missing_concepts"] = []
     drops = flat_restore_drops(_ROUTING, flat)
     assert drops == [
-        {
-            "path": "/routes/0/targeting",
-            "branch": "targeted",
-            "reason": "null_to_default",
-        },
         {
             "path": "/routes/0/missing_concepts",
             "branch": "targeted",

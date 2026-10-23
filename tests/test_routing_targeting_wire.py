@@ -117,12 +117,13 @@ def test_a_targeted_route_materializes_its_targeting_lists_on_the_route() -> Non
     assert route.disposition == "targeted"
 
 
-def test_a_targeted_route_with_null_targeting_fails_as_missing() -> None:
+def test_a_targeted_route_with_null_targeting_fails_as_a_null() -> None:
     with pytest.raises(ValidationError) as caught:
         _parse(_flat_route("targeted"))
     errors = caught.value.errors()
-    assert [e["type"] for e in errors] == ["missing"]
+    assert [e["type"] for e in errors] == ["model_type"]
     assert errors[0]["loc"][-1] == "targeting"
+    assert errors[0]["input"] is None
 
 
 @pytest.mark.parametrize("name", _REQUIRED_LISTS)

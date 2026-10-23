@@ -12,7 +12,7 @@ after ``$ref`` resolution.  A nullable field (one schema and
 
 :func:`restore_flat_reply` undoes the flattening on a reply before it is
 validated: it keeps only the keys the selected branch defines and drops a null
-in one of the branch's own fields that the branch rejects.
+in one of the branch's own optional fields that the branch rejects.
 """
 
 from __future__ import annotations
@@ -349,16 +349,17 @@ def restore_flat_reply(
     union, only the keys the selected branch defines are kept: every other
     key is dropped, whether its value is null or not.  A key the branch
     defines whose value is null is dropped too when the branch's schema for
-    that key does not accept null, so the field's default applies; a required
-    field without a default then fails validation as a missing field.  Nulls
-    outside a union position stay.  ``value`` is not modified.
+    that key does not accept null and the branch does not require the key,
+    so the field's default applies.  A null in a key the branch requires is
+    kept, so validation reports the null at that key rather than a missing
+    field.  Nulls outside a union position stay.  ``value`` is not modified.
 
     When ``drops`` is given, each drop is appended to it as ``path`` (a JSON
     pointer to the dropped key), ``branch`` (the discriminator value), and
     ``reason``: ``foreign_value`` for a non-null value the branch does not
-    define, ``null_to_default`` for a null its own field rejects.  A foreign
-    null is the normal flat form and is not recorded.  The dropped values are
-    not copied.
+    define, ``null_to_default`` for a null its own optional field rejects.  A
+    foreign null is the normal flat form and is not recorded.  The dropped
+    values are not copied.
     """
     restorer = _Restorer(schema.get("$defs", {}), [] if drops is None else drops)
     return restorer.value(value, schema, "")
@@ -435,10 +436,12 @@ class _Restorer:
     def _within_branch(
         self, value: dict[str, Any], branch: Any, tag: str, path: str
     ) -> dict[str, Any]:
-        properties = _deref(branch, self._defs).get("properties", {})
+        resolved = _deref(branch, self._defs)
+        properties = resolved.get("properties", {})
+        required = resolved.get("required", ())
         kept = {}
         for key, item in value.items():
-            fate = self._fate(key, item, properties)
+            fate = self._fate(key, item, properties, required)
             if fate == "keep":
                 kept[key] = item
             elif fate != "foreign_null":
@@ -447,10 +450,20 @@ class _Restorer:
                 )
         return kept
 
-    def _fate(self, key: str, item: Any, properties: Mapping[str, Any]) -> str:
+    def _fate(
+        self,
+        key: str,
+        item: Any,
+        properties: Mapping[str, Any],
+        required: Iterable[str],
+    ) -> str:
         if key not in properties:
             return "foreign_null" if item is None else "foreign_value"
-        if item is None and not _accepts_null(properties[key], self._defs):
+        if (
+            item is None
+            and key not in required
+            and not _accepts_null(properties[key], self._defs)
+        ):
             return "null_to_default"
         return "keep"
 
