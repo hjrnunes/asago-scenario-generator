@@ -163,6 +163,13 @@ _SCOPE_EDITS: dict[str, dict] = {
     },
     # In scope by its own decision, though policy coverage says outside.
     "ob:v1:05ed7cad": {"scope": "actionable"},
+    # Governance-only, routed to a slot that found nothing: never routed in
+    # the funnel's sense.
+    "ob:v1:0b1ed910": {
+        "stop_reason": "governance_routed_no_finding",
+        "slot_ids": ["RESP-3:CA-3-1:NOT_PROVIDED"],
+        "route_refs": ["route:v1:" + "e" * 64],
+    },
 }
 
 
@@ -204,8 +211,15 @@ def _scoped_run(tmp_path: Path) -> tuple[Path, ObligationAccounting, dict]:
     def rewrite(manifest: dict) -> None:
         manifest["obligation_stop_reason_counts"] = counts
         manifest["obligation_resolution_funnel"].update(
-            capability_excluded=funnel["capability_excluded"],
-            applicable_and_considered=funnel["applicable_and_considered"],
+            {
+                key: funnel[key]
+                for key in (
+                    "governance_only",
+                    "capability_excluded",
+                    "applicable_and_considered",
+                    "governance_routed_no_finding",
+                )
+            }
         )
 
     edit_yaml(output / "synthesis-manifest.yaml", rewrite)
@@ -218,7 +232,8 @@ def test_a_scoped_run_shows_every_category_with_its_meaning(tmp_path: Path) -> N
     html, n = shown(output)
 
     assert n == {
-        "obligations.governance_only": 24,
+        "obligations.governance_only": 23,
+        "obligations.governance_routed_no_finding": 1,
         "obligations.capability_excluded": 2,
         "obligations.no_structural_route": 44,
         "obligations.risk_out_of_scope": 1,
@@ -235,11 +250,13 @@ def test_a_scoped_run_shows_every_category_with_its_meaning(tmp_path: Path) -> N
         "risk_out_of_scope",
         "capability_excluded",
         "governance_only",
+        "governance_routed_no_finding",
     ):
         label, meaning = STOP_MEANING[key]
         assert label in text, key
         assert meaning in text, key
     assert body_rows(html, "obligations-capability-excluded-table") == 2
+    assert body_rows(html, "obligations-governance-routed-no-finding-table") == 1
     assert "Counts disagree" not in html
 
 
@@ -268,6 +285,8 @@ def test_the_lead_and_callout_count_routed_rows_as_the_manifest_does(
 
     html, _ = shown(output)
 
+    assert funnel["governance_only"] == 24
+    assert funnel["governance_routed_no_finding"] == 1
     assert len(routed) == funnel["applicable_and_considered"] == 93
     assert "24 map to no attack pattern" in html
     assert f"{funnel['capability_excluded']} need a capability" in html

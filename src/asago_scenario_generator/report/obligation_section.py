@@ -124,7 +124,8 @@ STOP_MEANING = {
 }
 ORDER = list(STOP_MEANING)
 REALIZED = {"scenario_realized", "addressed"}
-# Groups the manifest keeps apart from the routed, applicable obligations.
+# Dispositions the manifest keeps apart from the routed, applicable
+# obligations, and the muted groups that show them.
 NOT_ROUTED = {"governance_only", "capability_excluded"}
 QUESTION = (
     "Each obligation pairs a policy risk with one attack pattern from the "
@@ -143,6 +144,8 @@ class ObligationRow:
     pattern_name: str
     detail: str
     ica_ids: tuple[str, ...]
+    # The accounting disposition; the routed counts read it, not ``stop``.
+    disposition: str
 
 
 @cache
@@ -207,6 +210,7 @@ def obligation_rows(run: RunData) -> list[ObligationRow]:
                 pattern_names().get(pattern or "", ""),
                 _detail(row),
                 tuple(row.ica_ids),
+                row.disposition,
             )
         )
     return rows
@@ -276,13 +280,21 @@ def _realized_scenarios(run: RunData, rows: list[ObligationRow]) -> list[str]:
 
 
 def _routed(rows: list[ObligationRow]) -> list[ObligationRow]:
-    """Select the obligations routed to the control structure."""
-    return [o for o in rows if o.stop not in NOT_ROUTED]
+    """Select the obligations routed to the control structure.
+
+    The disposition decides, as in the manifest funnel: a governance-only row
+    is never counted as routed, even one routed to a slot that found nothing.
+    """
+    return [o for o in rows if o.disposition not in NOT_ROUTED]
+
+
+def _with_disposition(rows: list[ObligationRow], disposition: str) -> int:
+    return sum(o.disposition == disposition for o in rows)
 
 
 def _lead(run: RunData, rows: list[ObligationRow], by_stop: dict) -> Markup:
-    governance = len(by_stop.get("governance_only", []))
-    excluded = len(by_stop.get("capability_excluded", []))
+    governance = _with_disposition(rows, "governance_only")
+    excluded = _with_disposition(rows, "capability_excluded")
     realized = by_stop.get("scenario_realized", [])
     routed = len(_routed(rows))
     scenarios = _realized_scenarios(run, rows)
