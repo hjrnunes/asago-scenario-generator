@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -103,7 +104,12 @@ def test_publishing_reads_the_records_not_the_file(tmp_path: Path) -> None:
     mark_call_published(tmp_path, "stage", "call", log)
 
     assert log.entries(tmp_path)[0]["published"] is True
-    assert _file_entries(tmp_path)[0]["published"] is True
+    first, event = (tmp_path / "calls.jsonl").read_text().splitlines()
+    assert first == "not json"
+    assert json.loads(event) == {
+        "kind": "call-published",
+        "attempt_id": entry["attempt_id"],
+    }
 
 
 def test_publishing_rejects_a_missing_or_unvalidated_call(tmp_path: Path) -> None:

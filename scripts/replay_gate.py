@@ -39,7 +39,11 @@ from typing import Any, Callable, Iterable, Sequence
 import yaml
 
 import asago_scenario_generator
-from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
+from asago_scenario_generator.stpa.infra.call_log import (
+    CALLS_FILENAME,
+    call_entries,
+    jsonl_lines,
+)
 from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 
 _SCRIPT = Path(__file__).resolve()
@@ -82,10 +86,24 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
         "compared as a multiset ordered by identity, digest, and sequence",
     ),
     AllowedDifference(
-        "calls.jsonl",
+        CALLS_FILENAME,
         ("timestamp", "duration_ms", "retry_of"),
         "wall-clock time of each call; a recording made before calls.jsonl named "
         "the attempt a retry repeats lacks retry_of",
+    ),
+    AllowedDifference(
+        CALLS_FILENAME,
+        (
+            "system_prompt_text",
+            "user_prompt_text",
+            "raw_response",
+            "cleaned_response",
+            "response_content",
+            "provider_requests",
+        ),
+        "a recording made before calls.jsonl named its provider-calls.jsonl "
+        "records holds the prompt and response text instead; the record "
+        "sequence numbers follow the arrival order of concurrent requests",
     ),
     AllowedDifference(
         "run-manifest.yaml",
@@ -94,9 +112,15 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
     ),
     AllowedDifference(
         "synthesis-manifest.yaml",
-        ("created_at", "prompt_call_evidence.[].duration_ms", "semantic_digest"),
-        "wall-clock time of the run and of each call; the digest covers them, "
-        "so the gate recomputes it on both sides instead of comparing it",
+        ("created_at", "semantic_digest"),
+        "wall-clock time of the run; the digest covers it, so the gate "
+        "recomputes it on both sides instead of comparing it",
+    ),
+    AllowedDifference(
+        "synthesis-manifest.yaml",
+        ("prompt_call_evidence",),
+        "a recording made before the manifest dropped its copy of the call "
+        "records holds it; calls.jsonl keeps those records",
     ),
 )
 
@@ -497,7 +521,12 @@ def _short(value: Any, limit: int = 160) -> str:
     return text if len(text) <= limit else text[:limit] + "..."
 
 
-def _parse(text: str, suffix: str) -> Any:
+def _parse(text: str, suffix: str, relative: str = "") -> Any:
+    if relative == CALLS_FILENAME:
+        # Publication events fold into their calls, so a recording that
+        # marked a call published in place compares with one that appended
+        # the event.
+        return call_entries(text)
     if suffix == ".jsonl":
         return [json.loads(line) for line in jsonl_lines(text)]
     if suffix == ".json":
@@ -573,8 +602,8 @@ def compare_file(
         if left_text == right_text:
             return None
         return _text_difference(left_text, right_text)
-    left_data = _parse(left_text, suffix)
-    right_data = _parse(right_text, suffix)
+    left_data = _parse(left_text, suffix, relative)
+    right_data = _parse(right_text, suffix, relative)
     if relative in _SELF_DIGESTED:
         problem = _self_digest_problem(left_data, raw_right_text, suffix)
         if problem:

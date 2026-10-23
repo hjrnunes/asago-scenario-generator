@@ -7,14 +7,13 @@ runners record in their manifests.
 from __future__ import annotations
 
 import hashlib
-import json
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import yaml
 
-from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
+from asago_scenario_generator.stpa.infra.call_log import read_call_entries
 
 __all__ = ["hash_model", "count_calls_by_stage"]
 
@@ -73,13 +72,12 @@ def count_calls_by_stage(run_dir: Path) -> dict[str, dict[str, int]]:
         prompt the preflight blocked adds nothing; a stage whose entries were
         all blocked reports 0. Returns an empty dict if the file does not exist.
     """
-    calls_file = run_dir / "calls.jsonl"
-    if not calls_file.exists():
+    entries = read_call_entries(run_dir)
+    if entries is None:
         return {}
 
     counts: dict[str, dict[str, int]] = {}
-    for line in jsonl_lines(calls_file.read_text(encoding="utf-8")):
-        entry = json.loads(line)
+    for entry in entries:
         stage = entry.get("stage", "unknown")
         if stage not in counts:
             counts[stage] = {"call_count": 0, "total_tokens": 0}

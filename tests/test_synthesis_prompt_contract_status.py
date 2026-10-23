@@ -71,9 +71,10 @@ _PUBLISHED = (
 )
 _VOLATILE = ("run_id", "created_at", "semantic_digest")
 # The no-candidate manifest of ``_run`` with ``_OTHER_FAILURE`` seeded, as the
-# start commit writes it, without its run ID, timestamp, and digest.
+# start commit writes it, without its run ID, timestamp, and digest, and
+# without the copy of the call records the manifest no longer keeps.
 _NO_CANDIDATES_MANIFEST_DIGEST = (
-    "ef63af215c8f3078efddad0c03b890a2850469fabbfb598c08d374dfc1d88508"
+    "409dba2a3c26f07b8b1854a9dbc591065d4a9c7273cf288d6d429a353be7508f"
 )
 
 

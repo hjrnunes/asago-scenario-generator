@@ -27,7 +27,8 @@ from pydantic import (
 from asago_scenario_generator.models.obligation_accounting import ObligationAccounting
 from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferReport
 from asago_scenario_generator.models.target_realization import TargetRealizationResult
-from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
+from asago_scenario_generator.stpa.infra.call_log import call_entries, jsonl_lines
+from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.scenario_prod.handoff import (
@@ -50,8 +51,20 @@ class _Read(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
 
+class ProviderRequest(_Read):
+    """The ``provider-calls.jsonl`` record of one request a call sent."""
+
+    sequence: int
+    request_sha256: str
+
+
 class CallRecord(_Read):
-    """One request of ``calls.jsonl``; ``n`` is its 1-based line number."""
+    """One request of ``calls.jsonl``; ``n`` is its 1-based entry number.
+
+    ``response_content`` is the reply text.  A call log written before calls
+    named their provider records holds it; for a newer log the report reads
+    a successful call's reply from the record of its last request.
+    """
 
     n: int = 0
     stage: str
@@ -68,6 +81,7 @@ class CallRecord(_Read):
     completion_tokens: int | None = None
     duration_ms: int = 0
     retry_of: str | None = None
+    provider_requests: list[ProviderRequest] = Field(default_factory=list)
     response_content: str | None = None
 
     @property
@@ -240,11 +254,59 @@ def _read_calls(output: Path) -> tuple[CallRecord, ...]:
     path = output / CALLS
     if not path.exists():
         return ()
-    lines = jsonl_lines(path.read_text(encoding="utf-8"))
-    return tuple(
-        CallRecord.model_validate(json.loads(line)).model_copy(update={"n": n})
-        for n, line in enumerate(lines, 1)
-    )
+    entries = call_entries(path.read_text(encoding="utf-8"))
+    calls = [
+        CallRecord.model_validate(entry).model_copy(update={"n": n})
+        for n, entry in enumerate(entries, 1)
+    ]
+    return tuple(_with_replies(output, calls))
+
+
+def _reply_key(call: CallRecord) -> tuple[int, str] | None:
+    """The provider record holding *call*'s reply, when the log names it."""
+    if not call.success or call.response_content is not None:
+        return None
+    if not call.provider_requests:
+        return None
+    last = call.provider_requests[-1]
+    return last.sequence, last.request_sha256
+
+
+def _with_replies(output: Path, calls: list[CallRecord]) -> list[CallRecord]:
+    """Fill each successful call's reply from the provider record it names."""
+    wanted = {key for call in calls if (key := _reply_key(call)) is not None}
+    if not wanted:
+        return calls
+    replies = _provider_replies(output / RECORD_FILENAME, wanted)
+    return [
+        call.model_copy(update={"response_content": replies.get(key)})
+        if (key := _reply_key(call)) is not None
+        else call
+        for call in calls
+    ]
+
+
+def _provider_replies(
+    path: Path, wanted: set[tuple[int, str]]
+) -> dict[tuple[int, str], str]:
+    """Read the message content of the *wanted* provider records."""
+    if not path.exists():
+        return {}
+    replies: dict[tuple[int, str], str] = {}
+    for line in jsonl_lines(path.read_text(encoding="utf-8")):
+        record = json.loads(line)
+        key = (record.get("sequence"), record.get("request_sha256"))
+        if key in wanted and (content := _message_content(record)) is not None:
+            replies[key] = content
+    return replies
+
+
+def _message_content(record: dict[str, Any]) -> str | None:
+    body = (record.get("response") or {}).get("body") or {}
+    choices = body.get("choices") or []
+    message = choices[0].get("message") if choices else None
+    content = message.get("content") if isinstance(message, dict) else None
+    return content if isinstance(content, str) else None
 
 
 def _read_scenarios(output: Path) -> dict[str, ScenarioHandoff]:

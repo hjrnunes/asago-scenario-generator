@@ -16,6 +16,7 @@ import pytest
 from asago_scenario_generator.report.run_data import _read_calls
 from asago_scenario_generator.stpa.infra.call_log import (
     append_call_log,
+    call_entries,
     jsonl_lines,
     make_call_log_entry,
     mark_call_published,
@@ -100,8 +101,7 @@ def test_publishing_a_call_keeps_every_record(tmp_path: Path) -> None:
 
     mark_call_published(tmp_path, "stage_x", "b")
 
-    lines = (tmp_path / "calls.jsonl").read_text(encoding="utf-8").split("\n")
-    entries = [json.loads(line) for line in lines if line]
+    entries = call_entries((tmp_path / "calls.jsonl").read_text(encoding="utf-8"))
     assert [e["step"] for e in entries] == ["a", "b"]
     assert [e["published"] for e in entries] == [False, True]
     assert entries[0]["response_content"] == TEXT

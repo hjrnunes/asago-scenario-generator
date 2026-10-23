@@ -16,7 +16,7 @@ from asago_scenario_generator.pipeline.synthesis_types import (
     SynthesisInputs,
     SynthesisRunStatus,
 )
-from asago_scenario_generator.pipeline.synthesis_values import _digest_value, _dump
+from asago_scenario_generator.pipeline.synthesis_values import _dump
 from asago_scenario_generator.stpa.infra.prompt_preflight import PromptContractError
 from asago_scenario_generator.stpa.models.control_structure import (
     MAX_CONTEXT_ROWS_PER_ACTION,
@@ -109,7 +109,6 @@ def _build_manifest(
         },
         "stage_call_counts": {name: calls.count(name) for name in sorted(set(calls))},
         "provider_evidence": _manifest_provider_evidence(provider_stages or {}, inputs),
-        "prompt_call_evidence": _manifest_prompt_call_evidence(call_records),
         "total_prompt_tokens": _total_prompt_tokens(call_records),
         "context_tables": _manifest_context_tables(final_control),
         "obligation_disposition_counts": counts,
@@ -206,38 +205,6 @@ def _total_prompt_tokens(call_records: list[dict[str, Any]] | None) -> int | Non
     if call_records is None:
         return None
     return sum(int(entry.get("prompt_tokens") or 0) for entry in call_records)
-
-
-def _manifest_prompt_call_evidence(
-    call_records: list[dict[str, Any]] | None,
-) -> list[dict[str, Any]]:
-    """Copy compact prompt-budget and provider-usage evidence into the manifest."""
-    retained_fields = (
-        "stage",
-        "step",
-        "slot_id",
-        "scenario_id",
-        "model",
-        "system_prompt_hash",
-        "user_prompt_hash",
-        "prompt_tokens",
-        "completion_tokens",
-        "duration_ms",
-        "success",
-        "error",
-        "prompt_preflight",
-    )
-    records: list[dict[str, Any]] = []
-    for source in call_records or ():
-        record = {
-            field_name: source[field_name]
-            for field_name in retained_fields
-            if field_name in source and source[field_name] is not None
-        }
-        if "response_content" in source:
-            record["response_digest"] = _digest_value(source["response_content"])
-        records.append(record)
-    return records
 
 
 def _manifest_taxonomy_pins(value: Any) -> dict[str, Any]:

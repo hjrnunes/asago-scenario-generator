@@ -1,11 +1,12 @@
 """Per-request provider record and replay for the STPA pipeline.
 
-``calls.jsonl`` is the call-site log: it holds parsed, sanitized evidence and
-is rewritten when a call publishes.  This module records one level lower, at
-the single transport seam in ``LLMClient``, so a run keeps every request
-exactly as sent and every provider response exactly as returned.  The same
-seam can serve those responses back, which makes a recorded run replayable
-without a model endpoint.
+``calls.jsonl`` is the call-site log: it holds the lifecycle and usage of each
+call, and names the records here that the call sent (``sequence`` and
+``request_sha256``) instead of copying their text.  This module records one
+level lower, at the single transport seam in ``LLMClient``, so a run keeps
+every request exactly as sent and every provider response exactly as
+returned.  The same seam can serve those responses back, which makes a
+recorded run replayable without a model endpoint.
 
 Record format (one JSON object per line of ``provider-calls.jsonl``)::
 
@@ -569,6 +570,7 @@ class ProviderCallSession:
         """
         pending: list[_Attempt] = []
         self._local.pending = pending
+        self._local.scope_requests = []
         try:
             yield
         except Exception as error:
@@ -579,6 +581,18 @@ class ProviderCallSession:
             self._local.pending = None
             for attempt in pending:
                 self._write(attempt)
+            self._local.scope_requests = [
+                {"sequence": attempt.sequence, "request_sha256": attempt.digest}
+                for attempt in pending
+            ]
+
+    def scope_requests(self) -> list[dict[str, Any]]:
+        """Return the records of the requests this thread's latest scope sent.
+
+        Each is the ``sequence`` and ``request_sha256`` of one record, in the
+        order sent; a call log entry names them to join its records.
+        """
+        return list(getattr(self._local, "scope_requests", None) or ())
 
     def exchange_with_retry(
         self,
@@ -683,6 +697,14 @@ class ProviderCallSession:
         attempt.source = "live"
         self._local.went_live = True
         return send()
+
+
+def provider_requests_of(client: Any) -> list[dict[str, Any]]:
+    """Return the records the latest scope of *client*'s session sent, if any."""
+    session = getattr(client, "session", None)
+    if not isinstance(session, ProviderCallSession):
+        return []
+    return session.scope_requests()
 
 
 @contextmanager

@@ -41,15 +41,21 @@ def _jsonl(path: Path, records: list[dict[str, Any]]) -> None:
     path.write_text("".join(json.dumps(r) + "\n" for r in records), encoding="utf-8")
 
 
-def _manifest(run_id: str, created_at: str, duration: int) -> dict[str, Any]:
-    payload = {
-        "run_id": run_id,
-        "created_at": created_at,
-        "prompt_call_evidence": [{"step": "a", "duration_ms": duration}],
-        "scenario_counts": {"published": 2},
-    }
+def _manifest(
+    run_id: str, created_at: str, *, call_evidence: list[Any] | None = None
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"run_id": run_id, "created_at": created_at}
+    if call_evidence is not None:
+        payload["prompt_call_evidence"] = call_evidence
+    payload["scenario_counts"] = {"published": 2}
     payload["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, payload)
     return payload
+
+
+def _write_manifest(root: Path, payload: dict[str, Any]) -> None:
+    (root / "synthesis-manifest.yaml").write_text(
+        yaml.safe_dump(payload, sort_keys=False)
+    )
 
 
 def _provider_call(sequence: int, scenario: str, answer: str) -> dict[str, Any]:
@@ -87,9 +93,7 @@ def _output(
             {"run_id": run_id + ".1", "run_dir": output_dir, "created_at": stamp}
         )
     )
-    (root / "synthesis-manifest.yaml").write_text(
-        yaml.safe_dump(_manifest(run_id, stamp, len(stamp)), sort_keys=False)
-    )
+    _write_manifest(root, _manifest(run_id, stamp))
     (root / "synthesis-report.html").write_text(f"<p>Run: <code>{run_id}</code></p>\n")
     return root
 
@@ -191,6 +195,83 @@ def test_a_recording_made_before_the_generate_report_moved_still_matches(
                 "retry_of": 3,
             }
         ],
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def _old_call(published: bool) -> dict[str, Any]:
+    """A call entry as calls.jsonl held it before naming provider records."""
+    return {
+        "stage": "s",
+        "step": "a",
+        "system_prompt_hash": "h",
+        "system_prompt_text": "system",
+        "user_prompt_text": "user",
+        "timestamp": "t1",
+        "attempt_id": "s:a:1",
+        "compiled": published,
+        "published": published,
+        "raw_response": "{}",
+        "cleaned_response": {},
+        "response_content": "{}",
+    }
+
+
+def _new_call() -> dict[str, Any]:
+    """The same call as calls.jsonl holds it now."""
+    return {
+        "stage": "s",
+        "step": "a",
+        "system_prompt_hash": "h",
+        "provider_requests": [{"sequence": 9, "request_sha256": "d" * 64}],
+        "timestamp": "t2",
+        "attempt_id": "s:a:1",
+        "compiled": False,
+        "published": False,
+    }
+
+
+_PUBLISHED = {"kind": "call-published", "attempt_id": "s:a:1"}
+
+
+def test_a_recording_with_call_text_matches_a_replay_naming_provider_records(
+    trees,
+) -> None:
+    recorded, replayed, path_map = trees
+    _jsonl(recorded / "calls.jsonl", [_old_call(published=True)])
+    _jsonl(replayed / "calls.jsonl", [_new_call(), _PUBLISHED])
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_a_publication_the_recording_lacks_is_a_difference(trees) -> None:
+    recorded, replayed, path_map = trees
+    _jsonl(recorded / "calls.jsonl", [_old_call(published=False)])
+    _jsonl(replayed / "calls.jsonl", [_new_call(), _PUBLISHED])
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [str(d) for d in differences] == [
+        "calls.jsonl: $[0].compiled: false != true"
+    ]
+
+
+def test_a_recording_whose_manifest_copies_the_call_records_still_matches(
+    trees,
+) -> None:
+    recorded, replayed, path_map = trees
+    _write_manifest(
+        recorded,
+        _manifest(
+            "synthesis-20261001T000000Z",
+            "2026-10-01T00:00:00",
+            call_evidence=[{"step": "a", "duration_ms": 3}],
+        ),
     )
 
     _, differences = compare_trees(recorded, replayed, path_map)

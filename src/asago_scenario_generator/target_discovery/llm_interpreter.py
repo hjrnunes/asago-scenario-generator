@@ -11,7 +11,6 @@ publish.
 
 from __future__ import annotations
 
-import json
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Annotated, Any, Literal
@@ -24,7 +23,7 @@ from asago_scenario_generator.request_schema import (
     string_items_enum,
     uses_guided_decoding,
 )
-from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
+from asago_scenario_generator.stpa.infra.call_log import call_entries
 from asago_scenario_generator.stpa.infra.llm import (
     DEFAULT_TEMPERATURE,
     LLMClient,
@@ -372,8 +371,7 @@ def _entries_logged_since(
         return []
     with calls_path.open("rb") as handle:
         handle.seek(offset)
-        lines = jsonl_lines(handle.read().decode("utf-8"))
-    entries = [json.loads(line) for line in lines]
+        entries = call_entries(handle.read().decode("utf-8"))
     for entry in entries:
         entry["batch_id"] = batch_id
         if failure is not None and "error" in entry:
