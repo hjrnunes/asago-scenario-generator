@@ -181,6 +181,8 @@ default; `generate` has no sampling override. Invalid numeric or boolean
 environment values fail before the first model call.
 Requests have a 600-second application default deadline. Named-profile
 `timeout` and `ASAGO_SCENARIO_GENERATOR_TIMEOUT` values override that default.
+The connect phase has its own 10-second bound, or the request deadline when
+that is shorter, so an unreachable endpoint fails fast.
 The SDK's implicit retries are disabled so retry decisions remain bounded and
 visible in pipeline evidence. The client itself retries a request once, after
 a fixed one-second pause, when the provider answers HTTP 5xx or the connection

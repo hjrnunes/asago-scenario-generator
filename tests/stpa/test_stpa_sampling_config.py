@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
+import httpx
 import pytest
 import yaml
 
@@ -259,8 +260,70 @@ def test_stpa_client_has_a_default_deadline_and_no_hidden_sdk_retries(
         client = resolve_llm_client_from_env()
 
     assert client.timeout == 600.0
-    assert factory.call_args.kwargs["timeout"] == 600.0
+    assert factory.call_args.kwargs["timeout"] == httpx.Timeout(600.0, connect=10.0)
     assert factory.call_args.kwargs["max_retries"] == 0
+
+
+def _sdk_timeout(profiles: Path, name: str) -> tuple[LLMClient, httpx.Timeout]:
+    with patch("asago_scenario_generator.stpa.infra.llm.OpenAI") as factory:
+        client, _ = resolve_llm_client_from_profile(str(profiles), name)
+    return client, factory.call_args.kwargs["timeout"]
+
+
+def test_profile_timeout_bounds_the_request_and_not_the_connect(tmp_path) -> None:
+    profiles = _write_gemma_profile(tmp_path / "profiles.yaml")
+
+    client, timeout = _sdk_timeout(profiles, "gemma")
+
+    assert client.timeout == 45.0
+    assert effective_model_config(client)["timeout"] == 45.0
+    assert timeout.connect == 10.0
+    assert (timeout.read, timeout.write, timeout.pool) == (45.0, 45.0, 45.0)
+
+
+def test_profile_without_timeout_bounds_the_connect_to_ten_seconds(tmp_path) -> None:
+    profiles = tmp_path / "profiles.yaml"
+    profiles.write_text(
+        yaml.safe_dump(
+            {
+                "plain": {
+                    "base_url": "http://fixture.invalid/v1",
+                    "model": "m",
+                    _KEY: "x",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    client, timeout = _sdk_timeout(profiles, "plain")
+
+    assert client.timeout == 600.0
+    assert effective_model_config(client)["timeout"] == 600.0
+    assert timeout.connect == 10.0
+    assert (timeout.read, timeout.write, timeout.pool) == (600.0, 600.0, 600.0)
+
+
+def test_request_timeout_below_ten_seconds_also_bounds_the_connect(tmp_path) -> None:
+    profiles = tmp_path / "profiles.yaml"
+    profiles.write_text(
+        yaml.safe_dump(
+            {
+                "short": {
+                    "base_url": "http://fixture.invalid/v1",
+                    "model": "m",
+                    _KEY: "x",
+                    "timeout": 2.5,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    client, timeout = _sdk_timeout(profiles, "short")
+
+    assert client.timeout == 2.5
+    assert timeout == httpx.Timeout(2.5)
 
 
 @pytest.mark.parametrize(

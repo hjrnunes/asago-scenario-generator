@@ -608,9 +608,10 @@ profile/environment values and defaults, and manifests persist the effective
 non-secret settings.
 
 Both workflows apply a 600-second request deadline by default, configurable via
-the named-profile `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`. Hidden
-OpenAI SDK retries are disabled; all retry policy therefore remains explicit,
-bounded, and observable in pipeline evidence. The model client makes one
+the named-profile `timeout` field or `ASAGO_SCENARIO_GENERATOR_TIMEOUT`. The
+connect phase is bounded separately at 10 seconds, or at the request deadline
+when that is shorter. Hidden OpenAI SDK retries are disabled; all retry policy
+therefore remains explicit, bounded, and observable in pipeline evidence. The model client makes one
 recorded retry after a transport error: an HTTP 5xx status, or a connection
 error that is not a timeout. Timeouts, 4xx statuses, and invalid answers are
 never retried at the transport level. The retry waits one second, appears in
