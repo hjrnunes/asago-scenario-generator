@@ -11,7 +11,10 @@ scratch directory, ``--replay-calls`` pointing at a copy of the record, model
 settings stripped from the environment, and outbound sockets refused.  It then
 compares the trees.  Only the differences in :data:`ALLOWED_DIFFERENCES` and
 :data:`ALLOWED_TEXT_DIFFERENCES` are normalised; the first other difference
-fails the gate.
+fails the gate.  The named versions in :data:`VERSION_CHAINS` compare as the
+sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
+:data:`REMOVED_TEXT` and :data:`ALLOWED_FILE_CHANGES` name what a recording
+may hold that the replay no longer writes.
 
 A change that deletes a prompt template also drops that template's entry from
 the prompt-hash tables a run records.  A recorded entry whose ``.j2`` key the
@@ -115,6 +118,48 @@ _MANIFEST_FILENAME = "synthesis-manifest.yaml"
 
 
 @dataclass(frozen=True)
+class RetiredField:
+    """A nested field the current code no longer writes in one file.
+
+    *field* is a dotted path from the document root.  A recording may hold
+    it and the gate compares without it; a replay that writes it fails.
+    """
+
+    file: str
+    field: str
+    meaning: str
+
+
+RETIRED_FIELDS: tuple[RetiredField, ...] = (
+    RetiredField(
+        "run-manifest.yaml",
+        "stage_summary.stage_1a.target_evidence.artifact",
+        "the name of target-evidence.yaml, which the run no longer writes",
+    ),
+)
+
+# Successive versions of one artifact, in step order, each ending with its
+# canonical file.  A named version is written only when it differs from the
+# next one, so an absent version equals the next one present.  A recording
+# made before that rule wrote a version whenever its step ran, so the gate
+# compares the sequence of distinct versions each side holds, not the names.
+VERSION_CHAINS: dict[str, tuple[str, ...]] = {
+    "loss-analysis.yaml": (
+        "loss-analysis-draft.yaml",
+        "loss-analysis-reviewed.yaml",
+        "loss-analysis-reviewed-corrected.yaml",
+    ),
+    "control-structure.yaml": (
+        "control-structure-draft.yaml",
+        "control-structure-reviewed.yaml",
+        "control-structure-evidence-bound.yaml",
+        "control-structure-revised.yaml",
+        "control-structure-placed.yaml",
+    ),
+}
+
+
+@dataclass(frozen=True)
 class AllowedTextDifference:
     """One documented difference in a text file the gate cannot parse.
 
@@ -150,6 +195,31 @@ ALLOWED_TEXT_DIFFERENCES: tuple[AllowedTextDifference, ...] = (
 
 
 @dataclass(frozen=True)
+class RemovedText:
+    """Text a recording may hold in an unparsed file that the replay no longer writes.
+
+    Every match of *pattern* is deleted from the recording before the text
+    comparison; a replay that still writes a match fails.
+    """
+
+    file: str
+    pattern: re.Pattern[str]
+    reason: str
+
+
+REMOVED_TEXT: tuple[RemovedText, ...] = (
+    RemovedText(
+        "report/index.html",
+        re.compile(
+            r'<tr><td>Target profile</td><td><a class="artifact" '
+            r'href="\.\./execution-target-profile\.json">.*?</tr>'
+        ),
+        "the report row that linked the run's copy of the target profile input",
+    ),
+)
+
+
+@dataclass(frozen=True)
 class AllowedFileChange:
     """A file one side may lack because recordings predate the report rewrite.
 
@@ -164,7 +234,8 @@ class AllowedFileChange:
 
 # Recordings made before the generate report moved to the shared report kit
 # hold synthesis-report.html and neither report/ nor policy-coverage.json.
-# Re-record the corpus to retire these entries.
+# Recordings made before the run stopped copying its inputs hold those
+# copies.  Re-record the corpus to retire these entries.
 ALLOWED_FILE_CHANGES: tuple[AllowedFileChange, ...] = (
     AllowedFileChange(
         "synthesis-report.html",
@@ -179,6 +250,21 @@ ALLOWED_FILE_CHANGES: tuple[AllowedFileChange, ...] = (
     ),
     AllowedFileChange(
         "policy-coverage.json", "replay", "the policy funnel the report reads"
+    ),
+    AllowedFileChange(
+        "observation-contract.yaml",
+        "recording",
+        "a copy of the observation contract input",
+    ),
+    AllowedFileChange(
+        "execution-target-profile.json",
+        "recording",
+        "a copy of the target profile input; downstream reads the discovery copy",
+    ),
+    AllowedFileChange(
+        "target-evidence.yaml",
+        "recording",
+        "a projection of the target profile input that nothing read",
     ),
 )
 
@@ -641,6 +727,30 @@ def _retired_field_problem(replayed: Path) -> str | None:
     return None
 
 
+def _retired_fields(relative: str) -> list[RetiredField]:
+    return [retired for retired in RETIRED_FIELDS if retired.file == relative]
+
+
+def _has_field(value: Any, steps: list[str]) -> bool:
+    for step in steps:
+        if not isinstance(value, dict) or step not in value:
+            return False
+        value = value[step]
+    return True
+
+
+def _retired_nested_problem(replayed: Path, relative: str) -> str | None:
+    """Fail a replay that writes a :data:`RETIRED_FIELDS` entry again."""
+    retired = _retired_fields(relative)
+    if not retired:
+        return None
+    document = yaml.safe_load(replayed.read_text(encoding="utf-8"))
+    for item in retired:
+        if _has_field(document, item.field.split(".")):
+            return f"replay writes {item.field}, {item.meaning}, which is retired"
+    return None
+
+
 def _self_digest_difference(document: Any, side: str) -> str | None:
     from asago_scenario_generator.pipeline.synthesis_manifest import (
         _MANIFEST_DOMAIN,
@@ -687,6 +797,9 @@ def compare_file(
         problem = _retired_field_problem(replayed)
         if problem:
             return problem
+    problem = _retired_nested_problem(replayed, relative)
+    if problem:
+        return problem
     left = recorded.read_bytes()
     right = replayed.read_bytes()
     if left == right:
@@ -701,6 +814,12 @@ def compare_file(
         return None
     suffix = recorded.suffix
     if suffix not in {".json", ".jsonl", ".yaml", ".yml"}:
+        for removed_text in REMOVED_TEXT:
+            if removed_text.file != relative:
+                continue
+            if removed_text.pattern.search(right_text):
+                return f"replay writes {removed_text.reason}, which is removed"
+            left_text = removed_text.pattern.sub("", left_text)
         left_text = _mask_text(left_text, relative)
         right_text = _mask_text(right_text, relative)
         if left_text == right_text:
@@ -723,6 +842,8 @@ def compare_file(
             for key, value in left_data.items()
             if key not in RETIRED_MANIFEST_FIELDS
         }
+    for retired in _retired_fields(relative):
+        left_data = _drop_field(left_data, tuple(retired.field.split(".")))
     jsonl = suffix == ".jsonl"
     left_data = _normalise(left_data, relative, jsonl=jsonl)
     right_data = _normalise(right_data, relative, jsonl=jsonl)
@@ -796,6 +917,47 @@ def _file_change_allowed(name: str, side: str) -> bool:
     )
 
 
+def _distinct_versions(
+    root: Path, canonical: str, aliases: dict[str, str] | None = None
+) -> list[Any]:
+    """Return the chain's versions on disk in step order, repeats collapsed."""
+    versions: list[Any] = []
+    for name in (*VERSION_CHAINS[canonical], canonical):
+        path = root / name
+        if not path.is_file():
+            continue
+        text = path.read_text(encoding="utf-8")
+        if aliases is not None:
+            text = _substitute(text, aliases)
+        document = yaml.safe_load(text)
+        if not versions or versions[-1] != document:
+            versions.append(document)
+    return versions
+
+
+def _version_chain_differences(
+    recorded: Path, replayed: Path, aliases: dict[str, str]
+) -> list[Difference]:
+    differences = []
+    for canonical in VERSION_CHAINS:
+        left = _distinct_versions(recorded, canonical)
+        right = _distinct_versions(replayed, canonical, aliases)
+        if left == right:
+            continue
+        index = next(
+            (n for n, (a, b) in enumerate(zip(left, right)) if a != b),
+            min(len(left), len(right)),
+        )
+        differences.append(
+            Difference(
+                f"{canonical} versions",
+                f"recording holds {len(left)} distinct versions, replay "
+                f"{len(right)}; they first differ at version {index + 1}",
+            )
+        )
+    return differences
+
+
 def compare_trees(
     recorded: Path,
     replayed: Path,
@@ -811,16 +973,22 @@ def compare_trees(
     """
     present = checkout_templates() if present_templates is None else present_templates
     aliases = {**path_map, **_run_id_aliases(recorded, replayed)}
-    left, right = _files(recorded), _files(replayed)
-    differences = [
-        Difference(name, "only in recording")
-        for name in sorted(left - right)
-        if not _file_change_allowed(name, "recording")
-    ] + [
-        Difference(name, "only in replay")
-        for name in sorted(right - left)
-        if not _file_change_allowed(name, "replay")
-    ]
+    named_versions = {name for names in VERSION_CHAINS.values() for name in names}
+    left = _files(recorded) - named_versions
+    right = _files(replayed) - named_versions
+    differences = (
+        _version_chain_differences(recorded, replayed, aliases)
+        + [
+            Difference(name, "only in recording")
+            for name in sorted(left - right)
+            if not _file_change_allowed(name, "recording")
+        ]
+        + [
+            Difference(name, "only in replay")
+            for name in sorted(right - left)
+            if not _file_change_allowed(name, "replay")
+        ]
+    )
     shared = sorted(left & right)
     for relative in shared:
         detail = compare_file(

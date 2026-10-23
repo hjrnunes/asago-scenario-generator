@@ -20,7 +20,6 @@ from asago_scenario_generator.models.capability_profile import (
     Stage1Profile,
     ToolInventoryEntry,
     derive_zones_from_kc,
-    inject_kc_subcodes_display,
 )
 from asago_scenario_generator.request_schema import (
     string_items_enum,
@@ -125,8 +124,8 @@ def derive_capability_profile(
     observed *target_profile* then force the codes they decide in or out
     (:func:`target_kc_decision`); the request itself never sees the target.
     The draws, the counts, the fact decisions with their reasons, and the
-    decided codes land in ``capability-kc-decision.yaml``; the profile in
-    ``capability-profile.yaml``.
+    decided codes land in ``capability-kc-decision.yaml``.  The caller
+    publishes the returned profile as ``capability-profile.yaml``.
 
     Stage 1b has zero dependency on Stage 1a — no loss analysis context
     is passed to the prompt.
@@ -179,11 +178,6 @@ def derive_capability_profile(
             kc_subcodes=capability_profile.kc_subcodes,
         ),
         run_dir / KC_DECISION_FILENAME,
-    )
-    write_yaml(
-        capability_profile,
-        run_dir / "capability-profile.yaml",
-        post_process=inject_kc_subcodes_display,
     )
     return capability_profile
 

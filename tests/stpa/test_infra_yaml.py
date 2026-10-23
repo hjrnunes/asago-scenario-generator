@@ -6,6 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.infra.yaml_io import (
+    VersionChain,
     read_yaml,
     write_yaml,
     yaml_text,
@@ -105,3 +106,63 @@ security_constraints: []
         write_yaml(model, path)
 
         assert path.read_text(encoding="utf-8") == yaml_text(model)
+
+
+class TestVersionChain:
+    """A named version is written only when it differs from the next one."""
+
+    @staticmethod
+    def _models():
+        first = make_minimal_loss_analysis()
+        second = first.model_copy(
+            update={
+                "use_case_losses": [
+                    loss.model_copy(update={"description": "Changed"})
+                    for loss in first.use_case_losses
+                ]
+            }
+        )
+        return first, second
+
+    def test_a_version_equal_to_the_next_is_not_written(self, tmp_path):
+        first, _ = self._models()
+        with VersionChain(tmp_path) as chain:
+            chain.add(first, "a-draft.yaml")
+            chain.add(first, "a-reviewed.yaml")
+            chain.publish(first, "a.yaml")
+
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["a.yaml"]
+        assert (tmp_path / "a.yaml").read_text() == yaml_text(first)
+
+    def test_a_version_that_differs_from_the_next_is_written(self, tmp_path):
+        first, second = self._models()
+        with VersionChain(tmp_path) as chain:
+            chain.add(first, "a-draft.yaml")
+            chain.add(second, "a-reviewed.yaml")
+            chain.publish(second, "a.yaml")
+
+        assert sorted(p.name for p in tmp_path.iterdir()) == ["a-draft.yaml", "a.yaml"]
+        assert (tmp_path / "a-draft.yaml").read_text() == yaml_text(first)
+        assert (tmp_path / "a.yaml").read_text() == yaml_text(second)
+
+    def test_the_comparison_is_with_the_next_version_not_the_canonical(self, tmp_path):
+        first, second = self._models()
+        with VersionChain(tmp_path) as chain:
+            chain.add(first, "a-draft.yaml")
+            chain.add(second, "a-reviewed.yaml")
+            chain.publish(first, "a.yaml")
+
+        assert sorted(p.name for p in tmp_path.iterdir()) == [
+            "a-draft.yaml",
+            "a-reviewed.yaml",
+            "a.yaml",
+        ]
+
+    def test_a_chain_closed_without_a_canonical_keeps_its_last_version(self, tmp_path):
+        first, _ = self._models()
+        with pytest.raises(RuntimeError):
+            with VersionChain(tmp_path) as chain:
+                chain.add(first, "a-draft.yaml")
+                raise RuntimeError("the stage failed")
+
+        assert (tmp_path / "a-draft.yaml").read_text() == yaml_text(first)

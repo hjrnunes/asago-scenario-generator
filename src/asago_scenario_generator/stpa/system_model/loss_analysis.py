@@ -1263,10 +1263,9 @@ def derive_loss_analysis(
                 step=STEP_MERGE,
                 message=f"{type(exc).__name__}: {exc}",
             ) from exc
-        # Stage 2 may apply evidence-backed H/SC wording and edge reviews. Retain this
-        # merged Stage 1a graph as an explicit draft for audit; the canonical
-        # loss-analysis.yaml is replaced by the reviewed graph after Call 3.
-        write_yaml(merged, run_dir / "loss-analysis-draft.yaml")
+        # Stage 2 may apply evidence-backed H/SC wording and edge reviews; it
+        # keeps its input as ``loss-analysis-draft.yaml`` when the review
+        # changes it, and replaces this canonical graph after Call 3.
         write_yaml(merged, run_dir / "loss-analysis.yaml")
         return merged
     finally:

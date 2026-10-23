@@ -25,7 +25,6 @@ from pydantic import (
 
 OBSERVATION_CONTRACT_SCHEMA = "observation-contract-v1"
 OBSERVATION_CONTRACT_DIGEST_DOMAIN = OBSERVATION_CONTRACT_SCHEMA
-OBSERVATION_CONTRACT_FILENAME = "observation-contract.yaml"
 
 ClaimLevel = Literal["command_attempt", "reply", "returned_result", "state_effect"]
 ObservationEvidence = Literal[
@@ -310,23 +309,6 @@ def load_observation_contract(path: str | Path) -> ObservationContract:
     return observation_contract_from_payload(payload)
 
 
-def write_observation_contract(contract: ObservationContract, path: str | Path) -> Path:
-    """Write a verified observation contract as YAML."""
-
-    contract.verify_digest()
-    destination = Path(path)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_text(
-        yaml.safe_dump(
-            contract.model_dump(mode="json", exclude_none=True),
-            sort_keys=False,
-            allow_unicode=True,
-        ),
-        encoding="utf-8",
-    )
-    return destination
-
-
 def assess_observation_criteria(
     criteria: tuple[ObservationCriterion, ...] | list[ObservationCriterion],
     contract: ObservationContract,
@@ -464,7 +446,6 @@ def default_observation_contract() -> ObservationContract:
 __all__ = [
     "ClaimLevel",
     "OBSERVATION_CONTRACT_DIGEST_DOMAIN",
-    "OBSERVATION_CONTRACT_FILENAME",
     "OBSERVATION_CONTRACT_SCHEMA",
     "ObservationAssessment",
     "ObservationCapability",
@@ -479,5 +460,4 @@ __all__ = [
     "load_observation_contract",
     "observation_contract_digest",
     "observation_contract_from_payload",
-    "write_observation_contract",
 ]

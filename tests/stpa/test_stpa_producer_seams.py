@@ -16,20 +16,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
-    DiscoveryProvenance,
-    InventoryAuthority,
-    InventoryCompleteness,
     McpInventoryObservation,
-    McpToolObservation,
-    ProfileBasis,
-    SemanticAuthority,
-    SourceProtocol,
-    TargetInterpretationDisposition,
-    TargetOperationEffect,
-    TargetProfileOperation,
-    TargetProfileResource,
-    TargetStateEffect,
-    mcp_resource_id,
 )
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
@@ -39,9 +26,6 @@ from asago_scenario_generator.models.target_realization import (
     TargetRealizationResult,
     TargetRealizationRow,
     TargetRealizationSummary,
-)
-from asago_scenario_generator.stpa.scenario_prod.target_profile_publication import (
-    publish_execution_target_profile,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import (
     _target_operation_for_context,
@@ -198,90 +182,6 @@ def test_stage5_target_operation_resolver_rejects_unrecorded_selection() -> None
         operation_for_supported_row(
             _target_realization_fixture(_target_profile_fixture()), row
         )
-
-
-def test_target_profile_publication_uses_canonical_shared_writer(tmp_path) -> None:
-    tool = McpToolObservation(
-        name="process_refund",
-        source_observation_sha256=hashlib.sha256(
-            canonical_json_bytes(
-                {
-                    "name": "process_refund",
-                    "description": "Process a refund.",
-                    "input_schema": {
-                        "type": "object",
-                        "properties": {"order_id": {"type": "string"}},
-                    },
-                    "output_schema": "opaque",
-                }
-            )
-        ).hexdigest(),
-        description="Process a refund.",
-        input_schema={
-            "type": "object",
-            "properties": {"order_id": {"type": "string"}},
-        },
-        output_schema="opaque",
-    )
-    inventory = McpInventoryObservation(
-        target_id="target-profile-1",
-        authorization_scope_id="target-scope",
-        tools=(tool,),
-    )
-    resource = TargetProfileResource(
-        resource_id=mcp_resource_id("target-profile-1", tool.name),
-        resource_kind="tool",
-        target_id="target-profile-1",
-        tool_name=tool.name,
-        description=tool.description,
-        input_schema=tool.input_schema,
-        output_schema=tool.output_schema,
-        argument_names=tool.argument_names,
-        surfaces=("tool_call", "tool_result"),
-        operations=(
-            TargetProfileOperation(
-                operation_id=tool.name,
-                semantic_operation=tool.name,
-                argument_names=tool.argument_names,
-            ),
-        ),
-        evidence_refs=("inventory:tool:process_refund",),
-    )
-    profile = ExecutionTargetProfile(
-        target_id="target-profile-1",
-        authorization_scope_id="target-scope",
-        basis=ProfileBasis.target,
-        inventory_authority=InventoryAuthority.observed,
-        semantic_authority=SemanticAuthority.inferred,
-        inventory_completeness=InventoryCompleteness.observed_complete,
-        source_protocol=SourceProtocol.mcp,
-        source_inventory_digest=inventory.semantic_digest,
-        discovery_provenance=DiscoveryProvenance(
-            scanner_id="fixture-scanner",
-            interpreter_id="fixture-interpreter",
-            verifier_id="fixture-verifier",
-        ),
-        inventory=inventory,
-        resources=(resource,),
-        interpretations=(
-            {
-                "resource_id": resource.resource_id,
-                "tool_name": tool.name,
-                "disposition": TargetInterpretationDisposition.supported,
-                "likely_effect": TargetOperationEffect.update,
-                "likely_state_effect": TargetStateEffect.changes,
-                "evidence_refs": ("inventory:tool:process_refund:description",),
-                "rationale": "The observed description names a refund operation.",
-            },
-        ),
-    )
-
-    path = publish_execution_target_profile(tmp_path, profile)
-
-    assert path == tmp_path / "execution-target-profile.json"
-    assert json.loads(path.read_text(encoding="utf-8")) == profile.model_dump(
-        mode="json"
-    )
 
 
 @pytest.mark.parametrize(

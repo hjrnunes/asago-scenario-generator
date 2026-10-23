@@ -8,15 +8,16 @@ before ICA enumeration and target realization. Evidence-backed wording
 corrections preserve legitimate use-case functions and communication direction;
 they cannot change losses, identities or hazard-to-loss links. A genuinely
 unknown relationship remains explicit rather than becoming an invented rule.
-`loss-analysis-draft.yaml`, `control-structure-draft.yaml` and
-`control-structure-review.yaml` retain the drafts and explicit decisions.
-Each later version keeps its own name: `loss-analysis-reviewed.yaml`,
-`loss-analysis-reviewed-corrected.yaml`, `control-structure-reviewed.yaml`,
-`control-structure-evidence-bound.yaml`, `control-structure-revised.yaml` and
-`control-structure-placed.yaml`. A version exists only when its step ran:
-a correction round, an evidence-binding change, a revision attempt or a
-placement change. The normal loss-analysis and
-control-structure files contain the version in force when the stage ends.
+`control-structure-review.yaml` retains the explicit decisions. The normal
+`loss-analysis.yaml` and `control-structure.yaml` contain the version in force
+when the stage ends. Each earlier version is named after the step that left
+it: `loss-analysis-draft.yaml`, `loss-analysis-reviewed.yaml` and
+`loss-analysis-reviewed-corrected.yaml`; `control-structure-draft.yaml`,
+`control-structure-reviewed.yaml`, `control-structure-evidence-bound.yaml` and
+`control-structure-revised.yaml`. A version is written only when its YAML text
+differs from the next version's, so an absent version equals the next version
+present on disk, ending with the normal file. A stage that fails before it
+publishes the normal file keeps the last version it reached.
 No extra model call or target inventory is added to this baseline.
 
 After Stage 1a, deterministic offline gates verify the loss analysis before

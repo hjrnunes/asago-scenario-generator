@@ -119,28 +119,12 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
     assert f"Failure: {criterion}" in envelope.narrative
 
 
-class _ProfilePublicationObservingClient(MockLLMClient):
-    """Record whether the target profile exists before the first provider call."""
-
-    def __init__(self, run_dir: Path) -> None:
-        super().__init__()
-        self.run_dir = run_dir
-        self.profile_present_on_first_call: bool | None = None
-
-    def complete(self, *args, **kwargs):
-        if not self.calls:
-            self.profile_present_on_first_call = (
-                self.run_dir / "execution-target-profile.json"
-            ).is_file()
-        return super().complete(*args, **kwargs)
-
-
-def test_run_sp3_publishes_target_profile_before_stage5_provider_call(tmp_path):
-    """Stage 5 must never run before the verified profile copy is available."""
+def test_run_sp3_writes_no_copy_of_its_inputs(tmp_path):
+    """The target profile and observation contract are inputs, not outputs."""
     run_dir = tmp_path / "run"
-    client = _ProfilePublicationObservingClient(run_dir)
+    client = MockLLMClient()
 
-    result = run_sp3(
+    run_sp3(
         llm_client=client,
         enriched_threat_set=_make_ets(num_threats=1),
         control_structure=make_cs(),
@@ -149,15 +133,15 @@ def test_run_sp3_publishes_target_profile_before_stage5_provider_call(tmp_path):
         execution_target_profile=_target_profile_fixture(),
     )
 
-    assert result.scenario_envelopes == []
-    assert client.profile_present_on_first_call is True
-    assert (run_dir / "execution-target-profile.json").is_file()
+    assert client.calls
+    assert not (run_dir / "execution-target-profile.json").exists()
+    assert not (run_dir / "observation-contract.yaml").exists()
 
 
 def test_run_sp3_rejects_tampered_target_profile_before_provider_call(tmp_path):
-    """A tampered profile cannot reach Stage 5 or be published."""
+    """A tampered profile cannot reach Stage 5."""
     run_dir = tmp_path / "run"
-    client = _ProfilePublicationObservingClient(run_dir)
+    client = MockLLMClient()
     profile = _target_profile_fixture().model_copy(update={"target_id": "tampered"})
 
     with pytest.raises(ValueError, match="semantic_digest"):
@@ -171,36 +155,6 @@ def test_run_sp3_rejects_tampered_target_profile_before_provider_call(tmp_path):
         )
 
     assert client.calls == []
-    assert not (run_dir / "execution-target-profile.json").exists()
-
-
-def test_run_sp3_skips_provider_work_when_profile_publication_fails(
-    tmp_path, monkeypatch
-):
-    """A profile publication failure closes the run before provider work."""
-    run_dir = tmp_path / "run"
-    client = _ProfilePublicationObservingClient(run_dir)
-
-    def fail_publication(*_args, **_kwargs):
-        raise OSError("injected profile publication failure")
-
-    monkeypatch.setattr(
-        "asago_scenario_generator.stpa.scenario_prod.run.publish_execution_target_profile",
-        fail_publication,
-    )
-
-    result = run_sp3(
-        llm_client=client,
-        enriched_threat_set=_make_ets(num_threats=1),
-        control_structure=make_cs(),
-        loss_analysis=make_loss_analysis(),
-        run_dir=run_dir,
-        execution_target_profile=_target_profile_fixture(),
-    )
-
-    assert result.scenario_envelopes == []
-    assert client.calls == []
-    assert any("profile publication failed" in error for error in result.stage_errors)
 
 
 class TestFullRun:

@@ -13,6 +13,7 @@ import copy
 import json
 import re
 from collections.abc import Callable, Sequence
+from contextlib import ExitStack
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Annotated, Any, Literal, TypeVar
@@ -54,7 +55,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 from asago_scenario_generator.stpa._model_data import raw_model_data
 from asago_scenario_generator.stpa.infra.prompt_preflight import _REFERENCE_TOKEN_RE
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
+from asago_scenario_generator.stpa.infra.yaml_io import VersionChain, write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
     ASSEMBLY_DEFERRED,
     ControlAction,
@@ -1779,6 +1780,7 @@ def derive_control_structure(
         | None
     ) = None,
     target_evidence: TargetEvidence | None = None,
+    versions: VersionChain | None = None,
 ) -> ControlStructureDerivationResult:
     """Run all four Stage 2 calls in sequence and assemble the ControlStructure.
 
@@ -1811,13 +1813,53 @@ def derive_control_structure(
         target_evidence: Optional discovered target evidence rendered into
             every Stage 2 call.  Control actions may then name the observed
             operation they invoke; unknown names are dropped with a warning.
+        versions: Optional control-structure version chain that the caller
+            continues and publishes.  Without one, the derivation publishes
+            ``control-structure.yaml`` itself.
 
     Returns:
         A named result containing the reviewed ``LossAnalysis``, validated
         ``ControlStructure``, and warnings.  The warning tuple is empty when
         the assembly succeeds.
     """
-    loader = template_loader or TemplateLoader(PROMPTS_DIR)
+    with ExitStack() as stack:
+        loss_versions = stack.enter_context(VersionChain(run_dir))
+        structure_versions = versions or stack.enter_context(VersionChain(run_dir))
+        result = _derive_control_structure(
+            llm_client=llm_client,
+            use_case_text=use_case_text,
+            loss_analysis=loss_analysis,
+            capability_profile=capability_profile,
+            run_dir=run_dir,
+            loader=template_loader or TemplateLoader(PROMPTS_DIR),
+            temperature=temperature,
+            post_review_density_check=post_review_density_check,
+            target_evidence=target_evidence,
+            loss_versions=loss_versions,
+            structure_versions=structure_versions,
+        )
+        if versions is None:
+            structure_versions.publish(
+                result.control_structure, "control-structure.yaml"
+            )
+        return result
+
+
+def _derive_control_structure(
+    *,
+    llm_client: LLMClient,
+    use_case_text: str,
+    loss_analysis: LossAnalysis,
+    capability_profile: CapabilityProfile | None,
+    run_dir: Path,
+    loader: TemplateLoader,
+    temperature: float,
+    post_review_density_check: Callable[..., object] | None,
+    target_evidence: TargetEvidence | None,
+    loss_versions: VersionChain,
+    structure_versions: VersionChain,
+) -> ControlStructureDerivationResult:
+    """Derive the structure, recording each loss and structure version."""
 
     # Call 1 — Requirements
     requirement_set = _call_1_requirements(
@@ -1868,13 +1910,13 @@ def derive_control_structure(
     # Repair orphan PMs — auto-generate stub FB channels before Call 3
     control_structure, repair_warnings = repair_orphan_pms(control_structure)
 
-    # Preserve the merged, pre-review loss graph for audit.  Stage 2 may make
-    # only the bounded semantic wording/edge decisions in Call 3; all source
-    # texts and identities stay available in this draft artifact.
-    write_yaml(loss_analysis, run_dir / "loss-analysis-draft.yaml")
+    # Keep the merged, pre-review loss graph for audit when the review changes
+    # it.  Stage 2 may make only the bounded semantic wording/edge decisions
+    # in Call 3; all source texts and identities stay available in this draft.
+    loss_versions.add(loss_analysis, "loss-analysis-draft.yaml")
 
     # Call 3 — Coordination + integrity (receives full assembled control structure)
-    write_yaml(control_structure, run_dir / "control-structure-draft.yaml")
+    structure_versions.add(control_structure, "control-structure-draft.yaml")
     coordination_analysis = _call_3_coordination(
         llm_client=llm_client,
         use_case_text=use_case_text,
@@ -1898,15 +1940,14 @@ def derive_control_structure(
     control_structure = semantic_result.control_structure
 
     # The reviewed graph is the graph in force: it is what Stage 2 uses and
-    # what replaces the canonical ``loss-analysis.yaml``.  Persist it under its
-    # own name before the offline re-check so the evidence is always the exact
-    # graph the gate evaluated.  The pre-review merged graph stays available as
-    # ``loss-analysis-draft.yaml``.  The canonical name is written once, after
-    # the re-check, with whichever graph is in force.  Failing closed leaves an
+    # what replaces the canonical ``loss-analysis.yaml``.  It is recorded under
+    # its own name before the offline re-check, and kept when a correction
+    # round replaces it.  The canonical name is written once, after the
+    # re-check, with whichever graph is in force.  Failing closed leaves an
     # internally consistent run: the gates artifact names the still-failing
     # checks and the canonical artifact holds that same graph, instead of a
     # stale pre-review graph that silently keeps an edge the gate rejected.
-    write_yaml(reviewed_loss_analysis, run_dir / "loss-analysis-reviewed.yaml")
+    loss_versions.add(reviewed_loss_analysis, "loss-analysis-reviewed.yaml")
 
     # Fail closed before completing the stage: the semantic review may reword
     # hazards or constraints, or replace constraint hazard edges, and could
@@ -1967,9 +2008,8 @@ def derive_control_structure(
                     ),
                     run_dir / "control-structure-review-corrected.yaml",
                 )
-                write_yaml(
-                    result.loss_analysis,
-                    run_dir / "loss-analysis-reviewed-corrected.yaml",
+                loss_versions.add(
+                    result.loss_analysis, "loss-analysis-reviewed-corrected.yaml"
                 )
                 semantic_result = result
                 review_in_force = merged_review
@@ -1983,7 +2023,7 @@ def derive_control_structure(
             reviewed_loss_analysis = semantic_result.loss_analysis
             control_structure = semantic_result.control_structure
     finally:
-        write_yaml(semantic_result.loss_analysis, run_dir / "loss-analysis.yaml")
+        loss_versions.publish(semantic_result.loss_analysis, "loss-analysis.yaml")
 
     # Add coordination links to the ControlStructure
     control_structure = _add_coordination_links(
@@ -1995,8 +2035,7 @@ def derive_control_structure(
         call_log=call_log_of(llm_client),
     )
 
-    write_yaml(control_structure, run_dir / "control-structure-reviewed.yaml")
-    write_yaml(control_structure, run_dir / "control-structure.yaml")
+    structure_versions.add(control_structure, "control-structure-reviewed.yaml")
     return ControlStructureDerivationResult(
         loss_analysis=reviewed_loss_analysis,
         control_structure=control_structure,

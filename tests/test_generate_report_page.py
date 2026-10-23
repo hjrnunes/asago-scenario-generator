@@ -183,11 +183,12 @@ def test_the_handoff_lists_files_with_schema_versions(tmp_path: Path) -> None:
     for text in (
         "scenario-handoff-v5",
         "scenario-testability-v1",
-        "execution-target-profile-v1",
         "testability.yaml",
         "8 files",
     ):
         assert text in handoff
+    # The target profile is an input; downstream reads the discovery copy.
+    assert "execution-target-profile" not in handoff
 
 
 def test_the_handoff_omits_counts_that_are_zero(tmp_path: Path) -> None:

@@ -327,7 +327,7 @@ class TestRunOrchestration:
 
         assert any("SC-1" in call.user_prompt for call in client.calls)
 
-    def test_run_with_target_evidence_persists_and_renders_it(self, tmp_path):
+    def test_run_with_target_evidence_renders_it_without_a_copy(self, tmp_path):
         """Observed target evidence reaches Stage 1a and every Stage 2 call."""
 
         fixtures = Path(__file__).resolve().parents[1] / "fixtures"
@@ -344,8 +344,7 @@ class TestRunOrchestration:
 
         run_sp1_default(client, tmp_path, target_evidence=evidence)
 
-        record = yaml.safe_load((tmp_path / "target-evidence.yaml").read_text())
-        assert "operation:get_referral" in {op["ref"] for op in record["operations"]}
+        assert not (tmp_path / "target-evidence.yaml").exists()
         assert (tmp_path / "control-structure.yaml").exists()
         entries = read_calls_jsonl(tmp_path)
         steps = {
@@ -542,8 +541,34 @@ class TestRunOrchestration:
         stage_1b_entries = [e for e in entries if e["stage"] == "stage_1b"]
         assert len(stage_1b_entries) == 0
 
-    def test_run_with_external_profile_publishes_capability_artifact(self, tmp_path):
-        """A pre-built profile outside the run directory is copied to outputs."""
+    def test_a_derived_profile_is_published_once(self, tmp_path):
+        """Stage 1b's profile is written by SP1 alone, not again by derivation."""
+        from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
+        from asago_scenario_generator.stpa.system_model import profile as profile_module
+        from asago_scenario_generator.stpa.system_model import run as run_module
+
+        writes: list[str] = []
+
+        def spy(label):
+            def write(model, path, *args, **kwargs):
+                if Path(path).name == "capability-profile.yaml":
+                    writes.append(label)
+                return write_yaml(model, path, *args, **kwargs)
+
+            return write
+
+        with (
+            patch.object(profile_module, "write_yaml", side_effect=spy("profile")),
+            patch.object(run_module, "write_yaml", side_effect=spy("run")),
+        ):
+            run_sp1_default(_setup_mock_client(), tmp_path)
+
+        assert writes == ["run"]
+
+    def test_run_with_external_profile_leaves_its_publication_to_the_caller(
+        self, tmp_path
+    ):
+        """The caller that built a profile publishes it; SP1 writes no copy."""
         profile = Stage1Profile(
             entry_points=[
                 {
@@ -562,8 +587,7 @@ class TestRunOrchestration:
             _setup_mock_client(), run_dir, capability_profile=profile
         )
 
-        artifact = run_dir / "capability-profile.yaml"
-        assert artifact.exists()
+        assert not (run_dir / "capability-profile.yaml").exists()
         assert result.capability_profile == profile
 
     def test_run_15_manifest_with_empty_risk_cards(self, tmp_path):

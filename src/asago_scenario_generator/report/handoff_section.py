@@ -81,15 +81,6 @@ def _rows(run: RunData) -> list[Row]:
         ),
         Row(
             [
-                "Target profile",
-                _link(run, "execution-target-profile.json"),
-                "",
-                code_id(schema_of(out / "execution-target-profile.json")),
-                "Operations and state the target exposes.",
-            ]
-        ),
-        Row(
-            [
                 "Run manifest",
                 _link(run, "synthesis-manifest.yaml"),
                 f"{pinned} pinned inputs",

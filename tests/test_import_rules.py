@@ -602,8 +602,6 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     "handoff": 1,
     # Deterministic scenario identity is a pure projection over ScenarioSpec.
     "deduplication": 1,
-    # Target-profile publication is an atomic IO writer over the profile model.
-    "target_profile_publication": 2,
     # The narrate step's model request and write-up reuse presentation's
     # wording and the handoff's ownership check.
     "narration": 2,
