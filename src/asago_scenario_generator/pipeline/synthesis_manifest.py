@@ -650,12 +650,18 @@ def _obligation_stop_reason_counts(accounting: Any, realization: Any) -> dict[st
 
 
 def _considered_rows(rows: Iterable[Any]) -> tuple[Any, ...]:
-    """Select the applicable rows that carry a stop reason."""
+    """Select the applicable rows that carry a stop reason.
+
+    Governance-only and capability-excluded rows are not applicable; an
+    out-of-scope capability-excluded row carries ``risk_out_of_scope`` but is
+    counted under ``capability_excluded`` alone.
+    """
     return tuple(
         row
         for row in rows
         if row.stop_reason is not None
-        and getattr(row, "disposition", None) != "governance_only"
+        and getattr(row, "disposition", None)
+        not in {"governance_only", "capability_excluded"}
     )
 
 

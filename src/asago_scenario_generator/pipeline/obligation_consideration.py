@@ -15,6 +15,7 @@ from asago_scenario_generator.models.obligation_accounting import (
     GOVERNANCE_ROUTED_NO_FINDING,
     OUT_OF_SCOPE,
     RISK_OUT_OF_SCOPE,
+    SCOPE_EXEMPT_DISPOSITIONS,
     ObligationAccounting,
     ObligationAccountingRow,
     validate_obligation_accounting_source_pins,
@@ -712,11 +713,6 @@ def _accounting_rows(
     )
 
 
-# Stop reasons an out-of-scope risk scope does not replace: the row's credit,
-# and the governance-only outcome, which belongs to rows no pattern covers.
-_SCOPE_KEEPS_STOP_REASON = frozenset({"addressed", GOVERNANCE_ROUTED_NO_FINDING})
-
-
 def _scoped_rows(
     plan: TaxonomyObligationPlan,
     rows: tuple[ObligationAccountingRow, ...],
@@ -725,10 +721,10 @@ def _scoped_rows(
     """Record each row's risk scope; an out-of-scope scope sets the stop reason.
 
     A row whose risk class no action of this system can produce stops at
-    ``risk_out_of_scope`` in place of the reason the analysis gave, so
-    ``risk_pattern_mismatch`` and the other reasons count in-scope misses only.
-    An addressed row keeps its credit. A risk without a decision leaves its
-    rows unchanged.
+    ``risk_out_of_scope`` whatever stop reason it had, capability-excluded rows
+    included, so ``risk_pattern_mismatch`` and the other reasons count in-scope
+    misses only. Addressed and governance-only rows keep their own outcome. A
+    risk without a decision leaves its rows unchanged.
     """
     risk_of = {item.obligation_id: item.risk_ref.risk_id for item in plan.obligations}
     return tuple(
@@ -743,11 +739,7 @@ def _scoped_row(
     if scope is None:
         return row
     values = {**row.model_dump(), "scope": scope}
-    if (
-        scope in OUT_OF_SCOPE
-        and row.stop_reason is not None
-        and row.stop_reason not in _SCOPE_KEEPS_STOP_REASON
-    ):
+    if scope in OUT_OF_SCOPE and row.disposition not in SCOPE_EXEMPT_DISPOSITIONS:
         values["stop_reason"] = RISK_OUT_OF_SCOPE
     return ObligationAccountingRow.model_validate(values)
 

@@ -6,12 +6,15 @@ from pathlib import Path
 
 import pytest
 import yaml
+from pydantic import ValidationError
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.pipeline.synthesis_manifest import _boundary_decisions
 from asago_scenario_generator.stpa.system_model.risk_actionability import (
     ARTIFACT_FILENAME,
+    RiskActionabilityRecord,
     RiskActionabilityResponse,
     classify_risk_actionability,
 )
@@ -322,9 +325,114 @@ def test_a_decision_still_contradictory_after_the_retry_stays_actionable(
     outcome = _classify(client, [_card("r-1")], tmp_path)
 
     entry = outcome.record.entries[0]
-    assert entry.decision.value == "actionable"
     assert entry.source == "fallback"
+    assert entry.decision.value == "actionable"
+    assert entry.system_action is None
+    assert entry.affected_stakeholder is None
+    assert entry.reason.startswith("Not classified by the model after one retry")
     assert outcome.record.status == "partial"
+    persisted = yaml.safe_load((tmp_path / ARTIFACT_FILENAME).read_text())
+    assert persisted["schema_version"] == "risk-actionability-v2"
+    assert persisted["entries"][0]["source"] == "fallback"
+    assert "system_action" not in persisted["entries"][0]
+    assert RiskActionabilityRecord.model_validate(persisted) == outcome.record
+
+
+def test_an_unclassified_card_stays_in_scope_downstream(tmp_path: Path) -> None:
+    client = MockLLMClient()
+    client.set_invalid_response_for(RiskActionabilityResponse)
+
+    outcome = _classify(client, [_card("r-1")], tmp_path)
+
+    assert outcome.record.entries[0].source == "fallback"
+    # Accounting reads this map; the card is not out of scope.
+    assert _boundary_decisions(outcome.record) == {"r-1": "actionable"}
+
+
+def _entry(**fields: object) -> dict[str, object]:
+    return {"risk_id": "r-1", "reason": "Stated reason.", **fields}
+
+
+def _persisted(*entries: dict[str, object], version: str | None = None) -> dict:
+    record: dict[str, object] = {
+        "status": "completed",
+        "call_count": 1,
+        "counts": {},
+        "entries": list(entries),
+    }
+    if version is not None:
+        record["schema_version"] = version
+    return record
+
+
+@pytest.mark.parametrize(
+    ("entry", "problem"),
+    (
+        (
+            _entry(decision="actionable", source="model"),
+            "an actionable decision names no system action or stakeholder",
+        ),
+        (
+            _entry(decision="actionable", source="model", system_action="A reply."),
+            "an actionable decision names no system action or stakeholder",
+        ),
+        (
+            _entry(
+                decision="outside_boundary",
+                source="model",
+                affected_stakeholder="A user.",
+            ),
+            "the outside_boundary decision names a system action or stakeholder",
+        ),
+        (
+            _entry(decision="not_applicable", source="fallback"),
+            "a fallback entry keeps the card actionable",
+        ),
+        (
+            _entry(decision="actionable", source="fallback", system_action="A reply."),
+            "a fallback entry names no system action or stakeholder",
+        ),
+    ),
+)
+def test_a_current_record_rejects_an_entry_that_breaks_the_invariant(
+    entry: dict[str, object], problem: str
+) -> None:
+    with pytest.raises(ValidationError, match=f"entry 'r-1': {problem}"):
+        RiskActionabilityRecord.model_validate(_persisted(entry))
+
+
+def test_a_current_record_accepts_model_and_fallback_entries() -> None:
+    record = RiskActionabilityRecord.model_validate(
+        _persisted(
+            _entry(
+                decision="actionable",
+                source="model",
+                system_action="A reply.",
+                affected_stakeholder="A user.",
+            ),
+            {**_entry(decision="outside_boundary", source="model"), "risk_id": "r-2"},
+            {**_entry(decision="actionable", source="fallback"), "risk_id": "r-3"},
+        )
+    )
+
+    assert record.schema_version == "risk-actionability-v2"
+
+
+def test_a_v1_record_without_action_fields_still_loads() -> None:
+    record = RiskActionabilityRecord.model_validate(
+        _persisted(
+            _entry(decision="actionable", source="model"),
+            version="risk-actionability-v1",
+        )
+    )
+
+    assert record.entries[0].system_action is None
+    fixture = (
+        Path(__file__).parents[1]
+        / "fixtures/generate_report/miniklarna-1/risk-actionability.yaml"
+    )
+    loaded = RiskActionabilityRecord.model_validate(yaml.safe_load(fixture.read_text()))
+    assert loaded.schema_version == "risk-actionability-v1"
 
 
 def test_no_cards_makes_no_call(tmp_path: Path) -> None:

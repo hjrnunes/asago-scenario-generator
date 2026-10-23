@@ -173,9 +173,16 @@ def obligation_rows(run: RunData) -> list[ObligationRow]:
         risk = risks.get(obligation.risk_ref.risk_id)
         name = (risk or {}).get("display_name") or obligation.risk_ref.risk_name
         pattern = obligation.attack_pattern_id
+        # A capability-excluded row groups by its disposition, as the manifest
+        # counts it, even when an out-of-scope risk gave it a stop reason.
+        stop = (
+            row.disposition
+            if row.disposition == "capability_excluded"
+            else row.stop_reason or row.disposition
+        )
         rows.append(
             ObligationRow(
-                stop_key(row.stop_reason or row.disposition),
+                stop_key(stop),
                 name,
                 risk is not None and risk["coverage"] == "outside_boundary",
                 pattern,

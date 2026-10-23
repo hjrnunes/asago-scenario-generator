@@ -33,7 +33,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient
@@ -53,7 +53,9 @@ STEP_RETRY = "risk_actionability_retry"
 SYSTEM_TEMPLATE = "stage1a_actionability_system.j2"
 USER_TEMPLATE = "stage1a_actionability_user.j2"
 ARTIFACT_FILENAME = "risk-actionability.yaml"
-SCHEMA_VERSION = "risk-actionability-v1"
+# v2 entries meet the decision/field invariant (see RiskActionabilityRecord);
+# v1 records predate the action fields and still load.
+SCHEMA_VERSION = "risk-actionability-v2"
 MAX_CARDS_PER_CALL = 40
 MAX_COMPLETION_TOKENS = 8192
 
@@ -88,7 +90,13 @@ class RiskActionabilityResponse(BaseModel):
 
 
 class RiskActionabilityEntry(BaseModel):
-    """One card's recorded decision."""
+    """One card's recorded decision.
+
+    ``source`` says who decided.  ``model`` is a decision the model returned.
+    ``fallback`` marks a card the model left unclassified after the retry: its
+    ``actionable`` decision is the default that keeps the card in scope, not a
+    judgement, so it names no system action or stakeholder.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -117,12 +125,24 @@ class RiskActionabilityRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["risk-actionability-v1"] = SCHEMA_VERSION
+    schema_version: Literal["risk-actionability-v1", "risk-actionability-v2"] = (
+        SCHEMA_VERSION
+    )
     status: Literal["completed", "partial", "empty"]
     call_count: int = Field(ge=0)
     counts: dict[str, int]
     entries: list[RiskActionabilityEntry]
     warnings: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def entries_meet_the_field_invariant(self) -> "RiskActionabilityRecord":
+        """Check every v2 entry's decision against its action fields."""
+        if self.schema_version == SCHEMA_VERSION:
+            for entry in self.entries:
+                problem = _entry_problem(entry)
+                if problem is not None:
+                    raise ValueError(f"entry '{entry.risk_id}': {problem}")
+        return self
 
 
 @dataclass
@@ -254,7 +274,9 @@ def _accept_requested_decisions(
         decided.setdefault(item.risk_id, item)
 
 
-def _decision_problem(item: RiskActionabilityDecision) -> str | None:
+def _decision_problem(
+    item: RiskActionabilityDecision | RiskActionabilityEntry,
+) -> str | None:
     """Name the contradiction between a decision and its action fields."""
     named = [
         bool((value or "").strip())
@@ -268,6 +290,21 @@ def _decision_problem(item: RiskActionabilityDecision) -> str | None:
         return (
             f"the {item.decision.value} decision names a system action or stakeholder"
         )
+    return None
+
+
+def _entry_problem(entry: RiskActionabilityEntry) -> str | None:
+    """Name what breaks the field invariant of one recorded entry.
+
+    A model entry meets the reply invariant.  A fallback entry is the
+    in-scope default: ``actionable`` with no action fields.
+    """
+    if entry.source == "model":
+        return _decision_problem(entry)
+    if entry.decision is not ActionabilityDecision.actionable:
+        return "a fallback entry keeps the card actionable"
+    if entry.system_action is not None or entry.affected_stakeholder is not None:
+        return "a fallback entry names no system action or stakeholder"
     return None
 
 
@@ -293,7 +330,10 @@ def _actionability_entries(
                 RiskActionabilityEntry(
                     risk_id=card.risk_id,
                     decision=ActionabilityDecision.actionable,
-                    reason="Not classified by the model; kept in scope.",
+                    reason=(
+                        "Not classified by the model after one retry; kept in "
+                        "scope by default."
+                    ),
                     source="fallback",
                     **provenance,
                 )

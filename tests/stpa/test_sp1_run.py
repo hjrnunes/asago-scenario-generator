@@ -1030,6 +1030,29 @@ class TestRunSp1Artifacts:
         }
         assert cited == {card.risk_id for card in cards}
 
+    def test_unclassified_cards_still_reach_loss_derivation(self, tmp_path):
+        """A card the classification never decided stays in scope as a fallback."""
+        cards = make_risk_cards()
+        client = _make_queued_mock_client()
+        client.set_invalid_response_for(RiskActionabilityResponse)
+
+        result = run_sp1_default(client, tmp_path)
+
+        assert result.risk_actionability is not None
+        assert {entry.source for entry in result.risk_actionability.entries} == {
+            "fallback"
+        }
+        derivation = [
+            call
+            for call in client.calls
+            if getattr(call.response_format, "__name__", "")
+            == "_Stage1aRiskProviderDraft"
+        ]
+        assert len(derivation) == 1
+        for card in cards:
+            assert f"- {card.risk_id} — " in derivation[0].user_prompt
+        assert result.loss_analysis is not None
+
     def test_pinned_run_has_no_boundary_decision(self, tmp_path):
         """A pinned graph skips the classification, so the result has no record."""
         derived_dir = tmp_path / "derived"
