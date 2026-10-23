@@ -680,6 +680,15 @@ STPA, accounting, realization, manifest, and report artifacts in their
 requested output directory. Retired taxonomy-generator output is
 read-only historical data and is not accepted as a compatibility contract.
 
+The output holds what the run produced, not copies of its inputs: the
+observation contract and the execution target profile stay where the caller
+supplied them; the synthesis manifest pins the profile's digest and each
+scenario handoff names the contract's identity and digest. Each artifact is
+written once per run by the step that owns it; the composition root publishes
+the capability profile. An artifact refined by successive steps keeps an
+intermediate version only when it differs from the next version, as
+`stpa.infra.yaml_io.VersionChain` implements.
+
 ## Model-facing interface ownership
 
 Model authors make the semantic choices. Deterministic adapters own the values,

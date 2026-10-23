@@ -212,6 +212,36 @@ def test_synthesis_plans_before_baseline_and_keeps_shared_snapshot(
     assert (result.output_dir / "capability-profile.yaml").is_file()
 
 
+def test_synthesis_publishes_the_prepared_profile_once_with_its_display_field(
+    tmp_path: Path,
+) -> None:
+    """The composition root is the only writer of ``capability-profile.yaml``."""
+    from asago_scenario_generator.models.capability_profile import (
+        inject_kc_subcodes_display,
+    )
+    from asago_scenario_generator.pipeline import synthesis_persist
+    from asago_scenario_generator.stpa.infra.yaml_io import yaml_text
+
+    real_write = synthesis_persist.write_text_atomically
+    profile_writes: list[Path] = []
+
+    def spy(path, text):
+        if Path(path).name == "capability-profile.yaml":
+            profile_writes.append(Path(path))
+        return real_write(path, text)
+
+    fake = _FakeAdapters(calls=[])
+    with pytest.MonkeyPatch.context() as mp:
+        mp.setattr(synthesis_persist, "write_text_atomically", spy)
+        result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    path = result.output_dir / "capability-profile.yaml"
+    assert profile_writes == [path]
+    assert path.read_text(encoding="utf-8") == yaml_text(
+        synthesis_capability_profile(), post_process=inject_kc_subcodes_display
+    )
+
+
 def test_synthesis_rejects_a_capability_profile_that_is_not_typed(
     tmp_path: Path,
 ) -> None:

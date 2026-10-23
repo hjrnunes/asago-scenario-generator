@@ -10,7 +10,10 @@ from typing import Any
 import yaml
 
 from asago_scenario_generator.manifest import write_text_atomically
-from asago_scenario_generator.models.capability_profile import CapabilityProfile
+from asago_scenario_generator.models.capability_profile import (
+    CapabilityProfile,
+    inject_kc_subcodes_display,
+)
 from asago_scenario_generator.models.ica_merge import ICA_MERGES_FILENAME
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.models.slot_hazard_offer import (
@@ -30,6 +33,7 @@ from asago_scenario_generator.pipeline.target_realization_persistence import (
     TARGET_REALIZATION_FILENAME,
     write_target_realization,
 )
+from asago_scenario_generator.stpa.infra.yaml_io import yaml_text
 from asago_scenario_generator.stpa.scenario_prod.target_observations import (
     TARGET_OBSERVATIONS_FILENAME,
 )
@@ -40,15 +44,14 @@ logger = logging.getLogger("asago_scenario_generator.pipeline.synthesis")
 
 
 def _persist_prepared_profile(output_dir: Path, profile: CapabilityProfile) -> Path:
-    """Persist the prepared profile as run evidence, before SP1 starts.
+    """Publish the prepared profile once, before SP1 starts.
 
-    SP1 receives the same profile value and republishes the file itself, so
-    this write is the evidence a run keeps when its baseline adapter does not.
+    Neither the profile adapter nor SP1 writes a profile it was handed, so
+    this is the run's only ``capability-profile.yaml``.
     """
-    payload = profile.model_dump(mode="json", exclude_none=True)
     path = output_dir / "capability-profile.yaml"
     write_text_atomically(
-        path, yaml.safe_dump(payload, sort_keys=False, allow_unicode=True)
+        path, yaml_text(profile, post_process=inject_kc_subcodes_display)
     )
     return path
 

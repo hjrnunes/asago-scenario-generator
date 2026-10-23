@@ -1,9 +1,9 @@
 """Stage 1a and Stage 2 evidence: one file name per version of an artifact.
 
 The canonical ``loss-analysis.yaml`` and ``control-structure.yaml`` hold the
-graph in force at the end of a stage.  Every intermediate version is written
-under its own name, so a reader can tell which version a file holds, and the
-canonical name is written once per stage boundary instead of after each step.
+graph in force at the end of a stage, written once per stage boundary.  Each
+intermediate version keeps its own name and is written only when it differs
+from the next version, so an absent version equals the next one on disk.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from unittest.mock import patch
 
 import yaml
 
+from asago_scenario_generator.stpa.infra.yaml_io import VersionChain
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml as real_write_yaml
 from asago_scenario_generator.stpa.system_model import control_structure as cs_module
 from asago_scenario_generator.stpa.system_model import loss_analysis as la_module
@@ -63,7 +64,7 @@ def _hazards_by_constraint(document: dict) -> list[list[str]]:
 
 
 def _spy_canonical_writes(writes: Counter):
-    """Return patches that count canonical writes by the module that made them."""
+    """Return patches that count canonical writes by the code that made them."""
     patches = []
     for label, module in (
         ("loss_analysis", la_module),
@@ -77,18 +78,34 @@ def _spy_canonical_writes(writes: Counter):
             return real_write_yaml(value, path, *args, **kwargs)
 
         patches.append(patch.object(module, "write_yaml", side_effect=spy))
+    real_publish = VersionChain.publish
+
+    def publish(chain, model, name):
+        writes[("chain", name)] += 1
+        return real_publish(chain, model, name)
+
+    patches.append(patch.object(VersionChain, "publish", publish))
     return patches
 
 
+def _absent(run_dir: Path, *names: str) -> None:
+    for name in names:
+        assert not (run_dir / name).exists(), name
+
+
 class TestReviewedLossAnalysisVersions:
-    def test_review_is_kept_under_its_own_name_and_canonical_holds_it(self, tmp_path):
+    def test_an_unchanging_review_writes_no_copy_of_the_canonical(self, tmp_path):
         client = setup_sp1_mock_client()
         result = _run_sp1(client, tmp_path)
 
         assert result.loss_analysis is not None
-        reviewed = (tmp_path / "loss-analysis-reviewed.yaml").read_bytes()
-        assert reviewed == (tmp_path / "loss-analysis.yaml").read_bytes()
-        assert not (tmp_path / "loss-analysis-reviewed-corrected.yaml").exists()
+        assert (tmp_path / "loss-analysis.yaml").exists()
+        _absent(
+            tmp_path,
+            "loss-analysis-draft.yaml",
+            "loss-analysis-reviewed.yaml",
+            "loss-analysis-reviewed-corrected.yaml",
+        )
 
     def test_failed_recheck_leaves_the_graph_in_force_in_the_canonical_name(
         self, tmp_path
@@ -98,19 +115,23 @@ class TestReviewedLossAnalysisVersions:
         result = _run_sp1(client, tmp_path)
 
         assert result.control_structure is None
-        reviewed = _load(tmp_path, "loss-analysis-reviewed.yaml")
-        assert _hazards_by_constraint(reviewed) == [["H-1"], []]
         # The one correction round repeated the unresolved decision, so the
-        # corrected version equals the reviewed one and canonical follows it.
-        corrected = _load(tmp_path, "loss-analysis-reviewed-corrected.yaml")
-        assert corrected == reviewed
-        assert _load(tmp_path, "loss-analysis.yaml") == corrected
+        # reviewed and corrected versions equal the canonical graph.
+        assert _hazards_by_constraint(_load(tmp_path, "loss-analysis.yaml")) == [
+            ["H-1"],
+            [],
+        ]
+        _absent(
+            tmp_path,
+            "loss-analysis-reviewed.yaml",
+            "loss-analysis-reviewed-corrected.yaml",
+        )
         assert _hazards_by_constraint(_load(tmp_path, "loss-analysis-draft.yaml")) == [
             ["H-1"],
             ["H-2"],
         ]
 
-    def test_correction_is_a_separate_version_and_canonical_follows_it(self, tmp_path):
+    def test_a_replaced_review_keeps_its_own_version(self, tmp_path):
         corrected = valid_empty_coordination_analysis_dict(
             constraint_ids=("SC-1", "SC-2"),
             hazard_ids=("H-1", "H-2"),
@@ -121,10 +142,13 @@ class TestReviewedLossAnalysisVersions:
 
         assert result.stage_errors == []
         first = _load(tmp_path, "loss-analysis-reviewed.yaml")
-        second = _load(tmp_path, "loss-analysis-reviewed-corrected.yaml")
         assert _hazards_by_constraint(first) == [["H-1"], []]
-        assert _hazards_by_constraint(second) == [["H-1"], ["H-2"]]
-        assert _load(tmp_path, "loss-analysis.yaml") == second
+        canonical = _load(tmp_path, "loss-analysis.yaml")
+        assert _hazards_by_constraint(canonical) == [["H-1"], ["H-2"]]
+        # The draft equals the corrected graph, but not the reviewed one it
+        # precedes, so it is kept; the corrected version equals the canonical.
+        assert _load(tmp_path, "loss-analysis-draft.yaml") == canonical
+        _absent(tmp_path, "loss-analysis-reviewed-corrected.yaml")
 
     def test_canonical_loss_analysis_is_written_once_per_stage(self, tmp_path):
         corrected = valid_empty_coordination_analysis_dict(
@@ -134,13 +158,25 @@ class TestReviewedLossAnalysisVersions:
         client = setup_sp1_mock_client()
         client.set_response_for(CoordinationAnalysis, [_unresolved_review(), corrected])
         writes: Counter = Counter()
-        spies = _spy_canonical_writes(writes)
-        with spies[0], spies[1], spies[2]:
+        with ExitStack() as stack:
+            for item in _spy_canonical_writes(writes):
+                stack.enter_context(item)
             _run_sp1(client, tmp_path)
 
         assert writes[("loss_analysis", "loss-analysis.yaml")] == 1
-        assert writes[("control_structure", "loss-analysis.yaml")] == 1
+        assert writes[("chain", "loss-analysis.yaml")] == 1
+        assert writes[("control_structure", "loss-analysis.yaml")] == 0
         assert writes[("run", "loss-analysis.yaml")] == 0
+
+    def test_a_failed_review_call_keeps_the_drafts(self, tmp_path):
+        client = setup_sp1_mock_client()
+        client.set_exception_for(CoordinationAnalysis, RuntimeError("call 3 down"))
+        result = _run_sp1(client, tmp_path)
+
+        assert result.control_structure is None
+        assert (tmp_path / "loss-analysis-draft.yaml").exists()
+        assert (tmp_path / "control-structure-draft.yaml").exists()
+        _absent(tmp_path, "control-structure.yaml")
 
 
 class TestControlStructureVersions:
@@ -161,14 +197,21 @@ class TestControlStructureVersions:
 
         return step
 
-    def _run(self, run_dir: Path, writes: Counter | None = None):
+    @staticmethod
+    def _unchanged(control_structure, *_args, **_kwargs):
+        return control_structure, []
+
+    def _run(self, run_dir: Path, writes: Counter | None = None, *, bind=None):
         base = "asago_scenario_generator.stpa.system_model.run."
 
         def revise(*, control_structure, **_kwargs):
             return self._tagged("revised")(control_structure)
 
         patches = [
-            patch(base + "check_evidence_bindings", side_effect=self._tagged("bound")),
+            patch(
+                base + "check_evidence_bindings",
+                side_effect=bind or self._tagged("bound"),
+            ),
             patch(
                 base + "attach_to_sole_reply_responsibility",
                 side_effect=self._tagged("placed"),
@@ -199,47 +242,55 @@ class TestControlStructureVersions:
     def _description(run_dir: Path, name: str) -> str:
         return _load(run_dir, name)["responsibilities"][0]["description"]
 
-    def test_each_step_keeps_its_own_version(self, tmp_path):
+    def test_each_changing_step_keeps_the_version_before_it(self, tmp_path):
         self._run(tmp_path)
 
         reviewed = self._description(tmp_path, "control-structure-reviewed.yaml")
         bound = self._description(tmp_path, "control-structure-evidence-bound.yaml")
         revised = self._description(tmp_path, "control-structure-revised.yaml")
-        placed = self._description(tmp_path, "control-structure-placed.yaml")
         assert not reviewed.endswith(("bound", "revised", "placed"))
         assert bound == f"{reviewed} bound"
         assert revised == f"{bound} revised bound"
-        assert placed == f"{revised} placed"
+        # Placement is the last step: its version is the canonical file.
+        _absent(tmp_path, "control-structure-placed.yaml")
 
     def test_canonical_holds_the_final_version(self, tmp_path):
         result = self._run(tmp_path)
 
         assert self._description(tmp_path, "control-structure.yaml") == (
-            self._description(tmp_path, "control-structure-placed.yaml")
+            self._description(tmp_path, "control-structure-revised.yaml") + " placed"
         )
         assert result.control_structure.responsibilities[0].description.endswith(
             "revised bound placed"
         )
 
-    def test_canonical_control_structure_is_written_by_derivation_and_stage_end(
-        self, tmp_path
-    ):
+    def test_an_absent_version_equals_the_next_version_on_disk(self, tmp_path):
+        self._run(tmp_path, bind=self._unchanged)
+
+        # Evidence binding changed nothing, so the reviewed version equals
+        # the evidence-bound one and only the latter is written.
+        _absent(tmp_path, "control-structure-reviewed.yaml")
+        bound = self._description(tmp_path, "control-structure-evidence-bound.yaml")
+        assert self._description(tmp_path, "control-structure-revised.yaml") == (
+            f"{bound} revised"
+        )
+
+    def test_canonical_control_structure_is_written_once_at_stage_end(self, tmp_path):
         writes: Counter = Counter()
         self._run(tmp_path, writes)
 
-        assert writes[("control_structure", "control-structure.yaml")] == 1
-        assert writes[("run", "control-structure.yaml")] == 1
+        assert writes[("chain", "control-structure.yaml")] == 1
+        assert writes[("control_structure", "control-structure.yaml")] == 0
+        assert writes[("run", "control-structure.yaml")] == 0
 
     def test_unchanged_steps_write_no_extra_version(self, tmp_path):
         _run_sp1(setup_sp1_mock_client(), tmp_path)
 
-        assert (tmp_path / "control-structure-reviewed.yaml").exists()
-        assert (tmp_path / "control-structure.yaml").read_bytes() == (
-            tmp_path / "control-structure-reviewed.yaml"
-        ).read_bytes()
-        for name in (
+        assert (tmp_path / "control-structure.yaml").exists()
+        _absent(
+            tmp_path,
+            "control-structure-reviewed.yaml",
             "control-structure-evidence-bound.yaml",
             "control-structure-revised.yaml",
             "control-structure-placed.yaml",
-        ):
-            assert not (tmp_path / name).exists()
+        )

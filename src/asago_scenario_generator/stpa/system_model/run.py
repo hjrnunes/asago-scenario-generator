@@ -32,7 +32,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 from asago_scenario_generator.stpa.infra.manifest import STPARunManifest
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
-from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
+from asago_scenario_generator.stpa.infra.yaml_io import VersionChain, write_yaml
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     check_structural_heuristics,
@@ -170,8 +170,9 @@ def run_sp1(
         risk_cards: List of RiskCard objects from risk extraction.
         run_dir: Directory for output artifacts.
         capability_profile: Optional pre-built capability profile. When
-            provided, the Stage 1b LLM call is skipped and the profile is
-            published as ``capability-profile.yaml`` in *run_dir*.
+            provided, the Stage 1b LLM call is skipped and the caller that
+            built it publishes it; a profile Stage 1b derives is published
+            as ``capability-profile.yaml`` in *run_dir*.
         temperature: Explicit LLM temperature override. When omitted, use the
             resolved client temperature (default 0.4).
         profile_name: Optional model profile name for manifest recording.
@@ -184,8 +185,7 @@ def run_sp1(
             bounded revision), and re-published as the canonical
             ``loss-analysis.yaml``. A failing gate is a fatal stage error.
         target_evidence: Optional discovered target evidence (inventory,
-            state schema, session fields, policy text).  Persisted as
-            ``target-evidence.yaml``.
+            state schema, session fields, policy text).
 
     Returns:
         SP1RunResult with all artifacts and diagnostic info. On partial
@@ -201,7 +201,6 @@ def run_sp1(
     stage_warnings: list[str] = []
 
     if target_evidence is not None:
-        target_evidence.write(run_dir / "target-evidence.yaml")
         stage_warnings.extend(
             f"target_evidence: {item}" for item in target_evidence.diagnostics
         )
@@ -694,16 +693,15 @@ def _try_derive_capability_profile(
     capability_profile: CapabilityProfile | None,
     stage_errors: list[str],
 ) -> CapabilityProfile | None:
-    """Run Stage 1b (or publish a pre-built profile), recording errors on failure."""
+    """Run Stage 1b unless a profile is supplied, recording errors on failure.
+
+    The caller that built a supplied profile publishes it; a derived profile
+    is published here.
+    """
     if capability_profile is not None:
-        write_yaml(
-            capability_profile,
-            run_dir / "capability-profile.yaml",
-            post_process=inject_kc_subcodes_display,
-        )
         return capability_profile
     try:
-        return derive_capability_profile(
+        derived = derive_capability_profile(
             llm_client=llm_client,
             use_case_text=use_case_text,
             run_dir=run_dir,
@@ -713,6 +711,12 @@ def _try_derive_capability_profile(
     except StageError as exc:
         stage_errors.append(str(exc))
         return None
+    write_yaml(
+        derived,
+        run_dir / "capability-profile.yaml",
+        post_process=inject_kc_subcodes_display,
+    )
+    return derived
 
 
 def _stage2_prerequisites_missing(
@@ -733,6 +737,7 @@ def _derive_stage2_control_structure(
     temperature: float,
     stage_errors: list[str],
     target_evidence: TargetEvidence | None = None,
+    versions: VersionChain | None = None,
 ) -> ControlStructureDerivationResult | None:
     """Derive Stage 2's structure while retaining a graceful failure result."""
     try:
@@ -745,6 +750,7 @@ def _derive_stage2_control_structure(
             template_loader=loader,
             temperature=temperature,
             target_evidence=target_evidence,
+            versions=versions,
             post_review_density_check=lambda reviewed, correct, unresolved: (
                 verify_reviewed_density(
                     reviewed,
@@ -801,7 +807,6 @@ def _maybe_apply_revision(
         )
         post_revision_warnings.extend(binding_warnings)
     revised = control_structure != baseline_control_structure
-    write_yaml(control_structure, run_dir / "control-structure-revised.yaml")
     return control_structure, post_revision_warnings, revised
 
 
@@ -827,7 +832,7 @@ def _run_stage_2_block(
     of requests the block sent, retries included; a failed derivation still
     reports what it sent.
     """
-    with count_requests() as sent:
+    with count_requests() as sent, VersionChain(run_dir) as versions:
         result = _run_stage_2_steps(
             llm_client,
             use_case_text,
@@ -839,6 +844,7 @@ def _run_stage_2_block(
             stage_errors,
             stage_warnings,
             target_evidence=target_evidence,
+            versions=versions,
         )
     result.model_call_count = sent.requests
     return result
@@ -856,8 +862,14 @@ def _run_stage_2_steps(
     stage_warnings: list[str] | None = None,
     *,
     target_evidence: TargetEvidence | None = None,
+    versions: VersionChain,
 ) -> _Stage2Result:
-    """Run the Stage 2 steps; the caller counts the requests they send."""
+    """Run the Stage 2 steps; the caller counts the requests they send.
+
+    Each step records the control-structure version it leaves in
+    *versions*; the canonical ``control-structure.yaml`` is published once,
+    with the structure in force when the stage ends.
+    """
     if _stage2_prerequisites_missing(loss_analysis, capability_profile):
         return _Stage2Result()
 
@@ -873,6 +885,7 @@ def _run_stage_2_steps(
         temperature,
         stage_errors,
         target_evidence=target_evidence,
+        versions=versions,
     )
     if derivation is None:
         return _Stage2Result()
@@ -880,8 +893,7 @@ def _run_stage_2_steps(
     control_structure, binding_warnings = check_evidence_bindings(
         derivation.control_structure, target_evidence
     )
-    if control_structure != derivation.control_structure:
-        write_yaml(control_structure, run_dir / "control-structure-evidence-bound.yaml")
+    versions.add(control_structure, "control-structure-evidence-bound.yaml")
     merge_warnings = list(derivation.warnings)
     stage_warnings.extend(merge_warnings)
     stage_warnings.extend(binding_warnings)
@@ -921,18 +933,16 @@ def _run_stage_2_steps(
         temperature=temperature,
         target_evidence=target_evidence,
     )
+    versions.add(control_structure, "control-structure-revised.yaml")
 
-    placed, placement_warnings = attach_to_sole_reply_responsibility(
+    control_structure, placement_warnings = attach_to_sole_reply_responsibility(
         control_structure, loss_analysis
     )
-    if placed != control_structure:
-        control_structure = placed
-        write_yaml(control_structure, run_dir / "control-structure-placed.yaml")
     stage_warnings.extend(placement_warnings)
 
-    # Every step above kept its own named version; the canonical name is the
-    # structure in force when the stage ends.
-    write_yaml(control_structure, run_dir / "control-structure.yaml")
+    # The canonical name is the structure in force when the stage ends; it is
+    # the placement step's version, so that step keeps no named copy.
+    versions.publish(control_structure, "control-structure.yaml")
 
     # Advisory, code-only: a Stage 1a constraint that no responsibility cites
     # reaches no control action, so its rule produces no scenario.
@@ -1040,7 +1050,6 @@ def _write_manifest(
     )
     if target_evidence is not None:
         stage_1a_summary["target_evidence"] = {
-            "artifact": "target-evidence.yaml",
             "operations": len(target_evidence.operations),
             "session_fields": len(target_evidence.session_fields),
             "resources": len(target_evidence.resources),

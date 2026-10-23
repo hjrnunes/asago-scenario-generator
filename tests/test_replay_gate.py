@@ -1005,3 +1005,133 @@ def test_the_report_lists_network_attempts_and_differences(tmp_path: Path) -> No
         "  a.yaml: $.x: 1 != 2",
         "FAIL",
     ]
+
+
+def _versions(root: Path, files: dict[str, dict[str, Any]]) -> None:
+    for name, document in files.items():
+        (root / name).write_text(yaml.safe_dump(document))
+
+
+def test_version_chains_compare_their_distinct_versions_not_their_names(
+    trees,
+) -> None:
+    """A recording made before versions were skipped still matches."""
+    recorded, replayed, path_map = trees
+    draft, reviewed, bound = {"v": "draft"}, {"v": "reviewed"}, {"v": "bound"}
+    # The recording wrote every step that ran; the replay writes a version
+    # only when it differs from the next one.
+    _versions(
+        recorded,
+        {
+            "control-structure-draft.yaml": draft,
+            "control-structure-reviewed.yaml": reviewed,
+            "control-structure-revised.yaml": reviewed,
+            "control-structure-placed.yaml": bound,
+            "control-structure.yaml": bound,
+        },
+    )
+    _versions(
+        replayed,
+        {
+            "control-structure-draft.yaml": draft,
+            "control-structure-revised.yaml": reviewed,
+            "control-structure.yaml": bound,
+        },
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_a_version_chain_with_other_content_fails(trees) -> None:
+    recorded, replayed, path_map = trees
+    _versions(
+        recorded,
+        {"loss-analysis-draft.yaml": {"v": 1}, "loss-analysis.yaml": {"v": 2}},
+    )
+    _versions(replayed, {"loss-analysis.yaml": {"v": 2}})
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [str(d) for d in differences] == [
+        "loss-analysis.yaml versions: recording holds 2 distinct versions, "
+        "replay 1; they first differ at version 1"
+    ]
+
+
+def test_copies_of_inputs_may_be_only_in_the_recording(trees) -> None:
+    recorded, replayed, path_map = trees
+    for name in (
+        "observation-contract.yaml",
+        "execution-target-profile.json",
+        "target-evidence.yaml",
+    ):
+        (recorded / name).write_text("{}\n")
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def _run_manifest(root: Path, target_evidence: dict[str, Any]) -> None:
+    document = yaml.safe_load((root / "run-manifest.yaml").read_text())
+    document["stage_summary"] = {"stage_1a": {"target_evidence": target_evidence}}
+    (root / "run-manifest.yaml").write_text(yaml.safe_dump(document))
+
+
+def test_a_recorded_retired_field_is_compared_without_it(trees) -> None:
+    recorded, replayed, path_map = trees
+    _run_manifest(recorded, {"artifact": "target-evidence.yaml", "operations": 3})
+    _run_manifest(replayed, {"operations": 3})
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_a_replay_that_writes_a_retired_field_fails(trees) -> None:
+    recorded, replayed, path_map = trees
+    _run_manifest(recorded, {"artifact": "target-evidence.yaml", "operations": 3})
+    _run_manifest(replayed, {"artifact": "target-evidence.yaml", "operations": 3})
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "stage_summary.stage_1a.target_evidence.artifact" in differences[0].detail
+
+
+_TARGET_PROFILE_ROW = (
+    '<tr><td>Target profile</td><td><a class="artifact" '
+    'href="../execution-target-profile.json">execution-target-profile.json</a>'
+    "</td><td></td><td><code>execution-target-profile-v1</code></td>"
+    "<td>Operations and state the target exposes.</td></tr>"
+)
+
+
+def _report_page(root: Path, rows: str) -> None:
+    (root / "report").mkdir(exist_ok=True)
+    (root / "report" / "index.html").write_text(f"<table>{rows}<tr></tr></table>\n")
+
+
+def test_a_recorded_report_row_the_replay_no_longer_writes_is_removed(
+    trees,
+) -> None:
+    recorded, replayed, path_map = trees
+    _report_page(recorded, _TARGET_PROFILE_ROW)
+    _report_page(replayed, "")
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_a_replay_that_writes_a_removed_report_row_fails(trees) -> None:
+    recorded, replayed, path_map = trees
+    _report_page(recorded, _TARGET_PROFILE_ROW)
+    _report_page(replayed, _TARGET_PROFILE_ROW + "<tr>x</tr>")
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["report/index.html"]
+    assert "target profile" in differences[0].detail

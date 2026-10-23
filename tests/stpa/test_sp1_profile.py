@@ -17,7 +17,6 @@ from asago_scenario_generator.models.capability_profile import (
     classify_entry_point,
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import StageError
-from asago_scenario_generator.stpa.infra.yaml_io import read_yaml
 from asago_scenario_generator.stpa.system_model.profile import derive_capability_profile
 from tests.helpers.calls_log import read_calls_jsonl
 from tests.stpa.sp1_helpers import MockLLMClient
@@ -115,15 +114,13 @@ class TestStage1bProfile:
         assert entries[0]["stage"] == "stage_1b"
         assert entries[0]["step"] == "capability_profile"
 
-    def test_cp_06_capability_profile_written_to_yaml(self, tmp_path):
-        """capability-profile.yaml exists and contains valid model."""
+    def test_cp_06_derivation_leaves_profile_publication_to_the_caller(self, tmp_path):
+        """The derived profile is returned; the caller publishes it once."""
         client = MockLLMClient()
         client.set_response_for(Stage1Profile, _valid_stage1_profile_dict())
-        _derive(client, tmp_path)
-        yaml_file = tmp_path / "capability-profile.yaml"
-        assert yaml_file.exists()
-        loaded = read_yaml(yaml_file, CapabilityProfile)
-        assert isinstance(loaded, CapabilityProfile)
+        profile = _derive(client, tmp_path)
+        assert isinstance(profile, CapabilityProfile)
+        assert not (tmp_path / "capability-profile.yaml").exists()
 
     def test_cp_07_invalid_kc_subcodes_fail(self, tmp_path):
         """Invalid KC sub-codes in LLM response fail validation."""

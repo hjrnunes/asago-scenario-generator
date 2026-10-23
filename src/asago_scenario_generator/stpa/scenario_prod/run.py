@@ -90,7 +90,6 @@ from .stage5.shape_step import (
 )
 from .context import build_scenario_generation_context
 from .realized_operation import realized_operation
-from .target_profile_publication import publish_execution_target_profile
 from .presentation import render_scenario_presentation
 from .attack_path import attack_path_errors, reduce_to_attack_path
 from .and_or_tree import (
@@ -122,10 +121,8 @@ from .target_observations import (
     TargetObservationSnapshot,
 )
 from asago_scenario_generator.stpa.observation_contract import (
-    OBSERVATION_CONTRACT_FILENAME,
     ObservationContract,
     default_observation_contract,
-    write_observation_contract,
 )
 from .validators import (
     TraceabilityError,
@@ -317,10 +314,6 @@ def run_sp3(
         observation_contract or default_observation_contract()
     )
     effective_observation_contract.verify_digest()
-    write_observation_contract(
-        effective_observation_contract,
-        run_dir / OBSERVATION_CONTRACT_FILENAME,
-    )
     run_started = datetime.now(timezone.utc)
     run_identity = ExecutionRunIdentity(
         run_id=f"synthesis-{run_started.strftime('%Y%m%dT%H%M%S.%fZ')}"
@@ -342,38 +335,30 @@ def run_sp3(
         target_observations=target_observations,
         target_realization=target_realization,
     )
-    profile_published = _publish_execution_target_profile(
-        run_dir, execution_target_profile, stage_errors
+    inputs = _SP3Inputs(
+        llm_client=llm_client,
+        enriched_threat_set=enriched_threat_set,
+        control_structure=control_structure,
+        loss_analysis=loss_analysis,
+        run_dir=run_dir,
+        scenarios_dir=scenarios_dir,
+        loader=loader,
+        temperature=temperature,
+        capability_profile=capability_profile,
+        scenario_contexts=scenario_contexts,
+        execution_target_profile=execution_target_profile,
+        target_realization=target_realization,
+        target_observations=target_observations,
+        observation_contract=effective_observation_contract,
+        enriched_operations=enriched_operations,
+        stage_1a_source=stage_1a_source,
+        condition_families=condition_families,
+        shape_config=shape_config,
+        handoff_taxonomy=handoff_taxonomy,
     )
-    if profile_published:
-        inputs = _SP3Inputs(
-            llm_client=llm_client,
-            enriched_threat_set=enriched_threat_set,
-            control_structure=control_structure,
-            loss_analysis=loss_analysis,
-            run_dir=run_dir,
-            scenarios_dir=scenarios_dir,
-            loader=loader,
-            temperature=temperature,
-            capability_profile=capability_profile,
-            scenario_contexts=scenario_contexts,
-            execution_target_profile=execution_target_profile,
-            target_realization=target_realization,
-            target_observations=target_observations,
-            observation_contract=effective_observation_contract,
-            enriched_operations=enriched_operations,
-            stage_1a_source=stage_1a_source,
-            condition_families=condition_families,
-            shape_config=shape_config,
-            handoff_taxonomy=handoff_taxonomy,
-        )
-        scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
-            inputs, stage_errors, candidate_builders
-        )
-    else:
-        scenario_specs = []
-        scenario_envelopes = []
-        functional_test_specs = []
+    scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
+        inputs, stage_errors, candidate_builders
+    )
     all_validation_errors = _stage7_outputs(
         scenario_envelopes,
         enriched_threat_set,
@@ -1246,22 +1231,6 @@ def _mark_candidate_failure(
         return
     builder.status = status
     builder.diagnostics.extend(diagnostics)
-
-
-def _publish_execution_target_profile(
-    run_dir: Path,
-    profile: ExecutionTargetProfile | None,
-    stage_errors: list[str],
-) -> bool:
-    """Persist the verified profile before any scenario work."""
-    if profile is None:
-        return True
-    try:
-        publish_execution_target_profile(run_dir, profile)
-    except Exception as exc:  # noqa: BLE001 - isolate profile publication failure
-        stage_errors.append(f"Execution target profile publication failed: {exc}")
-        return False
-    return True
 
 
 def _stage7_outputs(

@@ -20,10 +20,8 @@ from __future__ import annotations
 import json
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import Any
 
-import yaml
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
@@ -153,67 +151,6 @@ class TargetEvidence:
             refs.update(item.ref for item in resource.fields)
         refs.update(item.ref for item in self.policies)
         return frozenset(refs)
-
-    def write(self, path: Path) -> Path:
-        """Persist :meth:`to_record` as YAML at *path*."""
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            yaml.safe_dump(self.to_record(), sort_keys=False, allow_unicode=True),
-            encoding="utf-8",
-        )
-        return path
-
-    def to_record(self) -> dict[str, Any]:
-        """Return the persisted, human-reviewable evidence record."""
-        return {
-            "operations": [
-                {
-                    "ref": op.ref,
-                    "description": op.description,
-                    "effect": op.effect,
-                    "arguments": [
-                        {
-                            "ref": op.argument_ref(arg),
-                            "type": arg.type,
-                            "required": arg.required,
-                        }
-                        for arg in op.arguments
-                    ],
-                }
-                for op in self.operations
-            ],
-            "session_fields": [
-                {"ref": item.ref, "value": item.value} for item in self.session_fields
-            ],
-            "resources": [
-                {
-                    "name": resource.name,
-                    "record_count": resource.record_count,
-                    "record_keys": list(resource.record_keys),
-                    "fields": [
-                        {
-                            "ref": item.ref,
-                            "types": list(item.types),
-                            "values": list(item.values),
-                            "more_values": item.more_values,
-                        }
-                        for item in resource.fields
-                    ],
-                }
-                for resource in self.resources
-            ],
-            "policies": [
-                {
-                    "ref": item.ref,
-                    "source_name": item.source_name,
-                    "query_label": item.query_label,
-                    "text": item.text,
-                    "truncated": item.truncated,
-                }
-                for item in self.policies
-            ],
-            "diagnostics": list(self.diagnostics),
-        }
 
 
 def build_target_evidence(
