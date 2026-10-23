@@ -16,6 +16,13 @@ sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
 :data:`REMOVED_TEXT` and :data:`ALLOWED_FILE_CHANGES` name what a recording
 may hold that the replay no longer writes.
 
+The lists cover output differences only.  A change that alters a model request
+on purpose, such as its prompt or the inputs a stage receives, cannot pass on a
+recording made before it: the replay finds no recorded response for the new
+request digest, the run diverges from that request on, and the comparison
+fails.  Re-record the corpus after such a change instead of listing the
+divergence.
+
 A change that deletes a prompt template also drops that template's entry from
 the prompt-hash tables a run records.  A recorded entry whose ``.j2`` key the
 replay lacks passes only when no template of that name exists in the checkout;

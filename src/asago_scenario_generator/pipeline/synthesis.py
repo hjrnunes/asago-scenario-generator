@@ -45,7 +45,10 @@ from asago_scenario_generator.pipeline.synthesis_governance import (
     _run_governance_routing,
 )
 
-from asago_scenario_generator.pipeline.synthesis_manifest import _build_manifest
+from asago_scenario_generator.pipeline.synthesis_manifest import (
+    _boundary_decisions,
+    _build_manifest,
+)
 from asago_scenario_generator.pipeline.synthesis_persist import (
     _artifact_paths,
     _persist_manifest,
@@ -342,6 +345,9 @@ def _run_synthesis(
             slot_evidence=ica_enumeration,
             governance_routes=governance_routes,
             hazard_offers=hazard_offers,
+            risk_scopes=_boundary_decisions(
+                getattr(baseline, "risk_actionability", None)
+            ),
         )
     )
     realization = log.take(

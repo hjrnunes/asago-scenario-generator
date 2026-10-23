@@ -44,6 +44,11 @@ OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS: tuple[tuple[str, str], ...] = (
 )
 
 GOVERNANCE_ROUTED_NO_FINDING = "governance_routed_no_finding"
+RISK_OUT_OF_SCOPE = "risk_out_of_scope"
+
+# The Stage 1a scope decision for the class of an obligation's risk.
+RiskScope = Literal["actionable", "outside_boundary", "not_applicable"]
+OUT_OF_SCOPE: frozenset[str] = frozenset({"outside_boundary", "not_applicable"})
 
 AccountingDisposition = Literal[
     "addressed",
@@ -138,6 +143,11 @@ class ObligationAccountingRow(_AccountingModel):
     route_refs: tuple[str, ...] = ()
     evidence: tuple[str, ...] = Field(min_length=1)
     diagnostics: tuple[ConsiderationDiagnostic, ...] = ()
+    # The scope decision for the obligation's risk; left out when the run made
+    # none, so earlier artifacts keep their bytes.
+    scope: RiskScope | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def canonicalize_and_validate(self) -> "ObligationAccountingRow":
@@ -158,6 +168,11 @@ class ObligationAccountingRow(_AccountingModel):
             raise ValueError(
                 f"stop reason {GOVERNANCE_ROUTED_NO_FINDING} belongs to "
                 "governance-only rows"
+            )
+        if self.stop_reason == RISK_OUT_OF_SCOPE and self.scope not in OUT_OF_SCOPE:
+            raise ValueError(
+                f"stop reason {RISK_OUT_OF_SCOPE} belongs to rows whose risk "
+                "scope is outside_boundary or not_applicable"
             )
         validate_disposition = _DISPOSITION_VALIDATORS.get(self.disposition)
         if validate_disposition is not None:
@@ -368,6 +383,9 @@ __all__ = [
     "ObligationAccountingRow",
     "ObligationAccountingSummary",
     "OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS",
+    "OUT_OF_SCOPE",
+    "RISK_OUT_OF_SCOPE",
+    "RiskScope",
     "derive_obligation_accounting_summary",
     "validate_obligation_accounting_source_pins",
 ]

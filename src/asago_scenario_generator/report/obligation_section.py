@@ -48,6 +48,10 @@ STOP_MEANING = {
         "No scenario requested",
         "The run did not ask for a scenario for this obligation.",
     ),
+    "risk_out_of_scope": (
+        "Risk outside the system's scope",
+        "The boundary decision found that no action of this system produces harm of this risk's class.",
+    ),
     "risk_pattern_mismatch": (
         "Route found, wrong mechanism",
         "The routed slot supports an ordinary STPA finding but does not realize this attack pattern.",

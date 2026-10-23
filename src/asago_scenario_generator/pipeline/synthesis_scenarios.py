@@ -505,14 +505,16 @@ def _run_accounting(
     source_pins: tuple[Any, ...] = (),
     governance_routes: tuple[Any, ...] = (),
     hazard_offers: Any | None = None,
+    risk_scopes: dict[str, str] | None = None,
 ) -> StageRun:
     """Derive provisional accounting from the complete Phase 1 universe.
 
     ``slot_evidence`` is the unprojected final ICA result.  A target projection
     keeps only the ICA enumeration, so the obligation/slot pairs and hazard
     verdicts come from the result the projection started from.
-    ``governance_routes`` are the final routes of governance-only rows and
-    ``hazard_offers`` is the slot hazard offer report; the adapter receives
+    ``governance_routes`` are the final routes of governance-only rows,
+    ``hazard_offers`` is the slot hazard offer report, and ``risk_scopes`` maps
+    each classified risk to its Stage 1a scope decision; the adapter receives
     each only when there is one.
     """
     ordinary_icas = _ordinary_icas(ica_enumeration)
@@ -523,6 +525,8 @@ def _run_accounting(
         extra["governance_routes"] = governance_routes
     if hazard_offers is not None:
         extra["hazard_offers"] = hazard_offers
+    if risk_scopes:
+        extra["risk_scopes"] = risk_scopes
     result = adapters.account(
         plan=plan,
         consideration=consideration,

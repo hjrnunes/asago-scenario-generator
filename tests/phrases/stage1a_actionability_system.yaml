@@ -1,0 +1,46 @@
+template: stage1a_actionability_system.j2
+cases:
+  no-variables:
+    required:
+      - to classes of organizational risk before loss analysis
+      - Each risk is a class of harm, given by its name, its taxonomy, and the taxonomy's description of the class.
+      - Decide on the class.
+      - that story is kept as provenance and is not shown to you
+      - >-
+        can this system's own actions (its replies, its tool calls, or the data
+        it stores or retrieves) produce harm of this class to someone
+      - "`actionable`: yes, or partly."
+      - produces part of it, is enough
+      - >-
+        A risk is `actionable` even when the policy's stated threat names an
+        outside actor
+      - whether this system's own actions can produce harm of the class
+      - it is not actionable merely because the system uses AI
+      - A capability the system lacks makes a risk `not_applicable`, not `outside_boundary`.
+      - "Name the system action first:"
+      - If you can name both, the risk is `actionable`.
+      - When the evidence does not settle the decision, choose `actionable`.
+      - Classify every supplied risk exactly once and copy its `risk_id` unchanged.
+      - "`null` for the other decisions."
+      - '"system_action": null, "affected_stakeholder": null'
+    once:
+      - "## Reply fields"
+      - "- `risk_id`:"
+      - "- `system_action`:"
+      - "- `affected_stakeholder`:"
+      - "- `decision`:"
+      - "- `reason`:"
+    ordered:
+      - - "## The question"
+        - "## Rules"
+        - "## Reply fields"
+        - "## Output"
+      - - "- `risk_id`:"
+        - "- `system_action`:"
+        - "- `affected_stakeholder`:"
+        - "- `decision`:"
+        - "- `reason`:"
+    forbidden:
+      - Judge the risk's description, threat, and consequence together
+      - "Threat:"
+      - "Consequence:"

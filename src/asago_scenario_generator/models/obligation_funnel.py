@@ -5,6 +5,7 @@ from typing import Literal
 
 ObligationStopReason = Literal[
     "addressed",
+    "risk_out_of_scope",
     "risk_pattern_mismatch",
     "mechanism_path_unsubstantiated",
     "no_structural_route",

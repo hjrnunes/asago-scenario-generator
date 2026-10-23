@@ -32,6 +32,7 @@ from types import SimpleNamespace
 
 import yaml
 
+from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
     TargetOperationReference,
@@ -143,6 +144,24 @@ RECORDS_SERVICE = {
     "next_hazard_num": 1,
     "next_sc_num": 1,
     "kc_subcodes": [],
+}
+
+ACTIONABILITY_RISKS = {
+    "use_case_text": "A records service retrieves authorized account records.",
+    "target_evidence": None,
+    "risk_cards": [
+        RiskCard(
+            risk_id="risk-records",
+            risk_name="Disclosure of account records",
+            risk_description="A reply discloses account records without authority.",
+            taxonomy="ibm-risk-atlas",
+            confidence=0.9,
+            grounding_confidence="high",
+            threat="Staff paste account records into an outside chat tool.",
+            threat_source="Staff of the organization.",
+            consequence="The records reach the outside tool's provider.",
+        )
+    ],
 }
 
 NEUTRAL_STATUS = {
@@ -476,6 +495,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "no-target-variables": _target_realization(),
     "no-stated-rules": _system_model(stated_rules=False),
     "records-service": _system_model(**RECORDS_SERVICE),
+    "actionability-risks": _system_model(**ACTIONABILITY_RISKS),
     "neutral-status": _system_model(**NEUTRAL_STATUS),
     "one-responsibility": _system_model(**ONE_RESPONSIBILITY),
     "test-use-case": _system_model(
