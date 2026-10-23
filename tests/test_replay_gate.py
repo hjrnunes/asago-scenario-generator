@@ -1101,6 +1101,58 @@ def test_a_replay_that_writes_a_retired_field_fails(trees) -> None:
     assert "stage_summary.stage_1a.target_evidence.artifact" in differences[0].detail
 
 
+def _testability(root: Path, **blocks: Any) -> None:
+    document = {"summary": {"total": 0}, **blocks}
+    (root / "testability.yaml").write_text(yaml.safe_dump(document))
+
+
+_NO_SPLITS = {"direct": 0, "indirect": 0, "forged_transcript": 0}
+
+
+def test_a_recording_without_an_added_field_is_compared_without_it(trees) -> None:
+    recorded, replayed, path_map = trees
+    _testability(recorded)
+    _testability(replayed, channel_splits=_NO_SPLITS)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_an_added_field_a_recording_holds_is_compared(trees) -> None:
+    recorded, replayed, path_map = trees
+    _testability(recorded, channel_splits=_NO_SPLITS)
+    _testability(replayed, channel_splits=dict(_NO_SPLITS, indirect=1))
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["testability.yaml"]
+    assert "channel_splits" in differences[0].detail
+
+
+def test_a_replay_that_drops_an_added_field_a_recording_holds_fails(trees) -> None:
+    recorded, replayed, path_map = trees
+    _testability(recorded, channel_splits=_NO_SPLITS)
+    _testability(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["testability.yaml"]
+
+
+def test_an_added_field_does_not_excuse_other_differences(trees) -> None:
+    recorded, replayed, path_map = trees
+    _testability(recorded)
+    (replayed / "testability.yaml").write_text(
+        yaml.safe_dump({"summary": {"total": 1}, "channel_splits": _NO_SPLITS})
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["testability.yaml"]
+    assert "summary.total" in differences[0].detail
+
+
 _TARGET_PROFILE_ROW = (
     '<tr><td>Target profile</td><td><a class="artifact" '
     'href="../execution-target-profile.json">execution-target-profile.json</a>'

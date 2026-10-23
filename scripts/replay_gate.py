@@ -14,7 +14,8 @@ compares the trees.  Only the differences in :data:`ALLOWED_DIFFERENCES` and
 fails the gate.  The named versions in :data:`VERSION_CHAINS` compare as the
 sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
 :data:`REMOVED_TEXT` and :data:`ALLOWED_FILE_CHANGES` name what a recording
-may hold that the replay no longer writes.
+may hold that the replay no longer writes, and :data:`ADDED_FIELDS` names
+what the replay writes that a recording may lack.
 
 A change that deletes a prompt template also drops that template's entry from
 the prompt-hash tables a run records.  A recorded entry whose ``.j2`` key the
@@ -135,6 +136,30 @@ RETIRED_FIELDS: tuple[RetiredField, ...] = (
         "run-manifest.yaml",
         "stage_summary.stage_1a.target_evidence.artifact",
         "the name of target-evidence.yaml, which the run no longer writes",
+    ),
+)
+
+
+@dataclass(frozen=True)
+class AddedField:
+    """A nested field the current code writes that older recordings lack.
+
+    *field* is a dotted path from the document root.  A recording without
+    it compares with the replay's copy dropped; a recording that holds it
+    compares it as usual.
+    """
+
+    file: str
+    field: str
+    meaning: str
+
+
+ADDED_FIELDS: tuple[AddedField, ...] = (
+    AddedField(
+        "testability.yaml",
+        "channel_splits",
+        "the per-channel count of canonicals that splitting a deduplication "
+        "group by validated channel and carrier operation added",
     ),
 )
 
@@ -786,7 +811,9 @@ def compare_file(
     the comparison.  ``calls.jsonl`` first checks each side's links against
     that side's own ``provider-calls.jsonl``; the synthesis manifest first
     fails a replay that writes a :data:`RETIRED_MANIFEST_FIELDS` entry, and
-    the recording's copy of one is dropped before comparing.
+    the recording's copy of one is dropped before comparing.  The replay's
+    copy of an :data:`ADDED_FIELDS` entry is dropped when the recording
+    lacks it.
     """
     if relative == CALLS_FILENAME:
         for path, side in ((recorded, "recording"), (replayed, "replay")):
@@ -844,6 +871,10 @@ def compare_file(
         }
     for retired in _retired_fields(relative):
         left_data = _drop_field(left_data, tuple(retired.field.split(".")))
+    for added in ADDED_FIELDS:
+        steps = added.field.split(".")
+        if added.file == relative and not _has_field(left_data, steps):
+            right_data = _drop_field(right_data, tuple(steps))
     jsonl = suffix == ".jsonl"
     left_data = _normalise(left_data, relative, jsonl=jsonl)
     right_data = _normalise(right_data, relative, jsonl=jsonl)

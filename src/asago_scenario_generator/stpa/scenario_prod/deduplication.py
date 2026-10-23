@@ -11,7 +11,10 @@ from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from asago_scenario_generator.stpa.discriminating_condition import (
     canonical_comparisons,
 )
-from asago_scenario_generator.stpa.models.attack_shape import ShapeSource
+from asago_scenario_generator.stpa.models.attack_shape import (
+    AttackChannel,
+    ShapeSource,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 DeduplicationStatus = Literal["canonical", "duplicate", "analytical_only"]
@@ -114,33 +117,21 @@ def deduplicate_scenario_specs(
     """Mark executable duplicates while leaving analytical scenarios alone.
 
     Call this after the shape step. A group holds scenarios of one kind
-    (functional or adversarial) that share a key. A group's canonical is the smallest
-    scenario ID among its members whose shape the model proposed and code
-    validated; a group with no such member takes its smallest ID. The rule
-    never reads provider or worker completion order.
+    (functional or adversarial) that share a key. Within a group, each distinct
+    attack variant (channel and carrier operation) of a shape the model
+    proposed and code validated keeps its own canonical: the smallest scenario
+    ID with that variant. A member without such a shape duplicates the group's
+    first canonical, the smallest validated ID; a group with no validated
+    member takes its smallest ID. The rule never reads provider or worker
+    completion order.
     """
 
     keys = {spec.scenario_id: scenario_deduplication_key(spec) for spec in specs}
-    validated = {spec.scenario_id for spec in specs if _has_validated_shape(spec)}
-    # The scenario kind partitions the groups without joining the persisted
-    # key: a functional scenario and an adversarial one with the same key need
-    # different stimuli, so neither may stand in for the other.
-    groups: dict[
-        tuple[bool, tuple[str, str, str | None, str, str | None, tuple[str, ...]]],
-        list[str],
-    ] = defaultdict(list)
+    variants = {spec.scenario_id: _attack_variant(spec) for spec in specs}
     records: dict[str, ScenarioDeduplication] = {}
-    for spec in specs:
-        key = keys[spec.scenario_id]
-        record = _ungrouped_record(spec, key)
-        if record is None:
-            groups[(spec.is_functional_test, key.as_tuple())].append(spec.scenario_id)
-        else:
-            records[spec.scenario_id] = record
-
-    for scenario_ids in groups.values():
-        canonical = _canonical_id(scenario_ids, validated)
+    for scenario_ids in _groups(specs, keys, records).values():
         for scenario_id in scenario_ids:
+            canonical = _canonical_id(scenario_id, scenario_ids, variants)
             records[scenario_id] = ScenarioDeduplication(
                 scenario_id=scenario_id,
                 status="canonical" if scenario_id == canonical else "duplicate",
@@ -150,15 +141,88 @@ def deduplicate_scenario_specs(
     return records
 
 
-def _has_validated_shape(spec: ScenarioSpec) -> bool:
+def _groups(
+    specs: Sequence[ScenarioSpec],
+    keys: Mapping[str, ScenarioDeduplicationKey],
+    ungrouped: dict[str, ScenarioDeduplication],
+) -> dict[
+    tuple[bool, tuple[str, str, str | None, str, str | None, tuple[str, ...]]],
+    list[str],
+]:
+    """Group scenarios by kind and key; put the ungrouped ones in *ungrouped*."""
+
+    # The scenario kind partitions the groups without joining the persisted
+    # key: a functional scenario and an adversarial one with the same key need
+    # different stimuli, so neither may stand in for the other.
+    groups: dict[
+        tuple[bool, tuple[str, str, str | None, str, str | None, tuple[str, ...]]],
+        list[str],
+    ] = defaultdict(list)
+    for spec in specs:
+        key = keys[spec.scenario_id]
+        record = _ungrouped_record(spec, key)
+        if record is None:
+            groups[(spec.is_functional_test, key.as_tuple())].append(spec.scenario_id)
+        else:
+            ungrouped[spec.scenario_id] = record
+    return groups
+
+
+def _attack_variant(spec: ScenarioSpec) -> tuple[AttackChannel, str | None] | None:
+    """Return the validated shape's channel and carrier operation, else ``None``.
+
+    Only these typed fields split a group. Free-text mechanisms and the
+    causal-factor sources a reply cites vary from run to run, so they never do.
+    """
+
     shape = spec.attack_shape
-    return shape is not None and shape.source is ShapeSource.STAGE5_VALIDATED
+    if shape is None or shape.source is not ShapeSource.STAGE5_VALIDATED:
+        return None
+    carrier = None if shape.indirect is None else shape.indirect.carrier_operation
+    return shape.channel, carrier
 
 
-def _canonical_id(scenario_ids: Sequence[str], validated: set[str]) -> str:
-    """Pick the smallest ID among validated members, else the smallest ID."""
+def _canonical_id(
+    scenario_id: str,
+    scenario_ids: Sequence[str],
+    variants: Mapping[str, tuple[AttackChannel, str | None] | None],
+) -> str:
+    """Return the canonical of one group member.
 
-    return min([item for item in scenario_ids if item in validated] or scenario_ids)
+    A validated member takes the smallest ID sharing its variant; any other
+    member takes the smallest validated ID, else the smallest ID.
+    """
+
+    variant = variants[scenario_id]
+    validated = [item for item in scenario_ids if variants[item] is not None]
+    if variant is not None:
+        validated = [item for item in validated if variants[item] == variant]
+    return min(validated or scenario_ids)
+
+
+def build_channel_splits(
+    specs: Sequence[ScenarioSpec],
+    records: Mapping[str, ScenarioDeduplication],
+) -> dict[str, int]:
+    """Count, per attack channel, the extra canonicals the variant split made.
+
+    Call this after deduplication.  A group's first canonical is its smallest
+    canonical ID; every other canonical of the group is an extra scenario
+    sent to authoring and counts under its own shape's channel.
+    """
+
+    keys = {spec.scenario_id: records[spec.scenario_id].key for spec in specs}
+    by_id = {spec.scenario_id: spec for spec in specs}
+    splits = dict.fromkeys((channel.value for channel in AttackChannel), 0)
+    for scenario_ids in _groups(specs, keys, {}).values():
+        canonicals = sorted(
+            item for item in scenario_ids if records[item].status == "canonical"
+        )
+        for scenario_id in canonicals[1:]:
+            variant = _attack_variant(by_id[scenario_id])
+            if variant is not None:
+                splits[variant[0].value] += 1
+    return splits
 
 
 def _ungrouped_record(
@@ -257,6 +321,7 @@ def build_testability_summary(
     records: dict[str, ScenarioDeduplication],
     *,
     constraint_reach: Mapping[str, object] | None = None,
+    channel_splits: Mapping[str, int] | None = None,
 ) -> dict[str, object]:
     """Build the deterministic run-level testability and deduplication view."""
 
@@ -279,6 +344,8 @@ def build_testability_summary(
     }
     if constraint_reach is not None:
         summary["constraint_reach"] = dict(constraint_reach)
+    if channel_splits is not None:
+        summary["channel_splits"] = dict(channel_splits)
     return summary
 
 
@@ -287,6 +354,7 @@ __all__ = [
     "DeduplicationStatus",
     "ScenarioDeduplication",
     "ScenarioDeduplicationKey",
+    "build_channel_splits",
     "build_constraint_reach",
     "build_testability_summary",
     "deduplicate_scenario_specs",

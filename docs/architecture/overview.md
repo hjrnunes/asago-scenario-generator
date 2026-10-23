@@ -451,10 +451,18 @@ adversarial scenario. The user adversary kinds (`external_attacker`,
 
 Deduplication runs after the shape step. Scenarios that share a deduplication
 key form a group, and a group never mixes scenario kinds: a functional scenario
-and an adversarial scenario with the same key each keep their own canonical. The canonical of a group is the smallest scenario ID among
-the members whose shape has `source: stage5_validated`; a group with no such
-member keeps its smallest ID as canonical. The shape does not join the key, and
+and an adversarial scenario with the same key each keep their own canonical. Within a group, each distinct
+`(channel, indirect.carrier_operation)` pair of a shape with
+`source: stage5_validated` keeps one canonical, the smallest scenario ID with
+that pair, so a direct and an indirect variant of one unsafe call both reach
+authoring. A member without a validated shape is a duplicate of the group's
+first canonical, the smallest validated scenario ID; a group with no validated
+member keeps its smallest ID as canonical. Free-text mechanisms and
+causal-factor sources never split a group. The shape does not join the key, and
 `testability.yaml` and every handoff's `deduplication` block read this result.
+`testability.yaml` carries a `channel_splits` block that counts, for each
+channel, the canonicals beyond a group's first that the split sent to
+authoring.
 
 `testability.yaml` also carries a `constraint_reach` block, computed from the
 final statuses. For each security constraint of the loss analysis it counts the
