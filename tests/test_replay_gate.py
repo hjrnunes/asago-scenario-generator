@@ -202,17 +202,17 @@ def test_a_recording_made_before_the_generate_report_moved_still_matches(
     assert differences == []
 
 
-def _old_call(published: bool) -> dict[str, Any]:
+def _old_call(scenario: str = "A", *, published: bool = False) -> dict[str, Any]:
     """A call entry as calls.jsonl held it before naming provider records."""
     return {
         "stage": "s",
         "step": "x",
-        "scenario_id": "A",
+        "scenario_id": scenario,
         "system_prompt_hash": "h",
         "system_prompt_text": "system",
         "user_prompt_text": "user",
         "timestamp": "t1",
-        "attempt_id": "s:x:A:1",
+        "attempt_id": f"s:x:{scenario}:1",
         "compiled": published,
         "published": published,
         "raw_response": "{}",
@@ -221,27 +221,33 @@ def _old_call(published: bool) -> dict[str, Any]:
     }
 
 
-# Scenario A's provider record is sequence 1 in the recording and 2 in the
-# replay, whose requests arrived in the other order.
-_RECORDED_A, _REPLAYED_A, _REPLAYED_B = 1, 2, 1
-
-
-def _new_call(*sequences: int, digest: str = "d" * 64) -> dict[str, Any]:
+def _new_call(scenario: str, *sequences: int, digest: str = "d" * 64) -> dict[str, Any]:
     """The same call as calls.jsonl holds it now, naming its provider records."""
     return {
         "stage": "s",
         "step": "x",
-        "scenario_id": "A",
+        "scenario_id": scenario,
         "system_prompt_hash": "h",
         "provider_requests": [
             {"sequence": sequence, "request_sha256": digest} for sequence in sequences
         ],
         "response_parsed": True,
         "timestamp": "t2",
-        "attempt_id": "s:x:A:1",
+        "attempt_id": f"s:x:{scenario}:1",
         "compiled": False,
         "published": False,
     }
+
+
+# The recording holds scenario A's provider record as sequence 1 and B's as
+# 2; the replay, whose requests arrived in the other order, holds them as 2
+# and 1.
+def _recorded_calls(call: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    return [call or _new_call("A", 1), _new_call("B", 2)]
+
+
+def _replayed_calls(call: dict[str, Any] | None = None) -> list[dict[str, Any]]:
+    return [call or _new_call("A", 2), _new_call("B", 1)]
 
 
 _PUBLISHED = {"kind": "call-published", "attempt_id": "s:x:A:1"}
@@ -251,26 +257,28 @@ def _calls(root: Path, *records: dict[str, Any]) -> None:
     _jsonl(root / "calls.jsonl", list(records))
 
 
+def _call_differences(
+    trees: tuple[Path, Path, dict[str, str]],
+    recorded_calls: list[dict[str, Any]],
+    replayed_calls: list[dict[str, Any]],
+) -> list[str]:
+    recorded, replayed, path_map = trees
+    _calls(recorded, *recorded_calls)
+    _calls(replayed, *replayed_calls)
+    _, differences = compare_trees(recorded, replayed, path_map)
+    return [str(d) for d in differences]
+
+
 def test_a_recording_with_call_text_matches_a_replay_naming_provider_records(
     trees,
 ) -> None:
-    recorded, replayed, path_map = trees
-    _calls(recorded, _old_call(published=True))
-    _calls(replayed, _new_call(_REPLAYED_A), _PUBLISHED)
-
-    _, differences = compare_trees(recorded, replayed, path_map)
-
-    assert differences == []
+    old = [_old_call("A", published=True), _old_call("B")]
+    assert _call_differences(trees, old, [*_replayed_calls(), _PUBLISHED]) == []
 
 
 def test_a_publication_the_recording_lacks_is_a_difference(trees) -> None:
-    recorded, replayed, path_map = trees
-    _calls(recorded, _old_call(published=False))
-    _calls(replayed, _new_call(_REPLAYED_A), _PUBLISHED)
-
-    _, differences = compare_trees(recorded, replayed, path_map)
-
-    assert [str(d) for d in differences] == [
+    old = [_old_call("A"), _old_call("B")]
+    assert _call_differences(trees, old, [*_replayed_calls(), _PUBLISHED]) == [
         "calls.jsonl: $[0].compiled: false != true"
     ]
 
@@ -278,80 +286,122 @@ def test_a_publication_the_recording_lacks_is_a_difference(trees) -> None:
 def test_links_that_resolve_on_each_side_match_across_sequence_numbers(
     trees,
 ) -> None:
-    recorded, replayed, path_map = trees
-    _calls(recorded, _new_call(_RECORDED_A))
-    _calls(replayed, _new_call(_REPLAYED_A))
-
-    _, differences = compare_trees(recorded, replayed, path_map)
-
-    assert differences == []
+    assert _call_differences(trees, _recorded_calls(), _replayed_calls()) == []
 
 
 @pytest.mark.parametrize(
-    ("replayed_call", "detail"),
+    ("call", "detail"),
     [
-        (_new_call(_REPLAYED_A, digest="e" * 64), "names no record"),
-        (_new_call(7), "names no record"),
-        (_new_call(_REPLAYED_B), "names the record of another call"),
+        (_new_call("A", 2, digest="e" * 64), "names no record"),
+        (_new_call("A", 7), "names no record"),
+        (_new_call("A", 1), "names the record of another call"),
     ],
     ids=["wrong-digest", "unknown-sequence", "other-call"],
 )
 def test_a_corrupted_link_fails_the_gate(
-    trees, replayed_call: dict[str, Any], detail: str
+    trees, call: dict[str, Any], detail: str
 ) -> None:
-    recorded, replayed, path_map = trees
-    _calls(recorded, _new_call(_RECORDED_A))
-    _calls(replayed, replayed_call)
+    (difference,) = _call_differences(
+        trees, _recorded_calls(), _replayed_calls(call=call)
+    )
 
-    _, differences = compare_trees(recorded, replayed, path_map)
-
-    assert [d.path for d in differences] == ["calls.jsonl"]
-    assert differences[0].detail.startswith("replay $[0].provider_requests")
-    assert detail in differences[0].detail
+    assert difference.startswith("calls.jsonl: replay $[0].provider_requests")
+    assert detail in difference
 
 
 def test_a_corrupted_link_in_the_recording_fails_the_gate(trees) -> None:
-    recorded, replayed, path_map = trees
-    _calls(recorded, _new_call(7))
-    _calls(replayed, _new_call(_REPLAYED_A))
+    (difference,) = _call_differences(
+        trees, _recorded_calls(call=_new_call("A", 7)), _replayed_calls()
+    )
 
-    _, differences = compare_trees(recorded, replayed, path_map)
-
-    assert [d.detail.split(" $")[0] for d in differences] == ["recording"]
+    assert difference.startswith("calls.jsonl: recording $[0]")
 
 
 def test_a_missing_link_between_new_entries_is_a_difference(trees) -> None:
-    recorded, replayed, path_map = trees
-    _calls(recorded, _new_call(_RECORDED_A))
-    _calls(replayed, _new_call())
+    assert _call_differences(
+        trees, _recorded_calls(), [_new_call("A"), _new_call("B", 1)]
+    ) == ["calls.jsonl: replay provider-calls.jsonl records [2] are named by no call"]
 
-    _, differences = compare_trees(recorded, replayed, path_map)
 
-    assert [str(d) for d in differences] == [
-        "calls.jsonl: $[0].provider_requests: length 1 != 0"
+def test_a_record_named_by_two_calls_is_a_difference(trees) -> None:
+    assert _call_differences(
+        trees, _recorded_calls(), [_new_call("A", 2), dict(_new_call("A", 2))]
+    ) == [
+        "calls.jsonl: replay $[1].provider_requests names record 2, "
+        "which $[0] names too"
     ]
 
 
 def test_a_replay_that_kept_text_instead_of_links_is_a_difference(trees) -> None:
-    recorded, replayed, path_map = trees
-    _calls(recorded, _new_call(_RECORDED_A))
-    _calls(replayed, dict(_old_call(published=False), provider_requests=[]))
+    unlinked = dict(_old_call("A"), provider_requests=[])
+    differences = _call_differences(
+        trees, _recorded_calls(), [unlinked, _new_call("B", 1)]
+    )
 
-    _, differences = compare_trees(recorded, replayed, path_map)
-
-    assert [d.path for d in differences] == ["calls.jsonl"]
+    assert differences == [
+        "calls.jsonl: replay provider-calls.jsonl records [2] are named by no call"
+    ]
 
 
 def test_a_changed_parse_flag_between_new_entries_is_a_difference(trees) -> None:
-    recorded, replayed, path_map = trees
-    _calls(recorded, _new_call(_RECORDED_A))
-    _calls(replayed, dict(_new_call(_REPLAYED_A), response_parsed=False))
+    flipped = dict(_new_call("A", 2), response_parsed=False)
+    assert _call_differences(
+        trees, _recorded_calls(), _replayed_calls(call=flipped)
+    ) == ["calls.jsonl: $[0].response_parsed: true != false"]
 
-    _, differences = compare_trees(recorded, replayed, path_map)
 
-    assert [str(d) for d in differences] == [
-        "calls.jsonl: $[0].response_parsed: true != false"
-    ]
+def _retry_records(root: Path) -> None:
+    """Scenario A's request, its transport retry, then scenario B's request."""
+    first, retry, other = (
+        _provider_call(1, "A", "failed"),
+        _provider_call(2, "A", "for A"),
+        _provider_call(3, "B", "for B"),
+    )
+    retry["retry_of"] = {"type": "APIConnectionError", "status_code": None}
+    _jsonl(root / RECORD_FILENAME, [first, retry, other])
+
+
+@pytest.mark.parametrize(
+    ("links", "expected"),
+    [
+        ((1, 2), []),
+        (
+            (2, 1),
+            [
+                "calls.jsonl: replay $[0].provider_requests [2, 1] does not rise "
+                "in sequence without repeats"
+            ],
+        ),
+        (
+            (1, 1),
+            [
+                "calls.jsonl: replay $[0].provider_requests [1, 1] does not rise "
+                "in sequence without repeats"
+            ],
+        ),
+    ],
+    ids=["in-order", "reversed", "duplicated"],
+)
+def test_retry_links_name_each_record_once_in_order(
+    trees, links: tuple[int, ...], expected: list[str]
+) -> None:
+    recorded, replayed, _ = trees
+    _retry_records(recorded)
+    _retry_records(replayed)
+
+    differences = _call_differences(
+        trees,
+        [_new_call("A", 1, 2), _new_call("B", 3)],
+        [_new_call("A", *links), _new_call("B", 3)],
+    )
+
+    assert differences == expected
+
+
+def _manifest_with_call_evidence(run_id: str, created_at: str) -> dict[str, Any]:
+    return _manifest(
+        run_id, created_at, call_evidence=[{"step": "a", "duration_ms": 3}]
+    )
 
 
 def test_a_recording_whose_manifest_copies_the_call_records_still_matches(
@@ -360,16 +410,39 @@ def test_a_recording_whose_manifest_copies_the_call_records_still_matches(
     recorded, replayed, path_map = trees
     _write_manifest(
         recorded,
-        _manifest(
-            "synthesis-20261001T000000Z",
-            "2026-10-01T00:00:00",
-            call_evidence=[{"step": "a", "duration_ms": 3}],
+        _manifest_with_call_evidence(
+            "synthesis-20261001T000000Z", "2026-10-01T00:00:00"
         ),
     )
 
     _, differences = compare_trees(recorded, replayed, path_map)
 
     assert differences == []
+
+
+@pytest.mark.parametrize("recording_has_it", [True, False])
+def test_a_replay_that_writes_the_retired_call_copy_fails(
+    trees, recording_has_it: bool
+) -> None:
+    recorded, replayed, path_map = trees
+    if recording_has_it:
+        _write_manifest(
+            recorded,
+            _manifest_with_call_evidence(
+                "synthesis-20261001T000000Z", "2026-10-01T00:00:00"
+            ),
+        )
+    _write_manifest(
+        replayed,
+        _manifest_with_call_evidence(
+            "synthesis-20261002T111111Z", "2026-10-02T11:11:11.5"
+        ),
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["synthesis-manifest.yaml"]
+    assert differences[0].detail.startswith("replay writes prompt_call_evidence")
 
 
 def test_only_the_named_report_files_may_appear_or_vanish(trees) -> None:
