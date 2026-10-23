@@ -11,6 +11,7 @@ import time
 from collections.abc import Mapping
 from typing import Any
 
+import httpx
 from openai import LengthFinishReasonError, OpenAI, RateLimitError
 from pydantic import BaseModel, Field
 
@@ -30,6 +31,7 @@ from asago_scenario_generator.request_schema import (
 )
 
 DEFAULT_TEMPERATURE: float = 0.4
+DEFAULT_CONNECT_TIMEOUT_SECONDS: float = 10.0
 
 _ENV_MAX_COMPLETION_TOKENS = "ASAGO_SCENARIO_GENERATOR_MAX_COMPLETION_TOKENS"
 _ENV_CONTEXT_WINDOW = "ASAGO_SCENARIO_GENERATOR_CONTEXT_WINDOW"
@@ -77,6 +79,18 @@ def _resolve_timeout(explicit: float | None, env_var: str | None) -> float:
     if env_var is not None:
         return _validated_float(env_var, _ENV_TIMEOUT, minimum=0.000001)
     return DEFAULT_REQUEST_TIMEOUT_SECONDS
+
+
+def _client_timeout(request_timeout: float) -> httpx.Timeout:
+    """Bound the connect apart from the request deadline.
+
+    A single float would let an unreachable endpoint hold the connect for the
+    whole request deadline. The connect bound never exceeds that deadline.
+    """
+    return httpx.Timeout(
+        request_timeout,
+        connect=min(DEFAULT_CONNECT_TIMEOUT_SECONDS, request_timeout),
+    )
 
 
 def _validated_float(
@@ -575,7 +589,7 @@ class LLMClient:
             base_url=self.base_url,
             api_key=self.api_key,
             default_headers=self.extra_headers or None,
-            timeout=self.timeout,
+            timeout=_client_timeout(self.timeout),
             max_retries=0,
         )
 
