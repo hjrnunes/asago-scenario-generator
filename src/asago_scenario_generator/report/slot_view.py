@@ -9,7 +9,11 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+from typing import Any
 
+from pydantic import BaseModel, ConfigDict
+
+from asago_scenario_generator.models.canonical import normalize_unicode
 from asago_scenario_generator.report.run_data import RunData
 
 ICA_STAGE = "synthesis_obligation_aware_icas"
@@ -47,12 +51,43 @@ class SlotView:
     findings: list[Finding]
 
 
+class _ParsedSlot(BaseModel):
+    """The fields of one reply slot the report reads, as the producer parsed them.
+
+    The producer's slot payload model normalizes its input to NFC and then
+    validates ``slot_id`` as a string, ``is_na`` as a boolean and
+    ``na_rationale`` as an optional string; this model repeats those steps.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    slot_id: str
+    is_na: bool
+    na_rationale: str | None = None
+
+
+def _reply_slots(content: str, parsed: bool) -> list[dict[str, Any]]:
+    """Return the reply's slots as the call log used to store them.
+
+    A reply the client parsed was stored as its model's dump, so its raw text
+    goes through the same normalization; any other reply was stored as text.
+    """
+    slots = json.loads(content).get("filled_slots", [])
+    if not parsed:
+        return slots
+    return [
+        _ParsedSlot.model_validate(normalize_unicode(item)).model_dump()
+        for item in slots
+    ]
+
+
 def _call_answers(run: RunData) -> dict[str, tuple[bool, str]]:
     """Map slot id to ``(is_na, reason)`` from the successful slot-analysis calls."""
     answers: dict[str, tuple[bool, str]] = {}
     for call in run.calls:
         if call.stage == ICA_STAGE and call.success and call.response_content:
-            for item in json.loads(call.response_content).get("filled_slots", []):
+            slots = _reply_slots(call.response_content, call.response_parsed)
+            for item in slots:
                 answers[item["slot_id"]] = (
                     bool(item.get("is_na")),
                     item.get("na_rationale") or "",

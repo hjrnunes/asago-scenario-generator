@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Callable, Iterator, Mapping
+from collections.abc import Callable, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
@@ -20,6 +20,7 @@ from pydantic import BaseModel, ValidationError
 from asago_scenario_generator.stpa.infra.provider_record import (
     CallIdentity,
     call_identity,
+    provider_requests_of,
 )
 from asago_scenario_generator.stpa.infra.transport_retry import (
     count_transport_retries,
@@ -416,6 +417,7 @@ class _SafeCallState:
     transport_retries: int = 0
     retry_of: str | None = None
     logged_attempt_id: str | None = None
+    provider_requests: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -504,12 +506,16 @@ def _call_client(
     completion_kwargs: dict[str, Any],
     state: _SafeCallState,
 ) -> LLMResult:
-    """Call a client, counting the transport retries the client makes."""
+    """Call a client, counting the transport retries the client makes.
+
+    The provider records the call sent are kept for its call-log entry.
+    """
     with count_transport_retries() as retries:
         try:
             return llm_client.complete(**completion_kwargs)
         finally:
             state.transport_retries += retries.count
+            state.provider_requests = provider_requests_of(llm_client)
 
 
 def _request_controls(
@@ -638,6 +644,7 @@ def _perform_safe_call(
         request_controls=_request_controls(state.result, state),
         call_log=call_log_of(llm_client),
         retry_of=state.retry_of,
+        provider_requests=state.provider_requests,
     )
     return model
 
@@ -690,6 +697,7 @@ def _log_structured_failure(
             state=state,
         ),
         call_log=call_log_of(llm_client),
+        provider_requests=state.provider_requests,
         slot_id=slot_id,
         scenario_id=scenario_id,
         terminal_error_codes=(
@@ -1017,6 +1025,7 @@ def log_llm_call(
     request_controls: Mapping[str, Any] | None = None,
     call_log: CallLog | None = None,
     retry_of: str | None = None,
+    provider_requests: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     """Append a call-log entry for a single LLM call and return its attempt id.
 
@@ -1026,6 +1035,9 @@ def log_llm_call(
         run_dir: Directory where ``calls.jsonl`` is appended.
         stage: Pipeline stage identifier (e.g. ``"stage_1a"``).
         step: Sub-step within the stage (e.g. ``"loss_analysis"``).
+        provider_requests: The ``provider-calls.jsonl`` records the call
+            wrote.  With any, the entry names them instead of holding the
+            prompt and response text; with none it keeps the text.
     """
     _success = True
     _response_content = _stringify_response_content(result.content)
@@ -1069,6 +1081,8 @@ def log_llm_call(
         published=False,
         prompt_template_hashes=prompt_template_hashes,
         retry_of=retry_of,
+        provider_requests=provider_requests,
+        response_parsed=isinstance(result.content, BaseModel),
     )
     entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir, call_log)
@@ -1107,6 +1121,7 @@ def log_llm_call_failure(
     failure_class: str | None = None,
     call_log: CallLog | None = None,
     retry_of: str | None = None,
+    provider_requests: Sequence[Mapping[str, Any]] = (),
 ) -> str:
     """Append a call-log entry for a failed LLM call and return its attempt id.
 
@@ -1121,6 +1136,8 @@ def log_llm_call_failure(
         prompt_tokens: Prompt tokens consumed (0 if call failed before completion).
         completion_tokens: Completion tokens generated (0 if call failed before completion).
         duration_ms: Wall-clock duration in milliseconds (0 if not measured).
+        provider_requests: As for :func:`log_llm_call`; none when the call
+            failed before dispatch.
     """
     _success = False
     entry = make_call_log_entry(
@@ -1152,6 +1169,7 @@ def log_llm_call_failure(
         terminal_error_codes=terminal_error_codes,
         prompt_template_hashes=prompt_template_hashes,
         retry_of=retry_of,
+        provider_requests=provider_requests,
     )
     entry.update(_prompt_audit_fields(prompt_audit))
     append_call_log([entry], run_dir, call_log)

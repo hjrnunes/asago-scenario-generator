@@ -52,6 +52,7 @@ from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from asago_scenario_generator.stpa.scenario_prod.stage5.shape_step import (
     ShapeProposal,
 )
+from tests.helpers.calls_log import read_calls_jsonl
 from tests.helpers.scenario_handoff_publication import (
     _functional_payload,
     _normal_semantics_payload,
@@ -363,9 +364,7 @@ def test_an_accepted_reply_costs_one_request(tmp_path: Path) -> None:
     assert outcome.reply == GherkinReply.model_validate(valid(spec)).model_dump()
     assert outcome.gherkin is not None
     assert outcome.gherkin.then_actual == ["But the agent refunds the wrong customer"]
-    record = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    record = read_calls_jsonl(tmp_path)
     assert {(r["stage"], r["step"]) for r in record} == {(GHERKIN_STAGE, GHERKIN_STEP)}
 
 
@@ -557,9 +556,7 @@ def test_the_gherkin_requests_follow_narrate_with_its_identity_and_temperature(
         if call.response_format in (NarrationReply, GherkinReply)
     }
     assert len(temperatures) == 1
-    records = [
-        json.loads(line) for line in (tmp_path / "calls.jsonl").read_text().splitlines()
-    ]
+    records = read_calls_jsonl(tmp_path)
     identity = {
         stage: list(
             dict.fromkeys(

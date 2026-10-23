@@ -19,7 +19,7 @@ from typing import Any
 import yaml
 
 from asago_scenario_generator.report_kit import read_metrics
-from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
+from asago_scenario_generator.stpa.infra.call_log import call_entries
 
 FIXTURE = Path(__file__).parent.parent / "fixtures" / "generate_report" / "miniklarna-1"
 SCENARIOS = "SCN-001 SCN-002 SCN-003 SCN-004 SCN-006 SCN-011 SCN-012 SCN-023".split()
@@ -40,9 +40,13 @@ def edit_yaml(path: Path, change: Any) -> None:
 
 
 def edit_calls(output: Path, change: Any) -> None:
-    """Let *change* mutate the list of call records, then save ``calls.jsonl``."""
+    """Let *change* mutate the list of call records, then save ``calls.jsonl``.
+
+    Publication events are folded into their calls first, so positions index
+    calls only; the saved log marks publication in place.
+    """
     path = output / "calls.jsonl"
-    calls = [json.loads(line) for line in jsonl_lines(path.read_text())]
+    calls = call_entries(path.read_text())
     change(calls)
     path.write_text("".join(json.dumps(call) + "\n" for call in calls))
 

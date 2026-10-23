@@ -2,20 +2,17 @@
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
-from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
+from asago_scenario_generator.stpa.infra.call_log import read_call_entries
 
 
 def read_calls_jsonl(run_dir: Path) -> list[dict]:
-    """Return the parsed entries of ``run_dir/calls.jsonl``, or ``[]`` if absent."""
-    calls_file = run_dir / "calls.jsonl"
-    if not calls_file.exists():
-        return []
-    return [
-        json.loads(line) for line in jsonl_lines(calls_file.read_text(encoding="utf-8"))
-    ]
+    """Return the entries of ``run_dir/calls.jsonl``, or ``[]`` if absent.
+
+    Publication events are folded into the entries they mark.
+    """
+    return read_call_entries(run_dir) or []
 
 
 def stage1a_steps(run_dir: Path) -> list[str]:

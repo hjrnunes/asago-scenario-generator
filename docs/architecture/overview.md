@@ -194,9 +194,11 @@ preflight audits the final rendered prompt and its exact reference universe,
 then checks it against the selected model profile's context window, reserved
 completion, and safety margin. Oversized routing batches split canonically;
 one oversized item becomes a typed local failure and is never silently
-truncated. `calls.jsonl` and the synthesis manifest retain the prompt audit,
-provider-reported usage, and the hashes of every obligation-aware template,
-included partial, and `prose/` template.
+truncated. `calls.jsonl` retains the prompt audit, provider-reported usage,
+and the hashes of every obligation-aware template, included partial, and
+`prose/` template; the exact prompt and response text is in
+`provider-calls.jsonl`, which each `calls.jsonl` line names by record
+`sequence` and `request_sha256`.
 
 Each structural route carries independent typed mechanism-plausibility and
 reviewed-risk-alignment decisions plus a plain mapping-strength label derived

@@ -39,7 +39,11 @@ from typing import Any, Callable, Iterable, Sequence
 import yaml
 
 import asago_scenario_generator
-from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
+from asago_scenario_generator.stpa.infra.call_log import (
+    CALLS_FILENAME,
+    call_entries,
+    jsonl_lines,
+)
 from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 
 _SCRIPT = Path(__file__).resolve()
@@ -82,7 +86,7 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
         "compared as a multiset ordered by identity, digest, and sequence",
     ),
     AllowedDifference(
-        "calls.jsonl",
+        CALLS_FILENAME,
         ("timestamp", "duration_ms", "retry_of"),
         "wall-clock time of each call; a recording made before calls.jsonl named "
         "the attempt a retry repeats lacks retry_of",
@@ -94,11 +98,20 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
     ),
     AllowedDifference(
         "synthesis-manifest.yaml",
-        ("created_at", "prompt_call_evidence.[].duration_ms", "semantic_digest"),
-        "wall-clock time of the run and of each call; the digest covers them, "
-        "so the gate recomputes it on both sides instead of comparing it",
+        ("created_at", "semantic_digest"),
+        "wall-clock time of the run; the digest covers it, so the gate "
+        "recomputes it on both sides instead of comparing it",
     ),
 )
+
+# Manifest fields the current code no longer writes.  A recording made before
+# a field was retired may hold it and the gate compares without it; a replay
+# that writes it again fails.
+RETIRED_MANIFEST_FIELDS: dict[str, str] = {
+    "prompt_call_evidence": "the manifest's copy of the call records, which "
+    "calls.jsonl keeps",
+}
+_MANIFEST_FILENAME = "synthesis-manifest.yaml"
 
 
 @dataclass(frozen=True)
@@ -168,6 +181,29 @@ ALLOWED_FILE_CHANGES: tuple[AllowedFileChange, ...] = (
         "policy-coverage.json", "replay", "the policy funnel the report reads"
     ),
 )
+
+# A calls.jsonl entry names the provider-calls.jsonl records its call wrote
+# (``provider_requests``, with ``response_parsed``), or has an empty list and
+# holds the prompt and response text when it wrote none.  An entry logged
+# before entries named their records has no ``provider_requests`` and holds
+# the text.  Only such an entry compares with a current one without the text
+# and link fields; two current entries compare their request digests, after
+# each side's links are checked against its own record.  Sequence numbers
+# follow the arrival order of concurrent requests, so only that check reads
+# them: within an entry the links must rise without repeats (a transport
+# retry's records share their digest and identity), and no record may be
+# named twice.  A record need not be named at all: an interrupted call or a
+# direct client request writes one without a call entry, and the gate
+# compares provider-calls.jsonl itself.
+_CALL_TEXT_FIELDS = (
+    "system_prompt_text",
+    "user_prompt_text",
+    "raw_response",
+    "cleaned_response",
+    "response_content",
+)
+_CALL_LINK_FIELDS = ("provider_requests", "response_parsed")
+_CALL_IDENTITY_FIELDS = ("stage", "step", "slot_id", "scenario_id", "attempt_number")
 
 # Files that carry a framed digest over their own payload.  The gate checks
 # that each side's digest matches its payload, then compares the payloads.
@@ -497,7 +533,12 @@ def _short(value: Any, limit: int = 160) -> str:
     return text if len(text) <= limit else text[:limit] + "..."
 
 
-def _parse(text: str, suffix: str) -> Any:
+def _parse(text: str, suffix: str, relative: str = "") -> Any:
+    if relative == CALLS_FILENAME:
+        # Publication events fold into their calls, so a recording that
+        # marked a call published in place compares with one that appended
+        # the event.
+        return call_entries(text)
     if suffix == ".jsonl":
         return [json.loads(line) for line in jsonl_lines(text)]
     if suffix == ".json":
@@ -518,6 +559,86 @@ def _provider_record_order(record: dict[str, Any]) -> str:
         [record.get("identity"), record["request_sha256"], record["sequence"]],
         sort_keys=True,
     )
+
+
+def _pair_call_forms(left: list[Any], right: list[Any]) -> None:
+    """Make each pair of call entries comparable on what both forms hold."""
+    for a, b in zip(left, right):
+        if not (isinstance(a, dict) and isinstance(b, dict)):
+            continue
+        if ("provider_requests" in a) != ("provider_requests" in b):
+            for entry in (a, b):
+                for name in _CALL_TEXT_FIELDS + _CALL_LINK_FIELDS:
+                    entry.pop(name, None)
+        elif "provider_requests" in a:
+            for entry in (a, b):
+                entry["provider_requests"] = [
+                    link.get("request_sha256") for link in entry["provider_requests"]
+                ]
+
+
+def _provider_records(directory: Path) -> dict[Any, dict[str, Any]]:
+    path = directory / RECORD_FILENAME
+    if not path.is_file():
+        return {}
+    records = (json.loads(line) for line in jsonl_lines(path.read_text("utf-8")))
+    return {record.get("sequence"): record for record in records}
+
+
+def _link_problem(
+    link: Any, entry: dict[str, Any], records: dict[Any, dict[str, Any]]
+) -> str | None:
+    """Check that one link names a record of the entry's own call."""
+    record = records.get(link.get("sequence"))
+    if record is None or record.get("request_sha256") != link.get("request_sha256"):
+        return f"names no record of {RECORD_FILENAME}"
+    identity = record.get("identity")
+    if identity is not None and any(
+        identity.get(name) != entry.get(name) for name in _CALL_IDENTITY_FIELDS
+    ):
+        return "names the record of another call"
+    return None
+
+
+def _call_link_problem(calls: Path, side: str) -> str | None:
+    """Check that the calls name the records of their own ``provider-calls.jsonl``.
+
+    Each link must give the sequence and request digest of one record whose
+    call identity is the entry's.  An entry's links rise in sequence without
+    repeats, and no record is named by two entries.
+    """
+    entries = call_entries(calls.read_text(encoding="utf-8"))
+    records = _provider_records(calls.parent)
+    claimed: dict[Any, int] = {}
+    for index, entry in enumerate(entries):
+        links = entry.get("provider_requests", ())
+        where = f"{side} $[{index}].provider_requests"
+        for link in links:
+            problem = _link_problem(link, entry, records)
+            if problem:
+                return f"{where} {_short(link)} {problem}"
+        sequences = [link["sequence"] for link in links]
+        if sequences != sorted(set(sequences)):
+            return f"{where} {sequences} does not rise in sequence without repeats"
+        for sequence in sequences:
+            if sequence in claimed:
+                return (
+                    f"{where} names record {sequence}, which "
+                    f"$[{claimed[sequence]}] names too"
+                )
+            claimed[sequence] = index
+    return None
+
+
+def _retired_field_problem(replayed: Path) -> str | None:
+    """Fail a replay manifest that writes a retired field again."""
+    document = yaml.safe_load(replayed.read_text(encoding="utf-8"))
+    if not isinstance(document, dict):
+        return None
+    for name, meaning in RETIRED_MANIFEST_FIELDS.items():
+        if name in document:
+            return f"replay writes {name}, {meaning}, which the manifest retired"
+    return None
 
 
 def _self_digest_difference(document: Any, side: str) -> str | None:
@@ -552,8 +673,20 @@ def compare_file(
     added to *removed_templates*.  Self-digested files check their digest
     over the full recorded payload first, and the digest itself is an allowed
     difference, so dropping a template entry never leaves a stale digest in
-    the comparison.
+    the comparison.  ``calls.jsonl`` first checks each side's links against
+    that side's own ``provider-calls.jsonl``; the synthesis manifest first
+    fails a replay that writes a :data:`RETIRED_MANIFEST_FIELDS` entry, and
+    the recording's copy of one is dropped before comparing.
     """
+    if relative == CALLS_FILENAME:
+        for path, side in ((recorded, "recording"), (replayed, "replay")):
+            problem = _call_link_problem(path, side)
+            if problem:
+                return problem
+    if relative == _MANIFEST_FILENAME:
+        problem = _retired_field_problem(replayed)
+        if problem:
+            return problem
     left = recorded.read_bytes()
     right = replayed.read_bytes()
     if left == right:
@@ -573,8 +706,8 @@ def compare_file(
         if left_text == right_text:
             return None
         return _text_difference(left_text, right_text)
-    left_data = _parse(left_text, suffix)
-    right_data = _parse(right_text, suffix)
+    left_data = _parse(left_text, suffix, relative)
+    right_data = _parse(right_text, suffix, relative)
     if relative in _SELF_DIGESTED:
         problem = _self_digest_problem(left_data, raw_right_text, suffix)
         if problem:
@@ -582,6 +715,14 @@ def compare_file(
     if relative == RECORD_FILENAME:
         left_data = sorted(left_data, key=_provider_record_order)
         right_data = sorted(right_data, key=_provider_record_order)
+    if relative == CALLS_FILENAME:
+        _pair_call_forms(left_data, right_data)
+    if relative == _MANIFEST_FILENAME and isinstance(left_data, dict):
+        left_data = {
+            key: value
+            for key, value in left_data.items()
+            if key not in RETIRED_MANIFEST_FIELDS
+        }
     jsonl = suffix == ".jsonl"
     left_data = _normalise(left_data, relative, jsonl=jsonl)
     right_data = _normalise(right_data, relative, jsonl=jsonl)

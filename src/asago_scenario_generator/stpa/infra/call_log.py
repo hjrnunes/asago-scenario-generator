@@ -18,8 +18,25 @@ Call log entry format (Section 6 of the STPA-Sec foundation spec):
       "completion_tokens": 1200,
       "duration_ms": 8500,
       "timestamp": "2026-08-08T12:34:56Z",
-      "success": true
+      "success": true,
+      "provider_requests": [{"sequence": 7, "request_sha256": "sha256..."}]
     }
+
+An entry whose call wrote ``provider-calls.jsonl`` records holds no prompt or
+response text: those records keep each request exactly as sent and each
+response exactly as returned, and ``provider_requests`` names them (their
+``sequence`` and ``request_sha256``) in the order sent.  ``response_parsed``
+then says whether the client returned the reply parsed against its response
+model rather than as text, which is how the reply used to be stored.  An entry
+whose call wrote no record (no session, a session that records nothing, or a
+call stopped before dispatch) has an empty ``provider_requests`` and keeps the
+prompt text and the raw, cleaned and stringified response instead.  Entries
+written before calls named their records have no ``provider_requests``.
+
+Publishing a call appends one event line, ``{"kind": "call-published",
+"attempt_id": ...}``, instead of rewriting the file.  :func:`call_entries`
+folds each event into the latest entry before it with that ``attempt_id``;
+read the file through it rather than line by line.
 """
 
 from __future__ import annotations
@@ -31,7 +48,7 @@ import re
 import threading
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Mapping
+from typing import Any, Mapping, Sequence
 
 _call_log_lock = threading.Lock()
 _SENSITIVE_ERROR = re.compile(
@@ -41,6 +58,9 @@ _SENSITIVE_CONTROL_KEY = re.compile(
     r"(?i)(?:api[-_ ]?key|token|password|authorization|secret|credential|url|endpoint)"
 )
 _URL_VALUE = re.compile(r"https?://[^\s\"')]+", re.IGNORECASE)
+
+CALLS_FILENAME = "calls.jsonl"
+PUBLISHED_KIND = "call-published"
 
 
 def _sha256(text: str) -> str:
@@ -194,8 +214,12 @@ def _response_fields(
     cleaned_response: Any | None,
     cleanup_transformations: tuple[Mapping[str, Any], ...],
     flat_restore_drops: tuple[Mapping[str, str], ...],
+    keep_text: bool,
 ) -> dict[str, Any]:
-    """Build raw/cleaned response evidence, cleanup records, and restore drops."""
+    """Build response pins, cleanup records, and restore drops.
+
+    With *keep_text*, the raw and cleaned responses themselves are kept too.
+    """
     fields: dict[str, Any] = {
         "cleanup_transformations": [
             dict(transformation) for transformation in cleanup_transformations
@@ -206,7 +230,8 @@ def _response_fields(
         ("raw_response", raw_response, "stpa-provider-raw-response-v1"),
         ("cleaned_response", cleaned_response, "stpa-provider-cleaned-response-v1"),
     ):
-        fields[name] = _jsonable(value) if value is not None else None
+        if keep_text:
+            fields[name] = _jsonable(value) if value is not None else None
         fields[f"{name}_pin"] = (
             _content_pin(value, frame) if value is not None else None
         )
@@ -218,12 +243,13 @@ def _optional_fields(
     failure_class: str | None,
     response_content: str | None,
     error: str | None,
+    keep_text: bool,
 ) -> dict[str, Any]:
     """Build optional lifecycle details without dropping explicit failures."""
     fields: dict[str, Any] = {}
     if failure_class is not None:
         fields["failure_class"] = failure_class
-    if response_content is not None:
+    if keep_text and response_content is not None:
         fields["response_content"] = response_content
     if error is not None:
         fields["error"] = _safe_error(error)
@@ -263,6 +289,8 @@ def make_call_log_entry(
     terminal_error_codes: tuple[str, ...] = (),
     prompt_template_hashes: Mapping[str, str] | None = None,
     retry_of: str | None = None,
+    provider_requests: Sequence[Mapping[str, Any]] = (),
+    response_parsed: bool = False,
 ) -> dict[str, Any]:
     """Build a call-log entry dict following the STPA format (Section 6).
 
@@ -270,8 +298,10 @@ def make_call_log_entry(
         stage: Pipeline stage (e.g. ``stage_2``, ``stage_6_narrative``).
         step: Sub-step within the stage (e.g. ``call_1_requirements``).
         model: LLM model name.
-        system_prompt: System prompt text (hashed and stored full in the entry).
-        user_prompt: User prompt text (hashed and stored full in the entry).
+        system_prompt: System prompt text (hashed; stored full only without
+            *provider_requests*).
+        user_prompt: User prompt text (hashed; stored full only without
+            *provider_requests*).
         prompt_tokens: Prompt tokens consumed, or ``None`` when unavailable.
         completion_tokens: Completion tokens generated, or ``None`` when
             unavailable.
@@ -283,14 +313,23 @@ def make_call_log_entry(
         timestamp: ISO 8601 timestamp; defaults to current UTC time.
         retry_of: ``attempt_id`` of the failed attempt this request retries;
             the key is absent from a first request.
-        response_content: Optional full response content (string representation).
+        response_content: Optional full response content (string
+            representation), stored only without *provider_requests*.
         flat_restore_drops: The drops the flat-reply restore made (path,
-            branch, reason); the dropped values stay in ``raw_response``.
+            branch, reason); the dropped values stay in the raw response.
+        provider_requests: The ``sequence`` and ``request_sha256`` of each
+            ``provider-calls.jsonl`` record the call wrote.  With any, the
+            entry holds these keys instead of the prompt and response text;
+            with none it keeps the text.
+        response_parsed: Whether the client returned the reply parsed
+            against its response model rather than as text; stored with
+            *provider_requests*.
 
     Returns:
         A dict suitable for JSONL serialization.
     """
     _timestamp = timestamp or datetime.now(timezone.utc).isoformat()
+    keep_text = not provider_requests
     entry: dict[str, Any] = {
         "stage": stage,
         "step": step,
@@ -298,8 +337,17 @@ def make_call_log_entry(
         "scenario_id": scenario_id,
         "system_prompt_hash": _sha256(system_prompt) if system_prompt else "",
         "user_prompt_hash": _sha256(user_prompt) if user_prompt else "",
-        "system_prompt_text": system_prompt,
-        "user_prompt_text": user_prompt,
+    }
+    entry["provider_requests"] = [
+        {"sequence": request["sequence"], "request_sha256": request["request_sha256"]}
+        for request in provider_requests
+    ]
+    if keep_text:
+        entry["system_prompt_text"] = system_prompt
+        entry["user_prompt_text"] = user_prompt
+    else:
+        entry["response_parsed"] = response_parsed
+    entry |= {
         "model": model,
         "call_category": "producer_provider",
         "provider_request": True,
@@ -353,6 +401,7 @@ def make_call_log_entry(
             cleaned_response=cleaned_response,
             cleanup_transformations=cleanup_transformations,
             flat_restore_drops=flat_restore_drops,
+            keep_text=keep_text,
         )
     )
     entry.update(
@@ -360,6 +409,7 @@ def make_call_log_entry(
             failure_class=failure_class,
             response_content=response_content,
             error=error,
+            keep_text=keep_text,
         )
     )
     if retry_of is not None:
@@ -370,9 +420,10 @@ def make_call_log_entry(
 class CallLog:
     """The call entries of one run, held in memory per run directory.
 
-    A provider-call session owns one. Each entry is stored as the JSON line
-    in ``calls.jsonl`` holds it, so a reader of the records sees what a reader
-    of the file would. Mutate it only through :func:`append_call_log` and
+    A provider-call session owns one. Each entry is stored as
+    :func:`call_entries` reads it back from ``calls.jsonl``, publication
+    included, so a reader of the records sees what a reader of the file
+    would. Mutate it only through :func:`append_call_log` and
     :func:`mark_call_published`, which keep the file and the records together.
     """
 
@@ -405,6 +456,44 @@ def jsonl_lines(text: str) -> list[str]:
     return [line for line in text.split("\n") if line.strip()]
 
 
+def call_entries(text: str) -> list[dict[str, Any]]:
+    """Return the call entries of ``calls.jsonl`` *text*, publication folded in.
+
+    Each publication event marks the latest entry before it with its
+    ``attempt_id`` as compiled and published, and is not itself returned.
+    An event with no such entry (it names no call, or precedes its call)
+    marks nothing.
+    Entries of logs written before publication events load unchanged.
+    """
+    entries: list[dict[str, Any]] = []
+    latest: dict[Any, dict[str, Any]] = {}
+    for line in jsonl_lines(text):
+        record = json.loads(line)
+        if record.get("kind") == PUBLISHED_KIND:
+            published = latest.get(record.get("attempt_id"))
+            if published is not None:
+                published["compiled"] = True
+                published["published"] = True
+            continue
+        entries.append(record)
+        latest[record.get("attempt_id")] = record
+    return entries
+
+
+def read_call_entries(run_dir: Path) -> list[dict[str, Any]] | None:
+    """Read the call entries of ``run_dir/calls.jsonl``, or ``None`` without one."""
+    calls_path = Path(run_dir) / CALLS_FILENAME
+    if not calls_path.exists():
+        return None
+    return call_entries(calls_path.read_text(encoding="utf-8"))
+
+
+def _append_lines(run_dir: Path, lines: list[str]) -> None:
+    run_dir.mkdir(parents=True, exist_ok=True)
+    with (run_dir / CALLS_FILENAME).open("a", encoding="utf-8") as fh:
+        fh.write("".join(lines))
+
+
 def append_call_log(
     entries: list[dict], run_dir: Path, call_log: CallLog | None = None
 ) -> None:
@@ -417,11 +506,8 @@ def append_call_log(
     if not entries:
         return
     with _call_log_lock:
-        run_dir.mkdir(parents=True, exist_ok=True)
-        calls_path = run_dir / "calls.jsonl"
         lines = [f"{json.dumps(entry, ensure_ascii=False)}\n" for entry in entries]
-        with calls_path.open("a", encoding="utf-8") as fh:
-            fh.write("".join(lines))
+        _append_lines(run_dir, lines)
         if call_log is not None:
             call_log._entries.setdefault(call_log._key(run_dir), []).extend(
                 json.loads(line) for line in lines
@@ -433,30 +519,22 @@ def mark_call_published(
 ) -> None:
     """Mark the latest matching validated call as compiled and published.
 
-    With *call_log*, the entries come from its records rather than the file;
-    the file is rewritten from them.
+    The file gains one publication event naming the call's ``attempt_id``;
+    its earlier lines are not rewritten. With *call_log*, the entries come
+    from its records rather than the file, and the record is updated too.
     """
-    calls_path = Path(run_dir) / "calls.jsonl"
     with _call_log_lock:
         if call_log is None:
-            entries = _load_call_entries(calls_path)
+            entries = read_call_entries(run_dir)
         else:
             entries = call_log._entries.get(call_log._key(run_dir))
-            if entries is None:
-                raise ValueError("cannot publish lifecycle for a missing call log")
+        if entries is None:
+            raise ValueError("cannot publish lifecycle for a missing call log")
         match = _latest_validated_call(entries, stage=stage, step=step)
         match["compiled"] = True
         match["published"] = True
-        _replace_call_entries(calls_path, entries)
-
-
-def _load_call_entries(calls_path: Path) -> list[dict[str, Any]]:
-    """Load an existing call log for a lifecycle transition."""
-    if not calls_path.exists():
-        raise ValueError("cannot publish lifecycle for a missing call log")
-    return [
-        json.loads(line) for line in jsonl_lines(calls_path.read_text(encoding="utf-8"))
-    ]
+        event = {"kind": PUBLISHED_KIND, "attempt_id": match.get("attempt_id")}
+        _append_lines(Path(run_dir), [f"{json.dumps(event, ensure_ascii=False)}\n"])
 
 
 def _latest_validated_call(
@@ -472,13 +550,3 @@ def _latest_validated_call(
     if match is None or not match.get("semantic_validation_passed", False):
         raise ValueError("cannot publish a call without semantic validation")
     return match
-
-
-def _replace_call_entries(calls_path: Path, entries: list[dict[str, Any]]) -> None:
-    """Atomically replace a call log after a lifecycle transition."""
-    temporary = calls_path.with_suffix(".jsonl.tmp")
-    temporary.write_text(
-        "".join(f"{json.dumps(entry, ensure_ascii=False)}\n" for entry in entries),
-        encoding="utf-8",
-    )
-    temporary.replace(calls_path)

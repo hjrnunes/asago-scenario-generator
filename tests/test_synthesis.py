@@ -37,7 +37,6 @@ from asago_scenario_generator.pipeline.synthesis import (
     run_synthesis,
 )
 from asago_scenario_generator.pipeline.synthesis_manifest import (
-    _manifest_prompt_call_evidence,
     _manifest_provider_evidence,
     _scenario_generation_status,
     _total_prompt_tokens,
@@ -736,32 +735,9 @@ def test_synthesis_manifest_retains_taxonomy_pins_and_stage_call_evidence(
     assert set(manifest["mapping_pins"]) == {"sssom", "obligation_edges"}
     assert manifest["provider_evidence"]["consideration_initial"]["call_count"] == 2
     assert manifest["provider_evidence"]["ica"]["call_count"] == 1
-    assert manifest["prompt_call_evidence"] == [
-        {
-            "stage": "stage_2",
-            "step": "control_action",
-            "model": "test-model",
-            "system_prompt_hash": "system-hash",
-            "user_prompt_hash": "user-hash",
-            "prompt_tokens": 23,
-            "completion_tokens": 5,
-            "duration_ms": 7,
-            "success": True,
-            "response_digest": manifest["prompt_call_evidence"][0]["response_digest"],
-            "prompt_preflight": {
-                "rendered_prompt_digest": "a" * 64,
-                "input_tokens": 29,
-                "input_tokens_estimated": True,
-                "context_window": 8_000,
-                "maximum_completion_tokens": 1_000,
-                "safety_margin": 1_024,
-                "usable_input_tokens": 5_976,
-                "provider_call_allowed": True,
-                "errors": [],
-            },
-        }
-    ]
-    assert len(manifest["prompt_call_evidence"][0]["response_digest"]) == 64
+    # calls.jsonl holds the call records; the manifest keeps no copy of them.
+    assert "prompt_call_evidence" not in manifest
+    assert manifest["total_prompt_tokens"] == 23
 
 
 def test_manifest_call_count_sums_requests_sent_including_zero() -> None:
@@ -2200,7 +2176,7 @@ def test_declared_capability_labels_are_exact_sorted_names() -> None:
     assert _declared_capability_labels(None) == ()
 
 
-def test_manifest_call_evidence_comes_from_the_records_not_the_file(
+def test_manifest_prompt_tokens_come_from_the_records_not_the_file(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     (tmp_path / "calls.jsonl").write_text(
@@ -2221,15 +2197,11 @@ def test_manifest_call_evidence_comes_from_the_records_not_the_file(
     manifest = yaml.safe_load(
         (tmp_path / "synthesis-manifest.yaml").read_text(encoding="utf-8")
     )
-    assert manifest["prompt_call_evidence"] == [
-        {"stage": "s", "step": "a", "prompt_tokens": 4},
-        {"stage": "s", "step": "b"},
-    ]
+    assert "prompt_call_evidence" not in manifest
     assert manifest["total_prompt_tokens"] == 4
 
 
-def test_manifest_without_call_records_has_no_call_evidence() -> None:
-    assert _manifest_prompt_call_evidence(None) == []
+def test_manifest_without_call_records_has_no_prompt_token_total() -> None:
     assert _total_prompt_tokens(None) is None
     assert _total_prompt_tokens([]) == 0
 
