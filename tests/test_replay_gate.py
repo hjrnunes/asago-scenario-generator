@@ -1672,6 +1672,8 @@ def _accounting_manifest(
     document.pop("semantic_digest")
     records = SimpleNamespace(records=realization.records)
     document.update(
+        schema_version="synthesis-manifest-v1",
+        run_status="completed",
         source_artifacts={
             "obligation_accounting": {
                 "artifact_id": "obligation-accounting",
@@ -1702,25 +1704,42 @@ def _accounting_manifest(
     _write_manifest(root, document)
 
 
-def _obligation_report(root: Path, section: str, *, other: str = "same") -> None:
+def _obligation_report(
+    root: Path, section: str | None = None, *, other: str = "same"
+) -> None:
+    """Write a report whose obligations section is *section*, or as rendered."""
+    from asago_scenario_generator.report.obligation_section import (
+        obligation_section,
+    )
+    from asago_scenario_generator.report.run_data import load_run
+
+    if section is None:
+        section = str(obligation_section(load_run(root)))
     (root / "report").mkdir(exist_ok=True)
     (root / "report" / "index.html").write_text(
-        f'<section id="obligations"><h2>O</h2>{section}</section>\n'
-        f'<section id="failed"><h2>F</h2>{other}</section>\n'
+        f'{section}\n<section id="failed"><h2>F</h2>{other}</section>\n'
     )
 
 
+def _obligations_section(root: Path) -> str:
+    text = (root / "report" / "index.html").read_text()
+    return text[: text.index("</section>") + len("</section>")]
+
+
 def _write_accounting_run(
-    root: Path, plan: Any, consideration: Any, accounting: Any, report: str
+    root: Path, plan: Any, consideration: Any, accounting: Any
 ) -> None:
     realization = _realization(accounting)
+    # The report reads the call log; both sides log the same call.
+    _jsonl(root / "calls.jsonl", [{"stage": "s", "step": "a", "success": True}])
+    (root / "taxonomy-obligation-plan.yaml").write_text(plan.to_yaml())
     (root / "obligation-accounting.yaml").write_text(accounting.to_yaml())
     (root / "obligation-consideration.yaml").write_text(
         yaml.safe_dump(consideration.model_dump(mode="json"))
     )
     (root / "scenario-realization.yaml").write_text(realization.to_yaml())
     _accounting_manifest(root, plan, accounting, realization)
-    _obligation_report(root, report)
+    _obligation_report(root)
 
 
 @pytest.fixture
@@ -1730,10 +1749,8 @@ def stop_order_trees(trees) -> tuple[Path, Path, dict[str, str]]:
     plan, consideration, current = _routed_accounting()
     obligation_id, old_fields = _old_mechanism_absent_row(current)
     before = _row_as_recorded(current, obligation_id, **old_fields)
-    _write_accounting_run(
-        recorded, plan, consideration, before, "1 not_applicable_evidence_incomplete"
-    )
-    _write_accounting_run(replayed, plan, consideration, current, "1 mechanism_absent")
+    _write_accounting_run(recorded, plan, consideration, before)
+    _write_accounting_run(replayed, plan, consideration, current)
     return recorded, replayed, path_map
 
 
@@ -1765,8 +1782,8 @@ def test_the_stop_order_accepts_a_deduplicated_verifier_diagnostic(trees) -> Non
     before = _row_as_recorded(
         current, obligation_id, diagnostics=(row.diagnostics[0],) * 2
     )
-    _write_accounting_run(recorded, plan, consideration, before, "same")
-    _write_accounting_run(replayed, plan, consideration, current, "same")
+    _write_accounting_run(recorded, plan, consideration, before)
+    _write_accounting_run(replayed, plan, consideration, current)
 
     _, differences = compare_trees(recorded, replayed, path_map)
 
@@ -1790,8 +1807,8 @@ def test_the_stop_order_does_not_hide_another_accounting_field(trees) -> None:
     before = _row_as_recorded(
         current, obligation_id, evidence=("other evidence",), **old_fields
     )
-    _write_accounting_run(recorded, plan, consideration, before, "old")
-    _write_accounting_run(replayed, plan, consideration, current, "new")
+    _write_accounting_run(recorded, plan, consideration, before)
+    _write_accounting_run(replayed, plan, consideration, current)
 
     _, differences = compare_trees(recorded, replayed, path_map)
 
@@ -1815,16 +1832,12 @@ def test_the_stop_order_does_not_hide_a_reason_the_route_does_not_derive(
         diagnostics=(wrong,),
     )
     before = _row_as_recorded(current, obligation_id, **old_fields)
-    _write_accounting_run(recorded, plan, consideration, before, "same")
-    _write_accounting_run(replayed, plan, consideration, after, "same")
+    _write_accounting_run(recorded, plan, consideration, before)
+    _write_accounting_run(replayed, plan, consideration, after)
 
     _, differences = compare_trees(recorded, replayed, path_map)
 
-    assert sorted(item.path for item in differences) == [
-        "obligation-accounting.yaml",
-        "scenario-realization.yaml",
-        "synthesis-manifest.yaml",
-    ]
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
 
 
 def test_the_stop_order_does_not_hide_a_manifest_count_the_rows_do_not_give(
@@ -1836,6 +1849,7 @@ def test_the_stop_order_does_not_hide_a_manifest_count_the_rows_do_not_give(
     document["obligation_stop_reason_counts"] = {"mechanism_absent": 2}
     document["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, document)
     _write_manifest(replayed, document)
+    _obligation_report(replayed)
 
     _, differences = compare_trees(recorded, replayed, path_map)
 
@@ -1859,7 +1873,172 @@ def test_the_stop_order_does_not_hide_a_report_change_outside_its_section(
     stop_order_trees,
 ) -> None:
     recorded, replayed, path_map = stop_order_trees
-    _obligation_report(replayed, "1 mechanism_absent", other="changed")
+    _obligation_report(replayed, other="changed")
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["report/index.html"]
+
+
+_OTHER_OBLIGATION = "ob:v1:" + "d" * 64
+
+
+def _diagnostic(obligation_id: str, code: str, detail: str) -> Any:
+    from asago_scenario_generator.models.obligation_consideration import (
+        ConsiderationDiagnostic,
+    )
+
+    return ConsiderationDiagnostic(
+        code=code,
+        detail=detail,
+        obligation_ids=(obligation_id,),
+        gap_ids=("GAP-1",),
+        refs=("ref-1",),
+    )
+
+
+def _diagnostic_trees(
+    trees, before: Any, after: Any
+) -> tuple[Path, Path, dict[str, str]]:
+    """Record the old mechanism_absent row and replay it with these diagnostics.
+
+    *before* and *after* each map the row's derived diagnostic and the
+    obligation ID to the diagnostics that side's row carries.
+    """
+    recorded, replayed, path_map = trees
+    plan, consideration, current = _routed_accounting()
+    obligation_id, old_fields = _old_mechanism_absent_row(current)
+    row = next(row for row in current.rows if row.obligation_id == obligation_id)
+    derived = row.diagnostics[0]
+    _write_accounting_run(
+        recorded,
+        plan,
+        consideration,
+        _row_as_recorded(
+            current,
+            obligation_id,
+            stop_reason=old_fields["stop_reason"],
+            diagnostics=before(derived, obligation_id),
+        ),
+    )
+    _write_accounting_run(
+        replayed,
+        plan,
+        consideration,
+        _row_as_recorded(
+            current, obligation_id, diagnostics=after(derived, obligation_id)
+        ),
+    )
+    return recorded, replayed, path_map
+
+
+def _superseded(obligation_id: str) -> Any:
+    return _diagnostic(obligation_id, "incomplete_non_applicability", "superseded")
+
+
+def _kept(obligation_id: str) -> Any:
+    return _diagnostic(obligation_id, "slot_pair_unresolved", "kept")
+
+
+def test_the_stop_order_keeps_other_diagnostics_and_drops_a_competing_one(
+    trees,
+) -> None:
+    def before(derived, oid):
+        stale = _diagnostic(oid, "mechanism_path_unsubstantiated", "stale")
+        return (_kept(oid), stale, _superseded(oid))
+
+    def after(derived, oid):
+        return (_kept(oid), derived)
+
+    recorded, replayed, path_map = _diagnostic_trees(trees, before, after)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_the_stop_order_keeps_the_first_recorded_copy_of_its_diagnostic(
+    trees,
+) -> None:
+    def before(derived, oid):
+        first = _diagnostic(oid, "mechanism_absent", "first")
+        second = _diagnostic(oid, "mechanism_absent", "second")
+        return (first, _superseded(oid), second)
+
+    def after(derived, oid):
+        return (_diagnostic(oid, "mechanism_absent", "first"),)
+
+    recorded, replayed, path_map = _diagnostic_trees(trees, before, after)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+_DIAGNOSTIC_EDITS = {
+    "detail": {"detail": "changed detail"},
+    "severity": {"severity": "error"},
+    "obligation_ids": {"obligation_ids": (_OTHER_OBLIGATION,)},
+    "gap_ids": {"gap_ids": ("GAP-2",)},
+    "refs": {"refs": ("ref-2",)},
+}
+
+
+@pytest.mark.parametrize("edit", _DIAGNOSTIC_EDITS)
+def test_the_stop_order_does_not_hide_an_edited_semantic_diagnostic(
+    trees, edit: str
+) -> None:
+    def before(derived, oid):
+        return (_kept(oid), _superseded(oid))
+
+    def after(derived, oid):
+        return (_kept(oid), derived.model_copy(update=_DIAGNOSTIC_EDITS[edit]))
+
+    recorded, replayed, path_map = _diagnostic_trees(trees, before, after)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+@pytest.mark.parametrize("edit", _DIAGNOSTIC_EDITS)
+def test_the_stop_order_does_not_hide_an_edited_retained_diagnostic(
+    trees, edit: str
+) -> None:
+    def before(derived, oid):
+        return (_kept(oid), _superseded(oid))
+
+    def after(derived, oid):
+        return (_kept(oid).model_copy(update=_DIAGNOSTIC_EDITS[edit]), derived)
+
+    recorded, replayed, path_map = _diagnostic_trees(trees, before, after)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_stop_order_does_not_hide_a_report_edit_without_accounting_drift(
+    trees,
+) -> None:
+    recorded, replayed, path_map = trees
+    plan, consideration, current = _routed_accounting()
+    _write_accounting_run(recorded, plan, consideration, current)
+    _write_accounting_run(replayed, plan, consideration, current)
+    section = _obligations_section(replayed)
+    _obligation_report(replayed, section.replace("</h2>", "</h2>edited", 1))
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["report/index.html"]
+
+
+def test_the_stop_order_does_not_hide_a_section_edit_the_rows_do_not_explain(
+    stop_order_trees,
+) -> None:
+    recorded, replayed, path_map = stop_order_trees
+    section = _obligations_section(replayed)
+    _obligation_report(replayed, section.replace("</h2>", "</h2>edited", 1))
 
     _, differences = compare_trees(recorded, replayed, path_map)
 

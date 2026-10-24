@@ -387,14 +387,18 @@ class AccountingStopReasonChange:
     *stop_order* derives from its route's semantic assessment in the replay's
     obligation consideration: its new stop reason (or ``risk_out_of_scope``
     for an out-of-scope risk), at most the move of a non-addressed row to
-    ``unresolved``, exactly one diagnostic of its semantic reason (none on an
-    out-of-scope row), and no other diagnostic lost except the
-    *superseded_diagnostics* of the checks the semantic stop now precedes.
-    The scenario realization may then differ only in its accounting pin and
-    digest; the synthesis manifest only in the *manifest_digests* of those two
-    files and in its obligation disposition counts, stop-reason counts,
-    resolution funnel and scope summary, each equal to its recorded value with
-    the changed rows moved; and the report only inside *report_section*.  This
+    ``unresolved``, and its recorded diagnostics less the
+    *superseded_diagnostics* of the checks the semantic stop now precedes and
+    the diagnostics of the other semantic reasons, with exactly one of its
+    own reason: the first recorded copy, or the one accounting derives (none
+    on an out-of-scope row).  Every other diagnostic stays as recorded.  At
+    least one row must differ, or nothing is allowed.  The scenario
+    realization may then differ only in its accounting pin and digest; the
+    synthesis manifest only in the *manifest_digests* of those two files and
+    in its obligation disposition counts, stop-reason counts, resolution
+    funnel and scope summary, each equal to its recorded value with the
+    changed rows moved; and the report only inside *report_section*, which
+    must be the section the report renders from the replayed files.  This
     temporary allowance remains until recordings made before the order are
     replaced.
     """
@@ -1455,15 +1459,6 @@ def _ordered_stop(
     return None
 
 
-def _diagnostic_codes(row: dict[str, Any]) -> list[Any]:
-    diagnostics = row.get("diagnostics", [])
-    if not isinstance(diagnostics, list):
-        return [None]
-    return [
-        item.get("code") if isinstance(item, dict) else None for item in diagnostics
-    ]
-
-
 def _changed_row_explained(
     before: dict[str, Any],
     after: dict[str, Any],
@@ -1498,30 +1493,80 @@ def _changed_row_explained(
         and before.get("disposition") in {"proposed_not_applicable", "upstream_gap"}
     ):
         return False
-    semantic = set(change.stop_order)
-    after_codes = _diagnostic_codes(after)
-    if [item for item in after_codes if item in semantic] != (
-        [] if out_of_scope else [code]
-    ):
+    before_items = before.get("diagnostics", [])
+    if not isinstance(before_items, list):
         return False
-    kept = Counter(
-        _record_key(item)
-        for item in before.get("diagnostics", [])
-        if isinstance(item, dict) and item.get("code") not in semantic
-    )
-    for item in after.get("diagnostics", []):
-        if item.get("code") in semantic:
-            continue
-        key = _record_key(item)
-        if not kept[key]:
+    derived = None
+    if code is not None:
+        derived = _derived_diagnostic(routes[refs[0]], after.get("obligation_id"), code)
+        if derived is None:
             return False
-        kept[key] -= 1
-    superseded = change.superseded_diagnostics if code is not None else frozenset()
-    return all(
-        json.loads(key).get("code") in superseded
-        for key, count in kept.items()
-        for _ in range(count)
+    expected = _expected_diagnostics(before_items, code, derived, out_of_scope, change)
+    return after.get("diagnostics", []) == expected
+
+
+def _derived_diagnostic(
+    route: dict[str, Any], obligation_id: Any, code: str
+) -> dict[str, Any] | None:
+    """Return the diagnostic accounting writes for *code* on the route's row."""
+    from asago_scenario_generator.models.obligation_consideration import (
+        ConsiderationDiagnostic,
+        ObligationSemanticAssessment,
     )
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        _semantic_stop_detail,
+    )
+
+    try:
+        assessment = ObligationSemanticAssessment.model_validate(
+            route.get("semantic_assessment")
+        )
+        stop = _semantic_stop_detail(route.get("disposition"), assessment)
+        if stop is None or stop[0] != code:
+            return None
+        diagnostic = ConsiderationDiagnostic(
+            code=code,
+            detail=stop[1],
+            obligation_ids=(obligation_id,),
+            refs=(route.get("route_id"),),
+        )
+    except (TypeError, ValueError):
+        return None
+    return diagnostic.model_dump(mode="json")
+
+
+def _expected_diagnostics(
+    before: list[Any],
+    code: str | None,
+    derived: dict[str, Any] | None,
+    out_of_scope: bool,
+    change: AccountingStopReasonChange,
+) -> list[Any]:
+    """Derive a changed row's diagnostics from the recorded row's.
+
+    Every other diagnostic stays as recorded.  A row with a semantic stop
+    reason loses the *superseded_diagnostics*, every diagnostic of another
+    semantic reason, and every copy of its own but the first recorded one;
+    with none recorded it gains *derived*.  An out-of-scope row keeps no
+    semantic diagnostic.
+    """
+    semantic = set(change.stop_order)
+    superseded = change.superseded_diagnostics if code is not None else frozenset()
+    kept: list[Any] = []
+    held = False
+    for item in before:
+        item_code = item.get("code") if isinstance(item, dict) else None
+        if item_code in superseded:
+            continue
+        if item_code in semantic:
+            if item_code == code and not held and not out_of_scope:
+                kept.append(item)
+                held = True
+            continue
+        kept.append(item)
+    if code is not None and not held and not out_of_scope:
+        kept.append(derived)
+    return kept
 
 
 def _considered_reason(row: dict[str, Any]) -> str | None:
@@ -1577,9 +1622,10 @@ def _accounting_stop_reason_change(
         return None
     removed: Counter[str] = Counter()
     added: Counter[str] = Counter()
-    for old, new in zip(before_rows, after_rows):
-        if old == new:
-            continue
+    changed = [(old, new) for old, new in zip(before_rows, after_rows) if old != new]
+    if not changed:
+        return None
+    for old, new in changed:
         if not _changed_row_explained(old, new, routes, change):
             return None
         for row, counter in ((old, removed), (new, added)):
@@ -1716,10 +1762,25 @@ def _manifest_follows(
     return expected == after
 
 
+def _section_pattern(section: str) -> re.Pattern[str]:
+    return re.compile(rf'<section id="{re.escape(section)}">.*?</section>', re.DOTALL)
+
+
 def _without_section(text: str, section: str) -> str:
-    return re.sub(
-        rf'<section id="{re.escape(section)}">.*?</section>', "", text, flags=re.DOTALL
+    return _section_pattern(section).sub("", text)
+
+
+def _rendered_obligations(root: Path) -> str | None:
+    """Render the obligations section from the run's own files."""
+    from asago_scenario_generator.report.obligation_section import (
+        obligation_section,
     )
+    from asago_scenario_generator.report.run_data import load_run
+
+    try:
+        return str(obligation_section(load_run(root)))
+    except (OSError, TypeError, ValueError):
+        return None
 
 
 def _report_follows(
@@ -1728,11 +1789,18 @@ def _report_follows(
     aliases: dict[str, str],
     change: AccountingStopReasonChange,
 ) -> bool:
-    """Accept a report that differs only inside the accounting's own section."""
+    """Accept a report whose accounting section alone differs, as rendered.
+
+    The replayed section must be the one the report renders from the
+    replayed files, whose differences the allowance has already validated.
+    """
     left = (recorded / change.report_file).read_text(encoding="utf-8")
-    right = _substitute(
-        (replayed / change.report_file).read_text(encoding="utf-8"), aliases
-    )
+    replayed_text = (replayed / change.report_file).read_text(encoding="utf-8")
+    sections = _section_pattern(change.report_section).findall(replayed_text)
+    rendered = _rendered_obligations(replayed)
+    if rendered is None or sections != [rendered]:
+        return False
+    right = _substitute(replayed_text, aliases)
     return (
         _unparsed_text_difference(
             _without_section(left, change.report_section),
