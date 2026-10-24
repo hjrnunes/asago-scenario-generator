@@ -106,8 +106,7 @@ Also report as a gap every observed operation that no control action names, and
 every untrusted feedback channel (user message, conversation history, retrieved
 content) whose information a control action relies on without another source.
 {% endif %}
-{% if control_structure.responsibilities | map(attribute="feedback_channels") | sum(start=[]) | selectattr("authority_for_update") | list %}
-A feedback channel shown with an authority for update carries the recorded
+{% if control_structure.responsibilities | map(attribute="feedback_channels") | sum(start=[]) | selectattr("authority_for_update") | list %}A feedback channel shown with an authority for update carries the recorded
 assessment of whether it is entitled to establish the value of the named PM, as
 opposed to only reporting it: `authoritative`, `non_authoritative`,
 `conditional` (only within the scope or conditions its basis states), or
