@@ -190,8 +190,10 @@ def test_out_of_scope_takes_precedence_over_a_pattern_mismatch(scope: str) -> No
     assert row.scope == scope
     assert row.stop_reason == "risk_out_of_scope"
     assert row.disposition == "unresolved"
-    # Only the stop reason changes; the analysis trace stays on the row.
-    assert row.diagnostics == _pattern_row(_build(route_kind="mismatch")).diagnostics
+    # The row is labelled with its one stop reason, not also with the mismatch.
+    in_scope = _pattern_row(_build(route_kind="mismatch"))
+    assert [item.code for item in in_scope.diagnostics] == ["risk_pattern_mismatch"]
+    assert row.diagnostics == ()
     accounting.assert_integrity()
 
 

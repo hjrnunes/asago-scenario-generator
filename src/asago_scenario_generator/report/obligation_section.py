@@ -54,8 +54,16 @@ STOP_MEANING = {
         "The boundary decision found that no action of this system produces harm of this risk's class.",
     ),
     "risk_pattern_mismatch": (
-        "Route found, wrong mechanism",
-        "The routed slot supports an ordinary STPA finding but does not realize this attack pattern.",
+        "Risk and attack pattern misaligned",
+        "The attack pattern's mechanism would not realize this risk; any routed slot still supports an ordinary STPA finding.",
+    ),
+    "mechanism_absent": (
+        "Mechanism absent from the system",
+        "The attack pattern fits the risk, but the system lacks the surface its mechanism needs, such as a tool that sends data to a chosen destination.",
+    ),
+    "mechanism_path_unsubstantiated": (
+        "Path does not prove the mechanism",
+        "The finding is kept, but the selected path does not establish the attack mechanism.",
     ),
     "no_structural_route": (
         "No route in the control structure",
@@ -64,10 +72,6 @@ STOP_MEANING = {
     "ica_consideration_unresolved": (
         "Slot left unresolved",
         "A route exists, but at least one routed slot stayed analytically unresolved.",
-    ),
-    "mechanism_path_unsubstantiated": (
-        "Path does not prove the mechanism",
-        "The finding is kept, but the selected path does not establish the attack mechanism.",
     ),
     "not_applicable_proven": (
         "Proven not applicable",
