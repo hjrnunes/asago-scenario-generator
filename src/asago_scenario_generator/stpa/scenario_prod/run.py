@@ -72,6 +72,7 @@ from .condition_family import (
 from .content_surface import ContentSurfaceFacts, content_surface_facts
 from .deduplication import (
     ScenarioDeduplication,
+    build_channel_splits,
     build_constraint_reach,
     build_testability_summary,
     deduplicate_scenario_specs,
@@ -581,6 +582,9 @@ def _run_stages_5_and_6(
                     ],
                     deduplicated_specs,
                     deduplication_by_scenario,
+                ),
+                channel_splits=build_channel_splits(
+                    deduplicated_specs, deduplication_by_scenario
                 ),
             ),
             sort_keys=False,

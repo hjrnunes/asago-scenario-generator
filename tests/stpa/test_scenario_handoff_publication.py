@@ -250,6 +250,18 @@ def test_testability_summary_lists_every_security_constraint_with_its_reach(
     assert reach["summary"] == {"constraints": 1, "reach_0": 1, "reach_1": 0}
 
 
+def test_testability_summary_counts_the_channel_splits(tmp_path: Path) -> None:
+    _publish([_normal_semantics_payload()], tmp_path)
+
+    summary = yaml.safe_load((tmp_path / "testability.yaml").read_text())
+
+    assert summary["channel_splits"] == {
+        "direct": 0,
+        "indirect": 0,
+        "forged_transcript": 0,
+    }
+
+
 def test_published_handoff_carries_no_artifact_design_content(
     tmp_path: Path,
 ) -> None:
