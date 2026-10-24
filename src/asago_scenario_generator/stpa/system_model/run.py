@@ -55,6 +55,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
 )
 from asago_scenario_generator.stpa.system_model.heuristics import (
     uncited_security_constraints,
+    untyped_control_actions,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     diagnose_loss_analysis_semantics,
@@ -936,6 +937,15 @@ def _run_stage_2_steps(
         control_structure, loss_analysis
     )
     stage_warnings.extend(placement_warnings)
+
+    # Fail closed: an action without a typed target and effect cannot be
+    # routed, so the structure is kept under its own name for audit and the
+    # canonical file is not written.
+    untyped = untyped_control_actions(control_structure)
+    if untyped:
+        versions.add(control_structure, "control-structure-refused.yaml")
+        stage_errors.append("stage_2/typed_control_actions: " + "; ".join(untyped))
+        return _Stage2Result()
 
     # The canonical name is the structure in force when the stage ends; it is
     # the placement step's version, so that step keeps no named copy.

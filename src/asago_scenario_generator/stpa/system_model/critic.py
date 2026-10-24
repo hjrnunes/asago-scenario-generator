@@ -760,8 +760,9 @@ def _carry_forward_context(original: Responsibility, revised: Responsibility) ->
     """Keep context fields a restated element omits.
 
     A revision restates a whole responsibility; the model may drop the
-    optional context fields (PM values and evidence, CA operation and PM
-    refs, FB source kind) of an element it did not mean to change.
+    optional context fields (PM values and evidence, CA target, effect,
+    temporality, operation and PM refs, FB source kind) of an element it did
+    not mean to change.
     """
     _carry_forward_process_model_context(original, revised)
     _carry_forward_action_context(original, revised)
@@ -790,13 +791,23 @@ def _carry_forward_process_model_context(
 def _carry_forward_action_context(
     original: Responsibility, revised: Responsibility
 ) -> None:
-    """Keep the operation and surviving PM refs a restated action omits."""
+    """Keep the typed fields, operation and surviving PM refs a restated action omits.
+
+    The effect is kept only while the action keeps its target: an effect
+    fixed for one target does not carry to another.
+    """
     revised_pm_ids = {pm.pm_id for pm in revised.process_model_parts}
     old_cas = {ca.ca_id: ca for ca in original.control_actions}
     for ca in revised.control_actions:
         old = old_cas.get(ca.ca_id)
         if old is None:
             continue
+        if ca.target is None:
+            ca.target = old.target
+        if ca.effect_kind is None and ca.target == old.target:
+            ca.effect_kind = old.effect_kind
+        if ca.temporality is None:
+            ca.temporality = old.temporality
         if ca.operation is None:
             ca.operation = old.operation
         if not ca.process_model_refs:

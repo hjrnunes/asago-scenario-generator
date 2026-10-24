@@ -393,7 +393,12 @@ The later completeness revision preserves those established owner/constraint
 links when replacing a responsibility; it cannot erase them by omitting the
 field or returning an empty list. Its prompt displays the links explicitly as
 copy-through provenance. Revoking ownership belongs to semantic review, not
-an additive completeness repair.
+an additive completeness repair. A restated control action likewise keeps the
+target, temporality, operation and process-model refs it omits, and its effect
+kind while its target is unchanged. Stage 2 then refuses a final structure in
+which any control action lacks a typed target or effect kind, naming each such
+action, instead of letting routing reject the action's slots later; temporality
+stays optional because a missing value only rules out a duration finding.
 Coordination links must place their shared process-model element at exactly one
 endpoint responsibility. Stage 2 and scenario-context assembly use the same
 `coordination_process_model_owner` resolver, so a defect can use the existing
