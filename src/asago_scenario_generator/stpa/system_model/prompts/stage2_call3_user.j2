@@ -25,8 +25,16 @@ Each `source_N` means one exact supplied USE_CASE paragraph, not an inferred fac
 {% for ca in resp.control_actions %}
   - {{ ca.ca_id }}: {{ ca.description }}; current effect: {{ ca.effect_kind.value if ca.effect_kind is not none else ca.effect_kind }}{% if ca.target %}; target: {{ ca.target.type.value }} {{ ca.target.id }}{% endif %}
 {% endfor %}
-  Feedback channels: {% for fb in resp.feedback_channels %}{{ fb.fb_id }} (updates {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type.value }} {{ fb.source.id }}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}
-{% endfor %}
+  Feedback channels: {% for fb in resp.feedback_channels %}{{ fb.fb_id }} (updates {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type.value }} {{ fb.source.id }}{% endif %}{% if fb.authority_for_update %}, authority for update: {{ fb.authority_for_update.status.value }}{% if fb.authority_for_update.basis %}, authority basis: {{ fb.authority_for_update.basis }}{% endif %}{% endif %}){% if not loop.last %}, {% endif %}{% endfor %}
+{% endfor %}{% if control_structure.responsibilities | map(attribute="feedback_channels") | sum(start=[]) | selectattr("authority_for_update") | list %}
+A feedback channel shown with an authority for update carries the recorded
+assessment of whether it is entitled to establish the value of the PM it
+updates, as opposed to only reporting it: `authoritative`, `non_authoritative`,
+`conditional` (only within the scope or conditions its authority basis
+states), or `unknown`, with the basis for the assessment. A channel shown
+without one is `unknown`. Authority is separate from source kind and trust.
+When you review the information one controller needs from another, do not
+treat a non-authoritative channel as establishing the value it reports.{% endif %}
 
 ### Controlled Processes
 {% for cp in control_structure.controlled_processes %}
