@@ -4,3 +4,22 @@ cases:
     required:
       - misstates it, contradicts it, or adds details it does not contain
       - the source supplies no applicable answer
+  context-gaps:
+    forbidden:
+      - source_feedback
+      - authority_for_update
+  context-gaps-feedback-authority:
+    required:
+      - >-
+        A gap may list `source_feedback`: the feedback channels that update its
+        source variable, shown when one of them carries `authority_for_update`
+      - >-
+        the recorded assessment of whether the channel is entitled to establish
+        the variable's value, as opposed to only reporting it
+      - a channel listed without it is unknown.
+      - It is separate from `untrusted` and from the source kind.
+      - >-
+        When the channel is non-authoritative, a reply that presents what the
+        source supplied as established, such as a reported approval stated as
+        the approval itself, can be unsafe even in a row where it repeats the
+        source accurately.

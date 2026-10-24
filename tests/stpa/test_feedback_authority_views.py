@@ -1,10 +1,11 @@
 """The views that reason about a channel's variable show its authority for update.
 
 A Stage 5 scenario context carries the assessment on its feedback elements;
-the Stage 5 feedback source choices, the belief request, and the
-obligation-aware target index show it, and each request explains the field
-only when a listed channel has one.  A context built without an assessment
-keeps the bytes and digest it had before the field existed.  The requests
+the Stage 5 feedback source choices, the belief request, the obligation-aware
+target index, the context-coverage request, and the Call 3 request show it,
+and each request explains the field only when a listed channel has one.  A
+context built without an assessment keeps the bytes and digest it had before
+the field existed, and so does every request built without one.  The requests
 are the ones the builders send; no request leaves the process.
 """
 
@@ -13,11 +14,14 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
+import pytest
 import yaml
 
 from asago_scenario_generator.models.obligation_consideration import (
     MissingStructuralConcept,
 )
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.causal_factor import CausalFactorKind
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
@@ -38,6 +42,14 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
 from asago_scenario_generator.stpa.scenario_prod.stage5.sources import (
     _causal_source_choices,
 )
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    _call_3_coordination,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings,
+    run_completeness_critic,
+)
 from tests.helpers.belief_step import belief_spec
 from tests.helpers.feedback_authority import (
     AUTHORITY,
@@ -46,6 +58,8 @@ from tests.helpers.feedback_authority import (
     authority_context,
     authority_slot_request,
     authority_structure,
+    call3_inputs,
+    context_coverage_prompts,
     with_feedback_authority,
 )
 from tests.helpers.normal_authoring_wire import (
@@ -59,8 +73,12 @@ from tests.helpers.obligation_aware import (
 from tests.helpers.obligation_aware import _loss_analysis as _obligation_losses
 from tests.helpers.obligation_aware import _provider_slot_request
 from tests.helpers.sp3_scenario_continuity import _threat_of_type
+from tests.helpers.stage2_source_selection import USE_CASE
 from tests.helpers.stage5_assembly import stage5_assembly
-from tests.stpa.sp1_helpers import MockLLMClient
+from tests.helpers.stpa_builders import make_capability_profile
+from tests.stpa.sp1_helpers import MockLLMClient, valid_critic_findings_dict_no_gaps
+from tests.stpa.test_ica_context_coverage import _structure as _coverage_structure
+from tests.stpa.test_stage2_source_selection import _provider_payload
 
 # The context digest and the SHA-256 of the JSON dump of
 # ``_wrong_timing_context()`` as the code before the field produced them.
@@ -296,3 +314,193 @@ def test_the_structural_revision_request_without_one_does_not_mention_it() -> No
     system, user = _structural_revision(_obligation_structure())
 
     assert "authority_for_update" not in system + user
+
+
+# ---------------------------------------------------------------------------
+# Context-coverage request
+# ---------------------------------------------------------------------------
+
+
+def _coverage_gap(user_prompt: str) -> dict:
+    start = user_prompt.index("## Context gaps\n\n") + len("## Context gaps\n\n")
+    end = user_prompt.index("\nReturn one entry", start)
+    [gap] = yaml.safe_load(user_prompt[start:end])
+    return gap
+
+
+def _assess(structure: ControlStructure, fb_id: str) -> ControlStructure:
+    """``structure`` with ``AUTHORITY`` on the one channel ``fb_id``."""
+    data = structure.model_dump(mode="json")
+    for responsibility in data["responsibilities"]:
+        for channel in responsibility["feedback_channels"]:
+            if channel["fb_id"] == fb_id:
+                channel["authority_for_update"] = _AUTHORITY_VIEW
+    return ControlStructure.model_validate(data)
+
+
+def test_the_context_coverage_request_shows_the_source_channel_assessment() -> None:
+    system, user = context_coverage_prompts(
+        with_feedback_authority(_coverage_structure())
+    )
+
+    gap = _coverage_gap(user)
+    assert gap["source_variable"]["id"] == "PM-1-1"
+    # FB-1-2 is assessed too but updates another variable, so it is not listed.
+    assert gap["source_feedback"] == [
+        {"id": "FB-1-1", "authority_for_update": _AUTHORITY_VIEW}
+    ]
+    assert gap["feedback_ids"] == ["FB-1-1", "FB-1-2"]
+    assert "A gap may list `source_feedback`" in _flat(system)
+    assert "a channel listed without it is unknown" in _flat(system)
+
+
+def test_an_assessment_of_another_variable_leaves_the_coverage_request_unchanged() -> (
+    None
+):
+    assessed = context_coverage_prompts(_assess(_coverage_structure(), "FB-1-2"))
+
+    assert assessed == context_coverage_prompts(_coverage_structure())
+    assert "authority_for_update" not in assessed[0] + assessed[1]
+
+
+def test_the_coverage_gap_selection_ignores_the_assessment() -> None:
+    """Selection keys on source kind; an assessment neither adds nor drops a gap."""
+    unassessed = _coverage_gap(context_coverage_prompts(_coverage_structure())[1])
+    assessed = _coverage_gap(
+        context_coverage_prompts(with_feedback_authority(_coverage_structure()))[1]
+    )
+
+    assessed.pop("source_feedback")
+    assert assessed == unassessed
+
+
+# ---------------------------------------------------------------------------
+# Call 3 request
+# ---------------------------------------------------------------------------
+
+
+def _call3_request(structure: ControlStructure, tmp_path: Path) -> tuple[str, str]:
+    losses, _ = call3_inputs()
+    client = MockLLMClient()
+    client.set_response_queue([_provider_payload(losses, structure)])
+    _call_3_coordination(
+        llm_client=client,
+        use_case_text=USE_CASE,
+        control_structure=structure,
+        loss_analysis=losses,
+        run_dir=tmp_path,
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0,
+    )
+    [call] = client.calls
+    return call.system_prompt, call.user_prompt
+
+
+def test_the_call3_request_shows_the_assessment_beside_the_update_relation(
+    tmp_path: Path,
+) -> None:
+    _, structure = call3_inputs()
+
+    _, user = _call3_request(with_feedback_authority(structure), tmp_path)
+
+    assert (
+        "Feedback channels: FB-1-1 (updates PM-1-1, source: controlled_process "
+        "CP-1, authority for update: non_authoritative, authority basis: "
+        f"{AUTHORITY.basis})"
+    ) in user
+    flat = _flat(user)
+    assert "A feedback channel shown with an authority for update" in flat
+    assert "A channel shown without one is `unknown`." in flat
+
+
+def test_the_call3_request_without_an_assessment_does_not_mention_it(
+    tmp_path: Path,
+) -> None:
+    _, structure = call3_inputs()
+
+    system, user = _call3_request(structure, tmp_path)
+
+    assert "Feedback channels: FB-1-1 (updates PM-1-1, source: " in user
+    assert "authority" not in (system + user).lower()
+
+
+# ---------------------------------------------------------------------------
+# Requests without an assessment keep their earlier bytes
+# ---------------------------------------------------------------------------
+
+
+def _critic_request(tmp_path: Path) -> tuple[str, str]:
+    client = MockLLMClient()
+    client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
+    run_completeness_critic(
+        llm_client=client,
+        control_structure=_wrong_timing_structure(),
+        capability_profile=make_capability_profile(),
+        use_case_text="A refund assistant issues refunds the finance reviewer approved.",
+        run_dir=tmp_path,
+    )
+    return client.calls[0].system_prompt, client.calls[0].user_prompt
+
+
+def _unassessed_stage5(tmp_path: Path) -> tuple[str, str]:
+    call = _stage5_request(_wrong_timing_context(), _wrong_timing_structure(), tmp_path)
+    return call.system_prompt, call.user_prompt
+
+
+def _unassessed_belief(tmp_path: Path) -> tuple[str, str]:
+    spec, structure = belief_spec(tmp_path)
+    return render_belief_prompts(spec, belief_request(spec, structure))
+
+
+# Each builder renders a request whose channels carry no assessment, every one
+# with at least one feedback channel.  The values are the SHA-256 of the system
+# and user prompt the code before the field produced for the same inputs.
+_UNASSESSED_REQUESTS = {
+    "stage5-context": (
+        _unassessed_stage5,
+        "54c55283fad929e9adf816f0c8736e98f9eba0d5c9f9938b1bc012cfb71e8275",
+        "a3d88b0229ed6adda8a90fbff416d9e22b02e4767017d0ac4a48471937726b79",
+    ),
+    "stage5-belief": (
+        _unassessed_belief,
+        "aea82473e3ad25b7e12aaad231b3d08314862a617e5890b21d26cfd3e5639676",
+        "123691e3169975d879fb4511385f8d0cee34fe34ae251104150e5b12593ddb46",
+    ),
+    "ica-target-index": (
+        lambda _: _slot_prompts(_provider_slot_request()),
+        "1ee393a7d9379f7eb15e1f9950b39da4e4bc2cdc27dfb3e3566e0cd6280bd047",
+        "c32bf77e27d2a65fbe355afc0074d49663e9d812023fd0c0c64ce74dcd6f0de2",
+    ),
+    "structural-revision": (
+        lambda _: _structural_revision(_obligation_structure()),
+        "4676294e97ec508634a3d474a918b1282a1c3b54482e0998f597754d54c08b51",
+        "eba4393f2ee571970679ed1909848fdc8fb7b6d71f8df3ea8a4f8226d833b9a8",
+    ),
+    "critic": (
+        _critic_request,
+        "e41350d0e23d2960e583dc725966d5a8ecdc0991c7f429a55278f22ab2489ba4",
+        "e97dfb0f129e9eeba7df7335ef90c8f0dddae97b33ab6d6f9ce8a80ac71fee7f",
+    ),
+    "context-coverage": (
+        lambda _: context_coverage_prompts(_coverage_structure()),
+        "5a258d02de9b3456ac9cc4e487a0e5659d7b77a1d64246001b1834c84721bc4a",
+        "e20681eff49655786044b347a090228c6c9b19ea5a4861d760523ccdb60a8de3",
+    ),
+    "call3": (
+        lambda tmp_path: _call3_request(call3_inputs()[1], tmp_path),
+        "62f48547a2a520ac14b0b841d9302518d01082765be7a5c3a9f2b43a86814283",
+        "d8feda1152d1ddfe0c62516db991aa8c4f0ab9303534a91f7e99d675d9103177",
+    ),
+}
+
+
+@pytest.mark.parametrize("request_name", sorted(_UNASSESSED_REQUESTS))
+def test_a_request_without_an_assessment_keeps_its_earlier_bytes(
+    request_name: str, tmp_path: Path
+) -> None:
+    build, system_sha256, user_sha256 = _UNASSESSED_REQUESTS[request_name]
+
+    system, user = build(tmp_path)
+
+    assert hashlib.sha256(system.encode()).hexdigest() == system_sha256
+    assert hashlib.sha256(user.encode()).hexdigest() == user_sha256

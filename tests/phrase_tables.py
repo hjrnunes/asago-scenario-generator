@@ -100,8 +100,12 @@ from tests.helpers.feedback_authority import (
     authority_belief_spec,
     authority_context,
     authority_slot_request,
+    call3_inputs,
+    context_coverage_prompts,
     with_feedback_authority,
 )
+from tests.helpers.stage2_source_selection import USE_CASE as CALL3_USE_CASE
+from tests.stpa.test_ica_context_coverage import _structure as _coverage_structure
 from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.normal_authoring_wire import (
     _record_observations,
@@ -395,6 +399,16 @@ OBLIGATION_AWARE_BUILDS: dict[
         ),
         ("synthesis_ica_context_system.j2", "synthesis_ica_context_user.j2"),
     ),
+    "context-gaps": (
+        lambda: context_coverage_prompts(_coverage_structure()),
+        ("synthesis_ica_context_system.j2", "synthesis_ica_context_user.j2"),
+    ),
+    "context-gaps-feedback-authority": (
+        lambda: context_coverage_prompts(
+            with_feedback_authority(_coverage_structure())
+        ),
+        ("synthesis_ica_context_system.j2", "synthesis_ica_context_user.j2"),
+    ),
 }
 
 
@@ -533,6 +547,16 @@ FEEDBACK_AUTHORITY_CRITIC = {
 }
 
 
+# The Call 3 request for a structure whose feedback channel is assessed.
+FEEDBACK_AUTHORITY_CALL3 = {
+    "use_case_text": CALL3_USE_CASE,
+    "control_structure": with_feedback_authority(call3_inputs()[1]),
+    "loss_analysis": None,
+    "source_excerpts": (),
+    "source_ref_by_canonical": {},
+}
+
+
 # A case renders one template; the table that names it supplies the template.
 CASES: dict[str, Callable[[str], str]] = {
     "no-variables": _system_model(),
@@ -585,6 +609,10 @@ CASES: dict[str, Callable[[str], str]] = {
     "feedback-authority-critic": _system_model(**FEEDBACK_AUTHORITY_CRITIC),
     "unassessed-critic": _system_model(
         **{**FEEDBACK_AUTHORITY_CRITIC, "control_structure": _obligation_structure()}
+    ),
+    "feedback-authority-call3": _system_model(**FEEDBACK_AUTHORITY_CALL3),
+    "unassessed-call3": _system_model(
+        **{**FEEDBACK_AUTHORITY_CALL3, "control_structure": call3_inputs()[1]}
     ),
     "archive-item": _stage5(_archive_item_facts),
     "commit-operation": _stage5(_commit_operation_facts),

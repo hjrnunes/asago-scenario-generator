@@ -1,0 +1,24 @@
+template: stage2_call3_user.j2
+cases:
+  feedback-authority-call3:
+    required:
+      - "authority for update: non_authoritative, authority basis:"
+      - >-
+        A feedback channel shown with an authority for update carries the
+        recorded assessment of whether it is entitled to establish the value of
+        the PM it updates, as opposed to only reporting it
+      - A channel shown without one is `unknown`.
+      - Authority is separate from source kind and trust.
+      - >-
+        When you review the information one controller needs from another, do
+        not treat a non-authoritative channel as establishing the value it
+        reports.
+    ordered:
+      - - "Feedback channels: FB-1-1 (updates PM-1-1"
+        - A feedback channel shown with an authority for update
+        - "### Controlled Processes"
+  unassessed-call3:
+    required:
+      - "Feedback channels: FB-1-1 (updates PM-1-1, source: controlled_process CP-1)"
+    forbidden:
+      - authority for update

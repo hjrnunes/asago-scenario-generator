@@ -10,11 +10,16 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     FeedbackUpdateAuthority,
 )
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
+from asago_scenario_generator.stpa.obligation_aware.context_coverage import (
+    build_context_coverage_prompts,
+    context_coverage_gaps,
+)
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotRequest,
 )
@@ -30,8 +35,15 @@ from tests.helpers.normal_authoring_wire import (
 )
 from tests.helpers.obligation_aware import _provider_slot_request
 from tests.helpers.sp3_scenario_continuity import _loss_analysis, _threat_of_type
+from tests.helpers.stage2_source_selection import _authorities
 from tests.helpers.stage5_assembly import stage5_assembly
 from tests.stpa.sp1_helpers import MockLLMClient
+from tests.stpa.test_ica_context_coverage import (
+    _draft_slots,
+    _finding,
+    _request,
+    _slot,
+)
 
 AUTHORITY = FeedbackUpdateAuthority(
     status="non_authoritative",
@@ -111,4 +123,55 @@ def authority_slot_request() -> SynthesisSlotRequest:
     request = _provider_slot_request()
     return request.model_copy(
         update={"control_structure": with_feedback_authority(request.control_structure)}
+    )
+
+
+def context_coverage_prompts(structure: ControlStructure) -> tuple[str, str]:
+    """The context-coverage request for the reply gap of ``structure``.
+
+    ``structure`` is a context-coverage test structure; its one drafted finding
+    cites the source variable without a row, so both of its values are a gap.
+    """
+    slot = _slot(structure)
+    drafted = _draft_slots(slot.slot_id, _finding(None))
+    request = _request(structure, slot)
+    gaps = context_coverage_gaps(drafted, request)
+    assert gaps
+    return build_context_coverage_prompts(
+        target_id="RESP-1", gaps=gaps, filled_slots=drafted, request=request
+    )
+
+
+def call3_inputs() -> tuple[LossAnalysis, ControlStructure]:
+    """The Call 3 source-selection inputs with a feedback channel added.
+
+    The channel updates a process-model part from a controlled process, so a
+    Call 3 request lists one update relation; the structure has no action, so
+    the source-selection reply still covers it.
+    """
+    losses, structure = _authorities()
+    [owner] = structure.model_dump(mode="json")["responsibilities"]
+    owner["process_model_parts"] = [
+        {
+            "pm_id": "PM-1-1",
+            "description": "Whether the requester owns the loan record.",
+            "values": ["owns the record", "does not own the record"],
+        }
+    ]
+    owner["feedback_channels"] = [
+        {
+            "fb_id": "FB-1-1",
+            "description": "The requester's statement of who they are.",
+            "updates": "PM-1-1",
+            "source": {"type": "controlled_process", "id": "CP-1"},
+            "source_kind": "user_message",
+        }
+    ]
+    return losses, ControlStructure.model_validate(
+        {
+            "responsibilities": [owner],
+            "controlled_processes": [
+                {"cp_id": "CP-1", "description": "Loan record lookup."}
+            ],
+        }
     )
