@@ -260,16 +260,13 @@ def _judging_record(unit: Unit, candidate: MechanismCandidate) -> dict[str, Any]
     }
     if _via_link(candidate):
         link = index.coordination_links[end_id]
-        owner = unit.owners.get(pm_id)
-        receiver = (
-            link.target if owner and owner.resp_id == link.source else link.source
-        )
         row["coordination_link"] = {
             **_model(link),
             "source": _responsibility(index.responsibilities.get(link.source)),
             "target": _responsibility(index.responsibilities.get(link.target)),
+            # A link is directed: its target receives what its source issues.
             "receiving_controller": _responsibility(
-                index.responsibilities.get(receiver)
+                index.responsibilities.get(link.target)
             ),
         }
     else:

@@ -177,3 +177,42 @@ def test_sample_chooses_structures_by_seed_when_more_than_it_holds() -> None:
     assert indexes != list(range(30))
     assert indexes == [unit.index for unit, _, _ in _script()._sample(units, 30, 7)]
     assert indexes != [unit.index for unit, _, _ in _script()._sample(units, 30, 8)]
+
+
+def test_link_record_names_the_link_target_as_receiver(tmp_path: Path) -> None:
+    data = _structure("retrieved_content")
+    data["responsibilities"].append({"resp_id": "RESP-2", "description": "Review"})
+    data["coordination_links"] = [
+        {
+            "link_id": "CL-1",
+            "source": "RESP-1",
+            "target": "RESP-2",
+            "shared_pm": "PM-1-1",
+            "coordination_mechanism": {
+                "cm_id": "CM-1",
+                "description": "Share belief",
+                "payload": "belief",
+            },
+            "description": "Controller 1 shares its belief.",
+        }
+    ]
+    path = tmp_path / "linked.yaml"
+    path.write_text(yaml.safe_dump(data))
+    script = _script()
+    (unit,) = script.load_units([("linked", path)])
+
+    rows = [
+        script._judging_record(unit, item)
+        for item in unit.candidates
+        if item.path[2] == "CL-1"
+    ]
+
+    assert {row["mechanism"] for row in rows} == {
+        "retrieved_instructions",
+        "delegated_authority",
+    }
+    for row in rows:
+        link = row["coordination_link"]
+        assert link["source"]["resp_id"] == "RESP-1"
+        assert link["receiving_controller"]["resp_id"] == "RESP-2"
+        assert row["control_action"] is None

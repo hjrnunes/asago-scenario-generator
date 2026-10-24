@@ -234,8 +234,8 @@ class MechanismCandidate:
 
     ``path`` is ``(FB, PM, CA)``: the untrusted feedback channel, the variable
     it updates, and a control action that lists the variable in
-    ``process_model_refs``.  Or it is ``(FB, PM, CL)``: the coordination link
-    whose ``shared_pm`` is that variable.
+    ``process_model_refs``.  Or it is ``(FB, PM, CL)``: a coordination link
+    whose ``source`` owns that variable as its ``shared_pm``.
     """
 
     mechanism: str
@@ -254,14 +254,15 @@ def mechanism_candidates(
     - to every control action that lists the variable in
       ``process_model_refs``;
     - to every coordination link whose ``shared_pm`` is the variable and is
-      owned by exactly one of the link's endpoints
-      (:func:`coordination_process_model_owner`).  The link carries the
-      adversary-influenced belief from that owner to the other endpoint.  A
-      link whose shared variable belongs to a third controller, or to both
-      endpoints, joins no path.  The path stops at the link: the other
-      endpoint's actions cannot list the variable, and the link names none of
-      them, so extending the path to its actions would cross the link with
-      every action.
+      owned by the link's ``source``, as
+      :func:`coordination_process_model_owner` resolves it.  A link is
+      directed: its ``source`` issues the coordination and its ``target``
+      receives it, so such a link carries the adversary-influenced belief to
+      the ``target``.  A link whose variable belongs to its ``target``, to a
+      third controller, or to both endpoints, and a link from a controller to
+      itself, join no path.  The path stops at the link: the target's actions
+      cannot list the variable, and the link names none of them, so extending
+      the path to its actions would cross the link with every action.
 
     Each path gets the mechanism of its channel's source kind, from
     :data:`SOURCE_MECHANISMS`.  A path that reaches another controller, through
@@ -287,7 +288,7 @@ def mechanism_candidates(
                     crosses,
                 )
         for link in control_structure.coordination_links:
-            if link.shared_pm == variable and _endpoint_owned(control_structure, link):
+            if link.shared_pm == variable and _issued_by_owner(control_structure, link):
                 _add_candidates(
                     result,
                     (channel.fb_id, variable, link.link_id),
@@ -297,14 +298,16 @@ def mechanism_candidates(
     return tuple(result)
 
 
-def _endpoint_owned(
+def _issued_by_owner(
     control_structure: ControlStructure, link: CoordinationLink
 ) -> bool:
+    if link.source == link.target:
+        return False
     try:
-        coordination_process_model_owner(control_structure, link)
+        owner = coordination_process_model_owner(control_structure, link)
     except ValueError:
         return False
-    return True
+    return owner.resp_id == link.source
 
 
 def _add_candidates(

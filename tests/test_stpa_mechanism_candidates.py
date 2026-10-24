@@ -100,8 +100,8 @@ def _structure() -> ControlStructure:
         coordination_links=[
             CoordinationLink(
                 link_id="CL-1",
-                source="RESP-2",
-                target="RESP-1",
+                source="RESP-1",
+                target="RESP-2",
                 shared_pm="PM-1-1",
                 coordination_mechanism=CoordinationMechanism(
                     cm_id="CM-1", description="Share policy", payload="policy"
@@ -171,20 +171,32 @@ _LINK_PAIRS = [
 ]
 
 
-def test_link_joins_when_shared_variable_owner_is_its_target() -> None:
-    structure = _structure()
-    link = structure.coordination_links[0]
-
-    assert (link.source, link.target) == ("RESP-2", "RESP-1")
-    assert _link_pairs(structure) == _LINK_PAIRS
-
-
 def test_link_joins_when_shared_variable_owner_is_its_source() -> None:
     structure = _structure()
     link = structure.coordination_links[0]
-    link.source, link.target = "RESP-1", "RESP-2"
 
+    assert (link.source, link.target) == ("RESP-1", "RESP-2")
     assert _link_pairs(structure) == _LINK_PAIRS
+
+
+def test_link_issued_to_the_variable_owner_joins_no_path() -> None:
+    structure = _structure()
+    link = structure.coordination_links[0]
+    # RESP-1 owns PM-1-1 and receives the link, so the link carries its
+    # belief to no other controller.
+    link.source, link.target = "RESP-2", "RESP-1"
+
+    assert _link_pairs(structure) == []
+    assert _pairs(structure) == [
+        pair for pair in _pairs(_structure()) if pair[1][2] != "CL-1"
+    ]
+
+
+def test_link_from_a_controller_to_itself_joins_no_path() -> None:
+    structure = _structure()
+    structure.coordination_links[0].target = "RESP-1"
+
+    assert _link_pairs(structure) == []
 
 
 def test_link_between_other_controllers_joins_no_path() -> None:
@@ -202,6 +214,16 @@ def test_link_between_other_controllers_joins_no_path() -> None:
 
     assert _link_pairs(structure) == []
     assert _pairs(structure) == [pair for pair in _pairs(base) if pair[1][2] != "CL-1"]
+
+
+def test_link_whose_variable_both_endpoints_own_joins_no_path() -> None:
+    structure = _structure()
+    # Validation rejects a repeated pm_id, so add the second owner afterwards.
+    structure.responsibilities[1].process_model_parts.append(
+        ProcessModelPart(pm_id="PM-1-1", description="Policy belief")
+    )
+
+    assert _link_pairs(structure) == []
 
 
 def test_repeated_records_yield_each_candidate_once() -> None:
