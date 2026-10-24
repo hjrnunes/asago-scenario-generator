@@ -239,8 +239,8 @@ class FeedbackUpdateAuthority(BaseModel):
         default=None,
         exclude_if=lambda value: value is None,
         description=(
-            "The scope and conditions of the assessment, citing the supplied "
-            "evidence; required unless status is unknown."
+            "The scope and conditions of the assessment in domain words, "
+            "citing the supplied evidence; required unless status is unknown."
         ),
     )
 
