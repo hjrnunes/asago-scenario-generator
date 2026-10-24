@@ -202,16 +202,30 @@ def _variable_rule(choice: _CausalSourceChoice, frame: FlawedBeliefFrame) -> str
 def _factors_yaml(spec: ScenarioSpec, request: BeliefRequest) -> str:
     return _yaml_dump(
         [
-            {
-                "source_handle": choice.handle,
-                "source_type": _source_type_explanation(choice.kind),
-                "source_description": choice.description,
-                "factor_description": spec.causal_factors[index].description,
-                "process_model_variable": _variable_rule(choice, request.frame),
-            }
+            _factor_entry(spec, request, index, choice)
             for index, choice in request.listed
         ]
     )
+
+
+def _factor_entry(
+    spec: ScenarioSpec,
+    request: BeliefRequest,
+    index: int,
+    choice: _CausalSourceChoice,
+) -> dict[str, object]:
+    entry: dict[str, object] = {
+        "source_handle": choice.handle,
+        "source_type": _source_type_explanation(choice.kind),
+        "source_description": choice.description,
+        "factor_description": spec.causal_factors[index].description,
+        "process_model_variable": _variable_rule(choice, request.frame),
+    }
+    if choice.authority_for_update is not None:
+        entry["authority_for_update"] = choice.authority_for_update.model_dump(
+            mode="json"
+        )
+    return entry
 
 
 def render_belief_prompts(
@@ -227,6 +241,9 @@ def render_belief_prompts(
         account=render_scenario_summary(spec)[0],
         factors_yaml=_factors_yaml(spec, request),
         process_model_variables_yaml=_process_model_variables_yaml(request.frame),
+        has_feedback_authority=any(
+            choice.authority_for_update is not None for _, choice in request.listed
+        ),
     )
     return system, user
 

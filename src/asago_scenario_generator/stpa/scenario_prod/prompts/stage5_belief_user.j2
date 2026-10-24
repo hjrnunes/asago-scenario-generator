@@ -9,7 +9,16 @@ The scenario's causal factors, under local `source_handle` values. Each one
 gives its source type, the source's description, the factor's description in
 this scenario, and whether code fills its `process_model_variable` or you
 choose it. Give each listed factor one entry under its `source_handle`. Do not
-return structural IDs.
+return structural IDs.{% if has_feedback_authority %}
+
+A feedback factor may carry `authority_for_update`, the recorded assessment of
+whether its source is entitled to establish the value of the variable it
+updates, as opposed to only reporting it: `authoritative`, `non_authoritative`,
+`conditional` (only within the scope or conditions its `basis` states), or
+`unknown`, with the `basis` that cites the supplied evidence. A factor without
+it is unknown. When the source is non-authoritative, the flawed belief can be
+that what the source reported establishes the value, such as taking a reported
+approval as the approval itself.{% endif %}
 
 {{ factors_yaml }}
 ---
