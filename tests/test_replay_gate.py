@@ -145,31 +145,36 @@ def test_an_unexplained_field_difference_is_reported_with_its_path(trees) -> Non
     assert [str(d) for d in differences] == ["calls.jsonl: $[0].ok: true != false"]
 
 
-def _obligation_plan(root: Path, *edges: tuple[str, str]) -> None:
+def _obligation_plan_from_paths(root: Path, *paths: list[dict[str, Any]]) -> None:
     obligations = [
         {
             "evidence": [
                 {
                     "kind": "mapping",
-                    "detail": json.dumps(
-                        {
-                            "path": [
-                                {
-                                    "relation": "realized_by",
-                                    "source_id": source,
-                                    "target_id": target,
-                                }
-                            ]
-                        },
-                        separators=(",", ":"),
-                    ),
+                    "detail": json.dumps({"path": path}, separators=(",", ":")),
                 }
             ]
         }
-        for source, target in edges
+        for path in paths
     ]
     (root / "taxonomy-obligation-plan.yaml").write_text(
         yaml.safe_dump({"obligations": obligations}), encoding="utf-8"
+    )
+
+
+def _obligation_plan(root: Path, *edges: tuple[str, str]) -> None:
+    _obligation_plan_from_paths(
+        root,
+        *(
+            [
+                {
+                    "relation": "realized_by",
+                    "source_id": source,
+                    "target_id": target,
+                }
+            ]
+            for source, target in edges
+        ),
     )
 
 
@@ -226,6 +231,25 @@ def _expected_replay_miss(recorded: Path, replayed: Path) -> None:
     )
 
 
+def _strict_call(sequence: int, digest: str, *, success: bool) -> dict[str, Any]:
+    entry: dict[str, Any] = {
+        "stage": "synthesis_obligation_aware_routing",
+        "step": "initial-batch-1",
+        "slot_id": None,
+        "scenario_id": None,
+        "attempt_number": 1,
+        "provider_requests": [{"sequence": sequence, "request_sha256": digest}],
+        "success": success,
+        "response_parsed": success,
+    }
+    if not success:
+        entry.update(
+            terminal_error_codes=["provider_call_failure"],
+            error="ReplayMissError: no recorded response",
+        )
+    return entry
+
+
 def test_expected_files_change_for_only_the_named_edge_removal(trees) -> None:
     recorded, replayed, path_map = trees
     kept = ("LLM01", "AP-T2-02")
@@ -268,12 +292,102 @@ def test_expected_files_do_not_hide_another_edge_change(trees) -> None:
     }
 
 
+def test_expected_files_do_not_hide_a_related_match_change(trees) -> None:
+    recorded, replayed, path_map = trees
+    kept = [
+        {
+            "relation": "skos:relatedMatch",
+            "source": "sssom",
+            "source_id": "risk-1",
+            "target_id": "LLM01",
+            "evidence": ["mapping.tsv"],
+        },
+        {
+            "relation": "realized_by",
+            "source": "cross-taxonomy",
+            "source_id": "LLM01",
+            "target_id": "AP-T2-02",
+            "evidence": ["llm-to-attack-pattern.yaml"],
+        },
+    ]
+    changed = json.loads(json.dumps(kept))
+    changed[0]["relation"] = "skos:closeMatch"
+    removed = [
+        {
+            "relation": "realized_by",
+            "source_id": "LLM02",
+            "target_id": "AP-T2-02",
+        }
+    ]
+    _obligation_plan_from_paths(recorded, kept, removed)
+    _obligation_plan_from_paths(replayed, changed)
+    _expected_replay_miss(recorded, replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert "taxonomy-obligation-plan.yaml" in {item.path for item in differences}
+
+
+@pytest.mark.parametrize("field", ["source", "evidence"])
+def test_expected_files_do_not_hide_kept_edge_provenance_changes(
+    trees, field: str
+) -> None:
+    recorded, replayed, path_map = trees
+    kept = [
+        {
+            "relation": "realized_by",
+            "source": "cross-taxonomy",
+            "source_id": "LLM01",
+            "target_id": "AP-T2-02",
+            "evidence": ["llm-to-attack-pattern.yaml"],
+        }
+    ]
+    changed = json.loads(json.dumps(kept))
+    changed[0][field] = "other" if field == "source" else ["other.yaml"]
+    removed = [
+        {
+            "relation": "realized_by",
+            "source_id": "LLM02",
+            "target_id": "AP-T2-02",
+        }
+    ]
+    _obligation_plan_from_paths(recorded, kept, removed)
+    _obligation_plan_from_paths(replayed, changed)
+    _expected_replay_miss(recorded, replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert "taxonomy-obligation-plan.yaml" in {item.path for item in differences}
+
+
 def test_expected_files_do_not_hide_integrity_failures(trees) -> None:
     recorded, replayed, path_map = trees
     _obligation_plan(recorded, ("LLM02", "AP-T2-02"))
     _obligation_plan(replayed)
     _expected_replay_miss(recorded, replayed)
     _calls(replayed, _new_call("A", 7), _new_call("B", 1))
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["calls.jsonl"]
+    assert "names no record" in differences[0].detail
+
+
+def test_expected_miss_link_does_not_hide_another_broken_call_link(trees) -> None:
+    recorded, replayed, path_map = trees
+    _obligation_plan(recorded, ("LLM02", "AP-T2-02"))
+    _obligation_plan(replayed)
+    _expected_replay_miss(recorded, replayed)
+    provider_records = [
+        json.loads(line)
+        for line in (replayed / RECORD_FILENAME).read_text().splitlines()
+    ]
+    first = _strict_call(1, provider_records[0]["request_sha256"], success=True)
+    broken = json.loads(json.dumps(first))
+    broken["provider_requests"][0]["sequence"] = 7
+    miss = _strict_call(2, provider_records[1]["request_sha256"], success=False)
+    _calls(recorded, first)
+    _calls(replayed, broken, miss)
 
     _, differences = compare_trees(recorded, replayed, path_map)
 
@@ -819,6 +933,7 @@ def test_every_allowed_difference_states_a_reason() -> None:
         assert len(expected.recording_only_files) == len(
             set(expected.recording_only_files)
         )
+        assert expected.allowed_stages
         assert expected.reason
 
 
