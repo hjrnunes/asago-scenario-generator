@@ -272,5 +272,10 @@ class TestLlmToAttackPatternTable:
             "AP-T9-07",
         }
 
+    def test_multi_tool_exfiltration_maps_to_agency_and_prompt_injection(self):
+        entries = {entry["id"]: entry for entry in self._table()["patterns"]}
+
+        assert entries["AP-T2-02"]["llm"] == ["LLM03", "LLM01"]
+
     def test_predicate_is_realized_by(self):
         assert self._table()["predicate"] == "realized_by"
