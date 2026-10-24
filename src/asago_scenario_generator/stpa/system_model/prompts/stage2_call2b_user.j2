@@ -79,6 +79,8 @@ Return one JSON object using exactly these top-level keys: `control_actions`,
 typed `temporality` fields, plus `operation` (exact observed operation name or
 `null`) and `process_model_refs` (PM-X-Y IDs of the same responsibility).  Each
 feedback item must have separate `fb_id`, `description`, `updates`, `source`,
-and `source_kind` fields.
+and `source_kind` fields, plus `authority_for_update` (`status` and `basis`)
+where the supplied evidence bears on whether the channel may establish the
+value of the PM it updates.
 Never combine an ID and description in an `action` string and never use an
 `action` property.
