@@ -37,6 +37,7 @@ from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionTemporality,
     ControlStructure,
+    FeedbackUpdateAuthority,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import (
     ICAEnumeration,
@@ -565,6 +566,9 @@ class ProviderFeedbackChannel(PromptReference):
         default=None, exclude_if=lambda value: value is None
     )
     untrusted: bool | None = Field(default=None, exclude_if=lambda value: value is None)
+    authority_for_update: FeedbackUpdateAuthority | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class ProviderContextValue(_Model):
