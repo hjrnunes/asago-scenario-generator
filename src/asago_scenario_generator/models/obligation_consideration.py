@@ -141,6 +141,17 @@ def _canonical_refs(
     return ordered
 
 
+# Diagnostic codes structural routing writes when a provider reply fails its
+# contract and the bounded retries run out. The first marks every obligation
+# of a batch whose reply never became usable as a whole: it failed to decode,
+# was bound to another request, did not route each obligation exactly once,
+# or its mechanism verifier changed route identity or authority. The second
+# marks one record that failed semantic or reference validation while its
+# siblings' routes were kept.
+ROUTING_VALIDATION_FAILED = "routing_validation_failed"
+ROUTING_RECORD_VALIDATION_FAILED = "routing_record_validation_failed"
+
+
 class ConsiderationDiagnostic(_ConsiderationModel):
     """One retained diagnostic that does not silently erase an obligation."""
 
@@ -780,6 +791,8 @@ __all__ = [
     "OBLIGATION_ACCOUNTING_SCHEMA_VERSION",
     "OBLIGATION_CONSIDERATION_DIGEST_DOMAIN",
     "OBLIGATION_CONSIDERATION_SCHEMA_VERSION",
+    "ROUTING_RECORD_VALIDATION_FAILED",
+    "ROUTING_VALIDATION_FAILED",
     "ObligationConsideration",
     "ObligationIcaConsideration",
     "ObligationRoute",

@@ -21,6 +21,8 @@ from asago_scenario_generator.models.obligation_accounting import (
     validate_obligation_accounting_source_pins,
 )
 from asago_scenario_generator.models.obligation_consideration import (
+    ROUTING_RECORD_VALIDATION_FAILED,
+    ROUTING_VALIDATION_FAILED,
     BoundedStructuralRevision,
     ConsiderationDiagnostic,
     NeutralObligationBrief,
@@ -749,7 +751,7 @@ def _route_stop_reason(route: ObligationRoute) -> str:
     codes = {item.code for item in route.diagnostics}
     if "prompt_budget_exceeded" in codes:
         return "prompt_budget_exceeded"
-    if "routing_validation_failed" in codes:
+    if codes & {ROUTING_VALIDATION_FAILED, ROUTING_RECORD_VALIDATION_FAILED}:
         return "provider_contract_failure"
     return "no_structural_route"
 

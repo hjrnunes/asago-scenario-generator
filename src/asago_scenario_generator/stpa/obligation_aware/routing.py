@@ -9,6 +9,8 @@ from typing import Any, Literal
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.models.obligation_consideration import (
+    ROUTING_RECORD_VALIDATION_FAILED,
+    ROUTING_VALIDATION_FAILED,
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
     NeutralObligationBrief,
@@ -661,7 +663,7 @@ def _unresolved_routes(
     diagnostic_code = (
         "prompt_budget_exceeded"
         if isinstance(error, PromptBudgetExceeded)
-        else "routing_validation_failed"
+        else ROUTING_VALIDATION_FAILED
     )
     diagnostic = ConsiderationDiagnostic(
         code=diagnostic_code,
@@ -699,7 +701,7 @@ def _unresolved_route_record(
     detail = f"{type(error).__name__}: {error}"
     route_refs = () if route is None else (route.route_id or "",)
     diagnostic = ConsiderationDiagnostic(
-        code="routing_record_validation_failed",
+        code=ROUTING_RECORD_VALIDATION_FAILED,
         detail=detail,
         obligation_ids=(brief.obligation_id,),
         refs=(request.batch_id, *route_refs),

@@ -16,6 +16,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
     ObligationIcaConsideration,
     ObligationRoute,
+    ObligationSemanticAssessment,
 )
 from asago_scenario_generator.pipeline.obligation_consideration import (
     build_consideration_artifact,
@@ -362,12 +363,14 @@ def test_accounting_rejects_pairs_outside_the_final_routes(pairs, error, match) 
         )
 
 
+# Literal codes pin the values saved routing diagnostics carry.
 @pytest.mark.parametrize(
     ("code", "stop_reason"),
     [
         ("prompt_budget_exceeded", "prompt_budget_exceeded"),
         ("routing_validation_failed", "provider_contract_failure"),
-        ("routing_record_validation_failed", "no_structural_route"),
+        ("routing_record_validation_failed", "provider_contract_failure"),
+        ("missing_final_route", "no_structural_route"),
     ],
 )
 def test_unresolved_route_stop_reason_follows_its_diagnostic(
@@ -392,6 +395,55 @@ def test_unresolved_route_stop_reason_follows_its_diagnostic(
     ).rows[0]
     assert (row.disposition, row.stop_reason) == ("unresolved", stop_reason)
     assert row.route_refs == (route.route_id,)
+
+
+def test_failed_routing_record_with_an_aligned_assessment_is_a_contract_failure() -> (
+    None
+):
+    """A record that failed local validation keeps its assessment as evidence.
+
+    An aligned, plausible assessment withholds no credit, so the record's
+    validation failure decides the stop: the reply broke the routing contract,
+    and the obligation was not judged to lack a structural route.
+    """
+    plan, original, _pair = _fixture()
+    route = ObligationRoute(
+        obligation_id=original.briefs[0].obligation_id,
+        disposition="unresolved",
+        semantic_assessment=ObligationSemanticAssessment(
+            mechanism_assessment="plausible_in_system",
+            risk_alignment="supported",
+            mapping_strength="direct_curated_pair",
+            mechanism_rationale="The mechanism exists in the system.",
+            risk_alignment_rationale="The mechanism realizes the risk.",
+        ),
+        rationale="This obligation's routing record failed local validation.",
+        evidence=("routing-validation",),
+        diagnostics=(
+            ConsiderationDiagnostic(
+                code="routing_record_validation_failed",
+                detail="ValueError: route names an unknown hazard",
+                obligation_ids=(original.briefs[0].obligation_id,),
+                refs=("batch-1",),
+            ),
+        ),
+    )
+    consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=original.briefs,
+        initial_routes=(route,),
+        final_routes=(route,),
+    )
+    row = build_obligation_accounting(
+        plan=plan, consideration=consideration, source_pins=_accounting_pins(plan)
+    ).rows[0]
+    assert (row.disposition, row.stop_reason) == (
+        "unresolved",
+        "provider_contract_failure",
+    )
+    assert [item.code for item in row.diagnostics] == [
+        "routing_record_validation_failed"
+    ]
 
 
 _ROUTE_REF = "route:v1:" + "c" * 64

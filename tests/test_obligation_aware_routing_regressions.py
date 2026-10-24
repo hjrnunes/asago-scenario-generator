@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from asago_scenario_generator.models.obligation_consideration import (
+    ROUTING_RECORD_VALIDATION_FAILED,
+    ROUTING_VALIDATION_FAILED,
     ObligationRoute,
     ObligationSemanticAssessment,
 )
@@ -140,8 +142,9 @@ def test_invalid_route_is_unresolved_without_discarding_valid_batch_sibling() ->
     assert (
         by_id[invalid.obligation_id].semantic_assessment.risk_alignment == "supported"
     )
-    assert by_id[invalid.obligation_id].diagnostics[0].code == (
-        "routing_record_validation_failed"
+    assert (
+        by_id[invalid.obligation_id].diagnostics[0].code
+        == ROUTING_RECORD_VALIDATION_FAILED
     )
     assert result.call_evidence[0].outcome == "unresolved"
 
@@ -225,7 +228,7 @@ def test_untyped_adapter_response_is_corrected_once_then_left_unresolved() -> No
     for route in result.routes:
         assert route.disposition == "unresolved"
         assert [(item.code, item.detail) for item in route.diagnostics] == [
-            ("routing_validation_failed", error)
+            (ROUTING_VALIDATION_FAILED, error)
         ]
     assert [item.outcome for item in result.call_evidence] == ["unresolved"]
     assert result.call_evidence[0].attempt_count == 0
