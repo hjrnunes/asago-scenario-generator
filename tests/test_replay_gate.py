@@ -1542,3 +1542,331 @@ def test_a_replay_that_writes_a_removed_report_row_fails(trees) -> None:
 
     assert [d.path for d in differences] == ["report/index.html"]
     assert "target profile" in differences[0].detail
+
+
+# The fixed stop-reason order changes accounting outputs, not requests.
+
+_STOP_PIN_DIGEST = "e" * 64
+
+
+def _routed_accounting(
+    mechanism: str = "absent_from_system", alignment: str = "supported"
+) -> tuple[Any, Any, Any]:
+    """Return a plan, its consideration, and the current accounting of one route."""
+    from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+    from asago_scenario_generator.models.obligation_consideration import (
+        ObligationRoute,
+        ObligationSemanticAssessment,
+    )
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        build_consideration_artifact,
+        build_neutral_briefs,
+        build_obligation_accounting,
+    )
+    from tests.helpers.governance import _accounting_pins, _plan_with_non_stpa_rows
+    from tests.helpers.projection_factory import get_test_raw_pattern
+
+    plan = _plan_with_non_stpa_rows()
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(plan, (pattern,))
+    route = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="proposed_not_applicable",
+        semantic_assessment=ObligationSemanticAssessment(
+            mechanism_assessment=mechanism,
+            risk_alignment=alignment,
+            mapping_strength="broad_category_expansion",
+            mechanism_rationale="The mechanism judgement.",
+            risk_alignment_rationale="The alignment judgement.",
+        ),
+        rationale="The routing rationale.",
+        evidence=("route evidence",),
+    )
+    consideration = build_consideration_artifact(
+        plan=plan, briefs=briefs, initial_routes=(route,), final_routes=(route,)
+    )
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=(),
+        source_pins=_accounting_pins(plan),
+    )
+    return plan, consideration, accounting
+
+
+def _row_as_recorded(accounting: Any, obligation_id: str, **fields: Any) -> Any:
+    """Rewrite one row as an earlier order wrote it, with a fresh digest."""
+    from asago_scenario_generator.models.obligation_accounting import (
+        ObligationAccounting,
+        ObligationAccountingRow,
+        derive_obligation_accounting_summary,
+    )
+
+    rows = tuple(
+        ObligationAccountingRow.model_validate({**row.model_dump(), **fields})
+        if row.obligation_id == obligation_id
+        else row
+        for row in accounting.rows
+    )
+    values = accounting.model_dump(exclude={"semantic_digest"})
+    values.update(rows=rows, summary=derive_obligation_accounting_summary(rows))
+    return ObligationAccounting.model_validate(values)
+
+
+def _old_mechanism_absent_row(accounting: Any) -> tuple[str, dict[str, Any]]:
+    row = next(row for row in accounting.rows if row.stop_reason == "mechanism_absent")
+    diagnostic = row.diagnostics[0].model_copy(
+        update={
+            "code": "incomplete_non_applicability",
+            "detail": "every routed slot must have explicit structural N/A evidence",
+        }
+    )
+    return row.obligation_id, {
+        "stop_reason": "not_applicable_evidence_incomplete",
+        "diagnostics": (diagnostic,),
+    }
+
+
+def _realization(accounting: Any) -> Any:
+    from asago_scenario_generator.models.artifact_pin import ArtifactPin
+    from asago_scenario_generator.models.scenario_realization import (
+        ScenarioRealizationAssessment,
+    )
+
+    pins = (
+        ("obligation-accounting", "stpa-obligation-accounting-v1"),
+        ("ica-enumeration", "ica-enumeration-v1"),
+        ("stpa-scenario-collection", "stpa-scenario-collection-v1"),
+    )
+    return ScenarioRealizationAssessment(
+        source_pins=tuple(
+            ArtifactPin(
+                artifact_id=artifact_id,
+                schema_version=schema,
+                semantic_digest=(
+                    accounting.semantic_digest
+                    if artifact_id == "obligation-accounting"
+                    else _STOP_PIN_DIGEST
+                ),
+            )
+            for artifact_id, schema in pins
+        ),
+        records=(),
+        summary={"total": 0, "realized": 0, "unresolved": 0, "not_requested": 0},
+    )
+
+
+def _accounting_manifest(
+    root: Path, plan: Any, accounting: Any, realization: Any
+) -> None:
+    from types import SimpleNamespace
+
+    from asago_scenario_generator.pipeline.synthesis_manifest import (
+        _obligation_resolution_funnel,
+        _obligation_scope_summary,
+        _obligation_stop_reason_counts,
+        _summary_dict,
+    )
+
+    document = yaml.safe_load((root / "synthesis-manifest.yaml").read_text())
+    document.pop("semantic_digest")
+    records = SimpleNamespace(records=realization.records)
+    document.update(
+        source_artifacts={
+            "obligation_accounting": {
+                "artifact_id": "obligation-accounting",
+                "schema_version": "stpa-obligation-accounting-v1",
+                "semantic_digest": accounting.semantic_digest,
+            },
+            "scenario_realization": {
+                "artifact_id": "scenario-realization",
+                "schema_version": "stpa-scenario-realization-v1",
+                "semantic_digest": realization.semantic_digest,
+            },
+        },
+        obligation_disposition_counts=_summary_dict(accounting.summary),
+        obligation_stop_reason_counts=_obligation_stop_reason_counts(
+            accounting, records
+        ),
+        obligation_resolution_funnel=_obligation_resolution_funnel(
+            plan=plan, accounting=accounting, realization=records, scenario_count=0
+        ),
+        obligation_scope_summary=_obligation_scope_summary(
+            plan=plan,
+            accounting=accounting,
+            realization=records,
+            risk_actionability=None,
+        ),
+    )
+    document["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, document)
+    _write_manifest(root, document)
+
+
+def _obligation_report(root: Path, section: str, *, other: str = "same") -> None:
+    (root / "report").mkdir(exist_ok=True)
+    (root / "report" / "index.html").write_text(
+        f'<section id="obligations"><h2>O</h2>{section}</section>\n'
+        f'<section id="failed"><h2>F</h2>{other}</section>\n'
+    )
+
+
+def _write_accounting_run(
+    root: Path, plan: Any, consideration: Any, accounting: Any, report: str
+) -> None:
+    realization = _realization(accounting)
+    (root / "obligation-accounting.yaml").write_text(accounting.to_yaml())
+    (root / "obligation-consideration.yaml").write_text(
+        yaml.safe_dump(consideration.model_dump(mode="json"))
+    )
+    (root / "scenario-realization.yaml").write_text(realization.to_yaml())
+    _accounting_manifest(root, plan, accounting, realization)
+    _obligation_report(root, report)
+
+
+@pytest.fixture
+def stop_order_trees(trees) -> tuple[Path, Path, dict[str, str]]:
+    """A recording made before the stop order and its replay through it."""
+    recorded, replayed, path_map = trees
+    plan, consideration, current = _routed_accounting()
+    obligation_id, old_fields = _old_mechanism_absent_row(current)
+    before = _row_as_recorded(current, obligation_id, **old_fields)
+    _write_accounting_run(
+        recorded, plan, consideration, before, "1 not_applicable_evidence_incomplete"
+    )
+    _write_accounting_run(replayed, plan, consideration, current, "1 mechanism_absent")
+    return recorded, replayed, path_map
+
+
+_STOP_ORDER_FILES = [
+    "obligation-accounting.yaml",
+    "report/index.html",
+    "scenario-realization.yaml",
+    "synthesis-manifest.yaml",
+]
+
+
+def test_the_stop_order_accepts_only_its_accounting_outputs(stop_order_trees) -> None:
+    recorded, replayed, path_map = stop_order_trees
+    expected: list[Difference] = []
+
+    _, differences = compare_trees(
+        recorded, replayed, path_map, expected_differences=expected
+    )
+
+    assert differences == []
+    assert sorted(item.path for item in expected) == _STOP_ORDER_FILES
+
+
+def test_the_stop_order_accepts_a_deduplicated_verifier_diagnostic(trees) -> None:
+    recorded, replayed, path_map = trees
+    plan, consideration, current = _routed_accounting()
+    obligation_id, _ = _old_mechanism_absent_row(current)
+    row = next(row for row in current.rows if row.obligation_id == obligation_id)
+    before = _row_as_recorded(
+        current, obligation_id, diagnostics=(row.diagnostics[0],) * 2
+    )
+    _write_accounting_run(recorded, plan, consideration, before, "same")
+    _write_accounting_run(replayed, plan, consideration, current, "same")
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_the_stop_order_does_not_hide_a_request_difference(stop_order_trees) -> None:
+    recorded, replayed, path_map = stop_order_trees
+    records = [_provider_call(1, "A", "for A"), _provider_call(2, "B", "changed")]
+    _jsonl(replayed / RECORD_FILENAME, records)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == [RECORD_FILENAME]
+
+
+def test_the_stop_order_does_not_hide_another_accounting_field(trees) -> None:
+    recorded, replayed, path_map = trees
+    plan, consideration, current = _routed_accounting()
+    obligation_id, old_fields = _old_mechanism_absent_row(current)
+    before = _row_as_recorded(
+        current, obligation_id, evidence=("other evidence",), **old_fields
+    )
+    _write_accounting_run(recorded, plan, consideration, before, "old")
+    _write_accounting_run(replayed, plan, consideration, current, "new")
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_stop_order_does_not_hide_a_reason_the_route_does_not_derive(
+    trees,
+) -> None:
+    recorded, replayed, path_map = trees
+    plan, consideration, current = _routed_accounting()
+    obligation_id, old_fields = _old_mechanism_absent_row(current)
+    row = next(row for row in current.rows if row.obligation_id == obligation_id)
+    wrong = row.diagnostics[0].model_copy(
+        update={"code": "mechanism_path_unsubstantiated"}
+    )
+    after = _row_as_recorded(
+        current,
+        obligation_id,
+        stop_reason="mechanism_path_unsubstantiated",
+        diagnostics=(wrong,),
+    )
+    before = _row_as_recorded(current, obligation_id, **old_fields)
+    _write_accounting_run(recorded, plan, consideration, before, "same")
+    _write_accounting_run(replayed, plan, consideration, after, "same")
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == [
+        "obligation-accounting.yaml",
+        "scenario-realization.yaml",
+        "synthesis-manifest.yaml",
+    ]
+
+
+def test_the_stop_order_does_not_hide_a_manifest_count_the_rows_do_not_give(
+    stop_order_trees,
+) -> None:
+    recorded, replayed, path_map = stop_order_trees
+    document = yaml.safe_load((replayed / "synthesis-manifest.yaml").read_text())
+    document.pop("semantic_digest")
+    document["obligation_stop_reason_counts"] = {"mechanism_absent": 2}
+    document["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, document)
+    _write_manifest(replayed, document)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["synthesis-manifest.yaml"]
+
+
+def test_the_stop_order_does_not_hide_another_manifest_field(stop_order_trees) -> None:
+    recorded, replayed, path_map = stop_order_trees
+    document = yaml.safe_load((replayed / "synthesis-manifest.yaml").read_text())
+    document.pop("semantic_digest")
+    document["scenario_counts"] = {"published": 3}
+    document["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, document)
+    _write_manifest(replayed, document)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["synthesis-manifest.yaml"]
+
+
+def test_the_stop_order_does_not_hide_a_report_change_outside_its_section(
+    stop_order_trees,
+) -> None:
+    recorded, replayed, path_map = stop_order_trees
+    _obligation_report(replayed, "1 mechanism_absent", other="changed")
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["report/index.html"]
+
+
+def test_the_stop_order_states_its_reason() -> None:
+    change = replay_gate.ACCOUNTING_STOP_REASON_CHANGE
+    assert change.reason and change.stop_order and change.superseded_diagnostics
+    assert len(change.files) == len(set(change.files))
