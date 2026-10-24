@@ -15,6 +15,7 @@ from asago_scenario_generator.stpa.models.causal_factor import (
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionEffectKind,
     ControlActionTemporality,
+    FeedbackUpdateAuthority,
     ReferenceType,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
@@ -66,6 +67,12 @@ class DescribedElement(ScenarioContextModel):
     description: str = Field(min_length=1)
     # Feedback channels only: the origin of the channel's information.
     source_kind: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    # Feedback channels only: the recorded authority over the updated
+    # variable.  Left out when unset so a context built without it keeps its
+    # bytes and digest.
+    authority_for_update: FeedbackUpdateAuthority | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
 

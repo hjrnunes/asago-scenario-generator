@@ -188,6 +188,7 @@ def _build_control_path(
                 source_kind=(
                     item.source_kind.value if item.source_kind is not None else None
                 ),
+                authority_for_update=item.authority_for_update,
             )
             for item in responsibility.feedback_channels
         ),

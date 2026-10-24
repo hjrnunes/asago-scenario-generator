@@ -20,6 +20,9 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     ProcessModelVariable,
     validate_causal_evidence_shape,
 )
+from asago_scenario_generator.stpa.models.control_structure import (
+    FeedbackUpdateAuthority,
+)
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticCondition,
     SemanticValue,
@@ -287,3 +290,4 @@ class _CausalSourceChoice:
     source_id: str
     description: str
     source_kind: str | None = None
+    authority_for_update: FeedbackUpdateAuthority | None = None
