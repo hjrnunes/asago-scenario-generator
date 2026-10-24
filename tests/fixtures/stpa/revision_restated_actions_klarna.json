@@ -1,0 +1,233 @@
+{
+  "new_responsibilities": [
+    {
+      "resp_id": "RESP-7",
+      "description": "Validates the parameters of financial and account-related tool calls against backend state and business rules.",
+      "responsibility_constraints": [
+        {
+          "rc_id": "RC-7-1",
+          "description": "Refund amounts must not exceed the remaining balance on the order."
+        }
+      ],
+      "security_constraint_refs": [],
+      "process_model_parts": [
+        {
+          "pm_id": "PM-7-1",
+          "description": "The remaining balance of the target order (evidence: state:orders.remaining_to_pay)",
+          "feedback_source": null
+        }
+      ],
+      "control_actions": [],
+      "feedback_channels": [
+        {
+          "fb_id": "FB-7-1",
+          "description": "Provide current order balance for validation",
+          "updates": "PM-7-1",
+          "source": {
+            "type": "controlled_process",
+            "id": "CP-2"
+          },
+          "source_kind": "operation_result"
+        }
+      ]
+    }
+  ],
+  "new_controlled_processes": [],
+  "new_coordination_links": [],
+  "modified_responsibilities": [
+    {
+      "resp_id": "RESP-1",
+      "description": "Manages the conversational interaction and generates natural language responses to customer queries.",
+      "responsibility_constraints": [
+        {
+          "rc_id": "RC-1-1",
+          "description": "Information disclosed during a conversation must match the authenticated customer ID."
+        },
+        {
+          "rc_id": "RC-1-2",
+          "description": "Information provided must be restricted to the approved information whitelist."
+        },
+        {
+          "rc_id": "RC-1-3",
+          "description": "Requests sent to the third-party model provider must not contain proprietary Klarna strategic data or internal prompt instructions."
+        },
+        {
+          "rc_id": "RC-1-4",
+          "description": "Responses containing order or merchant data must be grounded in information explicitly retrieved by RESP-2 (SC-7)."
+        }
+      ],
+      "security_constraint_refs": [
+        "SC-3",
+        "SC-8",
+        "SC-2",
+        "SC-7"
+      ],
+      "process_model_parts": [
+        {
+          "pm_id": "PM-1-1",
+          "description": "The identity of the currently authenticated customer (values: matches session identity; does not match session identity; unknown) (evidence: session:authenticated_customer_id)",
+          "feedback_source": null
+        },
+        {
+          "pm_id": "PM-1-2",
+          "description": "The content of the response relative to the information whitelist (values: on whitelist; not on whitelist; unknown)",
+          "feedback_source": null
+        },
+        {
+          "pm_id": "PM-1-3",
+          "description": "The presence of proprietary or internal data in the outbound request (values: contains proprietary data; does not contain proprietary data; unknown)",
+          "feedback_source": null
+        },
+        {
+          "pm_id": "PM-1-4",
+          "description": "The availability of retrieved order/merchant data from RESP-2 (values: data available; no data available; unknown)",
+          "feedback_source": null
+        },
+        {
+          "pm_id": "PM-1-5",
+          "description": "The grounding of the response against retrieved policy snippets (values: grounded; not grounded; unknown)",
+          "feedback_source": null
+        }
+      ],
+      "control_actions": [
+        {
+          "ca_id": "CA-1-1",
+          "description": "Generate natural language response to customer query (target: controlled_process CP-1) (effect: model_output) (temporality: instantaneous) (process-model refs: PM-1-1, PM-1-2, PM-1-3, PM-1-4, PM-1-5)"
+        }
+      ],
+      "feedback_channels": [
+        {
+          "fb_id": "FB-1-1",
+          "description": "Identify currently authenticated user from session (updates: PM-1-1, source: controlled_process CP-1, source kind: session_context)",
+          "updates": "PM-1-1",
+          "source": {
+            "type": "controlled_process",
+            "id": "CP-1"
+          },
+          "source_kind": "session_context"
+        },
+        {
+          "fb_id": "FB-1-2",
+          "description": "Review response content against whitelist (updates: PM-1-2, source: responsibility RESP-1, source kind: other)",
+          "updates": "PM-1-2",
+          "source": {
+            "type": "responsibility",
+            "id": "RESP-1"
+          },
+          "source_kind": "other"
+        },
+        {
+          "fb_id": "FB-1-3",
+          "description": "Check request for proprietary data (updates: PM-1-3, source: responsibility RESP-1, source kind: other)",
+          "updates": "PM-1-3",
+          "source": {
+            "type": "responsibility",
+            "id": "RESP-1"
+          },
+          "source_kind": "other"
+        },
+        {
+          "fb_id": "FB-1-4",
+          "description": "Receive retrieved order/merchant data from RESP-2",
+          "updates": "PM-1-4",
+          "source": {
+            "type": "responsibility",
+            "id": "RESP-2"
+          },
+          "source_kind": "retrieved_content"
+        },
+        {
+          "fb_id": "FB-1-5",
+          "description": "Receive policy snippet availability from RESP-3",
+          "updates": "PM-1-5",
+          "source": {
+            "type": "responsibility",
+            "id": "RESP-3"
+          },
+          "source_kind": "retrieved_content"
+        }
+      ]
+    },
+    {
+      "resp_id": "RESP-4",
+      "description": "Executes financial transactions including refunds and payment modifications.",
+      "responsibility_constraints": [
+        {
+          "rc_id": "RC-4-1",
+          "description": "Refunds and payment modifications must only be executed if the associated order belongs to the authenticated customer."
+        }
+      ],
+      "security_constraint_refs": [
+        "SC-5"
+      ],
+      "process_model_parts": [
+        {
+          "pm_id": "PM-4-1",
+          "description": "The identity of the customer owning the target order (values: matches session identity; does not match session identity; unknown) (evidence: state:orders.customer_id, session:authenticated_customer_id)",
+          "feedback_source": null
+        },
+        {
+          "pm_id": "PM-4-2",
+          "description": "The successful application of the transaction to the backend (values: success; failure; unknown)",
+          "feedback_source": null
+        }
+      ],
+      "control_actions": [
+        {
+          "ca_id": "CA-4-1",
+          "description": "Process a refund for an order (target: controlled_process CP-2) (effect: tool_call) (temporality: instantaneous) (operation: process_refund) (process-model refs: PM-4-1, PM-4-2)",
+          "target": {
+            "type": "controlled_process",
+            "id": "CP-2"
+          },
+          "effect_kind": "tool_call",
+          "temporality": "instantaneous",
+          "operation": "process_refund",
+          "process_model_refs": [
+            "PM-4-1",
+            "PM-4-2"
+          ]
+        },
+        {
+          "ca_id": "CA-4-2",
+          "description": "Schedule or modify a payment plan (target: controlled_process CP-2) (effect: tool_call) (temporality: instantaneous) (operation: schedule_payment) (process-model refs: PM-4-1)",
+          "target": {
+            "type": "controlled_process",
+            "id": "CP-2"
+          },
+          "effect_kind": "tool_call",
+          "temporality": "instantaneous",
+          "operation": "schedule_payment",
+          "process_model_refs": [
+            "PM-4-1"
+          ]
+        }
+      ],
+      "feedback_channels": [
+        {
+          "fb_id": "FB-4-1",
+          "description": "Validate ownership of order for transaction (updates: PM-4-1, source: controlled_process CP-2, source kind: operation_result)",
+          "updates": "PM-4-1",
+          "source": {
+            "type": "controlled_process",
+            "id": "CP-2"
+          },
+          "source_kind": "operation_result"
+        },
+        {
+          "fb_id": "FB-4-2",
+          "description": "Verify transaction success in backend (updates: PM-4-2, source: controlled_process CP-2, source kind: operation_result)",
+          "updates": "PM-4-2",
+          "source": {
+            "type": "controlled_process",
+            "id": "CP-2"
+          },
+          "source_kind": "operation_result"
+        }
+      ]
+    }
+  ],
+  "dismissed_gaps": [
+    "The suggestion for a dedicated parameter validation responsibility is addressed by adding a validation mechanism within a new specialized responsibility RESP-7 that tracks backend state for parameter bounds."
+  ]
+}

@@ -1,0 +1,375 @@
+responsibilities:
+- resp_id: RESP-1
+  description: Manages the conversational interaction and generates natural language
+    responses to customer queries.
+  responsibility_constraints:
+  - rc_id: RC-1-1
+    description: Information disclosed during a conversation must match the authenticated
+      customer ID.
+  - rc_id: RC-1-2
+    description: Information provided must be restricted to the approved information
+      whitelist.
+  - rc_id: RC-1-3
+    description: Requests sent to the third-party model provider must not contain
+      proprietary Klarna strategic data or internal prompt instructions.
+  security_constraint_refs:
+  - SC-3
+  - SC-8
+  - SC-2
+  process_model_parts:
+  - pm_id: PM-1-1
+    description: The identity of the currently authenticated customer
+    values:
+    - matches session identity
+    - does not match session identity
+    - unknown
+    evidence_refs:
+    - session:authenticated_customer_id
+  - pm_id: PM-1-2
+    description: The content of the response relative to the information whitelist
+    values:
+    - on whitelist
+    - not on whitelist
+    - unknown
+  - pm_id: PM-1-3
+    description: The presence of proprietary or internal data in the outbound request
+    values:
+    - contains proprietary data
+    - does not contain proprietary data
+    - unknown
+  control_actions:
+  - ca_id: CA-1-1
+    description: Generate natural language response to customer query
+    target:
+      type: controlled_process
+      id: CP-1
+    effect_kind: model_output
+    temporality: instantaneous
+    process_model_refs:
+    - PM-1-1
+    - PM-1-2
+    - PM-1-3
+  feedback_channels:
+  - fb_id: FB-1-1
+    description: Identify currently authenticated user from session
+    updates: PM-1-1
+    source:
+      type: controlled_process
+      id: CP-1
+    source_kind: session_context
+  - fb_id: FB-1-2
+    description: Review response content against whitelist
+    updates: PM-1-2
+    source:
+      type: responsibility
+      id: RESP-1
+    source_kind: other
+  - fb_id: FB-1-3
+    description: Check request for proprietary data
+    updates: PM-1-3
+    source:
+      type: responsibility
+      id: RESP-1
+    source_kind: other
+- resp_id: RESP-2
+  description: Retrieves customer account and order information to answer queries.
+  responsibility_constraints:
+  - rc_id: RC-2-1
+    description: Data retrieved must be restricted to the identity specified in the
+      authenticated session.
+  - rc_id: RC-2-2
+    description: Merchant or order-specific information provided must be explicitly
+      retrieved from the orders collection for the authenticated customer.
+  security_constraint_refs:
+  - SC-1
+  - SC-7
+  process_model_parts:
+  - pm_id: PM-2-1
+    description: The identity of the customer associated with the requested record
+    values:
+    - matches session identity
+    - does not match session identity
+    - unknown
+    evidence_refs:
+    - state:orders.customer_id
+    - session:authenticated_customer_id
+  - pm_id: PM-2-2
+    description: The source of the retrieved order information
+    values:
+    - retrieved from state:orders
+    - not retrieved from state:orders
+    - unknown
+    evidence_refs:
+    - state:orders
+  control_actions:
+  - ca_id: CA-2-1
+    description: Retrieve customer account details
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: get_account_details
+    process_model_refs:
+    - PM-2-1
+    - PM-2-2
+  - ca_id: CA-2-2
+    description: Look up specific order information
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: lookup_order
+    process_model_refs:
+    - PM-2-1
+    - PM-2-2
+  feedback_channels:
+  - fb_id: FB-2-1
+    description: Verify identity of customer in retrieved record
+    updates: PM-2-1
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+  - fb_id: FB-2-2
+    description: Confirm source of order information
+    updates: PM-2-2
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+- resp_id: RESP-3
+  description: Provides policy information based on retrieved snippets.
+  responsibility_constraints:
+  - rc_id: RC-3-1
+    description: The assistant must not provide policy details if no matching snippet
+      is returned from policy retrieval.
+  security_constraint_refs:
+  - SC-4
+  process_model_parts:
+  - pm_id: PM-3-1
+    description: The availability of a matching policy snippet for the query
+    values:
+    - snippet found
+    - no snippet found
+    - unknown
+    evidence_refs:
+    - policy:TARGET-READ-001
+    - policy:TARGET-READ-002
+    - policy:TARGET-READ-003
+    - policy:TARGET-READ-004
+  control_actions:
+  - ca_id: CA-3-1
+    description: Retrieve policy snippets
+    target:
+      type: controlled_process
+      id: CP-3
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: retrieve_policy
+    process_model_refs:
+    - PM-3-1
+  feedback_channels:
+  - fb_id: FB-3-1
+    description: Report availability of policy snippets
+    updates: PM-3-1
+    source:
+      type: controlled_process
+      id: CP-3
+    source_kind: operation_result
+- resp_id: RESP-4
+  description: Executes financial transactions including refunds and payment modifications.
+  responsibility_constraints:
+  - rc_id: RC-4-1
+    description: Refunds and payment modifications must only be executed if the associated
+      order belongs to the authenticated customer.
+  security_constraint_refs:
+  - SC-5
+  process_model_parts:
+  - pm_id: PM-4-1
+    description: The identity of the customer owning the target order
+    values:
+    - matches session identity
+    - does not match session identity
+    - unknown
+    evidence_refs:
+    - state:orders.customer_id
+    - session:authenticated_customer_id
+  control_actions:
+  - ca_id: CA-4-1
+    description: Process a refund for an order
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: process_refund
+    process_model_refs:
+    - PM-4-1
+  - ca_id: CA-4-2
+    description: Schedule or modify a payment plan
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: schedule_payment
+    process_model_refs:
+    - PM-4-1
+  feedback_channels:
+  - fb_id: FB-4-1
+    description: Validate ownership of order for transaction
+    updates: PM-4-1
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+- resp_id: RESP-5
+  description: Manages conversation escalation to human agents.
+  responsibility_constraints:
+  - rc_id: RC-5-1
+    description: Perform escalation when a query regarding regulated topics or complex
+      policies results in no matching snippet.
+  security_constraint_refs:
+  - SC-6
+  process_model_parts:
+  - pm_id: PM-5-1
+    description: The reason for escalation
+    values:
+    - regulated topic
+    - complex policy
+    - ambiguity
+    - other
+  - pm_id: PM-5-2
+    description: The result of the policy retrieval for the current topic
+    values:
+    - no matching snippet found
+    - snippet found
+    evidence_refs:
+    - policy:TARGET-READ-002
+    - policy:TARGET-READ-003
+    - policy:TARGET-READ-004
+  control_actions:
+  - ca_id: CA-5-1
+    description: Escalate conversation to a human agent
+    target:
+      type: controlled_process
+      id: CP-4
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: escalate_to_human
+    process_model_refs:
+    - PM-5-1
+    - PM-5-2
+  feedback_channels:
+  - fb_id: FB-5-1
+    description: Determine reason for escalation trigger
+    updates: PM-5-1
+    source:
+      type: responsibility
+      id: RESP-5
+    source_kind: other
+  - fb_id: FB-5-2
+    description: Capture policy retrieval outcome
+    updates: PM-5-2
+    source:
+      type: controlled_process
+      id: CP-3
+    source_kind: operation_result
+- resp_id: RESP-6
+  description: Manages context and memory for the conversation lifecycle.
+  responsibility_constraints: []
+  security_constraint_refs: []
+  process_model_parts:
+  - pm_id: PM-6-1
+    description: The current conversational context state
+    values:
+    - active
+    - expired
+    - unknown
+  control_actions:
+  - ca_id: CA-6-1
+    description: Update conversational context and memory
+    target:
+      type: controlled_process
+      id: CP-5
+    effect_kind: state_change
+    temporality: discrete
+    process_model_refs:
+    - PM-6-1
+  feedback_channels:
+  - fb_id: FB-6-1
+    description: Monitor conversation lifecycle status
+    updates: PM-6-1
+    source:
+      type: controlled_process
+      id: CP-5
+    source_kind: session_context
+controlled_processes:
+- cp_id: CP-1
+  description: Conversational Interface (App/Web)
+- cp_id: CP-2
+  description: Klarna Backend Systems (Orders, Payments, Refunds)
+- cp_id: CP-3
+  description: Policy Knowledge Base
+- cp_id: CP-4
+  description: Human Customer Service Operations
+- cp_id: CP-5
+  description: Session and Context Management System
+coordination_links:
+- link_id: CL-1
+  source: RESP-1
+  target: RESP-2
+  shared_pm: PM-2-1
+  coordination_mechanism:
+    cm_id: CM-1
+    description: RESP-1 requires the identity of the customer retrieved by RESP-2
+      to ensure the conversational response is scoped to the correct individual.
+    payload: authenticated_customer_id
+  description: RESP-1 needs the identity verified by RESP-2 to maintain session integrity
+    in generated responses.
+- link_id: CL-2
+  source: RESP-1
+  target: RESP-3
+  shared_pm: PM-3-1
+  coordination_mechanism:
+    cm_id: CM-2
+    description: RESP-1 must know if policy snippets were found by RESP-3 to decide
+      whether to answer or escalate.
+    payload: policy_snippet_presence
+  description: The conversational generator (RESP-1) depends on the presence of grounding
+    data from RESP-3 to avoid hallucination.
+- link_id: CL-3
+  source: RESP-1
+  target: RESP-4
+  shared_pm: PM-4-1
+  coordination_mechanism:
+    cm_id: CM-3
+    description: RESP-1 must coordinate with RESP-4 to ensure transaction requests
+      are based on the authenticated user's specific order history.
+    payload: order_ownership_status
+  description: Prevents RESP-1 from prompting or executing transactions via RESP-4
+    that do not belong to the authenticated user.
+- link_id: CL-4
+  source: RESP-5
+  target: RESP-1
+  shared_pm: PM-5-1
+  coordination_mechanism:
+    cm_id: CM-4
+    description: RESP-5 must signal the conversational interface to terminate AI interaction
+      and hand over to a human.
+    payload: escalation_trigger
+  description: Ensures the conversational lifecycle is transitioned correctly from
+    AI to human agent.
+- link_id: CL-5
+  source: RESP-6
+  target: RESP-1
+  shared_pm: PM-6-1
+  coordination_mechanism:
+    cm_id: CM-5
+    description: RESP-6 provides the conversational state/history needed by RESP-1
+      to generate contextually relevant responses.
+    payload: conversation_context
+  description: Ensures the conversational manager maintains the thread that the generator
+    uses.
