@@ -29,4 +29,14 @@ differs from the one the source supplied","hazardous_context":"the user acts on 
 source does not support","loss_consequence":"the user is harmed by acting on a wrong figure",
 "related_hazard_ids":["<hazard_id>"],"related_constraint_ids":["<constraint_id>"],
 "process_model_refs":["<pm_id>"],"feedback_refs":[],"context_row":"<context_row_id>"}],
-"rationale":"the source supplied an answer and the reply departs from it"}]}.
+"rationale":"the source supplied an answer and the reply departs from it"}]}.{% if has_feedback_authority %}
+
+A gap may list `source_feedback`: the feedback channels that update its source variable,
+shown when one of them carries `authority_for_update`, the recorded assessment of whether
+the channel is entitled to establish the variable's value, as opposed to only reporting it.
+Its `status` is `authoritative`, `non_authoritative`, `conditional` (only within the scope
+or conditions its `basis` states), or `unknown`, and its `basis` cites the supplied
+evidence; a channel listed without it is unknown. It is separate from `untrusted` and from
+the source kind. When the channel is non-authoritative, a reply that presents what the
+source supplied as established, such as a reported approval stated as the approval itself,
+can be unsafe even in a row where it repeats the source accurately.{% endif %}
