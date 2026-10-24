@@ -157,10 +157,10 @@ def run_sp1(
     bases and multi-agent capability flags enrich that analysis; they never
     select a different derivation.
 
-    Before a derived Stage 1a, one bounded classification applies the STPA
-    boundary test to every risk card (``risk-actionability.yaml``); only
-    actionable cards feed loss derivation, its gates, and the coverage
-    review.  Discovered target evidence, when supplied, grounds the Stage 1a
+    Before a derived Stage 1a, one bounded classification records the scope
+    of every risk card's class (``risk-actionability.yaml``).  Scope is not a
+    filter: every card feeds loss derivation, its gates, and the coverage
+    review, and obligation accounting carries the scope.  Discovered target evidence, when supplied, grounds the Stage 1a
     hazards and constraints and every Stage 2 call; losses stay derived from
     risk cards.
 
@@ -226,8 +226,6 @@ def run_sp1(
     risk_actionability: RiskActionabilityRecord | None = None
     stated_rule_coverage: StatedRuleCoverageArtifact | None = None
     derivation_sent = RequestTally()
-    # A pinned graph already accounts for every supplied card.
-    stage_1a_cards = risk_cards
     if loss_analysis_path is None:
         actionability = classify_risk_actionability(
             llm_client=llm_client,
@@ -239,7 +237,6 @@ def run_sp1(
             target_evidence=target_evidence,
         )
         risk_actionability = actionability.record
-        stage_1a_cards = actionability.actionable_cards
         stage_warnings.extend(
             f"stage_1a/risk_actionability: {item}"
             for item in actionability.record.warnings
@@ -260,7 +257,7 @@ def run_sp1(
         ) = _run_derived_stage_1a(
             llm_client,
             use_case_text,
-            stage_1a_cards,
+            risk_cards,
             run_dir,
             loader,
             temperature,
@@ -284,7 +281,7 @@ def run_sp1(
         risk_coverage_review = _try_run_risk_coverage_review(
             llm_client,
             loss_analysis,
-            stage_1a_cards,
+            risk_cards,
             use_case_text,
             run_dir,
             loader,

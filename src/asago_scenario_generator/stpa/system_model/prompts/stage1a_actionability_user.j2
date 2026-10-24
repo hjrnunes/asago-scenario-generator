@@ -7,8 +7,14 @@
 
 ## Organizational Risks
 
+Each risk names a class of harm: its `risk_id`, its name, the taxonomy it comes
+from, and the taxonomy's description of the class.
+{#- The card's threat and consequence are left out on purpose: they tell one
+    organizational story of the risk, and the decision is about the class.
+    risk-actionability.yaml keeps them as provenance. #}
+
 {% for card in risk_cards %}
-- `{{ card.risk_id }}`: {{ card.risk_name }}. Description: {{ card.risk_description }}{% if card.threat %} Threat: {{ card.threat }}{% endif %}{% if card.consequence %} Consequence: {{ card.consequence }}{% endif %}
+- `{{ card.risk_id }}`: {{ card.risk_name }} (taxonomy: {{ card.taxonomy }}). Class description: {{ card.risk_description }}
 
 {% endfor %}
 
@@ -16,5 +22,5 @@
 
 ## Your Task
 
-Apply the boundary test to each of the {{ risk_cards | length }} risks above and
-return one decision per risk.
+Apply the boundary test to the class of each of the {{ risk_cards | length }} risks
+above and return one decision per risk.

@@ -44,6 +44,14 @@ OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS: tuple[tuple[str, str], ...] = (
 )
 
 GOVERNANCE_ROUTED_NO_FINDING = "governance_routed_no_finding"
+RISK_OUT_OF_SCOPE = "risk_out_of_scope"
+
+# The Stage 1a scope decision for the class of an obligation's risk.
+RiskScope = Literal["actionable", "outside_boundary", "not_applicable"]
+OUT_OF_SCOPE: frozenset[str] = frozenset({"outside_boundary", "not_applicable"})
+# Dispositions that keep their own stop reason whatever the scope: a credited
+# row, and a governance-only row, whose outcome no pattern analysis decided.
+SCOPE_EXEMPT_DISPOSITIONS: frozenset[str] = frozenset({"addressed", "governance_only"})
 
 AccountingDisposition = Literal[
     "addressed",
@@ -138,6 +146,11 @@ class ObligationAccountingRow(_AccountingModel):
     route_refs: tuple[str, ...] = ()
     evidence: tuple[str, ...] = Field(min_length=1)
     diagnostics: tuple[ConsiderationDiagnostic, ...] = ()
+    # The scope decision for the obligation's risk; left out when the run made
+    # none, so earlier artifacts keep their bytes.
+    scope: RiskScope | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def canonicalize_and_validate(self) -> "ObligationAccountingRow":
@@ -159,10 +172,37 @@ class ObligationAccountingRow(_AccountingModel):
                 f"stop reason {GOVERNANCE_ROUTED_NO_FINDING} belongs to "
                 "governance-only rows"
             )
+        _validate_scope_stop_reason(self)
         validate_disposition = _DISPOSITION_VALIDATORS.get(self.disposition)
         if validate_disposition is not None:
             validate_disposition(self)
         return self
+
+
+def _validate_scope_stop_reason(row: ObligationAccountingRow) -> None:
+    """Tie ``risk_out_of_scope`` to an out-of-scope risk, in both directions.
+
+    A row whose risk is out of scope stops at ``risk_out_of_scope`` unless it
+    is addressed or governance-only; those two never use it. A row without a
+    scope, from a run that made no decision, is not constrained.
+    """
+    exempt = row.disposition in SCOPE_EXEMPT_DISPOSITIONS
+    if row.stop_reason == RISK_OUT_OF_SCOPE:
+        if row.scope not in OUT_OF_SCOPE:
+            raise ValueError(
+                f"stop reason {RISK_OUT_OF_SCOPE} belongs to rows whose risk "
+                "scope is outside_boundary or not_applicable"
+            )
+        if exempt:
+            raise ValueError(
+                f"{row.disposition} rows keep their own stop reason, not "
+                f"{RISK_OUT_OF_SCOPE}"
+            )
+    elif row.scope in OUT_OF_SCOPE and not exempt:
+        raise ValueError(
+            f"a {row.disposition} row whose risk scope is {row.scope} must stop "
+            f"at {RISK_OUT_OF_SCOPE}"
+        )
 
 
 _FINDING_FIELDS = (
@@ -368,6 +408,10 @@ __all__ = [
     "ObligationAccountingRow",
     "ObligationAccountingSummary",
     "OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS",
+    "OUT_OF_SCOPE",
+    "RISK_OUT_OF_SCOPE",
+    "RiskScope",
+    "SCOPE_EXEMPT_DISPOSITIONS",
     "derive_obligation_accounting_summary",
     "validate_obligation_accounting_source_pins",
 ]

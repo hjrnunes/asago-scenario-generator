@@ -17,7 +17,15 @@ from asago_scenario_generator.stpa.system_model.risk_actionability import (
 def _record(decisions: dict[str, str]) -> RiskActionabilityRecord:
     entries = [
         RiskActionabilityEntry(
-            risk_id=risk_id, decision=decision, reason="r", source="model"
+            risk_id=risk_id,
+            decision=decision,
+            reason="r",
+            source="model",
+            **(
+                {"system_action": "A reply.", "affected_stakeholder": "A user."}
+                if decision == "actionable"
+                else {}
+            ),
         )
         for risk_id, decision in decisions.items()
     ]

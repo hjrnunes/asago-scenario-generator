@@ -141,8 +141,10 @@ def actionability_response_from_prompt(
         "decisions": [
             {
                 "risk_id": risk_id,
+                "system_action": "The assistant's reply.",
+                "affected_stakeholder": "The user.",
                 "decision": "actionable",
-                "reason": "A controller in the boundary can realize the threat.",
+                "reason": "The assistant's reply can produce harm of this class.",
             }
             for risk_id in risk_ids
         ]

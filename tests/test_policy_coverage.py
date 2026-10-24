@@ -74,6 +74,16 @@ def analysis(
     )
 
 
+def _action_fields(decision: str) -> dict[str, str]:
+    """Name the action an actionable model decision must carry."""
+    if decision != "actionable":
+        return {}
+    return {
+        "system_action": "The assistant's reply.",
+        "affected_stakeholder": "A user.",
+    }
+
+
 def risk_loss(loss_id: str, description: str, cards: list[str]) -> Loss:
     return Loss(
         loss_id=loss_id,
@@ -85,7 +95,9 @@ def risk_loss(loss_id: str, description: str, cards: list[str]) -> Loss:
 
 def decisions(**by_risk: tuple[str, str]) -> RiskActionabilityRecord:
     entries = [
-        RiskActionabilityEntry(risk_id=rid, decision=d, reason=why, source="model")
+        RiskActionabilityEntry(
+            risk_id=rid, decision=d, reason=why, source="model", **_action_fields(d)
+        )
         for rid, (d, why) in by_risk.items()
     ]
     return RiskActionabilityRecord(

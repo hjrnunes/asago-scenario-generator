@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from functools import cache
 
 from asago_scenario_generator.data.loaders import load_attack_patterns
+from asago_scenario_generator.models.obligation_accounting import OUT_OF_SCOPE
 from asago_scenario_generator.report.common import (
     code_id,
     missing,
@@ -47,6 +48,10 @@ STOP_MEANING = {
     "scenario_not_requested": (
         "No scenario requested",
         "The run did not ask for a scenario for this obligation.",
+    ),
+    "risk_out_of_scope": (
+        "Risk outside the system's scope",
+        "The boundary decision found that no action of this system produces harm of this risk's class.",
     ),
     "risk_pattern_mismatch": (
         "Route found, wrong mechanism",
@@ -108,6 +113,10 @@ STOP_MEANING = {
         "Routed, no finding",
         "The risk was routed to a slot, and the slot produced no finding.",
     ),
+    "capability_excluded": (
+        "Capability not present",
+        "The attack pattern needs a capability this system does not have, so it was not routed to the control structure.",
+    ),
     "governance_only": (
         "No attack pattern",
         "The risk maps to no attack pattern in the catalog, so it has nothing to route.",
@@ -115,6 +124,9 @@ STOP_MEANING = {
 }
 ORDER = list(STOP_MEANING)
 REALIZED = {"scenario_realized", "addressed"}
+# Dispositions the manifest keeps apart from the routed, applicable
+# obligations, and the muted groups that show them.
+NOT_ROUTED = {"governance_only", "capability_excluded"}
 QUESTION = (
     "Each obligation pairs a policy risk with one attack pattern from the "
     "catalog. Rows group the obligations by where each one stopped."
@@ -132,6 +144,8 @@ class ObligationRow:
     pattern_name: str
     detail: str
     ica_ids: tuple[str, ...]
+    # The accounting disposition; the routed counts read it, not ``stop``.
+    disposition: str
 
 
 @cache
@@ -153,6 +167,17 @@ def _policy_risks(run: RunData) -> dict[str, dict]:
     return index
 
 
+def _outside(row, risk: dict | None) -> bool:
+    """Tell whether the row's risk is out of scope.
+
+    The row's own scope decides; a row written before rows carried a scope
+    falls back to the policy coverage of its risk.
+    """
+    if row.scope is not None:
+        return row.scope in OUT_OF_SCOPE
+    return risk is not None and risk["coverage"] == "outside_boundary"
+
+
 def _detail(row) -> str:
     if row.diagnostics:
         return row.diagnostics[0].detail
@@ -169,15 +194,23 @@ def obligation_rows(run: RunData) -> list[ObligationRow]:
         risk = risks.get(obligation.risk_ref.risk_id)
         name = (risk or {}).get("display_name") or obligation.risk_ref.risk_name
         pattern = obligation.attack_pattern_id
+        # A capability-excluded row groups by its disposition, as the manifest
+        # counts it, even when an out-of-scope risk gave it a stop reason.
+        stop = (
+            row.disposition
+            if row.disposition == "capability_excluded"
+            else row.stop_reason or row.disposition
+        )
         rows.append(
             ObligationRow(
-                stop_key(row.stop_reason or row.disposition),
+                stop_key(stop),
                 name,
-                risk is not None and risk["coverage"] == "outside_boundary",
+                _outside(row, risk),
                 pattern,
                 pattern_names().get(pattern or "", ""),
                 _detail(row),
                 tuple(row.ica_ids),
+                row.disposition,
             )
         )
     return rows
@@ -219,9 +252,7 @@ def _row_disclosure(key: str, members: list[ObligationRow]) -> Markup:
     label, meaning = STOP_MEANING[key]
     risks = len({o.risk_name for o in members})
     outside = sum(o.outside for o in members)
-    tone = (
-        "pass" if key in REALIZED else ("skip" if key == "governance_only" else "warn")
-    )
+    tone = "pass" if key in REALIZED else ("skip" if key in NOT_ROUTED else "warn")
     summary = join(
         [
             badge(tone, label),
@@ -248,24 +279,41 @@ def _realized_scenarios(run: RunData, rows: list[ObligationRow]) -> list[str]:
     return sorted(found)
 
 
+def _routed(rows: list[ObligationRow]) -> list[ObligationRow]:
+    """Select the obligations routed to the control structure.
+
+    The disposition decides, as in the manifest funnel: a governance-only row
+    is never counted as routed, even one routed to a slot that found nothing.
+    """
+    return [o for o in rows if o.disposition not in NOT_ROUTED]
+
+
+def _with_disposition(rows: list[ObligationRow], disposition: str) -> int:
+    return sum(o.disposition == disposition for o in rows)
+
+
 def _lead(run: RunData, rows: list[ObligationRow], by_stop: dict) -> Markup:
-    governance = len(by_stop.get("governance_only", []))
+    governance = _with_disposition(rows, "governance_only")
+    excluded = _with_disposition(rows, "capability_excluded")
     realized = by_stop.get("scenario_realized", [])
-    routed = len(rows) - governance
+    routed = len(_routed(rows))
     scenarios = _realized_scenarios(run, rows)
     verb = "was" if len(realized) == 1 else "were"
     by = f", by {scenario_links(run, scenarios)}" if scenarios else ""
+    lacking = (
+        f"{excluded} need a capability the system does not have, " if excluded else ""
+    )
     return Markup(
         f"<p>{len(rows)} attack-pattern obligations from {len({o.risk_name for o in rows})} "
-        f"risks: {governance} map to no attack pattern, and {routed} were routed to the "
-        f"control structure. {len(realized)} {verb} realized{by}; the other "
+        f"risks: {governance} map to no attack pattern, {lacking}and {routed} were "
+        f"routed to the control structure. {len(realized)} {verb} realized{by}; the other "
         f"{routed - len(realized)} stopped. The other "
         f"{len(run.scenarios) - len(scenarios)} scenarios come from the loss analysis alone.</p>"
     )
 
 
 def _outside_note(rows: list[ObligationRow]) -> Markup:
-    routed = [o for o in rows if o.stop != "governance_only"]
+    routed = _routed(rows)
     outside = [o for o in routed if o.outside]
     if not outside:
         return Markup("")

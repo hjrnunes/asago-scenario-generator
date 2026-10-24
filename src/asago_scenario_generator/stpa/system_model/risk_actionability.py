@@ -1,27 +1,39 @@
-"""Risk-card actionability classification before Stage 1a.
+"""Risk-card scope classification before Stage 1a.
 
-Risk cards stay the only input for losses, but only actionable cards feed loss
-derivation. A bounded classification applies the STPA boundary test to every
-card: can a controller inside the analysis boundary realize the card's threat
-through a control action it takes or omits, with a consequence that reaches a
-stakeholder of this system?
+A bounded classification applies the STPA boundary test to the risk class of
+every card: can this system's own actions (its replies, its tool calls, or the
+data it stores or retrieves) produce harm of this class to someone?  Yes or
+partly makes the card ``actionable``; otherwise it is ``outside_boundary`` or
+``not_applicable``.
 
-Every card receives a decision and reason in ``risk-actionability.yaml``.
-Together with the Stage 1a risk dispositions (which cover the actionable
-cards) that record accounts for every supplied card.  A card the model
-leaves unclassified after one retry stays actionable with a warning, so a
-provider omission never silently removes coverage.
+The request shows the class (id, name, taxonomy, and the class description)
+and the system's own context, but not the card's threat and consequence.
+Policies often tell a class through one organizational story, such as staff
+pasting data into an external tool, and a model shown that story judges the
+story instead of the class.  The story is kept as provenance in the record
+only.  An actionable reply names the system action and the affected
+stakeholder, so the decision rests on a concrete action; a reply that
+contradicts its own fields goes to the retry.
+
+Scope is recorded, not used as a filter: every card reaches loss derivation,
+and obligation accounting carries each card's scope.  Wrongly including a
+card costs some analysis effort, while wrongly excluding one removes it from
+the loss analysis, so the classification leans toward ``actionable``.
+
+Every card receives a decision and reason in ``risk-actionability.yaml``.  A
+card the model leaves unclassified after one retry stays actionable with a
+warning, so a provider omission never hides a card.
 """
 
 from __future__ import annotations
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.stpa.infra.llm import LLMClient
@@ -41,7 +53,9 @@ STEP_RETRY = "risk_actionability_retry"
 SYSTEM_TEMPLATE = "stage1a_actionability_system.j2"
 USER_TEMPLATE = "stage1a_actionability_user.j2"
 ARTIFACT_FILENAME = "risk-actionability.yaml"
-SCHEMA_VERSION = "risk-actionability-v1"
+# v2 entries meet the decision/field invariant (see RiskActionabilityRecord);
+# v1 records predate the action fields and still load.
+SCHEMA_VERSION = "risk-actionability-v2"
 MAX_CARDS_PER_CALL = 40
 MAX_COMPLETION_TOKENS = 8192
 
@@ -55,9 +69,14 @@ class ActionabilityDecision(str, Enum):
 
 
 class RiskActionabilityDecision(BaseModel):
+    """One risk's decision. system_action and affected_stakeholder are text for
+    an actionable decision and null for the other decisions."""
+
     model_config = ConfigDict(extra="forbid")
 
     risk_id: str = Field(min_length=1)
+    system_action: str | None
+    affected_stakeholder: str | None
     decision: ActionabilityDecision
     reason: str = Field(min_length=1)
 
@@ -71,7 +90,13 @@ class RiskActionabilityResponse(BaseModel):
 
 
 class RiskActionabilityEntry(BaseModel):
-    """One card's recorded decision."""
+    """One card's recorded decision.
+
+    ``source`` says who decided.  ``model`` is a decision the model returned.
+    ``fallback`` marks a card the model left unclassified after the retry: its
+    ``actionable`` decision is the default that keeps the card in scope, not a
+    judgement, so it names no system action or stakeholder.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
@@ -79,6 +104,20 @@ class RiskActionabilityEntry(BaseModel):
     decision: ActionabilityDecision
     reason: str
     source: Literal["model", "fallback"]
+    system_action: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    affected_stakeholder: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    # The card's own threat and consequence: provenance only, never shown to
+    # the classification.
+    stated_threat: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
+    stated_consequence: str | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class RiskActionabilityRecord(BaseModel):
@@ -86,20 +125,31 @@ class RiskActionabilityRecord(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    schema_version: Literal["risk-actionability-v1"] = SCHEMA_VERSION
+    schema_version: Literal["risk-actionability-v1", "risk-actionability-v2"] = (
+        SCHEMA_VERSION
+    )
     status: Literal["completed", "partial", "empty"]
     call_count: int = Field(ge=0)
     counts: dict[str, int]
     entries: list[RiskActionabilityEntry]
     warnings: list[str] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def entries_meet_the_field_invariant(self) -> "RiskActionabilityRecord":
+        """Check every v2 entry's decision against its action fields."""
+        if self.schema_version == SCHEMA_VERSION:
+            for entry in self.entries:
+                problem = _entry_problem(entry)
+                if problem is not None:
+                    raise ValueError(f"entry '{entry.risk_id}': {problem}")
+        return self
+
 
 @dataclass
 class RiskActionabilityOutcome:
-    """Classification result: the record and the cards Stage 1a receives."""
+    """Classification result: the persisted record of every card's scope."""
 
     record: RiskActionabilityRecord
-    actionable_cards: list[RiskCard] = field(default_factory=list)
 
 
 def classify_risk_actionability(
@@ -112,7 +162,7 @@ def classify_risk_actionability(
     temperature: float,
     target_evidence: TargetEvidence | None = None,
 ) -> RiskActionabilityOutcome:
-    """Classify every card, persist the record, and return actionable cards.
+    """Classify every card's scope and persist the record.
 
     Cards are sent in batches of at most :data:`MAX_CARDS_PER_CALL`.  A batch
     whose call fails or omits cards receives one retry for its missing cards;
@@ -123,7 +173,7 @@ def classify_risk_actionability(
     if not cards:
         record = _record([], call_count=0, warnings=[])
         write_yaml(record, run_dir / ARTIFACT_FILENAME)
-        return RiskActionabilityOutcome(record=record, actionable_cards=[])
+        return RiskActionabilityOutcome(record=record)
 
     system_prompt = template_loader.render_prompt(SYSTEM_TEMPLATE)
     decided: dict[str, RiskActionabilityDecision] = {}
@@ -146,15 +196,7 @@ def classify_risk_actionability(
     entries = _actionability_entries(cards, decided, warnings)
     record = _record(entries, call_count=call_count, warnings=warnings)
     write_yaml(record, run_dir / ARTIFACT_FILENAME)
-    actionable_ids = {
-        entry.risk_id
-        for entry in entries
-        if entry.decision is ActionabilityDecision.actionable
-    }
-    return RiskActionabilityOutcome(
-        record=record,
-        actionable_cards=[card for card in cards if card.risk_id in actionable_ids],
-    )
+    return RiskActionabilityOutcome(record=record)
 
 
 def _classify_with_retry(
@@ -211,7 +253,11 @@ def _accept_requested_decisions(
     warnings: list[str],
     step: str,
 ) -> None:
-    """Record the first decision for each requested card; warn on the others."""
+    """Record the first consistent decision for each requested card.
+
+    A decision for an unrequested card, or one whose action fields contradict
+    it, is left out with a warning; its card stays pending for the retry.
+    """
     expected = {card.risk_id for card in pending}
     for item in decisions:
         if item.risk_id not in expected:
@@ -219,7 +265,47 @@ def _accept_requested_decisions(
                 f"{step}: ignored decision for unrequested card '{item.risk_id}'"
             )
             continue
+        problem = _decision_problem(item)
+        if problem is not None:
+            warnings.append(
+                f"{step}: rejected decision for '{item.risk_id}': {problem}"
+            )
+            continue
         decided.setdefault(item.risk_id, item)
+
+
+def _decision_problem(
+    item: RiskActionabilityDecision | RiskActionabilityEntry,
+) -> str | None:
+    """Name the contradiction between a decision and its action fields."""
+    named = [
+        bool((value or "").strip())
+        for value in (item.system_action, item.affected_stakeholder)
+    ]
+    if item.decision is ActionabilityDecision.actionable:
+        if not all(named):
+            return "an actionable decision names no system action or stakeholder"
+        return None
+    if any(named):
+        return (
+            f"the {item.decision.value} decision names a system action or stakeholder"
+        )
+    return None
+
+
+def _entry_problem(entry: RiskActionabilityEntry) -> str | None:
+    """Name what breaks the field invariant of one recorded entry.
+
+    A model entry meets the reply invariant.  A fallback entry is the
+    in-scope default: ``actionable`` with no action fields.
+    """
+    if entry.source == "model":
+        return _decision_problem(entry)
+    if entry.decision is not ActionabilityDecision.actionable:
+        return "a fallback entry keeps the card actionable"
+    if entry.system_action is not None or entry.affected_stakeholder is not None:
+        return "a fallback entry names no system action or stakeholder"
+    return None
 
 
 def _actionability_entries(
@@ -230,6 +316,10 @@ def _actionability_entries(
     """Build one entry per card, keeping unclassified cards actionable."""
     entries: list[RiskActionabilityEntry] = []
     for card in cards:
+        provenance = {
+            "stated_threat": card.threat,
+            "stated_consequence": card.consequence,
+        }
         item = decided.get(card.risk_id)
         if item is None:
             warnings.append(
@@ -240,8 +330,12 @@ def _actionability_entries(
                 RiskActionabilityEntry(
                     risk_id=card.risk_id,
                     decision=ActionabilityDecision.actionable,
-                    reason="Not classified by the model; kept in scope.",
+                    reason=(
+                        "Not classified by the model after one retry; kept in "
+                        "scope by default."
+                    ),
                     source="fallback",
+                    **provenance,
                 )
             )
         else:
@@ -251,9 +345,18 @@ def _actionability_entries(
                     decision=item.decision,
                     reason=item.reason.strip(),
                     source="model",
+                    system_action=_stripped(item.system_action),
+                    affected_stakeholder=_stripped(item.affected_stakeholder),
+                    **provenance,
                 )
             )
     return entries
+
+
+def _stripped(value: str | None) -> str | None:
+    """Return *value* without surrounding whitespace, or None when blank."""
+    text = (value or "").strip()
+    return text or None
 
 
 def _classify_batch(

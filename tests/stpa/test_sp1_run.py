@@ -33,6 +33,9 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     RevisionDelta,
 )
+from asago_scenario_generator.stpa.system_model.risk_actionability import (
+    RiskActionabilityResponse,
+)
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.calls_log import read_calls_jsonl
@@ -985,6 +988,70 @@ class TestRunSp1Artifacts:
         assert [entry.risk_id for entry in record.entries] == [
             card.risk_id for card in cards
         ]
+
+    def test_out_of_scope_cards_still_reach_loss_derivation(self, tmp_path):
+        """Scope is recorded, not a filter: every card feeds Stage 1a."""
+        cards = make_risk_cards()
+        client = _make_queued_mock_client()
+        client.set_response_for(
+            RiskActionabilityResponse,
+            {
+                "decisions": [
+                    {
+                        "risk_id": card.risk_id,
+                        "system_action": None,
+                        "affected_stakeholder": None,
+                        "decision": "outside_boundary",
+                        "reason": "Only actors outside the system act.",
+                    }
+                    for card in cards
+                ]
+            },
+        )
+
+        result = run_sp1_default(client, tmp_path)
+
+        assert result.risk_actionability is not None
+        assert result.risk_actionability.counts["actionable"] == 0
+        derivation = [
+            call
+            for call in client.calls
+            if getattr(call.response_format, "__name__", "")
+            == "_Stage1aRiskProviderDraft"
+        ]
+        assert len(derivation) == 1
+        for card in cards:
+            assert f"- {card.risk_id} — " in derivation[0].user_prompt
+        assert result.loss_analysis is not None
+        cited = {
+            ref
+            for loss in result.loss_analysis.risk_card_losses
+            for ref in loss.source_risk_cards
+        }
+        assert cited == {card.risk_id for card in cards}
+
+    def test_unclassified_cards_still_reach_loss_derivation(self, tmp_path):
+        """A card the classification never decided stays in scope as a fallback."""
+        cards = make_risk_cards()
+        client = _make_queued_mock_client()
+        client.set_invalid_response_for(RiskActionabilityResponse)
+
+        result = run_sp1_default(client, tmp_path)
+
+        assert result.risk_actionability is not None
+        assert {entry.source for entry in result.risk_actionability.entries} == {
+            "fallback"
+        }
+        derivation = [
+            call
+            for call in client.calls
+            if getattr(call.response_format, "__name__", "")
+            == "_Stage1aRiskProviderDraft"
+        ]
+        assert len(derivation) == 1
+        for card in cards:
+            assert f"- {card.risk_id} — " in derivation[0].user_prompt
+        assert result.loss_analysis is not None
 
     def test_pinned_run_has_no_boundary_decision(self, tmp_path):
         """A pinned graph skips the classification, so the result has no record."""

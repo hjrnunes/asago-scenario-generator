@@ -1,0 +1,21 @@
+template: stage1a_actionability_user.j2
+cases:
+  actionability-risks:
+    required:
+      - "## Use-Case Description"
+      - "## Organizational Risks"
+      - >-
+        Each risk names a class of harm: its `risk_id`, its name, the taxonomy
+        it comes from, and the taxonomy's description of the class.
+      - >-
+        - `risk-records`: Disclosure of account records (taxonomy:
+        ibm-risk-atlas). Class description: A reply discloses account records
+        without authority.
+      - Apply the boundary test to the class of each of the 1 risks above
+    forbidden:
+      - "Threat:"
+      - "Consequence:"
+      - Staff paste account records
+      - Staff of the organization
+      - outside tool's provider
+      - provenance

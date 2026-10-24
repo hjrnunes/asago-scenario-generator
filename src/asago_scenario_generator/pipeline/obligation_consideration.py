@@ -8,11 +8,14 @@ typed adapters.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from typing import Any
 
 from asago_scenario_generator.models.obligation_accounting import (
     GOVERNANCE_ROUTED_NO_FINDING,
+    OUT_OF_SCOPE,
+    RISK_OUT_OF_SCOPE,
+    SCOPE_EXEMPT_DISPOSITIONS,
     ObligationAccounting,
     ObligationAccountingRow,
     validate_obligation_accounting_source_pins,
@@ -710,6 +713,37 @@ def _accounting_rows(
     )
 
 
+def _scoped_rows(
+    plan: TaxonomyObligationPlan,
+    rows: tuple[ObligationAccountingRow, ...],
+    risk_scopes: Mapping[str, str],
+) -> tuple[ObligationAccountingRow, ...]:
+    """Record each row's risk scope; an out-of-scope scope sets the stop reason.
+
+    A row whose risk class no action of this system can produce stops at
+    ``risk_out_of_scope`` whatever stop reason it had, capability-excluded rows
+    included, so ``risk_pattern_mismatch`` and the other reasons count in-scope
+    misses only. Addressed and governance-only rows keep their own outcome. A
+    risk without a decision leaves its rows unchanged.
+    """
+    risk_of = {item.obligation_id: item.risk_ref.risk_id for item in plan.obligations}
+    return tuple(
+        _scoped_row(row, risk_scopes.get(risk_of[row.obligation_id])) for row in rows
+    )
+
+
+def _scoped_row(
+    row: ObligationAccountingRow, scope: str | None
+) -> ObligationAccountingRow:
+    """Return *row* with *scope* recorded and its precedence applied."""
+    if scope is None:
+        return row
+    values = {**row.model_dump(), "scope": scope}
+    if scope in OUT_OF_SCOPE and row.disposition not in SCOPE_EXEMPT_DISPOSITIONS:
+        values["stop_reason"] = RISK_OUT_OF_SCOPE
+    return ObligationAccountingRow.model_validate(values)
+
+
 def _accounting_summary(rows: tuple[ObligationAccountingRow, ...]) -> dict[str, int]:
     """Derive all provisional counts from rows, never from caller input."""
     return {
@@ -757,6 +791,7 @@ def build_obligation_accounting(
     ica_enumeration: Any | None = None,
     governance_routes: Iterable[ObligationRoute] = (),
     hazard_offers: SlotHazardOfferReport | None = None,
+    risk_scopes: Mapping[str, str] | None = None,
 ) -> ObligationAccounting:
     """Derive one provisional row per Phase 1 obligation.
 
@@ -765,7 +800,8 @@ def build_obligation_accounting(
     final routes of governance-only rows; a row with a finding on each routed
     slot is credited without leaving the governance-only disposition.
     ``hazard_offers`` is the run's slot hazard offer report; accounting
-    carries its summary.
+    carries its summary. ``risk_scopes`` maps a risk ID to its Stage 1a scope
+    decision; each row records the scope of its risk.
     """
     plan = _require_plan(plan)
     if not isinstance(consideration, ObligationConsideration):
@@ -787,7 +823,7 @@ def build_obligation_accounting(
     routes = _validate_accounting_pairs(
         plan, consideration, pairs, tuple(governance_routes)
     )
-    rows = _accounting_rows(plan, routes, pairs)
+    rows = _scoped_rows(plan, _accounting_rows(plan, routes, pairs), risk_scopes or {})
     pins = _validated_accounting_pins(source_pins, plan)
     return ObligationAccounting(
         source_pins=pins,
