@@ -46,8 +46,22 @@ cases:
       - "With no required pair it is the empty object `{}`."
     forbidden:
       - For a NOT_PROVIDED slot marked N/A
+      - authority_for_update
       - absence cannot be hazardous
       - lacks a requirement
       - not established before
       - the supplied hazardous context
       - the supplied loss consequence occurs
+  slot-request-feedback-authority:
+    required:
+      - >-
+        A feedback channel may carry `authority_for_update`, the recorded
+        assessment of whether it is entitled to establish the value of the
+        process-model part it updates, as opposed to only reporting it.
+      - a channel without it is unknown. It is separate from `untrusted`.
+      - >-
+        A controller that takes a non-authoritative report as establishing the
+        value, such as a reported approval taken as the approval itself, holds
+        a wrong process-model value even when the report is accurate.
+    once:
+      - "`authority_for_update`"

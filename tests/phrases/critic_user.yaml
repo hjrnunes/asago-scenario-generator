@@ -1,0 +1,18 @@
+template: critic_user.j2
+cases:
+  feedback-authority-critic:
+    required:
+      - >-
+        A feedback channel shown with an authority for update carries the
+        recorded assessment of whether it is entitled to establish the value of
+        the named PM, as opposed to only reporting it
+      - A channel shown without one is `unknown`.
+      - Authority is separate from source kind and trust.
+      - >-
+        Report as a `missing_feedback` gap a PM that decides a control action
+        when its only feedback is non-authoritative, or conditional outside its
+        stated conditions, and the supplied source names the party or record
+        that decides the value.
+  unassessed-critic:
+    forbidden:
+      - authority for update

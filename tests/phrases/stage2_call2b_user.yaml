@@ -21,6 +21,10 @@ cases:
       - risk flag
       - physical alarm
       - responsibilities
+      - >-
+        plus `authority_for_update` (`status` and `basis`) where the supplied
+        evidence bears on whether the channel may establish the value of the PM
+        it updates
   one-responsibility:
     required:
       - "Governing security constraints:"
