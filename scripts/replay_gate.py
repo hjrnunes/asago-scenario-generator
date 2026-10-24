@@ -11,7 +11,10 @@ scratch directory, ``--replay-calls`` pointing at a copy of the record, model
 settings stripped from the environment, and outbound sockets refused.  It then
 compares the trees.  Only the differences in :data:`ALLOWED_DIFFERENCES` and
 :data:`ALLOWED_TEXT_DIFFERENCES` are normalised; the first other difference
-fails the gate.  The named versions in :data:`VERSION_CHAINS` compare as the
+fails the gate.  :data:`EXPECTED_FILE_DIFFERENCES` names files expected to
+change when one exact cross-taxonomy edge is removed and all other mapping paths
+and obligation-plan content stay equal.  The named versions in
+:data:`VERSION_CHAINS` compare as the
 sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
 :data:`REMOVED_TEXT` and :data:`ALLOWED_FILE_CHANGES` name what a recording
 may hold that the replay no longer writes.
@@ -25,6 +28,7 @@ the gate reports it as a removed template instead of a difference.
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 import fnmatch
 import json
 import os
@@ -48,6 +52,7 @@ from asago_scenario_generator.stpa.infra.call_log import (
     jsonl_lines,
 )
 from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
+from asago_scenario_generator.stpa.infra.provider_record import request_digest
 
 _SCRIPT = Path(__file__).resolve()
 STAGE_FILENAME = "stage.json"
@@ -268,6 +273,73 @@ ALLOWED_FILE_CHANGES: tuple[AllowedFileChange, ...] = (
     ),
 )
 
+
+@dataclass(frozen=True)
+class ExpectedFileDifference:
+    """Files changed downstream of one exact mapping-path removal.
+
+    Affected recordings compare only through their validated replay misses:
+    missing scenario, Stage 5, and attack-flow files and exit status 1 are
+    expected.  This temporary allowance remains until those recordings are
+    replaced.  It activates only when the complete obligation plan differs by
+    paths containing the named realized-by edge and their derived obligations.
+    """
+
+    source_id: str
+    target_id: str
+    files: tuple[str, ...]
+    recording_only_files: tuple[str, ...]
+    allowed_stages: frozenset[str]
+    reason: str
+
+
+EXPECTED_FILE_DIFFERENCES: tuple[ExpectedFileDifference, ...] = (
+    ExpectedFileDifference(
+        source_id="LLM02",
+        target_id="AP-T2-02",
+        files=(
+            CALLS_FILENAME,
+            "condition-families.yaml",
+            "beliefs.json",
+            "gherkins.json",
+            "ica-merges.yaml",
+            "narratives.json",
+            "obligation-accounting.yaml",
+            "obligation-consideration.yaml",
+            "policy-coverage.json",
+            RECORD_FILENAME,
+            "report/index.html",
+            "report/stage-summary.json",
+            "run-manifest.yaml",
+            "scenario-realization.yaml",
+            "slot-hazard-offers.yaml",
+            "synthesis-manifest.yaml",
+            "target-realization.yaml",
+            "taxonomy-obligation-plan.yaml",
+            "testability.yaml",
+        ),
+        recording_only_files=(
+            "report/attack-flow/*.json",
+            "report/process-model-gaps.yaml",
+            "scenarios/*.feature",
+            "scenarios/*.yaml",
+            "stage5-normalizations/*.yaml",
+        ),
+        allowed_stages=frozenset(
+            {
+                "synthesis_obligation_aware_routing",
+                "synthesis_obligation_aware_icas",
+                "synthesis_obligation_aware_ica_hazard_verification",
+                "synthesis_obligation_aware_ica_hazard_correction",
+                "stage_5",
+            }
+        ),
+        reason="removing the data-leakage route to multi-tool exfiltration changes "
+        "the obligation plan, downstream request identities, replay misses, and "
+        "the partial artifacts and reports produced by interrupted offline runs",
+    ),
+)
+
 # A calls.jsonl entry names the provider-calls.jsonl records its call wrote
 # (``provider_requests``, with ``response_parsed``), or has an empty list and
 # holds the prompt and response text when it wrote none.  An entry logged
@@ -314,7 +386,9 @@ class GateResult:
     exit_code: int
     seconds: float
     expected_exit_code: int = 0
+    expected_exit_difference: str | None = None
     network_attempts: list[str] = field(default_factory=list)
+    expected_differences: list[Difference] = field(default_factory=list)
     differences: list[Difference] = field(default_factory=list)
     files_compared: int = 0
     removed_templates: list[str] = field(default_factory=list)
@@ -323,7 +397,10 @@ class GateResult:
     @property
     def passed(self) -> bool:
         return (
-            self.exit_code == self.expected_exit_code
+            (
+                self.exit_code == self.expected_exit_code
+                or self.expected_exit_difference is not None
+            )
             and not self.network_attempts
             and not self.differences
         )
@@ -917,6 +994,333 @@ def _file_change_allowed(name: str, side: str) -> bool:
     )
 
 
+_OBLIGATION_PLAN_FILENAME = "taxonomy-obligation-plan.yaml"
+
+
+def _obligation_plan(root: Path, aliases: dict[str, str]) -> dict[str, Any] | None:
+    path = root / _OBLIGATION_PLAN_FILENAME
+    if not path.is_file():
+        return None
+    document = yaml.safe_load(_substitute(path.read_text(encoding="utf-8"), aliases))
+    return document if isinstance(document, dict) else None
+
+
+def _mapping_paths(obligation: Any) -> list[list[dict[str, Any]]] | None:
+    """Return complete mapping paths, or ``None`` for malformed evidence."""
+    if not isinstance(obligation, dict) or not isinstance(
+        obligation.get("evidence", []), list
+    ):
+        return None
+    paths: list[list[dict[str, Any]]] = []
+    for item in obligation.get("evidence", []):
+        if not isinstance(item, dict) or item.get("kind") != "mapping":
+            continue
+        try:
+            detail = json.loads(item.get("detail", ""))
+        except (TypeError, ValueError):
+            return None
+        path = detail.get("path") if isinstance(detail, dict) else None
+        if not isinstance(path, list) or not all(
+            isinstance(edge, dict) for edge in path
+        ):
+            return None
+        paths.append(path)
+    return paths
+
+
+def _contains_removed_edge(
+    path: list[dict[str, Any]], change: ExpectedFileDifference
+) -> bool:
+    return any(
+        edge.get("relation") == "realized_by"
+        and edge.get("source_id") == change.source_id
+        and edge.get("target_id") == change.target_id
+        for edge in path
+    )
+
+
+def _plan_integrity_holds(document: dict[str, Any]) -> bool:
+    """Validate complete persisted plans while permitting minimal test fixtures."""
+    if document.get("schema_version") != "taxonomy-obligation-plan-v1":
+        return True
+    from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
+
+    try:
+        plan = TaxonomyObligationPlan.model_validate(document)
+        plan.assert_integrity()
+    except (TypeError, ValueError):
+        return False
+    return True
+
+
+def _normalised_plan_header(document: dict[str, Any]) -> dict[str, Any]:
+    """Drop fields derived from obligations or the changed mapping bundle."""
+    copied = json.loads(json.dumps(document))
+    for field_name in ("obligations", "semantic_digest", "summary"):
+        copied.pop(field_name, None)
+    mapping_pins = copied.get("mapping_pins")
+    if isinstance(mapping_pins, dict):
+        edge_pin = mapping_pins.get("obligation_edges")
+        if isinstance(edge_pin, dict):
+            edge_pin.pop("digest", None)
+    return copied
+
+
+def _normalised_obligations(obligations: list[dict[str, Any]]) -> list[Any]:
+    rows = []
+    for obligation in obligations:
+        copied = json.loads(json.dumps(obligation))
+        copied.pop("obligation_id", None)
+        rows.append(copied)
+    return sorted(rows, key=_record_key)
+
+
+def _expected_file_difference(
+    recorded: Path, replayed: Path, aliases: dict[str, str]
+) -> ExpectedFileDifference | None:
+    """Return the allowance enabled by one exact obligation-plan transform."""
+    before = _obligation_plan(recorded, {})
+    after = _obligation_plan(replayed, aliases)
+    if before is None or after is None:
+        return None
+    before_obligations = before.get("obligations")
+    after_obligations = after.get("obligations")
+    if not (
+        isinstance(before_obligations, list)
+        and isinstance(after_obligations, list)
+        and _plan_integrity_holds(before)
+        and _plan_integrity_holds(after)
+    ):
+        return None
+    for change in EXPECTED_FILE_DIFFERENCES:
+        kept_obligations: list[dict[str, Any]] = []
+        kept_paths: Counter[str] = Counter()
+        removed_paths = 0
+        valid = True
+        for obligation in before_obligations:
+            paths = _mapping_paths(obligation)
+            if paths is None:
+                valid = False
+                break
+            removed = [path for path in paths if _contains_removed_edge(path, change)]
+            if removed:
+                if len(removed) != len(paths):
+                    valid = False
+                    break
+                removed_paths += len(removed)
+                continue
+            if not isinstance(obligation, dict):
+                valid = False
+                break
+            kept_obligations.append(obligation)
+            kept_paths.update(_record_key(path) for path in paths)
+        replay_paths: Counter[str] = Counter()
+        for obligation in after_obligations:
+            paths = _mapping_paths(obligation)
+            if paths is None or any(
+                _contains_removed_edge(path, change) for path in paths
+            ):
+                valid = False
+                break
+            replay_paths.update(_record_key(path) for path in paths)
+        if not valid or not removed_paths or kept_paths != replay_paths:
+            continue
+        if _normalised_obligations(kept_obligations) != _normalised_obligations(
+            after_obligations
+        ):
+            continue
+        if _normalised_plan_header(before) == _normalised_plan_header(after):
+            return change
+    return None
+
+
+def _normalised_record(record: Any, relative: str) -> Any:
+    return _normalise(record, relative, jsonl=False)
+
+
+def _record_key(record: Any) -> str:
+    return json.dumps(record, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _provider_record_problem(record: Any, side: str, index: int) -> str | None:
+    where = f"{side} $[{index}]"
+    if not isinstance(record, dict):
+        return f"{where} is not an object"
+    request = record.get("request")
+    if not isinstance(request, dict):
+        return f"{where}.request is not an object"
+    if record.get("request_sha256") != request_digest(request):
+        return f"{where}.request_sha256 does not match its request"
+    return None
+
+
+def _expected_replay_miss_sequences(
+    recorded: Path,
+    replayed: Path,
+    aliases: dict[str, str],
+    allowed_stages: frozenset[str],
+) -> frozenset[int] | None:
+    """Validate unchanged responses and return new replay-miss sequences."""
+    left_path, right_path = recorded / RECORD_FILENAME, replayed / RECORD_FILENAME
+    if not left_path.is_file() or not right_path.is_file():
+        return None
+    left_raw = _parse(left_path.read_text(encoding="utf-8"), ".jsonl")
+    right_text = right_path.read_text(encoding="utf-8")
+    right_raw = _parse(right_text, ".jsonl")
+    right_aliased = _parse(_substitute(right_text, aliases), ".jsonl")
+    for side, rows in (("recording", left_raw), ("replay", right_raw)):
+        for index, record in enumerate(rows):
+            if _provider_record_problem(record, side, index):
+                return None
+
+    available = Counter(
+        _record_key(_normalised_record(record, RECORD_FILENAME)) for record in left_raw
+    )
+    recorded_requests = {
+        _record_key([record.get("identity"), record.get("request_sha256")])
+        for record in left_raw
+    }
+    misses: set[int] = set()
+    for raw, aliased in zip(right_raw, right_aliased):
+        key = _record_key(_normalised_record(aliased, RECORD_FILENAME))
+        if available[key]:
+            available[key] -= 1
+            continue
+        error = raw.get("error")
+        request_key = _record_key([raw.get("identity"), raw.get("request_sha256")])
+        if not (
+            raw.get("outcome") == "error"
+            and raw.get("response") is None
+            and raw.get("local_rejection") is None
+            and isinstance(error, dict)
+            and error.get("type") == "ReplayMissError"
+            and isinstance(error.get("message"), str)
+            and error["message"].startswith("no recorded response for request ")
+            and request_key not in recorded_requests
+            and isinstance(raw.get("identity"), dict)
+            and raw["identity"].get("stage") in allowed_stages
+            and isinstance(raw.get("sequence"), int)
+        ):
+            return None
+        misses.add(raw["sequence"])
+    return frozenset(misses) if misses else None
+
+
+@dataclass(frozen=True)
+class _ExpectedDifference:
+    change: ExpectedFileDifference
+    miss_sequences: frozenset[int] | None
+    call_links_valid: bool
+
+
+def _expected_difference(
+    recorded: Path, replayed: Path, aliases: dict[str, str]
+) -> _ExpectedDifference | None:
+    """Validate the plan transform and its replay-miss cascade once."""
+    change = _expected_file_difference(recorded, replayed, aliases)
+    if change is None:
+        return None
+    misses = _expected_replay_miss_sequences(
+        recorded, replayed, aliases, change.allowed_stages
+    )
+    call_links_valid = all(
+        path.is_file() and _call_link_problem(path, side) is None
+        for path, side in (
+            (recorded / CALLS_FILENAME, "recording"),
+            (replayed / CALLS_FILENAME, "replay"),
+        )
+    )
+    return _ExpectedDifference(change, misses, call_links_valid)
+
+
+def _normalised_call(entry: Any) -> Any:
+    copied = json.loads(json.dumps(entry))
+    if isinstance(copied, dict):
+        for name in _CALL_TEXT_FIELDS + _CALL_LINK_FIELDS:
+            copied.pop(name, None)
+    return _normalised_record(copied, CALLS_FILENAME)
+
+
+def _expected_call_log_difference(
+    recorded: Path,
+    replayed: Path,
+    aliases: dict[str, str],
+    miss_sequences: frozenset[int],
+) -> bool:
+    """Accept exact old calls or fully validated calls linked to replay misses."""
+    left = call_entries((recorded / CALLS_FILENAME).read_text(encoding="utf-8"))
+    right_text = (replayed / CALLS_FILENAME).read_text(encoding="utf-8")
+    right = call_entries(_substitute(right_text, aliases))
+    available = Counter(_record_key(_normalised_call(entry)) for entry in left)
+    accepted_miss = False
+    for entry in right:
+        key = _record_key(_normalised_call(entry))
+        if available[key]:
+            available[key] -= 1
+            continue
+        if not isinstance(entry, dict):
+            return False
+        links = entry.get("provider_requests")
+        sequences = (
+            {link.get("sequence") for link in links if isinstance(link, dict)}
+            if isinstance(links, list)
+            else set()
+        )
+        if not (
+            sequences
+            and sequences <= miss_sequences
+            and entry.get("success") is False
+            and entry.get("response_parsed") is False
+            and entry.get("terminal_error_codes") == ["provider_call_failure"]
+            and isinstance(entry.get("error"), str)
+            and entry["error"].startswith("ReplayMissError: no recorded response")
+        ):
+            return False
+        accepted_miss = True
+    return accepted_miss
+
+
+def _expected_recording_only_file(
+    relative: str, expected: _ExpectedDifference | None
+) -> bool:
+    return (
+        expected is not None
+        and expected.miss_sequences is not None
+        and any(
+            fnmatch.fnmatch(relative, pattern)
+            for pattern in expected.change.recording_only_files
+        )
+    )
+
+
+def _is_expected_content_difference(
+    recorded: Path,
+    replayed: Path,
+    relative: str,
+    detail: str,
+    aliases: dict[str, str],
+    expected: _ExpectedDifference | None,
+) -> bool:
+    """Keep integrity failures visible while accepting expected content drift."""
+    if expected is None or relative not in expected.change.files:
+        return False
+    if relative == RECORD_FILENAME:
+        return expected.miss_sequences is not None
+    if relative == CALLS_FILENAME:
+        return (
+            expected.miss_sequences is not None
+            and expected.call_links_valid
+            and _expected_call_log_difference(
+                recorded, replayed, aliases, expected.miss_sequences
+            )
+        )
+    if detail.startswith("$"):
+        return True
+    return relative == "report/index.html" and detail.startswith(
+        ("line ", "content differs")
+    )
+
+
 def _distinct_versions(
     root: Path, canonical: str, aliases: dict[str, str] | None = None
 ) -> list[Any]:
@@ -965,6 +1369,7 @@ def compare_trees(
     *,
     present_templates: frozenset[str] | None = None,
     removed_templates: set[str] | None = None,
+    expected_differences: list[Difference] | None = None,
 ) -> tuple[int, list[Difference]]:
     """Compare every file under *recorded* and *replayed*.
 
@@ -973,6 +1378,7 @@ def compare_trees(
     """
     present = checkout_templates() if present_templates is None else present_templates
     aliases = {**path_map, **_run_id_aliases(recorded, replayed)}
+    expected = _expected_difference(recorded, replayed, aliases)
     named_versions = {name for names in VERSION_CHAINS.values() for name in names}
     left = _files(recorded) - named_versions
     right = _files(replayed) - named_versions
@@ -982,6 +1388,7 @@ def compare_trees(
             Difference(name, "only in recording")
             for name in sorted(left - right)
             if not _file_change_allowed(name, "recording")
+            and not _expected_recording_only_file(name, expected)
         ]
         + [
             Difference(name, "only in replay")
@@ -989,6 +1396,12 @@ def compare_trees(
             if not _file_change_allowed(name, "replay")
         ]
     )
+    if expected_differences is not None:
+        expected_differences.extend(
+            Difference(name, "only in recording")
+            for name in sorted(left - right)
+            if _expected_recording_only_file(name, expected)
+        )
     shared = sorted(left & right)
     for relative in shared:
         detail = compare_file(
@@ -1000,11 +1413,46 @@ def compare_trees(
             removed_templates=removed_templates,
         )
         if detail:
-            differences.append(Difference(relative, detail))
+            difference = Difference(relative, detail)
+            if _is_expected_content_difference(
+                recorded, replayed, relative, detail, aliases, expected
+            ):
+                if expected_differences is not None:
+                    expected_differences.append(difference)
+            else:
+                differences.append(difference)
     return len(shared), differences
 
 
 # --- the gate ----------------------------------------------------------------
+
+
+def _expected_replay_miss_exit(
+    recorded: Path,
+    replayed: Path,
+    aliases: dict[str, str],
+    run_log: Path,
+    exit_code: int,
+    expected_exit_code: int,
+) -> str | None:
+    """Describe the exact replay-miss exit caused by an expected plan change."""
+    if exit_code != 1 or expected_exit_code != 0 or not run_log.is_file():
+        return None
+    change = _expected_file_difference(recorded, replayed, aliases)
+    if change is None:
+        return None
+    misses = _expected_replay_miss_sequences(
+        recorded, replayed, aliases, change.allowed_stages
+    )
+    lines = run_log.read_text(encoding="utf-8").splitlines()
+    if misses is None or len(lines) != 1:
+        return None
+    match = re.fullmatch(
+        r"Error: (\d+) request\(s\) had no recorded response: \[.*\]", lines[0]
+    )
+    if match is None or int(match.group(1)) != len(misses):
+        return None
+    return f"{len(misses)} expected replay miss(es) after the obligation-plan change"
 
 
 def run_gate(
@@ -1076,13 +1524,28 @@ def _run_gate_in(
         result.log_tail = run_log.read_text(encoding="utf-8").splitlines()[-5:]
     if prepared.output_dir.is_dir():
         removed: set[str] = set()
+        expected: list[Difference] = []
         result.files_compared, result.differences = compare_trees(
             recorded,
             prepared.output_dir,
             prepared.path_map,
             removed_templates=removed,
+            expected_differences=expected,
         )
         result.removed_templates = sorted(removed)
+        result.expected_differences = expected
+        aliases = {
+            **prepared.path_map,
+            **_run_id_aliases(recorded, prepared.output_dir),
+        }
+        result.expected_exit_difference = _expected_replay_miss_exit(
+            recorded,
+            prepared.output_dir,
+            aliases,
+            run_log,
+            exit_code,
+            expected_exit_code,
+        )
     else:
         result.differences = [Difference(".", "replay wrote no output directory")]
     return result
@@ -1099,6 +1562,8 @@ def _report(result: GateResult, work: Path | None, limit: int) -> str:
         f"files:     {result.files_compared} compared",
     ]
     lines += [f"  {line[:300]}" for line in result.log_tail]
+    if result.expected_exit_difference:
+        lines.append(f"expected exit difference: {result.expected_exit_difference}")
     if result.network_attempts:
         lines.append(f"network:   {len(result.network_attempts)} refused attempt(s)")
         lines += [f"  {attempt}" for attempt in result.network_attempts[:limit]]
@@ -1108,6 +1573,11 @@ def _report(result: GateResult, work: Path | None, limit: int) -> str:
             "hash(es) for templates absent from this checkout"
         )
         lines += [f"  {name}" for name in result.removed_templates]
+    if result.expected_differences:
+        lines.append(
+            f"expected differences: {len(result.expected_differences)} file(s)"
+        )
+        lines += [f"  {item.path}" for item in result.expected_differences[:limit]]
     if result.differences:
         lines.append(f"differences: {len(result.differences)} file(s)")
         lines += [f"  {item}" for item in result.differences[:limit]]

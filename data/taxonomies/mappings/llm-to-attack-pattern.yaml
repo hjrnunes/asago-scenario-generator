@@ -32,7 +32,7 @@ patterns:
     llm: [LLM03, LLM01]
     rationale: Manipulated function-call parameters abuse an agent's tool authority through the prompt.
   - id: AP-T2-02
-    llm: [LLM03, LLM02, LLM01]
+    llm: [LLM03, LLM01]
     rationale: A chain of authorized tool calls discloses sensitive data through excessive agency.
   - id: AP-T2-03
     llm: [LLM03, LLM01]
