@@ -200,7 +200,7 @@ def test_a_misaligned_pair_stops_at_mismatch(disposition: str) -> None:
 
 
 @pytest.mark.parametrize("alignment", ("supported", "insufficient_evidence"))
-def test_an_aligned_pair_without_the_mechanism_stops_at_mechanism_absent(
+def test_a_not_misaligned_pair_without_the_mechanism_stops_at_mechanism_absent(
     alignment: str,
 ) -> None:
     row = _stop("proposed_not_applicable", "absent_from_system", alignment)
@@ -287,6 +287,77 @@ def test_an_absent_mechanism_beats_a_missing_structural_route() -> None:
     row = _stop("unresolved", "absent_from_system", "supported")
 
     assert row.stop_reason == "mechanism_absent"
+
+
+# The whole table: every alignment, mechanism and disposition, in and out of scope.
+
+_ALIGNMENTS = ("supported", "mismatch", "insufficient_evidence")
+_MECHANISMS = ("plausible_in_system", "absent_from_system", "insufficient_evidence")
+_DISPOSITIONS = ("targeted", "proposed_not_applicable", "unresolved")
+# The reason a route keeps when no semantic reason applies.
+_ROUTE_REASON = {
+    "targeted": "addressed",
+    "proposed_not_applicable": "not_applicable_evidence_incomplete",
+    "unresolved": "no_structural_route",
+}
+
+
+def _ordered_reason(disposition: str, mechanism: str, alignment: str) -> str:
+    """The decided order: alignment, then an absent mechanism, then the path."""
+    if alignment == "mismatch":
+        return "risk_pattern_mismatch"
+    if mechanism == "absent_from_system":
+        return "mechanism_absent"
+    if disposition == "targeted" and mechanism != "plausible_in_system":
+        return "mechanism_path_unsubstantiated"
+    return _ROUTE_REASON[disposition]
+
+
+_TABLE = tuple(
+    (disposition, mechanism, alignment)
+    for disposition in _DISPOSITIONS
+    for mechanism in _MECHANISMS
+    for alignment in _ALIGNMENTS
+)
+
+
+@pytest.mark.parametrize("disposition", _DISPOSITIONS)
+def test_a_misaligned_pair_without_the_mechanism_stops_at_mismatch(
+    disposition: str,
+) -> None:
+    row = _stop(disposition, "absent_from_system", "mismatch")
+
+    assert row.stop_reason == "risk_pattern_mismatch"
+    assert _semantic_codes(row) == ["risk_pattern_mismatch"]
+
+
+@pytest.mark.parametrize(("disposition", "mechanism", "alignment"), _TABLE)
+def test_every_combination_stops_at_one_reason(
+    disposition: str, mechanism: str, alignment: str
+) -> None:
+    reason = _ordered_reason(disposition, mechanism, alignment)
+
+    row = _stop(disposition, mechanism, alignment)
+
+    assert row.stop_reason == reason
+    expected = [reason] if reason in SEMANTIC_STOP_REASONS else []
+    assert _semantic_codes(row) == expected
+
+
+@pytest.mark.parametrize(("disposition", "mechanism", "alignment"), _TABLE)
+@pytest.mark.parametrize("scope", ("outside_boundary", "not_applicable"))
+def test_an_out_of_scope_risk_overrides_every_combination(
+    disposition: str, mechanism: str, alignment: str, scope: str
+) -> None:
+    reason = _ordered_reason(disposition, mechanism, alignment)
+
+    row = _stop(disposition, mechanism, alignment, scope=scope)
+
+    # A credited row keeps its own outcome; every other stops at the scope.
+    assert row.stop_reason == (
+        "addressed" if reason == "addressed" else "risk_out_of_scope"
+    )
+    assert _semantic_codes(row) == []
 
 
 # One label per row.

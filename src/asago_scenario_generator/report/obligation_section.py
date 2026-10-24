@@ -59,7 +59,7 @@ STOP_MEANING = {
     ),
     "mechanism_absent": (
         "Mechanism absent from the system",
-        "The attack pattern fits the risk, but the system lacks the surface its mechanism needs, such as a tool that sends data to a chosen destination.",
+        "The attack pattern was not judged misaligned with the risk, but the system lacks the surface its mechanism needs, such as a tool that sends data to a chosen destination.",
     ),
     "mechanism_path_unsubstantiated": (
         "Path does not prove the mechanism",

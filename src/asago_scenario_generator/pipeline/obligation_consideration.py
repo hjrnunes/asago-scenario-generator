@@ -471,7 +471,8 @@ def _semantic_stop_detail(disposition: str, assessment: Any) -> tuple[str, str] 
 
     Alignment comes before mechanism: a pair whose mechanism would not realize
     the risk stops at ``risk_pattern_mismatch`` whatever the mechanism
-    judgement. An aligned pair whose mechanism the system lacks stops at
+    judgement. A pair not judged misaligned (``supported`` or
+    ``insufficient_evidence``) whose mechanism the system lacks stops at
     ``mechanism_absent``; a targeted route whose path does not establish the
     mechanism stops at ``mechanism_path_unsubstantiated``.
     """
