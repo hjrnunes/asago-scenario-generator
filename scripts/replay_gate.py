@@ -13,7 +13,10 @@ compares the trees.  Only the differences in :data:`ALLOWED_DIFFERENCES` and
 :data:`ALLOWED_TEXT_DIFFERENCES` are normalised; the first other difference
 fails the gate.  :data:`EXPECTED_FILE_DIFFERENCES` names files expected to
 change when one exact cross-taxonomy edge is removed and all other mapping paths
-and obligation-plan content stay equal.  The named versions in
+and obligation-plan content stay equal.  :data:`ACCOUNTING_STOP_REASON_CHANGE`
+names the accounting outputs the fixed order of the semantic stop reasons
+changes, accepted only as that order derives them from unchanged routes.
+The named versions in
 :data:`VERSION_CHAINS` compare as the
 sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
 :data:`REMOVED_TEXT` and :data:`ALLOWED_FILE_CHANGES` name what a recording
@@ -370,6 +373,80 @@ EXPECTED_FILE_DIFFERENCES: tuple[ExpectedFileDifference, ...] = (
         "the obligation plan, downstream request identities, replay misses, and "
         "the partial artifacts and reports produced by interrupted offline runs",
     ),
+)
+
+
+@dataclass(frozen=True)
+class AccountingStopReasonChange:
+    """Accounting outputs changed by the fixed order of the semantic stop reasons.
+
+    Accounting runs after every model request, so the order changes no request:
+    only the accounting rows and what reads them.  The allowance activates
+    when both accounting files pass their integrity checks, hold the same
+    obligations and header, and every row that differs is the one
+    *stop_order* derives from its route's semantic assessment in the replay's
+    obligation consideration: its new stop reason (or ``risk_out_of_scope``
+    for an out-of-scope risk), at most the move of a non-addressed row to
+    ``unresolved``, and its recorded diagnostics less the
+    *superseded_diagnostics* of the checks the semantic stop now precedes and
+    the diagnostics of the other semantic reasons, with exactly one of its
+    own reason: the first recorded copy, or the one accounting derives (none
+    on an out-of-scope row).  Every other diagnostic stays as recorded.  At
+    least one row must differ, or nothing is allowed.  The scenario
+    realization may then differ only in its accounting pin and digest; the
+    synthesis manifest only in the *manifest_digests* of those two files and
+    in its obligation disposition counts, stop-reason counts, resolution
+    funnel and scope summary, each equal to its recorded value with the
+    changed rows moved; and the report only inside *report_section*, which
+    must be the section the report renders from the replayed files.  This
+    temporary allowance remains until recordings made before the order are
+    replaced.
+    """
+
+    stop_order: tuple[str, ...]
+    superseded_diagnostics: frozenset[str]
+    accounting_file: str
+    accounting_pin: str
+    consideration_file: str
+    realization_file: str
+    manifest_digests: tuple[str, ...]
+    report_file: str
+    report_section: str
+    reason: str
+
+    @property
+    def files(self) -> tuple[str, ...]:
+        return (
+            self.accounting_file,
+            self.realization_file,
+            _MANIFEST_FILENAME,
+            self.report_file,
+        )
+
+
+ACCOUNTING_STOP_REASON_CHANGE = AccountingStopReasonChange(
+    stop_order=(
+        "risk_pattern_mismatch",
+        "mechanism_absent",
+        "mechanism_path_unsubstantiated",
+    ),
+    superseded_diagnostics=frozenset(
+        {
+            "incomplete_non_applicability",
+            "missing_ica_consideration",
+            "unresolved_ica_consideration",
+        }
+    ),
+    accounting_file="obligation-accounting.yaml",
+    accounting_pin="obligation-accounting",
+    consideration_file="obligation-consideration.yaml",
+    realization_file="scenario-realization.yaml",
+    manifest_digests=("obligation_accounting", "scenario_realization"),
+    report_file="report/index.html",
+    report_section="obligations",
+    reason="accounting applies the risk scope, then risk alignment, then the "
+    "mechanism, adds mechanism_absent, and keeps one semantic diagnostic per "
+    "row, so recorded stop reasons and diagnostics move with no request change",
 )
 
 # A calls.jsonl entry names the provider-calls.jsonl records its call wrote
@@ -925,17 +1002,7 @@ def compare_file(
         return None
     suffix = recorded.suffix
     if suffix not in {".json", ".jsonl", ".yaml", ".yml"}:
-        for removed_text in REMOVED_TEXT:
-            if removed_text.file != relative:
-                continue
-            if removed_text.pattern.search(right_text):
-                return f"replay writes {removed_text.reason}, which is removed"
-            left_text = removed_text.pattern.sub("", left_text)
-        left_text = _mask_text(left_text, relative)
-        right_text = _mask_text(right_text, relative)
-        if left_text == right_text:
-            return None
-        return _text_difference(left_text, right_text)
+        return _unparsed_text_difference(left_text, right_text, relative)
     left_data = _parse(left_text, suffix, relative)
     right_data = _parse(right_text, suffix, relative)
     if relative in _SELF_DIGESTED:
@@ -970,6 +1037,23 @@ def compare_file(
     if difference is None and removed_templates is not None:
         removed_templates |= removed
     return difference
+
+
+def _unparsed_text_difference(
+    left_text: str, right_text: str, relative: str
+) -> str | None:
+    """Compare a text file the gate cannot parse, after its documented masks."""
+    for removed_text in REMOVED_TEXT:
+        if removed_text.file != relative:
+            continue
+        if removed_text.pattern.search(right_text):
+            return f"replay writes {removed_text.reason}, which is removed"
+        left_text = removed_text.pattern.sub("", left_text)
+    left_text = _mask_text(left_text, relative)
+    right_text = _mask_text(right_text, relative)
+    if left_text == right_text:
+        return None
+    return _text_difference(left_text, right_text)
 
 
 def _mask_text(text: str, relative: str) -> str:
@@ -1331,6 +1415,427 @@ def _expected_recording_only_file(
     )
 
 
+@dataclass(frozen=True)
+class _AccountingChange:
+    """The validated accounting difference the derived files must follow."""
+
+    recorded_digest: str
+    replayed_digest: str
+    replayed_summary: dict[str, int]
+    removed_reasons: Counter[str]
+    added_reasons: Counter[str]
+
+
+def _checked_yaml(path: Path, load: Callable[[str], Any]) -> dict[str, Any] | None:
+    """Return the parsed mapping when *load* accepts the file's integrity."""
+    if not path.is_file():
+        return None
+    text = path.read_text(encoding="utf-8")
+    try:
+        load(text)
+    except (TypeError, ValueError):
+        return None
+    document = yaml.safe_load(text)
+    return document if isinstance(document, dict) else None
+
+
+def _ordered_stop(
+    route: Any, change: AccountingStopReasonChange = ACCOUNTING_STOP_REASON_CHANGE
+) -> str | None:
+    """Derive the semantic stop reason of one route in the fixed order."""
+    if not isinstance(route, dict):
+        return None
+    assessment = route.get("semantic_assessment")
+    if not isinstance(assessment, dict):
+        return None
+    mismatch, absent, unsubstantiated = change.stop_order
+    if assessment.get("risk_alignment") == "mismatch":
+        return mismatch
+    mechanism = assessment.get("mechanism_assessment")
+    if mechanism == "absent_from_system":
+        return absent
+    if route.get("disposition") == "targeted" and mechanism != "plausible_in_system":
+        return unsubstantiated
+    return None
+
+
+def _changed_row_explained(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    routes: dict[Any, Any],
+    change: AccountingStopReasonChange,
+) -> bool:
+    """Tell whether *after* is the row the stop order derives from *before*."""
+    from asago_scenario_generator.models.obligation_accounting import (
+        OUT_OF_SCOPE,
+        RISK_OUT_OF_SCOPE,
+        SCOPE_EXEMPT_DISPOSITIONS,
+    )
+
+    moved = ("stop_reason", "disposition", "diagnostics")
+    if {k: v for k, v in before.items() if k not in moved} != {
+        k: v for k, v in after.items() if k not in moved
+    }:
+        return False
+    refs = after.get("route_refs") or []
+    code = _ordered_stop(routes.get(refs[0]) if len(refs) == 1 else None, change)
+    out_of_scope = (
+        after.get("scope") in OUT_OF_SCOPE
+        and after.get("disposition") not in SCOPE_EXEMPT_DISPOSITIONS
+    )
+    if not out_of_scope and code is None:
+        return False
+    if after.get("stop_reason") != (RISK_OUT_OF_SCOPE if out_of_scope else code):
+        return False
+    if before.get("disposition") != after.get("disposition") and not (
+        code is not None
+        and after.get("disposition") == "unresolved"
+        and before.get("disposition") in {"proposed_not_applicable", "upstream_gap"}
+    ):
+        return False
+    before_items = before.get("diagnostics", [])
+    if not isinstance(before_items, list):
+        return False
+    derived = None
+    if code is not None:
+        derived = _derived_diagnostic(routes[refs[0]], after.get("obligation_id"), code)
+        if derived is None:
+            return False
+    expected = _expected_diagnostics(before_items, code, derived, out_of_scope, change)
+    return after.get("diagnostics", []) == expected
+
+
+def _derived_diagnostic(
+    route: dict[str, Any], obligation_id: Any, code: str
+) -> dict[str, Any] | None:
+    """Return the diagnostic accounting writes for *code* on the route's row."""
+    from asago_scenario_generator.models.obligation_consideration import (
+        ConsiderationDiagnostic,
+        ObligationSemanticAssessment,
+    )
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        _semantic_stop_detail,
+    )
+
+    try:
+        assessment = ObligationSemanticAssessment.model_validate(
+            route.get("semantic_assessment")
+        )
+        stop = _semantic_stop_detail(route.get("disposition"), assessment)
+        if stop is None or stop[0] != code:
+            return None
+        diagnostic = ConsiderationDiagnostic(
+            code=code,
+            detail=stop[1],
+            obligation_ids=(obligation_id,),
+            refs=(route.get("route_id"),),
+        )
+    except (TypeError, ValueError):
+        return None
+    return diagnostic.model_dump(mode="json")
+
+
+def _expected_diagnostics(
+    before: list[Any],
+    code: str | None,
+    derived: dict[str, Any] | None,
+    out_of_scope: bool,
+    change: AccountingStopReasonChange,
+) -> list[Any]:
+    """Derive a changed row's diagnostics from the recorded row's.
+
+    Every other diagnostic stays as recorded.  A row with a semantic stop
+    reason loses the *superseded_diagnostics*, every diagnostic of another
+    semantic reason, and every copy of its own but the first recorded one;
+    with none recorded it gains *derived*.  An out-of-scope row keeps no
+    semantic diagnostic.
+    """
+    semantic = set(change.stop_order)
+    superseded = change.superseded_diagnostics if code is not None else frozenset()
+    kept: list[Any] = []
+    held = False
+    for item in before:
+        item_code = item.get("code") if isinstance(item, dict) else None
+        if item_code in superseded:
+            continue
+        if item_code in semantic:
+            if item_code == code and not held and not out_of_scope:
+                kept.append(item)
+                held = True
+            continue
+        kept.append(item)
+    if code is not None and not held and not out_of_scope:
+        kept.append(derived)
+    return kept
+
+
+def _considered_reason(row: dict[str, Any]) -> str | None:
+    """Return the row's stop reason when the manifest counts it."""
+    if row.get("disposition") in {"governance_only", "capability_excluded"}:
+        return None
+    reason = row.get("stop_reason")
+    return reason if isinstance(reason, str) else None
+
+
+def _accounting_stop_reason_change(
+    recorded: Path,
+    replayed: Path,
+    change: AccountingStopReasonChange = ACCOUNTING_STOP_REASON_CHANGE,
+) -> _AccountingChange | None:
+    """Validate that the accounting differs only as the stop order derives."""
+    from asago_scenario_generator.models.obligation_accounting import (
+        ObligationAccounting,
+    )
+
+    before = _checked_yaml(
+        recorded / change.accounting_file, ObligationAccounting.from_yaml
+    )
+    after = _checked_yaml(
+        replayed / change.accounting_file, ObligationAccounting.from_yaml
+    )
+    consideration_path = replayed / change.consideration_file
+    if before is None or after is None or not consideration_path.is_file():
+        return None
+    consideration = yaml.safe_load(consideration_path.read_text(encoding="utf-8"))
+    final_routes = (
+        consideration.get("final_routes") if isinstance(consideration, dict) else None
+    )
+    if not isinstance(final_routes, list):
+        return None
+    routes = {
+        route.get("route_id"): route
+        for route in final_routes
+        if isinstance(route, dict)
+    }
+    header = ("rows", "summary", "semantic_digest")
+    if {k: v for k, v in before.items() if k not in header} != {
+        k: v for k, v in after.items() if k not in header
+    }:
+        return None
+    before_rows, after_rows = before.get("rows"), after.get("rows")
+    if not (
+        isinstance(before_rows, list)
+        and isinstance(after_rows, list)
+        and [row.get("obligation_id") for row in before_rows]
+        == [row.get("obligation_id") for row in after_rows]
+    ):
+        return None
+    removed: Counter[str] = Counter()
+    added: Counter[str] = Counter()
+    changed = [(old, new) for old, new in zip(before_rows, after_rows) if old != new]
+    if not changed:
+        return None
+    for old, new in changed:
+        if not _changed_row_explained(old, new, routes, change):
+            return None
+        for row, counter in ((old, removed), (new, added)):
+            reason = _considered_reason(row)
+            if reason is not None:
+                counter[reason] += 1
+    return _AccountingChange(
+        recorded_digest=before["semantic_digest"],
+        replayed_digest=after["semantic_digest"],
+        replayed_summary=dict(after["summary"]),
+        removed_reasons=removed,
+        added_reasons=added,
+    )
+
+
+def _moved_reasons(counts: Any, accounting: _AccountingChange) -> dict[str, int]:
+    """Move the changed rows' stop reasons within one recorded count."""
+    moved = Counter(counts if isinstance(counts, dict) else {})
+    moved.subtract(accounting.removed_reasons)
+    moved.update(accounting.added_reasons)
+    return {key: value for key, value in sorted(moved.items()) if value}
+
+
+def _pin_digest(document: dict[str, Any], artifact_id: str) -> Any:
+    pins = document.get("source_pins")
+    found = [
+        pin.get("semantic_digest")
+        for pin in (pins if isinstance(pins, list) else [])
+        if isinstance(pin, dict) and pin.get("artifact_id") == artifact_id
+    ]
+    return found[0] if len(found) == 1 else None
+
+
+def _without_pin_digest(document: dict[str, Any], artifact_id: str) -> dict[str, Any]:
+    copied = json.loads(json.dumps(document))
+    copied.pop("semantic_digest", None)
+    for pin in copied.get("source_pins", []):
+        if isinstance(pin, dict) and pin.get("artifact_id") == artifact_id:
+            pin.pop("semantic_digest", None)
+    return copied
+
+
+def _realization_follows(
+    recorded: Path,
+    replayed: Path,
+    accounting: _AccountingChange,
+    change: AccountingStopReasonChange,
+) -> bool:
+    """Accept a realization that changed only its accounting pin and digest."""
+    from asago_scenario_generator.models.scenario_realization import (
+        ScenarioRealizationAssessment,
+    )
+
+    load = ScenarioRealizationAssessment.from_yaml
+    before = _checked_yaml(recorded / change.realization_file, load)
+    after = _checked_yaml(replayed / change.realization_file, load)
+    pin = change.accounting_pin
+    return (
+        before is not None
+        and after is not None
+        and _pin_digest(before, pin) == accounting.recorded_digest
+        and _pin_digest(after, pin) == accounting.replayed_digest
+        and _without_pin_digest(before, pin) == _without_pin_digest(after, pin)
+    )
+
+
+def _manifest_document(path: Path, aliases: dict[str, str] | None) -> Any:
+    text = path.read_text(encoding="utf-8")
+    if aliases is not None:
+        text = _substitute(text, aliases)
+    document = _normalise(yaml.safe_load(text), _MANIFEST_FILENAME, jsonl=False)
+    if isinstance(document, dict):
+        for name in RETIRED_MANIFEST_FIELDS:
+            document.pop(name, None)
+    return document
+
+
+def _artifact_digest(document: dict[str, Any], name: str) -> Any:
+    artifacts = document.get("source_artifacts")
+    entry = artifacts.get(name) if isinstance(artifacts, dict) else None
+    return entry.get("semantic_digest") if isinstance(entry, dict) else None
+
+
+def _file_digest(root: Path, relative: str) -> Any:
+    document = yaml.safe_load((root / relative).read_text(encoding="utf-8"))
+    return document.get("semantic_digest") if isinstance(document, dict) else None
+
+
+def _manifest_follows(
+    recorded: Path,
+    replayed: Path,
+    aliases: dict[str, str],
+    accounting: _AccountingChange,
+    change: AccountingStopReasonChange,
+) -> bool:
+    """Accept a manifest whose accounting-derived fields match the changed rows."""
+    before = _manifest_document(recorded / _MANIFEST_FILENAME, None)
+    after = _manifest_document(replayed / _MANIFEST_FILENAME, aliases)
+    if not isinstance(before, dict) or not isinstance(after, dict):
+        return False
+    sources = {
+        "obligation_accounting": change.accounting_file,
+        "scenario_realization": change.realization_file,
+    }
+    for name in change.manifest_digests:
+        relative = sources[name]
+        if not (
+            (recorded / relative).is_file()
+            and (replayed / relative).is_file()
+            and _artifact_digest(before, name) == _file_digest(recorded, relative)
+            and _artifact_digest(after, name) == _file_digest(replayed, relative)
+        ):
+            return False
+    expected = json.loads(json.dumps(before))
+    for name in change.manifest_digests:
+        expected["source_artifacts"][name]["semantic_digest"] = _artifact_digest(
+            after, name
+        )
+    if "obligation_disposition_counts" in expected:
+        expected["obligation_disposition_counts"] = accounting.replayed_summary
+    if "obligation_stop_reason_counts" in expected:
+        expected["obligation_stop_reason_counts"] = _moved_reasons(
+            expected["obligation_stop_reason_counts"], accounting
+        )
+    funnel = expected.get("obligation_resolution_funnel")
+    if isinstance(funnel, dict) and "terminal_reasons" in funnel:
+        funnel["terminal_reasons"] = _moved_reasons(
+            funnel["terminal_reasons"], accounting
+        )
+    scope = expected.get("obligation_scope_summary")
+    in_scope = scope.get("in_scope") if isinstance(scope, dict) else None
+    if isinstance(in_scope, dict) and "stop_reasons" in in_scope:
+        in_scope["stop_reasons"] = _moved_reasons(in_scope["stop_reasons"], accounting)
+    return expected == after
+
+
+def _section_pattern(section: str) -> re.Pattern[str]:
+    return re.compile(rf'<section id="{re.escape(section)}">.*?</section>', re.DOTALL)
+
+
+def _without_section(text: str, section: str) -> str:
+    return _section_pattern(section).sub("", text)
+
+
+def _rendered_obligations(root: Path) -> str | None:
+    """Render the obligations section from the run's own files."""
+    from asago_scenario_generator.report.obligation_section import (
+        obligation_section,
+    )
+    from asago_scenario_generator.report.run_data import load_run
+
+    try:
+        return str(obligation_section(load_run(root)))
+    except (OSError, TypeError, ValueError):
+        return None
+
+
+def _report_follows(
+    recorded: Path,
+    replayed: Path,
+    aliases: dict[str, str],
+    change: AccountingStopReasonChange,
+) -> bool:
+    """Accept a report whose accounting section alone differs, as rendered.
+
+    The replayed section must be the one the report renders from the
+    replayed files, whose differences the allowance has already validated.
+    """
+    left = (recorded / change.report_file).read_text(encoding="utf-8")
+    replayed_text = (replayed / change.report_file).read_text(encoding="utf-8")
+    sections = _section_pattern(change.report_section).findall(replayed_text)
+    rendered = _rendered_obligations(replayed)
+    if rendered is None or sections != [rendered]:
+        return False
+    right = _substitute(replayed_text, aliases)
+    return (
+        _unparsed_text_difference(
+            _without_section(left, change.report_section),
+            _without_section(right, change.report_section),
+            change.report_file,
+        )
+        is None
+    )
+
+
+def _is_accounting_stop_reason_difference(
+    recorded: Path,
+    replayed: Path,
+    relative: str,
+    detail: str,
+    aliases: dict[str, str],
+    accounting: _AccountingChange | None,
+    change: AccountingStopReasonChange = ACCOUNTING_STOP_REASON_CHANGE,
+) -> bool:
+    """Accept only the validated accounting change and the files it derives."""
+    if accounting is None or relative not in change.files:
+        return False
+    if relative == change.report_file:
+        return detail.startswith(("line ", "content differs")) and _report_follows(
+            recorded, replayed, aliases, change
+        )
+    if not detail.startswith("$"):
+        return False
+    if relative == change.accounting_file:
+        return True
+    if relative == change.realization_file:
+        return _realization_follows(recorded, replayed, accounting, change)
+    return _manifest_follows(recorded, replayed, aliases, accounting, change)
+
+
 def _is_expected_content_difference(
     recorded: Path,
     replayed: Path,
@@ -1417,6 +1922,7 @@ def compare_trees(
     present = checkout_templates() if present_templates is None else present_templates
     aliases = {**path_map, **_run_id_aliases(recorded, replayed)}
     expected = _expected_difference(recorded, replayed, aliases)
+    accounting = _accounting_stop_reason_change(recorded, replayed)
     named_versions = {name for names in VERSION_CHAINS.values() for name in names}
     left = _files(recorded) - named_versions
     right = _files(replayed) - named_versions
@@ -1454,6 +1960,8 @@ def compare_trees(
             difference = Difference(relative, detail)
             if _is_expected_content_difference(
                 recorded, replayed, relative, detail, aliases, expected
+            ) or _is_accounting_stop_reason_difference(
+                recorded, replayed, relative, detail, aliases, accounting
             ):
                 if expected_differences is not None:
                     expected_differences.append(difference)

@@ -204,15 +204,35 @@ Each structural route carries independent typed mechanism-plausibility and
 reviewed-risk-alignment decisions plus a plain mapping-strength label derived
 from the exact mapping path. The raw mapping path never enters the prompt. A
 plausible mechanism with `risk_alignment: mismatch` remains eligible for
-ordinary STPA analysis, but accounting records `risk_pattern_mismatch` and
-does not credit the obligation. Provider routes that would otherwise receive
-credit pass through a compact mechanism/path verifier that sees only the
-distinctive mechanism and exact selected structural descriptions. An adjacent
-control or incomplete mechanism path remains a usable STPA route but records
-`mechanism_path_unsubstantiated` and receives no obligation credit. ICA prose
-length and repetition are
-presentation diagnostics only: semantically valid findings remain available
-with `ica_prose_quality_warning`.
+ordinary STPA analysis, but it does not credit the obligation. Provider routes
+that would otherwise receive credit pass through a compact mechanism/path
+verifier that sees only the distinctive mechanism and exact selected
+structural descriptions. An adjacent control or incomplete mechanism path
+remains a usable STPA route but receives no obligation credit.
+
+Accounting gives an uncredited row one stop reason, checked in a fixed order:
+
+1. `risk_out_of_scope`: the Stage 1a boundary decision put the risk's class
+   outside the system (`outside_boundary` or `not_applicable`). It outranks
+   every reason below; addressed and governance-only rows keep their own.
+2. `risk_pattern_mismatch`: routing judged `risk_alignment: mismatch`, so the
+   pattern's mechanism would not realize the risk, whatever the mechanism
+   judgement.
+3. `mechanism_absent`: the pair is not misaligned (`supported` or
+   `insufficient_evidence`), but routing judged the mechanism
+   `absent_from_system`: the system lacks the capability the pattern needs.
+4. `mechanism_path_unsubstantiated`: a targeted, not-misaligned route whose
+   mechanism is `insufficient_evidence`, from routing or from the verifier,
+   so the selected path does not establish the mechanism.
+
+The reasons that come from the route's structure or its slot results, such as
+`no_structural_route`, `not_applicable_evidence_incomplete`, and
+`ica_consideration_unresolved`, apply only when none of these does. A row
+carries the diagnostic of its own semantic reason once and none of a reason it
+did not stop at.
+
+ICA prose length and repetition are presentation diagnostics only:
+semantically valid findings remain available with `ica_prose_quality_warning`.
 
 Scenario generation receives one immutable `ScenarioGenerationContext` per
 ICA. It contains only the selected loss, hazard, governing constraint, unsafe

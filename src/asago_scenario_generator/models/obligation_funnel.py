@@ -7,6 +7,7 @@ ObligationStopReason = Literal[
     "addressed",
     "risk_out_of_scope",
     "risk_pattern_mismatch",
+    "mechanism_absent",
     "mechanism_path_unsubstantiated",
     "no_structural_route",
     "not_applicable_proven",

@@ -419,54 +419,107 @@ def _account_findings(
     )
 
 
+RISK_PATTERN_MISMATCH = "risk_pattern_mismatch"
+MECHANISM_ABSENT = "mechanism_absent"
+MECHANISM_PATH_UNSUBSTANTIATED = "mechanism_path_unsubstantiated"
+# The stop reasons the route's semantic assessment decides, in the order
+# accounting applies them; the risk scope outranks all three.
+SEMANTIC_STOP_REASONS = (
+    RISK_PATTERN_MISMATCH,
+    MECHANISM_ABSENT,
+    MECHANISM_PATH_UNSUBSTANTIATED,
+)
+
+
 def _semantic_credit_stop(
     row: Any,
     route: ObligationRoute,
     evidence: tuple[str, ...],
     diagnostics: list[ConsiderationDiagnostic],
 ) -> ObligationAccountingRow | None:
-    """Withhold obligation credit while preserving the ordinary STPA route."""
+    """Withhold obligation credit while preserving the ordinary STPA route.
+
+    The row carries exactly one diagnostic of its stop reason and none of the
+    semantic reasons it outranks or yields to. A route that already carries
+    the stop's diagnostic, such as the mechanism verifier's, keeps its first
+    copy and gains none.
+    """
     assessment = route.semantic_assessment
     stop = _semantic_stop_detail(route.disposition, assessment)
     if stop is None:
         return None
     code, detail = stop
-    diagnostics.append(
-        ConsiderationDiagnostic(
-            code=code,
-            detail=detail,
-            obligation_ids=(row.obligation_id,),
-            refs=(route.route_id,),
-        )
-    )
     return _account_route_row(
         row,
         route,
         disposition="unresolved",
         stop_reason=code,
         evidence=evidence or (f"route:{code.replace('_', '-')}",),
-        diagnostics=diagnostics,
+        diagnostics=_one_semantic_diagnostic(
+            diagnostics,
+            ConsiderationDiagnostic(
+                code=code,
+                detail=detail,
+                obligation_ids=(row.obligation_id,),
+                refs=(route.route_id,),
+            ),
+        ),
     )
 
 
+def _one_semantic_diagnostic(
+    diagnostics: list[ConsiderationDiagnostic], selected: ConsiderationDiagnostic
+) -> list[ConsiderationDiagnostic]:
+    """Keep the other diagnostics and one of *selected*'s code, the first held.
+
+    A diagnostic of another semantic stop reason is dropped; *selected* is
+    appended only when no diagnostic of its code is held.
+    """
+    result: list[ConsiderationDiagnostic] = []
+    for item in diagnostics:
+        if item.code == selected.code and all(
+            kept.code != selected.code for kept in result
+        ):
+            result.append(item)
+        elif item.code not in SEMANTIC_STOP_REASONS:
+            result.append(item)
+    if all(item.code != selected.code for item in result):
+        result.append(selected)
+    return result
+
+
 def _semantic_stop_detail(disposition: str, assessment: Any) -> tuple[str, str] | None:
-    """Classify the two semantic reasons that withhold obligation credit."""
+    """Classify the semantic reason that withholds obligation credit.
+
+    Alignment comes before mechanism: a pair whose mechanism would not realize
+    the risk stops at ``risk_pattern_mismatch`` whatever the mechanism
+    judgement. A pair not judged misaligned (``supported`` or
+    ``insufficient_evidence``) whose mechanism the system lacks stops at
+    ``mechanism_absent``; a targeted route whose path does not establish the
+    mechanism stops at ``mechanism_path_unsubstantiated``.
+    """
     if assessment is None:
         return None
+    if assessment.risk_alignment == "mismatch":
+        return (
+            RISK_PATTERN_MISMATCH,
+            "the routed mechanism may support an ordinary STPA finding but does "
+            "not realize the reviewed risk",
+        )
+    if assessment.mechanism_assessment == "absent_from_system":
+        return (
+            MECHANISM_ABSENT,
+            "the attack pattern is not misaligned with the reviewed risk, but "
+            "the system lacks the surface its mechanism needs",
+        )
     if (
         disposition == "targeted"
         and assessment.mechanism_assessment != "plausible_in_system"
     ):
         return (
-            "mechanism_path_unsubstantiated",
+            MECHANISM_PATH_UNSUBSTANTIATED,
             "the ordinary STPA finding is retained, but the selected path does "
             "not establish the taxonomy mechanism",
-        )
-    if assessment.risk_alignment == "mismatch":
-        return (
-            "risk_pattern_mismatch",
-            "the routed mechanism may support an ordinary STPA finding but does "
-            "not realize the reviewed risk",
         )
     return None
 
@@ -723,7 +776,8 @@ def _scoped_rows(
     A row whose risk class no action of this system can produce stops at
     ``risk_out_of_scope`` whatever stop reason it had, capability-excluded rows
     included, so ``risk_pattern_mismatch`` and the other reasons count in-scope
-    misses only. Addressed and governance-only rows keep their own outcome. A
+    misses only. Such a row keeps no diagnostic of the semantic reason it
+    replaced. Addressed and governance-only rows keep their own outcome. A
     risk without a decision leaves its rows unchanged.
     """
     risk_of = {item.obligation_id: item.risk_ref.risk_id for item in plan.obligations}
@@ -741,6 +795,9 @@ def _scoped_row(
     values = {**row.model_dump(), "scope": scope}
     if scope in OUT_OF_SCOPE and row.disposition not in SCOPE_EXEMPT_DISPOSITIONS:
         values["stop_reason"] = RISK_OUT_OF_SCOPE
+        values["diagnostics"] = tuple(
+            item for item in row.diagnostics if item.code not in SEMANTIC_STOP_REASONS
+        )
     return ObligationAccountingRow.model_validate(values)
 
 

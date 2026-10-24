@@ -469,7 +469,11 @@ top-level templates and included partials. Routing answers two separate typed
 questions: whether the attack mechanism is plausible in the supplied system,
 and whether that mechanism actually realizes the reviewed risk. A plausible
 mechanism with a risk mismatch may still yield a useful ordinary STPA
-scenario, but it cannot mark that risk obligation as addressed. A separate
+scenario, but it cannot mark that risk obligation as addressed; accounting
+records `risk_pattern_mismatch`. A pair routing did not judge misaligned
+(`supported` or `insufficient_evidence`) whose mechanism the system lacks
+records `mechanism_absent` instead. A risk outside the system's scope
+records `risk_out_of_scope` before either. A separate
 compact verifier compares only the distinctive mechanism with the selected
 structural path. If it finds an adjacent control or insufficient evidence, the
 STPA route and scenario remain available while accounting records
