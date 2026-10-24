@@ -389,6 +389,46 @@ def test_an_out_of_scope_row_drops_the_verifier_label() -> None:
     assert [item.code for item in row.diagnostics] == ["slot_pair_unresolved"]
 
 
+# A targeted route assessed to each semantic reason.
+_SEMANTIC_CASES = {
+    "risk_pattern_mismatch": ("targeted", "plausible_in_system", "mismatch"),
+    "mechanism_absent": ("targeted", "absent_from_system", "supported"),
+    "mechanism_path_unsubstantiated": (
+        "targeted",
+        "insufficient_evidence",
+        "supported",
+    ),
+}
+
+
+@pytest.mark.parametrize("reason", SEMANTIC_STOP_REASONS)
+def test_a_stale_competing_semantic_diagnostic_is_dropped(reason: str) -> None:
+    stale = tuple(code for code in SEMANTIC_STOP_REASONS if code != reason)
+    row = _stop(
+        *_SEMANTIC_CASES[reason],
+        route_diagnostics=(*stale, "slot_pair_unresolved"),
+    )
+
+    assert row.stop_reason == reason
+    assert [item.code for item in row.diagnostics] == [
+        "slot_pair_unresolved",
+        reason,
+    ]
+    assert row.diagnostics[1].detail != f"route {reason}"
+
+
+@pytest.mark.parametrize("reason", SEMANTIC_STOP_REASONS)
+def test_a_duplicated_selected_diagnostic_keeps_its_first_copy(reason: str) -> None:
+    row = _stop(
+        *_SEMANTIC_CASES[reason],
+        route_diagnostics=(reason, "slot_pair_unresolved", reason),
+    )
+
+    assert row.stop_reason == reason
+    assert [item.code for item in row.diagnostics] == [reason, "slot_pair_unresolved"]
+    assert row.diagnostics[0].detail == f"route {reason}"
+
+
 def test_the_funnel_counts_each_row_under_its_one_reason() -> None:
     plan = _plan_with_non_stpa_rows()
     cases = {

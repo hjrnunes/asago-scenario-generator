@@ -439,31 +439,53 @@ def _semantic_credit_stop(
 ) -> ObligationAccountingRow | None:
     """Withhold obligation credit while preserving the ordinary STPA route.
 
-    A route that already carries the stop's diagnostic, such as the mechanism
-    verifier's, keeps that one and gains no copy.
+    The row carries exactly one diagnostic of its stop reason and none of the
+    semantic reasons it outranks or yields to. A route that already carries
+    the stop's diagnostic, such as the mechanism verifier's, keeps its first
+    copy and gains none.
     """
     assessment = route.semantic_assessment
     stop = _semantic_stop_detail(route.disposition, assessment)
     if stop is None:
         return None
     code, detail = stop
-    if all(item.code != code for item in diagnostics):
-        diagnostics.append(
-            ConsiderationDiagnostic(
-                code=code,
-                detail=detail,
-                obligation_ids=(row.obligation_id,),
-                refs=(route.route_id,),
-            )
-        )
     return _account_route_row(
         row,
         route,
         disposition="unresolved",
         stop_reason=code,
         evidence=evidence or (f"route:{code.replace('_', '-')}",),
-        diagnostics=diagnostics,
+        diagnostics=_one_semantic_diagnostic(
+            diagnostics,
+            ConsiderationDiagnostic(
+                code=code,
+                detail=detail,
+                obligation_ids=(row.obligation_id,),
+                refs=(route.route_id,),
+            ),
+        ),
     )
+
+
+def _one_semantic_diagnostic(
+    diagnostics: list[ConsiderationDiagnostic], selected: ConsiderationDiagnostic
+) -> list[ConsiderationDiagnostic]:
+    """Keep the other diagnostics and one of *selected*'s code, the first held.
+
+    A diagnostic of another semantic stop reason is dropped; *selected* is
+    appended only when no diagnostic of its code is held.
+    """
+    result: list[ConsiderationDiagnostic] = []
+    for item in diagnostics:
+        if item.code == selected.code and all(
+            kept.code != selected.code for kept in result
+        ):
+            result.append(item)
+        elif item.code not in SEMANTIC_STOP_REASONS:
+            result.append(item)
+    if all(item.code != selected.code for item in result):
+        result.append(selected)
+    return result
 
 
 def _semantic_stop_detail(disposition: str, assessment: Any) -> tuple[str, str] | None:
