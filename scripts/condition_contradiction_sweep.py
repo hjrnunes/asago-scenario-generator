@@ -12,7 +12,8 @@ paired with. Nothing is sent anywhere: the check reads only these files::
 The report states what happens to a refused condition (``RECOVERY``) and
 counts, per directory and in total, the bound conditions checked, the
 scenarios refused under each rule, which are the scenarios at risk of losing
-their tool-call condition, and the undecidable cases, with every example.
+their tool-call condition, and the undecidable cases under each rule, with
+every example.
 """
 
 from __future__ import annotations
@@ -55,7 +56,9 @@ RECOVERY = (
     "without a tool_call_condition and records the reason in "
     "condition_omitted_reason. No scenario is dropped: each refused scenario "
     "is at risk of losing its tool-call condition, nothing more. An "
-    "undecidable case is reported only; it changes nothing in the scenario."
+    "undecidable case is reported only, in the run's candidate diagnostics "
+    "(synthesis-manifest.yaml) and in this sweep; it changes nothing in the "
+    "scenario."
 )
 
 
@@ -153,12 +156,39 @@ def report(summaries: list[dict[str, Any]]) -> dict[str, Any]:
             "directories": len(summaries),
             "handoffs": sum(item["handoffs"] for item in summaries),
             "checked": sum(item["checked"] for item in summaries),
+            "refused_by_rule": _rule_totals(summaries, "refused_by_rule"),
+            "undecidable_by_rule": _rule_totals(summaries, "undecidable_by_rule"),
             "at_risk_of_losing_condition": sum(
                 len(item["at_risk_of_losing_condition"]) for item in summaries
             ),
             "dropped_scenarios": 0,
         },
     }
+
+
+def _rule_totals(summaries: list[dict[str, Any]], key: str) -> dict[str, int]:
+    return {rule: sum(item[key].get(rule, 0) for item in summaries) for rule in RULES}
+
+
+def _table(summaries: list[dict[str, Any]]) -> list[str]:
+    """One row per directory: checked, refused and undecidable per rule, at risk."""
+
+    lines = [
+        "| directory | handoffs | checked | refused a/b/c | undecidable a/b/c "
+        "| at risk | dropped |",
+        "| --- | ---: | ---: | --- | --- | ---: | ---: |",
+    ]
+    for item in summaries:
+        refused = "/".join(str(item["refused_by_rule"].get(rule, 0)) for rule in RULES)
+        undecidable = "/".join(
+            str(item["undecidable_by_rule"].get(rule, 0)) for rule in RULES
+        )
+        lines.append(
+            f"| {item['directory']} | {item['handoffs']} | {item['checked']} | "
+            f"{refused} | {undecidable} | "
+            f"{len(item['at_risk_of_losing_condition'])} | 0 |"
+        )
+    return lines
 
 
 def _at_risk(count: int, handoffs: int, ids: list[str]) -> str:
@@ -184,7 +214,15 @@ def render(summaries: list[dict[str, Any]]) -> str:
         "",
         f"- directories: {total['directories']}; handoffs: {total['handoffs']}; "
         f"bound conditions checked: {total['checked']}",
+        "- refused scenarios by rule: "
+        + ", ".join(f"rule {rule}: {total['refused_by_rule'][rule]}" for rule in RULES),
+        "- undecidable cases by rule: "
+        + ", ".join(
+            f"rule {rule}: {total['undecidable_by_rule'][rule]}" for rule in RULES
+        ),
         _at_risk(total["at_risk_of_losing_condition"], total["handoffs"], []),
+        "",
+        *_table(summaries),
         "",
     ]
     for summary in summaries:

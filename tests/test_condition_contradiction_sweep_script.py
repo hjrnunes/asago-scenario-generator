@@ -66,6 +66,8 @@ def test_report_counts_the_scenarios_at_risk_per_directory_and_in_total() -> Non
         "directories": 2,
         "handoffs": 8,
         "checked": 3,
+        "refused_by_rule": {"a": 0, "b": 2, "c": 0},
+        "undecidable_by_rule": {"a": 1, "b": 0, "c": 0},
         "at_risk_of_losing_condition": 2,
         "dropped_scenarios": 0,
     }
@@ -83,15 +85,19 @@ def test_rendered_report_states_what_happens_to_a_refused_condition() -> None:
         "published without a tool_call_condition and records the reason in "
         "condition_omitted_reason. No scenario is dropped: each refused "
         "scenario is at risk of losing its tool-call condition, nothing more. "
-        "An undecidable case is reported only; it changes nothing in the "
-        "scenario."
+        "An undecidable case is reported only, in the run's candidate "
+        "diagnostics (synthesis-manifest.yaml) and in this sweep; it changes "
+        "nothing in the scenario."
     )
     assert f"## What happens to a refused condition\n\n{script.RECOVERY}\n" in rendered
     assert (
         "## Total\n\n- directories: 2; handoffs: 8; bound conditions checked: 3\n"
+        "- refused scenarios by rule: rule a: 0, rule b: 2, rule c: 0\n"
+        "- undecidable cases by rule: rule a: 1, rule b: 0, rule c: 0\n"
         "- scenarios at risk of losing their tool_call_condition: 2 of 8 "
         "handoffs; scenarios dropped: 0\n"
     ) in rendered
+    assert "| first | 5 | 2 | 0/1/0 | 1/0/0 | 1 | 0 |\n" in rendered
     assert (
         "- scenarios at risk of losing their tool_call_condition: 1 of 5 "
         "handoffs (SCN-001); scenarios dropped: 0\n"
