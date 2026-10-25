@@ -111,8 +111,14 @@ assessment of whether it is entitled to establish the value of the named PM, as
 opposed to only reporting it: `authoritative`, `non_authoritative`,
 `conditional` (only within the scope or conditions its basis states), or
 `unknown`, with the basis for the assessment. A channel shown without one is
-`unknown`. Authority is separate from source kind and trust. Report as a
-`missing_feedback` gap a PM that decides a control action when its only
+`unknown`. Authority is separate from source kind and trust: untrusted user
+input may legitimately establish the user's own request, requested dates,
+answers, or operation arguments, but not a value the system must establish
+independently. Check the shown assessments against the supplied use case and
+exact target-evidence refs. Report as a `missing_feedback` gap an omitted
+assessment when that evidence settles authority, or a recorded status that the
+evidence contradicts.
+Report as a `missing_feedback` gap a PM that decides a control action when its only
 feedback is non-authoritative, or conditional outside its stated conditions,
 and the supplied source names the party or record that decides the value.
-{% endif %}
+{% endif -%}

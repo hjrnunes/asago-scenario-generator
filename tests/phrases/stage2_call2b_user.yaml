@@ -25,6 +25,13 @@ cases:
         plus `authority_for_update` (`status` and `basis`) where the supplied
         evidence bears on whether the channel may establish the value of the PM
         it updates
+      - >-
+        An untrusted user message may still be authoritative for the user's own
+        request, requested dates, answers, or operation arguments
+      - a value the system must establish independently
+      - "Every settled basis must cite `Use case: ...` or an exact target-evidence `ref`"
+      - state the scope in domain words
+      - do more than restate `source_kind`
   one-responsibility:
     required:
       - "Governing security constraints:"

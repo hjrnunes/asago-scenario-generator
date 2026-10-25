@@ -5,5 +5,9 @@ cases:
       - add the missing element(s)
       - dismiss it with a one-sentence justification
       - dismissed_gaps
+      - distinguish values the source legitimately sets
+      - values the system must establish independently
+      - "Cite `Use case: ...` or an exact target-evidence `ref`"
+      - state the scope in domain words rather than restating the source kind
     forbidden:
       - You MUST add at least one element for EACH finding

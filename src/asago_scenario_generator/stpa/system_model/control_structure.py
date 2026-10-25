@@ -81,6 +81,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     compose_constraint_description,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.feedback_authority import (
+    validate_feedback_authority_assessments,
+)
 from asago_scenario_generator.stpa.system_model.publication import (
     publish_control_structure,
 )
@@ -2234,9 +2237,15 @@ def _call_2b_control_elements(
     """
 
     def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
-        return parse_control_element_set_response(
+        elements = parse_control_element_set_response(
             result.content, responsibilities=responsibility_set.responsibilities
         )
+        validate_feedback_authority_assessments(
+            elements.feedback_channels,
+            target_evidence=target_evidence,
+            require_domain_scope=True,
+        )
+        return elements
 
     def recover(
         outcome: CallOutcome[ControlElementSet], system_prompt: str, user_prompt: str

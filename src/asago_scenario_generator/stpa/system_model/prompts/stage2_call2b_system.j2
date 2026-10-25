@@ -95,10 +95,23 @@ The response is one JSON object with exactly these top-level collections:
    - `conditional`: the channel may establish the value only within a scope
      or under conditions the evidence states;
    - `unknown`: the evidence bears on the question but leaves it open.
-   `basis` states the scope and any conditions and cites the supplied
-   evidence it rests on: the use-case wording, or the exact `ref` of a
-   discovered target-evidence record. Write it in domain words, without
-   control-structure IDs. A `basis` is required unless `status` is `unknown`;
+   Decide authority for the particular value being updated. A person may be
+   authoritative for values they legitimately choose or supply for themselves,
+   such as their own request, requested date, answers, or operation arguments,
+   even though their message is untrusted. The same person is not authoritative
+   for a value the system must establish independently, such as eligibility,
+   record ownership, available capacity, or another person's approval. For
+   example, when the use case lets a user choose a requested delivery date,
+   their message is authoritative for that user's requested date, but not for
+   whether that date is available.
+
+   `basis` states the authority scope and any conditions and cites the supplied
+   evidence it rests on: say `Use case: ...` and identify the relevant wording,
+   or include the exact `ref` of a discovered target-evidence record. Write it
+   in domain words, without control-structure IDs. A bare ref such as
+   `state:records.owner_id` is not a basis. A source-kind restatement such as
+   `user input is unverified` or `user-provided text` is not a basis. A `basis`
+   is required unless `status` is `unknown`;
    for `unknown` it may name what the evidence leaves open. Omit
    `authority_for_update` when the supplied evidence says nothing about it; an
    omitted assessment means `unknown`. Do not derive authority from
@@ -186,7 +199,11 @@ separate fields:
       "description": "Report current greenhouse temperature",
       "updates": "PM-1-1",
       "source": {"type": "controlled_process", "id": "CP-1"},
-      "source_kind": "operation_result"
+      "source_kind": "operation_result",
+      "authority_for_update": {
+        "status": "authoritative",
+        "basis": "Use case: the greenhouse sensor reading establishes the current greenhouse temperature."
+      }
     }
   ],
   "controlled_processes": [
