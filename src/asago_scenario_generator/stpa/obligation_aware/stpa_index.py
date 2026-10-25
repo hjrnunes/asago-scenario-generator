@@ -19,6 +19,7 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, TypeVar
 
+from asago_scenario_generator.stpa.mechanism_library import MechanismId
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlActionEffectKind,
@@ -208,14 +209,17 @@ def _describe_structure(control_structure: ControlStructure) -> dict[str, str]:
     return result
 
 
-SOURCE_MECHANISMS: Mapping[FeedbackSourceKind, str] = MappingProxyType(
+SOURCE_MECHANISMS: Mapping[FeedbackSourceKind, MechanismId] = MappingProxyType(
     {
-        FeedbackSourceKind.retrieved_content: "retrieved_instructions",
-        FeedbackSourceKind.conversation_history: "stale_history",
-        FeedbackSourceKind.user_message: "user_claim",
+        FeedbackSourceKind.retrieved_content: MechanismId.retrieved_instructions,
+        FeedbackSourceKind.conversation_history: MechanismId.stale_history,
+        FeedbackSourceKind.user_message: MechanismId.user_claim,
     }
 )
 """The mechanism an untrusted channel's source kind suggests on every path.
+
+Each label is a mechanism library ID, and its entry's signature lists that
+source kind.
 
 - ``retrieved_instructions``: retrieved free text can change what the
   controller believes about its instructions or authority;
@@ -225,8 +229,10 @@ SOURCE_MECHANISMS: Mapping[FeedbackSourceKind, str] = MappingProxyType(
   variable should record.
 """
 
-CROSS_CONTROLLER_MECHANISM = "delegated_authority"
+CROSS_CONTROLLER_MECHANISM = MechanismId.delegated_authority
 """The mechanism of a path whose untrusted belief reaches another controller.
+
+Its library entry's signature must cross controllers.
 
 One controller's adversary-influenced belief or message can count as
 permission for the other.
@@ -243,7 +249,7 @@ class MechanismCandidate:
     whose ``source`` owns that variable as its ``shared_pm``.
     """
 
-    mechanism: str
+    mechanism: MechanismId
     path: tuple[str, str, str]
 
 
@@ -492,7 +498,7 @@ def _issued_by_owner(
 def _add_candidates(
     result: dict[MechanismCandidate, None],
     path: tuple[str, str, str],
-    source_mechanism: str | None,
+    source_mechanism: MechanismId | None,
     crosses: bool,
 ) -> None:
     for mechanism in (
