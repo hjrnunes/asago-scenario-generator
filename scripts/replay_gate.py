@@ -28,7 +28,8 @@ The named versions in
 sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
 :data:`REMOVED_TEXT` and :data:`ALLOWED_FILE_CHANGES` name what a recording
 may hold that the replay no longer writes, and :data:`ADDED_FIELDS` names
-what the replay writes that a recording may lack.
+what the replay writes that a recording may lack, checked against the
+replay's own outputs where an entry gives a check.
 
 A recording made with ``--replay-fill`` replays strictly too: the gate drops
 ``--replay-fill``, ``--live-stage`` and ``--max-live-requests``, so a request
@@ -65,9 +66,10 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence, TypeGuard
 
 import yaml
+from pydantic import ValidationError
 
 import asago_scenario_generator
 from asago_scenario_generator.models.obligation_consideration import (
@@ -85,6 +87,19 @@ from asago_scenario_generator.stpa.infra.call_log import (
 )
 from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 from asago_scenario_generator.stpa.infra.provider_record import request_digest
+from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.system_model.critic import (
+    _REVISION_FAILED as REVISION_FAILED,
+    _REVISION_MERGE_DEGRADED as REVISION_MERGE_DEGRADED,
+    STAGE as CRITIC_STAGE,
+    STEP_REVISION,
+    discarded_revision_reason,
+    strip_empty_responsibilities,
+)
+from asago_scenario_generator.stpa.system_model.publication import (
+    CONTROL_STRUCTURE_FILENAME,
+    REFUSED_CONTROL_STRUCTURE_FILENAME,
+)
 
 _SCRIPT = Path(__file__).resolve()
 STAGE_FILENAME = "stage.json"
@@ -216,12 +231,337 @@ class AddedField:
 
     *field* is a dotted path from the document root.  A recording without
     it compares with the replay's copy dropped; a recording that holds it
-    compares it as usual.
+    compares it as usual.  When *check* is given, the replay's copy is
+    dropped only when ``check(value, replay_root, aliases)`` returns
+    ``None``; otherwise its message fails the file.
     """
 
     file: str
     field: str
     meaning: str
+    check: Callable[[Any, Path, dict[str, str]], str | None] | None = None
+
+
+_CRITIC_REVISION_STATUSES = ("applied", "unchanged", "discarded")
+_EVIDENCE_BOUND_VERSION = "control-structure-evidence-bound.yaml"
+_NONE_REVISION_REASON = f"{REVISION_FAILED}unexpected None response"
+
+
+# Stage 2's run manifest keeps the post-revision warnings until scenario
+# production replaces that manifest; ``_baseline_diagnostics`` carries each
+# into the synthesis manifest's stage warnings under this prefix.
+_RUN_MANIFEST_FILENAME = "run-manifest.yaml"
+_BASELINE_REVISION_WARNING = "Baseline post_revision_warnings: "
+# Only scenario production's run manifest holds this key; the run manifest
+# Stage 2 wrote always holds ``post_revision_warnings`` instead.
+_SCENARIO_MANIFEST_KEY = "validation_error_count"
+# ``check_evidence_bindings`` strips this prefix from an observed operation.
+_OPERATION_PREFIX = "operation:"
+
+
+def _critic_revision_problem(
+    value: Any, root: Path, aliases: dict[str, str]
+) -> str | None:
+    """Check a replayed Stage 2 critic-revision record against its own run.
+
+    The record says ``status: applied`` or ``unchanged`` and nothing else, or
+    ``status: discarded`` with the ``reason`` warning that kept the reviewed
+    structure.  That reason is the one :func:`discarded_revision_reason`
+    finds in the run's post-revision warnings, and an applied or unchanged
+    record is one where it finds none; a run that kept no copy of those
+    warnings skips this comparison.  The run's revision requests and
+    control-structure versions must agree as well: see
+    :func:`_revision_request_problem` and :func:`_revision_structure_problem`.
+    """
+    problem = _critic_revision_shape_problem(value)
+    if problem:
+        return problem
+    status, reason = value["status"], value.get("reason")
+    warnings, problem = _post_revision_warnings(root, aliases)
+    if problem:
+        return problem
+    if warnings is not None:
+        expected = discarded_revision_reason(warnings)
+        if reason != expected:
+            found = f"discard it with {_short(expected)}" if expected else "keep it"
+            return (
+                f"the run's post-revision warnings {found}, but the critic "
+                f"revision is recorded as {status}"
+                + (f" with {_short(reason)}" if reason is not None else "")
+            )
+    problem = _revision_request_problem(reason, _revision_attempts(root, aliases))
+    if problem:
+        return problem
+    return _revision_structure_problem(status, root)
+
+
+def _critic_revision_shape_problem(value: Any) -> str | None:
+    if not isinstance(value, dict):
+        return f"the critic revision record is not a mapping: {_short(value)}"
+    status = value.get("status")
+    if status not in _CRITIC_REVISION_STATUSES:
+        return (
+            f"critic revision status {status!r} is not one of "
+            f"{', '.join(_CRITIC_REVISION_STATUSES)}"
+        )
+    keys = {"status", "reason"} if status == "discarded" else {"status"}
+    if set(value) != keys:
+        return (
+            f"a {status} critic revision record holds {sorted(keys)}, "
+            f"not {sorted(value)}"
+        )
+    reason = value.get("reason")
+    if status == "discarded" and (
+        not isinstance(reason, str) or discarded_revision_reason([reason]) != reason
+    ):
+        return (
+            f"discarded critic revision reason {_short(reason)} is not a "
+            "revision failure or merge degradation warning"
+        )
+    return None
+
+
+def _post_revision_warnings(
+    root: Path, aliases: dict[str, str]
+) -> tuple[list[str] | None, str | None]:
+    """Return the run's Stage 2 post-revision warnings, or why they are unusable.
+
+    The run manifest Stage 2 wrote holds them as ``post_revision_warnings``;
+    once scenario production has replaced it, only the synthesis manifest's
+    prefixed copy remains.  When both hold them, they must agree.  A run that
+    stopped after scenario production replaced the run manifest and before
+    synthesis wrote its manifest kept neither copy: the warnings are then
+    ``None``, which is not an empty list.
+    """
+    sources: list[tuple[str, list[str]]] = []
+    run_manifest = _yaml_mapping(root / _RUN_MANIFEST_FILENAME, aliases) or {}
+    if "post_revision_warnings" in run_manifest:
+        warnings = run_manifest["post_revision_warnings"]
+        if not _is_text_list(warnings):
+            return None, (
+                f"the run's {_RUN_MANIFEST_FILENAME} post_revision_warnings is "
+                f"not a list of warnings: {_short(warnings)}"
+            )
+        sources.append((_RUN_MANIFEST_FILENAME, warnings))
+    synthesis = _yaml_mapping(root / _MANIFEST_FILENAME, aliases)
+    if synthesis is not None:
+        stage_warnings = synthesis.get("stage_warnings")
+        if not _is_text_list(stage_warnings):
+            return None, (
+                f"the run's {_MANIFEST_FILENAME} holds no stage warnings to check "
+                "the critic revision against"
+            )
+        sources.append(
+            (
+                _MANIFEST_FILENAME,
+                [
+                    warning.removeprefix(_BASELINE_REVISION_WARNING)
+                    for warning in stage_warnings
+                    if warning.startswith(_BASELINE_REVISION_WARNING)
+                ],
+            )
+        )
+    if not sources:
+        if _SCENARIO_MANIFEST_KEY in run_manifest:
+            return None, None
+        return None, (
+            f"the run's {_RUN_MANIFEST_FILENAME} keeps no post-revision warnings "
+            f"and was not written by scenario production, and it has no "
+            f"{_MANIFEST_FILENAME}"
+        )
+    if len(sources) == 2 and sources[0][1] != sources[1][1]:
+        return None, (
+            f"the post-revision warnings in {_RUN_MANIFEST_FILENAME} and "
+            f"{_MANIFEST_FILENAME} disagree: {_short(sources[0][1])} != "
+            f"{_short(sources[1][1])}"
+        )
+    return sources[0][1], None
+
+
+def _yaml_mapping(path: Path, aliases: dict[str, str]) -> dict[str, Any] | None:
+    if not path.is_file():
+        return None
+    document = yaml.safe_load(_substitute(path.read_text(encoding="utf-8"), aliases))
+    return document if isinstance(document, dict) else None
+
+
+def _is_text_list(value: Any) -> TypeGuard[list[str]]:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
+
+
+def _revision_request_problem(
+    reason: str | None, attempts: list[dict[str, Any]]
+) -> str | None:
+    """Check the discard reason against the run's revision requests.
+
+    A failed last attempt discards the revision with that attempt's logged
+    error.  After a successful one, only a merge degradation or the
+    unexpected empty response discards it.
+    """
+    if not attempts:
+        return "the run records a critic revision but made no revision request"
+    last = attempts[-1]
+    if last.get("success") is not True:
+        failed = f"{REVISION_FAILED}{last.get('error')}"
+        if reason == failed:
+            return None
+        return (
+            "the last revision request failed, so the critic revision is "
+            f"discarded with reason {_short(failed)}, not {_short(reason)}"
+        )
+    if (
+        reason is None
+        or reason == _NONE_REVISION_REASON
+        or reason.startswith(REVISION_MERGE_DEGRADED)
+    ):
+        return None
+    return (
+        "the last revision request succeeded, so a discarded critic "
+        f"revision cannot give the failure {_short(reason)}"
+    )
+
+
+def _revision_structure_problem(status: str, root: Path) -> str | None:
+    """Check the record against what the revision step did to the structure.
+
+    The step's input is the evidence-bound version and its output the revised
+    one.  Whatever the reply, the step strips any responsibility with no
+    process-model part, control action or feedback channel, so its output
+    holds none.  An applied revision changed the structure and an unchanged
+    one did not.  A discarded revision keeps its input, so its output is the
+    input with those responsibilities stripped: see
+    :func:`_discarded_structure_problem`.
+    """
+    versions = _revision_versions(root)
+    if versions is None:
+        return "the run published no control structure to check the revision against"
+    before_text, after_text = versions
+    before, after = _loaded_structure(before_text), _loaded_structure(after_text)
+    if before is None or after is None:
+        return "the revision step's control structure versions do not load"
+    if strip_empty_responsibilities(after)[1]:
+        return (
+            "the revised control structure holds an empty responsibility, which "
+            "the revision step always strips"
+        )
+    changed = before_text != after_text
+    if status == "applied" and not changed:
+        return (
+            "a critic revision recorded as applied left the control structure unchanged"
+        )
+    if status == "unchanged" and changed:
+        return "a critic revision recorded as unchanged changed the control structure"
+    if status == "discarded" and changed:
+        return _discarded_structure_problem(before, after)
+    return None
+
+
+def _discarded_structure_problem(
+    before: ControlStructure, after: ControlStructure
+) -> str | None:
+    """Check that a discarded revision's output is its input, stripped.
+
+    The step strips the input's empty responsibilities and, only when that
+    changed it, runs ``check_evidence_bindings`` again with the evidence that
+    already bound the input.  Every evidence ref and every operation the input
+    holds survived that evidence once, so the second pass changes nothing,
+    except an operation whose bound name itself begins with ``operation:``:
+    it loses that prefix once more, or is dropped when the shorter name is
+    not observed.
+    """
+    stripped, removed = strip_empty_responsibilities(before)
+    if not removed:
+        return (
+            "a discarded critic revision changed the control structure, though "
+            "the evidence-bound structure holds no empty responsibility to strip"
+        )
+    if _without_operations(stripped) != _without_operations(after):
+        return (
+            "a discarded critic revision changed the control structure beyond "
+            "stripping its empty responsibilities"
+        )
+    for kept, bound in zip(stripped.responsibilities, after.responsibilities):
+        for action, bound_action in zip(kept.control_actions, bound.control_actions):
+            operation = action.operation
+            if operation is not None and operation.startswith(_OPERATION_PREFIX):
+                allowed = {None, operation.removeprefix(_OPERATION_PREFIX)}
+            else:
+                allowed = {operation}
+            if bound_action.operation not in allowed:
+                expected = " or ".join(
+                    repr(name) if name is not None else "none"
+                    for name in sorted(allowed, key=lambda name: name is None)
+                )
+                return (
+                    "a discarded critic revision gave control action "
+                    f"{bound_action.ca_id} the operation "
+                    f"{bound_action.operation!r}, not {expected}"
+                )
+    return None
+
+
+def _without_operations(structure: ControlStructure) -> ControlStructure:
+    """Return *structure* with no control action naming an operation."""
+    return structure.model_copy(
+        update={
+            "responsibilities": [
+                resp.model_copy(
+                    update={
+                        "control_actions": [
+                            action.model_copy(update={"operation": None})
+                            for action in resp.control_actions
+                        ]
+                    }
+                )
+                for resp in structure.responsibilities
+            ]
+        }
+    )
+
+
+def _revision_attempts(root: Path, aliases: dict[str, str]) -> list[dict[str, Any]]:
+    """Return the run's Stage 2 revision call entries in log order."""
+    calls = root / CALLS_FILENAME
+    if not calls.is_file():
+        return []
+    entries = call_entries(_substitute(calls.read_text(encoding="utf-8"), aliases))
+    return [
+        entry
+        for entry in entries
+        if entry.get("stage") == CRITIC_STAGE and entry.get("step") == STEP_REVISION
+    ]
+
+
+def _revision_versions(root: Path) -> tuple[str, str] | None:
+    """Return the text of the revision step's input and output versions.
+
+    An absent named version equals the next version present, ending with the
+    published structure (or the refused one).
+    """
+    chain = VERSION_CHAINS[CONTROL_STRUCTURE_FILENAME]
+    ends = (CONTROL_STRUCTURE_FILENAME, REFUSED_CONTROL_STRUCTURE_FILENAME)
+    start = chain.index(_EVIDENCE_BOUND_VERSION)
+    before = _version_text(root, chain[start:] + ends)
+    after = _version_text(root, chain[start + 1 :] + ends)
+    if before is None or after is None:
+        return None
+    return before, after
+
+
+def _loaded_structure(text: str) -> ControlStructure | None:
+    try:
+        return ControlStructure.model_validate(yaml.safe_load(text))
+    except (yaml.YAMLError, ValidationError):
+        return None
+
+
+def _version_text(root: Path, names: Sequence[str]) -> str | None:
+    """Return the text of the first of *names* present under *root*."""
+    for name in names:
+        path = root / name
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+    return None
 
 
 ADDED_FIELDS: tuple[AddedField, ...] = (
@@ -230,6 +570,13 @@ ADDED_FIELDS: tuple[AddedField, ...] = (
         "channel_splits",
         "the per-channel count of canonicals that splitting a deduplication "
         "group by validated channel and carrier operation added",
+    ),
+    AddedField(
+        "run-manifest.yaml",
+        "stage_summary.stage_2.critic_revision",
+        "whether the Stage 2 critic revision was applied, changed nothing, or "
+        "was discarded, and why",
+        check=_critic_revision_problem,
     ),
 )
 
@@ -1102,6 +1449,12 @@ def _has_field(value: Any, steps: list[str]) -> bool:
     return True
 
 
+def _field_value(value: Any, steps: list[str]) -> Any:
+    for step in steps:
+        value = value[step]
+    return value
+
+
 def _retired_nested_problem(replayed: Path, relative: str) -> str | None:
     """Fail a replay that writes a :data:`RETIRED_FIELDS` entry again."""
     retired = _retired_fields(relative)
@@ -1270,6 +1623,14 @@ def compare_file(
     for added in ADDED_FIELDS:
         steps = added.field.split(".")
         if added.file == relative and not _has_field(left_data, steps):
+            if added.check is not None and _has_field(right_data, steps):
+                problem = added.check(
+                    _field_value(right_data, steps),
+                    replayed.parents[relative.count("/")],
+                    aliases,
+                )
+                if problem:
+                    return f"$.{added.field}: {problem}"
             right_data = _drop_field(right_data, tuple(steps))
     jsonl = suffix == ".jsonl"
     left_data = _normalise(left_data, relative, jsonl=jsonl)
