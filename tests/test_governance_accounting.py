@@ -200,6 +200,62 @@ def test_governance_route_without_a_finding_records_its_route(case: str) -> None
     assert reloaded.semantic_digest == accounting.semantic_digest
 
 
+def test_governance_lost_reply_beside_an_analytic_slot_found_nothing() -> None:
+    """A slot the analysis left unresolved explains the stop, not the lost reply.
+
+    One routed slot lost its reply, one the analysis left unresolved, and one
+    the analysis found not applicable: the analysis ran and found nothing.
+    """
+    from asago_scenario_generator.models.obligation_consideration import (
+        ConsiderationDiagnostic,
+    )
+
+    lost, analytic, timing = (
+        "RESP-1:CA-1-1:INCORRECT",
+        _SLOT,
+        "RESP-1:CA-1-1:WRONG_TIMING",
+    )
+    route = _governance_route(slots=(lost, analytic, timing))
+    lost_pair = ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=_GOVERNANCE_ID,
+        slot_id=lost,
+        disposition="unresolved",
+        rationale="Slot response could not be validated.",
+        evidence=("slot-analysis-validation",),
+        diagnostics=(
+            ConsiderationDiagnostic(
+                code="slot_provider_contract_failed",
+                detail="Slot response could not be validated.",
+                obligation_ids=(_GOVERNANCE_ID,),
+                refs=(lost, route.route_id),
+            ),
+        ),
+    )
+    not_applicable = ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=_GOVERNANCE_ID,
+        slot_id=timing,
+        disposition="proposed_not_applicable",
+        structural_inventory_complete=True,
+        rationale="The concern cannot be expressed as a timing deviation.",
+        evidence=("provider-structured-consideration",),
+    )
+
+    accounting = _build(
+        pairs=(
+            lost_pair,
+            _governance_pair(route, disposition="unresolved", slot=analytic),
+            not_applicable,
+        ),
+        governance_routes=(route,),
+    )
+
+    row = _row(accounting, _GOVERNANCE_ID)
+    assert row.stop_reason == "governance_routed_no_finding"
+    assert [item.code for item in row.diagnostics] == ["slot_provider_contract_failed"]
+
+
 def test_a_governance_route_for_an_unknown_row_is_rejected() -> None:
     stray = _governance_route().model_copy(
         update={"obligation_id": "ob:v1:" + "e" * 64}
