@@ -138,14 +138,15 @@ def test_system_prompt_lists_elements_with_descriptions_and_references(
         ),
     )
 
-    pm_line = next(line for line in system.splitlines() if "PM-1-1:" in line)
-    assert "PM-1-1: belief about retrieval source integrity (source: " in pm_line
-    assert pm_line.endswith("responsibility RESP-2)")
     for fragment in (
+        "PM-1-1: belief about retrieval source integrity\n"
+        "      feedback_source: responsibility RESP-2\n",
         "RC-1-1: retrieved content must carry provenance",
-        "CA-1-1: reject unverified retrieved content (target: controlled_process CP-1)",
-        "FB-1-1: provenance verdict from the index (updates: PM-1-1, source: "
-        "controlled_process CP-1",
+        "CA-1-1: reject unverified retrieved content\n"
+        "      target: controlled_process CP-1\n",
+        "FB-1-1: provenance verdict from the index\n"
+        "      updates: PM-1-1\n"
+        "      source: controlled_process CP-1\n",
         "(mechanism: CM-4 — Shared session scope)",
         "(next available: CM-5)",
         "(next available: CP-2)",

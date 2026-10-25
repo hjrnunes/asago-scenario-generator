@@ -972,12 +972,107 @@ def _merge_revision_delta(
 
     Returns a tuple of (merged ControlStructure, repair and stitch warnings).
     """
+    delta, label_warnings = _restore_descriptions_with_pasted_labels(cs, delta)
     delta, kind_warnings = _move_source_kinds_out_of_source_refs(delta)
     stitched, stitch_warnings = _stitch_revision_delta(cs, delta)
     return (
         validate_normalized_control_structure(stitched),
-        kind_warnings + stitch_warnings,
+        label_warnings + kind_warnings + stitch_warnings,
     )
+
+
+# The typed-field labels a revision prompt has shown beside or under an
+# element's description: the parenthetical labels of earlier prompts and the
+# JSON field names of the current one.
+_TYPED_FIELD_LABELS = (
+    "target",
+    "effect",
+    "effect_kind",
+    "temporality",
+    "operation",
+    "process-model refs",
+    "process_model_refs",
+    "source",
+    "feedback_source",
+    "values",
+    "evidence",
+    "evidence_refs",
+    "updates",
+    "source kind",
+    "source_kind",
+    "authority for update",
+    "authority_for_update",
+)
+_TRAILING_LABEL_GROUP = re.compile(
+    r"\((?:" + "|".join(map(re.escape, _TYPED_FIELD_LABELS)) + r")\s*:[^()]*\)$"
+)
+
+
+def _plain_description(text: str) -> str:
+    """Collapse whitespace and drop trailing punctuation for comparison."""
+    return " ".join(text.split()).rstrip(" .,;:")
+
+
+def _is_original_with_pasted_labels(original: str, restated: str) -> bool:
+    """Whether *restated* is *original* followed only by typed-field labels."""
+    remainder = _plain_description(restated)
+    stripped = False
+    while match := _TRAILING_LABEL_GROUP.search(remainder):
+        remainder = _plain_description(remainder[: match.start()])
+        stripped = True
+    return stripped and remainder == _plain_description(original)
+
+
+def _restore_descriptions_with_pasted_labels(
+    cs: ControlStructure,
+    delta: RevisionDelta,
+) -> tuple[RevisionDelta, list[str]]:
+    """Keep an element's description when a restatement only appends labels.
+
+    A reply may restate an existing PM part, control action, or feedback
+    channel with its typed fields pasted into the description as labels, such
+    as ``(target: controlled_process CP-1) (effect: model_output)``.  When
+    removing trailing label groups leaves the original description, the
+    original is kept; any other change to the description is a revision and
+    stays.
+    """
+    delta = delta.model_copy(deep=True)
+    warnings: list[str] = []
+    originals = {resp.resp_id: resp for resp in cs.responsibilities}
+    for resp in delta.modified_responsibilities:
+        original = originals.get(resp.resp_id)
+        if original is None:
+            continue
+        for kind, restated, existing in (
+            (
+                "process model part",
+                {pm.pm_id: pm for pm in resp.process_model_parts},
+                {pm.pm_id: pm for pm in original.process_model_parts},
+            ),
+            (
+                "control action",
+                {ca.ca_id: ca for ca in resp.control_actions},
+                {ca.ca_id: ca for ca in original.control_actions},
+            ),
+            (
+                "feedback channel",
+                {fb.fb_id: fb for fb in resp.feedback_channels},
+                {fb.fb_id: fb for fb in original.feedback_channels},
+            ),
+        ):
+            for element_id, element in restated.items():
+                old = existing.get(element_id)
+                if old is None or not _is_original_with_pasted_labels(
+                    old.description, element.description
+                ):
+                    continue
+                warnings.append(
+                    f"Revision {kind} {element_id} of {resp.resp_id} restated its "
+                    "description with typed-field labels appended; the original "
+                    "description is kept."
+                )
+                element.description = old.description
+    return delta, warnings
 
 
 _SOURCE_KINDS = {kind.value: kind for kind in FeedbackSourceKind}

@@ -36,7 +36,20 @@ cases:
       - do not invent synonyms such as
       - internal_state_update
       - 'MUST use `effect_kind: "agent_message"`'
-      - source kind, and authority for update shown beside existing elements
+      - source, source kind, and authority for update shown under existing elements
+      - >-
+        An existing element's `description` is only the text after its ID on
+        the first line. The indented lines under it are its typed fields, each
+        named as its JSON field.
+      - >-
+        copy each one into that field and keep it out of the `description`;
+        never append field names or values to the prose
+      - >-
+        `type` is exactly `responsibility` (with a `RESP-*` ID) or
+        `controlled_process` (with a `CP-*` ID)
+      - >-
+        Write the kind of information only in `source_kind`; a source kind is
+        never a reference `type`.
       - "A feedback channel may also carry `authority_for_update`, with a `status` and a `basis`"
       - >-
         Assess it for a new channel, and for a restated channel shown without
