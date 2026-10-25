@@ -23,6 +23,7 @@ from asago_scenario_generator.models.obligation_accounting import (
 from asago_scenario_generator.models.obligation_consideration import (
     ROUTING_RECORD_VALIDATION_FAILED,
     ROUTING_VALIDATION_FAILED,
+    SLOT_PROVIDER_CONTRACT_FAILED,
     BoundedStructuralRevision,
     ConsiderationDiagnostic,
     NeutralObligationBrief,
@@ -333,26 +334,64 @@ def _account_proposed_not_applicable(
     )
 
 
+_ICA_VERIFICATION_STOP_REASONS = (
+    "ica_hazard_contradictory",
+    "ica_hazard_insufficient_evidence",
+    "ica_hazard_absence_evidence_missing",
+    "ica_hazard_verification_provider_failure",
+    "ica_hazard_correction_exhausted",
+    "unsafe_outcome_lineage_incomplete",
+)
+
+
+def _provider_contract_failed(
+    pairs: tuple[ObligationIcaConsideration, ...],
+) -> bool:
+    """Tell whether every unresolved routed slot lost its provider reply.
+
+    A slot whose request ended in a provider contract failure was never
+    analyzed. When another routed slot stayed analytically unresolved, that
+    slot explains the stop whatever the failed reply would have held.
+    """
+    unresolved = [item for item in pairs if item.disposition == "unresolved"]
+    return bool(unresolved) and all(
+        any(
+            diagnostic.code == SLOT_PROVIDER_CONTRACT_FAILED
+            for diagnostic in item.diagnostics
+        )
+        for item in unresolved
+    )
+
+
 def _account_unresolved_ica(
     row: Any,
     route: ObligationRoute,
+    pairs: tuple[ObligationIcaConsideration, ...],
     evidence: tuple[str, ...],
     diagnostics: list[ConsiderationDiagnostic],
 ) -> ObligationAccountingRow:
-    """Retain unresolved routed slots as unresolved accounting."""
-    stop_reason = "ica_consideration_unresolved"
+    """Retain unresolved routed slots as unresolved accounting.
+
+    A verification stop reason comes first. A row whose every unresolved slot
+    lost its reply to a provider contract failure stops at
+    ``provider_contract_failure``; any other row stops at
+    ``ica_consideration_unresolved``.
+    """
     diagnostic_codes = {item.code for item in diagnostics}
-    for code in (
-        "ica_hazard_contradictory",
-        "ica_hazard_insufficient_evidence",
-        "ica_hazard_absence_evidence_missing",
-        "ica_hazard_verification_provider_failure",
-        "ica_hazard_correction_exhausted",
-        "unsafe_outcome_lineage_incomplete",
-    ):
-        if code in diagnostic_codes:
-            stop_reason = code
-            break
+    stop_reason = next(
+        (code for code in _ICA_VERIFICATION_STOP_REASONS if code in diagnostic_codes),
+        None,
+    )
+    if stop_reason is None and _provider_contract_failed(pairs):
+        return _account_route_row(
+            row,
+            route,
+            disposition="unresolved",
+            stop_reason="provider_contract_failure",
+            evidence=evidence or ("route:targeted",),
+            diagnostics=diagnostics,
+        )
+    stop_reason = stop_reason or "ica_consideration_unresolved"
     diagnostics.append(
         ConsiderationDiagnostic(
             code="unresolved_ica_consideration",
@@ -563,7 +602,7 @@ def _account_targeted(
 ) -> ObligationAccountingRow:
     """Account a targeted route from its exact ICA pair results."""
     if any(item.disposition == "unresolved" for item in pairs):
-        return _account_unresolved_ica(row, route, evidence, diagnostics)
+        return _account_unresolved_ica(row, route, pairs, evidence, diagnostics)
     findings = tuple(item for item in pairs if item.disposition == "finding")
     if not findings:
         return _account_missing_ica(row, route, evidence, diagnostics)

@@ -229,7 +229,12 @@ The reasons that come from the route's structure or its slot results, such as
 `no_structural_route`, `not_applicable_evidence_incomplete`, and
 `ica_consideration_unresolved`, apply only when none of these does. A row
 carries the diagnostic of its own semantic reason once and none of a reason it
-did not stop at.
+did not stop at. A routed slot whose request ended in a reply that broke its
+contract, such as one cut off at its completion cap that no longer decodes, was
+never analyzed: its pairs carry `slot_provider_contract_failed`, and a row
+whose every unresolved slot carries it stops at `provider_contract_failure`.
+A slot left unresolved on the analysis, or an ICA verification stop, keeps its
+own reason beside it.
 
 ICA prose length and repetition are presentation diagnostics only:
 semantically valid findings remain available with `ica_prose_quality_warning`.

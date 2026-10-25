@@ -150,6 +150,10 @@ def _canonical_refs(
 # siblings' routes were kept.
 ROUTING_VALIDATION_FAILED = "routing_validation_failed"
 ROUTING_RECORD_VALIDATION_FAILED = "routing_record_validation_failed"
+# Diagnostic code ICA slot filling writes on each routed pair of a target
+# request whose last provider reply failed its contract: it did not decode, as
+# when it stopped at its completion cap, or did not match its schema.
+SLOT_PROVIDER_CONTRACT_FAILED = "slot_provider_contract_failed"
 
 
 class ConsiderationDiagnostic(_ConsiderationModel):
@@ -793,6 +797,7 @@ __all__ = [
     "OBLIGATION_CONSIDERATION_SCHEMA_VERSION",
     "ROUTING_RECORD_VALIDATION_FAILED",
     "ROUTING_VALIDATION_FAILED",
+    "SLOT_PROVIDER_CONTRACT_FAILED",
     "ObligationConsideration",
     "ObligationIcaConsideration",
     "ObligationRoute",
