@@ -56,6 +56,9 @@ from asago_scenario_generator.stpa.system_model.critic import (
 from asago_scenario_generator.stpa.system_model.heuristics import (
     uncited_security_constraints,
 )
+from asago_scenario_generator.stpa.system_model.publication import (
+    publish_control_structure,
+)
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     diagnose_loss_analysis_semantics,
     derive_loss_analysis,
@@ -938,8 +941,13 @@ def _run_stage_2_steps(
     stage_warnings.extend(placement_warnings)
 
     # The canonical name is the structure in force when the stage ends; it is
-    # the placement step's version, so that step keeps no named copy.
-    versions.publish(control_structure, "control-structure.yaml")
+    # the placement step's version, so that step keeps no named copy.  A
+    # structure with an untyped action is refused instead: it cannot be routed.
+    try:
+        publish_control_structure(versions, control_structure, run_dir)
+    except StageError as exc:
+        stage_errors.append(str(exc))
+        return _Stage2Result()
 
     # Advisory, code-only: a Stage 1a constraint that no responsibility cites
     # reaches no control action, so its rule produces no scenario.

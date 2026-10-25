@@ -81,6 +81,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     compose_constraint_description,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.publication import (
+    publish_control_structure,
+)
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     TargetEvidence,
 )
@@ -1818,12 +1821,17 @@ def derive_control_structure(
             operation they invoke; unknown names are dropped with a warning.
         versions: Optional control-structure version chain that the caller
             continues and publishes.  Without one, the derivation publishes
-            ``control-structure.yaml`` itself.
+            ``control-structure.yaml`` itself, or refuses a structure with an
+            untyped control action.
 
     Returns:
         A named result containing the reviewed ``LossAnalysis``, validated
         ``ControlStructure``, and warnings.  The warning tuple is empty when
         the assembly succeeds.
+
+    Raises:
+        StageError: If a call fails, or, without *versions*, if a control
+            action of the derived structure lacks a typed target or effect.
     """
     with ExitStack() as stack:
         loss_versions = stack.enter_context(VersionChain(run_dir))
@@ -1842,8 +1850,8 @@ def derive_control_structure(
             structure_versions=structure_versions,
         )
         if versions is None:
-            structure_versions.publish(
-                result.control_structure, "control-structure.yaml"
+            publish_control_structure(
+                structure_versions, result.control_structure, run_dir
             )
         return result
 
