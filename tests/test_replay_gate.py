@@ -1508,6 +1508,201 @@ def test_an_added_field_does_not_excuse_other_differences(trees) -> None:
     assert "summary.total" in differences[0].detail
 
 
+_MISS = "ReplayMissError: no recorded response for request abc"
+_DEGRADED = "Revision delta merge degraded: KeyError: 'RESP-9'"
+
+
+def _critic_run(
+    root: Path,
+    record: Any = None,
+    *,
+    attempts: tuple[bool, ...] = (True,),
+    changed: bool = True,
+) -> None:
+    """Write one side's Stage 2 critic-revision evidence and manifest record.
+
+    *attempts* gives each revision request's success, in order; a failed one
+    logs :data:`_MISS`.  *changed* writes an evidence-bound version that
+    differs from the published structure.
+    """
+    document = yaml.safe_load((root / "run-manifest.yaml").read_text())
+    stage_2: dict[str, Any] = {"call_count": 2 + len(attempts)}
+    if record is not None:
+        stage_2["critic_revision"] = record
+    document["stage_summary"] = {"stage_2": stage_2}
+    (root / "run-manifest.yaml").write_text(yaml.safe_dump(document))
+    with (root / "calls.jsonl").open("a", encoding="utf-8") as calls:
+        for number, success in enumerate(attempts, start=1):
+            entry: dict[str, Any] = {
+                "stage": "stage_2",
+                "step": "revision",
+                "attempt_number": number,
+                "success": success,
+            }
+            if not success:
+                entry["error"] = _MISS
+            calls.write(json.dumps(entry) + "\n")
+    (root / "control-structure.yaml").write_text("responsibilities: [RESP-1, RESP-2]\n")
+    if changed:
+        (root / "control-structure-evidence-bound.yaml").write_text(
+            "responsibilities: [RESP-1]\n"
+        )
+
+
+@pytest.mark.parametrize(
+    ("record", "attempts", "changed"),
+    [
+        ({"status": "applied"}, (True,), True),
+        ({"status": "unchanged"}, (True,), False),
+        ({"status": "applied"}, (False, True), True),
+        (
+            {"status": "discarded", "reason": f"Revision failed: {_MISS}"},
+            (False,),
+            False,
+        ),
+        ({"status": "discarded", "reason": _DEGRADED}, (True,), False),
+        ({"status": "discarded", "reason": _DEGRADED}, (True,), True),
+        (
+            {
+                "status": "discarded",
+                "reason": "Revision failed: unexpected None response",
+            },
+            (True,),
+            False,
+        ),
+    ],
+)
+def test_a_recording_without_the_critic_revision_accepts_a_consistent_one(
+    trees, record: dict[str, Any], attempts: tuple[bool, ...], changed: bool
+) -> None:
+    recorded, replayed, path_map = trees
+    _critic_run(recorded, attempts=attempts, changed=changed)
+    _critic_run(replayed, record, attempts=attempts, changed=changed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+@pytest.mark.parametrize(
+    ("record", "message"),
+    [
+        ("applied", "not a mapping"),
+        ({}, "status None is not one of applied, unchanged, discarded"),
+        ({"status": "revised"}, "status 'revised' is not one of"),
+        ({"status": "applied", "reason": "x"}, "holds ['status'], not"),
+        ({"status": "unchanged", "note": "x"}, "holds ['status'], not"),
+        ({"status": "discarded"}, "holds ['reason', 'status'], not ['status']"),
+        (
+            {"status": "discarded", "reason": "x", "extra": 1},
+            "holds ['reason', 'status']",
+        ),
+        ({"status": "discarded", "reason": 7}, "is not a revision failure"),
+        ({"status": "discarded", "reason": "the model refused"}, "is not a revision"),
+    ],
+)
+def test_a_malformed_added_critic_revision_fails(
+    trees, record: Any, message: str
+) -> None:
+    recorded, replayed, path_map = trees
+    _critic_run(recorded)
+    _critic_run(replayed, record)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "$.stage_summary.stage_2.critic_revision" in differences[0].detail
+    assert message in differences[0].detail
+
+
+@pytest.mark.parametrize(
+    ("record", "attempts", "changed", "message"),
+    [
+        ({"status": "applied"}, (), True, "made no revision request"),
+        ({"status": "applied"}, (True,), False, "as applied left unchanged"),
+        ({"status": "unchanged"}, (True,), True, "as unchanged changed"),
+        (
+            {"status": "applied"},
+            (True, False),
+            True,
+            "the last revision request failed",
+        ),
+        ({"status": "unchanged"}, (False,), False, "the last revision request failed"),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (False,),
+            False,
+            "the last revision request failed",
+        ),
+        (
+            {"status": "discarded", "reason": "Revision failed: TimeoutError: slow"},
+            (False,),
+            False,
+            "the last revision request failed",
+        ),
+        (
+            {"status": "discarded", "reason": f"Revision failed: {_MISS}"},
+            (True,),
+            False,
+            "the last revision request succeeded",
+        ),
+    ],
+)
+def test_an_added_critic_revision_inconsistent_with_its_run_fails(
+    trees,
+    record: dict[str, Any],
+    attempts: tuple[bool, ...],
+    changed: bool,
+    message: str,
+) -> None:
+    recorded, replayed, path_map = trees
+    _critic_run(recorded, attempts=attempts, changed=changed)
+    _critic_run(replayed, record, attempts=attempts, changed=changed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "$.stage_summary.stage_2.critic_revision" in differences[0].detail
+    assert message in differences[0].detail
+
+
+def test_an_added_critic_revision_needs_a_published_structure(trees) -> None:
+    recorded, replayed, path_map = trees
+    _critic_run(recorded)
+    _critic_run(replayed, {"status": "applied"})
+    for root in (recorded, replayed):
+        (root / "control-structure.yaml").unlink()
+        (root / "control-structure-evidence-bound.yaml").unlink()
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "published no control structure" in differences[0].detail
+
+
+def test_a_critic_revision_both_sides_hold_compares_as_usual(trees) -> None:
+    recorded, replayed, path_map = trees
+    # Inconsistent with the run, but the recording holds the same record.
+    _critic_run(recorded, {"status": "unchanged"})
+    _critic_run(replayed, {"status": "unchanged"})
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_a_critic_revision_that_differs_from_the_recording_fails(trees) -> None:
+    recorded, replayed, path_map = trees
+    _critic_run(recorded, {"status": "unchanged"})
+    _critic_run(replayed, {"status": "applied"})
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "stage_2.critic_revision" in differences[0].detail
+    assert "applied" in differences[0].detail
+
+
 _TARGET_PROFILE_ROW = (
     '<tr><td>Target profile</td><td><a class="artifact" '
     'href="../execution-target-profile.json">execution-target-profile.json</a>'

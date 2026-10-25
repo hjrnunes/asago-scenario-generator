@@ -28,7 +28,8 @@ The named versions in
 sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
 :data:`REMOVED_TEXT` and :data:`ALLOWED_FILE_CHANGES` name what a recording
 may hold that the replay no longer writes, and :data:`ADDED_FIELDS` names
-what the replay writes that a recording may lack.
+what the replay writes that a recording may lack, checked against the
+replay's own outputs where an entry gives a check.
 
 A recording made with ``--replay-fill`` replays strictly too: the gate drops
 ``--replay-fill``, ``--live-stage`` and ``--max-live-requests``, so a request
@@ -85,6 +86,17 @@ from asago_scenario_generator.stpa.infra.call_log import (
 )
 from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 from asago_scenario_generator.stpa.infra.provider_record import request_digest
+from asago_scenario_generator.stpa.system_model.critic import (
+    _REVISION_FAILED as REVISION_FAILED,
+    _REVISION_MERGE_DEGRADED as REVISION_MERGE_DEGRADED,
+    STAGE as CRITIC_STAGE,
+    STEP_REVISION,
+    discarded_revision_reason,
+)
+from asago_scenario_generator.stpa.system_model.publication import (
+    CONTROL_STRUCTURE_FILENAME,
+    REFUSED_CONTROL_STRUCTURE_FILENAME,
+)
 
 _SCRIPT = Path(__file__).resolve()
 STAGE_FILENAME = "stage.json"
@@ -216,12 +228,130 @@ class AddedField:
 
     *field* is a dotted path from the document root.  A recording without
     it compares with the replay's copy dropped; a recording that holds it
-    compares it as usual.
+    compares it as usual.  When *check* is given, the replay's copy is
+    dropped only when ``check(value, replay_root, aliases)`` returns
+    ``None``; otherwise its message fails the file.
     """
 
     file: str
     field: str
     meaning: str
+    check: Callable[[Any, Path, dict[str, str]], str | None] | None = None
+
+
+_CRITIC_REVISION_STATUSES = ("applied", "unchanged", "discarded")
+_EVIDENCE_BOUND_VERSION = "control-structure-evidence-bound.yaml"
+_NONE_REVISION_REASON = f"{REVISION_FAILED}unexpected None response"
+
+
+def _critic_revision_problem(
+    value: Any, root: Path, aliases: dict[str, str]
+) -> str | None:
+    """Check a replayed Stage 2 critic-revision record against its own run.
+
+    The record says ``status: applied`` or ``unchanged`` and nothing else, or
+    ``status: discarded`` with the ``reason`` warning that kept the reviewed
+    structure.  The run must have made a revision request.  When its last
+    attempt failed, the record is discarded with that attempt's error as the
+    reason.  When it succeeded, a discarded reason is a merge degradation or
+    the unexpected empty response, and an applied revision changed the
+    control structure while an unchanged one did not: the evidence-bound
+    version differs from the revised version exactly when it was applied.
+    """
+    if not isinstance(value, dict):
+        return f"the critic revision record is not a mapping: {_short(value)}"
+    status = value.get("status")
+    if status not in _CRITIC_REVISION_STATUSES:
+        return (
+            f"critic revision status {status!r} is not one of "
+            f"{', '.join(_CRITIC_REVISION_STATUSES)}"
+        )
+    keys = {"status", "reason"} if status == "discarded" else {"status"}
+    if set(value) != keys:
+        return (
+            f"a {status} critic revision record holds {sorted(keys)}, "
+            f"not {sorted(value)}"
+        )
+    reason = value.get("reason")
+    if status == "discarded" and (
+        not isinstance(reason, str) or discarded_revision_reason([reason]) != reason
+    ):
+        return (
+            f"discarded critic revision reason {_short(reason)} is not a "
+            "revision failure or merge degradation warning"
+        )
+    attempts = _revision_attempts(root, aliases)
+    if not attempts:
+        return "the run records a critic revision but made no revision request"
+    last = attempts[-1]
+    if last.get("success") is not True:
+        failed = f"{REVISION_FAILED}{last.get('error')}"
+        if reason != failed:
+            return (
+                f"the last revision request failed, so the critic revision is "
+                f"discarded with reason {_short(failed)}, not {status}"
+                + (f" with {_short(reason)}" if reason is not None else "")
+            )
+        return None
+    # Only a discarded record holds a reason.
+    if isinstance(reason, str):
+        if reason == _NONE_REVISION_REASON or reason.startswith(
+            REVISION_MERGE_DEGRADED
+        ):
+            return None
+        return (
+            "the last revision request succeeded, so a discarded critic "
+            f"revision cannot give the failure {_short(reason)}"
+        )
+    changed = _revision_changed_structure(root)
+    if changed is None:
+        return "the run published no control structure to check the revision against"
+    if changed != (status == "applied"):
+        return (
+            f"a critic revision recorded as {status} "
+            + ("changed" if changed else "left unchanged")
+            + " the control structure"
+        )
+    return None
+
+
+def _revision_attempts(root: Path, aliases: dict[str, str]) -> list[dict[str, Any]]:
+    """Return the run's Stage 2 revision call entries in log order."""
+    calls = root / CALLS_FILENAME
+    if not calls.is_file():
+        return []
+    entries = call_entries(_substitute(calls.read_text(encoding="utf-8"), aliases))
+    return [
+        entry
+        for entry in entries
+        if entry.get("stage") == CRITIC_STAGE and entry.get("step") == STEP_REVISION
+    ]
+
+
+def _revision_changed_structure(root: Path) -> bool | None:
+    """Say whether the revision step changed the control structure.
+
+    An absent named version equals the next version present, ending with the
+    published structure (or the refused one), so the step changed the
+    structure exactly when its input and output versions differ.
+    """
+    chain = VERSION_CHAINS[CONTROL_STRUCTURE_FILENAME]
+    ends = (CONTROL_STRUCTURE_FILENAME, REFUSED_CONTROL_STRUCTURE_FILENAME)
+    start = chain.index(_EVIDENCE_BOUND_VERSION)
+    before = _version_text(root, chain[start:] + ends)
+    after = _version_text(root, chain[start + 1 :] + ends)
+    if before is None or after is None:
+        return None
+    return before != after
+
+
+def _version_text(root: Path, names: Sequence[str]) -> str | None:
+    """Return the text of the first of *names* present under *root*."""
+    for name in names:
+        path = root / name
+        if path.is_file():
+            return path.read_text(encoding="utf-8")
+    return None
 
 
 ADDED_FIELDS: tuple[AddedField, ...] = (
@@ -230,6 +360,13 @@ ADDED_FIELDS: tuple[AddedField, ...] = (
         "channel_splits",
         "the per-channel count of canonicals that splitting a deduplication "
         "group by validated channel and carrier operation added",
+    ),
+    AddedField(
+        "run-manifest.yaml",
+        "stage_summary.stage_2.critic_revision",
+        "whether the Stage 2 critic revision was applied, changed nothing, or "
+        "was discarded, and why",
+        check=_critic_revision_problem,
     ),
 )
 
@@ -1102,6 +1239,12 @@ def _has_field(value: Any, steps: list[str]) -> bool:
     return True
 
 
+def _field_value(value: Any, steps: list[str]) -> Any:
+    for step in steps:
+        value = value[step]
+    return value
+
+
 def _retired_nested_problem(replayed: Path, relative: str) -> str | None:
     """Fail a replay that writes a :data:`RETIRED_FIELDS` entry again."""
     retired = _retired_fields(relative)
@@ -1270,6 +1413,14 @@ def compare_file(
     for added in ADDED_FIELDS:
         steps = added.field.split(".")
         if added.file == relative and not _has_field(left_data, steps):
+            if added.check is not None and _has_field(right_data, steps):
+                problem = added.check(
+                    _field_value(right_data, steps),
+                    replayed.parents[relative.count("/")],
+                    aliases,
+                )
+                if problem:
+                    return f"$.{added.field}: {problem}"
             right_data = _drop_field(right_data, tuple(steps))
     jsonl = suffix == ".jsonl"
     left_data = _normalise(left_data, relative, jsonl=jsonl)
