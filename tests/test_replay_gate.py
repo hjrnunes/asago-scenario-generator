@@ -2624,7 +2624,8 @@ def _lost_reply_accounting(
     """Return a plan, its consideration, its accounting, and the moving row's ID.
 
     Each lost slot reply carries *code*.  The first applicable row is routed
-    to one lost slot, and to a slot whose pair carries *analytic* when given;
+    to one lost slot, and to a slot whose pair carries *analytic* when given
+    (an empty *analytic* is a pair the analysis left bare, as most are);
     the second, whose mechanism is not established, to one lost slot; the
     governance-only row to a lost slot and a slot the analysis left
     unresolved.  With *out_of_scope*, the first row's risk is out of scope.
@@ -2652,7 +2653,7 @@ def _lost_reply_accounting(
         _slot_pair(governance, _ANALYTIC_SLOT, None),
     ]
     if analytic is not None:
-        pairs.append(_slot_pair(moved, _ANALYTIC_SLOT, analytic))
+        pairs.append(_slot_pair(moved, _ANALYTIC_SLOT, analytic or None))
     risk = next(
         o.risk_ref.risk_id for o in plan.obligations if o.obligation_id == first
     )
@@ -3006,3 +3007,148 @@ def test_the_lost_reply_states_its_reason() -> None:
     assert change.reason
     assert change.recorded_pair_code != change.replayed_pair_code
     assert change.analytic_reason != change.replayed_reason
+
+
+def test_the_lost_reply_does_not_hide_a_move_beside_a_bare_analytic_slot(
+    trees,
+) -> None:
+    """An analytic slot most often carries no diagnostic; the move still fails."""
+    recorded, replayed, path_map = _lost_reply_run(
+        trees, analytic="", replayed_fields=_moved_to("provider_contract_failure")
+    )
+    moved = yaml.safe_load((replayed / "obligation-accounting.yaml").read_text())
+    row = next(
+        row
+        for row in moved["rows"]
+        if row.get("stop_reason") == "provider_contract_failure"
+    )
+    assert row["slot_ids"] == [_LOST_SLOT, _ANALYTIC_SLOT]
+    assert [item["code"] for item in row["diagnostics"]] == [_LOST_REPLY]
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_lost_reply_does_not_hide_an_out_of_scope_drop_beside_a_bare_slot(
+    trees,
+) -> None:
+    def dropped(accounting: Any, first: str) -> dict[str, Any]:
+        return {"diagnostics": _row_of(accounting, first).diagnostics[:-1]}
+
+    recorded, replayed, path_map = _lost_reply_run(
+        trees, analytic="", out_of_scope=True, replayed_fields=dropped
+    )
+    assert ("unresolved", "risk_out_of_scope", [_LOST_REPLY]) in _shapes(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    # The report renders the row's first diagnostic, which stays the same.
+    assert sorted(item.path for item in differences) == [
+        "obligation-accounting.yaml",
+        "scenario-realization.yaml",
+        "synthesis-manifest.yaml",
+    ]
+
+
+@pytest.mark.parametrize(
+    "reason", ["provider_contract_failure", "prompt_budget_exceeded"]
+)
+def test_the_lost_reply_does_not_hide_a_slot_its_budget_rejected(
+    trees, reason: str
+) -> None:
+    def budget_rejected(accounting: Any, first: str) -> dict[str, Any]:
+        lost, analytic, _ = _row_of(accounting, first).diagnostics
+        return {
+            "stop_reason": reason,
+            "diagnostics": (
+                lost,
+                analytic.model_copy(update={"code": "slot_prompt_budget_exceeded"}),
+            ),
+        }
+
+    recorded, replayed, path_map = _lost_reply_run(
+        trees, analytic=_BEFORE_LOST_REPLY, replayed_fields=budget_rejected
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_lost_reply_accepts_renamed_slots_beside_a_bare_analytic_slot(
+    trees,
+) -> None:
+    """Only renamed rows: the report section renders as recorded and is checked."""
+    recorded, replayed, path_map = _lost_reply_run(trees, analytic="")
+    assert (
+        "unresolved",
+        "ica_consideration_unresolved",
+        [
+            _LOST_REPLY,
+            "unresolved_ica_consideration",
+        ],
+    ) in _shapes(replayed)
+    assert (recorded / "report" / "index.html").read_text() == (
+        replayed / "report" / "index.html"
+    ).read_text()
+    expected: list[Difference] = []
+
+    _, differences = compare_trees(
+        recorded, replayed, path_map, expected_differences=expected
+    )
+
+    assert differences == []
+    assert sorted(item.path for item in expected) == [
+        "obligation-accounting.yaml",
+        "scenario-realization.yaml",
+        "synthesis-manifest.yaml",
+    ]
+
+
+@pytest.fixture
+def lost_reply_trees(trees) -> tuple[Path, Path, dict[str, str]]:
+    """A recording made before lost slot replies counted and its replay."""
+    return _lost_reply_run(trees)
+
+
+@pytest.mark.parametrize(
+    "allowance", ["stop_order_trees", "failed_record_trees", "lost_reply_trees"]
+)
+@pytest.mark.parametrize(
+    "derived",
+    ["scenario-realization.yaml", "synthesis-manifest.yaml", "report/index.html"],
+)
+def test_an_accounting_change_fails_a_derived_file_left_as_recorded(
+    request: pytest.FixtureRequest, allowance: str, derived: str
+) -> None:
+    recorded, replayed, path_map = request.getfixturevalue(allowance)
+    assert (recorded / derived).read_bytes() != (replayed / derived).read_bytes()
+    shutil.copyfile(recorded / derived, replayed / derived)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    # The manifest pins the realization's digest and the report reads the
+    # manifest, so a stale file can fail the files that check it too.
+    assert (derived, "does not follow the accepted accounting change") in [
+        (item.path, item.detail) for item in differences
+    ]
+    # A copied manifest also carries the recorded run ID, which the gate
+    # reads to map the replay's run ID in the old report back.
+    others = {item.path for item in differences} - {"synthesis-report.html"}
+    assert others <= set(_STOP_ORDER_FILES)
+
+
+def test_an_accounting_change_fails_a_derived_file_neither_side_wrote(
+    lost_reply_trees,
+) -> None:
+    recorded, replayed, path_map = lost_reply_trees
+    for root in (recorded, replayed):
+        (root / "scenario-realization.yaml").unlink()
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert (
+        "scenario-realization.yaml",
+        "does not follow the accepted accounting change",
+    ) in [(item.path, item.detail) for item in differences]
