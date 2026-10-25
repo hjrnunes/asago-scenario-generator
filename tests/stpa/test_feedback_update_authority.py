@@ -84,6 +84,10 @@ _AUTHORITY_EVIDENCE = TargetEvidence(
         EvidenceSessionField(name="authenticated_reviewer", value="reviewer-1"),
     )
 )
+_USER_INPUT_CITED_BASIS = (
+    "The user input names the reviewer for this refund; "
+    "session:authenticated_reviewer establishes which reviewer may approve it."
+)
 
 
 def _channel(**fields: Any) -> FeedbackChannel:
@@ -447,6 +451,26 @@ def test_call_2b_accepts_an_offered_ref_with_domain_scope(tmp_path: Path) -> Non
     )
 
 
+def test_call_2b_accepts_user_input_wording_that_cites_offered_evidence(
+    tmp_path: Path,
+) -> None:
+    feedback = {
+        **_CALL_2B_FEEDBACK,
+        "authority_for_update": {
+            "status": "authoritative",
+            "basis": _USER_INPUT_CITED_BASIS,
+        },
+    }
+    client = _client(_call_2b_reply(feedback))
+
+    elements = _call_2b(client, tmp_path, target_evidence=_AUTHORITY_EVIDENCE)
+
+    assert elements.feedback_channels[0].authority_for_update == (
+        FeedbackUpdateAuthority(status="authoritative", basis=_USER_INPUT_CITED_BASIS)
+    )
+    assert len(_sent(client)) == 1
+
+
 def test_the_call_2b_request_offers_and_explains_the_field(tmp_path: Path) -> None:
     client = _client(_call_2b_reply(_CALL_2B_FEEDBACK))
 
@@ -681,6 +705,18 @@ def test_a_revision_may_assess_a_channel_that_had_no_assessment(
             id="source-kind-restatement",
         ),
         pytest.param(
+            "The finance reviewer decides refund approvals.",
+            "must cite the supplied use case",
+            None,
+            id="no-offered-evidence-citation",
+        ),
+        pytest.param(
+            "session:authenticated_reviewer",
+            "scope in domain words",
+            _AUTHORITY_EVIDENCE,
+            id="bare-ref-without-domain-scope",
+        ),
+        pytest.param(
             "Refund approval is decided by state:refunds.approved",
             "not offered in this request",
             _AUTHORITY_EVIDENCE,
@@ -724,6 +760,33 @@ def test_revision_corrects_invalid_authority_bases_through_existing_retry(
     assert error_text in _message(sent[1], "user")
     [channel] = revised.responsibilities[0].feedback_channels
     assert channel.authority_for_update == _NON_AUTHORITATIVE
+
+
+def test_revision_accepts_user_input_wording_that_cites_offered_evidence(
+    tmp_path: Path,
+) -> None:
+    original = _structure(_channel())
+    assessed = {
+        **_RESTATED_CHANNEL,
+        "source_kind": "user_message",
+        "authority_for_update": {
+            "status": "authoritative",
+            "basis": _USER_INPUT_CITED_BASIS,
+        },
+    }
+
+    revised, sent = _revision_attempts(
+        tmp_path,
+        original,
+        _restated(assessed),
+        target_evidence=_AUTHORITY_EVIDENCE,
+    )
+
+    assert len(sent) == 1
+    [channel] = revised.responsibilities[0].feedback_channels
+    assert channel.authority_for_update == FeedbackUpdateAuthority(
+        status="authoritative", basis=_USER_INPUT_CITED_BASIS
+    )
 
 
 def test_the_revision_wire_rejects_a_settled_status_without_a_basis() -> None:

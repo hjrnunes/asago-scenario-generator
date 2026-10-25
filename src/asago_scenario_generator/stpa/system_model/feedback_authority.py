@@ -169,7 +169,7 @@ def _only_restates_source_kind(
     if source_kind is None or cited_refs or cites_use_case:
         return False
     words = frozenset(_WORD_RE.findall(basis.casefold()))
-    kind_words = _SOURCE_KIND_WORDS[source_kind]
+    kind_words = _SOURCE_KIND_WORDS.get(source_kind, frozenset())
     return bool(words & kind_words) and words <= _GENERIC_RESTATEMENT_WORDS | kind_words
 
 
