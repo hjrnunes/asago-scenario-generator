@@ -604,7 +604,11 @@ live request.
 
 To check that a change leaves recorded runs unchanged, run the replay gate,
 which replays offline and compares every output file
-(`scripts/replay_gate.py` documents the comparison rules):
+(`scripts/replay_gate.py` documents the comparison rules). The gate replays a
+fill run's recording strictly: it drops the fill flags, so a request the record
+lacks fails the replay instead of going live, and it accepts the recording's
+`source` keys and `provider_replay_fill` block, which a strict replay does not
+write:
 
 ```bash
 ./scripts/replay-check.sh <recorded-generate-output-dir>

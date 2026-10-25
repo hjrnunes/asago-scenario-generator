@@ -26,6 +26,12 @@ sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
 may hold that the replay no longer writes, and :data:`ADDED_FIELDS` names
 what the replay writes that a recording may lack.
 
+A recording made with ``--replay-fill`` replays strictly too: the gate drops
+``--replay-fill``, ``--live-stage`` and ``--max-live-requests``, so a request
+the record lacks is a replay miss and never goes live.  Such a recording holds
+fill provenance its replay does not write; :data:`REPLAY_FILL_PROVENANCE`
+names it, accepted only when the recorded arguments carried ``--replay-fill``.
+
 The lists cover output differences only.  A change that alters a model request
 on purpose, such as its prompt or the inputs a stage receives, cannot pass on a
 recording made before it: the replay finds no recorded response for the new
@@ -81,6 +87,11 @@ NETWORK_LOG = "network-attempts.log"
 # Options whose value is a path the run only writes or that the gate replaces.
 _OUTPUT_OPTIONS = frozenset({"--output-dir"})
 _GATE_OPTIONS = frozenset({"--replay-calls"})
+# The replay-fill options of a recording made in fill mode.  The gate drops
+# them so the replay is strict: a request the record lacks ends the run in a
+# replay miss instead of going live.
+_FILL_FLAG = "--replay-fill"
+_FILL_OPTIONS = frozenset({"--live-stage", "--max-live-requests"})
 # Read in place: the profiles file holds endpoint credentials, and copying it
 # into scratch space would spread them.  Its content is already in each
 # request digest.
@@ -131,6 +142,35 @@ ALLOWED_DIFFERENCES: tuple[AllowedDifference, ...] = (
         "recomputes it on both sides instead of comparing it",
     ),
 )
+
+
+@dataclass(frozen=True)
+class ReplayFillProvenance:
+    """What a recording made in fill mode holds that its strict replay does not.
+
+    Applies only when the recorded arguments carried ``--replay-fill``.  The
+    recording's provider records may carry *record_field* with a value in
+    *record_sources* where the replay's records carry no such key, and its
+    synthesis manifest may hold *manifest_block* where the replay's has none,
+    when that block counts exactly the recording's own records: every request
+    served or sent, none refused, and the live ones by stage.
+    """
+
+    record_field: str
+    record_sources: frozenset[str]
+    manifest_block: str
+    reason: str
+
+
+REPLAY_FILL_PROVENANCE = ReplayFillProvenance(
+    record_field="source",
+    record_sources=frozenset({"replay", "live"}),
+    manifest_block="provider_replay_fill",
+    reason="the gate replays a fill recording strictly from its own records, so "
+    "no request is served from another record or sent live; a refused request "
+    "never got a response the replay could serve",
+)
+_UNATTRIBUTED_STAGE = "unattributed"
 
 # Manifest fields the current code no longer writes.  A recording made before
 # a field was retired may hold it and the gate compares without it; a replay
@@ -605,13 +645,16 @@ class PreparedRun:
     arguments: list[str]
     output_dir: Path
     path_map: dict[str, str]
+    replay_fill: bool = False
 
 
 def prepare_run(arguments: Sequence[str], *, recorded: Path, work: Path) -> PreparedRun:
     """Rewrite *arguments* to read copied inputs and write into *work*.
 
     ``path_map`` maps every scratch path back to the recorded path so outputs
-    that echo an input or output path compare equal.
+    that echo an input or output path compare equal.  The replay-fill options
+    are dropped, so a recording made in fill mode replays strictly;
+    ``replay_fill`` says whether the recorded arguments carried them.
     """
     inputs = work / "inputs"
     inputs.mkdir(parents=True)
@@ -628,7 +671,9 @@ def prepare_run(arguments: Sequence[str], *, recorded: Path, work: Path) -> Prep
         raise ValueError("the recorded arguments have no --output-dir")
     path_map[str(output_dir)] = original_output
     rewritten += ["--replay-calls", str(record)]
-    return PreparedRun(rewritten, output_dir, path_map)
+    return PreparedRun(
+        rewritten, output_dir, path_map, replay_fill=_FILL_FLAG in arguments
+    )
 
 
 def _rewrite_arguments(
@@ -641,8 +686,11 @@ def _rewrite_arguments(
     while index < len(items):
         item = items[index]
         option = item.split("=", 1)[0]
-        if option in _GATE_OPTIONS:
+        if option in _GATE_OPTIONS or option in _FILL_OPTIONS:
             index += 1 if "=" in item else 2
+            continue
+        if item == _FILL_FLAG:
+            index += 1
             continue
         if option in _OUTPUT_OPTIONS and "=" not in item:
             original_output = items[index + 1]
@@ -997,6 +1045,68 @@ def _retired_nested_problem(replayed: Path, relative: str) -> str | None:
     return None
 
 
+def _without_fill_provenance(left: Any, right: Any, relative: str, root: Path) -> Any:
+    """Drop the :data:`REPLAY_FILL_PROVENANCE` of a recording made in fill mode."""
+    allowed = REPLAY_FILL_PROVENANCE
+    if relative == RECORD_FILENAME and isinstance(left, list):
+        return [_without_fill_source(record) for record in left]
+    if (
+        relative == _MANIFEST_FILENAME
+        and isinstance(left, dict)
+        and isinstance(right, dict)
+        and allowed.manifest_block not in right
+        and _fill_block_counts_records(left.get(allowed.manifest_block), root)
+    ):
+        return {
+            key: value for key, value in left.items() if key != allowed.manifest_block
+        }
+    return left
+
+
+def _without_fill_source(record: Any) -> Any:
+    allowed = REPLAY_FILL_PROVENANCE
+    if (
+        isinstance(record, dict)
+        and record.get(allowed.record_field) in allowed.record_sources
+    ):
+        return {
+            key: value for key, value in record.items() if key != allowed.record_field
+        }
+    return record
+
+
+def _fill_block_counts_records(block: Any, root: Path) -> bool:
+    """Whether a recorded fill block counts exactly the records beside it.
+
+    Every record must have been served or sent live; the block's served and
+    live totals, its live requests by stage, and its refusals must be what
+    those records give, within its live-request budget.
+    """
+    path = root / RECORD_FILENAME
+    if not isinstance(block, dict) or block.get("mode") != "fill" or not path.is_file():
+        return False
+    records = [json.loads(line) for line in jsonl_lines(path.read_text("utf-8"))]
+    field_name = REPLAY_FILL_PROVENANCE.record_field
+    sources = [record.get(field_name) for record in records]
+    if not set(sources) <= REPLAY_FILL_PROVENANCE.record_sources:
+        return False
+    live_by_stage = Counter(
+        (record.get("identity") or {}).get("stage") or _UNATTRIBUTED_STAGE
+        for record in records
+        if record.get(field_name) == "live"
+    )
+    live = sources.count("live")
+    budget = block.get("max_live_requests")
+    return (
+        block.get("served_requests") == sources.count("replay")
+        and block.get("live_requests") == live
+        and block.get("live_requests_by_stage") == dict(live_by_stage)
+        and block.get("refused_requests") == 0
+        and isinstance(budget, int)
+        and live <= budget
+    )
+
+
 def _self_digest_difference(document: Any, side: str) -> str | None:
     from asago_scenario_generator.pipeline.synthesis_manifest import (
         _MANIFEST_DOMAIN,
@@ -1019,6 +1129,7 @@ def compare_file(
     *,
     present_templates: frozenset[str] = frozenset(),
     removed_templates: set[str] | None = None,
+    replay_fill: bool = False,
 ) -> str | None:
     """Return the first unexplained difference in one file, or ``None``.
 
@@ -1034,7 +1145,8 @@ def compare_file(
     fails a replay that writes a :data:`RETIRED_MANIFEST_FIELDS` entry, and
     the recording's copy of one is dropped before comparing.  The replay's
     copy of an :data:`ADDED_FIELDS` entry is dropped when the recording
-    lacks it.
+    lacks it.  With *replay_fill*, the recording's
+    :data:`REPLAY_FILL_PROVENANCE` is dropped where the replay lacks it.
     """
     if relative == CALLS_FILENAME:
         for path, side in ((recorded, "recording"), (replayed, "replay")):
@@ -1074,6 +1186,10 @@ def compare_file(
         right_data = sorted(right_data, key=_provider_record_order)
     if relative == CALLS_FILENAME:
         _pair_call_forms(left_data, right_data)
+    if replay_fill:
+        left_data = _without_fill_provenance(
+            left_data, right_data, relative, recorded.parent
+        )
     if relative == _MANIFEST_FILENAME and isinstance(left_data, dict):
         left_data = {
             key: value
@@ -2039,11 +2155,13 @@ def compare_trees(
     present_templates: frozenset[str] | None = None,
     removed_templates: set[str] | None = None,
     expected_differences: list[Difference] | None = None,
+    replay_fill: bool = False,
 ) -> tuple[int, list[Difference]]:
     """Compare every file under *recorded* and *replayed*.
 
     *present_templates* defaults to :func:`checkout_templates`; recorded
     hashes of other templates are collected in *removed_templates*.
+    *replay_fill* says the recorded arguments carried ``--replay-fill``.
     """
     present = checkout_templates() if present_templates is None else present_templates
     aliases = {**path_map, **_run_id_aliases(recorded, replayed)}
@@ -2081,6 +2199,7 @@ def compare_trees(
             aliases,
             present_templates=present,
             removed_templates=removed_templates,
+            replay_fill=replay_fill,
         )
         if detail:
             difference = Difference(relative, detail)
@@ -2203,6 +2322,7 @@ def _run_gate_in(
             prepared.path_map,
             removed_templates=removed,
             expected_differences=expected,
+            replay_fill=prepared.replay_fill,
         )
         result.removed_templates = sorted(removed)
         result.expected_differences = expected
