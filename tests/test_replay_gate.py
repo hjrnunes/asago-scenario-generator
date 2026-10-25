@@ -53,8 +53,11 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     CriticGap,
     RevisionDelta,
+    strip_empty_responsibilities,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
+    EvidenceOperation,
+    TargetEvidence,
     check_evidence_bindings,
 )
 from asago_scenario_generator.stpa.system_model.run import (
@@ -1541,6 +1544,7 @@ _REVIEWED_STRUCTURE = (
     / "control_structure_reviewed_occiai.yaml"
 )
 _UNSET = object()
+_LOOKUP = "ask_clinical_question"
 
 
 def _reviewed_structure() -> ControlStructure:
@@ -1583,24 +1587,23 @@ def _rebound(
 def _revision_versions(kind: str) -> tuple[ControlStructure, ControlStructure]:
     """Return the evidence-bound and revised structures a revision step left.
 
-    ``changed`` edits a responsibility, ``stripped`` removes an empty one,
-    ``unchanged`` keeps the structure, and ``rebound`` and ``rebound_dropped``
-    strip one and then change only what binding to the target evidence may.
+    ``changed`` edits a responsibility, ``stripped`` removes an empty one, and
+    ``unchanged`` keeps the structure.  ``prefixed_rebound`` and
+    ``prefixed_dropped`` strip one from a structure whose bound operation
+    still begins with ``operation:``, which binding again shortens or drops.
     The other kinds are what no revision step leaves.
     """
     reviewed = _reviewed_structure()
     holding = _with_empty_responsibility(reviewed)
     first = reviewed.responsibilities[0]
     pm_refs = first.process_model_parts[1].evidence_refs
+    prefixed = _rebound(holding, operation=f"operation:{_LOOKUP}")
     versions = {
         "changed": (reviewed, _with_first(reviewed, description="Answer only")),
         "stripped": (holding, reviewed),
         "unchanged": (reviewed, reviewed),
-        "rebound": (
-            _rebound(holding, operation="operation:ask_clinical_question"),
-            _rebound(reviewed, refs=pm_refs[1:], operation="ask_clinical_question"),
-        ),
-        "rebound_dropped": (holding, _rebound(reviewed, refs=[], operation=None)),
+        "prefixed_rebound": (prefixed, _rebound(reviewed, operation=_LOOKUP)),
+        "prefixed_dropped": (prefixed, _rebound(reviewed, operation=None)),
         "kept_empty": (holding, holding),
         "kept_one_empty": (
             _with_empty_responsibility(reviewed, "RESP-98", "RESP-99"),
@@ -1627,6 +1630,17 @@ def _revision_versions(kind: str) -> tuple[ControlStructure, ControlStructure]:
         ),
         "rebound_reordered": (holding, _rebound(reviewed, refs=pm_refs[::-1])),
         "rebound_renamed": (holding, _rebound(reviewed, operation="lookup_order")),
+        "refs_dropped": (holding, _rebound(reviewed, refs=pm_refs[1:])),
+        "refs_emptied": (holding, _rebound(reviewed, refs=[])),
+        "operation_dropped": (holding, _rebound(reviewed, operation=None)),
+        "prefixed_kept": (
+            prefixed,
+            _rebound(reviewed, operation=f"operation:{_LOOKUP}"),
+        ),
+        "prefixed_twice": (
+            _rebound(holding, operation=f"operation:operation:{_LOOKUP}"),
+            _rebound(reviewed, operation=_LOOKUP),
+        ),
         "rebound_without_strip": (reviewed, _rebound(reviewed, operation=None)),
     }
     return versions[kind]
@@ -1664,7 +1678,7 @@ def _critic_run(
     attempts: tuple[bool, ...],
     versions: str,
     warnings: list[str],
-    sources: tuple[str, ...] = ("synthesis",),
+    sources: tuple[str, ...] = ("scenario", "synthesis"),
     run_manifest_warnings: Any = _UNSET,
 ) -> None:
     """Write one side's Stage 2 critic-revision evidence and manifest record.
@@ -1672,9 +1686,11 @@ def _critic_run(
     *attempts* gives each revision request's success, in order; a failed one
     logs :data:`_MISS`.  *versions* names a :func:`_revision_versions` kind,
     and *warnings* are the run's post-revision warnings.  *sources* says
-    where the run keeps them: ``run`` in the run manifest Stage 2 wrote,
-    ``synthesis`` in the synthesis manifest (which is otherwise removed);
-    *run_manifest_warnings* replaces the run manifest's copy.
+    which manifests the run left: ``run`` keeps them in the run manifest
+    Stage 2 wrote, ``scenario`` marks a run manifest scenario production
+    replaced (which keeps none), and ``synthesis`` keeps them in the
+    synthesis manifest, which is otherwise removed.  *run_manifest_warnings*
+    replaces the run manifest's copy.
     """
     document = yaml.safe_load((root / "run-manifest.yaml").read_text())
     stage_2: dict[str, Any] = {"call_count": 2 + len(attempts)}
@@ -1685,6 +1701,8 @@ def _critic_run(
         document["post_revision_warnings"] = (
             warnings if run_manifest_warnings is _UNSET else run_manifest_warnings
         )
+    if "scenario" in sources:
+        document["validation_error_count"] = 0
     (root / "run-manifest.yaml").write_text(yaml.safe_dump(document))
     with (root / "calls.jsonl").open("a", encoding="utf-8") as calls:
         for number, success in enumerate(attempts, start=1):
@@ -1714,7 +1732,7 @@ def _critic_differences(
     attempts: tuple[bool, ...] = (True,),
     versions: str = "changed",
     warnings: list[str] | None = None,
-    sources: tuple[str, ...] = ("synthesis",),
+    sources: tuple[str, ...] = ("scenario", "synthesis"),
     run_manifest_warnings: Any = _UNSET,
 ) -> list[Difference]:
     """Compare a run whose replay holds *record* and whose recording may not.
@@ -1749,10 +1767,10 @@ def _critic_differences(
         ({"status": "unchanged"}, (True,), "unchanged"),
         ({"status": "discarded", "reason": _FAILED}, (False,), "unchanged"),
         ({"status": "discarded", "reason": _FAILED}, (False,), "stripped"),
-        ({"status": "discarded", "reason": _FAILED}, (False,), "rebound"),
+        ({"status": "discarded", "reason": _FAILED}, (False,), "prefixed_rebound"),
         ({"status": "discarded", "reason": _DEGRADED}, (True,), "unchanged"),
         ({"status": "discarded", "reason": _DEGRADED}, (True,), "stripped"),
-        ({"status": "discarded", "reason": _DEGRADED}, (True,), "rebound_dropped"),
+        ({"status": "discarded", "reason": _DEGRADED}, (True,), "prefixed_dropped"),
         ({"status": "discarded", "reason": _NO_RESPONSE}, (True,), "unchanged"),
         ({"status": "discarded", "reason": _NO_RESPONSE}, (True,), "stripped"),
     ],
@@ -1767,7 +1785,9 @@ def test_a_recording_without_the_critic_revision_accepts_a_consistent_one(
     assert differences == []
 
 
-@pytest.mark.parametrize("sources", [("run",), ("synthesis",), ("run", "synthesis")])
+@pytest.mark.parametrize(
+    "sources", [("run",), ("scenario", "synthesis"), ("run", "synthesis")]
+)
 def test_an_added_critic_revision_reads_the_warnings_wherever_the_run_keeps_them(
     trees, sources: tuple[str, ...]
 ) -> None:
@@ -1784,7 +1804,7 @@ def test_an_added_critic_revision_reads_the_warnings_wherever_the_run_keeps_them
 @pytest.mark.parametrize(
     ("sources", "run_manifest_warnings", "message"),
     [
-        ((), _UNSET, "neither run-manifest.yaml nor synthesis-manifest.yaml"),
+        ((), _UNSET, "keeps no post-revision warnings and was not written by"),
         (("run",), [], "keep it, but the critic revision is recorded as discarded"),
         (("run", "synthesis"), [], "disagree"),
         (
@@ -1993,19 +2013,53 @@ _BEYOND_STRIPPING = "beyond stripping its empty responsibilities"
             {"status": "discarded", "reason": _DEGRADED},
             (True,),
             "rebound_gained",
-            "gave process-model part PM-1-2 evidence refs it did not hold",
+            _BEYOND_STRIPPING,
         ),
         (
             {"status": "discarded", "reason": _DEGRADED},
             (True,),
             "rebound_reordered",
-            "gave process-model part PM-1-2 evidence refs it did not hold",
+            _BEYOND_STRIPPING,
         ),
         (
             {"status": "discarded", "reason": _NO_RESPONSE},
             (True,),
             "rebound_renamed",
-            "gave control action CA-1-2 the operation 'lookup_order'",
+            "gave control action CA-1-2 the operation 'lookup_order', not "
+            "'ask_clinical_question'",
+        ),
+        (
+            {"status": "discarded", "reason": _FAILED},
+            (False,),
+            "refs_dropped",
+            _BEYOND_STRIPPING,
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (True,),
+            "refs_emptied",
+            _BEYOND_STRIPPING,
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (True,),
+            "operation_dropped",
+            "gave control action CA-1-2 the operation None, not "
+            "'ask_clinical_question'",
+        ),
+        (
+            {"status": "discarded", "reason": _FAILED},
+            (False,),
+            "prefixed_kept",
+            "the operation 'operation:ask_clinical_question', not "
+            "'ask_clinical_question' or none",
+        ),
+        (
+            {"status": "discarded", "reason": _NO_RESPONSE},
+            (True,),
+            "prefixed_twice",
+            "the operation 'ask_clinical_question', not "
+            "'operation:ask_clinical_question' or none",
         ),
     ],
 )
@@ -2043,6 +2097,94 @@ def test_an_added_critic_revision_needs_a_published_structure(trees) -> None:
 
     assert [d.path for d in differences] == ["run-manifest.yaml"]
     assert "published no control structure" in differences[0].detail
+
+
+@pytest.mark.parametrize(
+    ("record", "attempts", "versions"),
+    [
+        ({"status": "applied"}, (True,), "changed"),
+        ({"status": "discarded", "reason": _FAILED}, (False,), "stripped"),
+        ({"status": "discarded", "reason": _DEGRADED}, (True,), "unchanged"),
+    ],
+)
+def test_a_run_that_stopped_before_its_synthesis_manifest_skips_the_reason_check(
+    trees, record: dict[str, Any], attempts: tuple[bool, ...], versions: str
+) -> None:
+    # Scenario production replaced the run manifest, then the run stopped
+    # before synthesis wrote its manifest: no copy of the warnings is left.
+    differences = _critic_differences(
+        trees, record, attempts=attempts, versions=versions, sources=("scenario",)
+    )
+
+    assert differences == []
+
+
+@pytest.mark.parametrize(
+    ("record", "attempts", "versions", "message"),
+    [
+        ({"status": "revised"}, (True,), "changed", "is not one of"),
+        ({"status": "applied"}, (True,), "unchanged", "as applied left"),
+        (
+            {"status": "discarded", "reason": _FAILED},
+            (True,),
+            "unchanged",
+            "the last revision request succeeded",
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (True,),
+            "stripped_and_edited",
+            _BEYOND_STRIPPING,
+        ),
+    ],
+)
+def test_a_run_that_stopped_before_its_synthesis_manifest_keeps_the_other_checks(
+    trees,
+    record: dict[str, Any],
+    attempts: tuple[bool, ...],
+    versions: str,
+    message: str,
+) -> None:
+    differences = _critic_differences(
+        trees, record, attempts=attempts, versions=versions, sources=("scenario",)
+    )
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert message in differences[0].detail
+
+
+@pytest.mark.parametrize(
+    ("observed", "rebound"),
+    [
+        ((f"operation:{_LOOKUP}",), None),
+        ((f"operation:{_LOOKUP}", _LOOKUP), _LOOKUP),
+    ],
+)
+def test_a_discarded_revision_rebinds_an_operation_named_with_the_prefix(
+    observed: tuple[str, ...], rebound: str | None
+) -> None:
+    """Bind as Stage 2 does, then strip and bind again as the revision step does
+    after a discarded reply."""
+    evidence = TargetEvidence(
+        operations=tuple(
+            EvidenceOperation(name=name, description="observed", arguments=())
+            for name in observed
+        )
+    )
+    derived = _with_empty_responsibility(
+        _rebound(_reviewed_structure(), operation=f"operation:operation:{_LOOKUP}")
+    )
+    before, _ = check_evidence_bindings(derived, evidence)
+    stripped, _ = strip_empty_responsibilities(before)
+    after, _ = check_evidence_bindings(stripped, evidence)
+
+    assert before.responsibilities[0].control_actions[1].operation == (
+        f"operation:{_LOOKUP}"
+    )
+    assert after.responsibilities[0].control_actions[1].operation == rebound
+    assert replay_gate._discarded_structure_problem(before, after) is None
+    kept = replay_gate._discarded_structure_problem(before, stripped)
+    assert kept is not None and f"'operation:{_LOOKUP}', not" in kept
 
 
 @pytest.mark.parametrize("reply", [None, "merge_degraded"])

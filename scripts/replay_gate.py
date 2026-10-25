@@ -252,14 +252,10 @@ _NONE_REVISION_REASON = f"{REVISION_FAILED}unexpected None response"
 # into the synthesis manifest's stage warnings under this prefix.
 _RUN_MANIFEST_FILENAME = "run-manifest.yaml"
 _BASELINE_REVISION_WARNING = "Baseline post_revision_warnings: "
-# ``check_evidence_bindings`` owns one field of each listed element of a
-# responsibility: it drops a process-model part's unsupported
-# ``evidence_refs`` and a control action's unobserved ``operation``, and
-# strips an ``operation:`` prefix from an observed one.
-_REBOUND_FIELDS = {
-    "process_model_parts": "evidence_refs",
-    "control_actions": "operation",
-}
+# Only scenario production's run manifest holds this key; the run manifest
+# Stage 2 wrote always holds ``post_revision_warnings`` instead.
+_SCENARIO_MANIFEST_KEY = "validation_error_count"
+# ``check_evidence_bindings`` strips this prefix from an observed operation.
 _OPERATION_PREFIX = "operation:"
 
 
@@ -272,7 +268,8 @@ def _critic_revision_problem(
     ``status: discarded`` with the ``reason`` warning that kept the reviewed
     structure.  That reason is the one :func:`discarded_revision_reason`
     finds in the run's post-revision warnings, and an applied or unchanged
-    record is one where it finds none.  The run's revision requests and
+    record is one where it finds none; a run that kept no copy of those
+    warnings skips this comparison.  The run's revision requests and
     control-structure versions must agree as well: see
     :func:`_revision_request_problem` and :func:`_revision_structure_problem`.
     """
@@ -283,14 +280,15 @@ def _critic_revision_problem(
     warnings, problem = _post_revision_warnings(root, aliases)
     if problem:
         return problem
-    expected = discarded_revision_reason(warnings)
-    if reason != expected:
-        found = f"discard it with {_short(expected)}" if expected else "keep it"
-        return (
-            f"the run's post-revision warnings {found}, but the critic revision "
-            f"is recorded as {status}"
-            + (f" with {_short(reason)}" if reason is not None else "")
-        )
+    if warnings is not None:
+        expected = discarded_revision_reason(warnings)
+        if reason != expected:
+            found = f"discard it with {_short(expected)}" if expected else "keep it"
+            return (
+                f"the run's post-revision warnings {found}, but the critic "
+                f"revision is recorded as {status}"
+                + (f" with {_short(reason)}" if reason is not None else "")
+            )
     problem = _revision_request_problem(reason, _revision_attempts(root, aliases))
     if problem:
         return problem
@@ -325,19 +323,22 @@ def _critic_revision_shape_problem(value: Any) -> str | None:
 
 def _post_revision_warnings(
     root: Path, aliases: dict[str, str]
-) -> tuple[list[str], str | None]:
-    """Return the run's Stage 2 post-revision warnings, or why they are unknown.
+) -> tuple[list[str] | None, str | None]:
+    """Return the run's Stage 2 post-revision warnings, or why they are unusable.
 
     The run manifest Stage 2 wrote holds them as ``post_revision_warnings``;
     once scenario production has replaced it, only the synthesis manifest's
-    prefixed copy remains.  When both hold them, they must agree.
+    prefixed copy remains.  When both hold them, they must agree.  A run that
+    stopped after scenario production replaced the run manifest and before
+    synthesis wrote its manifest kept neither copy: the warnings are then
+    ``None``, which is not an empty list.
     """
     sources: list[tuple[str, list[str]]] = []
-    run_manifest = _yaml_mapping(root / _RUN_MANIFEST_FILENAME, aliases)
-    if run_manifest is not None and "post_revision_warnings" in run_manifest:
+    run_manifest = _yaml_mapping(root / _RUN_MANIFEST_FILENAME, aliases) or {}
+    if "post_revision_warnings" in run_manifest:
         warnings = run_manifest["post_revision_warnings"]
         if not _is_text_list(warnings):
-            return [], (
+            return None, (
                 f"the run's {_RUN_MANIFEST_FILENAME} post_revision_warnings is "
                 f"not a list of warnings: {_short(warnings)}"
             )
@@ -346,7 +347,7 @@ def _post_revision_warnings(
     if synthesis is not None:
         stage_warnings = synthesis.get("stage_warnings")
         if not _is_text_list(stage_warnings):
-            return [], (
+            return None, (
                 f"the run's {_MANIFEST_FILENAME} holds no stage warnings to check "
                 "the critic revision against"
             )
@@ -361,12 +362,15 @@ def _post_revision_warnings(
             )
         )
     if not sources:
-        return [], (
-            f"neither {_RUN_MANIFEST_FILENAME} nor {_MANIFEST_FILENAME} keeps the "
-            "post-revision warnings to check the critic revision against"
+        if _SCENARIO_MANIFEST_KEY in run_manifest:
+            return None, None
+        return None, (
+            f"the run's {_RUN_MANIFEST_FILENAME} keeps no post-revision warnings "
+            f"and was not written by scenario production, and it has no "
+            f"{_MANIFEST_FILENAME}"
         )
     if len(sources) == 2 and sources[0][1] != sources[1][1]:
-        return [], (
+        return None, (
             f"the post-revision warnings in {_RUN_MANIFEST_FILENAME} and "
             f"{_MANIFEST_FILENAME} disagree: {_short(sources[0][1])} != "
             f"{_short(sources[1][1])}"
@@ -458,10 +462,12 @@ def _discarded_structure_problem(
     """Check that a discarded revision's output is its input, stripped.
 
     The step strips the input's empty responsibilities and, only when that
-    changed it, binds the result to the target evidence again.  The
-    :data:`_REBOUND_FIELDS` may then differ from the stripped input, but only
-    as that binding changes them: evidence refs dropped, an operation dropped
-    or its ``operation:`` prefix removed.  Everything else is equal.
+    changed it, runs ``check_evidence_bindings`` again with the evidence that
+    already bound the input.  Every evidence ref and every operation the input
+    holds survived that evidence once, so the second pass changes nothing,
+    except an operation whose bound name itself begins with ``operation:``:
+    it loses that prefix once more, or is dropped when the shorter name is
+    not observed.
     """
     stripped, removed = strip_empty_responsibilities(before)
     if not removed:
@@ -469,53 +475,42 @@ def _discarded_structure_problem(
             "a discarded critic revision changed the control structure, though "
             "the evidence-bound structure holds no empty responsibility to strip"
         )
-    if _without_rebound_fields(stripped) != _without_rebound_fields(after):
+    if _without_operations(stripped) != _without_operations(after):
         return (
             "a discarded critic revision changed the control structure beyond "
             "stripping its empty responsibilities"
         )
     for kept, bound in zip(stripped.responsibilities, after.responsibilities):
-        for part, bound_part in zip(
-            kept.process_model_parts, bound.process_model_parts
-        ):
-            refs = iter(part.evidence_refs)
-            if not all(ref in refs for ref in bound_part.evidence_refs):
-                return (
-                    "a discarded critic revision gave process-model part "
-                    f"{bound_part.pm_id} evidence refs it did not hold"
-                )
         for action, bound_action in zip(kept.control_actions, bound.control_actions):
             operation = action.operation
-            allowed = {None, operation}
-            if operation is not None:
-                allowed.add(operation.removeprefix(_OPERATION_PREFIX))
+            if operation is not None and operation.startswith(_OPERATION_PREFIX):
+                allowed = {None, operation.removeprefix(_OPERATION_PREFIX)}
+            else:
+                allowed = {operation}
             if bound_action.operation not in allowed:
+                expected = " or ".join(
+                    repr(name) if name is not None else "none"
+                    for name in sorted(allowed, key=lambda name: name is None)
+                )
                 return (
                     "a discarded critic revision gave control action "
                     f"{bound_action.ca_id} the operation "
-                    f"{bound_action.operation!r}, not {operation!r}"
+                    f"{bound_action.operation!r}, not {expected}"
                 )
     return None
 
 
-def _without_rebound_fields(structure: ControlStructure) -> ControlStructure:
-    """Return *structure* with each :data:`_REBOUND_FIELDS` value at its default."""
+def _without_operations(structure: ControlStructure) -> ControlStructure:
+    """Return *structure* with no control action naming an operation."""
     return structure.model_copy(
         update={
             "responsibilities": [
                 resp.model_copy(
                     update={
-                        elements: [
-                            item.model_copy(
-                                update={
-                                    owned: type(item)
-                                    .model_fields[owned]
-                                    .get_default(call_default_factory=True)
-                                }
-                            )
-                            for item in getattr(resp, elements)
+                        "control_actions": [
+                            action.model_copy(update={"operation": None})
+                            for action in resp.control_actions
                         ]
-                        for elements, owned in _REBOUND_FIELDS.items()
                     }
                 )
                 for resp in structure.responsibilities
