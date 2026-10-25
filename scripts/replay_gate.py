@@ -69,6 +69,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Sequence
 
 import yaml
+from pydantic import ValidationError
 
 import asago_scenario_generator
 from asago_scenario_generator.models.obligation_consideration import (
@@ -86,12 +87,14 @@ from asago_scenario_generator.stpa.infra.call_log import (
 )
 from asago_scenario_generator.stpa.infra.provider_record import RECORD_FILENAME
 from asago_scenario_generator.stpa.infra.provider_record import request_digest
+from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.system_model.critic import (
     _REVISION_FAILED as REVISION_FAILED,
     _REVISION_MERGE_DEGRADED as REVISION_MERGE_DEGRADED,
     STAGE as CRITIC_STAGE,
     STEP_REVISION,
     discarded_revision_reason,
+    strip_empty_responsibilities,
 )
 from asago_scenario_generator.stpa.system_model.publication import (
     CONTROL_STRUCTURE_FILENAME,
@@ -244,6 +247,11 @@ _EVIDENCE_BOUND_VERSION = "control-structure-evidence-bound.yaml"
 _NONE_REVISION_REASON = f"{REVISION_FAILED}unexpected None response"
 
 
+# ``_baseline_diagnostics`` carries each Stage 2 post-revision warning into
+# the synthesis manifest's stage warnings under this prefix.
+_BASELINE_REVISION_WARNING = "Baseline post_revision_warnings: "
+
+
 def _critic_revision_problem(
     value: Any, root: Path, aliases: dict[str, str]
 ) -> str | None:
@@ -251,13 +259,37 @@ def _critic_revision_problem(
 
     The record says ``status: applied`` or ``unchanged`` and nothing else, or
     ``status: discarded`` with the ``reason`` warning that kept the reviewed
-    structure.  The run must have made a revision request.  When its last
-    attempt failed, the record is discarded with that attempt's error as the
-    reason.  When it succeeded, a discarded reason is a merge degradation or
-    the unexpected empty response, and an applied revision changed the
-    control structure while an unchanged one did not: the evidence-bound
-    version differs from the revised version exactly when it was applied.
+    structure.  That reason is the one :func:`discarded_revision_reason`
+    finds in the run's post-revision warnings, and an applied or unchanged
+    record is one where it finds none.  The run's revision requests and
+    control-structure versions must agree as well: see
+    :func:`_revision_request_problem` and :func:`_revision_structure_problem`.
     """
+    problem = _critic_revision_shape_problem(value)
+    if problem:
+        return problem
+    status, reason = value["status"], value.get("reason")
+    warnings = _post_revision_warnings(root, aliases)
+    if warnings is None:
+        return (
+            f"the run's {_MANIFEST_FILENAME} holds no stage warnings to check "
+            "the critic revision against"
+        )
+    expected = discarded_revision_reason(warnings)
+    if reason != expected:
+        found = f"discard it with {_short(expected)}" if expected else "keep it"
+        return (
+            f"the run's post-revision warnings {found}, but the critic revision "
+            f"is recorded as {status}"
+            + (f" with {_short(reason)}" if reason is not None else "")
+        )
+    problem = _revision_request_problem(reason, _revision_attempts(root, aliases))
+    if problem:
+        return problem
+    return _revision_structure_problem(status, root)
+
+
+def _critic_revision_shape_problem(value: Any) -> str | None:
     if not isinstance(value, dict):
         return f"the critic revision record is not a mapping: {_short(value)}"
     status = value.get("status")
@@ -280,37 +312,90 @@ def _critic_revision_problem(
             f"discarded critic revision reason {_short(reason)} is not a "
             "revision failure or merge degradation warning"
         )
-    attempts = _revision_attempts(root, aliases)
+    return None
+
+
+def _post_revision_warnings(root: Path, aliases: dict[str, str]) -> list[str] | None:
+    """Return the Stage 2 post-revision warnings the synthesis manifest keeps."""
+    path = root / _MANIFEST_FILENAME
+    if not path.is_file():
+        return None
+    document = yaml.safe_load(_substitute(path.read_text(encoding="utf-8"), aliases))
+    warnings = document.get("stage_warnings") if isinstance(document, dict) else None
+    if not isinstance(warnings, list):
+        return None
+    return [
+        warning.removeprefix(_BASELINE_REVISION_WARNING)
+        for warning in warnings
+        if isinstance(warning, str) and warning.startswith(_BASELINE_REVISION_WARNING)
+    ]
+
+
+def _revision_request_problem(
+    reason: str | None, attempts: list[dict[str, Any]]
+) -> str | None:
+    """Check the discard reason against the run's revision requests.
+
+    A failed last attempt discards the revision with that attempt's logged
+    error.  After a successful one, only a merge degradation or the
+    unexpected empty response discards it.
+    """
     if not attempts:
         return "the run records a critic revision but made no revision request"
     last = attempts[-1]
     if last.get("success") is not True:
         failed = f"{REVISION_FAILED}{last.get('error')}"
-        if reason != failed:
-            return (
-                f"the last revision request failed, so the critic revision is "
-                f"discarded with reason {_short(failed)}, not {status}"
-                + (f" with {_short(reason)}" if reason is not None else "")
-            )
-        return None
-    # Only a discarded record holds a reason.
-    if isinstance(reason, str):
-        if reason == _NONE_REVISION_REASON or reason.startswith(
-            REVISION_MERGE_DEGRADED
-        ):
+        if reason == failed:
             return None
         return (
-            "the last revision request succeeded, so a discarded critic "
-            f"revision cannot give the failure {_short(reason)}"
+            "the last revision request failed, so the critic revision is "
+            f"discarded with reason {_short(failed)}, not {_short(reason)}"
         )
-    changed = _revision_changed_structure(root)
-    if changed is None:
+    if (
+        reason is None
+        or reason == _NONE_REVISION_REASON
+        or reason.startswith(REVISION_MERGE_DEGRADED)
+    ):
+        return None
+    return (
+        "the last revision request succeeded, so a discarded critic "
+        f"revision cannot give the failure {_short(reason)}"
+    )
+
+
+def _revision_structure_problem(status: str, root: Path) -> str | None:
+    """Check the record against what the revision step did to the structure.
+
+    The step's input is the evidence-bound version and its output the revised
+    one.  Whatever the reply, the step strips any responsibility with no
+    process-model part, control action or feedback channel, so an input that
+    holds one always changes.  An applied revision changed the structure and
+    an unchanged one did not.  A discarded revision keeps its input, so it
+    changes the structure only by that stripping.
+    """
+    versions = _revision_versions(root)
+    if versions is None:
         return "the run published no control structure to check the revision against"
-    if changed != (status == "applied"):
+    before, after = versions
+    changed = before != after
+    holds_empty = _holds_empty_responsibility(before)
+    if holds_empty is None:
+        return f"the evidence-bound control structure does not load: {_short(before)}"
+    if holds_empty and not changed:
         return (
-            f"a critic revision recorded as {status} "
-            + ("changed" if changed else "left unchanged")
-            + " the control structure"
+            "the evidence-bound control structure holds an empty responsibility "
+            "that the revision step did not strip"
+        )
+    if status == "applied" and not changed:
+        return (
+            "a critic revision recorded as applied left the control structure unchanged"
+        )
+    if status == "unchanged" and changed:
+        return "a critic revision recorded as unchanged changed the control structure"
+    if status == "discarded" and changed and not holds_empty:
+        return (
+            "a discarded critic revision changed the control structure, though "
+            "the evidence-bound structure holds no empty responsibility to strip"
         )
     return None
 
@@ -328,12 +413,11 @@ def _revision_attempts(root: Path, aliases: dict[str, str]) -> list[dict[str, An
     ]
 
 
-def _revision_changed_structure(root: Path) -> bool | None:
-    """Say whether the revision step changed the control structure.
+def _revision_versions(root: Path) -> tuple[str, str] | None:
+    """Return the text of the revision step's input and output versions.
 
     An absent named version equals the next version present, ending with the
-    published structure (or the refused one), so the step changed the
-    structure exactly when its input and output versions differ.
+    published structure (or the refused one).
     """
     chain = VERSION_CHAINS[CONTROL_STRUCTURE_FILENAME]
     ends = (CONTROL_STRUCTURE_FILENAME, REFUSED_CONTROL_STRUCTURE_FILENAME)
@@ -342,7 +426,16 @@ def _revision_changed_structure(root: Path) -> bool | None:
     after = _version_text(root, chain[start + 1 :] + ends)
     if before is None or after is None:
         return None
-    return before != after
+    return before, after
+
+
+def _holds_empty_responsibility(text: str) -> bool | None:
+    """Say whether a control structure holds a responsibility the step strips."""
+    try:
+        structure = ControlStructure.model_validate(yaml.safe_load(text))
+    except (yaml.YAMLError, ValidationError):
+        return None
+    return bool(strip_empty_responsibilities(structure)[1])
 
 
 def _version_text(root: Path, names: Sequence[str]) -> str | None:

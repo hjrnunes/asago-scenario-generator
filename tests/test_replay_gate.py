@@ -8,6 +8,7 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 
 import pytest
@@ -36,10 +37,28 @@ from replay_gate import (
     replay_environment,
     run_gate,
 )
+from asago_scenario_generator.pipeline.synthesis_baseline import _baseline_diagnostics
 from asago_scenario_generator.stpa.infra.provider_record import (
     RECORD_FILENAME,
     request_digest,
 )
+from asago_scenario_generator.stpa.infra.templates import TemplateLoader
+from asago_scenario_generator.stpa.infra.yaml_io import VersionChain, read_yaml
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlStructure,
+    Responsibility,
+)
+from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings,
+    CriticGap,
+    RevisionDelta,
+)
+from asago_scenario_generator.stpa.system_model.run import (
+    _critic_revision_record,
+    _maybe_apply_revision,
+)
+from tests.stpa.sp1_helpers import MockLLMClient
 
 
 def _jsonl(path: Path, records: list[dict[str, Any]]) -> None:
@@ -1509,21 +1528,90 @@ def test_an_added_field_does_not_excuse_other_differences(trees) -> None:
 
 
 _MISS = "ReplayMissError: no recorded response for request abc"
+_FAILED = f"Revision failed: {_MISS}"
 _DEGRADED = "Revision delta merge degraded: KeyError: 'RESP-9'"
+_NO_RESPONSE = "Revision failed: unexpected None response"
+_REVIEWED_STRUCTURE = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "stpa"
+    / "control_structure_reviewed_occiai.yaml"
+)
+
+
+def _reviewed_structure() -> ControlStructure:
+    return read_yaml(_REVIEWED_STRUCTURE, ControlStructure)  # type: ignore[return-value]
+
+
+def _with_empty_responsibility(structure: ControlStructure) -> ControlStructure:
+    empty = Responsibility(resp_id="RESP-99", description="Escalate to a human")
+    return structure.model_copy(
+        update={"responsibilities": [*structure.responsibilities, empty]}
+    )
+
+
+def _edited(structure: ControlStructure) -> ControlStructure:
+    first, *rest = structure.responsibilities
+    edited = first.model_copy(update={"description": "Answer from policy only"})
+    return structure.model_copy(update={"responsibilities": [edited, *rest]})
+
+
+def _revision_versions(kind: str) -> tuple[ControlStructure, ControlStructure]:
+    """Return the evidence-bound and revised structures a revision step left.
+
+    ``changed`` edits a responsibility, ``stripped`` removes an empty one,
+    ``unchanged`` keeps the structure, and ``kept_empty`` keeps an empty
+    responsibility the step would have stripped.
+    """
+    reviewed = _reviewed_structure()
+    if kind == "changed":
+        return reviewed, _edited(reviewed)
+    if kind == "stripped":
+        return _with_empty_responsibility(reviewed), reviewed
+    if kind == "kept_empty":
+        holding = _with_empty_responsibility(reviewed)
+        return holding, holding
+    return reviewed, reviewed
+
+
+def _write_revision_versions(
+    root: Path, before: ControlStructure, after: ControlStructure
+) -> None:
+    with VersionChain(root) as versions:
+        versions.add(before, "control-structure-evidence-bound.yaml")
+        versions.add(after, "control-structure-revised.yaml")
+        versions.publish(after, "control-structure.yaml")
+
+
+def _write_post_revision_warnings(root: Path, warnings: list[str]) -> None:
+    """Keep *warnings* in the synthesis manifest as the pipeline does."""
+    payload = yaml.safe_load((root / "synthesis-manifest.yaml").read_text())
+    payload.pop("semantic_digest", None)
+    payload["stage_warnings"] = _baseline_diagnostics(
+        SimpleNamespace(
+            stage_warnings=[],
+            heuristic_errors=[],
+            heuristic_warnings=[],
+            post_revision_warnings=warnings,
+        )
+    )
+    payload["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, payload)
+    _write_manifest(root, payload)
 
 
 def _critic_run(
     root: Path,
     record: Any = None,
     *,
-    attempts: tuple[bool, ...] = (True,),
-    changed: bool = True,
+    attempts: tuple[bool, ...],
+    versions: str,
+    warnings: list[str],
 ) -> None:
     """Write one side's Stage 2 critic-revision evidence and manifest record.
 
     *attempts* gives each revision request's success, in order; a failed one
-    logs :data:`_MISS`.  *changed* writes an evidence-bound version that
-    differs from the published structure.
+    logs :data:`_MISS`.  *versions* names a :func:`_revision_versions` kind,
+    and *warnings* are the run's post-revision warnings.
     """
     document = yaml.safe_load((root / "run-manifest.yaml").read_text())
     stage_2: dict[str, Any] = {"call_count": 2 + len(attempts)}
@@ -1542,44 +1630,57 @@ def _critic_run(
             if not success:
                 entry["error"] = _MISS
             calls.write(json.dumps(entry) + "\n")
-    (root / "control-structure.yaml").write_text("responsibilities: [RESP-1, RESP-2]\n")
-    if changed:
-        (root / "control-structure-evidence-bound.yaml").write_text(
-            "responsibilities: [RESP-1]\n"
+    _write_revision_versions(root, *_revision_versions(versions))
+    _write_post_revision_warnings(root, warnings)
+
+
+def _critic_differences(
+    trees: tuple[Path, Path, dict[str, str]],
+    record: Any,
+    *,
+    recorded_record: Any = None,
+    attempts: tuple[bool, ...] = (True,),
+    versions: str = "changed",
+    warnings: list[str] | None = None,
+) -> list[Difference]:
+    """Compare a run whose replay holds *record* and whose recording may not.
+
+    *warnings* default to the replayed record's own reason, if any.
+    """
+    recorded, replayed, path_map = trees
+    if warnings is None:
+        reason = record.get("reason") if isinstance(record, dict) else None
+        warnings = ["Revision dismissed finding: covered"] + (
+            [reason] if isinstance(reason, str) else []
         )
+    for root, side_record in ((recorded, recorded_record), (replayed, record)):
+        _critic_run(
+            root, side_record, attempts=attempts, versions=versions, warnings=warnings
+        )
+    return compare_trees(recorded, replayed, path_map)[1]
 
 
 @pytest.mark.parametrize(
-    ("record", "attempts", "changed"),
+    ("record", "attempts", "versions"),
     [
-        ({"status": "applied"}, (True,), True),
-        ({"status": "unchanged"}, (True,), False),
-        ({"status": "applied"}, (False, True), True),
-        (
-            {"status": "discarded", "reason": f"Revision failed: {_MISS}"},
-            (False,),
-            False,
-        ),
-        ({"status": "discarded", "reason": _DEGRADED}, (True,), False),
-        ({"status": "discarded", "reason": _DEGRADED}, (True,), True),
-        (
-            {
-                "status": "discarded",
-                "reason": "Revision failed: unexpected None response",
-            },
-            (True,),
-            False,
-        ),
+        ({"status": "applied"}, (True,), "changed"),
+        ({"status": "applied"}, (True,), "stripped"),
+        ({"status": "applied"}, (False, True), "changed"),
+        ({"status": "unchanged"}, (True,), "unchanged"),
+        ({"status": "discarded", "reason": _FAILED}, (False,), "unchanged"),
+        ({"status": "discarded", "reason": _FAILED}, (False,), "stripped"),
+        ({"status": "discarded", "reason": _DEGRADED}, (True,), "unchanged"),
+        ({"status": "discarded", "reason": _DEGRADED}, (True,), "stripped"),
+        ({"status": "discarded", "reason": _NO_RESPONSE}, (True,), "unchanged"),
+        ({"status": "discarded", "reason": _NO_RESPONSE}, (True,), "stripped"),
     ],
 )
 def test_a_recording_without_the_critic_revision_accepts_a_consistent_one(
-    trees, record: dict[str, Any], attempts: tuple[bool, ...], changed: bool
+    trees, record: dict[str, Any], attempts: tuple[bool, ...], versions: str
 ) -> None:
-    recorded, replayed, path_map = trees
-    _critic_run(recorded, attempts=attempts, changed=changed)
-    _critic_run(replayed, record, attempts=attempts, changed=changed)
-
-    _, differences = compare_trees(recorded, replayed, path_map)
+    differences = _critic_differences(
+        trees, record, attempts=attempts, versions=versions
+    )
 
     assert differences == []
 
@@ -1594,7 +1695,7 @@ def test_a_recording_without_the_critic_revision_accepts_a_consistent_one(
         ({"status": "unchanged", "note": "x"}, "holds ['status'], not"),
         ({"status": "discarded"}, "holds ['reason', 'status'], not ['status']"),
         (
-            {"status": "discarded", "reason": "x", "extra": 1},
+            {"status": "discarded", "reason": _DEGRADED, "extra": 1},
             "holds ['reason', 'status']",
         ),
         ({"status": "discarded", "reason": 7}, "is not a revision failure"),
@@ -1604,11 +1705,7 @@ def test_a_recording_without_the_critic_revision_accepts_a_consistent_one(
 def test_a_malformed_added_critic_revision_fails(
     trees, record: Any, message: str
 ) -> None:
-    recorded, replayed, path_map = trees
-    _critic_run(recorded)
-    _critic_run(replayed, record)
-
-    _, differences = compare_trees(recorded, replayed, path_map)
+    differences = _critic_differences(trees, record, warnings=[])
 
     assert [d.path for d in differences] == ["run-manifest.yaml"]
     assert "$.stage_summary.stage_2.critic_revision" in differences[0].detail
@@ -1616,35 +1713,120 @@ def test_a_malformed_added_critic_revision_fails(
 
 
 @pytest.mark.parametrize(
-    ("record", "attempts", "changed", "message"),
+    ("record", "warnings", "message"),
     [
-        ({"status": "applied"}, (), True, "made no revision request"),
-        ({"status": "applied"}, (True,), False, "as applied left unchanged"),
-        ({"status": "unchanged"}, (True,), True, "as unchanged changed"),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            ["Revision delta merge degraded: KeyError: 'RESP-8'"],
+            "discard it with \"Revision delta merge degraded: KeyError: 'RESP-8'\"",
+        ),
+        ({"status": "discarded", "reason": _DEGRADED}, [], "keep it"),
+        (
+            {"status": "discarded", "reason": _NO_RESPONSE},
+            [_DEGRADED, _NO_RESPONSE],
+            "discard it with",
+        ),
+        ({"status": "discarded", "reason": _NO_RESPONSE}, [], "keep it"),
+        ({"status": "applied"}, [_DEGRADED], "is recorded as applied"),
+        ({"status": "unchanged"}, [_NO_RESPONSE], "is recorded as unchanged"),
+    ],
+)
+def test_an_added_critic_revision_contradicting_its_warnings_fails(
+    trees, record: dict[str, Any], warnings: list[str], message: str
+) -> None:
+    versions = "unchanged" if record["status"] != "applied" else "changed"
+    differences = _critic_differences(
+        trees, record, versions=versions, warnings=warnings
+    )
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "post-revision warnings" in differences[0].detail
+    assert message in differences[0].detail
+
+
+def test_an_added_critic_revision_needs_the_synthesis_stage_warnings(trees) -> None:
+    recorded, replayed, path_map = trees
+    _critic_run(recorded, attempts=(True,), versions="changed", warnings=[])
+    _critic_run(
+        replayed,
+        {"status": "applied"},
+        attempts=(True,),
+        versions="changed",
+        warnings=[],
+    )
+    for root in (recorded, replayed):
+        payload = yaml.safe_load((root / "synthesis-manifest.yaml").read_text())
+        del payload["stage_warnings"]
+        payload.pop("semantic_digest")
+        payload["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, payload)
+        _write_manifest(root, payload)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "holds no stage warnings" in differences[0].detail
+
+
+@pytest.mark.parametrize(
+    ("record", "attempts", "versions", "message"),
+    [
+        ({"status": "applied"}, (), "changed", "made no revision request"),
+        ({"status": "applied"}, (True,), "unchanged", "as applied left"),
+        ({"status": "unchanged"}, (True,), "changed", "as unchanged changed"),
+        ({"status": "unchanged"}, (True,), "kept_empty", "did not strip"),
         (
             {"status": "applied"},
             (True, False),
-            True,
-            "the last revision request failed",
+            "changed",
+            "last revision request failed",
         ),
-        ({"status": "unchanged"}, (False,), False, "the last revision request failed"),
+        (
+            {"status": "unchanged"},
+            (False,),
+            "unchanged",
+            "last revision request failed",
+        ),
         (
             {"status": "discarded", "reason": _DEGRADED},
             (False,),
-            False,
+            "unchanged",
             "the last revision request failed",
         ),
         (
             {"status": "discarded", "reason": "Revision failed: TimeoutError: slow"},
             (False,),
-            False,
+            "unchanged",
             "the last revision request failed",
         ),
         (
-            {"status": "discarded", "reason": f"Revision failed: {_MISS}"},
+            {"status": "discarded", "reason": _FAILED},
             (True,),
-            False,
+            "unchanged",
             "the last revision request succeeded",
+        ),
+        (
+            {"status": "discarded", "reason": _FAILED},
+            (False,),
+            "changed",
+            "holds no empty responsibility to strip",
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (True,),
+            "changed",
+            "holds no empty responsibility to strip",
+        ),
+        (
+            {"status": "discarded", "reason": _NO_RESPONSE},
+            (True,),
+            "changed",
+            "holds no empty responsibility to strip",
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (True,),
+            "kept_empty",
+            "did not strip",
         ),
     ],
 )
@@ -1652,14 +1834,12 @@ def test_an_added_critic_revision_inconsistent_with_its_run_fails(
     trees,
     record: dict[str, Any],
     attempts: tuple[bool, ...],
-    changed: bool,
+    versions: str,
     message: str,
 ) -> None:
-    recorded, replayed, path_map = trees
-    _critic_run(recorded, attempts=attempts, changed=changed)
-    _critic_run(replayed, record, attempts=attempts, changed=changed)
-
-    _, differences = compare_trees(recorded, replayed, path_map)
+    differences = _critic_differences(
+        trees, record, attempts=attempts, versions=versions
+    )
 
     assert [d.path for d in differences] == ["run-manifest.yaml"]
     assert "$.stage_summary.stage_2.critic_revision" in differences[0].detail
@@ -1668,8 +1848,14 @@ def test_an_added_critic_revision_inconsistent_with_its_run_fails(
 
 def test_an_added_critic_revision_needs_a_published_structure(trees) -> None:
     recorded, replayed, path_map = trees
-    _critic_run(recorded)
-    _critic_run(replayed, {"status": "applied"})
+    _critic_run(recorded, attempts=(True,), versions="changed", warnings=[])
+    _critic_run(
+        replayed,
+        {"status": "applied"},
+        attempts=(True,),
+        versions="changed",
+        warnings=[],
+    )
     for root in (recorded, replayed):
         (root / "control-structure.yaml").unlink()
         (root / "control-structure-evidence-bound.yaml").unlink()
@@ -1680,23 +1866,84 @@ def test_an_added_critic_revision_needs_a_published_structure(trees) -> None:
     assert "published no control structure" in differences[0].detail
 
 
-def test_a_critic_revision_both_sides_hold_compares_as_usual(trees) -> None:
-    recorded, replayed, path_map = trees
-    # Inconsistent with the run, but the recording holds the same record.
-    _critic_run(recorded, {"status": "unchanged"})
-    _critic_run(replayed, {"status": "unchanged"})
+@pytest.mark.parametrize("reply", [None, "merge_degraded"])
+def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
+    tmp_path: Path, reply: str | None
+) -> None:
+    """Run the producer's revision step on a structure with an empty
+    responsibility and a reply it discards, then check its record."""
+    findings = CriticFindings(
+        gaps=[
+            CriticGap(
+                gap_type="missing_feedback",
+                description="No feedback reports the classified intent",
+                related_attack_path="A crafted message is read as a routine request",
+                suggested_remedy="Add intent classification feedback",
+            )
+        ]
+    )
+    client = MockLLMClient()
+    if reply is None:
+        client.set_exception_for(RevisionDelta, RuntimeError("provider down"))
+    else:
+        # A modified responsibility the structure lacks cannot be merged.
+        client.set_response_for(
+            RevisionDelta,
+            {
+                "new_responsibilities": [],
+                "new_controlled_processes": [],
+                "new_coordination_links": [],
+                "modified_responsibilities": [
+                    {"resp_id": "RESP-50", "description": "Verify the intent"}
+                ],
+                "dismissed_gaps": [],
+            },
+        )
+    baseline = _with_empty_responsibility(_reviewed_structure())
 
-    _, differences = compare_trees(recorded, replayed, path_map)
+    revised_structure, warnings, revised = _maybe_apply_revision(
+        baseline,
+        critic_findings=findings,
+        llm_client=client,
+        use_case_text="A support assistant answers account questions.",
+        run_dir=tmp_path,
+        loss_analysis=None,  # type: ignore[arg-type]
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0.4,
+    )
+    record = _critic_revision_record(findings, warnings, revised=revised)
+    _write_revision_versions(tmp_path, baseline, revised_structure)
+    (tmp_path / "synthesis-manifest.yaml").write_text(
+        yaml.safe_dump({"run_id": "r", "created_at": "t"})
+    )
+    _write_post_revision_warnings(tmp_path, warnings)
+
+    assert record is not None and record["status"] == "discarded"
+    assert record["reason"].startswith(
+        "Revision failed: " if reply is None else "Revision delta merge degraded: "
+    )
+    assert revised is True
+    assert (tmp_path / "control-structure-evidence-bound.yaml").is_file()
+    assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
+
+
+def test_a_critic_revision_both_sides_hold_compares_as_usual(trees) -> None:
+    # Inconsistent with the run, but the recording holds the same record.
+    differences = _critic_differences(
+        trees,
+        {"status": "unchanged"},
+        recorded_record={"status": "unchanged"},
+        versions="changed",
+        warnings=[_DEGRADED],
+    )
 
     assert differences == []
 
 
 def test_a_critic_revision_that_differs_from_the_recording_fails(trees) -> None:
-    recorded, replayed, path_map = trees
-    _critic_run(recorded, {"status": "unchanged"})
-    _critic_run(replayed, {"status": "applied"})
-
-    _, differences = compare_trees(recorded, replayed, path_map)
+    differences = _critic_differences(
+        trees, {"status": "applied"}, recorded_record={"status": "unchanged"}
+    )
 
     assert [d.path for d in differences] == ["run-manifest.yaml"]
     assert "stage_2.critic_revision" in differences[0].detail
