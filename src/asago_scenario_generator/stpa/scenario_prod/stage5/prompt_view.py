@@ -121,6 +121,9 @@ def build_context_bdi_prompts(
             available_observation_kinds=available_observation_kinds,
             unsupported_observation_claims=unsupported_observation_claims,
             has_condition_references=has_condition_references,
+            has_feedback_authority=any(
+                choice.authority_for_update is not None for choice in source_choices
+            ),
         ),
         loader.render_prompt(
             "stage5_context_user.j2",
@@ -286,6 +289,10 @@ def _context_source_choices_yaml(
         if choice.source_kind is not None:
             rendered_choice["feedback_source_kind"] = choice.source_kind
             rendered_choice["untrusted"] = choice.source_kind in _UNTRUSTED_SOURCE_KINDS
+        if choice.authority_for_update is not None:
+            rendered_choice["authority_for_update"] = (
+                choice.authority_for_update.model_dump(mode="json")
+            )
         rendered_choices.append(rendered_choice)
     return _yaml_dump(rendered_choices)
 

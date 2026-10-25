@@ -95,9 +95,7 @@ def _causal_source_choices(
 ) -> tuple[_CausalSourceChoice, ...]:
     """Project the selected path into request-local executable source choices."""
     path = context.target_control_path
-    feedback_source_kinds = {
-        item.element_id: item.source_kind for item in path.feedback
-    }
+    feedback = {item.element_id: item for item in path.feedback}
     candidates: list[tuple[CausalFactorKind, str, str]] = []
     candidates.extend(
         (CausalFactorKind.process_model_flaw, item.element_id, item.description)
@@ -117,18 +115,24 @@ def _causal_source_choices(
         if item.action_id.startswith("CA-")
     )
     unique = tuple(dict.fromkeys(candidates))
-    return tuple(
-        _CausalSourceChoice(
-            handle=f"cause_{index}",
-            kind=kind,
-            source_id=source_id,
-            description=description,
-            source_kind=(
-                feedback_source_kinds.get(source_id)
-                if kind
-                in {CausalFactorKind.feedback_delay, CausalFactorKind.sensor_anomaly}
-                else None
-            ),
+    choices: list[_CausalSourceChoice] = []
+    for index, (kind, source_id, description) in enumerate(unique, start=1):
+        channel = (
+            feedback.get(source_id)
+            if kind
+            in {CausalFactorKind.feedback_delay, CausalFactorKind.sensor_anomaly}
+            else None
         )
-        for index, (kind, source_id, description) in enumerate(unique, start=1)
-    )
+        choices.append(
+            _CausalSourceChoice(
+                handle=f"cause_{index}",
+                kind=kind,
+                source_id=source_id,
+                description=description,
+                source_kind=channel.source_kind if channel is not None else None,
+                authority_for_update=(
+                    channel.authority_for_update if channel is not None else None
+                ),
+            )
+        )
+    return tuple(choices)

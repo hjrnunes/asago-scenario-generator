@@ -1,0 +1,9 @@
+{% if has_feedback_authority is defined and has_feedback_authority %}
+
+A feedback channel may carry `authority_for_update`, the recorded assessment of whether it is
+entitled to establish the value of the process-model part it updates, as opposed to only
+reporting it. Its `status` is `authoritative`, `non_authoritative`, `conditional` (only within
+the scope or conditions its `basis` states), or `unknown`, and its `basis` cites the supplied
+evidence; a channel without it is unknown. It is separate from `untrusted`. A controller that
+takes a non-authoritative report as establishing the value, such as a reported approval taken
+as the approval itself, holds a wrong process-model value even when the report is accurate.{% endif %}

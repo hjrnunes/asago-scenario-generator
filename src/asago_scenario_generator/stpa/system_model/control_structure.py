@@ -67,6 +67,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ElementRef,
     FeedbackChannel,
     FeedbackSourceKind,
+    FeedbackUpdateAuthority,
     NonBlankStr,
     ProcessModelPart,
     ReferenceType,
@@ -967,6 +968,7 @@ class _Call2bFeedback(_Call2bWire):
     updates: NonBlankStr
     source: _Call2bRefField
     source_kind: FeedbackSourceKind | None = None
+    authority_for_update: FeedbackUpdateAuthority | None = None
 
     @field_validator("fb_id")
     @classmethod
@@ -980,6 +982,7 @@ class _Call2bFeedback(_Call2bWire):
             updates=self.updates,
             source=ElementRef(type=self.source.type, id=self.source.id),
             source_kind=self.source_kind,
+            authority_for_update=self.authority_for_update,
         )
 
 

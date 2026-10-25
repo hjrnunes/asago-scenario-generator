@@ -737,6 +737,7 @@ def _responsibility_feedback_views(
                 if channel.source_kind is not None
                 else None
             ),
+            authority_for_update=channel.authority_for_update,
         )
         for channel in responsibility.feedback_channels
     ]
@@ -1625,6 +1626,17 @@ def build_structural_revision_prompts(
     return render_structural_revision_prompts(context)
 
 
+def _has_feedback_authority(target_index: ProviderTargetIndex) -> bool:
+    """Whether a listed channel carries an authority assessment to explain.
+
+    The explanation renders only then, so a request without one keeps its
+    bytes.
+    """
+    return any(
+        item.authority_for_update is not None for item in target_index.feedback_channels
+    )
+
+
 def render_structural_revision_prompts(
     context: ProviderRevisionContext,
 ) -> tuple[str, str]:
@@ -1632,6 +1644,7 @@ def render_structural_revision_prompts(
     system = _TEMPLATE_LOADER.render_prompt(
         "structural_revision_system.j2",
         instructions=context.instructions,
+        has_feedback_authority=_has_feedback_authority(context.target_index),
     )
     user = _TEMPLATE_LOADER.render_prompt(
         "structural_revision_user.j2",
@@ -1691,6 +1704,7 @@ def render_synthesis_slot_prompts(
         has_governance_question=any(
             isinstance(item, ProviderGovernanceQuestion) for item in questions
         ),
+        has_feedback_authority=_has_feedback_authority(target_index),
     )
     user = _TEMPLATE_LOADER.render_prompt(
         "synthesis_ica_user.j2",

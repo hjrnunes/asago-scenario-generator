@@ -96,6 +96,17 @@ from asago_scenario_generator.stpa.target_realization.provider import (
     PROMPTS_DIR as TARGET_REALIZATION_PROMPTS_DIR,
 )
 from tests.helpers.belief_step import belief_spec
+from tests.helpers.feedback_authority import (
+    authority_belief_spec,
+    authority_context,
+    authority_slot_request,
+    call3_inputs,
+    context_coverage_prompts,
+    with_feedback_authority,
+)
+from tests.helpers.stage2_source_selection import USE_CASE as CALL3_USE_CASE
+from tests.stpa.test_ica_context_coverage import _structure as _coverage_structure
+from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.normal_authoring_wire import (
     _record_observations,
     _target_operation,
@@ -302,6 +313,18 @@ def _realistic_request_facts(tool_call: bool = True) -> dict[str, object]:
     }
 
 
+def _authority_slot_request() -> tuple[str, str]:
+    request = authority_slot_request()
+    return build_synthesis_slot_prompts(
+        target_id=request.target_id,
+        slots=request.slots,
+        routed_briefs=request.routed_briefs,
+        routed_routes=request.routed_routes,
+        loss_analysis=request.loss_analysis,
+        control_structure=request.control_structure,
+    )
+
+
 def _routing_batch() -> tuple[str, str]:
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
     structure = _obligation_structure()
@@ -354,6 +377,10 @@ OBLIGATION_AWARE_BUILDS: dict[
         _slot_request,
         ("synthesis_ica_system.j2", "synthesis_ica_user.j2"),
     ),
+    "slot-request-feedback-authority": (
+        _authority_slot_request,
+        ("synthesis_ica_system.j2", "synthesis_ica_user.j2"),
+    ),
     "verification-request": (
         lambda: build_ica_hazard_verification_prompts((_verification_request(),)),
         ("ica_hazard_verification_system.j2", "ica_hazard_verification_user.j2"),
@@ -369,6 +396,16 @@ OBLIGATION_AWARE_BUILDS: dict[
     "no-context-gaps": (
         lambda: build_context_coverage_prompts(
             target_id="RESP-1", gaps=(), filled_slots=(), request=None
+        ),
+        ("synthesis_ica_context_system.j2", "synthesis_ica_context_user.j2"),
+    ),
+    "context-gaps": (
+        lambda: context_coverage_prompts(_coverage_structure()),
+        ("synthesis_ica_context_system.j2", "synthesis_ica_context_user.j2"),
+    ),
+    "context-gaps-feedback-authority": (
+        lambda: context_coverage_prompts(
+            with_feedback_authority(_coverage_structure())
         ),
         ("synthesis_ica_context_system.j2", "synthesis_ica_context_user.j2"),
     ),
@@ -489,6 +526,37 @@ def _separate_beliefs() -> Callable[[str], str]:
     return render
 
 
+def _authority_beliefs() -> Callable[[str], str]:
+    """Render the belief request of a spec whose factor has an assessed source."""
+
+    def render(template: str) -> str:
+        spec, structure = authority_belief_spec()
+        prompts = render_belief_prompts(spec, belief_request(spec, structure))
+        return dict(zip(_BELIEF_TEMPLATES, prompts))[template]
+
+    return render
+
+
+# The critic request for a structure whose feedback channel is assessed.
+FEEDBACK_AUTHORITY_CRITIC = {
+    "use_case_text": "Test use case",
+    "control_structure": with_feedback_authority(_obligation_structure()),
+    "capability_profile": make_capability_profile(),
+    "loss_analysis": None,
+    "call3_warnings": None,
+}
+
+
+# The Call 3 request for a structure whose feedback channel is assessed.
+FEEDBACK_AUTHORITY_CALL3 = {
+    "use_case_text": CALL3_USE_CASE,
+    "control_structure": with_feedback_authority(call3_inputs()[1]),
+    "loss_analysis": None,
+    "source_excerpts": (),
+    "source_ref_by_canonical": {},
+}
+
+
 # A case renders one template; the table that names it supplies the template.
 CASES: dict[str, Callable[[str], str]] = {
     "no-variables": _system_model(),
@@ -536,6 +604,16 @@ CASES: dict[str, Callable[[str], str]] = {
     "narrate-stated": _narrate_stated(),
     "gherkin": _gherkin(),
     "separate-beliefs": _separate_beliefs(),
+    "feedback-authority-beliefs": _authority_beliefs(),
+    "feedback-authority": _stage5(dict, authority_context),
+    "feedback-authority-critic": _system_model(**FEEDBACK_AUTHORITY_CRITIC),
+    "unassessed-critic": _system_model(
+        **{**FEEDBACK_AUTHORITY_CRITIC, "control_structure": _obligation_structure()}
+    ),
+    "feedback-authority-call3": _system_model(**FEEDBACK_AUTHORITY_CALL3),
+    "unassessed-call3": _system_model(
+        **{**FEEDBACK_AUTHORITY_CALL3, "control_structure": call3_inputs()[1]}
+    ),
     "archive-item": _stage5(_archive_item_facts),
     "commit-operation": _stage5(_commit_operation_facts),
     "realistic-request": _stage5(_realistic_request_facts),

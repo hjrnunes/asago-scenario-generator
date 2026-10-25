@@ -36,5 +36,14 @@ cases:
       - do not invent synonyms such as
       - internal_state_update
       - 'MUST use `effect_kind: "agent_message"`'
+      - source kind, and authority for update shown beside existing elements
+      - "A feedback channel may also carry `authority_for_update`, with a `status` and a `basis`"
+      - >-
+        Assess it for a new channel, and for a restated channel shown without
+        one, where the supplied evidence bears on it; omit it otherwise.
+      - "An omitted assessment means `unknown`."
+      - "An assessment covers only the PM shown with it"
+      - "when a restated channel updates a different PM, assess it again or omit it"
+      - "Do not derive authority from `source_kind`"
     forbidden:
       - STPA-Sec

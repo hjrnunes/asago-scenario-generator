@@ -23,7 +23,7 @@ Your task is to address gaps identified by the completeness critic. This is a si
   {% endfor %}
   Feedback channels:
   {% for fb in resp.feedback_channels %}
-    - {{ fb.fb_id }}: {{ fb.description }} (updates: {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type.value }} {{ fb.source.id }}{% endif %}{% if fb.source_kind %}, source kind: {{ fb.source_kind.value }}{% endif %})
+    - {{ fb.fb_id }}: {{ fb.description }} (updates: {{ fb.updates }}{% if fb.source %}, source: {{ fb.source.type.value }} {{ fb.source.id }}{% endif %}{% if fb.source_kind %}, source kind: {{ fb.source_kind.value }}{% endif %}{% if fb.authority_for_update %}, authority for update: {{ fb.authority_for_update.status.value }}{% if fb.authority_for_update.basis %}, authority basis: {{ fb.authority_for_update.basis }}{% endif %}{% endif %})
   {% endfor %}
 {% endfor %}
 ### Controlled Processes
@@ -105,9 +105,9 @@ process model. Preserve the exact typed value shown for an existing action.
 `continuous`, `bounded_duration`, or `unknown`; do not infer it from wording.
 
 ## Context fields
-The values, evidence, operation, process-model refs, and source kind shown
-beside existing elements are typed fields. Copy them into any responsibility you
-restate. For new elements:
+The values, evidence, operation, process-model refs, source kind, and authority
+for update shown beside existing elements are typed fields. Copy them into any
+responsibility you restate. For new elements:
 - process model parts carry `values` (distinct decision-relevant values) and
   `evidence_refs` (exact discovered-evidence refs, or `[]`);
 - control actions carry `operation` (exact observed operation name, or `null`)
@@ -116,6 +116,24 @@ restate. For new elements:
 - feedback channels carry `source_kind`: `operation_result`,
   `session_context`, `user_message`, `conversation_history`,
   `retrieved_content`, or `other`.
+
+A feedback channel may also carry `authority_for_update`, with a `status` and a
+`basis`: whether the channel is entitled to establish the value of the PM it
+`updates`, as opposed to only reporting it. `status` is `authoritative` (the
+evidence makes the channel a source that may set the value), `non_authoritative`
+(the evidence shows it can report the value but not establish it),
+`conditional` (it may establish the value only within a scope or under
+conditions the evidence states), or `unknown` (the evidence bears on the
+question but leaves it open). `basis` states the scope and any conditions in
+domain words, without control-structure IDs, and cites the use-case wording or
+the exact `ref` of a discovered target-evidence record; it is required unless
+`status` is `unknown`. Assess it for a new channel, and for a restated channel
+shown without one, where the supplied evidence bears on it; omit it otherwise.
+An omitted assessment means `unknown`. An
+assessment covers only the PM shown with it: when a restated channel updates a
+different PM, assess it again or omit it. Do not derive authority from
+`source_kind`: a trusted source kind does not make a channel authoritative, and
+an untrusted one does not by itself make it non-authoritative.
 
 ## ID format rules
 - New responsibilities: RESP-{next_resp_num} (next available: RESP-{{ next_resp_num }})

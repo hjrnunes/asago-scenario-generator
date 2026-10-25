@@ -209,6 +209,27 @@ def _existing_finding_views(gap: ContextGap, drafted: Any) -> list[dict[str, Any
     ]
 
 
+def _source_feedback_views(
+    responsibility: Responsibility, pm_id: str
+) -> list[dict[str, Any]] | None:
+    """The channels updating ``pm_id``, when one of them has an assessment.
+
+    The list renders only then, so a request without one keeps its bytes.
+    """
+    channels = [c for c in responsibility.feedback_channels if c.updates == pm_id]
+    if all(channel.authority_for_update is None for channel in channels):
+        return None
+    views: list[dict[str, Any]] = []
+    for channel in channels:
+        view: dict[str, Any] = {"id": channel.fb_id}
+        if channel.authority_for_update is not None:
+            view["authority_for_update"] = channel.authority_for_update.model_dump(
+                mode="json"
+            )
+        views.append(view)
+    return views
+
+
 def _gap_view(gap: ContextGap, drafted: Any, request: Any) -> dict[str, Any]:
     responsibility, action = _reply_action(request, gap.control_action)  # type: ignore[misc]
     slot = next(s for s in request.slots if s.slot_id == gap.slot_id)
@@ -221,7 +242,7 @@ def _gap_view(gap: ContextGap, drafted: Any, request: Any) -> dict[str, Any]:
         if c.constraint_id == gap.constraint_id
     )
     rows = _context_rows_by_id(request, gap.control_action)
-    return {
+    view: dict[str, Any] = {
         "gap_id": gap.gap_id,
         "slot_id": gap.slot_id,
         "uca_type": slot.uca_type.value,
@@ -240,6 +261,10 @@ def _gap_view(gap: ContextGap, drafted: Any, request: Any) -> dict[str, Any]:
         "feedback_ids": [channel.fb_id for channel in responsibility.feedback_channels],
         "existing_findings": _existing_finding_views(gap, drafted),
     }
+    source_feedback = _source_feedback_views(responsibility, part.pm_id)
+    if source_feedback is not None:
+        view["source_feedback"] = source_feedback
+    return view
 
 
 def build_context_coverage_prompts(
@@ -252,7 +277,10 @@ def build_context_coverage_prompts(
     """Render the supplement prompt for the gaps of one target."""
     drafted = {slot.slot_id: slot for slot in filled_slots}
     views = [_gap_view(gap, drafted[gap.slot_id], request) for gap in gaps]
-    system = _TEMPLATE_LOADER.render_prompt("synthesis_ica_context_system.j2")
+    system = _TEMPLATE_LOADER.render_prompt(
+        "synthesis_ica_context_system.j2",
+        has_feedback_authority=any("source_feedback" in view for view in views),
+    )
     user = _TEMPLATE_LOADER.render_prompt(
         "synthesis_ica_context_user.j2",
         target_id=target_id,

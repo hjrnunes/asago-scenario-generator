@@ -22,6 +22,7 @@ from typing import TYPE_CHECKING, Annotated
 from pydantic import (
     AfterValidator,
     BaseModel,
+    ConfigDict,
     Field,
     StrictStr,
     ValidationError,
@@ -192,6 +193,71 @@ UNTRUSTED_FEEDBACK_SOURCES = frozenset(
         FeedbackSourceKind.retrieved_content,
     }
 )
+
+
+class FeedbackAuthorityStatus(str, Enum):
+    """Whether a feedback channel is entitled to establish the fact it updates.
+
+    The status assesses the channel's ``updates`` relation, not its trust.
+    A source kind that is not untrusted does not make a channel
+    authoritative.
+
+    - ``authoritative``: the supplied evidence establishes that this channel
+      may set the variable's value;
+    - ``non_authoritative``: the supplied evidence establishes that it may
+      not, for example because another party decides the fact;
+    - ``conditional``: it may set the value only within a scope or under
+      conditions the evidence states;
+    - ``unknown``: the evidence does not settle it.
+    """
+
+    authoritative = "authoritative"
+    non_authoritative = "non_authoritative"
+    conditional = "conditional"
+    unknown = "unknown"
+
+
+class FeedbackUpdateAuthority(BaseModel):
+    """An assessment of a channel's authority over the variable it updates.
+
+    ``basis`` is required for every status except ``unknown``: an assessment
+    that settles authority says which supplied evidence settles it and within
+    what scope.  An ``unknown`` assessment may still name what the evidence
+    leaves open.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    status: FeedbackAuthorityStatus = Field(
+        description=(
+            "authoritative, non_authoritative, or conditional when the "
+            "supplied evidence settles whether the channel may establish the "
+            "updated variable's value; otherwise unknown."
+        )
+    )
+    basis: NonBlankStr | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The scope and conditions of the assessment in domain words, "
+            "citing the supplied evidence; required unless status is unknown."
+        ),
+    )
+
+    @model_validator(mode="after")
+    def require_basis_for_settled_status(self) -> FeedbackUpdateAuthority:
+        if self.status is not FeedbackAuthorityStatus.unknown and self.basis is None:
+            raise ValueError(
+                f"authority status {self.status.value!r} requires a basis citing "
+                "the supplied evidence"
+            )
+        return self
+
+
+UNKNOWN_UPDATE_AUTHORITY = FeedbackUpdateAuthority(
+    status=FeedbackAuthorityStatus.unknown
+)
+"""The assessment a channel without ``authority_for_update`` carries."""
 
 
 def _empty(value: object) -> bool:
@@ -399,11 +465,32 @@ class FeedbackChannel(BaseModel):
         exclude_if=lambda value: value is None,
         description="Origin of the information; fixes the channel's trust.",
     )
+    # Absent means unknown.  ``None`` stays out of the dump, so a structure
+    # written before the field existed keeps its bytes; read the assessment
+    # through ``update_authority``.
+    authority_for_update: FeedbackUpdateAuthority | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Whether this channel is entitled to establish the value of the "
+            "variable it updates; omit it when the supplied evidence says "
+            "nothing about that, which means unknown."
+        ),
+    )
 
     @property
     def untrusted(self) -> bool:
         """Whether an adversary can author this channel's information."""
         return self.source_kind in UNTRUSTED_FEEDBACK_SOURCES
+
+    @property
+    def update_authority(self) -> FeedbackUpdateAuthority:
+        """The channel's authority over its updated variable; unknown if absent.
+
+        This is the recorded assessment only.  It is never derived from
+        :attr:`untrusted` or ``source_kind``.
+        """
+        return self.authority_for_update or UNKNOWN_UPDATE_AUTHORITY
 
     @field_validator("fb_id")
     @classmethod

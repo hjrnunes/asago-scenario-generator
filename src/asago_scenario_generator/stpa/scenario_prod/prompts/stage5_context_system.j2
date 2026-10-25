@@ -52,7 +52,18 @@ attacker-controlled content.
 
 A source marked `untrusted: true` carries information an adversary can author;
 it does not establish attacker access by itself, so the evidence rules above
-still apply.
+still apply.{% if has_feedback_authority %}
+
+A feedback source may carry `authority_for_update`, the recorded assessment of
+whether that channel is entitled to establish the value of the variable it
+updates, as opposed to only reporting it. Its `status` is `authoritative`,
+`non_authoritative`, `conditional` (only within the scope or conditions its
+`basis` states), or `unknown`, and its `basis` cites the supplied evidence for
+the assessment; a source without it is unknown. It is separate from
+`untrusted` and does not establish attacker access by itself. A controller that
+takes a non-authoritative report as establishing the value, such as a reported
+approval taken as the approval itself, has a process-model flaw even when the
+feedback accurately carries what was reported.{% endif %}
 
 ## Closed response
 

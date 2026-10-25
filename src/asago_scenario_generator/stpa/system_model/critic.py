@@ -50,6 +50,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlledProcess,
     CoordinationLink,
     FeedbackSourceKind,
+    FeedbackUpdateAuthority,
     Responsibility,
     check_structural_heuristics,
 )
@@ -236,6 +237,7 @@ class _RevisionFeedbackChannel(_RevisionWire):
     updates: _Text
     source: _RevisionRef | None = None
     source_kind: FeedbackSourceKind | None = None
+    authority_for_update: FeedbackUpdateAuthority | None = None
 
 
 class _RevisionResponsibility(_RevisionWire):
@@ -761,15 +763,21 @@ def _carry_forward_context(original: Responsibility, revised: Responsibility) ->
 
     A revision restates a whole responsibility; the model may drop the
     optional context fields (PM values and evidence, CA operation and PM
-    refs, FB source kind) of an element it did not mean to change.
+    refs, FB source kind and authority) of an element it did not mean to
+    change.  An authority assessment is about the variable a channel updates,
+    so it is kept only while the channel still updates that variable.
     """
     _carry_forward_process_model_context(original, revised)
     _carry_forward_action_context(original, revised)
     old_fbs = {fb.fb_id: fb for fb in original.feedback_channels}
     for fb in revised.feedback_channels:
         old = old_fbs.get(fb.fb_id)
-        if old is not None and fb.source_kind is None:
+        if old is None:
+            continue
+        if fb.source_kind is None:
             fb.source_kind = old.source_kind
+        if fb.authority_for_update is None and fb.updates == old.updates:
+            fb.authority_for_update = old.authority_for_update
 
 
 def _carry_forward_process_model_context(

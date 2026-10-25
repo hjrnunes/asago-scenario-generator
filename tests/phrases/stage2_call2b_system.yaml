@@ -29,6 +29,24 @@ cases:
       - control action target
       - at least N feedback channels
       - at least one feedback channel
+      - >-
+        assess whether the channel is entitled to establish the value of the PM
+        it `updates`, as `authority_for_update` with a `status` and a `basis`
+      - "`authoritative`: the evidence makes this channel a source that may set the value"
+      - >-
+        `non_authoritative`: the evidence shows the channel can report the
+        value but not establish it
+      - >-
+        `conditional`: the channel may establish the value only within a scope
+        or under conditions the evidence states
+      - "`unknown`: the evidence bears on the question but leaves it open"
+      - Write it in domain words, without control-structure IDs
+      - A `basis` is required unless `status` is `unknown`
+      - an omitted assessment means `unknown`
+      - "Do not derive authority from `source_kind`"
+      - >-
+        a trusted source kind does not make a channel authoritative, and an
+        untrusted one does not by itself make it non-authoritative
     forbidden:
       - Poh
       - STPA-Sec

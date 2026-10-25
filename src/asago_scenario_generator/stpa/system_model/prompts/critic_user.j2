@@ -46,7 +46,7 @@ Loss analysis not available.
   {% endfor %}
   Feedback channels:
   {% for fb in resp.feedback_channels %}
-    - {{ fb.fb_id }}: {{ fb.description }}{% if fb.source_kind %} (source kind: {{ fb.source_kind.value }}){% endif %}
+    - {{ fb.fb_id }}: {{ fb.description }}{% if fb.source_kind %} (source kind: {{ fb.source_kind.value }}){% endif %}{% if fb.authority_for_update %} (authority for update of {{ fb.updates }}: {{ fb.authority_for_update.status.value }}{% if fb.authority_for_update.basis %}; basis: {{ fb.authority_for_update.basis }}{% endif %}){% endif %}
 
   {% endfor %}
 {% endfor %}
@@ -105,4 +105,14 @@ Run all three probes on the control structure. Check whether it adequately gover
 Also report as a gap every observed operation that no control action names, and
 every untrusted feedback channel (user message, conversation history, retrieved
 content) whose information a control action relies on without another source.
+{% endif %}
+{% if control_structure.responsibilities | map(attribute="feedback_channels") | sum(start=[]) | selectattr("authority_for_update") | list %}A feedback channel shown with an authority for update carries the recorded
+assessment of whether it is entitled to establish the value of the named PM, as
+opposed to only reporting it: `authoritative`, `non_authoritative`,
+`conditional` (only within the scope or conditions its basis states), or
+`unknown`, with the basis for the assessment. A channel shown without one is
+`unknown`. Authority is separate from source kind and trust. Report as a
+`missing_feedback` gap a PM that decides a control action when its only
+feedback is non-authoritative, or conditional outside its stated conditions,
+and the supplied source names the party or record that decides the value.
 {% endif %}

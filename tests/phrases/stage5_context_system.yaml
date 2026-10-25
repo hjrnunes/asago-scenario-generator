@@ -47,6 +47,7 @@ cases:
       - A negative or empty feedback result can be valid
     forbidden:
       - omit `gain`
+      - authority_for_update
       - Security mechanism
       - compatible_mechanisms
       - injected_instruction
@@ -167,3 +168,21 @@ cases:
         the agent made in the conversation
       - *call-precondition
       - *call-boundary
+  feedback-authority:
+    required:
+      - >-
+        A feedback source may carry `authority_for_update`, the recorded
+        assessment of whether that channel is entitled to establish the value
+        of the variable it updates, as opposed to only reporting it.
+      - >-
+        `conditional` (only within the scope or conditions its `basis`
+        states), or `unknown`
+      - a source without it is unknown
+      - It is separate from `untrusted` and does not establish attacker access by itself.
+      - >-
+        A controller that takes a non-authoritative report as establishing the
+        value, such as a reported approval taken as the approval itself, has a
+        process-model flaw even when the feedback accurately carries what was
+        reported.
+    once:
+      - "`authority_for_update`"
