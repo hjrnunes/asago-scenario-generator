@@ -16,27 +16,33 @@ is reported undecidable, never refused.
   whose absence is the failure, or the wrongly provided call itself, and only
   the prose says which.
 - (b) Operands of one kind. A call argument compared with a literal (from a
-  literal, a fact, or a record selection) is refused when the literal has a
-  JSON type the argument's schema does not declare (membership in a list
-  argument tests its elements, so it is not typed), or when every value the
-  supplied reads passed for that argument is provably a different kind of
-  value than the literal (the ID-prefix, key-domain, and field rule of
-  :func:`~..condition_check.kind_mismatch`). An identifier literal compared
-  with an argument no read passed and whose schema declares only a string is
-  undecidable: nothing typed says which records the argument names.
+  literal, a fact, or a record selection) is refused only when the input
+  schema of the argument's own operation proves the literal is never equal to
+  a value it admits: the literal has a JSON type that schema does not admit
+  (membership in a list argument tests its elements, so it is not typed). A
+  kind mismatch that only values, names, or descriptions suggest is
+  undecidable: an identifier literal of another kind than the values reads of
+  that operation passed, or than the values reads of another operation passed
+  for an argument of the same name, or an identifier literal compared with
+  an argument no read passed and whose schema admits a string.
 - (c) Ordering needs numbers. ``tool-call-condition-v1`` orders only
-  numbers, so ``gt``, ``ge``, ``lt``, or ``le`` is refused when a literal is
-  not a number or an argument's schema declares no numeric type, and is
-  undecidable when an argument's schema declares no type.
+  numbers, converting a string that ``float()`` accepts. ``gt``, ``ge``,
+  ``lt``, or ``le`` is refused when a literal is not a number under that
+  conversion, or when the input schema of an argument's own operation admits
+  no number and no numeric string: no numeric type and no string, an
+  ``enum`` or ``const`` of non-numbers, or a string ``format`` or ``pattern``
+  that no number matches. A string or untyped argument the schema leaves open
+  is undecidable.
 
 A refusal is a Stage 5 validation failure, corrected through the existing
-correction request; undecidable cases are reported only.
+correction request. Undecidable cases are reported only: in the run's
+candidate diagnostics and by the offline sweep, never in the scenario.
 """
 
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
 
@@ -68,6 +74,11 @@ from .issues import IssueCode
 Rule = Literal["a", "b", "c"]
 
 _NUMERIC_TYPES = frozenset({"number", "integer"})
+# String formats whose every valid value fails ``float()``.
+_NON_NUMERIC_FORMATS = frozenset({"date", "date-time", "time", "email", "uuid"})
+_REGEX_SPECIAL = frozenset("\\^$.|?*+()[]{}")
+# The first characters of a text ``float()`` accepts, besides digits and spaces.
+_NUMBER_STARTS = frozenset("+-.iInN")
 _NEVER_HOLDS = (
     "the comparison holds on no call and the condition never detects the unsafe call"
 )
@@ -152,6 +163,24 @@ def assess_condition(
             *_unmapped_not_called(condition, claim),
             *bound_result.undecidable,
         ),
+    )
+
+
+def undecidable_diagnostics(
+    condition: DiscriminatingCondition | None,
+    bound: ToolCallCondition | None,
+    universe: ConditionUniverse,
+    *,
+    claim: ConditionClaim,
+) -> tuple[str, ...]:
+    """Return a run diagnostic for each undecidable case of a published condition."""
+
+    if condition is None or bound is None:
+        return ()
+    result = assess_condition(condition, universe, claim=claim, bound=bound)
+    return tuple(
+        f"tool-call condition undecidable under rule ({item.rule}): {item.detail}"
+        for item in result.undecidable
     )
 
 
@@ -360,17 +389,17 @@ def _value_equality(
 def _kinds(
     equality: _Equality, universe: ConditionUniverse, state: StateIndex
 ) -> tuple[RuleFinding | None, RuleFinding | None]:
-    """Apply rule (b) to one equality: declared types, then observed record kinds."""
+    """Apply rule (b) to one equality: the declared type, then observed values."""
 
     argument = equality.argument
-    types = universe.argument_types.get(argument.operation, {}).get(
-        argument.argument, frozenset()
-    )
+    types = _schema_types(_argument_schema(universe, argument))
     candidates = [value for value in equality.values if value is not None]
     # Membership tests each element of a list argument, whose type is unknown.
-    elements = equality.op_word in MEMBERSHIP_OPERATORS and "array" in types
+    elements = equality.op_word in MEMBERSHIP_OPERATORS and (
+        types is None or "array" in types
+    )
     if (
-        types
+        types is not None
         and candidates
         and not elements
         and not any(_fits(value, types) for value in candidates)
@@ -383,16 +412,21 @@ def _kinds(
     ]
     if not identifiers or len(identifiers) != len(equality.values):
         return None, None
-    observed = universe.observed_arguments.get(argument.argument, frozenset())
+    if types is not None and "string" not in types:
+        return None, None
+    own = universe.read_arguments.get(argument.operation, {}).get(
+        argument.argument, frozenset()
+    )
+    observed = own or universe.observed_arguments.get(argument.argument, frozenset())
     if observed:
         if all(
             kind_mismatch(state, seen, value)
             for seen in observed
             for value in identifiers
         ):
-            return _kind_refusal(equality, observed, identifiers, state), None
-        return None, None
-    if types and "string" not in types:
+            return None, _kind_suggested(
+                equality, types, observed, identifiers, state, universe, own=bool(own)
+            )
         return None, None
     if any(
         state.key_collections(value) or state.field_labels(value)
@@ -425,67 +459,89 @@ def _type_refusal(
     )
 
 
-def _kind_refusal(
+def _kind_suggested(
     equality: _Equality,
+    types: frozenset[str] | None,
     observed: frozenset[str],
     identifiers: list[str],
     state: StateIndex,
+    universe: ConditionUniverse,
+    *,
+    own: bool,
 ) -> RuleFinding:
-    name = equality.argument.argument
+    """Report a kind mismatch that only observed values suggest."""
+
+    argument = equality.argument
+    name = argument.argument
+    seen = ", ".join(_render(value) for value in sorted(observed))
+    if own:
+        source = f"the values reads of {argument.operation} passed for {name} ({seen})"
+        limit = (
+            f"a value a read passed does not prove which values "
+            f"{argument.operation} accepts for {name}"
+        )
+    else:
+        others = sorted(
+            operation
+            for operation, arguments in universe.read_arguments.items()
+            if operation != argument.operation and name in arguments
+        )
+        named = f" ({', '.join(others)})" if others else ""
+        source = (
+            f"the values reads of another operation{named} passed for an "
+            f"argument named {name} ({seen})"
+        )
+        limit = (
+            "values passed to another operation prove nothing about "
+            f"{argument.operation}.{name}"
+        )
+    return RuleFinding(
+        "b",
+        f"{equality.label} binds {equality.subject}: {source} are "
+        f"{_observed_kind(observed, state)}, and {_domains(identifiers, state)}, "
+        f"but {limit} and the input schema of {argument.operation} "
+        f"{_declared_text(types)}, so whether {name} can take that value is "
+        "unknown",
+    )
+
+
+def _observed_kind(observed: frozenset[str], state: StateIndex) -> str:
     collections = sorted(
         {collection for seen in observed for collection in state.key_collections(seen)}
     )
     if collections:
-        paths = " or ".join(collection_path(item) for item in collections)
-        kind = f"keys of {paths}"
-        advice = (
-            f"such as a key of {paths}; in record_selection.argument_values, "
-            "map it to the selected record's path or to a field whose values "
-            "are those keys"
-        )
-    else:
-        labels = sorted(
-            {label for seen in observed for label in state.field_labels(seen)}
-        )
-        kind = f"values of {', '.join(labels)}" if labels else "observed values"
-        advice = "such as a value supplied reads passed for it"
-    literals = "; ".join(
+        return f"keys of {' or '.join(collection_path(item) for item in collections)}"
+    labels = sorted({label for seen in observed for label in state.field_labels(seen)})
+    return f"values of {', '.join(labels)}" if labels else "observed values"
+
+
+def _domains(identifiers: list[str], state: StateIndex) -> str:
+    return "; ".join(
         f"{_render(value)} is {state.describe_domain(value)}"
         for value in dict.fromkeys(identifiers)
     )
-    seen = ", ".join(_render(value) for value in sorted(observed))
-    return RuleFinding(
-        "b",
-        f"{equality.label} binds {equality.subject} in the tool-call condition, "
-        f"but the values supplied reads passed for {name} ({seen}) are {kind}, "
-        f"and {literals}: a different kind of value, so {equality.consequence}. "
-        f"Compare {name} only with a value of the kind it takes, {advice}",
-        IssueCode.discriminating_condition_record_kind_mismatch,
-    )
+
+
+def _declared_text(types: frozenset[str] | None) -> str:
+    if types is None:
+        return "declares no type for it"
+    return f"declares it only as {' or '.join(sorted(types))}"
 
 
 def _kind_unknown(
     equality: _Equality,
-    types: frozenset[str],
+    types: frozenset[str] | None,
     identifiers: list[str],
     state: StateIndex,
 ) -> RuleFinding:
     argument = equality.argument
-    literals = "; ".join(
-        f"{_render(value)} is {state.describe_domain(value)}"
-        for value in dict.fromkeys(identifiers)
-    )
-    declared = (
-        f"declares it only as {' or '.join(sorted(types))}"
-        if types
-        else "declares no type for it"
-    )
     return RuleFinding(
         "b",
-        f"{equality.label} binds {equality.subject}: {literals}, but no supplied "
-        f"read passed a value for {argument.argument} and the input schema of "
-        f"{argument.operation} {declared}, so the kind of value "
-        f"{argument.argument} takes is unknown",
+        f"{equality.label} binds {equality.subject}: "
+        f"{_domains(identifiers, state)}, but no supplied read passed a value "
+        f"for {argument.argument} and the input schema of {argument.operation} "
+        f"{_declared_text(types)}, so the kind of value {argument.argument} "
+        "takes is unknown",
     )
 
 
@@ -494,25 +550,24 @@ def _ordering(
 ) -> tuple[RuleFinding | None, RuleFinding | None]:
     """Apply rule (c): every side of an ordering must be a number under v1."""
 
-    declared: dict[str, list[tuple[str, frozenset[str]]]] = {}
-    literals: list[str] = []
-    untyped: list[ToolCallArgumentOperand] = []
+    reasons: list[str] = []
+    open_sides: dict[str, list[tuple[str, frozenset[str] | None]]] = {}
     for side in (comparison.left, comparison.right):
         if isinstance(side, ToolCallLiteralOperand):
             if numeric_value(side.value) is None:
-                literals.append(f"the literal {_render(side.value)} is not a number")
+                reasons.append(f"the literal {_render(side.value)} is not a number")
             continue
-        types = universe.argument_types.get(side.operation, {}).get(
-            side.argument, frozenset()
-        )
-        if not types:
-            untyped.append(side)
-        elif not types & _NUMERIC_TYPES:
-            declared.setdefault(side.operation, []).append((side.argument, types))
-    reasons = [
-        _declared_reason(operation, items) for operation, items in declared.items()
-    ]
-    reasons += literals
+        schema = _argument_schema(universe, side)
+        reason = _non_numeric_reason(schema, side.argument)
+        if reason is not None:
+            reasons.append(
+                f"the input schema of {side.operation} {reason}, so no value it "
+                "admits is a number"
+            )
+            continue
+        types = _schema_types(schema)
+        if types is None or not (types - {"null"}) <= _NUMERIC_TYPES:
+            open_sides.setdefault(side.operation, []).append((side.argument, types))
     call = _comparison_text(comparison)
     if reasons:
         return (
@@ -528,25 +583,127 @@ def _ordering(
             ),
             None,
         )
-    if untyped:
-        side = untyped[0]
+    if open_sides:
+        declared = "; ".join(
+            f"the input schema of {operation} declares "
+            + " and ".join(
+                f"{argument} as {' or '.join(sorted(types))}"
+                if types
+                else f"no type for {argument}"
+                for argument, types in items
+            )
+            for operation, items in open_sides.items()
+        )
         return None, RuleFinding(
             "c",
-            f"{label} binds {call}: the input schema of {side.operation} "
-            f"declares no type for {side.argument}, so whether it is a number "
-            "under tool-call-condition-v1 is unknown",
+            f"{label} binds {call}: {declared}, and tool-call-condition-v1 orders "
+            "a string only when float() accepts its whole text; nothing typed "
+            "says whether the values passed are such text, so whether the "
+            "comparison can hold is unknown",
         )
     return None, None
 
 
-def _declared_reason(operation: str, items: list[tuple[str, frozenset[str]]]) -> str:
-    named = " and ".join(
-        f"{argument} as {' or '.join(sorted(types))}" for argument, types in items
-    )
-    reason = f"the input schema of {operation} declares {named}"
-    if any("string" in types for _, types in items):
-        reason += ", and a string is a number only when its whole text is one"
-    return reason
+def _argument_schema(
+    universe: ConditionUniverse, argument: ToolCallArgumentOperand
+) -> Mapping[str, Any] | None:
+    """Return the input-schema property of the argument's own operation."""
+
+    return universe.argument_schemas.get(argument.operation, {}).get(argument.argument)
+
+
+def _schema_types(schema: object) -> frozenset[str] | None:
+    """Return every JSON type a schema admits, or ``None`` when that is unknown.
+
+    ``type`` bounds the schema; without it, every ``anyOf`` (or ``oneOf``)
+    branch must bound its own, or an ``enum`` or ``const`` gives the types of
+    its values.
+    """
+
+    if not isinstance(schema, Mapping):
+        return None
+    declared = _type_names(schema.get("type"))
+    if declared:
+        return frozenset(declared)
+    branches = schema.get("anyOf") or schema.get("oneOf")
+    if isinstance(branches, list) and branches:
+        types = [_schema_types(branch) for branch in branches]
+        if any(item is None for item in types):
+            return None
+        return frozenset().union(*(item for item in types if item is not None))
+    values = _enumerated(schema)
+    if values is not None:
+        return frozenset(_json_type(value) for value in values)
+    return None
+
+
+def _non_numeric_reason(schema: object, name: str) -> str | None:
+    """Say how a schema admits no number and no numeric string, else ``None``."""
+
+    if not isinstance(schema, Mapping):
+        return None
+    values = _enumerated(schema)
+    if values is not None and all(numeric_value(value) is None for value in values):
+        return f"restricts {name} to {_render(list(values))}"
+    declared = _type_names(schema.get("type"))
+    if declared and not set(declared) & _NUMERIC_TYPES:
+        types = " or ".join(sorted(declared))
+        if "string" not in declared:
+            return f"declares {name} as {types}"
+        text = _non_numeric_text(schema)
+        if text is not None:
+            return f"declares {name} as {types} {text}"
+    branches = schema.get("anyOf") or schema.get("oneOf")
+    if isinstance(branches, list) and branches:
+        reasons = [_non_numeric_reason(branch, name) for branch in branches]
+        if all(reasons):
+            return " or ".join(item for item in reasons if item)
+    return None
+
+
+def _non_numeric_text(schema: Mapping[str, Any]) -> str | None:
+    """Say which string constraint no numeric text meets, else ``None``."""
+
+    text_format = schema.get("format")
+    if text_format in _NON_NUMERIC_FORMATS:
+        return f"of format {text_format}"
+    pattern = schema.get("pattern")
+    if _pattern_excludes_numbers(pattern):
+        return f"matching the pattern {pattern}"
+    return None
+
+
+def _pattern_excludes_numbers(pattern: object) -> bool:
+    """Return whether an anchored pattern's first character starts no number.
+
+    Only a pattern without alternation that starts ``^`` and then a plain,
+    required character is judged; ``float()`` text starts with a space, a
+    digit, a sign, a point, or the ``inf`` or ``nan`` of either case.
+    """
+
+    if not isinstance(pattern, str) or len(pattern) < 2 or "|" in pattern:
+        return False
+    first = pattern[1]
+    if pattern[0] != "^" or first in _REGEX_SPECIAL or first in _NUMBER_STARTS:
+        return False
+    if first.isspace() or first.isdecimal():
+        return False
+    return pattern[2:3] not in {"?", "*", "{"}
+
+
+def _enumerated(schema: Mapping[str, Any]) -> Sequence[object] | None:
+    if "const" in schema:
+        return (schema["const"],)
+    values = schema.get("enum")
+    return values if isinstance(values, list) and values else None
+
+
+def _type_names(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
 
 
 def _fits(value: object, types: frozenset[str]) -> bool:
@@ -603,4 +760,5 @@ __all__ = [
     "assess_condition",
     "assess_handoff",
     "tool_call_condition_findings",
+    "undecidable_diagnostics",
 ]

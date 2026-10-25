@@ -7,12 +7,14 @@
 # as a coordination mechanism between controllers does).
 #
 # expected is the classification the pre-publication check gives the case:
-# refused under a rule, undecidable under a rule, or clean.
+# refused under a rule, undecidable under a rule, or clean. None of these
+# contradictions is provable from typed facts about the operation itself, so
+# each is undecidable and publishes unchanged.
 cases:
   refund_order_id_vs_customer_id:
     target: refund_assistant
     control_action_operation: null
-    expected: {refused: [b], undecidable: []}
+    expected: {refused: [], undecidable: [b]}
   question_text_vs_patient_id:
     target: clinical_assistant
     control_action_operation: ask_clinical_question
@@ -28,7 +30,7 @@ cases:
   check_in_gt_check_out_dates:
     target: booking_assistant
     control_action_operation: modify_booking
-    expected: {refused: [c], undecidable: []}
+    expected: {refused: [], undecidable: [c]}
   lookup_foreign_order_key:
     target: refund_assistant
     control_action_operation: lookup_order

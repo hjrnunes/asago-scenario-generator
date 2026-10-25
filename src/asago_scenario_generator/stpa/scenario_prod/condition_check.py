@@ -94,6 +94,11 @@ class ConditionUniverse:
     fact_values: Mapping[str, object] = field(default_factory=dict)
     # Argument name -> the string values supplied reads passed for it.
     observed_arguments: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # Read operation name -> argument -> the string values supplied reads of
+    # that operation passed for it.
+    read_arguments: Mapping[str, Mapping[str, frozenset[str]]] = field(
+        default_factory=dict
+    )
     # Every string a comparison may cite: fact keys and values, argument values
     # the reads passed, and schema enum, default, and const values.
     literal_values: frozenset[str] = frozenset()
@@ -101,8 +106,8 @@ class ConditionUniverse:
     operation_text: Mapping[str, str] = field(default_factory=dict)
     # Operation name -> the arguments its input schema requires.
     required_arguments: Mapping[str, frozenset[str]] = field(default_factory=dict)
-    # Operation name -> argument -> the JSON types its input schema declares.
-    argument_types: Mapping[str, Mapping[str, frozenset[str]]] = field(
+    # Operation name -> argument -> its input-schema property.
+    argument_schemas: Mapping[str, Mapping[str, Mapping[str, Any]]] = field(
         default_factory=dict
     )
 
@@ -158,7 +163,7 @@ def build_condition_universe(
     operations: dict[str, set[str]] = {}
     texts: dict[str, str] = {}
     required: dict[str, frozenset[str]] = {}
-    types: dict[str, dict[str, frozenset[str]]] = {}
+    schemas: dict[str, dict[str, Mapping[str, Any]]] = {}
     literals = _observed_literals(target_observations)
     if execution_target_profile is not None:
         for resource in execution_target_profile.resources:
@@ -172,7 +177,9 @@ def build_condition_universe(
                 required[operation.operation_id] = _required_arguments(
                     resource.input_schema
                 )
-                types[operation.operation_id] = _argument_types(resource.input_schema)
+                schemas[operation.operation_id] = _argument_schemas(
+                    resource.input_schema
+                )
     elif target_operation is not None:
         names = operations.setdefault(target_operation.operation_id, set())
         names.update(target_operation.argument_names)
@@ -182,17 +189,18 @@ def build_condition_universe(
         required[target_operation.operation_id] = _required_arguments(
             target_operation.input_schema
         )
-        types[target_operation.operation_id] = _argument_types(
+        schemas[target_operation.operation_id] = _argument_schemas(
             target_operation.input_schema
         )
     return ConditionUniverse(
         operations={name: frozenset(args) for name, args in operations.items()},
         fact_values=target_observation_fact_values(target_observations),
         observed_arguments=_observed_arguments(target_observations),
+        read_arguments=_read_arguments(target_observations),
         literal_values=frozenset(literals),
         operation_text=texts,
         required_arguments=required,
-        argument_types=types,
+        argument_schemas=schemas,
     )
 
 
@@ -200,37 +208,15 @@ def _required_arguments(schema: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(schema.get("required", ()))
 
 
-def _argument_types(schema: object) -> dict[str, frozenset[str]]:
-    """Map each schema property to the JSON types it declares.
-
-    A property's types come from its ``type`` and from the ``type`` of each
-    ``anyOf`` or ``oneOf`` branch. A property that declares none is left out:
-    its type is unknown, not "any".
-    """
+def _argument_schemas(schema: object) -> dict[str, Mapping[str, Any]]:
+    """Map each schema property that is a schema object to that object."""
 
     properties = schema.get("properties") if isinstance(schema, Mapping) else None
-    types: dict[str, frozenset[str]] = {}
-    for name, prop in (properties or {}).items():
-        branches = [prop]
-        if isinstance(prop, Mapping):
-            branches += [*(prop.get("anyOf") or ()), *(prop.get("oneOf") or ())]
-        declared = {
-            item
-            for branch in branches
-            if isinstance(branch, Mapping)
-            for item in _declared_types(branch.get("type"))
-        }
-        if declared:
-            types[str(name)] = frozenset(declared)
-    return types
-
-
-def _declared_types(value: object) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, str)]
-    return []
+    return {
+        str(name): prop
+        for name, prop in (properties or {}).items()
+        if isinstance(prop, Mapping)
+    }
 
 
 def _observed_literals(
@@ -289,6 +275,25 @@ def _observed_arguments(
             for name, value in (observation.source_arguments or {}).items():
                 values.setdefault(name, set()).add(value)
     return {name: frozenset(items) for name, items in values.items()}
+
+
+def _read_arguments(
+    target_observations: TargetObservationSnapshot | None,
+) -> dict[str, dict[str, frozenset[str]]]:
+    """Collect, per read operation and argument, the values its reads passed."""
+
+    values: dict[str, dict[str, set[str]]] = {}
+    if target_observations is not None:
+        for observation in target_observations.observations:
+            if observation.source_name is None:
+                continue
+            arguments = values.setdefault(observation.source_name, {})
+            for name, value in (observation.source_arguments or {}).items():
+                arguments.setdefault(name, set()).add(value)
+    return {
+        operation: {name: frozenset(items) for name, items in arguments.items()}
+        for operation, arguments in values.items()
+    }
 
 
 def target_observation_fact_values(

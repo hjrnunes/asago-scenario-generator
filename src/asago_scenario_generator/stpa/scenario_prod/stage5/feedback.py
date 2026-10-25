@@ -153,13 +153,11 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "and safe_observable_outcome unchanged."
         ),
         IssueCode.discriminating_condition_record_kind_mismatch: (
-            "compare an argument only with a value of the kind it takes: a "
-            "value of its declared schema type and, when supplied reads passed "
-            "values for it, a key of the collection those values key or a "
-            "field whose values are such keys. In "
-            "record_selection.argument_values, map an argument to the selected "
-            "record's path or to such a field, not to a field that holds "
-            "another kind of value. Keep observation_criteria and "
+            "compare an argument only with a value of a type the input "
+            "schema of its own operation declares for it; the tool-call "
+            "condition never converts a value for eq, ne, in, or not_in. In "
+            "record_selection.argument_values, map an argument only to a path "
+            "whose value has such a type. Keep observation_criteria and "
             "safe_observable_outcome unchanged."
         ),
         IssueCode.discriminating_condition_ordering_not_numeric: (
