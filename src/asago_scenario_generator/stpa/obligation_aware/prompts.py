@@ -29,6 +29,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ReferenceType,
     control_action_context_rows,
 )
+from asago_scenario_generator.stpa.mechanism_library import (
+    bundled_mechanism_library,
+    bundled_pattern_mechanism_relation,
+)
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     prohibited_view_field_errors,
@@ -381,16 +385,69 @@ def _routing_question_payload(item: ProviderObligationQuestion) -> dict[str, Any
 
 def _routing_concern_catalog(
     questions: Sequence[ProviderObligationQuestion],
-) -> list[dict[str, str]]:
-    """Render each repeated attack-pattern concern once per routing batch."""
-    by_id: dict[str, dict[str, str]] = {}
+) -> list[dict[str, Any]]:
+    """Render each repeated attack-pattern concern once per routing batch.
+
+    A concern whose pattern realizes known mechanisms names them in
+    ``known_mechanism_refs``; any other concern has no such key.
+    """
+    by_id: dict[str, dict[str, Any]] = {}
     for question in questions:
         concern = question.known_concern.model_dump(mode="json")
         identity = concern["attack_pattern_id"]
         previous = by_id.setdefault(identity, concern)
         if previous != concern:
             raise ValueError(f"conflicting concern descriptions for {identity}")
-    return [by_id[identity] for identity in sorted(by_id)]
+    return [
+        _with_known_mechanism_refs(by_id[identity], identity)
+        for identity in sorted(by_id)
+    ]
+
+
+def known_mechanism_refs(attack_pattern_id: str) -> tuple[str, ...]:
+    """The library mechanisms an attack pattern realizes, as prompt references."""
+    relation = bundled_pattern_mechanism_relation()
+    return tuple(item.value for item in relation.mechanisms_for(attack_pattern_id))
+
+
+def _with_known_mechanism_refs(
+    row: dict[str, Any], attack_pattern_id: str
+) -> dict[str, Any]:
+    refs = known_mechanism_refs(attack_pattern_id)
+    return {**row, "known_mechanism_refs": list(refs)} if refs else row
+
+
+def known_mechanism_glossary(refs: Iterable[str]) -> list[dict[str, Any]]:
+    """Define each referenced library mechanism once, in library order.
+
+    A row carries the fields the prompts explain: ``id``, ``question``,
+    ``required_evidence`` and ``counterexamples``.  The signature stays in
+    code, and the safe behavior is not prompt material.  An unknown
+    reference raises ``ValueError``.
+    """
+    wanted = set(refs)
+    entries = bundled_mechanism_library().mechanisms
+    unknown = sorted(wanted - {entry.id.value for entry in entries})
+    if unknown:
+        raise ValueError(f"unknown mechanism references: {unknown}")
+    return [
+        {
+            "id": entry.id.value,
+            "question": entry.question,
+            "required_evidence": list(entry.required_evidence),
+            "counterexamples": list(entry.counterexamples),
+        }
+        for entry in entries
+        if entry.id.value in wanted
+    ]
+
+
+def _known_mechanism_glossary_yaml(rows: Iterable[Mapping[str, Any]]) -> str:
+    """The glossary of every row's ``known_mechanism_refs``; empty without one."""
+    glossary = known_mechanism_glossary(
+        ref for row in rows for ref in row.get("known_mechanism_refs", ())
+    )
+    return _yaml(glossary) if glossary else ""
 
 
 def project_obligation_question(
@@ -1509,18 +1566,20 @@ def render_structural_routing_prompts(
 ) -> tuple[str, str]:
     """Render system/user prompts from an already projected routing view."""
     routing_targeted_example, routing_unresolved_example = _routing_wire_examples()
+    concern_catalog = _routing_concern_catalog(context.obligation_questions)
+    mechanism_glossary_yaml = _known_mechanism_glossary_yaml(concern_catalog)
     system = _TEMPLATE_LOADER.render_prompt(
         "structural_routing_system.j2",
         obligation_count=len(context.obligation_questions),
         instructions=context.instructions,
         routing_targeted_example=routing_targeted_example,
         routing_unresolved_example=routing_unresolved_example,
+        has_known_mechanisms=bool(mechanism_glossary_yaml),
     )
     user = _TEMPLATE_LOADER.render_prompt(
         "structural_routing_user.j2",
-        known_concern_catalog_yaml=_yaml(
-            _routing_concern_catalog(context.obligation_questions)
-        ),
+        known_concern_catalog_yaml=_yaml(concern_catalog),
+        known_mechanism_glossary_yaml=mechanism_glossary_yaml,
         obligation_questions_yaml=_yaml(
             [_routing_question_payload(item) for item in context.obligation_questions]
         ),
@@ -1535,14 +1594,23 @@ def render_structural_routing_prompts(
 def build_mechanism_verification_prompts(
     verification_items: Sequence[Mapping[str, Any]],
 ) -> tuple[str, str]:
-    """Render the compact post-routing mechanism/path comparison."""
+    """Render the compact post-routing mechanism/path comparison.
+
+    An item may name library mechanisms in ``known_mechanism_refs``; the user
+    message then defines each once in a known mechanism glossary.
+    """
     items = tuple(dict(item) for item in verification_items)
     if not items:
         raise ValueError("mechanism verification requires at least one item")
-    system = _TEMPLATE_LOADER.render_prompt("mechanism_verification_system.j2")
+    mechanism_glossary_yaml = _known_mechanism_glossary_yaml(items)
+    system = _TEMPLATE_LOADER.render_prompt(
+        "mechanism_verification_system.j2",
+        has_known_mechanisms=bool(mechanism_glossary_yaml),
+    )
     user = _TEMPLATE_LOADER.render_prompt(
         "mechanism_verification_user.j2",
         verification_items_yaml=_yaml(items),
+        known_mechanism_glossary_yaml=mechanism_glossary_yaml,
     )
     return system, user
 
@@ -1726,6 +1794,8 @@ __all__ = [
     "build_structural_revision_prompts",
     "build_structural_routing_prompts",
     "build_mechanism_verification_prompts",
+    "known_mechanism_glossary",
+    "known_mechanism_refs",
     "build_ica_hazard_verification_prompts",
     "build_ica_hazard_correction_prompts",
     "build_synthesis_slot_prompts",

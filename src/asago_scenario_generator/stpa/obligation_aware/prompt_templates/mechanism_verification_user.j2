@@ -1,4 +1,8 @@
 Mechanism/path comparisons:
 {{ verification_items_yaml }}
-
+{% if known_mechanism_glossary_yaml %}
+Known mechanism glossary (each mechanism is defined once; items refer to it by
+known_mechanism_refs):
+{{ known_mechanism_glossary_yaml }}
+{% endif %}
 Return a JSON object with a `verdicts` array. Copy every item handle unchanged.

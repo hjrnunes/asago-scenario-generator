@@ -31,11 +31,47 @@ cases:
       - not whether the system description mentions or describes the
       - Choose `absent_from_system` only when the structure lacks that surface
       - adjacent safeguard is not evidence
-      - unauthenticated access or authentication rejection is not poisoned
       - ingress resource proves only that content can arrive
-      - neither establishes semantic separation
-      - the disposition must be `unresolved`
-      - capability flags, or integration IDs cannot substitute
     forbidden:
+      - known_mechanism_refs
+      - known mechanism glossary
+      - unauthenticated access or authentication rejection is not poisoned
+      - neither establishes semantic separation
+      - Before selecting `targeted` for goal redirection
       - Common empty collections belong only to the inward compiled route
       - '"slot_ids":["RESP-1:CA-1-1:INCORRECT"]'
+  routing-batch-known-mechanism:
+    required:
+      - adjacent safeguard is not evidence
+      - ingress resource proves only that content can arrive
+      - >-
+        A concern in the known concern glossary may list `known_mechanism_refs`:
+        the control-loop mechanisms its attack is known to realize, each defined
+        once in the known mechanism glossary of the user message.
+      - A glossary entry's `id` is the reference
+      - "`question` says what the mechanism asks of the system"
+      - >-
+        `required_evidence` lists conditions that exact supplied descriptions
+        must meet before the path carries the mechanism, every one of them, and
+        names the kinds of description that count
+      - >-
+        `counterexamples` lists structures that resemble the mechanism but do
+        not carry it
+      - >-
+        Before selecting `targeted` for a concern that lists known mechanisms,
+        identify exact supplied descriptions that meet the required evidence of
+        one of them. A description that matches only a counterexample is not
+        that evidence.
+      - >-
+        If no such descriptions exist, the disposition must be `unresolved`, even
+        when the mechanism seems generally plausible and the reviewed risk is
+        conceptually aligned, and `mechanism_assessment` is
+        `insufficient_evidence` for the missing mechanism path.
+      - >-
+        Similar wording, consequences, capability flags, or integration IDs
+        cannot substitute for that path.
+    once:
+      - known_mechanism_refs
+    forbidden:
+      - unauthenticated access or authentication rejection is not poisoned
+      - Before selecting `targeted` for goal redirection

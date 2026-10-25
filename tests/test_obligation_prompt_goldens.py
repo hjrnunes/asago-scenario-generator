@@ -4,8 +4,9 @@ Each case renders the complete system and user messages of one prompt builder
 from fixed inputs and compares them byte for byte with the files under
 ``tests/golden/obligation_prompts/``. The cases cover each branch that changes
 instruction text: the four mapping-strength readings, the empty hazard-constraint
-ledger, both revision context paths, the governance and pattern ICA questions,
-and every routing retry repair.
+ledger, a concern that links known mechanisms, both revision context paths, the
+governance and pattern ICA questions, every routing retry repair, and the
+mechanism verifier with and without known mechanisms.
 
 To rewrite the goldens after an intended prompt change, call ``write_goldens()``
 from a Python shell at the repository root.
@@ -23,7 +24,9 @@ from asago_scenario_generator.models.obligation_consideration import (
     MissingStructuralConcept,
     ObligationRoute,
 )
+from asago_scenario_generator.data.loaders import load_attack_patterns
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    build_mechanism_verification_prompts,
     build_structural_revision_prompts,
     build_structural_routing_prompts,
     build_synthesis_slot_prompts,
@@ -34,6 +37,7 @@ from asago_scenario_generator.stpa.obligation_aware.routing import (
 )
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.governance import _pattern_route, _setup
+from tests.helpers.known_mechanism import linked_brief
 from tests.helpers.obligation_aware import _control_structure, _loss_analysis
 from tests.helpers.obligation_factory import make_plan
 from tests.helpers.projection_factory import get_test_raw_pattern
@@ -68,6 +72,10 @@ def _brief(*, first_relation: str | None = None):
     return build_neutral_briefs(plan, (pattern,))[0]
 
 
+def _linked_brief(pattern_id: str):
+    return linked_brief(_brief(), pattern_id)
+
+
 def _routing(brief, *, loss_analysis=None) -> Messages:
     structure = _control_structure()
     system, user = build_structural_routing_prompts(
@@ -76,6 +84,31 @@ def _routing(brief, *, loss_analysis=None) -> Messages:
         control_structure=structure,
         slots=create_slots(structure),
     )
+    return {"system": system, "user": user}
+
+
+_PATH = [
+    {"id": "RESP-1", "description": "Answer customer requests."},
+    {"id": "CA-1-1", "description": "Compose the reply to the customer."},
+    {"id": "H-1", "description": "A reply discloses another customer's records."},
+]
+
+
+def _verifier_item(handle: str, pattern_id: str, refs: tuple[str, ...]) -> dict:
+    record = load_attack_patterns()[pattern_id]
+    item = {
+        "item_handle": handle,
+        "distinctive_mechanism": {
+            "name": record["name"],
+            "description": record["description"],
+        },
+        "selected_structural_path": [dict(row) for row in _PATH],
+    }
+    return {**item, "known_mechanism_refs": list(refs)} if refs else item
+
+
+def _verification(*items: dict) -> Messages:
+    system, user = build_mechanism_verification_prompts(items)
     return {"system": system, "user": user}
 
 
@@ -166,6 +199,14 @@ CASES: dict[str, Callable[[], Messages]] = {
     ),
     "routing-empty-ledger": lambda: _routing(
         _brief(), loss_analysis=_empty_ledger_analysis()
+    ),
+    "routing-known-mechanism": lambda: _routing(_linked_brief("AP-T6-03")),
+    "mechanism-verification": lambda: _verification(
+        _verifier_item("R1", "AP-T1-01", ())
+    ),
+    "mechanism-verification-known-mechanism": lambda: _verification(
+        _verifier_item("R1", "AP-T6-08", ("user_claim",)),
+        _verifier_item("R2", "AP-T6-03", ("retrieved_instructions",)),
     ),
     "revision-responsibility-gap": lambda: _revision(
         _gap("responsibility", "A reviewing responsibility is needed.", "review-gap")

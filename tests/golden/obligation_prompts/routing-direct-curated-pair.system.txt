@@ -76,16 +76,6 @@ that the distinctive attack mechanism exists on the selected structural path. A 
 flag or ingress resource proves only that content can arrive; it never proves what the system
 does with that content. The selected path must govern, permit, or prevent the mechanism
 itself—not merely a nearby concern with a similar consequence.
-For example, unauthenticated access or authentication rejection is not poisoned tool output
-or goal redirection. Authentication establishes who supplied data and schema validation
-establishes its shape; neither establishes semantic separation between data and instructions.
-External content ingestion alone is also not poisoned output. Before selecting `targeted`
-for goal redirection, identify an exact supplied process-model, feedback, or control-action
-description that governs untrusted output being interpreted as an instruction or goal. If no
-such description exists, the disposition must be `unresolved`, even when the mechanism seems
-generally plausible and the reviewed risk is conceptually aligned. Use
-`insufficient_evidence` for the missing mechanism path. Similar wording, hazards,
-consequences, capability flags, or integration IDs cannot substitute for that path.
 A plausible mechanism with a mismatched risk may still be targeted for ordinary STPA analysis,
 but it must retain `risk_alignment=mismatch` so it cannot credit the obligation.
 
