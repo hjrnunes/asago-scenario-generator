@@ -2,6 +2,8 @@
 
 :func:`mechanism_candidates` walks the typed control structure from untrusted
 feedback to the actions and coordination links it reaches.
+:func:`mechanism_join` runs the same walk under the authority filter and
+records why each channel's candidates were kept or dropped.
 
 The index is rebuilt per call rather than cached: the STPA models are mutable,
 so a cache keyed on them could serve records that were changed in place.
@@ -13,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
+from enum import Enum
 from types import MappingProxyType
 from typing import Any, TypeVar
 
@@ -23,9 +26,11 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     CoordinationLink,
     CoordinationMechanism,
+    FeedbackAuthorityStatus,
     FeedbackChannel,
     FeedbackSourceKind,
     ProcessModelPart,
+    ReferenceType,
     Responsibility,
     ResponsibilityConstraint,
     coordination_process_model_owner,
@@ -244,6 +249,8 @@ class MechanismCandidate:
 
 def mechanism_candidates(
     control_structure: ControlStructure,
+    *,
+    authority_filter: bool = False,
 ) -> tuple[MechanismCandidate, ...]:
     """Join untrusted feedback to the actions and links its variable reaches.
 
@@ -270,32 +277,211 @@ def mechanism_candidates(
     gets :data:`CROSS_CONTROLLER_MECHANISM`.  Candidates follow the structure's
     order: responsibilities, their channels, the actions of every
     responsibility, then the links; a repeated candidate is kept once.
+
+    With *authority_filter*, the candidates are those :func:`mechanism_join`
+    keeps, in the same order; without it the join is unchanged.
     """
+    if authority_filter:
+        return tuple(item.candidate for item in mechanism_join(control_structure).kept)
     actions = _children(control_structure.responsibilities, "control_actions")
     result: dict[MechanismCandidate, None] = {}
     for channel in _children(control_structure.responsibilities, "feedback_channels"):
         if not channel.untrusted:
             continue
-        variable = channel.updates
-        source_mechanism = SOURCE_MECHANISMS.get(channel.source_kind)
-        for action in actions:
-            if variable in action.process_model_refs:
-                crosses = action.effect_kind is ControlActionEffectKind.agent_message
-                _add_candidates(
-                    result,
-                    (channel.fb_id, variable, action.ca_id),
-                    source_mechanism,
-                    crosses,
-                )
-        for link in control_structure.coordination_links:
-            if link.shared_pm == variable and _issued_by_owner(control_structure, link):
-                _add_candidates(
-                    result,
-                    (channel.fb_id, variable, link.link_id),
-                    source_mechanism,
-                    True,
-                )
+        for path, crosses in _channel_paths(control_structure, actions, channel):
+            _add_candidates(
+                result, path, SOURCE_MECHANISMS.get(channel.source_kind), crosses
+            )
     return tuple(result)
+
+
+class ReachBasis(str, Enum):
+    """The structure field that decided whether an adversary reaches a channel.
+
+    - ``argument_evidence``: the updated variable cites an ``argument:``
+      evidence reference.  Its value is a tool argument the controller fills
+      from the conversation, so the user can shape it: reachable, whatever
+      ``source_kind`` says.
+    - ``own_controller``: the channel's ``source`` is the responsibility that
+      owns the channel.  The controller produces the information itself (its
+      own check, classification, or draft), so no adversary authors it:
+      not reachable, whatever ``source_kind`` says.  Adversary influence on
+      such a value enters through the controller's other channels, which the
+      join follows on their own.
+    - ``source_kind``: neither applies, so ``source_kind`` decides, as in the
+      unfiltered join.  A source that is a controlled process or another
+      controller names where the information enters, not who authors it.
+    """
+
+    argument_evidence = "argument_evidence"
+    own_controller = "own_controller"
+    source_kind = "source_kind"
+
+
+class DropReason(str, Enum):
+    """Why the authority filter drops a channel's candidates.
+
+    - ``authoritative``: an adversary reaches the channel, but its
+      ``authority_for_update`` says it is entitled to set the variable;
+    - ``own_controller``: ``source_kind`` is untrusted, but the channel's
+      source is its own controller (:attr:`ReachBasis.own_controller`).
+    """
+
+    authoritative = "authoritative"
+    own_controller = "own_controller"
+
+
+ASSESSED_AUTHORITY = frozenset(
+    {FeedbackAuthorityStatus.non_authoritative, FeedbackAuthorityStatus.conditional}
+)
+"""The statuses that settle a kept channel's lack of authority.
+
+A kept channel with any other status is kept only because its authority is
+``unknown``: recorded so, or absent.
+"""
+
+
+@dataclass(frozen=True)
+class KeptCandidate:
+    """A candidate the authority filter keeps, with what kept it.
+
+    ``authority`` is the channel's status, ``unknown`` when
+    ``authority_for_update`` is absent; ``authority_recorded`` says whether it
+    was present.  ``reach`` is the field that made the channel reachable.
+    """
+
+    candidate: MechanismCandidate
+    authority: FeedbackAuthorityStatus
+    authority_recorded: bool
+    reach: ReachBasis
+
+    @property
+    def authority_assessed(self) -> bool:
+        """Whether the record settles that the channel lacks authority."""
+        return self.authority in ASSESSED_AUTHORITY
+
+
+@dataclass(frozen=True)
+class DroppedCandidate:
+    """A candidate the authority filter drops, and why."""
+
+    candidate: MechanismCandidate
+    reason: DropReason
+
+
+@dataclass(frozen=True)
+class MechanismJoin:
+    """The filtered join: what it keeps and what it drops, in structure order.
+
+    ``kept`` holds the filtered candidates.  ``dropped`` holds the candidates
+    of channels the filter refuses, with the mechanisms they would carry; for
+    an ``own_controller`` drop these are exactly the unfiltered join's
+    candidates on that channel.
+    """
+
+    kept: tuple[KeptCandidate, ...]
+    dropped: tuple[DroppedCandidate, ...]
+
+
+def mechanism_join(control_structure: ControlStructure) -> MechanismJoin:
+    """Join adversary-reachable feedback that lacks authority over its variable.
+
+    The paths and mechanisms are those of :func:`mechanism_candidates`; the
+    filter changes only which channels start a path:
+
+    1. Reach.  A channel is adversary-reachable as :class:`ReachBasis`
+       decides, in its order: the updated variable's ``evidence_refs``, then
+       the channel's ``source`` against the responsibility that owns the
+       channel, then ``source_kind``.  A channel the ``argument:`` rule makes
+       reachable takes its source kind's mechanism, or ``user_claim`` when the
+       kind names none.  Other evidence prefixes (``state:``, ``session:``,
+       ``policy:``, ``operation:``) decide nothing: a variable can cite them
+       and still hold what the user wrote.
+    2. Authority.  A reachable channel is kept unless its
+       ``update_authority`` status is ``authoritative``; ``non_authoritative``,
+       ``conditional`` and ``unknown`` (recorded or absent) keep it.
+
+    A channel that fails both is dropped for the first.  A channel neither
+    join would follow is not reported.
+    """
+    actions = _children(control_structure.responsibilities, "control_actions")
+    kept: dict[MechanismCandidate, KeptCandidate] = {}
+    dropped: dict[MechanismCandidate, DroppedCandidate] = {}
+    for owner in control_structure.responsibilities:
+        variables = _first_by_id(owner.process_model_parts, "pm_id")
+        for channel in owner.feedback_channels:
+            reach, reachable = _channel_reach(owner, channel, variables)
+            mechanism = SOURCE_MECHANISMS.get(channel.source_kind)
+            if mechanism is None and reach is ReachBasis.argument_evidence:
+                mechanism = SOURCE_MECHANISMS[FeedbackSourceKind.user_message]
+            status = channel.update_authority.status
+            reason: DropReason | None = None
+            if not reachable:
+                if reach is not ReachBasis.own_controller or not channel.untrusted:
+                    continue
+                reason = DropReason.own_controller
+            elif status is FeedbackAuthorityStatus.authoritative:
+                reason = DropReason.authoritative
+            found: dict[MechanismCandidate, None] = {}
+            for path, crosses in _channel_paths(control_structure, actions, channel):
+                _add_candidates(found, path, mechanism, crosses)
+            for candidate in found:
+                if reason is None:
+                    kept.setdefault(
+                        candidate,
+                        KeptCandidate(
+                            candidate,
+                            status,
+                            channel.authority_for_update is not None,
+                            reach,
+                        ),
+                    )
+                else:
+                    dropped.setdefault(candidate, DroppedCandidate(candidate, reason))
+    return MechanismJoin(tuple(kept.values()), tuple(dropped.values()))
+
+
+def _channel_reach(
+    owner: Responsibility,
+    channel: FeedbackChannel,
+    variables: Mapping[str, ProcessModelPart],
+) -> tuple[ReachBasis, bool]:
+    variable = variables.get(channel.updates)
+    if variable is not None and any(
+        ref.startswith("argument:") for ref in variable.evidence_refs
+    ):
+        return ReachBasis.argument_evidence, True
+    source = channel.source
+    if (
+        source is not None
+        and source.type is ReferenceType.responsibility
+        and source.id == owner.resp_id
+    ):
+        return ReachBasis.own_controller, False
+    return ReachBasis.source_kind, channel.untrusted
+
+
+def _channel_paths(
+    control_structure: ControlStructure,
+    actions: Sequence[ControlAction],
+    channel: FeedbackChannel,
+) -> list[tuple[tuple[str, str, str], bool]]:
+    """Every path from *channel*, and whether it reaches another controller."""
+    variable = channel.updates
+    paths = [
+        (
+            (channel.fb_id, variable, action.ca_id),
+            action.effect_kind is ControlActionEffectKind.agent_message,
+        )
+        for action in actions
+        if variable in action.process_model_refs
+    ]
+    paths += [
+        ((channel.fb_id, variable, link.link_id), True)
+        for link in control_structure.coordination_links
+        if link.shared_pm == variable and _issued_by_owner(control_structure, link)
+    ]
+    return paths
 
 
 def _issued_by_owner(
@@ -325,11 +511,18 @@ def _add_candidates(
 
 
 __all__ = [
+    "ASSESSED_AUTHORITY",
     "CROSS_CONTROLLER_MECHANISM",
     "SOURCE_MECHANISMS",
+    "DropReason",
+    "DroppedCandidate",
+    "KeptCandidate",
     "MechanismCandidate",
+    "MechanismJoin",
+    "ReachBasis",
     "SlotPath",
     "StpaIndex",
     "build_stpa_index",
     "mechanism_candidates",
+    "mechanism_join",
 ]
