@@ -627,7 +627,7 @@ def _perform_safe_call(
     )
     state.cleaned_response = model
     state.semantic_validation_passed = True
-    log_llm_call(
+    state.logged_attempt_id = log_llm_call(
         state.result,
         llm_client.model,
         run_dir,
@@ -794,6 +794,8 @@ class CallOutcome(Generic[_T]):
     ``failure`` is the exception behind ``error``, for a caller that reads
     typed detail from it.  ``attempt_number`` is the number of the last
     attempt, so a follow-up request in the same step can continue it.
+    ``attempt_id`` is the call-log id of the last attempt, which a follow-up
+    request names as its ``retry_of``; it is ``None`` when nothing was logged.
     """
 
     value: _T | None
@@ -802,6 +804,7 @@ class CallOutcome(Generic[_T]):
     calls: int
     failure: BaseException | None = None
     attempt_number: int = 1
+    attempt_id: str | None = None
 
 
 @dataclass
@@ -1210,6 +1213,7 @@ def call_with_policy(
     response_parser: (Callable[[LLMResult, list[dict[str, Any]]], _T] | None) = None,
     prompt_template_hashes: Mapping[str, str] | None = None,
     first_attempt_number: int = 1,
+    retry_of: str | None = None,
 ) -> CallOutcome[_T]:
     """Request a structured response, correcting it as ``policy`` allows.
 
@@ -1246,13 +1250,15 @@ def call_with_policy(
             to the list so the record keeps it apart from model output.
         first_attempt_number: Number of the first attempt in the call log; a
             follow-up request in the same step continues the numbering.
+        retry_of: Call-log ``attempt_id`` of the failed attempt the first
+            attempt repeats, recorded as its ``retry_of``; later attempts
+            name the attempt before them.
     """
     json_retries_remaining = policy.json_retries
     validation_retries_remaining = policy.validation_retries
     attempt_user_prompt = user_prompt
     attempt_number = first_attempt_number
     calls = 0
-    retry_of: str | None = None
     while True:
         state = _SafeCallState(retry_of=retry_of)
         try:
@@ -1290,6 +1296,7 @@ def call_with_policy(
                 None,
                 _dispatched(calls + 1 + state.transport_retries),
                 attempt_number=attempt_number,
+                attempt_id=state.logged_attempt_id,
             )
         except Exception as exc:
             calls += state.dispatched + state.transport_retries
@@ -1345,6 +1352,7 @@ def call_with_policy(
                 _dispatched(calls),
                 exc,
                 attempt_number=attempt_number,
+                attempt_id=state.logged_attempt_id,
             )
 
 

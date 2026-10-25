@@ -66,7 +66,8 @@ class CallRecord(_Read):
     a successful call's reply from the record of its last request.  The old
     log stored a reply the client had parsed against its response model as
     that model's JSON dump; ``response_parsed`` marks such a reply, whose raw
-    text a reader must normalize as the model did.
+    text a reader must normalize as the model did.  ``finish_reason`` is why
+    a failed call's last reply stopped, read from its provider record.
     """
 
     n: int = 0
@@ -87,6 +88,7 @@ class CallRecord(_Read):
     provider_requests: list[ProviderRequest] = Field(default_factory=list)
     response_parsed: bool = False
     response_content: str | None = None
+    finish_reason: str | None = None
 
     @property
     def tokens(self) -> int:
@@ -267,8 +269,8 @@ def _read_calls(output: Path) -> tuple[CallRecord, ...]:
 
 
 def _reply_key(call: CallRecord) -> tuple[int, str] | None:
-    """The provider record holding *call*'s reply, when the log names it."""
-    if not call.success or call.response_content is not None:
+    """The provider record holding *call*'s last reply, when the log names it."""
+    if call.success and call.response_content is not None:
         return None
     if not call.provider_requests:
         return None
@@ -277,31 +279,45 @@ def _reply_key(call: CallRecord) -> tuple[int, str] | None:
 
 
 def _with_replies(output: Path, calls: list[CallRecord]) -> list[CallRecord]:
-    """Fill each successful call's reply from the provider record it names."""
+    """Fill each call's reply evidence from the provider record it names.
+
+    A successful call gets its reply text; a failed call gets the reason its
+    last reply stopped.
+    """
     wanted = {key for call in calls if (key := _reply_key(call)) is not None}
     if not wanted:
         return calls
     replies = _provider_replies(output / RECORD_FILENAME, wanted)
     return [
-        call.model_copy(update={"response_content": replies.get(key)})
+        call.model_copy(update=_reply_fields(call, replies.get(key, (None, None))))
         if (key := _reply_key(call)) is not None
         else call
         for call in calls
     ]
 
 
+def _reply_fields(
+    call: CallRecord, reply: tuple[str | None, str | None]
+) -> dict[str, Any]:
+    content, finish_reason = reply
+    if call.success:
+        return {"response_content": content}
+    return {"finish_reason": finish_reason}
+
+
 def _provider_replies(
     path: Path, wanted: set[tuple[int, str]]
-) -> dict[tuple[int, str], str]:
-    """Read the message content of the *wanted* provider records."""
+) -> dict[tuple[int, str], tuple[str | None, str | None]]:
+    """Read the message content and finish reason of the *wanted* provider records."""
     if not path.exists():
         return {}
-    replies: dict[tuple[int, str], str] = {}
+    replies: dict[tuple[int, str], tuple[str | None, str | None]] = {}
     for line in jsonl_lines(path.read_text(encoding="utf-8")):
         record = json.loads(line)
         key = (record.get("sequence"), record.get("request_sha256"))
-        if key in wanted and (content := _message_content(record)) is not None:
-            replies[key] = content
+        if key in wanted:
+            response = record.get("response") or {}
+            replies[key] = (_message_content(record), response.get("finish_reason"))
     return replies
 
 

@@ -3,7 +3,10 @@
 A chain is a failed request plus its retries. ``calls.jsonl`` links a retry to
 the attempt it repeats with ``retry_of``; an older log has no link, so the
 chain is inferred: within one (stage, step, scenario) group, a request with
-``attempt_number`` above 1 continues the open chain.
+``attempt_number`` above 1 continues the open chain, and so does a Stage 5
+request for the same slot after a reply that stopped at its completion cap,
+which is the concise retry of a log written before that retry named its
+attempt.
 
 Each chain gets one outcome:
 
@@ -25,6 +28,7 @@ from asago_scenario_generator.report.slot_view import ICA_STAGE, SlotView
 OUTCOME_ORDER = {"lost": 0, "degraded": 1, "repaired": 2, "recovered": 3}
 REVIEW_STEP = "risk_coverage_review"
 BELIEF_STAGE = "stage5_belief"
+SCENARIO_STAGE = "stage_5"
 
 
 @dataclass(frozen=True)
@@ -74,6 +78,14 @@ def error_parts(call: CallRecord) -> tuple[str, str]:
     return code, message
 
 
+def _is_unlinked_length_retry(call: CallRecord, chain: list[CallRecord] | None) -> bool:
+    """Tell whether *call* is an older log's Stage 5 retry of a cut-off reply."""
+    if chain is None or call.retry_of is not None or call.stage != SCENARIO_STAGE:
+        return False
+    last = chain[-1]
+    return last.finish_reason == "length" and last.slot_id == call.slot_id
+
+
 def _chains(calls: Iterable[CallRecord]) -> list[list[CallRecord]]:
     """Group the requests into attempt chains that contain a failure."""
     chains: list[list[CallRecord]] = []
@@ -84,6 +96,8 @@ def _chains(calls: Iterable[CallRecord]) -> list[list[CallRecord]]:
         chain = by_attempt.get(call.retry_of) if call.retry_of else None
         if chain is None and call.retry_of is None and call.attempt_number > 1:
             chain = open_by_group.get(group)
+        if chain is None and _is_unlinked_length_retry(call, open_by_group.get(group)):
+            chain = open_by_group[group]
         if chain is None:
             chain = [call]
             if not call.success:

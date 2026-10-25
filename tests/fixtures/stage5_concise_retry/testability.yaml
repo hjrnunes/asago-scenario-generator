@@ -1,0 +1,5 @@
+schema_version: scenario-testability-v1
+scenarios:
+- scenario_id: SCN-012
+  status: analytical_only
+  duplicate_of: null
