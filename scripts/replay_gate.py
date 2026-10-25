@@ -64,6 +64,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ROUTING_RECORD_VALIDATION_FAILED,
     ROUTING_VALIDATION_FAILED,
     ConsiderationDiagnostic,
+    ObligationSemanticAssessment,
 )
 from asago_scenario_generator.stpa.infra.call_log import (
     CALLS_FILENAME,
@@ -473,9 +474,13 @@ class RoutingRecordStopReasonChange:
     changed, and the replay's obligation consideration holds exactly one
     final route for its obligation, with the row's disposition
     *route_disposition*, from which accounting derives *replayed_reason*:
-    its diagnostics carry *record_diagnostic* and none of
-    *earlier_diagnostics*, which set the reason before the change, and they
-    open the row's diagnostics, as accounting copies them.  Such rows join
+    its semantic assessment derives no semantic stop, which accounting
+    applies first; its diagnostics carry *record_diagnostic* and none of
+    *earlier_diagnostics*, which set the reason before the change; and they
+    open the row's diagnostics, as accounting copies them.  An out-of-scope
+    risk, which accounting applies last, needs no check here: such a row
+    must stop at ``risk_out_of_scope`` or the accounting file fails its
+    integrity check, and nothing is allowed.  Such rows join
     the rows :data:`ACCOUNTING_STOP_REASON_CHANGE` explains: the gate accepts
     the accounting when each differing row is explained by one of the two,
     and the realization, manifest and report must follow all of them through
@@ -1564,10 +1569,6 @@ def _derived_diagnostic(
     route: dict[str, Any], obligation_id: Any, code: str
 ) -> dict[str, Any] | None:
     """Return the diagnostic accounting writes for *code* on the route's row."""
-    from asago_scenario_generator.models.obligation_consideration import (
-        ConsiderationDiagnostic,
-        ObligationSemanticAssessment,
-    )
     from asago_scenario_generator.pipeline.obligation_consideration import (
         _semantic_stop_detail,
     )
@@ -1631,6 +1632,10 @@ def _failed_record_row_explained(
     change: RoutingRecordStopReasonChange,
 ) -> bool:
     """Tell whether *after* is *before* moved by its route's failed record."""
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        _semantic_stop_detail,
+    )
+
     if {k: v for k, v in before.items() if k != "stop_reason"} != {
         k: v for k, v in after.items() if k != "stop_reason"
     }:
@@ -1649,7 +1654,13 @@ def _failed_record_row_explained(
     row_items = after.get("diagnostics", [])
     if not isinstance(items, list) or not isinstance(row_items, list):
         return False
+    assessment = route.get("semantic_assessment")
     try:
+        semantic = (
+            None
+            if assessment is None
+            else ObligationSemanticAssessment.model_validate(assessment)
+        )
         diagnostics = [ConsiderationDiagnostic.model_validate(i) for i in items]
         opening = [
             ConsiderationDiagnostic.model_validate(i) for i in row_items[: len(items)]
@@ -1658,7 +1669,8 @@ def _failed_record_row_explained(
         return False
     codes = {item.code for item in diagnostics}
     return (
-        change.record_diagnostic in codes
+        _semantic_stop_detail(route.get("disposition"), semantic) is None
+        and change.record_diagnostic in codes
         and not codes & change.earlier_diagnostics
         and opening == diagnostics
     )
