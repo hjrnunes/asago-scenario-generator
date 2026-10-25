@@ -1369,3 +1369,10 @@ def _terminal_error_code(
     if provider_response_received:
         return "provider_semantic_validation_failure"
     return "provider_call_failure"
+
+
+def is_provider_contract_failure(error: BaseException | None) -> bool:
+    """Tell whether the call log records *error* as ``provider_contract_failure``."""
+    return error is not None and (
+        _terminal_error_code(error) == "provider_contract_failure"
+    )

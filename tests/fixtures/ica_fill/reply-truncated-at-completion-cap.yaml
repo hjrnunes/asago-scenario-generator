@@ -1,0 +1,12 @@
+# One obligation-aware ICA slot reply that stopped at its completion cap.
+# Recorded from a gemma-4-26b-a4b-it generate run on the Klarna use case;
+# the content keeps the reply's opening through the start of its second
+# finding, cut inside a string value as the cap cut the original.
+stage: synthesis_obligation_aware_icas
+step: RESP-1
+finish_reason: length
+completion_tokens: 8192
+max_completion_tokens: 8192
+original_content_chars: 27913
+original_decode_error: "Unterminated string starting at: line 1 column 27905"
+content: "{\"filled_slots\": [{\"slot_id\": \"RESP-1:CA-1-1:INCORRECT\", \"is_na\": false, \"na_rationale\": null, \"findings\": [{\"deviation\": \"the response contains sensitive financial data not associated with the authenticated customer\", \"hazardous_context\": \"the assistant reveals financial details belonging to another customer\", \"loss_consequence\": \"unauthorized disclosure of sensitive financial records\", \"governing_pairs\": [\"SC-2/H-2\"], \"process_model_refs\": [\"PM-1-1\"], \"feedback_refs\": [\"FB-1-1\"], \"context_row\": \"CA-1-1:ctx-103\"}, {\"deviation\": \"the response reveals"

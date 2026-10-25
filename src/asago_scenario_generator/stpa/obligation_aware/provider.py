@@ -2105,7 +2105,11 @@ class ObligationAwareLLMAdapter:
             prompt_template_hashes=obligation_prompt_template_hashes(),
         )
         if outcome.error is not None or outcome.value is None:
-            raise ValueError(outcome.error or "slot provider returned no payload")
+            # The cause carries the typed call failure, so slot filling can
+            # tell a reply that broke its contract from one judged invalid.
+            raise ValueError(
+                outcome.error or "slot provider returned no payload"
+            ) from outcome.failure
         payload, supplement_calls = self._supplement_context_coverage(
             _resolve_slot_handles(_listed_results(outcome.value), by_local), request
         )

@@ -9,13 +9,17 @@ from typing import Any, Literal, cast
 
 from asago_scenario_generator.models.ica_merge import IcaMerge, IcaMergedFinding
 from asago_scenario_generator.models.obligation_consideration import (
+    SLOT_PROVIDER_CONTRACT_FAILED,
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
     NeutralObligationBrief,
     ObligationIcaConsideration,
     ObligationRoute,
 )
-from asago_scenario_generator.stpa.infra.llm_helpers import count_requests
+from asago_scenario_generator.stpa.infra.llm_helpers import (
+    count_requests,
+    is_provider_contract_failure,
+)
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
     PromptBudgetExceeded,
@@ -971,6 +975,7 @@ def _unresolved_pair(
     detail: str,
     *,
     call_ref: str | None = None,
+    code: str = "slot_pair_unresolved",
 ) -> ObligationIcaConsideration:
     """Create typed unresolved pair evidence without inventing findings."""
     refs = () if call_ref is None else (call_ref,)
@@ -984,7 +989,7 @@ def _unresolved_pair(
         rationale=detail,
         diagnostics=(
             ConsiderationDiagnostic(
-                code="slot_pair_unresolved",
+                code=code,
                 detail=detail,
                 obligation_ids=(route.obligation_id,),
                 refs=(route.route_id, slot.slot_id),
@@ -1093,6 +1098,19 @@ def _unresolved_diagnostic_code(error: BaseException | None) -> str:
     return "slot_response_unresolved"
 
 
+def _unresolved_pair_code(error: BaseException | None) -> str:
+    """Name why a failed request leaves its routed pairs unresolved.
+
+    The provider adapter raises its call failure as the cause. A cause the call
+    log records as ``provider_contract_failure``, such as a reply cut off at its
+    completion cap that no longer decodes, marks a provider contract failure;
+    every other failure leaves the pairs analytically unresolved.
+    """
+    if error is not None and is_provider_contract_failure(error.__cause__):
+        return SLOT_PROVIDER_CONTRACT_FAILED
+    return "slot_pair_unresolved"
+
+
 def _record_unresolved_slot_fallbacks(
     request: SynthesisSlotRequest,
     detail: str,
@@ -1127,6 +1145,7 @@ def _record_unresolved_pairs(
     *,
     all_pairs: list[ObligationIcaConsideration],
     call_ref: str,
+    code: str = "slot_pair_unresolved",
 ) -> None:
     """Retain unresolved evidence for each routed, provider-owned slot."""
     for route in request.routed_routes:
@@ -1134,7 +1153,9 @@ def _record_unresolved_pairs(
             slot = expected[slot_id]
             if not requires_provider_slot_analysis(slot):
                 continue
-            all_pairs.append(_unresolved_pair(route, slot, detail, call_ref=call_ref))
+            all_pairs.append(
+                _unresolved_pair(route, slot, detail, call_ref=call_ref, code=code)
+            )
 
 
 def _record_request_unresolved(
@@ -1188,6 +1209,7 @@ def _record_request_unresolved(
         detail,
         all_pairs=all_pairs,
         call_ref=call_ref,
+        code=_unresolved_pair_code(error),
     )
 
 
