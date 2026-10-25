@@ -2,7 +2,8 @@
 
 ``uncited_security_constraints`` is advisory: it runs after Stage 2 Call 3
 assembles the structure.  ``untyped_control_actions`` gates the final
-structure: an action without a typed target and effect cannot be routed.
+structure: an action without a typed target and effect cannot be routed;
+``system_model.publication`` applies it to every canonical publication.
 The structural checks live in
 ``stpa.models.control_structure.check_structural_heuristics``.
 """

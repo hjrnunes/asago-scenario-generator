@@ -55,7 +55,9 @@ from asago_scenario_generator.stpa.system_model.critic import (
 )
 from asago_scenario_generator.stpa.system_model.heuristics import (
     uncited_security_constraints,
-    untyped_control_actions,
+)
+from asago_scenario_generator.stpa.system_model.publication import (
+    publish_control_structure,
 )
 from asago_scenario_generator.stpa.system_model.loss_analysis import (
     diagnose_loss_analysis_semantics,
@@ -938,18 +940,14 @@ def _run_stage_2_steps(
     )
     stage_warnings.extend(placement_warnings)
 
-    # Fail closed: an action without a typed target and effect cannot be
-    # routed, so the structure is kept under its own name for audit and the
-    # canonical file is not written.
-    untyped = untyped_control_actions(control_structure)
-    if untyped:
-        versions.add(control_structure, "control-structure-refused.yaml")
-        stage_errors.append("stage_2/typed_control_actions: " + "; ".join(untyped))
-        return _Stage2Result()
-
     # The canonical name is the structure in force when the stage ends; it is
-    # the placement step's version, so that step keeps no named copy.
-    versions.publish(control_structure, "control-structure.yaml")
+    # the placement step's version, so that step keeps no named copy.  A
+    # structure with an untyped action is refused instead: it cannot be routed.
+    try:
+        publish_control_structure(versions, control_structure, run_dir)
+    except StageError as exc:
+        stage_errors.append(str(exc))
+        return _Stage2Result()
 
     # Advisory, code-only: a Stage 1a constraint that no responsibility cites
     # reaches no control action, so its rule produces no scenario.

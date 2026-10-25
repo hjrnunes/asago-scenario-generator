@@ -17,10 +17,13 @@ it: `loss-analysis-draft.yaml`, `loss-analysis-reviewed.yaml` and
 `control-structure-revised.yaml`. A version is written only when its YAML text
 differs from the next version's, so an absent version equals the next version
 present on disk, ending with the normal file. A stage that fails before it
-publishes the normal file keeps the last version it reached. Stage 2 publishes
-`control-structure.yaml` only when every control action has a typed `target`
-and `effect_kind`; otherwise it fails with each untyped action's ID and keeps
-the structure as `control-structure-refused.yaml`.
+publishes the normal file keeps the last version it reached. Every writer of
+`control-structure.yaml` (the pipeline's Stage 2 and a standalone
+`derive_control_structure` call) publishes it only when every control action
+has a typed `target` and `effect_kind`. Otherwise Stage 2 fails with each
+untyped action's ID, keeps the structure as `control-structure-refused.yaml`,
+and removes any `control-structure.yaml` an earlier attempt left in the output
+directory, so no reader takes a stale structure for the refused one.
 No extra model call or target inventory is added to this baseline.
 
 After Stage 1a, deterministic offline gates verify the loss analysis before

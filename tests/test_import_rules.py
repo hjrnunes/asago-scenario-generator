@@ -557,6 +557,9 @@ SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "rule_span_repair": 0,
     "quote_normalization": 0,
     "heuristics": 1,
+    # The one writer of the canonical control structure; it applies the
+    # heuristics check and is shared by the derivation and the orchestrator.
+    "publication": 1,
     "loss_analysis": 1,
     "loss_analysis_gates": 2,
     "risk_coverage_review": 2,
