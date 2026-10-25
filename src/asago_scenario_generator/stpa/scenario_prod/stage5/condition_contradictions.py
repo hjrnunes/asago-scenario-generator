@@ -21,7 +21,8 @@ is reported undecidable, never refused.
   a value it admits: the literal has no JSON type that schema admits, or is
   none of the values its ``enum`` and ``const`` allow. Membership compares
   each element: a list argument on the left by its ``items``, and the list on
-  the right by its own; a right side that is never a list (a literal, or an
+  the right by its own, types and listed values alike (``not_in`` with no
+  common element holds on every call, as ``ne`` does); a right side that is never a list (a literal, or an
   argument whose schema admits no array) makes ``in`` and ``not_in`` unknown
   on every call, so it is refused. A kind mismatch that only values, names,
   or descriptions suggest is undecidable: an identifier literal of another
@@ -34,11 +35,12 @@ is reported undecidable, never refused.
 - (c) Ordering needs numbers. ``tool-call-condition-v1`` orders only
   numbers, converting a string that ``float()`` accepts, and every
   comparison with NaN is false. ``gt``, ``ge``, ``lt``, or ``le`` is
-  refused when a side is not a number under that conversion, or is NaN on
-  every call: a literal, or an argument whose schema admits no number and no
-  numeric string (no numeric type and no string, an ``enum`` or ``const`` of
-  non-numbers, or a string ``pattern`` that no number matches), or admits
-  only NaN text. A side is clean only when its schema admits numbers alone:
+  refused when a side admits no orderable number, each value being no
+  number under that conversion or NaN: a literal, or an argument whose
+  schema admits no number and no numeric string (no numeric type and no
+  string, an ``enum`` or ``const`` of non-numbers, or a string ``pattern``
+  that no number matches), or only NaN text, or both. A side is clean only
+  when its schema admits numbers alone:
   a numeric type without ``null``, or an ``enum`` or ``const`` of numbers or
   numeric strings. Any other side is undecidable: a string, a nullable
   number, or an untyped argument; a ``format`` only annotates, so it proves
@@ -47,8 +49,10 @@ is reported undecidable, never refused.
 Each schema fact is read from every keyword that asserts it: ``type`` (with
 OpenAPI ``nullable``), ``enum`` and ``const``, ``pattern``, ``items`` and
 ``prefixItems``, and each of ``allOf``, ``anyOf``, and ``oneOf`` as its own
-conjunct. A keyword the check does not read (``not``, ``$ref``, an unknown
-type name) proves nothing.
+conjunct. A keyword the check does not read (``not``, ``if``, ``contains``,
+``$ref``, an unknown type name) proves nothing, and neither does a schema
+whose facts contradict each other: one that admits nothing is read as
+unconstrained, in every rule and operand position.
 
 A refusal is a Stage 5 validation failure, corrected through the existing
 correction request. Undecidable cases are reported only: in the run's
@@ -686,60 +690,76 @@ def _kind_unknown(
 def _ordering(
     label: str, comparison: ToolCallValueComparison, universe: ConditionUniverse
 ) -> tuple[RuleFinding | None, RuleFinding | None]:
-    """Apply rule (c): every side of an ordering must be a number under v1.
+    """Apply rule (c): each side of an ordering must admit an orderable number.
 
-    A side that is NaN on every call makes the comparison false on every
-    call, since v1 makes every comparison with NaN false.
+    v1 gives unknown for a side that is not a number and false for NaN, so a
+    side whose every admitted value is one of these never lets the
+    comparison hold. A side that admits an orderable number and nothing but
+    numbers is clean; any other side is undecidable.
     """
 
-    reasons: list[str] = []
-    nan_reasons: list[str] = []
+    not_numbers: list[str] = []
+    nans: list[str] = []
+    mixed: list[str] = []
     open_sides: dict[str, list[tuple[str, object]]] = {}
     for side in (comparison.left, comparison.right):
         if isinstance(side, ToolCallLiteralOperand):
-            number = numeric_value(side.value)
-            if number is None:
-                reasons.append(f"the literal {_render(side.value)} is not a number")
-            elif math.isnan(number):
-                nan_reasons.append(f"the literal {_render(side.value)} converts to NaN")
+            literal = _number_class(side.value)
+            if literal == _OTHER:
+                not_numbers.append(f"the literal {_render(side.value)} is not a number")
+            elif literal == _NAN:
+                nans.append(f"the literal {_render(side.value)} converts to NaN")
             continue
         schema = _argument_schema(universe, side)
         facts = _admitted(schema, side.argument).number
-        if facts.proof == "not_number":
-            reasons.append(
-                f"the input schema of {side.operation} {facts.reason}, so no value "
-                "it admits is a number"
-            )
-        elif facts.proof == "nan":
-            nan_reasons.append(
-                f"the input schema of {side.operation} {facts.reason}, so every "
-                "value it admits converts to NaN"
-            )
-        elif facts.proof == "open":
+        source = f"the input schema of {side.operation} {facts.reason}"
+        if facts.classes == {_OTHER}:
+            not_numbers.append(f"{source}, so no value it admits is a number")
+        elif facts.classes == {_NAN}:
+            nans.append(f"{source}, so every value it admits converts to NaN")
+        elif _ORDERABLE not in facts.classes:
+            mixed.append(f"{source}, so no value it admits is a number other than NaN")
+        elif _OTHER in facts.classes:
             open_sides.setdefault(side.operation, []).append((side.argument, schema))
     call = _comparison_text(comparison)
-    if reasons:
+    advice = (
+        "Compare numbers, or state the rule with eq, ne, in, or not_in on "
+        "supplied values"
+    )
+    if not_numbers and not mixed:
         return (
             RuleFinding(
                 "c",
                 f"{label} binds {call} in the tool-call condition, but "
                 "tool-call-condition-v1 orders only numbers: "
-                f"{'; '.join(reasons)}, so {_NEVER_KNOWN}. Compare numbers, or "
-                "state the rule with eq, ne, in, or not_in on supplied values; "
-                "the contract cannot order dates or other text",
+                f"{'; '.join(not_numbers)}, so {_NEVER_KNOWN}. {advice}; the "
+                "contract cannot order dates or other text",
                 IssueCode.discriminating_condition_ordering_not_numeric,
             ),
             None,
         )
-    if nan_reasons:
+    if nans and not mixed:
         return (
             RuleFinding(
                 "c",
                 f"{label} binds {call} in the tool-call condition, but "
-                f"{'; '.join(nan_reasons)}, and tool-call-condition-v1 makes every "
+                f"{'; '.join(nans)}, and tool-call-condition-v1 makes every "
                 "comparison with NaN false, so the comparison holds on no call "
-                "and never detects the unsafe call. Compare numbers, or state "
-                "the rule with eq, ne, in, or not_in on supplied values",
+                f"and never detects the unsafe call. {advice}",
+                IssueCode.discriminating_condition_ordering_not_numeric,
+            ),
+            None,
+        )
+    if mixed:
+        return (
+            RuleFinding(
+                "c",
+                f"{label} binds {call} in the tool-call condition, but "
+                "tool-call-condition-v1 orders only numbers and makes every "
+                f"comparison with NaN false: {'; '.join(not_numbers + nans + mixed)}"
+                ", so the comparison holds on no call and never detects the "
+                f"unsafe call. {advice}; the contract cannot order dates or other "
+                "text",
                 IssueCode.discriminating_condition_ordering_not_numeric,
             ),
             None,
@@ -759,9 +779,10 @@ def _ordering_open(
         + " and ".join(_open_text(argument, schema) for argument, schema in items)
         for operation, items in open_sides.items()
     )
-    sides = [
-        _schema_types(schema) for items in open_sides.values() for _, schema in items
+    facts = [
+        _admitted(schema, "") for items in open_sides.values() for _, schema in items
     ]
+    sides = [item.types for item in facts if not item.nothing]
     text = any(types is None or "string" in types for types in sides)
     others = sorted(
         {
@@ -772,7 +793,7 @@ def _ordering_open(
         }
     )
     clauses = []
-    if text or not others:
+    if text:
         clauses.append(
             "tool-call-condition-v1 orders a string only when float() accepts its "
             "whole text; nothing typed says whether the values passed are such text"
@@ -782,6 +803,10 @@ def _ordering_open(
             f"tool-call-condition-v1 never orders {' or '.join(others)}; nothing "
             "typed says whether the values passed are numbers"
         )
+    if any(item.nothing for item in facts) or not clauses:
+        clauses.append(
+            "a schema that admits no value proves nothing about the values passed"
+        )
     return RuleFinding(
         "c",
         f"{label} binds {call}: {declared}, and {'; and '.join(clauses)}, so "
@@ -790,7 +815,10 @@ def _ordering_open(
 
 
 def _open_text(argument: str, schema: object) -> str:
-    types = _schema_types(schema)
+    admitted = _admitted(schema, argument)
+    if admitted.nothing:
+        return f"no type for {argument}, since it admits no value for {argument}"
+    types = admitted.types
     if not types:
         return f"no type for {argument}"
     text = f"{argument} as {' or '.join(sorted(types))}"
@@ -903,6 +931,11 @@ def _argument_pair(
 def _declares(
     argument: ToolCallArgumentOperand, admitted: _Admitted, membership: bool = False
 ) -> str:
+    if admitted.nothing:
+        return (
+            f"the input schema of {argument.operation} admits no value for "
+            f"{argument.argument}"
+        )
     if admitted.types is None:
         return (
             f"the input schema of {argument.operation} declares no type for "
@@ -923,7 +956,7 @@ def _list_text(admitted: _Admitted) -> str:
     types = admitted.types or frozenset()
     names = sorted(types - {"array"})
     if "array" in types:
-        elements = admitted.elements
+        elements = admitted.elements.types if admitted.elements else None
         names.append(
             f"array of {' or '.join(sorted(elements))}" if elements else "array"
         )
@@ -956,22 +989,25 @@ def _schema_types(schema: object) -> frozenset[str] | None:
     return _admitted(schema, "").types
 
 
+_ORDERABLE, _NAN, _OTHER = "orderable", "nan", "other"
+_EVERY_CLASS = frozenset({_ORDERABLE, _NAN, _OTHER})
+
+
 @dataclass(frozen=True)
 class _NumberFacts:
-    """What a schema proves about its values under the v1 number conversion.
+    """The number classes an admitted value may fall into under v1.
 
-    ``proof`` is ``number`` when every value it admits is a number, ``nan``
-    when every value converts to NaN, ``not_number`` when none is a number
-    (``reason`` then says how, as it does for ``nan``), and ``open``
-    otherwise.
+    The v1 conversion makes a value an orderable number, NaN (every
+    comparison with it is false), or no number (``other``: an ordering with
+    it is unknown). ``classes`` over-approximates the admitted values;
+    ``reason`` names the fact that bounds it.
     """
 
-    proof: Literal["number", "nan", "not_number", "open"]
+    classes: frozenset[str] = _EVERY_CLASS
     reason: str = ""
 
 
-_OPEN = _NumberFacts("open")
-_NUMBER = _NumberFacts("number")
+_ANY_NUMBER = _NumberFacts()
 
 
 @dataclass(frozen=True)
@@ -980,35 +1016,40 @@ class _Admitted:
 
     Every field over-approximates the admitted values: ``types`` is every
     JSON type a value may have, ``values`` every value it may take when an
-    ``enum`` or ``const`` lists them, and ``elements`` every JSON type an
-    element of an admitted list may have; ``None`` means unknown.
-    ``text_pattern`` is a ``pattern`` no admitted string with a number's text
-    matches, and ``number`` is what the v1 number conversion makes of every
-    admitted value. An empty
-    ``types``, ``values``, or ``elements`` is reported as ``None``: a schema
-    that admits nothing proves nothing about a call.
+    ``enum`` or ``const`` lists them, and ``elements`` the facts of every
+    element of an admitted list; ``None`` means unknown. ``text_pattern`` is
+    a ``pattern`` no admitted string with a number's text matches, and
+    ``number`` the number classes of the admitted values.
+
+    ``nothing`` marks a schema whose facts admit no value. It carries no
+    other fact, so every rule reads it as unconstrained: a schema that
+    admits nothing proves nothing.
     """
 
     types: frozenset[str] | None = None
     values: tuple[object, ...] | None = None
-    elements: frozenset[str] | None = None
-    number: _NumberFacts = _OPEN
+    elements: _Admitted | None = None
+    number: _NumberFacts = _ANY_NUMBER
     text_pattern: str | None = None
+    nothing: bool = False
 
 
 _ANY = _Admitted()
+_NOTHING = _Admitted(nothing=True)
 
 
 def _admitted(schema: object, name: str) -> _Admitted:
     """Combine every assertion of a schema into what it admits.
 
-    The schema's own ``type``, ``enum`` and ``const``, ``items`` and
-    ``prefixItems``, and each of ``allOf``, ``anyOf``, and ``oneOf`` are
-    conjuncts, so the facts intersect; ``allOf`` intersects its branches and
-    ``anyOf`` and ``oneOf`` join theirs. A fact that proves no number decides
-    over one that proves only numbers. ``null`` is not a number, ``format``
-    only annotates, and an unknown keyword proves nothing, so each leaves the
-    facts open. ``name`` is the argument named in a reason.
+    The schema's own ``type``, ``enum`` and ``const``, ``pattern``,
+    ``items`` and ``prefixItems``, and each of ``allOf``, ``anyOf``, and
+    ``oneOf`` are conjuncts, so the facts intersect; ``allOf`` intersects its
+    branches and ``anyOf`` and ``oneOf`` join theirs. ``null`` is not a
+    number, ``format`` only annotates, and an unread keyword (``not``,
+    ``if``, ``contains``, ``$ref``, an unknown type name) proves nothing.
+    Facts that contradict each other give ``_NOTHING``, and an ``anyOf`` or
+    ``oneOf`` with such a branch proves nothing. ``name`` is the argument
+    named in a reason.
     """
 
     if not isinstance(schema, Mapping):
@@ -1019,32 +1060,50 @@ def _admitted(schema: object, name: str) -> _Admitted:
         if isinstance(branches, list) and branches:
             facts = [_admitted(branch, name) for branch in branches]
             parts.append(_all_of(facts) if key == "allOf" else _any_of(facts))
-    combined = _all_of(parts)
-    types, values, elements = combined.types, combined.values, combined.elements
-    numbers = [combined.number]
+    return _closed(_all_of(parts), name)
+
+
+def _closed(facts: _Admitted, name: str) -> _Admitted:
+    """Narrow combined facts by each other, or give ``_NOTHING``.
+
+    Listed values keep only those of an admitted type, the types only those
+    of a listed value, and the listed lists bound the elements; the number
+    classes of every fact intersect. Any fact left empty means the schema
+    admits nothing.
+    """
+
+    if facts.nothing:
+        return _NOTHING
+    types, values, elements = facts.types, facts.values, facts.elements
+    if types is not None and not types:
+        return _NOTHING
+    numbers = [facts.number]
     if values is not None:
         if types is not None:
             values = tuple(value for value in values if _fits(value, types))
+        if not values:
+            return _NOTHING
         types = _meet(types, frozenset(_json_type(value) for value in values))
-        listed = [value for value in values if isinstance(value, list)]
-        elements = _meet(
-            elements, frozenset(_json_type(item) for value in listed for item in value)
-        )
+        lists = [value for value in values if isinstance(value, list)]
+        if lists:
+            listed = _listed_elements(tuple(item for value in lists for item in value))
+            elements = (
+                listed if elements is None else _closed(_all_of([elements, listed]), "")
+            )
         numbers.append(_values_number(values, name))
-    # The types and the pattern that every conjunct leaves decide together.
-    numbers.append(_type_number(types, combined.text_pattern, name))
-    return _published(
-        _Admitted(types, values, elements, _conjoined(numbers), combined.text_pattern)
-    )
+    numbers.append(_type_number(types, facts.text_pattern, name))
+    number = _conjoined(numbers)
+    if number is None:
+        return _NOTHING
+    return _Admitted(types, values, elements, number, facts.text_pattern)
 
 
-def _published(facts: _Admitted) -> _Admitted:
-    return _Admitted(
-        types=facts.types or None,
-        values=facts.values or None,
-        elements=facts.elements or None,
-        number=facts.number,
-        text_pattern=facts.text_pattern,
+def _listed_elements(items: tuple[object, ...]) -> _Admitted:
+    if not items:
+        return _NOTHING
+    return _closed(
+        _Admitted(types=frozenset(_json_type(item) for item in items), values=items),
+        "",
     )
 
 
@@ -1055,32 +1114,45 @@ def _own_facts(schema: Mapping[str, Any]) -> _Admitted:
     return _Admitted(
         types=_declared_types(schema),
         values=_enumerated(schema),
-        elements=_item_types(schema),
+        elements=_item_facts(schema),
         text_pattern=pattern if _pattern_excludes_numbers(pattern) else None,
     )
 
 
 def _all_of(parts: Sequence[_Admitted]) -> _Admitted:
-    """Intersect facts that all hold of one value."""
+    """Intersect facts that all hold of one value; ``_closed`` narrows them."""
 
+    if any(part.nothing for part in parts):
+        return _NOTHING
     types: frozenset[str] | None = None
     values: tuple[object, ...] | None = None
-    elements: frozenset[str] | None = None
-    pattern = next((part.text_pattern for part in parts if part.text_pattern), None)
     for part in parts:
         types = _meet(types, part.types)
-        elements = _meet(elements, part.elements)
         if part.values is not None:
             values = (
                 part.values if values is None else _common_values(values, part.values)
             )
+    listed = [part.elements for part in parts if part.elements is not None]
+    elements = None
+    if len(listed) == 1:
+        elements = listed[0]
+    elif listed:
+        elements = _closed(_all_of(listed), "")
     number = _conjoined([part.number for part in parts])
+    if number is None:
+        return _NOTHING
+    pattern = next((part.text_pattern for part in parts if part.text_pattern), None)
     return _Admitted(types, values, elements, number, pattern)
 
 
 def _any_of(parts: Sequence[_Admitted]) -> _Admitted:
-    """Join facts of which at least one holds of a value."""
+    """Join closed facts of which at least one holds of a value."""
 
+    live = [part for part in parts if not part.nothing]
+    if not live:
+        return _NOTHING
+    if len(live) < len(parts):
+        return _ANY
     types = (
         None
         if any(part.types is None for part in parts)
@@ -1092,38 +1164,40 @@ def _any_of(parts: Sequence[_Admitted]) -> _Admitted:
         else tuple(value for part in parts for value in part.values or ())
     )
     lists = [part for part in parts if part.types is None or "array" in part.types]
-    elements = (
-        None
-        if any(part.elements is None for part in lists)
-        else frozenset().union(*(part.elements or () for part in lists))
-    )
+    elements = None
+    if lists and all(part.elements is not None for part in lists):
+        elements = _closed(
+            _any_of([part.elements for part in lists if part.elements is not None]),
+            "",
+        )
     texts = [part for part in parts if part.types is None or "string" in part.types]
     pattern = (
         " or ".join(dict.fromkeys(part.text_pattern or "" for part in texts))
         if texts and all(part.text_pattern for part in texts)
         else None
     )
-    numbers = [part.number for part in parts]
-    proofs = {item.proof for item in numbers}
-    if proofs in ({"not_number"}, {"nan"}):
-        number = _NumberFacts(
-            numbers[0].proof, " or ".join(item.reason for item in numbers)
-        )
-    elif proofs <= {"number", "nan"}:
-        number = _NUMBER
-    else:
-        number = _OPEN
+    number = _NumberFacts(
+        frozenset().union(*(part.number.classes for part in parts)),
+        " or ".join(dict.fromkeys(part.number.reason for part in parts)),
+    )
     return _Admitted(types, values, elements, number, pattern)
 
 
-def _conjoined(facts: Sequence[_NumberFacts]) -> _NumberFacts:
-    """Combine number facts that all hold: no number wins, then NaN, then number."""
+def _conjoined(facts: Sequence[_NumberFacts]) -> _NumberFacts | None:
+    """Intersect number facts that all hold; ``None`` when none is left."""
 
-    for proof in ("not_number", "nan", "number"):
-        for item in facts:
-            if item.proof == proof:
-                return item
-    return _OPEN
+    known = [item for item in facts if item.classes != _EVERY_CLASS]
+    if not known:
+        return _ANY_NUMBER
+    classes = frozenset.intersection(*(item.classes for item in known))
+    if not classes:
+        return None
+    for item in known:
+        if item.classes == classes:
+            return item
+    return _NumberFacts(
+        classes, " and ".join(dict.fromkeys(item.reason for item in known))
+    )
 
 
 def _meet(
@@ -1158,8 +1232,12 @@ def _declared_types(schema: Mapping[str, Any]) -> frozenset[str] | None:
     return types
 
 
-def _item_types(schema: Mapping[str, Any]) -> frozenset[str] | None:
-    """Return every JSON type an element of a list the schema admits may have."""
+def _item_facts(schema: Mapping[str, Any]) -> _Admitted | None:
+    """Return the facts of every element of a list the schema admits.
+
+    ``prefixItems`` and ``items`` join: an element meets one of them.
+    Without ``items``, elements past ``prefixItems`` are unconstrained.
+    """
 
     items = schema.get("items")
     prefix = schema.get("prefixItems")
@@ -1172,84 +1250,73 @@ def _item_types(schema: Mapping[str, Any]) -> frozenset[str] | None:
         return None
     if not branches:
         return None
-    types = [_admitted(branch, "").types for branch in branches]
-    if any(item is None for item in types):
-        return None
-    return frozenset().union(*(item or () for item in types))
+    return _closed(_any_of([_admitted(branch, "") for branch in branches]), "")
 
 
 def _type_number(
     types: frozenset[str] | None, pattern: str | None, name: str
 ) -> _NumberFacts:
     if not types:
-        return _OPEN
-    if types <= _NUMERIC_TYPES:
-        return _NUMBER
+        return _ANY_NUMBER
+    classes: set[str] = set()
     if types & _NUMERIC_TYPES:
-        return _OPEN
+        classes.add(_ORDERABLE)
+    if "string" in types:
+        classes |= {_OTHER} if pattern else _EVERY_CLASS
+    if types - _NUMERIC_TYPES - {"string"}:
+        classes.add(_OTHER)
     declared = " or ".join(sorted(types))
-    if "string" not in types:
-        return _NumberFacts("not_number", f"declares {name} as {declared}")
-    if pattern is not None:
-        return _NumberFacts(
-            "not_number",
-            f"declares {name} as {declared} matching the pattern {pattern}",
-        )
-    return _OPEN
+    if pattern and "string" in types:
+        declared += f" matching the pattern {pattern}"
+    return _NumberFacts(frozenset(classes), f"declares {name} as {declared}")
 
 
 def _values_number(values: Sequence[object], name: str) -> _NumberFacts:
-    if not values:
-        return _OPEN
-    numbers = [numeric_value(value) for value in values]
-    if all(number is None for number in numbers):
-        return _NumberFacts(
-            "not_number", f"restricts {name} to {_render(list(values))}"
-        )
-    if any(number is None for number in numbers):
-        return _OPEN
-    if all(number is not None and math.isnan(number) for number in numbers):
-        return _NumberFacts("nan", f"restricts {name} to {_render(list(values))}")
-    return _NUMBER
+    return _NumberFacts(
+        frozenset(_number_class(value) for value in values),
+        f"restricts {name} to {_render(list(values))}",
+    )
+
+
+def _number_class(value: object) -> str:
+    number = numeric_value(value)
+    if number is None:
+        return _OTHER
+    return _NAN if math.isnan(number) else _ORDERABLE
 
 
 def _compared(admitted: _Admitted, role: str) -> _Admitted:
-    """Return the types and values an equality compares for an argument's role."""
+    """Return the types and values an equality compares for an argument's role.
+
+    ``value`` compares the argument; ``list`` the elements of the list it
+    must be; ``member`` the argument, or each element when it is a list.
+    """
 
     if role == "value":
         return admitted
-    values = admitted.values
+    elements = admitted.elements or _ANY
     if role == "list":
-        return _published(
-            _Admitted(
-                types=admitted.elements,
-                values=None
-                if values is None
-                else tuple(
-                    item
-                    for value in values
-                    if isinstance(value, list)
-                    for item in value
-                ),
-            )
-        )
+        return _Admitted(types=elements.types, values=elements.values)
     types = admitted.types
-    if types is not None:
-        types = types - {"array"}
-        if "array" in (admitted.types or ()):
-            types = None if admitted.elements is None else types | admitted.elements
-    return _published(
-        _Admitted(
-            types=types,
-            values=None
-            if values is None
-            else tuple(
-                item
-                for value in values
-                for item in (value if isinstance(value, list) else [value])
-            ),
+    if types is None:
+        return _ANY
+    scalars = types - {"array"}
+    if "array" in types:
+        compared = None if elements.types is None else scalars | elements.types
+    else:
+        compared = scalars
+    values = admitted.values
+    if values is not None:
+        listed: tuple[object, ...] | None = tuple(
+            item
+            for value in values
+            for item in (value if isinstance(value, list) else [value])
         )
-    )
+    elif not scalars:
+        listed = elements.values
+    else:
+        listed = None
+    return _Admitted(types=compared or None, values=listed or None)
 
 
 def _same(left: object, right: object) -> bool:

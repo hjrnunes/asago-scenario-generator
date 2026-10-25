@@ -1381,7 +1381,9 @@ def test_a_list_argument_tested_against_values_of_no_element_type_is_refused() -
     [
         ({"type": "boolean"}, ["b"]),
         ({"type": "array", "items": {"type": "number"}}, ["b"]),
-        ({"type": "array", "items": {"enum": ["y"]}}, []),
+        # The listed elements of a list leave "x" out.
+        ({"type": "array", "items": {"enum": ["y"]}}, ["b"]),
+        ({"type": "array", "items": {"enum": ["x", "y"]}}, []),
         ({"type": "array", "items": {"type": "string"}}, []),
         ({"type": "array"}, []),
         ({"title": "untyped"}, []),
@@ -1463,6 +1465,321 @@ def test_ordering_by_a_nan_literal_is_refused(literal) -> None:
         "Compare numbers, or state the rule with eq, ne, in, or not_in on "
         "supplied values"
     ]
+
+
+# -- the schema-fact lattice ---------------------------------------------------
+#
+# A schema fact is unconstrained, admits nothing, or proves types, listed
+# values, a number verdict, or element facts. A refusal follows only from a
+# positive proof; a schema that admits nothing proves nothing anywhere.
+
+SUBJECT = {"source": "argument", "operation": "refund_payment", "argument": "subject"}
+PARTNER = {"source": "argument", "operation": "lookup_order", "argument": "partner"}
+
+UNSATISFIABLE = [
+    {"allOf": [{"type": "number"}, {"type": "boolean"}]},
+    {"allOf": [{"type": "integer"}, {"type": "string"}]},
+    {"const": "a", "enum": ["b"]},
+    {"type": "string", "const": 1},
+    {"type": "string", "enum": [1, True]},
+    {"allOf": [{"enum": ["a"]}, {"enum": ["b"]}]},
+    # Numeric text only, but the pattern lets no numeric text through.
+    {"type": "string", "pattern": "^R-", "enum": ["1", "2"]},
+    {"anyOf": [{"allOf": [{"type": "number"}, {"type": "string"}]}]},
+    {"type": "string", "allOf": [{"allOf": [{"type": "number"}, {"type": "null"}]}]},
+    {"oneOf": [{"const": "a", "enum": ["b"]}, {"type": "boolean", "const": 1}]},
+]
+
+PARTNERS = [
+    {"type": "string"},
+    {"type": "number"},
+    {"type": "boolean"},
+    {"const": "y"},
+    {"type": "array", "items": {"type": "string"}},
+    {"type": "array", "items": {"const": "y"}},
+    {"enum": ["nan", "closed"]},
+]
+
+
+def _lit(value: object) -> dict:
+    return {"source": "literal", "value": value}
+
+
+def _every_position() -> list[dict]:
+    """Every comparison shape with the subject argument in every operand position."""
+
+    comparisons = [
+        _membership(SUBJECT, op, _lit(value))
+        for op in ("eq", "ne")
+        for value in ("x", 7, True, None, ["x"])
+    ]
+    comparisons += [
+        _membership(SUBJECT, op, _lit(["x", 7, None])) for op in ("in", "not_in")
+    ]
+    comparisons += [
+        _membership(_lit(value), op, SUBJECT)
+        for op in ("in", "not_in")
+        for value in ("x", 7, ["x", 7])
+    ]
+    comparisons += [_membership(SUBJECT, op, _lit(5)) for op in ("gt", "le")]
+    comparisons += [_membership(_lit("nan"), "lt", SUBJECT)]
+    comparisons += [
+        _membership(left, op, right)
+        for op in ("eq", "ne", "in", "not_in", "gt", "ge")
+        for left, right in ((SUBJECT, PARTNER), (PARTNER, SUBJECT))
+    ]
+    comparisons.append(
+        {
+            "kind": "not_called",
+            "operation": "refund_payment",
+            "where": [{"argument": "subject", "value": "x"}],
+        }
+    )
+    return comparisons
+
+
+def _lattice_universe(subject: dict, partner: dict) -> ConditionUniverse:
+    return _with_schemas(
+        {
+            "refund_payment": {"subject": subject},
+            "lookup_order": {"partner": partner},
+        }
+    )
+
+
+def _judge(comparison: dict, universe: ConditionUniverse):
+    return _bound(_value_condition("eq", "x", argument="subject"), comparison, universe)
+
+
+@pytest.mark.parametrize("schema", UNSATISFIABLE)
+def test_a_schema_that_admits_nothing_is_judged_as_unconstrained(schema) -> None:
+    # In every operand position and against every partner, the schema gets
+    # exactly the classification of a schema with no fact at all.
+    for partner in PARTNERS:
+        nothing = _lattice_universe(schema, partner)
+        unconstrained = _lattice_universe({"title": "untyped"}, partner)
+        for comparison in _every_position():
+            assert _rules(_judge(comparison, nothing)) == _rules(
+                _judge(comparison, unconstrained)
+            ), (comparison, partner)
+
+
+@pytest.mark.parametrize("schema", UNSATISFIABLE)
+def test_list_items_that_admit_nothing_prove_nothing(schema) -> None:
+    for partner in PARTNERS:
+        nothing = _lattice_universe({"type": "array", "items": schema}, partner)
+        unconstrained = _lattice_universe({"type": "array"}, partner)
+        for comparison in _every_position():
+            assert _rules(_judge(comparison, nothing)) == _rules(
+                _judge(comparison, unconstrained)
+            ), (comparison, partner)
+
+
+def test_an_unsatisfiable_numeric_conjunct_does_not_refuse_an_ordering() -> None:
+    universe = _ordering_universe({"allOf": [{"type": "number"}, {"type": "boolean"}]})
+
+    result = _judged(_ordering(), universe)
+
+    assert result.refused == ()
+    assert [item.rule for item in result.undecidable] == ["c"]
+    assert "admits no value for ref" in result.undecidable[0].detail
+
+
+LATTICE_SUBJECTS = {
+    "unconstrained": {"title": "untyped"},
+    "admits nothing": {"allOf": [{"type": "number"}, {"type": "boolean"}]},
+    "typed string": {"type": "string"},
+    "typed boolean": {"type": "boolean"},
+    "typed integer": {"type": "integer"},
+    "listed values": {"enum": ["a", "b"]},
+    "number verdict, NaN or text": {"enum": ["nan", "closed"]},
+    "element facts": {"type": "array", "items": {"const": "y"}},
+}
+LATTICE_COMPARISONS = {
+    "subject eq 7": _membership(SUBJECT, "eq", _lit(7)),
+    "subject gt 5": _membership(SUBJECT, "gt", _lit(5)),
+    '"y" in subject': _membership(_lit("y"), "in", SUBJECT),
+    "subject eq number partner": _membership(SUBJECT, "eq", PARTNER),
+}
+B, C = (["b"], []), (["c"], [])
+CLEAN, OPEN_B, OPEN_C = ([], []), ([], ["b"]), ([], ["c"])
+LATTICE = {
+    "unconstrained": (CLEAN, OPEN_C, CLEAN, OPEN_B),
+    "admits nothing": (CLEAN, OPEN_C, CLEAN, OPEN_B),
+    "typed string": (B, OPEN_C, B, B),
+    "typed boolean": (B, C, B, B),
+    "typed integer": (CLEAN, CLEAN, B, OPEN_B),
+    "listed values": (B, C, B, B),
+    "number verdict, NaN or text": (B, C, B, B),
+    "element facts": (B, C, CLEAN, B),
+}
+
+
+@pytest.mark.parametrize("subject", sorted(LATTICE))
+def test_the_schema_fact_lattice_for_rules_b_and_c(subject) -> None:
+    universe = _lattice_universe(LATTICE_SUBJECTS[subject], {"type": "number"})
+
+    judged = tuple(
+        _rules(_judge(comparison, universe))
+        for comparison in LATTICE_COMPARISONS.values()
+    )
+
+    assert judged == LATTICE[subject]
+
+
+# -- listed list elements --------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("op", "consequence"),
+    [
+        ("in", "the comparison holds on no call and the condition never detects"),
+        ("not_in", "the comparison holds on every call and the condition fires"),
+    ],
+)
+def test_a_value_outside_the_listed_elements_is_refused(op, consequence) -> None:
+    universe = _arguments_universe(
+        {"const": "x"}, {"type": "array", "items": {"const": "y"}}
+    )
+
+    findings = _findings(_arguments_condition(op), universe)
+
+    assert [item.detail for item in findings] == [
+        f"comparisons[0] binds refund_payment.total {op} lookup_order.total in "
+        "the tool-call condition, but the input schema of refund_payment "
+        'restricts total to ["x"] and the input schema of lookup_order restricts '
+        'the elements of total to ["y"]; tool-call-condition-v1 never converts a '
+        f"value for {op}, so no listed value of one equals a listed value of the "
+        f"other and {consequence} "
+        + ("the unsafe call. " if op == "in" else "on the safe call as well. ")
+        + "Compare total with an argument or a supplied value it can take"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        # prefixItems and items join: an element is "a" or "b".
+        (
+            {"const": "c"},
+            {"type": "array", "prefixItems": [{"const": "a"}], "items": {"const": "b"}},
+            B,
+        ),
+        (
+            {"const": "b"},
+            {"type": "array", "prefixItems": [{"const": "a"}], "items": {"const": "b"}},
+            OPEN_B,
+        ),
+        # Extra elements are unconstrained without items.
+        ({"const": "c"}, {"type": "array", "prefixItems": [{"const": "a"}]}, OPEN_B),
+        # A left list is a member when any element is: its listed elements count.
+        (
+            {"type": "array", "items": {"enum": ["p", "q"]}},
+            {"type": "array", "items": {"enum": ["r"]}},
+            B,
+        ),
+        (
+            {"type": "array", "items": {"enum": ["p", "r"]}},
+            {"type": "array", "items": {"enum": ["r"]}},
+            OPEN_B,
+        ),
+        # Elements listed by anyOf branches join.
+        (
+            {"const": "x"},
+            {
+                "anyOf": [
+                    {"type": "array", "items": {"const": "y"}},
+                    {"type": "array", "items": {"const": "z"}},
+                ]
+            },
+            B,
+        ),
+        (
+            {"const": "z"},
+            {
+                "anyOf": [
+                    {"type": "array", "items": {"const": "y"}},
+                    {"type": "array", "items": {"const": "z"}},
+                ]
+            },
+            OPEN_B,
+        ),
+        # v1 equality: 1 equals 1.0 and not true.
+        ({"const": 1}, {"type": "array", "items": {"enum": [1.0]}}, OPEN_B),
+        ({"const": True}, {"type": "array", "items": {"enum": [1]}}, B),
+    ],
+)
+def test_membership_reads_the_listed_elements_of_both_lists(
+    left, right, expected
+) -> None:
+    universe = _arguments_universe(left, right)
+
+    assert _rules(_judged(_arguments_condition("in"), universe)) == expected
+
+
+# -- orderable numbers -------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"enum": ["nan", "closed"]},
+        {"enum": ["NaN", True, None]},
+        {"anyOf": [{"const": "nan"}, {"type": "boolean"}]},
+        {"type": ["string", "boolean"], "enum": ["nan", "open", False]},
+    ],
+)
+def test_ordering_an_argument_with_no_orderable_number_is_refused(schema) -> None:
+    findings = _findings(_ordering(), _ordering_universe(schema))
+
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_ordering_not_numeric
+    ]
+
+
+def test_ordering_nan_mixed_with_text_states_why() -> None:
+    findings = _findings(_ordering(), _ordering_universe({"enum": ["nan", "closed"]}))
+
+    assert [item.detail for item in findings] == [
+        "comparisons[0] binds refund_payment.ref gt 5 in the tool-call "
+        "condition, but tool-call-condition-v1 orders only numbers and makes "
+        "every comparison with NaN false: the input schema of refund_payment "
+        'restricts ref to ["nan", "closed"], so no value it admits is a number '
+        "other than NaN, so the comparison holds on no call and never detects "
+        "the unsafe call. Compare numbers, or state the rule with eq, ne, in, "
+        "or not_in on supplied values; the contract cannot order dates or other "
+        "text"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("schema", "expected"),
+    [
+        ({"enum": ["nan", "closed", "3"]}, OPEN_C),
+        ({"enum": ["nan", "closed", 3]}, OPEN_C),
+        ({"enum": ["nan", 3]}, CLEAN),
+        ({"anyOf": [{"const": "nan"}, {"type": "string"}]}, OPEN_C),
+    ],
+)
+def test_an_orderable_number_keeps_an_ordering_from_refusal(schema, expected) -> None:
+    assert _rules(_judged(_ordering(), _ordering_universe(schema))) == expected
+
+
+# -- keywords the check does not read -----------------------------------------------
+
+
+def test_if_then_proves_nothing_for_an_ordering() -> None:
+    schema = {"if": {"const": 1}, "then": {"type": "boolean"}}
+
+    assert _rules(_judged(_ordering(), _ordering_universe(schema))) == OPEN_C
+
+
+def test_contains_proves_nothing_for_membership() -> None:
+    universe = _arguments_universe(
+        {"type": "number"}, {"type": "array", "contains": {"type": "string"}}
+    )
+
+    assert _rules(_judged(_arguments_condition("in"), universe)) == OPEN_B
 
 
 # -- wiring -----------------------------------------------------------------------
