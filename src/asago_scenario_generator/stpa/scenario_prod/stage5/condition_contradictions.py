@@ -18,27 +18,37 @@ is reported undecidable, never refused.
 - (b) Operands of one kind. A call argument compared with a literal (from a
   literal, a fact, or a record selection) is refused only when the input
   schema of the argument's own operation proves the literal is never equal to
-  a value it admits: the literal has a JSON type that schema does not admit
-  (membership in a list argument tests its elements, so it is not typed). A
-  kind mismatch that only values, names, or descriptions suggest is
-  undecidable: an identifier literal of another kind than the values reads of
-  that operation passed, or than the values reads of another operation passed
-  for an argument of the same name, or an identifier literal compared with
-  an argument no read passed and whose schema admits a string. Two compared
-  arguments are judged each by the schema of its own operation: ``eq`` or
-  ``ne`` is refused when the two admit no common JSON type, and is otherwise
-  undecidable, as is membership of one argument in another's list.
+  a value it admits: the literal has no JSON type that schema admits, or is
+  none of the values its ``enum`` and ``const`` allow. Membership compares
+  each element: a list argument on the left by its ``items``, and the list on
+  the right by its own; a right side that is never a list (a literal, or an
+  argument whose schema admits no array) makes ``in`` and ``not_in`` unknown
+  on every call, so it is refused. A kind mismatch that only values, names,
+  or descriptions suggest is undecidable: an identifier literal of another
+  kind than the values reads of that operation passed, or than the values
+  reads of another operation passed for an argument of the same name, or an
+  identifier literal compared with an argument no read passed and whose
+  schema admits a string. Two compared arguments are judged each by the
+  schema of its own operation, by the same facts: refused when the compared
+  values share no JSON type or no listed value, and otherwise undecidable.
 - (c) Ordering needs numbers. ``tool-call-condition-v1`` orders only
-  numbers, converting a string that ``float()`` accepts. ``gt``, ``ge``,
-  ``lt``, or ``le`` is refused when a literal is not a number under that
-  conversion, or when the input schema of an argument's own operation admits
-  no number and no numeric string: no numeric type and no string, an
-  ``enum`` or ``const`` of non-numbers, or a string ``pattern`` that no
-  number matches. A side is clean only when its schema admits numbers alone:
+  numbers, converting a string that ``float()`` accepts, and every
+  comparison with NaN is false. ``gt``, ``ge``, ``lt``, or ``le`` is
+  refused when a side is not a number under that conversion, or is NaN on
+  every call: a literal, or an argument whose schema admits no number and no
+  numeric string (no numeric type and no string, an ``enum`` or ``const`` of
+  non-numbers, or a string ``pattern`` that no number matches), or admits
+  only NaN text. A side is clean only when its schema admits numbers alone:
   a numeric type without ``null``, or an ``enum`` or ``const`` of numbers or
   numeric strings. Any other side is undecidable: a string, a nullable
   number, or an untyped argument; a ``format`` only annotates, so it proves
   nothing.
+
+Each schema fact is read from every keyword that asserts it: ``type`` (with
+OpenAPI ``nullable``), ``enum`` and ``const``, ``pattern``, ``items`` and
+``prefixItems``, and each of ``allOf``, ``anyOf``, and ``oneOf`` as its own
+conjunct. A keyword the check does not read (``not``, ``$ref``, an unknown
+type name) proves nothing.
 
 A refusal is a Stage 5 validation failure, corrected through the existing
 correction request. Undecidable cases are reported only: in the run's
@@ -48,6 +58,7 @@ candidate diagnostics and by the offline sweep, never in the scenario.
 from __future__ import annotations
 
 import json
+import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -80,6 +91,10 @@ from .issues import IssueCode
 Rule = Literal["a", "b", "c"]
 
 _NUMERIC_TYPES = frozenset({"number", "integer"})
+_JSON_TYPES = frozenset(
+    {"array", "boolean", "integer", "null", "number", "object", "string"}
+)
+_COMBINATORS = ("allOf", "anyOf", "oneOf")
 _REGEX_SPECIAL = frozenset("\\^$.|?*+()[]{}")
 # The first characters of a text ``float()`` accepts, besides digits and spaces.
 _NUMBER_STARTS = frozenset("+-.iInN")
@@ -89,6 +104,9 @@ _NEVER_HOLDS = (
 _ALWAYS_HOLDS = (
     "the comparison holds on every call and the condition fires on the safe "
     "call as well"
+)
+_NEVER_KNOWN = (
+    "the comparison is unknown on every call and never detects the unsafe call"
 )
 _WHERE_NEVER_MATCHES = (
     "the where item matches no call, so not_called holds on every call, "
@@ -118,7 +136,13 @@ class ConditionContradictions:
 
 @dataclass(frozen=True)
 class _Equality:
-    """A call argument tested for equality with literal values."""
+    """A call argument tested for equality with literal values.
+
+    ``role`` says what of the argument is compared: its value (``value``),
+    its value or, for a list, each element (``member``, the left side of
+    ``in``), or the elements of the list it must be (``list``, the right side
+    of ``in``). ``literal`` is the literal as the condition states it.
+    """
 
     label: str
     subject: str
@@ -126,6 +150,8 @@ class _Equality:
     values: tuple[object, ...]
     op_word: str
     consequence: str
+    role: Literal["value", "member", "list"] = "value"
+    literal: object = None
 
 
 def tool_call_condition_findings(
@@ -283,7 +309,9 @@ def _bound_contradictions(
                 results.append(_ordering(labels[index], comparison, universe))
             else:
                 equality = _value_equality(labels[index], comparison)
-                if equality is not None:
+                if isinstance(equality, RuleFinding):
+                    results.append((equality, None))
+                elif equality is not None:
                     results.append(_kinds(equality, universe, state))
                 else:
                     pair = _argument_pair(labels[index], comparison, universe)
@@ -308,6 +336,7 @@ def _bound_contradictions(
                     values=(item.value,),
                     op_word="a where item",
                     consequence=_WHERE_NEVER_MATCHES,
+                    literal=item.value,
                 )
                 results.append(_kinds(equality, universe, state))
     return ConditionContradictions(
@@ -369,50 +398,89 @@ def _bound_labels(
 
 def _value_equality(
     label: str, comparison: ToolCallValueComparison
-) -> _Equality | None:
-    """Return an argument-versus-literal equality, or ``None`` for any other shape."""
+) -> _Equality | RuleFinding | None:
+    """Return an argument-versus-literal equality, or ``None`` for any other shape.
 
-    sides = (comparison.left, comparison.right)
-    arguments = [side for side in sides if isinstance(side, ToolCallArgumentOperand)]
-    literals = [side for side in sides if isinstance(side, ToolCallLiteralOperand)]
-    if len(arguments) != 1 or len(literals) != 1:
-        return None
-    value = literals[0].value
-    if comparison.op in MEMBERSHIP_OPERATORS:
-        if not isinstance(value, list):
-            return None
-        values = tuple(value)
+    A literal on the right of ``in`` or ``not_in`` that is not a list makes
+    the comparison unknown on every call, so it is refused here.
+    """
+
+    left, right = comparison.left, comparison.right
+    if isinstance(left, ToolCallArgumentOperand) and isinstance(
+        right, ToolCallLiteralOperand
+    ):
+        argument, literal = left, right.value
+    elif isinstance(left, ToolCallLiteralOperand) and isinstance(
+        right, ToolCallArgumentOperand
+    ):
+        argument, literal = right, left.value
     else:
-        values = (value,)
+        return None
+    subject = _comparison_text(comparison)
+    role: Literal["value", "member", "list"] = "value"
+    values: tuple[object, ...] = (literal,)
+    if comparison.op in MEMBERSHIP_OPERATORS:
+        if argument is left:
+            if not isinstance(literal, list):
+                return RuleFinding(
+                    "b",
+                    f"{label} binds {subject} in the tool-call condition, but the "
+                    f"right side {_render(literal)} is not a list, and "
+                    f"tool-call-condition-v1 gives unknown for {comparison.op} "
+                    f"when the right side is not a list, so {_NEVER_KNOWN}. "
+                    f"Compare {argument.argument} with a list of supplied values",
+                    IssueCode.discriminating_condition_record_kind_mismatch,
+                )
+            role = "member"
+            values = tuple(literal)
+        else:
+            role = "list"
+            values = tuple(literal) if isinstance(literal, list) else (literal,)
     return _Equality(
         label=label,
-        subject=_comparison_text(comparison),
-        argument=arguments[0],
+        subject=subject,
+        argument=argument,
         values=values,
         op_word=comparison.op,
         consequence=_NEVER_HOLDS if comparison.op in {"eq", "in"} else _ALWAYS_HOLDS,
+        role=role,
+        literal=literal,
     )
 
 
 def _kinds(
     equality: _Equality, universe: ConditionUniverse, state: StateIndex
 ) -> tuple[RuleFinding | None, RuleFinding | None]:
-    """Apply rule (b) to one equality: the declared type, then observed values."""
+    """Apply rule (b) to one equality: the declared schema, then observed values."""
 
     argument = equality.argument
-    types = _schema_types(_argument_schema(universe, argument))
-    candidates = [value for value in equality.values if value is not None]
-    # Membership tests each element of a list argument, whose type is unknown.
-    elements = equality.op_word in MEMBERSHIP_OPERATORS and (
-        types is None or "array" in types
-    )
+    admitted = _argument_facts(universe, argument)
     if (
-        types is not None
-        and candidates
-        and not elements
-        and not any(_fits(value, types) for value in candidates)
+        equality.role == "list"
+        and admitted.types is not None
+        and "array" not in admitted.types
     ):
-        return _type_refusal(equality, types, candidates), None
+        return (
+            _never_a_list(
+                equality.label, equality.subject, equality.op_word, argument, admitted
+            ),
+            None,
+        )
+    view = _compared(admitted, equality.role)
+    candidates = list(equality.values)
+    if (
+        view.types is not None
+        and candidates
+        and not any(_fits(value, view.types) for value in candidates)
+    ):
+        return _type_refusal(equality, admitted, view.types, candidates), None
+    if (
+        view.values is not None
+        and candidates
+        and not _common_values(tuple(candidates), view.values)
+    ):
+        return _value_refusal(equality, view.values), None
+    types = view.types
     identifiers = [
         value
         for value in equality.values
@@ -445,24 +513,86 @@ def _kinds(
 
 
 def _type_refusal(
-    equality: _Equality, types: frozenset[str], values: list[object]
+    equality: _Equality,
+    admitted: _Admitted,
+    types: frozenset[str],
+    values: list[object],
 ) -> RuleFinding:
     argument = equality.argument
-    declared = " or ".join(sorted(types))
     found = " or ".join(sorted({_json_type(value) for value in values}))
+    listed = equality.role != "value" and isinstance(equality.literal, list)
     literal = (
-        f"the values in {_render(list(equality.values))} are {found}"
-        if equality.op_word in MEMBERSHIP_OPERATORS
-        else f"{_render(equality.values[0])} is {_article(found)} {found}"
+        f"the values in {_render(equality.literal)} are {found}"
+        if listed
+        else f"{_render(values[0])} is {_article(found)} {found}"
     )
+    elements = equality.role == "list" or (
+        equality.role == "member"
+        and admitted.types is not None
+        and "array" in admitted.types
+    )
+    if elements:
+        declared = _list_text(admitted)
+        advice = (
+            f"Compare {argument.argument} with supplied values of type "
+            f"{' or '.join(sorted(types))}"
+        )
+    else:
+        declared = " or ".join(sorted(types))
+        advice = f"Compare {argument.argument} with a supplied value of type {declared}"
     return RuleFinding(
         "b",
         f"{equality.label} binds {equality.subject} in the tool-call condition, "
         f"but the input schema of {argument.operation} declares "
         f"{argument.argument} as {declared} and {literal}; "
         "tool-call-condition-v1 never converts a value for "
-        f"{equality.op_word}, so {equality.consequence}. Compare "
-        f"{argument.argument} with a supplied value of type {declared}",
+        f"{equality.op_word}, so {equality.consequence}. {advice}",
+        IssueCode.discriminating_condition_record_kind_mismatch,
+    )
+
+
+def _value_refusal(equality: _Equality, admitted: tuple[object, ...]) -> RuleFinding:
+    argument = equality.argument
+    listed = equality.role != "value" and isinstance(equality.literal, list)
+    literal = (
+        f"no value in {_render(equality.literal)} is one of them"
+        if listed
+        else f"{_render(equality.values[0])} is none of them"
+    )
+    restricted = (
+        f"the elements of {argument.argument}"
+        if equality.role == "list"
+        else argument.argument
+    )
+    return RuleFinding(
+        "b",
+        f"{equality.label} binds {equality.subject} in the tool-call condition, "
+        f"but the input schema of {argument.operation} restricts {restricted} to "
+        f"{_render(list(admitted))} and {literal}; tool-call-condition-v1 never "
+        f"converts a value for {equality.op_word}, so {equality.consequence}. "
+        f"Compare {argument.argument} with one of those values",
+        IssueCode.discriminating_condition_record_kind_mismatch,
+    )
+
+
+def _never_a_list(
+    label: str,
+    subject: str,
+    op: str,
+    argument: ToolCallArgumentOperand,
+    admitted: _Admitted,
+) -> RuleFinding:
+    """Refuse membership in an argument whose schema admits no list."""
+
+    types = admitted.types or frozenset()
+    return RuleFinding(
+        "b",
+        f"{label} binds {subject} in the tool-call condition, but the input "
+        f"schema of {argument.operation} declares {argument.argument} as "
+        f"{' or '.join(sorted(types))}, never a list, and tool-call-condition-v1 "
+        f"gives unknown for {op} when the right side is not a list, so "
+        f"{_NEVER_KNOWN}. Test membership in a list argument or in a list of "
+        "supplied values",
         IssueCode.discriminating_condition_record_kind_mismatch,
     )
 
@@ -556,21 +686,34 @@ def _kind_unknown(
 def _ordering(
     label: str, comparison: ToolCallValueComparison, universe: ConditionUniverse
 ) -> tuple[RuleFinding | None, RuleFinding | None]:
-    """Apply rule (c): every side of an ordering must be a number under v1."""
+    """Apply rule (c): every side of an ordering must be a number under v1.
+
+    A side that is NaN on every call makes the comparison false on every
+    call, since v1 makes every comparison with NaN false.
+    """
 
     reasons: list[str] = []
+    nan_reasons: list[str] = []
     open_sides: dict[str, list[tuple[str, object]]] = {}
     for side in (comparison.left, comparison.right):
         if isinstance(side, ToolCallLiteralOperand):
-            if numeric_value(side.value) is None:
+            number = numeric_value(side.value)
+            if number is None:
                 reasons.append(f"the literal {_render(side.value)} is not a number")
+            elif math.isnan(number):
+                nan_reasons.append(f"the literal {_render(side.value)} converts to NaN")
             continue
         schema = _argument_schema(universe, side)
-        facts = _number_facts(schema, side.argument)
+        facts = _admitted(schema, side.argument).number
         if facts.proof == "not_number":
             reasons.append(
                 f"the input schema of {side.operation} {facts.reason}, so no value "
                 "it admits is a number"
+            )
+        elif facts.proof == "nan":
+            nan_reasons.append(
+                f"the input schema of {side.operation} {facts.reason}, so every "
+                "value it admits converts to NaN"
             )
         elif facts.proof == "open":
             open_sides.setdefault(side.operation, []).append((side.argument, schema))
@@ -581,10 +724,22 @@ def _ordering(
                 "c",
                 f"{label} binds {call} in the tool-call condition, but "
                 "tool-call-condition-v1 orders only numbers: "
-                f"{'; '.join(reasons)}, so the comparison is unknown on every "
-                "call and never detects the unsafe call. Compare numbers, or "
+                f"{'; '.join(reasons)}, so {_NEVER_KNOWN}. Compare numbers, or "
                 "state the rule with eq, ne, in, or not_in on supplied values; "
                 "the contract cannot order dates or other text",
+                IssueCode.discriminating_condition_ordering_not_numeric,
+            ),
+            None,
+        )
+    if nan_reasons:
+        return (
+            RuleFinding(
+                "c",
+                f"{label} binds {call} in the tool-call condition, but "
+                f"{'; '.join(nan_reasons)}, and tool-call-condition-v1 makes every "
+                "comparison with NaN false, so the comparison holds on no call "
+                "and never detects the unsafe call. Compare numbers, or state "
+                "the rule with eq, ne, in, or not_in on supplied values",
                 IssueCode.discriminating_condition_ordering_not_numeric,
             ),
             None,
@@ -650,10 +805,13 @@ def _argument_pair(
 ) -> tuple[RuleFinding | None, RuleFinding | None] | None:
     """Apply rule (b) to two compared arguments, each by its own operation's schema.
 
-    Returns ``None`` when a side is not an argument. ``eq`` and ``ne`` are
-    refused only when the two schemas admit no common JSON type, so no value
-    of one ever equals a value of the other; anything else is undecidable,
-    since no schema says that two arguments take the same kind of record.
+    Returns ``None`` when a side is not an argument. ``eq`` and ``ne`` compare
+    the two values; ``in`` and ``not_in`` compare the left value (or each of
+    its elements) with the elements of the right list, and are refused when
+    the right schema admits no list. The comparison is refused when the
+    compared values share no JSON type, or no listed value; anything else is
+    undecidable, since no schema says that two arguments take the same kind
+    of record.
     """
 
     left, right = comparison.left, comparison.right
@@ -662,37 +820,73 @@ def _argument_pair(
     ):
         return None
     call = _comparison_text(comparison)
-    left_name = _operand_text(left)
-    right_name = _operand_text(right)
-    if comparison.op in MEMBERSHIP_OPERATORS:
-        return None, RuleFinding(
-            "b",
-            f"{label} binds {call}: tool-call-condition-v1 tests whether a value "
-            f"of {left_name} is a member of the list {right_name} passes, and "
-            "the check compares no element types of a list argument, so whether "
-            f"{left_name} can be a member is unknown",
+    op = comparison.op
+    membership = op in MEMBERSHIP_OPERATORS
+    left_admitted = _argument_facts(universe, left)
+    right_admitted = _argument_facts(universe, right)
+    if (
+        membership
+        and right_admitted.types is not None
+        and "array" not in right_admitted.types
+    ):
+        return _never_a_list(label, call, op, right, right_admitted), None
+    left_view = _compared(left_admitted, "member" if membership else "value")
+    right_view = _compared(right_admitted, "list" if membership else "value")
+    consequence = _NEVER_HOLDS if op in {"eq", "in"} else _ALWAYS_HOLDS
+    declared = (
+        f"{_declares(left, left_admitted, membership)} and "
+        f"{_declares(right, right_admitted, membership)}"
+    )
+    if left_view.types is None or right_view.types is None:
+        question = (
+            f"whether a value of {_operand_text(left)} can be a member of "
+            f"{_operand_text(right)}"
+            if membership
+            else "whether the two arguments can take equal values"
         )
-    left_types = _schema_types(_argument_schema(universe, left))
-    right_types = _schema_types(_argument_schema(universe, right))
-    declared = f"{_declares(left, left_types)} and {_declares(right, right_types)}"
-    if left_types is None or right_types is None:
         return None, RuleFinding(
-            "b",
-            f"{label} binds {call}: {declared}, so whether the two arguments "
-            "can take equal values is unknown",
+            "b", f"{label} binds {call}: {declared}, so {question} is unknown"
         )
-    common = _equality_classes(left_types) & _equality_classes(right_types)
+    common = _equality_classes(left_view.types) & _equality_classes(right_view.types)
     if not common:
-        consequence = _NEVER_HOLDS if comparison.op == "eq" else _ALWAYS_HOLDS
+        compared = (
+            f"no value of {_operand_text(left)} equals an element of "
+            f"{_operand_text(right)}"
+            if membership
+            else "no value of one equals a value of the other"
+        )
         return (
             RuleFinding(
                 "b",
                 f"{label} binds {call} in the tool-call condition, but "
                 f"{declared}; tool-call-condition-v1 never converts a value for "
-                f"{comparison.op}, so no value of one equals a value of the "
+                f"{op}, so {compared} and {consequence}. Compare "
+                f"{left.argument} with an argument or a supplied value of type "
+                f"{' or '.join(sorted(left_view.types))}",
+                IssueCode.discriminating_condition_record_kind_mismatch,
+            ),
+            None,
+        )
+    if (
+        left_view.values is not None
+        and right_view.values is not None
+        and not _common_values(left_view.values, right_view.values)
+    ):
+        restricted = (
+            f"the input schema of {left.operation} restricts {left.argument} to "
+            f"{_render(list(left_view.values))} and the input schema of "
+            f"{right.operation} restricts "
+            f"{'the elements of ' if membership else ''}{right.argument} to "
+            f"{_render(list(right_view.values))}"
+        )
+        return (
+            RuleFinding(
+                "b",
+                f"{label} binds {call} in the tool-call condition, but "
+                f"{restricted}; tool-call-condition-v1 never converts a value for "
+                f"{op}, so no listed value of one equals a listed value of the "
                 f"other and {consequence}. Compare {left.argument} with an "
-                "argument or a supplied value of type "
-                f"{' or '.join(sorted(left_types))}",
+                "argument or a supplied value it can take",
                 IssueCode.discriminating_condition_record_kind_mismatch,
             ),
             None,
@@ -706,16 +900,34 @@ def _argument_pair(
     )
 
 
-def _declares(argument: ToolCallArgumentOperand, types: frozenset[str] | None) -> str:
-    if types is None:
+def _declares(
+    argument: ToolCallArgumentOperand, admitted: _Admitted, membership: bool = False
+) -> str:
+    if admitted.types is None:
         return (
             f"the input schema of {argument.operation} declares no type for "
             f"{argument.argument}"
         )
+    declared = (
+        _list_text(admitted) if membership else " or ".join(sorted(admitted.types))
+    )
     return (
         f"the input schema of {argument.operation} declares {argument.argument} "
-        f"as {' or '.join(sorted(types))}"
+        f"as {declared}"
     )
+
+
+def _list_text(admitted: _Admitted) -> str:
+    """Name the admitted types, with the element types of an admitted list."""
+
+    types = admitted.types or frozenset()
+    names = sorted(types - {"array"})
+    if "array" in types:
+        elements = admitted.elements
+        names.append(
+            f"array of {' or '.join(sorted(elements))}" if elements else "array"
+        )
+    return " or ".join(names)
 
 
 def _equality_classes(types: frozenset[str]) -> frozenset[str]:
@@ -732,114 +944,328 @@ def _argument_schema(
     return universe.argument_schemas.get(argument.operation, {}).get(argument.argument)
 
 
+def _argument_facts(
+    universe: ConditionUniverse, argument: ToolCallArgumentOperand
+) -> _Admitted:
+    return _admitted(_argument_schema(universe, argument), argument.argument)
+
+
 def _schema_types(schema: object) -> frozenset[str] | None:
-    """Return every JSON type a schema admits, or ``None`` when that is unknown.
+    """Return every JSON type a schema admits, or ``None`` when that is unknown."""
 
-    ``type`` bounds the schema; without it, every ``anyOf`` (or ``oneOf``)
-    branch must bound its own, or an ``enum`` or ``const`` gives the types of
-    its values.
-    """
-
-    if not isinstance(schema, Mapping):
-        return None
-    declared = _type_names(schema.get("type"))
-    if declared:
-        return frozenset(declared)
-    branches = schema.get("anyOf") or schema.get("oneOf")
-    if isinstance(branches, list) and branches:
-        types = [_schema_types(branch) for branch in branches]
-        if any(item is None for item in types):
-            return None
-        return frozenset().union(*(item for item in types if item is not None))
-    values = _enumerated(schema)
-    if values is not None:
-        return frozenset(_json_type(value) for value in values)
-    return None
+    return _admitted(schema, "").types
 
 
 @dataclass(frozen=True)
 class _NumberFacts:
     """What a schema proves about its values under the v1 number conversion.
 
-    ``proof`` is ``number`` when every value it admits is a number,
-    ``not_number`` when none is (``reason`` then says how), and ``open``
+    ``proof`` is ``number`` when every value it admits is a number, ``nan``
+    when every value converts to NaN, ``not_number`` when none is a number
+    (``reason`` then says how, as it does for ``nan``), and ``open``
     otherwise.
     """
 
-    proof: Literal["number", "not_number", "open"]
+    proof: Literal["number", "nan", "not_number", "open"]
     reason: str = ""
 
 
 _OPEN = _NumberFacts("open")
+_NUMBER = _NumberFacts("number")
 
 
-def _number_facts(schema: object, name: str) -> _NumberFacts:
-    """Prove that every value a schema admits is a number under v1, or that none is.
+@dataclass(frozen=True)
+class _Admitted:
+    """What a schema proves about the values it admits.
 
-    ``enum`` or ``const``, ``type`` with ``pattern``, and the ``anyOf`` or
-    ``oneOf`` branches each constrain every value, so one that proves no
-    number decides, then one that proves only numbers. ``null`` is not a
-    number, so a nullable numeric type proves neither; ``format`` is only an
-    annotation, so it proves nothing.
+    Every field over-approximates the admitted values: ``types`` is every
+    JSON type a value may have, ``values`` every value it may take when an
+    ``enum`` or ``const`` lists them, and ``elements`` every JSON type an
+    element of an admitted list may have; ``None`` means unknown.
+    ``text_pattern`` is a ``pattern`` no admitted string with a number's text
+    matches, and ``number`` is what the v1 number conversion makes of every
+    admitted value. An empty
+    ``types``, ``values``, or ``elements`` is reported as ``None``: a schema
+    that admits nothing proves nothing about a call.
+    """
+
+    types: frozenset[str] | None = None
+    values: tuple[object, ...] | None = None
+    elements: frozenset[str] | None = None
+    number: _NumberFacts = _OPEN
+    text_pattern: str | None = None
+
+
+_ANY = _Admitted()
+
+
+def _admitted(schema: object, name: str) -> _Admitted:
+    """Combine every assertion of a schema into what it admits.
+
+    The schema's own ``type``, ``enum`` and ``const``, ``items`` and
+    ``prefixItems``, and each of ``allOf``, ``anyOf``, and ``oneOf`` are
+    conjuncts, so the facts intersect; ``allOf`` intersects its branches and
+    ``anyOf`` and ``oneOf`` join theirs. A fact that proves no number decides
+    over one that proves only numbers. ``null`` is not a number, ``format``
+    only annotates, and an unknown keyword proves nothing, so each leaves the
+    facts open. ``name`` is the argument named in a reason.
     """
 
     if not isinstance(schema, Mapping):
-        return _OPEN
-    facts = (
-        _enumerated_facts(schema, name),
-        _type_facts(schema, name),
-        _branch_facts(schema, name),
+        return _ANY
+    parts = [_own_facts(schema)]
+    for key in _COMBINATORS:
+        branches = schema.get(key)
+        if isinstance(branches, list) and branches:
+            facts = [_admitted(branch, name) for branch in branches]
+            parts.append(_all_of(facts) if key == "allOf" else _any_of(facts))
+    combined = _all_of(parts)
+    types, values, elements = combined.types, combined.values, combined.elements
+    numbers = [combined.number]
+    if values is not None:
+        if types is not None:
+            values = tuple(value for value in values if _fits(value, types))
+        types = _meet(types, frozenset(_json_type(value) for value in values))
+        listed = [value for value in values if isinstance(value, list)]
+        elements = _meet(
+            elements, frozenset(_json_type(item) for value in listed for item in value)
+        )
+        numbers.append(_values_number(values, name))
+    # The types and the pattern that every conjunct leaves decide together.
+    numbers.append(_type_number(types, combined.text_pattern, name))
+    return _published(
+        _Admitted(types, values, elements, _conjoined(numbers), combined.text_pattern)
     )
-    for proof in ("not_number", "number"):
+
+
+def _published(facts: _Admitted) -> _Admitted:
+    return _Admitted(
+        types=facts.types or None,
+        values=facts.values or None,
+        elements=facts.elements or None,
+        number=facts.number,
+        text_pattern=facts.text_pattern,
+    )
+
+
+def _own_facts(schema: Mapping[str, Any]) -> _Admitted:
+    """Return the facts of a schema's own keywords, before its combinators."""
+
+    pattern = schema.get("pattern")
+    return _Admitted(
+        types=_declared_types(schema),
+        values=_enumerated(schema),
+        elements=_item_types(schema),
+        text_pattern=pattern if _pattern_excludes_numbers(pattern) else None,
+    )
+
+
+def _all_of(parts: Sequence[_Admitted]) -> _Admitted:
+    """Intersect facts that all hold of one value."""
+
+    types: frozenset[str] | None = None
+    values: tuple[object, ...] | None = None
+    elements: frozenset[str] | None = None
+    pattern = next((part.text_pattern for part in parts if part.text_pattern), None)
+    for part in parts:
+        types = _meet(types, part.types)
+        elements = _meet(elements, part.elements)
+        if part.values is not None:
+            values = (
+                part.values if values is None else _common_values(values, part.values)
+            )
+    number = _conjoined([part.number for part in parts])
+    return _Admitted(types, values, elements, number, pattern)
+
+
+def _any_of(parts: Sequence[_Admitted]) -> _Admitted:
+    """Join facts of which at least one holds of a value."""
+
+    types = (
+        None
+        if any(part.types is None for part in parts)
+        else frozenset().union(*(part.types or () for part in parts))
+    )
+    values = (
+        None
+        if any(part.values is None for part in parts)
+        else tuple(value for part in parts for value in part.values or ())
+    )
+    lists = [part for part in parts if part.types is None or "array" in part.types]
+    elements = (
+        None
+        if any(part.elements is None for part in lists)
+        else frozenset().union(*(part.elements or () for part in lists))
+    )
+    texts = [part for part in parts if part.types is None or "string" in part.types]
+    pattern = (
+        " or ".join(dict.fromkeys(part.text_pattern or "" for part in texts))
+        if texts and all(part.text_pattern for part in texts)
+        else None
+    )
+    numbers = [part.number for part in parts]
+    proofs = {item.proof for item in numbers}
+    if proofs in ({"not_number"}, {"nan"}):
+        number = _NumberFacts(
+            numbers[0].proof, " or ".join(item.reason for item in numbers)
+        )
+    elif proofs <= {"number", "nan"}:
+        number = _NUMBER
+    else:
+        number = _OPEN
+    return _Admitted(types, values, elements, number, pattern)
+
+
+def _conjoined(facts: Sequence[_NumberFacts]) -> _NumberFacts:
+    """Combine number facts that all hold: no number wins, then NaN, then number."""
+
+    for proof in ("not_number", "nan", "number"):
         for item in facts:
             if item.proof == proof:
                 return item
     return _OPEN
 
 
-def _enumerated_facts(schema: Mapping[str, Any], name: str) -> _NumberFacts:
-    values = _enumerated(schema)
-    if values is None:
+def _meet(
+    left: frozenset[str] | None, right: frozenset[str] | None
+) -> frozenset[str] | None:
+    """Intersect two type sets, where every integer is also a number."""
+
+    if left is None:
+        return right
+    if right is None:
+        return left
+    common = set(left & right)
+    if ("integer" in left and "number" in right) or (
+        "number" in left and "integer" in right
+    ):
+        common.add("integer")
+    return frozenset(common)
+
+
+def _declared_types(schema: Mapping[str, Any]) -> frozenset[str] | None:
+    """Return the ``type`` of a schema; an unknown type name proves nothing.
+
+    The OpenAPI ``nullable: true`` adds ``null``, so it is never left out.
+    """
+
+    names = _type_names(schema.get("type"))
+    if not names or not set(names) <= _JSON_TYPES:
+        return None
+    types = frozenset(names)
+    if schema.get("nullable") is True:
+        types |= {"null"}
+    return types
+
+
+def _item_types(schema: Mapping[str, Any]) -> frozenset[str] | None:
+    """Return every JSON type an element of a list the schema admits may have."""
+
+    items = schema.get("items")
+    prefix = schema.get("prefixItems")
+    if isinstance(items, list):
+        return None
+    branches: list[object] = list(prefix) if isinstance(prefix, list) else []
+    if isinstance(items, Mapping):
+        branches.append(items)
+    elif items is not False and isinstance(prefix, list):
+        return None
+    if not branches:
+        return None
+    types = [_admitted(branch, "").types for branch in branches]
+    if any(item is None for item in types):
+        return None
+    return frozenset().union(*(item or () for item in types))
+
+
+def _type_number(
+    types: frozenset[str] | None, pattern: str | None, name: str
+) -> _NumberFacts:
+    if not types:
         return _OPEN
-    numbers = [numeric_value(value) is not None for value in values]
-    if all(numbers):
-        return _NumberFacts("number")
-    if not any(numbers):
+    if types <= _NUMERIC_TYPES:
+        return _NUMBER
+    if types & _NUMERIC_TYPES:
+        return _OPEN
+    declared = " or ".join(sorted(types))
+    if "string" not in types:
+        return _NumberFacts("not_number", f"declares {name} as {declared}")
+    if pattern is not None:
+        return _NumberFacts(
+            "not_number",
+            f"declares {name} as {declared} matching the pattern {pattern}",
+        )
+    return _OPEN
+
+
+def _values_number(values: Sequence[object], name: str) -> _NumberFacts:
+    if not values:
+        return _OPEN
+    numbers = [numeric_value(value) for value in values]
+    if all(number is None for number in numbers):
         return _NumberFacts(
             "not_number", f"restricts {name} to {_render(list(values))}"
         )
-    return _OPEN
+    if any(number is None for number in numbers):
+        return _OPEN
+    if all(number is not None and math.isnan(number) for number in numbers):
+        return _NumberFacts("nan", f"restricts {name} to {_render(list(values))}")
+    return _NUMBER
 
 
-def _type_facts(schema: Mapping[str, Any], name: str) -> _NumberFacts:
-    declared = set(_type_names(schema.get("type")))
-    if not declared:
-        return _OPEN
-    if declared <= _NUMERIC_TYPES:
-        return _NumberFacts("number")
-    if declared & _NUMERIC_TYPES:
-        return _OPEN
-    types = " or ".join(sorted(declared))
-    if "string" not in declared:
-        return _NumberFacts("not_number", f"declares {name} as {types}")
-    pattern = schema.get("pattern")
-    if _pattern_excludes_numbers(pattern):
-        return _NumberFacts(
-            "not_number", f"declares {name} as {types} matching the pattern {pattern}"
+def _compared(admitted: _Admitted, role: str) -> _Admitted:
+    """Return the types and values an equality compares for an argument's role."""
+
+    if role == "value":
+        return admitted
+    values = admitted.values
+    if role == "list":
+        return _published(
+            _Admitted(
+                types=admitted.elements,
+                values=None
+                if values is None
+                else tuple(
+                    item
+                    for value in values
+                    if isinstance(value, list)
+                    for item in value
+                ),
+            )
         )
-    return _OPEN
+    types = admitted.types
+    if types is not None:
+        types = types - {"array"}
+        if "array" in (admitted.types or ()):
+            types = None if admitted.elements is None else types | admitted.elements
+    return _published(
+        _Admitted(
+            types=types,
+            values=None
+            if values is None
+            else tuple(
+                item
+                for value in values
+                for item in (value if isinstance(value, list) else [value])
+            ),
+        )
+    )
 
 
-def _branch_facts(schema: Mapping[str, Any], name: str) -> _NumberFacts:
-    branches = schema.get("anyOf") or schema.get("oneOf")
-    if not isinstance(branches, list) or not branches:
-        return _OPEN
-    facts = [_number_facts(branch, name) for branch in branches]
-    if all(item.proof == "number" for item in facts):
-        return _NumberFacts("number")
-    if all(item.proof == "not_number" for item in facts):
-        return _NumberFacts("not_number", " or ".join(item.reason for item in facts))
-    return _OPEN
+def _same(left: object, right: object) -> bool:
+    """Return whether v1 equality holds between two JSON values."""
+
+    if isinstance(left, bool) != isinstance(right, bool):
+        return False
+    if isinstance(left, (int, float)) and isinstance(right, (int, float)):
+        return float(left) == float(right)
+    return bool(left == right)
+
+
+def _common_values(
+    left: tuple[object, ...], right: tuple[object, ...]
+) -> tuple[object, ...]:
+    return tuple(value for value in left if any(_same(value, other) for other in right))
 
 
 def _pattern_excludes_numbers(pattern: object) -> bool:
@@ -860,11 +1286,21 @@ def _pattern_excludes_numbers(pattern: object) -> bool:
     return pattern[2:3] not in {"?", "*", "{"}
 
 
-def _enumerated(schema: Mapping[str, Any]) -> Sequence[object] | None:
+def _enumerated(schema: Mapping[str, Any]) -> tuple[object, ...] | None:
+    """Return the values ``const`` and ``enum`` both allow, or ``None``."""
+
+    listed: list[tuple[object, ...]] = []
     if "const" in schema:
-        return (schema["const"],)
+        listed.append((schema["const"],))
     values = schema.get("enum")
-    return values if isinstance(values, list) and values else None
+    if isinstance(values, list) and values:
+        listed.append(tuple(values))
+    if not listed:
+        return None
+    common = listed[0]
+    for other in listed[1:]:
+        common = _common_values(common, other)
+    return common
 
 
 def _type_names(value: object) -> list[str]:

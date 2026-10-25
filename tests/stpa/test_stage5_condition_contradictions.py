@@ -903,18 +903,122 @@ def test_two_arguments_without_a_declared_type_state_why_they_are_undecidable() 
 
 
 @pytest.mark.parametrize("op", ["in", "not_in"])
-def test_membership_in_another_arguments_list_is_undecidable(op) -> None:
+def test_membership_in_an_argument_that_is_never_a_list_is_refused(op) -> None:
+    # v1 gives unknown for in and not_in when the right side is not a list.
     universe = _arguments_universe({"type": "string"}, {"type": "boolean"})
 
-    result = _judged(_arguments_condition(op), universe)
+    findings = _findings(_arguments_condition(op), universe)
 
-    assert result.refused == ()
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_record_kind_mismatch
+    ]
+    assert findings[0].detail == (
+        f"comparisons[0] binds refund_payment.total {op} lookup_order.total in "
+        "the tool-call condition, but the input schema of lookup_order declares "
+        "total as boolean, never a list, and tool-call-condition-v1 gives "
+        f"unknown for {op} when the right side is not a list, so the comparison "
+        "is unknown on every call and never detects the unsafe call. Test "
+        "membership in a list argument or in a list of supplied values"
+    )
+
+
+@pytest.mark.parametrize(
+    "right",
+    [
+        {"type": ["string", "null"]},
+        {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+        {"type": ["array", "string"], "const": "x"},
+    ],
+)
+def test_membership_in_a_schema_narrowed_to_no_list_is_refused(right) -> None:
+    universe = _arguments_universe({"type": "string"}, right)
+
+    assert _rules(_judged(_arguments_condition("in"), universe)) == (["b"], [])
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        ({"type": "number"}, {"type": "array", "items": {"type": "string"}}),
+        (
+            {"type": "number"},
+            {
+                "anyOf": [
+                    {"type": "array", "items": {"type": "string"}},
+                    {"type": "null"},
+                ]
+            },
+        ),
+        # A list on the left is a member when any of its elements is.
+        (
+            {"type": "array", "items": {"type": "boolean"}},
+            {"type": "array", "items": {"type": "number"}},
+        ),
+        (
+            {"type": "string"},
+            {"type": "array", "prefixItems": [{"type": "number"}], "items": False},
+        ),
+    ],
+)
+def test_membership_of_a_value_no_element_type_admits_is_refused(left, right) -> None:
+    universe = _arguments_universe(left, right)
+
+    assert _rules(_judged(_arguments_condition("in"), universe)) == (["b"], [])
+
+
+def test_membership_of_a_disjoint_element_type_states_why() -> None:
+    universe = _arguments_universe(
+        {"type": "number"}, {"type": "array", "items": {"type": "string"}}
+    )
+
+    findings = _findings(_arguments_condition("not_in"), universe)
+
+    assert [item.detail for item in findings] == [
+        "comparisons[0] binds refund_payment.total not_in lookup_order.total in "
+        "the tool-call condition, but the input schema of refund_payment "
+        "declares total as number and the input schema of lookup_order declares "
+        "total as array of string; tool-call-condition-v1 never converts a "
+        "value for not_in, so no value of refund_payment.total equals an "
+        "element of lookup_order.total and the comparison holds on every call "
+        "and the condition fires on the safe call as well. Compare total with "
+        "an argument or a supplied value of type number"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        ({"type": "string"}, {"type": "array", "items": {"type": "string"}}),
+        ({"type": "integer"}, {"type": "array", "items": {"type": "number"}}),
+        ({"type": "number"}, {"type": "array"}),
+        ({"type": "number"}, {"type": "array", "prefixItems": [{"type": "string"}]}),
+        ({"type": "number"}, {"type": ["array", "boolean"]}),
+        ({"type": "number"}, {"title": "untyped"}),
+        ({"type": "array"}, {"type": "array", "items": {"type": "string"}}),
+    ],
+)
+def test_membership_the_schemas_do_not_set_apart_is_undecidable(left, right) -> None:
+    universe = _arguments_universe(left, right)
+
+    result = _judged(_arguments_condition("in"), universe)
+
+    assert _rules(result) == ([], ["b"])
+
+
+def test_membership_of_a_common_element_type_states_why_it_is_undecidable() -> None:
+    universe = _arguments_universe(
+        {"type": "string"}, {"type": "array", "items": {"type": "string"}}
+    )
+
+    result = _judged(_arguments_condition("in"), universe)
+
     assert [item.detail for item in result.undecidable] == [
-        f"comparisons[0] binds refund_payment.total {op} lookup_order.total: "
-        "tool-call-condition-v1 tests whether a value of refund_payment.total is "
-        "a member of the list lookup_order.total passes, and the check compares "
-        "no element types of a list argument, so whether refund_payment.total "
-        "can be a member is unknown"
+        "comparisons[0] binds refund_payment.total in lookup_order.total: the "
+        "input schema of refund_payment declares total as string and the input "
+        "schema of lookup_order declares total as array of string, so both "
+        "admit string, but nothing typed says whether the two arguments take "
+        "the same kind of value, so whether the comparison separates the unsafe "
+        "call is unknown"
     ]
 
 
@@ -954,6 +1058,410 @@ def test_ordering_two_open_arguments_states_each_reason() -> None:
         "text; and tool-call-condition-v1 never orders null; nothing typed says "
         "whether the values passed are numbers, so whether the comparison can "
         "hold is unknown"
+    ]
+
+
+# -- conjunctive schema facts ---------------------------------------------------
+
+
+def _bound(condition: dict, comparison: dict, universe: ConditionUniverse):
+    """Judge ``comparison`` as the bound form of ``condition``."""
+
+    return condition_contradictions._bound_contradictions(
+        DiscriminatingCondition.model_validate(condition),
+        universe,
+        ToolCallCondition.model_validate({"comparisons": [comparison]}),
+    )
+
+
+def test_a_const_narrows_the_declared_type_for_two_arguments() -> None:
+    universe = _arguments_universe(
+        {"type": ["number", "string"], "const": 1}, {"type": "string"}
+    )
+
+    findings = _findings(_arguments_condition("eq"), universe)
+
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_record_kind_mismatch
+    ]
+    assert "declares total as number and the input schema of lookup_order" in (
+        findings[0].detail
+    )
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": ["number", "string"], "const": 1},
+        {"type": ["number", "string"], "enum": [1, 2]},
+        {"type": ["number", "string"], "allOf": [{"type": ["number", "boolean"]}]},
+        {
+            "anyOf": [{"type": "string"}, {"type": "number"}],
+            "oneOf": [{"type": "number"}, {"type": "boolean"}],
+        },
+        {"allOf": [{"type": ["number", "string"]}, {"type": ["integer", "null"]}]},
+        {"type": "number", "nullable": False},
+    ],
+)
+def test_conjunctive_facts_narrow_an_argument_to_numbers(schema) -> None:
+    universe = _with_schemas({"refund_payment": {"amount": schema}})
+
+    assert _findings(_value_condition("eq", "forty", argument="amount"), universe)
+    assert _rules(_judged(_ordering_on("amount"), universe)) == ([], [])
+
+
+def _ordering_on(argument: str) -> dict:
+    return _value_condition("gt", 5, argument=argument)
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        # anyOf and oneOf are separate conjuncts: one does not hide the other.
+        {
+            "anyOf": [{"type": "string"}, {"type": "boolean"}],
+            "oneOf": [{"type": "boolean"}, {"type": "null"}],
+        },
+        {
+            "oneOf": [{"type": "boolean"}],
+            "anyOf": [{"type": "number"}, {"type": "boolean"}],
+        },
+        {"allOf": [{"type": ["number", "boolean"]}, {"type": ["boolean", "string"]}]},
+        {"type": ["number", "string"], "const": "open"},
+        {"enum": [1, "low"], "allOf": [{"type": "string"}]},
+        {"const": "low", "enum": ["low", 2]},
+    ],
+)
+def test_conjunctive_facts_that_admit_no_number_refuse_an_ordering(schema) -> None:
+    findings = _findings(_ordering(), _ordering_universe(schema))
+
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_ordering_not_numeric
+    ]
+
+
+@pytest.mark.parametrize(
+    ("schema", "reason"),
+    [
+        (
+            {"type": "string", "allOf": [{"pattern": "^R-"}]},
+            "declares ref as string matching the pattern ^R-",
+        ),
+        (
+            {"allOf": [{"type": "string"}, {"pattern": "^R-"}]},
+            "declares ref as string matching the pattern ^R-",
+        ),
+        (
+            {"type": "string", "anyOf": [{"pattern": "^R-"}, {"pattern": "^Q-"}]},
+            "declares ref as string matching the pattern ^R- or ^Q-",
+        ),
+    ],
+)
+def test_a_pattern_in_one_conjunct_and_a_type_in_another_refuse(schema, reason) -> None:
+    findings = _findings(_ordering(), _ordering_universe(schema))
+
+    assert len(findings) == 1
+    assert f"the input schema of refund_payment {reason}, so no value" in (
+        findings[0].detail
+    )
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "string", "anyOf": [{"pattern": "^R-"}, {"maxLength": 3}]},
+        {"anyOf": [{"type": "string", "pattern": "^R-"}, {"type": "string"}]},
+    ],
+)
+def test_a_pattern_only_some_branches_state_is_undecidable(schema) -> None:
+    assert _rules(_judged(_ordering(), _ordering_universe(schema))) == ([], ["c"])
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "string", "enum": ["10", True]},
+        {"enum": ["a", "1"], "allOf": [{"enum": ["1", "2"]}]},
+        {"type": ["number", "boolean"], "enum": [1, "x"]},
+    ],
+)
+def test_an_enum_filtered_by_its_other_facts_admits_only_numbers(schema) -> None:
+    assert _rules(_judged(_ordering(), _ordering_universe(schema))) == ([], [])
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "number", "nullable": True},
+        {
+            "anyOf": [{"type": "number"}, {"type": "null"}],
+            "oneOf": [{"type": ["integer", "null"]}],
+        },
+        {
+            "allOf": [{"type": ["number", "null"]}],
+            "anyOf": [{"type": "number"}, {"type": "null"}],
+        },
+    ],
+)
+def test_a_null_no_fact_rules_out_keeps_an_ordering_undecidable(schema) -> None:
+    assert _rules(_judged(_ordering(), _ordering_universe(schema))) == ([], ["c"])
+
+
+def test_a_conjunct_without_null_rules_null_out() -> None:
+    schema = {
+        "anyOf": [{"type": "number"}],
+        "oneOf": [{"type": "number"}, {"type": "null"}],
+    }
+
+    assert _rules(_judged(_ordering(), _ordering_universe(schema))) == ([], [])
+
+
+def test_a_literal_outside_the_enum_is_refused() -> None:
+    universe = _with_schemas(
+        {"refund_payment": {"status": {"type": "string", "enum": ["low", "high"]}}}
+    )
+
+    findings = _findings(_value_condition("eq", "medium", argument="status"), universe)
+
+    assert [item.detail for item in findings] == [
+        'comparisons[0] binds refund_payment.status eq "medium" in the tool-call '
+        "condition, but the input schema of refund_payment restricts status to "
+        '["low", "high"] and "medium" is none of them; tool-call-condition-v1 '
+        "never converts a value for eq, so the comparison holds on no call and "
+        "the condition never detects the unsafe call. Compare status with one of "
+        "those values"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("schema", "value", "refused"),
+    [
+        ({"const": "low", "enum": ["low", "high"]}, "high", ["b"]),
+        ({"const": "low", "enum": ["low", "high"]}, "low", []),
+        ({"enum": [1, 2]}, 2.0, []),
+        ({"enum": [1, 2]}, True, ["b"]),
+        ({"type": "string", "enum": ["a", 1]}, 1, ["b"]),
+    ],
+)
+def test_const_and_enum_both_restrict_a_literal(schema, value, refused) -> None:
+    universe = _with_schemas({"refund_payment": {"status": schema}})
+
+    result = _judged(_value_condition("eq", value, argument="status"), universe)
+
+    assert _rules(result)[0] == refused
+
+
+def test_two_arguments_with_no_common_listed_value_are_refused() -> None:
+    universe = _arguments_universe({"enum": ["a", "b"]}, {"enum": ["c"]})
+
+    findings = _findings(_arguments_condition("eq"), universe)
+
+    assert [item.detail for item in findings] == [
+        "comparisons[0] binds refund_payment.total eq lookup_order.total in the "
+        "tool-call condition, but the input schema of refund_payment restricts "
+        'total to ["a", "b"] and the input schema of lookup_order restricts '
+        'total to ["c"]; tool-call-condition-v1 never converts a value for eq, '
+        "so no listed value of one equals a listed value of the other and the "
+        "comparison holds on no call and the condition never detects the unsafe "
+        "call. Compare total with an argument or a supplied value it can take"
+    ]
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "int"},
+        {"type": ["string", "decimal"]},
+        {"$ref": "#/$defs/Amount"},
+        {"not": {"type": "string"}},
+    ],
+)
+def test_a_keyword_the_check_does_not_read_proves_nothing(schema) -> None:
+    universe = _with_schemas({"refund_payment": {"amount": schema}})
+
+    assert _findings(_value_condition("eq", "forty", argument="amount"), universe) == ()
+    assert _rules(_judged(_ordering_on("amount"), universe)) == ([], ["c"])
+
+
+def _null_note() -> dict:
+    """``note eq null``: a fact or a selection binds to a null literal."""
+
+    return {
+        "kind": "value",
+        "left": {
+            "source": "argument",
+            "operation": "refund_payment",
+            "argument": "note",
+        },
+        "op": "eq",
+        "right": {"source": "literal", "value": None},
+    }
+
+
+def test_a_null_literal_is_compared_with_the_declared_type() -> None:
+    # A key passed with the value null has the value null under v1, and a
+    # string schema admits no null.
+    universe = _with_schemas({"refund_payment": {"note": {"type": "string"}}})
+
+    result = _bound(
+        _value_condition("eq", "x", argument="note"), _null_note(), universe
+    )
+
+    assert [item.detail for item in result.refused] == [
+        "comparisons[0] binds refund_payment.note eq null in the tool-call "
+        "condition, but the input schema of refund_payment declares note as "
+        "string and null is a null; tool-call-condition-v1 never converts a "
+        "value for eq, so the comparison holds on no call and the condition "
+        "never detects the unsafe call. Compare note with a supplied value of "
+        "type string"
+    ]
+
+
+def test_a_null_literal_passes_a_nullable_argument() -> None:
+    universe = _with_schemas(
+        {"refund_payment": {"note": {"anyOf": [{"type": "string"}, {"type": "null"}]}}}
+    )
+
+    result = _bound(
+        _value_condition("eq", "x", argument="note"), _null_note(), universe
+    )
+
+    assert result == condition_contradictions.ConditionContradictions()
+
+
+# -- membership with a literal ---------------------------------------------------
+
+
+def _membership(left: dict, op: str, right: dict) -> dict:
+    return {"kind": "value", "left": left, "op": op, "right": right}
+
+
+def _flags(schema: dict) -> ConditionUniverse:
+    return _with_schemas({"refund_payment": {"flags": schema}})
+
+
+FLAGS = {"source": "argument", "operation": "refund_payment", "argument": "flags"}
+
+
+def test_membership_in_a_fact_that_binds_to_no_list_is_refused() -> None:
+    condition = _value_condition("in", ["x"], argument="flags")
+    condition["comparisons"][0]["right"] = {
+        "source": "fact",
+        "path": "TARGET-STATE.session_customer",
+    }
+
+    findings = _findings(condition, _flags({"type": "string"}))
+
+    assert [item.detail for item in findings] == [
+        'comparisons[0] binds refund_payment.flags in "CUS-1" in the tool-call '
+        'condition, but the right side "CUS-1" is not a list, and '
+        "tool-call-condition-v1 gives unknown for in when the right side is not "
+        "a list, so the comparison is unknown on every call and never detects "
+        "the unsafe call. Compare flags with a list of supplied values"
+    ]
+
+
+def test_a_list_argument_tested_against_values_of_no_element_type_is_refused() -> None:
+    universe = _flags({"type": "array", "items": {"type": "number"}})
+
+    findings = _findings(_value_condition("in", ["x", "y"], argument="flags"), universe)
+
+    assert [item.detail for item in findings] == [
+        'comparisons[0] binds refund_payment.flags in ["x", "y"] in the tool-call '
+        "condition, but the input schema of refund_payment declares flags as "
+        'array of number and the values in ["x", "y"] are string; '
+        "tool-call-condition-v1 never converts a value for in, so the comparison "
+        "holds on no call and the condition never detects the unsafe call. "
+        "Compare flags with supplied values of type number"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("schema", "refused"),
+    [
+        ({"type": "boolean"}, ["b"]),
+        ({"type": "array", "items": {"type": "number"}}, ["b"]),
+        ({"type": "array", "items": {"enum": ["y"]}}, []),
+        ({"type": "array", "items": {"type": "string"}}, []),
+        ({"type": "array"}, []),
+        ({"title": "untyped"}, []),
+    ],
+)
+def test_a_literal_member_of_a_list_argument_reads_its_schema(schema, refused) -> None:
+    condition = _value_condition("in", ["x"], argument="flags")
+    comparison = _membership({"source": "literal", "value": "x"}, "in", FLAGS)
+
+    result = _bound(condition, comparison, _flags(schema))
+
+    assert _rules(result)[0] == refused
+
+
+# -- NaN ----------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"const": "nan"},
+        {"type": "string", "enum": ["nan", "NaN", " -nan "]},
+        {"anyOf": [{"const": "nan"}, {"const": "+NAN"}]},
+        {
+            "type": ["string", "number"],
+            "allOf": [{"enum": ["nan", "low"]}],
+            "enum": ["nan", 1],
+        },
+    ],
+)
+def test_ordering_an_argument_that_is_always_nan_is_refused(schema) -> None:
+    findings = _findings(_ordering(), _ordering_universe(schema))
+
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_ordering_not_numeric
+    ]
+
+
+def test_ordering_an_always_nan_argument_states_why() -> None:
+    findings = _findings(_ordering(), _ordering_universe({"const": "nan"}))
+
+    assert [item.detail for item in findings] == [
+        "comparisons[0] binds refund_payment.ref gt 5 in the tool-call "
+        "condition, but the input schema of refund_payment restricts ref to "
+        '["nan"], so every value it admits converts to NaN, and '
+        "tool-call-condition-v1 makes every comparison with NaN false, so the "
+        "comparison holds on no call and never detects the unsafe call. Compare "
+        "numbers, or state the rule with eq, ne, in, or not_in on supplied values"
+    ]
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"enum": ["nan", 1]},
+        {"enum": ["nan", "2"]},
+        {"const": "inf"},
+        {"enum": ["-Infinity", "1"]},
+    ],
+)
+def test_ordering_an_argument_that_admits_ordinary_numbers_passes(schema) -> None:
+    # v1 orders inf like any number; NaN only makes the comparison false for
+    # the calls that pass it.
+    assert _rules(_judged(_ordering(), _ordering_universe(schema))) == ([], [])
+
+
+@pytest.mark.parametrize("literal", ["nan", " NaN ", "-nan"])
+def test_ordering_by_a_nan_literal_is_refused(literal) -> None:
+    condition = _value_condition("gt", 0, argument="amount")
+    comparison = _value_condition("gt", literal, argument="amount")["comparisons"][0]
+
+    result = _bound(condition, comparison, _orders_universe())
+
+    assert [item.detail for item in result.refused] == [
+        f"comparisons[0] binds refund_payment.amount gt {json.dumps(literal)} in the "
+        f"tool-call condition, but the literal {json.dumps(literal)} converts to "
+        "NaN, and tool-call-condition-v1 makes every comparison with NaN false, "
+        "so the comparison holds on no call and never detects the unsafe call. "
+        "Compare numbers, or state the rule with eq, ne, in, or not_in on "
+        "supplied values"
     ]
 
 
