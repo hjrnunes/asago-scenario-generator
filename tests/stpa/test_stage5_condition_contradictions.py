@@ -709,3 +709,24 @@ def test_contradiction_module_names_no_target() -> None:
 
     for word in ("klarna", "airbnb", "occiai", "order_id", "patient"):
         assert word not in source.lower()
+
+
+def test_the_repair_guidance_of_each_new_code_is_pinned() -> None:
+    guidance = _repair_guidance("TARGET-STATE")
+
+    assert guidance[IssueCode.discriminating_condition_record_kind_mismatch] == (
+        "compare an argument only with a value of the kind it takes: a value of "
+        "its declared schema type and, when supplied reads passed values for it, "
+        "a key of the collection those values key or a field whose values are "
+        "such keys. In record_selection.argument_values, map an argument to the "
+        "selected record's path or to such a field, not to a field that holds "
+        "another kind of value. Keep observation_criteria and "
+        "safe_observable_outcome unchanged."
+    )
+    assert guidance[IssueCode.discriminating_condition_ordering_not_numeric].startswith(
+        "use gt, ge, lt, and le only between numbers: an argument whose input "
+        "schema declares number or integer, or a numeric supplied value. The "
+        "tool-call condition cannot order dates or other text; state the rule "
+        "with eq, ne, in, or not_in on supplied values instead. If no supplied "
+        "argument, fact, call order, or omitted call separates the unsafe case, "
+    )
