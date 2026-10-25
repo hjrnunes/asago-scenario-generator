@@ -9,12 +9,10 @@ paired with. Nothing is sent anywhere: the check reads only these files::
 
     uv run python scripts/condition_contradiction_sweep.py OUTPUT_DIR [...]
 
-The report counts, per directory, the bound conditions checked, the
-scenarios refused under each rule, and the undecidable cases, with every
-example. A refused condition goes to the existing Stage 5 correction; one
-that still fails after the corrections is published without its condition
-(as ``reply`` or ``analytical_only``), so a refusal costs no scenario, and
-at most the scenario's tool-call condition.
+The report states what happens to a refused condition (``RECOVERY``) and
+counts, per directory and in total, the bound conditions checked, the
+scenarios refused under each rule, which are the scenarios at risk of losing
+their tool-call condition, and the undecidable cases, with every example.
 """
 
 from __future__ import annotations
@@ -48,6 +46,17 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 )
 
 RULES = ("a", "b", "c")
+
+RECOVERY = (
+    "A refused condition fails Stage 5 validation, so the scenario goes "
+    "through the existing Stage 5 condition correction request, with a second "
+    "correction only when the scenario would otherwise publish as "
+    "analytical_only. If the condition still fails, the scenario is published "
+    "without a tool_call_condition and records the reason in "
+    "condition_omitted_reason. No scenario is dropped: each refused scenario "
+    "is at risk of losing its tool-call condition, nothing more. An "
+    "undecidable case is reported only; it changes nothing in the scenario."
+)
 
 
 def sweep_directory(
@@ -118,6 +127,8 @@ def _summary(
         "handoffs": handoffs,
         "checked": len(rows),
         "refused_scenarios": len(refused),
+        "at_risk_of_losing_condition": [row["scenario_id"] for row in refused],
+        "dropped_scenarios": 0,
         "refused_by_rule": {
             rule: sum(
                 any(item["rule"] == rule for item in row["refused"]) for row in rows
@@ -132,11 +143,52 @@ def _summary(
     }
 
 
+def report(summaries: list[dict[str, Any]]) -> dict[str, Any]:
+    """Return the sweep with its recovery statement and totals."""
+
+    return {
+        "recovery": RECOVERY,
+        "directories": summaries,
+        "total": {
+            "directories": len(summaries),
+            "handoffs": sum(item["handoffs"] for item in summaries),
+            "checked": sum(item["checked"] for item in summaries),
+            "at_risk_of_losing_condition": sum(
+                len(item["at_risk_of_losing_condition"]) for item in summaries
+            ),
+            "dropped_scenarios": 0,
+        },
+    }
+
+
+def _at_risk(count: int, handoffs: int, ids: list[str]) -> str:
+    named = f" ({', '.join(ids)})" if ids else ""
+    return (
+        f"- scenarios at risk of losing their tool_call_condition: {count} of "
+        f"{handoffs} handoffs{named}; scenarios dropped: 0"
+    )
+
+
 def render(summaries: list[dict[str, Any]]) -> str:
     """Render the sweep as Markdown."""
 
-    lines = ["# Tool-call condition check: offline sweep", ""]
+    total = report(summaries)["total"]
+    lines = [
+        "# Tool-call condition check: offline sweep",
+        "",
+        "## What happens to a refused condition",
+        "",
+        RECOVERY,
+        "",
+        "## Total",
+        "",
+        f"- directories: {total['directories']}; handoffs: {total['handoffs']}; "
+        f"bound conditions checked: {total['checked']}",
+        _at_risk(total["at_risk_of_losing_condition"], total["handoffs"], []),
+        "",
+    ]
     for summary in summaries:
+        ids = summary["at_risk_of_losing_condition"]
         lines += [
             f"## {summary['directory']}",
             "",
@@ -156,6 +208,7 @@ def render(summaries: list[dict[str, Any]]) -> str:
                 or "none"
             )
             + f" ({summary['undecidable_scenarios']} scenarios)",
+            _at_risk(len(ids), summary["handoffs"], ids),
             "",
         ]
         for row in summary["examples"]:
@@ -165,6 +218,11 @@ def render(summaries: list[dict[str, Any]]) -> str:
             )
             for item in row["refused"]:
                 lines.append(f"  - refused, rule {item['rule']}: {item['detail']}")
+            if row["refused"]:
+                lines.append(
+                    "  - recovery: the existing Stage 5 condition correction; "
+                    "if still refused, published without a tool_call_condition"
+                )
             for item in row["undecidable"]:
                 lines.append(f"  - undecidable, rule {item['rule']}: {item['detail']}")
         lines.append("")
@@ -186,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
         for directory in args.output_dirs
     ]
     if args.json:
-        print(json.dumps(summaries, indent=2, sort_keys=True))
+        print(json.dumps(report(summaries), indent=2, sort_keys=True))
     else:
         print(render(summaries))
     return 0
