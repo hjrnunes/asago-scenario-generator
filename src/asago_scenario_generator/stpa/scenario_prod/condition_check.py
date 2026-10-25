@@ -101,6 +101,10 @@ class ConditionUniverse:
     operation_text: Mapping[str, str] = field(default_factory=dict)
     # Operation name -> the arguments its input schema requires.
     required_arguments: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # Operation name -> argument -> the JSON types its input schema declares.
+    argument_types: Mapping[str, Mapping[str, frozenset[str]]] = field(
+        default_factory=dict
+    )
 
     @property
     def grounded(self) -> bool:
@@ -154,6 +158,7 @@ def build_condition_universe(
     operations: dict[str, set[str]] = {}
     texts: dict[str, str] = {}
     required: dict[str, frozenset[str]] = {}
+    types: dict[str, dict[str, frozenset[str]]] = {}
     literals = _observed_literals(target_observations)
     if execution_target_profile is not None:
         for resource in execution_target_profile.resources:
@@ -167,6 +172,7 @@ def build_condition_universe(
                 required[operation.operation_id] = _required_arguments(
                     resource.input_schema
                 )
+                types[operation.operation_id] = _argument_types(resource.input_schema)
     elif target_operation is not None:
         names = operations.setdefault(target_operation.operation_id, set())
         names.update(target_operation.argument_names)
@@ -176,6 +182,9 @@ def build_condition_universe(
         required[target_operation.operation_id] = _required_arguments(
             target_operation.input_schema
         )
+        types[target_operation.operation_id] = _argument_types(
+            target_operation.input_schema
+        )
     return ConditionUniverse(
         operations={name: frozenset(args) for name, args in operations.items()},
         fact_values=target_observation_fact_values(target_observations),
@@ -183,11 +192,45 @@ def build_condition_universe(
         literal_values=frozenset(literals),
         operation_text=texts,
         required_arguments=required,
+        argument_types=types,
     )
 
 
 def _required_arguments(schema: Mapping[str, Any]) -> frozenset[str]:
     return frozenset(schema.get("required", ()))
+
+
+def _argument_types(schema: object) -> dict[str, frozenset[str]]:
+    """Map each schema property to the JSON types it declares.
+
+    A property's types come from its ``type`` and from the ``type`` of each
+    ``anyOf`` or ``oneOf`` branch. A property that declares none is left out:
+    its type is unknown, not "any".
+    """
+
+    properties = schema.get("properties") if isinstance(schema, Mapping) else None
+    types: dict[str, frozenset[str]] = {}
+    for name, prop in (properties or {}).items():
+        branches = [prop]
+        if isinstance(prop, Mapping):
+            branches += [*(prop.get("anyOf") or ()), *(prop.get("oneOf") or ())]
+        declared = {
+            item
+            for branch in branches
+            if isinstance(branch, Mapping)
+            for item in _declared_types(branch.get("type"))
+        }
+        if declared:
+            types[str(name)] = frozenset(declared)
+    return types
+
+
+def _declared_types(value: object) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [item for item in value if isinstance(item, str)]
+    return []
 
 
 def _observed_literals(
@@ -870,7 +913,7 @@ def _depends_on_unsafe_call(
     return False
 
 
-def _kind_mismatch(state: StateIndex, left: object, right: object) -> bool:
+def kind_mismatch(state: StateIndex, left: object, right: object) -> bool:
     """Return whether two strings are provably different kinds of value.
 
     Both must be ID-shaped with different prefixes, both must occur in the
@@ -908,11 +951,11 @@ def _mismatched_values(
     """Return the values of a kind mismatch, or None when there is none."""
 
     if op not in MEMBERSHIP_OPERATORS:
-        return [left, right] if _kind_mismatch(state, left, right) else None
+        return [left, right] if kind_mismatch(state, left, right) else None
     items = right if isinstance(right, list) else []
     if not items or not all(isinstance(item, str) for item in items):
         return None
-    if not all(_kind_mismatch(state, left, item) for item in items):
+    if not all(kind_mismatch(state, left, item) for item in items):
         return None
     return [left, *items]
 
@@ -1146,6 +1189,7 @@ __all__ = [
     "condition_fact_listing",
     "condition_findings",
     "condition_findings_message",
+    "kind_mismatch",
     "resolve_fact",
     "target_observation_fact_values",
 ]

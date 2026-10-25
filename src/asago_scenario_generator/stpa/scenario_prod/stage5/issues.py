@@ -47,6 +47,12 @@ class IssueCode(StrEnum):
         "discriminating_condition_polarity_inverted"
     )
     discriminating_condition_no_call = "discriminating_condition_no_call"
+    discriminating_condition_record_kind_mismatch = (
+        "discriminating_condition_record_kind_mismatch"
+    )
+    discriminating_condition_ordering_not_numeric = (
+        "discriminating_condition_ordering_not_numeric"
+    )
     safe_outcome_record_ref_not_supplied = "safe_outcome_record_ref_not_supplied"
     safe_outcome_fact_ref_not_supplied = "safe_outcome_fact_ref_not_supplied"
     safe_outcome_observability_mismatch = "safe_outcome_observability_mismatch"
@@ -66,6 +72,8 @@ CONDITION_FAILURE_CODES = (
     IssueCode.discriminating_condition_order_unscoped,
     IssueCode.discriminating_condition_polarity_inverted,
     IssueCode.discriminating_condition_no_call,
+    IssueCode.discriminating_condition_record_kind_mismatch,
+    IssueCode.discriminating_condition_ordering_not_numeric,
 )
 
 

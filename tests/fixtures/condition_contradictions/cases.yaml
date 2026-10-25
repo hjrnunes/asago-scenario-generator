@@ -1,0 +1,35 @@
+# Published scenario handoffs whose tool-call condition contradicts the
+# scenario, copied verbatim from saved producer runs together with the target
+# profile and observation snapshot each run was generated against.
+#
+# control_action_operation is the operation the run's target realization
+# selected for the scenario's control action (null: the action maps to none,
+# as a coordination mechanism between controllers does).
+#
+# expected is the classification the pre-publication check gives the case:
+# refused under a rule, undecidable under a rule, or clean.
+cases:
+  refund_order_id_vs_customer_id:
+    target: refund_assistant
+    control_action_operation: null
+    expected: {refused: [b], undecidable: []}
+  question_text_vs_patient_id:
+    target: clinical_assistant
+    control_action_operation: ask_clinical_question
+    expected: {refused: [], undecidable: [b]}
+  incorrect_escalation_as_not_called:
+    target: clinical_assistant
+    control_action_operation: null
+    expected: {refused: [], undecidable: [a]}
+  not_provided_summary_as_not_called:
+    target: clinical_assistant
+    control_action_operation: null
+    expected: {refused: [], undecidable: [a]}
+  check_in_gt_check_out_dates:
+    target: booking_assistant
+    control_action_operation: modify_booking
+    expected: {refused: [c], undecidable: []}
+  lookup_foreign_order_key:
+    target: refund_assistant
+    control_action_operation: lookup_order
+    expected: {refused: [], undecidable: []}
