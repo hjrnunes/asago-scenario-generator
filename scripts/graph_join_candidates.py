@@ -3,7 +3,7 @@
 
     uv run --frozen python scripts/graph_join_candidates.py \\
         --units-tsv UNITS.tsv [--unit LABEL PATH ...] --out-dir DIR \\
-        [--sample-size 30] [--seed 20261024] [--suffix=-v2]
+        [--sample-size 30] [--seed 20261024] [--suffix=-v2] [--authority-filter]
 
 Each unit is a label and a saved ``control-structure.yaml``. The TSV holds one
 ``label<TAB>path`` per line. Labels must be non-blank and unique; the script
@@ -31,6 +31,18 @@ unit order, then draws the rest uniformly from the remaining candidates of
 distinct structures. When more structures have candidates than the sample
 holds, the seeded generator chooses which structures give one. Every draw uses
 ``random.Random(seed)``.
+
+``--authority-filter`` runs ``mechanism_join`` instead: the candidates are the
+ones it keeps, sampled the same way, and the outputs add what kept or dropped
+each one. Every candidate row and sample row adds ``authority_status``
+(``unknown`` when ``authority_for_update`` is absent), ``authority_recorded``
+and ``reach_basis``; every unit adds the kept counts by authority (assessed:
+``non_authoritative`` or ``conditional``; unknown: recorded ``unknown`` or
+absent), the dropped counts by reason, the kept candidates the unfiltered join
+lacks, and its channels by authority value (``missing`` when absent): all of
+them, those whose ``source_kind`` is untrusted, and those that start a kept or
+an authoritative-dropped candidate. ``join-dropped.jsonl`` lists the dropped
+candidates. Without the flag every output is as before.
 """
 
 from __future__ import annotations
@@ -49,13 +61,19 @@ import yaml
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
+    FeedbackAuthorityStatus,
+    FeedbackChannel,
     Responsibility,
 )
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    DropReason,
+    KeptCandidate,
     MechanismCandidate,
+    MechanismJoin,
     StpaIndex,
     build_stpa_index,
     mechanism_candidates,
+    mechanism_join,
 )
 
 SMALL_UNIT = 5
@@ -74,6 +92,10 @@ class Unit:
     error: str | None = None
     candidates: tuple[MechanismCandidate, ...] = ()
     owners: dict[str, Responsibility] = field(default_factory=dict)
+    join: MechanismJoin | None = None
+    """The filtered join, when the script runs with ``--authority-filter``."""
+    unfiltered: tuple[MechanismCandidate, ...] = ()
+    """The unfiltered candidates, kept beside a filtered join for comparison."""
 
 
 def _read_tsv(path: Path) -> list[tuple[str, Path]]:
@@ -100,13 +122,15 @@ def _check_labels(specs: list[tuple[str, Path]]) -> None:
         seen[label] = index
 
 
-def load_units(specs: list[tuple[str, Path]]) -> list[Unit]:
+def load_units(
+    specs: list[tuple[str, Path]], *, authority_filter: bool = False
+) -> list[Unit]:
     """Load every unit, marking each byte-identical copy of an earlier one."""
     _check_labels(specs)
     first_by_digest: dict[str, int] = {}
     units = []
     for index, (label, path) in enumerate(specs):
-        unit = _load(index, label, path)
+        unit = _load(index, label, path, authority_filter)
         if unit.digest is not None:
             first = first_by_digest.setdefault(unit.digest, index)
             unit.duplicate_of = None if first == index else first
@@ -114,7 +138,7 @@ def load_units(specs: list[tuple[str, Path]]) -> list[Unit]:
     return units
 
 
-def _load(index: int, label: str, path: Path) -> Unit:
+def _load(index: int, label: str, path: Path, authority_filter: bool = False) -> Unit:
     unit = Unit(index, label, path)
     try:
         raw = path.read_bytes()
@@ -129,6 +153,10 @@ def _load(index: int, label: str, path: Path) -> Unit:
         return unit
     unit.structure = structure
     unit.candidates = mechanism_candidates(structure)
+    if authority_filter:
+        unit.join = mechanism_join(structure)
+        unit.unfiltered = unit.candidates
+        unit.candidates = tuple(item.candidate for item in unit.join.kept)
     unit.owners = _owners(structure)
     return unit
 
@@ -178,7 +206,56 @@ def _unit_counts(unit: Unit, units: list[Unit]) -> dict[str, Any]:
         untrusted_feedback_channels=sum(channel.untrusted for channel in channels),
         coordination_links=len(unit.structure.coordination_links),
     )
+    if unit.join is not None:
+        row.update(_filter_counts(unit, channels))
     return row
+
+
+_AUTHORITY_VALUES = (*(status.value for status in FeedbackAuthorityStatus), "missing")
+
+
+def _channel_authority(channel: FeedbackChannel) -> str:
+    if channel.authority_for_update is None:
+        return "missing"
+    return channel.authority_for_update.status.value
+
+
+def _by_authority(channels: list[FeedbackChannel]) -> dict[str, int]:
+    counts = Counter(_channel_authority(channel) for channel in channels)
+    return {value: counts[value] for value in _AUTHORITY_VALUES}
+
+
+def _filter_counts(unit: Unit, channels: list[FeedbackChannel]) -> dict[str, Any]:
+    assert unit.join is not None
+    kept, dropped = unit.join.kept, unit.join.dropped
+    joined = {item.candidate.path[0] for item in kept} | {
+        item.candidate.path[0]
+        for item in dropped
+        if item.reason is DropReason.authoritative
+    }
+    unfiltered = set(unit.unfiltered)
+    return {
+        "unfiltered_candidates": len(unit.unfiltered),
+        "kept_assessed": sum(item.authority_assessed for item in kept),
+        "kept_unknown": sum(not item.authority_assessed for item in kept),
+        "kept_unknown_missing": sum(not item.authority_recorded for item in kept),
+        "kept_by_authority": dict(Counter(item.authority.value for item in kept)),
+        "kept_by_reach": dict(Counter(item.reach.value for item in kept)),
+        "kept_not_unfiltered": sum(item.candidate not in unfiltered for item in kept),
+        "dropped": len(dropped),
+        "dropped_by_reason": {
+            reason.value: sum(item.reason is reason for item in dropped)
+            for reason in DropReason
+        },
+        "channel_authority": _by_authority(channels),
+        "untrusted_channel_authority": _by_authority(
+            [channel for channel in channels if channel.untrusted]
+        ),
+        "joined_channels": len(joined),
+        "joined_channel_authority": _by_authority(
+            [channel for channel in channels if channel.fb_id in joined]
+        ),
+    }
 
 
 def _via_link(candidate: MechanismCandidate) -> bool:
@@ -276,9 +353,27 @@ def _judging_record(unit: Unit, candidate: MechanismCandidate) -> dict[str, Any]
             "target": _element(index, action.target),
             "controller": _responsibility(unit.owners.get(end_id)),
         }
+    row.update(_filter_fields(unit, candidate))
     row["label"] = ""
     row["note"] = ""
     return row
+
+
+def _kept(unit: Unit, candidate: MechanismCandidate) -> KeptCandidate | None:
+    if unit.join is None:
+        return None
+    return next(item for item in unit.join.kept if item.candidate == candidate)
+
+
+def _filter_fields(unit: Unit, candidate: MechanismCandidate) -> dict[str, Any]:
+    kept = _kept(unit, candidate)
+    if kept is None:
+        return {}
+    return {
+        "authority_status": kept.authority.value,
+        "authority_recorded": kept.authority_recorded,
+        "reach_basis": kept.reach.value,
+    }
 
 
 def _sample(
@@ -358,11 +453,50 @@ def _summary(
             f"| {paths['min']} / {paths['median']} / {paths['max']} "
             f"| {paths[share]:.0%} | {aggregate['units_with_no_candidate']} |"
         )
+    lines += _filter_summary(rows)
     unloadable = [row for row in rows if not row["loaded"]]
     lines += ["", f"Unloadable files: {len(unloadable)}."]
     lines += [f"- {row['label']} ({row['path']}): {row['error']}" for row in unloadable]
     lines += ["", sample_note, ""]
     return "\n".join(lines)
+
+
+def _slashed(counts: dict[str, int]) -> str:
+    return " / ".join(str(count) for count in counts.values())
+
+
+def _filter_summary(rows: list[dict[str, Any]]) -> list[str]:
+    filtered = [row for row in rows if "unfiltered_candidates" in row]
+    if not filtered:
+        return []
+    statuses = " / ".join(_AUTHORITY_VALUES)
+    lines = [
+        "",
+        "Authority filter: kept candidates whose authority is assessed"
+        " (non_authoritative or conditional) or unknown (recorded unknown, or"
+        " missing); dropped candidates by reason. Channels counts every"
+        f" channel by authority ({statuses}); untrusted counts the channels"
+        " whose source_kind is untrusted; joined counts the channels that"
+        " start a kept or an authoritative-dropped candidate.",
+        "",
+        "| Unit | Unfiltered | Kept | Assessed | Unknown (missing) | Not unfiltered "
+        "| Dropped authoritative | Dropped own controller "
+        f"| Channels {statuses} | Untrusted {statuses} | Joined {statuses} |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+    ]
+    for row in filtered:
+        reasons = row["dropped_by_reason"]
+        lines.append(
+            f"| {row['label']} | {row['unfiltered_candidates']} "
+            f"| {row['candidates']} | {row['kept_assessed']} "
+            f"| {row['kept_unknown']} ({row['kept_unknown_missing']}) "
+            f"| {row['kept_not_unfiltered']} | {reasons['authoritative']} "
+            f"| {reasons['own_controller']} "
+            f"| {_slashed(row['channel_authority'])} "
+            f"| {_slashed(row['untrusted_channel_authority'])} "
+            f"| {_slashed(row['joined_channel_authority'])} |"
+        )
+    return lines
 
 
 def main() -> None:
@@ -375,6 +509,11 @@ def main() -> None:
     parser.add_argument("--sample-size", type=int, default=30)
     parser.add_argument("--seed", type=int, default=20261024)
     parser.add_argument("--suffix", default="", help="added to every output name")
+    parser.add_argument(
+        "--authority-filter",
+        action="store_true",
+        help="run the join that drops authoritative and controller-sourced channels",
+    )
     args = parser.parse_args()
 
     specs = [item for tsv in args.units_tsv for item in _read_tsv(tsv)]
@@ -382,7 +521,7 @@ def main() -> None:
     if not specs:
         parser.error("give --units-tsv or --unit")
 
-    units = load_units(specs)
+    units = load_units(specs, authority_filter=args.authority_filter)
     rows = [_unit_counts(unit, units) for unit in units]
     loaded = [row for row in rows if row["loaded"]]
     aggregates = {
@@ -432,11 +571,30 @@ def main() -> None:
                 "duplicate_of": _duplicate_label(unit, units),
                 "mechanism": candidate.mechanism,
                 "path": list(candidate.path),
+                **_filter_fields(unit, candidate),
             }
             for unit in units
             for candidate in unit.candidates
         ],
     )
+    if args.authority_filter:
+        _write_jsonl(
+            out / f"join-dropped{args.suffix}.jsonl",
+            [
+                {
+                    "unit": unit.label,
+                    "file": str(unit.path),
+                    "sha256": unit.digest,
+                    "duplicate_of": _duplicate_label(unit, units),
+                    "mechanism": item.candidate.mechanism,
+                    "path": list(item.candidate.path),
+                    "reason": item.reason.value,
+                }
+                for unit in units
+                if unit.join is not None
+                for item in unit.join.dropped
+            ],
+        )
     counts = {
         "small_unit_threshold": SMALL_UNIT,
         "units": rows,

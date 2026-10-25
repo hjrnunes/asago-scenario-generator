@@ -216,3 +216,71 @@ def test_link_record_names_the_link_target_as_receiver(tmp_path: Path) -> None:
         assert link["source"]["resp_id"] == "RESP-1"
         assert link["receiving_controller"]["resp_id"] == "RESP-2"
         assert row["control_action"] is None
+
+
+def _authority_structure() -> dict:
+    """User-message channels (assessed, absent, authoritative) and an own check."""
+    data = _structure("user_message")
+    first = data["responsibilities"][0]
+    first["process_model_parts"] += [
+        {"pm_id": "PM-1-2", "description": "Claim"},
+        {"pm_id": "PM-1-3", "description": "Own check"},
+    ]
+    first["control_actions"][0]["process_model_refs"] += ["PM-1-2", "PM-1-3"]
+    channel = first["feedback_channels"][0]
+    channel["authority_for_update"] = {
+        "status": "non_authoritative",
+        "basis": "The user may not set it.",
+    }
+    first["feedback_channels"] += [
+        {**channel, "fb_id": "FB-1-2", "updates": "PM-1-2"},
+        {
+            **channel,
+            "fb_id": "FB-1-3",
+            "updates": "PM-1-3",
+            "source": {"type": "responsibility", "id": "RESP-1"},
+            "source_kind": "conversation_history",
+        },
+    ]
+    del first["feedback_channels"][1]["authority_for_update"]
+    first["feedback_channels"].append(
+        {
+            **channel,
+            "fb_id": "FB-1-4",
+            "updates": "PM-1-1",
+            "authority_for_update": {"status": "authoritative", "basis": "Backend."},
+        }
+    )
+    return data
+
+
+def test_authority_filter_counts_kept_and_dropped(tmp_path: Path) -> None:
+    path = tmp_path / "authority.yaml"
+    path.write_text(yaml.safe_dump(_authority_structure()))
+    script = _script()
+
+    (plain,) = script.load_units([("u", path)])
+    (unit,) = script.load_units([("u", path)], authority_filter=True)
+    plain_row = script._unit_counts(plain, [plain])
+    row = script._unit_counts(unit, [unit])
+
+    assert plain.join is None and "unfiltered_candidates" not in plain_row
+    assert [item.path[0] for item in unit.candidates] == ["FB-1-1", "FB-1-2"]
+    assert unit.unfiltered == plain.candidates
+    assert row["candidates"] == 2 and row["unfiltered_candidates"] == 4
+    assert (row["kept_assessed"], row["kept_unknown"]) == (1, 1)
+    assert row["kept_unknown_missing"] == 1
+    assert row["dropped_by_reason"] == {"authoritative": 1, "own_controller": 1}
+    assert row["channel_authority"] == {
+        "authoritative": 1,
+        "non_authoritative": 2,
+        "conditional": 0,
+        "unknown": 0,
+        "missing": 1,
+    }
+    assert row["joined_channels"] == 3
+    record = script._judging_record(unit, unit.candidates[1])
+    assert record["authority_status"] == "unknown"
+    assert record["authority_recorded"] is False
+    assert record["reach_basis"] == "source_kind"
+    assert "authority_status" not in script._judging_record(plain, plain.candidates[0])
