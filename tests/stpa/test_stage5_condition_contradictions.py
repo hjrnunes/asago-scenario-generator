@@ -568,7 +568,6 @@ def _ordering_universe(schema: dict) -> ConditionUniverse:
     [
         ({"type": "boolean"}, "declares ref as boolean"),
         ({"type": ["object", "null"]}, "declares ref as null or object"),
-        ({"type": "string", "format": "date"}, "declares ref as string of format date"),
         (
             {"type": "string", "pattern": "^RES-[0-9]+$"},
             "declares ref as string matching the pattern ^RES-[0-9]+$",
@@ -579,8 +578,9 @@ def _ordering_universe(schema: dict) -> ConditionUniverse:
         ),
         ({"const": "open"}, 'restricts ref to ["open"]'),
         (
-            {"anyOf": [{"type": "boolean"}, {"type": "string", "format": "uuid"}]},
-            "declares ref as boolean or declares ref as string of format uuid",
+            {"anyOf": [{"type": "boolean"}, {"type": "string", "pattern": "^R-"}]},
+            "declares ref as boolean or declares ref as string matching the "
+            "pattern ^R-",
         ),
     ],
 )
@@ -612,6 +612,15 @@ def test_ordering_an_argument_its_schema_keeps_from_numbers_is_refused(
         {"anyOf": [{"type": "boolean"}, {"type": "string"}]},
         {"type": "string", "enum": ["low", "10"]},
         {"type": "string", "format": "hostname"},
+        {"type": "string", "format": "date"},
+        {"type": "string", "format": "date-time"},
+        {"type": "string", "format": "uuid"},
+        {"anyOf": [{"type": "boolean"}, {"type": "string", "format": "uuid"}]},
+        {"type": ["number", "null"]},
+        {"type": ["integer", "null"]},
+        {"anyOf": [{"type": "number"}, {"type": "null"}]},
+        {"enum": [1, None]},
+        {"enum": [1, True]},
         {"type": "string", "pattern": "^[A-Z]+$"},
         {"type": "string", "pattern": "^\\d+$"},
         {"type": "string", "pattern": "^R?\\d+$"},
@@ -625,6 +634,56 @@ def test_ordering_an_argument_its_schema_leaves_open_is_undecidable(schema) -> N
     result = _judged(_ordering(), _ordering_universe(schema))
 
     assert _rules(result) == ([], ["c"])
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": "integer"},
+        {"type": ["number", "integer"]},
+        {"anyOf": [{"type": "number"}, {"type": "integer"}]},
+        {"type": "string", "enum": ["10", "20"]},
+        {"const": "5"},
+        {"enum": [1, "2.5", " 7 "]},
+        {"type": ["number", "null"], "enum": [1, 2]},
+        {"type": "string", "format": "date", "enum": ["1", "2"]},
+    ],
+)
+def test_ordering_an_argument_its_schema_keeps_to_numbers_passes(schema) -> None:
+    # An enum or const of numeric strings admits only numbers under v1, and
+    # one that leaves out null proves a nullable type non-null.
+    assert _rules(_judged(_ordering(), _ordering_universe(schema))) == ([], [])
+
+
+def test_a_format_alone_proves_no_date_and_is_undecidable() -> None:
+    universe = _ordering_universe({"type": "string", "format": "date"})
+
+    result = _judged(_ordering(), universe)
+
+    assert result.refused == ()
+    assert [item.detail for item in result.undecidable] == [
+        "comparisons[0] binds refund_payment.ref gt 5: the input schema of "
+        "refund_payment declares ref as string of format date, which JSON "
+        "Schema only annotates, and tool-call-condition-v1 orders a string "
+        "only when float() accepts its whole text; nothing typed says whether "
+        "the values passed are such text, so whether the comparison can hold "
+        "is unknown"
+    ]
+
+
+def test_ordering_a_nullable_number_is_undecidable() -> None:
+    universe = _ordering_universe({"type": ["number", "null"]})
+
+    result = _judged(_ordering(), universe)
+
+    assert result.refused == ()
+    assert [item.detail for item in result.undecidable] == [
+        "comparisons[0] binds refund_payment.ref gt 5: the input schema of "
+        "refund_payment declares ref as null or number, and "
+        "tool-call-condition-v1 never orders null; nothing typed says whether "
+        "the values passed are numbers, so whether the comparison can hold is "
+        "unknown"
+    ]
 
 
 def test_ordering_a_plain_string_argument_states_why_it_is_undecidable() -> None:
@@ -733,6 +792,169 @@ def test_ordering_by_a_numeric_string_literal_passes(literal) -> None:
     )
 
     assert _rules(result) == ([], [])
+
+
+# -- two argument operands ---------------------------------------------------------
+
+
+def _arguments_condition(op: str) -> dict:
+    """refund_payment's ``total`` compared with lookup_order's ``total``."""
+
+    condition = _value_condition(op, 0, argument="total")
+    condition["comparisons"][0]["right"] = {
+        "source": "argument",
+        "operation": "lookup_order",
+        "argument": "total",
+    }
+    return condition
+
+
+def _arguments_universe(left: dict | None, right: dict | None) -> ConditionUniverse:
+    """Each side's schema on its own operation; ``None`` leaves it out."""
+
+    return _with_schemas(
+        {
+            "refund_payment": {} if left is None else {"total": left},
+            "lookup_order": {} if right is None else {"total": right},
+        }
+    )
+
+
+@pytest.mark.parametrize(
+    ("op", "consequence"),
+    [
+        (
+            "eq",
+            "the comparison holds on no call and the condition never detects "
+            "the unsafe call",
+        ),
+        (
+            "ne",
+            "the comparison holds on every call and the condition fires on the "
+            "safe call as well",
+        ),
+    ],
+)
+def test_two_arguments_of_disjoint_declared_types_are_refused(op, consequence) -> None:
+    universe = _arguments_universe({"type": "string"}, {"type": ["number", "boolean"]})
+
+    findings = _findings(_arguments_condition(op), universe)
+
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_record_kind_mismatch
+    ]
+    assert findings[0].detail == (
+        f"comparisons[0] binds refund_payment.total {op} lookup_order.total in "
+        "the tool-call condition, but the input schema of refund_payment "
+        "declares total as string and the input schema of lookup_order "
+        "declares total as boolean or number; tool-call-condition-v1 never "
+        f"converts a value for {op}, so no value of one equals a value of the "
+        f"other and {consequence}. Compare total with an argument or a "
+        "supplied value of type string"
+    )
+
+
+@pytest.mark.parametrize(
+    ("left", "right"),
+    [
+        # v1 equality: an integer equals a number of the same value.
+        ({"type": "integer"}, {"type": "number"}),
+        ({"type": "string"}, {"type": "string"}),
+        # Both nullable: two null values are equal.
+        ({"type": ["string", "null"]}, {"type": ["number", "null"]}),
+        ({"type": "string"}, {"anyOf": [{"type": "number"}, {"type": "string"}]}),
+        ({"type": "string"}, {"title": "untyped"}),
+        ({"type": "number"}, None),
+    ],
+)
+def test_two_arguments_the_schemas_do_not_set_apart_are_undecidable(
+    left, right
+) -> None:
+    result = _judged(_arguments_condition("eq"), _arguments_universe(left, right))
+
+    assert _rules(result) == ([], ["b"])
+
+
+def test_two_arguments_of_a_common_type_state_why_they_are_undecidable() -> None:
+    universe = _arguments_universe({"type": "integer"}, {"type": "number"})
+
+    result = _judged(_arguments_condition("eq"), universe)
+
+    assert [item.detail for item in result.undecidable] == [
+        "comparisons[0] binds refund_payment.total eq lookup_order.total: the "
+        "input schema of refund_payment declares total as integer and the input "
+        "schema of lookup_order declares total as number, so both admit number, "
+        "but nothing typed says whether the two arguments take the same kind of "
+        "value, so whether the comparison separates the unsafe call is unknown"
+    ]
+
+
+def test_two_arguments_without_a_declared_type_state_why_they_are_undecidable() -> None:
+    result = _judged(
+        _arguments_condition("ne"), _arguments_universe({"type": "number"}, None)
+    )
+
+    assert [item.detail for item in result.undecidable] == [
+        "comparisons[0] binds refund_payment.total ne lookup_order.total: the "
+        "input schema of refund_payment declares total as number and the input "
+        "schema of lookup_order declares no type for total, so whether the two "
+        "arguments can take equal values is unknown"
+    ]
+
+
+@pytest.mark.parametrize("op", ["in", "not_in"])
+def test_membership_in_another_arguments_list_is_undecidable(op) -> None:
+    universe = _arguments_universe({"type": "string"}, {"type": "boolean"})
+
+    result = _judged(_arguments_condition(op), universe)
+
+    assert result.refused == ()
+    assert [item.detail for item in result.undecidable] == [
+        f"comparisons[0] binds refund_payment.total {op} lookup_order.total: "
+        "tool-call-condition-v1 tests whether a value of refund_payment.total is "
+        "a member of the list lookup_order.total passes, and the check compares "
+        "no element types of a list argument, so whether refund_payment.total "
+        "can be a member is unknown"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("left", "right", "expected"),
+    [
+        ({"type": "number"}, {"type": "integer"}, ([], [])),
+        ({"type": "number"}, {"type": "string", "enum": ["10", "20"]}, ([], [])),
+        ({"type": "number"}, {"type": "boolean"}, (["c"], [])),
+        ({"type": "boolean"}, {"type": "number"}, (["c"], [])),
+        ({"type": "string"}, {"type": "boolean"}, (["c"], [])),
+        ({"type": "number"}, {"type": "string"}, ([], ["c"])),
+        ({"type": "number"}, {"type": ["number", "null"]}, ([], ["c"])),
+        ({"type": "number"}, {"type": "string", "format": "date"}, ([], ["c"])),
+        ({"type": "number"}, None, ([], ["c"])),
+    ],
+)
+def test_ordering_two_arguments_reads_both_schemas(left, right, expected) -> None:
+    # Ordering converts numeric strings, so a declared type mismatch is not a
+    # rule (b) case: only rule (c) judges it, from each side's own schema.
+    result = _judged(_arguments_condition("lt"), _arguments_universe(left, right))
+
+    assert _rules(result) == expected
+
+
+def test_ordering_two_open_arguments_states_each_reason() -> None:
+    universe = _arguments_universe({"type": "string"}, {"type": ["integer", "null"]})
+
+    result = _judged(_arguments_condition("ge"), universe)
+
+    assert [item.detail for item in result.undecidable] == [
+        "comparisons[0] binds refund_payment.total ge lookup_order.total: the "
+        "input schema of refund_payment declares total as string; the input "
+        "schema of lookup_order declares total as integer or null, and "
+        "tool-call-condition-v1 orders a string only when float() accepts its "
+        "whole text; nothing typed says whether the values passed are such "
+        "text; and tool-call-condition-v1 never orders null; nothing typed says "
+        "whether the values passed are numbers, so whether the comparison can "
+        "hold is unknown"
+    ]
 
 
 # -- wiring -----------------------------------------------------------------------

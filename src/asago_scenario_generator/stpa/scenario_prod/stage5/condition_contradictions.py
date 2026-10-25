@@ -24,15 +24,21 @@ is reported undecidable, never refused.
   undecidable: an identifier literal of another kind than the values reads of
   that operation passed, or than the values reads of another operation passed
   for an argument of the same name, or an identifier literal compared with
-  an argument no read passed and whose schema admits a string.
+  an argument no read passed and whose schema admits a string. Two compared
+  arguments are judged each by the schema of its own operation: ``eq`` or
+  ``ne`` is refused when the two admit no common JSON type, and is otherwise
+  undecidable, as is membership of one argument in another's list.
 - (c) Ordering needs numbers. ``tool-call-condition-v1`` orders only
   numbers, converting a string that ``float()`` accepts. ``gt``, ``ge``,
   ``lt``, or ``le`` is refused when a literal is not a number under that
   conversion, or when the input schema of an argument's own operation admits
   no number and no numeric string: no numeric type and no string, an
-  ``enum`` or ``const`` of non-numbers, or a string ``format`` or ``pattern``
-  that no number matches. A string or untyped argument the schema leaves open
-  is undecidable.
+  ``enum`` or ``const`` of non-numbers, or a string ``pattern`` that no
+  number matches. A side is clean only when its schema admits numbers alone:
+  a numeric type without ``null``, or an ``enum`` or ``const`` of numbers or
+  numeric strings. Any other side is undecidable: a string, a nullable
+  number, or an untyped argument; a ``format`` only annotates, so it proves
+  nothing.
 
 A refusal is a Stage 5 validation failure, corrected through the existing
 correction request. Undecidable cases are reported only: in the run's
@@ -74,8 +80,6 @@ from .issues import IssueCode
 Rule = Literal["a", "b", "c"]
 
 _NUMERIC_TYPES = frozenset({"number", "integer"})
-# String formats whose every valid value fails ``float()``.
-_NON_NUMERIC_FORMATS = frozenset({"date", "date-time", "time", "email", "uuid"})
 _REGEX_SPECIAL = frozenset("\\^$.|?*+()[]{}")
 # The first characters of a text ``float()`` accepts, besides digits and spaces.
 _NUMBER_STARTS = frozenset("+-.iInN")
@@ -281,6 +285,10 @@ def _bound_contradictions(
                 equality = _value_equality(labels[index], comparison)
                 if equality is not None:
                     results.append(_kinds(equality, universe, state))
+                else:
+                    pair = _argument_pair(labels[index], comparison, universe)
+                    if pair is not None:
+                        results.append(pair)
         elif isinstance(comparison, ToolCallNotCalledComparison):
             for position, item in enumerate(comparison.where):
                 equality = _Equality(
@@ -551,23 +559,21 @@ def _ordering(
     """Apply rule (c): every side of an ordering must be a number under v1."""
 
     reasons: list[str] = []
-    open_sides: dict[str, list[tuple[str, frozenset[str] | None]]] = {}
+    open_sides: dict[str, list[tuple[str, object]]] = {}
     for side in (comparison.left, comparison.right):
         if isinstance(side, ToolCallLiteralOperand):
             if numeric_value(side.value) is None:
                 reasons.append(f"the literal {_render(side.value)} is not a number")
             continue
         schema = _argument_schema(universe, side)
-        reason = _non_numeric_reason(schema, side.argument)
-        if reason is not None:
+        facts = _number_facts(schema, side.argument)
+        if facts.proof == "not_number":
             reasons.append(
-                f"the input schema of {side.operation} {reason}, so no value it "
-                "admits is a number"
+                f"the input schema of {side.operation} {facts.reason}, so no value "
+                "it admits is a number"
             )
-            continue
-        types = _schema_types(schema)
-        if types is None or not (types - {"null"}) <= _NUMERIC_TYPES:
-            open_sides.setdefault(side.operation, []).append((side.argument, types))
+        elif facts.proof == "open":
+            open_sides.setdefault(side.operation, []).append((side.argument, schema))
     call = _comparison_text(comparison)
     if reasons:
         return (
@@ -584,24 +590,138 @@ def _ordering(
             None,
         )
     if open_sides:
-        declared = "; ".join(
-            f"the input schema of {operation} declares "
-            + " and ".join(
-                f"{argument} as {' or '.join(sorted(types))}"
-                if types
-                else f"no type for {argument}"
-                for argument, types in items
-            )
-            for operation, items in open_sides.items()
-        )
-        return None, RuleFinding(
-            "c",
-            f"{label} binds {call}: {declared}, and tool-call-condition-v1 orders "
-            "a string only when float() accepts its whole text; nothing typed "
-            "says whether the values passed are such text, so whether the "
-            "comparison can hold is unknown",
-        )
+        return None, _ordering_open(label, call, open_sides)
     return None, None
+
+
+def _ordering_open(
+    label: str, call: str, open_sides: Mapping[str, list[tuple[str, object]]]
+) -> RuleFinding:
+    """Report an ordering whose argument schemas prove neither way."""
+
+    declared = "; ".join(
+        f"the input schema of {operation} declares "
+        + " and ".join(_open_text(argument, schema) for argument, schema in items)
+        for operation, items in open_sides.items()
+    )
+    sides = [
+        _schema_types(schema) for items in open_sides.values() for _, schema in items
+    ]
+    text = any(types is None or "string" in types for types in sides)
+    others = sorted(
+        {
+            name
+            for types in sides
+            if types is not None and "string" not in types
+            for name in types - _NUMERIC_TYPES
+        }
+    )
+    clauses = []
+    if text or not others:
+        clauses.append(
+            "tool-call-condition-v1 orders a string only when float() accepts its "
+            "whole text; nothing typed says whether the values passed are such text"
+        )
+    if others:
+        clauses.append(
+            f"tool-call-condition-v1 never orders {' or '.join(others)}; nothing "
+            "typed says whether the values passed are numbers"
+        )
+    return RuleFinding(
+        "c",
+        f"{label} binds {call}: {declared}, and {'; and '.join(clauses)}, so "
+        "whether the comparison can hold is unknown",
+    )
+
+
+def _open_text(argument: str, schema: object) -> str:
+    types = _schema_types(schema)
+    if not types:
+        return f"no type for {argument}"
+    text = f"{argument} as {' or '.join(sorted(types))}"
+    text_format = schema.get("format") if isinstance(schema, Mapping) else None
+    if isinstance(text_format, str):
+        text += f" of format {text_format}, which JSON Schema only annotates"
+    return text
+
+
+def _argument_pair(
+    label: str, comparison: ToolCallValueComparison, universe: ConditionUniverse
+) -> tuple[RuleFinding | None, RuleFinding | None] | None:
+    """Apply rule (b) to two compared arguments, each by its own operation's schema.
+
+    Returns ``None`` when a side is not an argument. ``eq`` and ``ne`` are
+    refused only when the two schemas admit no common JSON type, so no value
+    of one ever equals a value of the other; anything else is undecidable,
+    since no schema says that two arguments take the same kind of record.
+    """
+
+    left, right = comparison.left, comparison.right
+    if not isinstance(left, ToolCallArgumentOperand) or not isinstance(
+        right, ToolCallArgumentOperand
+    ):
+        return None
+    call = _comparison_text(comparison)
+    left_name = _operand_text(left)
+    right_name = _operand_text(right)
+    if comparison.op in MEMBERSHIP_OPERATORS:
+        return None, RuleFinding(
+            "b",
+            f"{label} binds {call}: tool-call-condition-v1 tests whether a value "
+            f"of {left_name} is a member of the list {right_name} passes, and "
+            "the check compares no element types of a list argument, so whether "
+            f"{left_name} can be a member is unknown",
+        )
+    left_types = _schema_types(_argument_schema(universe, left))
+    right_types = _schema_types(_argument_schema(universe, right))
+    declared = f"{_declares(left, left_types)} and {_declares(right, right_types)}"
+    if left_types is None or right_types is None:
+        return None, RuleFinding(
+            "b",
+            f"{label} binds {call}: {declared}, so whether the two arguments "
+            "can take equal values is unknown",
+        )
+    common = _equality_classes(left_types) & _equality_classes(right_types)
+    if not common:
+        consequence = _NEVER_HOLDS if comparison.op == "eq" else _ALWAYS_HOLDS
+        return (
+            RuleFinding(
+                "b",
+                f"{label} binds {call} in the tool-call condition, but "
+                f"{declared}; tool-call-condition-v1 never converts a value for "
+                f"{comparison.op}, so no value of one equals a value of the "
+                f"other and {consequence}. Compare {left.argument} with an "
+                "argument or a supplied value of type "
+                f"{' or '.join(sorted(left_types))}",
+                IssueCode.discriminating_condition_record_kind_mismatch,
+            ),
+            None,
+        )
+    return None, RuleFinding(
+        "b",
+        f"{label} binds {call}: {declared}, so both admit "
+        f"{' or '.join(sorted(common))}, but nothing typed says whether the two "
+        "arguments take the same kind of value, so whether the comparison "
+        "separates the unsafe call is unknown",
+    )
+
+
+def _declares(argument: ToolCallArgumentOperand, types: frozenset[str] | None) -> str:
+    if types is None:
+        return (
+            f"the input schema of {argument.operation} declares no type for "
+            f"{argument.argument}"
+        )
+    return (
+        f"the input schema of {argument.operation} declares {argument.argument} "
+        f"as {' or '.join(sorted(types))}"
+    )
+
+
+def _equality_classes(types: frozenset[str]) -> frozenset[str]:
+    """Return the JSON types v1 equality tells apart: an integer equals a number."""
+
+    return frozenset("number" if name == "integer" else name for name in types)
 
 
 def _argument_schema(
@@ -637,40 +757,89 @@ def _schema_types(schema: object) -> frozenset[str] | None:
     return None
 
 
-def _non_numeric_reason(schema: object, name: str) -> str | None:
-    """Say how a schema admits no number and no numeric string, else ``None``."""
+@dataclass(frozen=True)
+class _NumberFacts:
+    """What a schema proves about its values under the v1 number conversion.
+
+    ``proof`` is ``number`` when every value it admits is a number,
+    ``not_number`` when none is (``reason`` then says how), and ``open``
+    otherwise.
+    """
+
+    proof: Literal["number", "not_number", "open"]
+    reason: str = ""
+
+
+_OPEN = _NumberFacts("open")
+
+
+def _number_facts(schema: object, name: str) -> _NumberFacts:
+    """Prove that every value a schema admits is a number under v1, or that none is.
+
+    ``enum`` or ``const``, ``type`` with ``pattern``, and the ``anyOf`` or
+    ``oneOf`` branches each constrain every value, so one that proves no
+    number decides, then one that proves only numbers. ``null`` is not a
+    number, so a nullable numeric type proves neither; ``format`` is only an
+    annotation, so it proves nothing.
+    """
 
     if not isinstance(schema, Mapping):
-        return None
+        return _OPEN
+    facts = (
+        _enumerated_facts(schema, name),
+        _type_facts(schema, name),
+        _branch_facts(schema, name),
+    )
+    for proof in ("not_number", "number"):
+        for item in facts:
+            if item.proof == proof:
+                return item
+    return _OPEN
+
+
+def _enumerated_facts(schema: Mapping[str, Any], name: str) -> _NumberFacts:
     values = _enumerated(schema)
-    if values is not None and all(numeric_value(value) is None for value in values):
-        return f"restricts {name} to {_render(list(values))}"
-    declared = _type_names(schema.get("type"))
-    if declared and not set(declared) & _NUMERIC_TYPES:
-        types = " or ".join(sorted(declared))
-        if "string" not in declared:
-            return f"declares {name} as {types}"
-        text = _non_numeric_text(schema)
-        if text is not None:
-            return f"declares {name} as {types} {text}"
-    branches = schema.get("anyOf") or schema.get("oneOf")
-    if isinstance(branches, list) and branches:
-        reasons = [_non_numeric_reason(branch, name) for branch in branches]
-        if all(reasons):
-            return " or ".join(item for item in reasons if item)
-    return None
+    if values is None:
+        return _OPEN
+    numbers = [numeric_value(value) is not None for value in values]
+    if all(numbers):
+        return _NumberFacts("number")
+    if not any(numbers):
+        return _NumberFacts(
+            "not_number", f"restricts {name} to {_render(list(values))}"
+        )
+    return _OPEN
 
 
-def _non_numeric_text(schema: Mapping[str, Any]) -> str | None:
-    """Say which string constraint no numeric text meets, else ``None``."""
-
-    text_format = schema.get("format")
-    if text_format in _NON_NUMERIC_FORMATS:
-        return f"of format {text_format}"
+def _type_facts(schema: Mapping[str, Any], name: str) -> _NumberFacts:
+    declared = set(_type_names(schema.get("type")))
+    if not declared:
+        return _OPEN
+    if declared <= _NUMERIC_TYPES:
+        return _NumberFacts("number")
+    if declared & _NUMERIC_TYPES:
+        return _OPEN
+    types = " or ".join(sorted(declared))
+    if "string" not in declared:
+        return _NumberFacts("not_number", f"declares {name} as {types}")
     pattern = schema.get("pattern")
     if _pattern_excludes_numbers(pattern):
-        return f"matching the pattern {pattern}"
-    return None
+        return _NumberFacts(
+            "not_number", f"declares {name} as {types} matching the pattern {pattern}"
+        )
+    return _OPEN
+
+
+def _branch_facts(schema: Mapping[str, Any], name: str) -> _NumberFacts:
+    branches = schema.get("anyOf") or schema.get("oneOf")
+    if not isinstance(branches, list) or not branches:
+        return _OPEN
+    facts = [_number_facts(branch, name) for branch in branches]
+    if all(item.proof == "number" for item in facts):
+        return _NumberFacts("number")
+    if all(item.proof == "not_number" for item in facts):
+        return _NumberFacts("not_number", " or ".join(item.reason for item in facts))
+    return _OPEN
 
 
 def _pattern_excludes_numbers(pattern: object) -> bool:
