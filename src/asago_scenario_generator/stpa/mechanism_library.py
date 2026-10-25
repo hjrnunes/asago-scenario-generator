@@ -21,20 +21,30 @@ An entry records:
 A judgement of a path against an entry reads the signature to decide whether
 the path's structure fits, then the evidence and counterexamples to decide
 whether its descriptions do.
+
+:class:`PatternMechanismRelation` links attack patterns to the mechanisms they
+realize, in ``data/taxonomies/mappings/attack-pattern-to-mechanism.yaml``.
+The relation is many to many.  Each link pins the pattern's chain semantic
+digest, so a revised pattern needs its link reviewed again, and the file
+carries the semantic digest of its own content, which loading checks.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import StrEnum
 from functools import cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, ClassVar, Literal
 
 from pydantic import Field, field_validator, model_validator
 import yaml
 
 from asago_scenario_generator.data.paths import DATA_ROOT
-from asago_scenario_generator.models.canonical import ClosedCanonicalModel
+from asago_scenario_generator.models.canonical import (
+    ClosedCanonicalModel,
+    SemanticDigestMixin,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     FeedbackAuthorityStatus,
     FeedbackSourceKind,
@@ -42,6 +52,12 @@ from asago_scenario_generator.stpa.models.control_structure import (
 
 MECHANISM_LIBRARY_PATH = (
     DATA_ROOT / "taxonomies" / "mechanisms" / "mechanism-library.yaml"
+)
+PATTERN_MECHANISM_RELATION_PATH = (
+    DATA_ROOT / "taxonomies" / "mappings" / "attack-pattern-to-mechanism.yaml"
+)
+PATTERN_MECHANISM_DIGEST_DOMAIN = (
+    "asago-scenario-generator:pattern-mechanism-relation:v1"
 )
 
 
@@ -178,14 +194,123 @@ def bundled_mechanism_library() -> MechanismLibrary:
     return load_mechanism_library()
 
 
+class PatternMechanismLink(ClosedCanonicalModel):
+    """The mechanisms one attack pattern realizes, pinned to its revision.
+
+    ``pattern_semantic_digest`` is the pattern's ``canonical_chain``
+    semantic digest when the link was reviewed.
+    """
+
+    pattern_id: str = Field(pattern=r"^AP-T\d+-\d+$")
+    pattern_semantic_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+    mechanisms: tuple[MechanismId, ...] = Field(min_length=1)
+    rationale: str = Field(min_length=1)
+
+    @field_validator("mechanisms")
+    @classmethod
+    def _distinct(cls, value: tuple[MechanismId, ...]) -> tuple[MechanismId, ...]:
+        if len(set(value)) != len(value):
+            raise ValueError("must not repeat a mechanism")
+        return value
+
+
+class PatternMechanismRelation(SemanticDigestMixin, ClosedCanonicalModel):
+    """Attack pattern to mechanism links, one per pattern, with a checked digest.
+
+    A pattern without a link realizes no known mechanism; that is not a
+    claim that it realizes none.
+    """
+
+    _digest_domain: ClassVar[str] = PATTERN_MECHANISM_DIGEST_DOMAIN
+
+    version: Literal[1]
+    predicate: Literal["realizes"]
+    links: tuple[PatternMechanismLink, ...] = Field(min_length=1)
+    semantic_digest: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+    @model_validator(mode="after")
+    def _one_link_per_pattern_and_digest(self) -> PatternMechanismRelation:
+        ids = [link.pattern_id for link in self.links]
+        repeated = sorted({item for item in ids if ids.count(item) > 1})
+        if repeated:
+            raise ValueError(f"pattern-mechanism relation repeats patterns: {repeated}")
+        expected = self.compute_semantic_digest()
+        if self.semantic_digest != expected:
+            raise ValueError(
+                "pattern-mechanism relation semantic_digest does not match its "
+                f"content; expected {expected}"
+            )
+        return self
+
+    def mechanisms_for(self, pattern_id: str) -> tuple[MechanismId, ...]:
+        """The mechanisms *pattern_id* realizes; empty for an unlinked pattern."""
+        return next(
+            (link.mechanisms for link in self.links if link.pattern_id == pattern_id),
+            (),
+        )
+
+    def pattern_reference_errors(self, catalog: Iterable[Any]) -> list[str]:
+        """Name every link whose pattern is missing from *catalog* or revised.
+
+        *catalog* holds typed attack patterns; a link resolves when a pattern
+        has its ID and its chain's semantic digest equals the pinned one.
+        """
+        digests = {
+            pattern.id: pattern.canonical_chain.semantic_digest for pattern in catalog
+        }
+        errors = []
+        for link in self.links:
+            digest = digests.get(link.pattern_id)
+            if digest is None:
+                errors.append(f"{link.pattern_id}: not in the attack-pattern catalog")
+            elif digest != link.pattern_semantic_digest:
+                errors.append(
+                    f"{link.pattern_id}: pinned digest "
+                    f"{link.pattern_semantic_digest} != catalog digest {digest}"
+                )
+        return errors
+
+
+def load_pattern_mechanism_relation(
+    path: str | Path | None = None,
+) -> PatternMechanismRelation:
+    """Load the relation file and check its digest, the bundled one by default."""
+    source = Path(path) if path is not None else PATTERN_MECHANISM_RELATION_PATH
+    return PatternMechanismRelation.model_validate(yaml.safe_load(source.read_text()))
+
+
+@cache
+def bundled_pattern_mechanism_relation() -> PatternMechanismRelation:
+    """The digest-checked bundled relation, loaded once."""
+    return load_pattern_mechanism_relation()
+
+
+def pattern_mechanisms(pattern_id: str) -> tuple[MechanismEntry, ...]:
+    """The bundled entries of the mechanisms *pattern_id* realizes, in link order."""
+    library = bundled_mechanism_library()
+    return tuple(
+        library.entry(mechanism_id)
+        for mechanism_id in bundled_pattern_mechanism_relation().mechanisms_for(
+            pattern_id
+        )
+    )
+
+
 __all__ = [
     "MECHANISM_LIBRARY_PATH",
+    "PATTERN_MECHANISM_DIGEST_DOMAIN",
+    "PATTERN_MECHANISM_RELATION_PATH",
     "ControllerCrossing",
     "MechanismEntry",
     "MechanismId",
     "MechanismLibrary",
     "MechanismSignature",
+    "PatternMechanismLink",
+    "PatternMechanismRelation",
     "ProcessModelUse",
     "bundled_mechanism_library",
+    "bundled_pattern_mechanism_relation",
     "load_mechanism_library",
+    "load_pattern_mechanism_relation",
+    "pattern_mechanisms",
 ]

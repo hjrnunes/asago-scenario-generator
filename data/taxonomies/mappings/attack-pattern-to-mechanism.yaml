@@ -1,0 +1,79 @@
+# Reviewed control-loop mechanisms per attack pattern.
+#
+# A link says the pattern's attack realizes the listed mechanisms (defined in
+# taxonomies/mechanisms/mechanism-library.yaml) on a system with the surface
+# the pattern needs. The relation is many to many: one pattern can realize
+# several mechanisms and one mechanism can serve many patterns. A pattern
+# without a link realizes no known mechanism, which is not a claim that it
+# realizes none; stale_feedback and forged_completion have no clear pattern
+# yet, so no link names them.
+#
+# pattern_semantic_digest pins the pattern's canonical_chain.semantic_digest
+# at review time; a revised pattern fails the reference test until its link is
+# reviewed again. semantic_digest covers every other field of this file under
+# the domain asago-scenario-generator:pattern-mechanism-relation:v1, and
+# loading rejects a file whose content does not match it.
+version: 1
+predicate: realizes
+links:
+  - pattern_id: AP-T1-02
+    pattern_semantic_digest: 69ee8bd89d63381bfcf02c7b2a957b3a8fa197880852250ca8b3c74fb6efb09a
+    mechanisms: [stale_history]
+    rationale: >-
+      Fragments spread over earlier turns stand in for an authorization state
+      the agent no longer checks when it grants access.
+  - pattern_id: AP-T1-06
+    pattern_semantic_digest: e5541cfc97717eb1577c2240bc27646fb5bb2614a5c909d5443d248f4757638f
+    mechanisms: [retrieved_instructions]
+    rationale: >-
+      Instructions hidden in a retrieved document direct the assistant's
+      output once a query retrieves them.
+  - pattern_id: AP-T2-05
+    pattern_semantic_digest: c3b19d82202c29076fb2d2f589ab9461c751a7151e209f574f6d6e0ed4b1ca1a
+    mechanisms: [retrieved_instructions]
+    rationale: >-
+      Directives embedded in retrieved store content are taken as operational
+      guidance for tool invocations.
+  - pattern_id: AP-T6-03
+    pattern_semantic_digest: 9e960c940518164d7028183882883d2d7b5cb5e16c9ec9543087fae115628ade
+    mechanisms: [retrieved_instructions]
+    rationale: >-
+      Hidden instructions in a data source's output are taken into the
+      agent's goal.
+  - pattern_id: AP-T6-08
+    pattern_semantic_digest: 04b4df0e12dc1c55c6371f0fe508e88937a4387ce96172055fe2d11689e8bba9
+    mechanisms: [user_claim]
+    rationale: >-
+      A claimed authority or pretext in the conversation stands in for the
+      entitlement that should decide what the reply may disclose.
+  - pattern_id: AP-T11-05
+    pattern_semantic_digest: 18c5971224ae521aee9fbfae86038361ffee831760d49f3955e3ae72251f5ca6
+    mechanisms: [retrieved_instructions]
+    rationale: >-
+      Instructions embedded in fetched web content direct the agent's GUI
+      actions.
+  - pattern_id: AP-T12-01
+    pattern_semantic_digest: 5ddb645c06bb49afd7ad0bee36cb6c73b599085c886cab8fe7e15e97cdbfb4a7
+    mechanisms: [delegated_authority]
+    rationale: >-
+      Each agent takes a peer's message as trusted input, so injected content
+      in one agent's messages decides another agent's actions.
+  - pattern_id: AP-T15-01
+    pattern_semantic_digest: 11997cb51190fdf2718b97dae4598a59abf85de22bbf9b2674022176a24df050
+    mechanisms: [retrieved_instructions]
+    rationale: >-
+      Indirect injection in processed content makes the assistant present
+      attacker values in place of the data it should report.
+  - pattern_id: AP-T15-02
+    pattern_semantic_digest: 3478b8c3ebc6fa52dbe989353a4fc305943fa2c06a2ec7bece206c6b90684434
+    mechanisms: [retrieved_instructions]
+    rationale: >-
+      Indirect injection in processed content steers the assistant into
+      generating instructions that send users to malicious actions.
+  - pattern_id: AP-T16-02
+    pattern_semantic_digest: 0a9380b91a6b141b71109e08d3b90ecdf847a0b5164c4b46b8f237378bd6b8ba
+    mechanisms: [delegated_authority]
+    rationale: >-
+      The receiving agent takes another party's protocol response as trusted
+      context and acts on what it injects.
+semantic_digest: 67e4b94d08f97747c671e83a4f8ea9a11acaf083eff08c2026014beeee23fe7c
