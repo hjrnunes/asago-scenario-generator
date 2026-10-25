@@ -9,6 +9,7 @@ from typing import Any, Literal, cast
 
 from asago_scenario_generator.models.ica_merge import IcaMerge, IcaMergedFinding
 from asago_scenario_generator.models.obligation_consideration import (
+    SLOT_PROMPT_BUDGET_EXCEEDED,
     SLOT_PROVIDER_CONTRACT_FAILED,
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
@@ -1089,9 +1090,21 @@ def _draft_finding_consideration(
     )
 
 
+def _prompt_budget_exceeded(error: BaseException | None) -> bool:
+    """Tell whether a request failed because its prompt budget rejected it.
+
+    The provider adapter's own preflight raises the budget failure itself; a
+    rejection inside the provider call reaches slot filling as the cause.
+    """
+    return error is not None and (
+        isinstance(error, PromptBudgetExceeded)
+        or isinstance(error.__cause__, PromptBudgetExceeded)
+    )
+
+
 def _unresolved_diagnostic_code(error: BaseException | None) -> str:
     """Map a request failure to its stable local diagnostic code."""
-    if isinstance(error, PromptBudgetExceeded):
+    if _prompt_budget_exceeded(error):
         return "prompt_budget_exceeded"
     if isinstance(error, PromptContractError):
         return "prompt_contract_invalid"
@@ -1101,11 +1114,14 @@ def _unresolved_diagnostic_code(error: BaseException | None) -> str:
 def _unresolved_pair_code(error: BaseException | None) -> str:
     """Name why a failed request leaves its routed pairs unresolved.
 
-    The provider adapter raises its call failure as the cause. A cause the call
-    log records as ``provider_contract_failure``, such as a reply cut off at its
-    completion cap that no longer decodes, marks a provider contract failure;
-    every other failure leaves the pairs analytically unresolved.
+    A request its prompt budget rejected was never sent. The provider adapter
+    raises its call failure as the cause. A cause the call log records as
+    ``provider_contract_failure``, such as a reply cut off at its completion
+    cap that no longer decodes, marks a provider contract failure; every other
+    failure leaves the pairs analytically unresolved.
     """
+    if _prompt_budget_exceeded(error):
+        return SLOT_PROMPT_BUDGET_EXCEEDED
     if error is not None and is_provider_contract_failure(error.__cause__):
         return SLOT_PROVIDER_CONTRACT_FAILED
     return "slot_pair_unresolved"
