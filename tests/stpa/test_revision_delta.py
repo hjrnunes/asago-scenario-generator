@@ -1078,5 +1078,7 @@ def test_revision_prompt_renders_a_feedback_source_type_as_its_value():
         "revision_system.j2", control_structure=cs, **_compute_next_ids(cs)
     )
 
-    assert "- PM-1-1: State 1 (source: controlled_process CP-1)" in rendered
+    assert (
+        "- PM-1-1: State 1\n      feedback_source: controlled_process CP-1\n"
+    ) in rendered
     assert "ReferenceType." not in rendered

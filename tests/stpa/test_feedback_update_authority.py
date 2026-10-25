@@ -480,9 +480,9 @@ def test_the_revision_request_shows_offers_and_explains_the_field(
     system = " ".join(_message(sent, "system").split())
     assert (
         "- FB-1-1: The requester's statement that the refund was approved "
-        "(updates: PM-1-1, source: controlled_process CP-1, source kind: "
-        "user_message, authority for update: non_authoritative, authority "
-        f"basis: {_BASIS})"
+        "updates: PM-1-1 source: controlled_process CP-1 source_kind: "
+        "user_message authority_for_update.status: non_authoritative "
+        f"authority_for_update.basis: {_BASIS}"
     ) in system
     assert "A feedback channel may also carry `authority_for_update`" in system
     schema = sent["response_format"]["json_schema"]["schema"]

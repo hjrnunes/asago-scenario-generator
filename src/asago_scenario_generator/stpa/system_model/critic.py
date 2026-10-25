@@ -972,12 +972,235 @@ def _merge_revision_delta(
 
     Returns a tuple of (merged ControlStructure, repair and stitch warnings).
     """
+    delta, label_warnings = _restore_descriptions_with_pasted_labels(cs, delta)
     delta, kind_warnings = _move_source_kinds_out_of_source_refs(delta)
     stitched, stitch_warnings = _stitch_revision_delta(cs, delta)
     return (
         validate_normalized_control_structure(stitched),
-        kind_warnings + stitch_warnings,
+        label_warnings + kind_warnings + stitch_warnings,
     )
+
+
+# The labels a revision prompt has shown for an element's typed fields, mapped
+# to the field: the parenthetical labels of earlier prompts and the JSON field
+# names of the current one.
+_ACTION_LABELS = {
+    "target": "target",
+    "effect": "effect_kind",
+    "effect_kind": "effect_kind",
+    "temporality": "temporality",
+    "operation": "operation",
+    "process-model refs": "process_model_refs",
+    "process_model_refs": "process_model_refs",
+}
+_PROCESS_MODEL_LABELS = {
+    "source": "feedback_source",
+    "feedback_source": "feedback_source",
+    "values": "values",
+    "evidence": "evidence_refs",
+    "evidence_refs": "evidence_refs",
+}
+_FEEDBACK_LABELS = {
+    "updates": "updates",
+    "source": "source",
+    "source kind": "source_kind",
+    "source_kind": "source_kind",
+    "authority for update": "authority_for_update.status",
+    "authority_for_update.status": "authority_for_update.status",
+    "authority basis": "authority_for_update.basis",
+    "authority_for_update.basis": "authority_for_update.basis",
+}
+# One ``label: value`` item of a group.  Earlier prompts listed a channel's
+# fields as comma-separated items of one group.
+_LABEL_ITEM = re.compile(r"^([a-z_.\- ]+):\s*(.*)$", re.DOTALL)
+
+
+def _plain_description(text: str) -> str:
+    """Collapse whitespace and drop trailing punctuation for comparison."""
+    return " ".join(text.split()).rstrip(" .,;:")
+
+
+def _parenthesised_groups(text: str) -> list[str] | None:
+    """Split *text* into the contents of its balanced parenthesised groups.
+
+    Returns ``None`` unless *text* is only such groups separated by
+    whitespace.  A group may itself contain balanced parentheses.
+    """
+    groups: list[str] = []
+    index = 0
+    while index < len(text):
+        if text[index].isspace():
+            index += 1
+            continue
+        if text[index] != "(":
+            return None
+        depth = 0
+        for end in range(index, len(text)):
+            depth += {"(": 1, ")": -1}.get(text[end], 0)
+            if depth == 0:
+                break
+        else:
+            return None
+        groups.append(text[index + 1 : end])
+        index = end + 1
+    return groups
+
+
+def _rendered_field(element: Any, field: str) -> str | None:
+    """Render one typed field of *element* the way the revision prompt shows it."""
+    owner, _, name = field.rpartition(".")
+    if owner:
+        element = getattr(element, owner, None)
+    value = getattr(element, name or field, None) if element is not None else None
+    if value is None or value == []:
+        return None
+    if isinstance(value, list):
+        return ("; " if field == "values" else ", ").join(map(str, value))
+    if hasattr(value, "id") and hasattr(value, "type"):
+        return f"{getattr(value.type, 'value', value.type)} {value.id}"
+    return " ".join(str(getattr(value, "value", value)).split())
+
+
+def _is_pasted_field(
+    label: str,
+    value: str,
+    labels: dict[str, str],
+    elements: tuple[Any, ...],
+    pm_ids: set[str],
+) -> bool:
+    """Whether ``label: value`` shows a typed field of one of *elements*.
+
+    A process-model ref list is pasted when every ref names a PM part of the
+    responsibility: a reply may paste the refs it meant to set.  Every other
+    value must be the field's value on the original or restated element.
+    """
+    field = labels.get(label)
+    if field is None:
+        return False
+    value = " ".join(value.split())
+    if field == "process_model_refs":
+        refs = [ref.strip() for ref in value.split(",")]
+        return all(ref in pm_ids for ref in refs)
+    return any(_rendered_field(element, field) == value for element in elements)
+
+
+def _label_items(group: str, labels: dict[str, str]) -> list[str]:
+    """Split a group at each comma that a known label follows.
+
+    Only a comma outside nested parentheses separates items, so a value may
+    itself contain ``, label:``.
+    """
+    marker = "|".join(re.escape(label) for label in sorted(labels, key=len)[::-1])
+    next_label = re.compile(rf",\s*(?:{marker}):")
+    items: list[str] = []
+    depth = start = 0
+    for index, char in enumerate(group):
+        depth += {"(": 1, ")": -1}.get(char, 0)
+        if char == "," and depth == 0 and next_label.match(group, index):
+            items.append(group[start:index])
+            start = index + 1
+    items.append(group[start:])
+    return [item.strip() for item in items]
+
+
+def _is_pasted_group(
+    group: str,
+    labels: dict[str, str],
+    elements: tuple[Any, ...],
+    pm_ids: set[str],
+) -> bool:
+    """Whether a parenthesised group lists only typed fields of *elements*."""
+    for item in _label_items(group.strip(), labels):
+        match = _LABEL_ITEM.match(item)
+        if match is None or not _is_pasted_field(
+            match.group(1), match.group(2), labels, elements, pm_ids
+        ):
+            return False
+    return True
+
+
+def _only_appends_typed_fields(
+    original: Any,
+    restated: Any,
+    labels: dict[str, str],
+    pm_ids: set[str],
+) -> bool:
+    """Whether *restated*'s description is *original*'s plus pasted typed fields.
+
+    Only the text appended to the original description is read.  It must be
+    one or more balanced parenthesised groups, each listing typed fields whose
+    values are the element's own.
+    """
+    before = _plain_description(original.description)
+    after = _plain_description(restated.description)
+    if not after.startswith(before) or after == before:
+        return False
+    suffix = after[len(before) :].lstrip(".,;:")
+    groups = _parenthesised_groups(suffix)
+    if not groups:
+        return False
+    return all(
+        _is_pasted_group(group, labels, (original, restated), pm_ids)
+        for group in groups
+    )
+
+
+def _restore_descriptions_with_pasted_labels(
+    cs: ControlStructure,
+    delta: RevisionDelta,
+) -> tuple[RevisionDelta, list[str]]:
+    """Keep an element's description when a restatement only appends labels.
+
+    A reply may restate an existing PM part, control action, or feedback
+    channel with its typed fields pasted after the description, such as
+    ``(target: controlled_process CP-1) (effect: model_output)``.  When the
+    restated description is the original followed only by groups that show
+    the element's own typed field values, the original is kept; any other
+    change to the description is a revision and stays.
+    """
+    delta = delta.model_copy(deep=True)
+    warnings: list[str] = []
+    originals = {resp.resp_id: resp for resp in cs.responsibilities}
+    for resp in delta.modified_responsibilities:
+        original = originals.get(resp.resp_id)
+        if original is None:
+            continue
+        pm_ids = {
+            pm.pm_id for owner in (original, resp) for pm in owner.process_model_parts
+        }
+        for kind, labels, restated, existing in (
+            (
+                "process model part",
+                _PROCESS_MODEL_LABELS,
+                {pm.pm_id: pm for pm in resp.process_model_parts},
+                {pm.pm_id: pm for pm in original.process_model_parts},
+            ),
+            (
+                "control action",
+                _ACTION_LABELS,
+                {ca.ca_id: ca for ca in resp.control_actions},
+                {ca.ca_id: ca for ca in original.control_actions},
+            ),
+            (
+                "feedback channel",
+                _FEEDBACK_LABELS,
+                {fb.fb_id: fb for fb in resp.feedback_channels},
+                {fb.fb_id: fb for fb in original.feedback_channels},
+            ),
+        ):
+            for element_id, element in restated.items():
+                old = existing.get(element_id)
+                if old is None or not _only_appends_typed_fields(
+                    old, element, labels, pm_ids
+                ):
+                    continue
+                warnings.append(
+                    f"Revision {kind} {element_id} of {resp.resp_id} restated its "
+                    "description with typed-field labels appended; the original "
+                    "description is kept."
+                )
+                element.description = old.description
+    return delta, warnings
 
 
 _SOURCE_KINDS = {kind.value: kind for kind in FeedbackSourceKind}
