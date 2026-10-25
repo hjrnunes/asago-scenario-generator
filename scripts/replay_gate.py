@@ -15,7 +15,10 @@ fails the gate.  :data:`EXPECTED_FILE_DIFFERENCES` names files expected to
 change when one exact cross-taxonomy edge is removed and all other mapping paths
 and obligation-plan content stay equal.  :data:`ACCOUNTING_STOP_REASON_CHANGE`
 names the accounting outputs the fixed order of the semantic stop reasons
-changes, accepted only as that order derives them from unchanged routes.
+changes, accepted only as that order derives them from unchanged routes;
+:data:`ROUTING_RECORD_STOP_REASON_CHANGE` names those that counting a failed
+routing record as a provider contract failure changes, accepted only on rows
+whose replayed route carries that record's diagnostic.
 The named versions in
 :data:`VERSION_CHAINS` compare as the
 sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
@@ -57,6 +60,12 @@ from typing import Any, Callable, Iterable, Sequence
 import yaml
 
 import asago_scenario_generator
+from asago_scenario_generator.models.obligation_consideration import (
+    ROUTING_RECORD_VALIDATION_FAILED,
+    ROUTING_VALIDATION_FAILED,
+    ConsiderationDiagnostic,
+    ObligationSemanticAssessment,
+)
 from asago_scenario_generator.stpa.infra.call_log import (
     CALLS_FILENAME,
     call_entries,
@@ -391,8 +400,10 @@ class AccountingStopReasonChange:
     *superseded_diagnostics* of the checks the semantic stop now precedes and
     the diagnostics of the other semantic reasons, with exactly one of its
     own reason: the first recorded copy, or the one accounting derives (none
-    on an out-of-scope row).  Every other diagnostic stays as recorded.  At
-    least one row must differ, or nothing is allowed.  The scenario
+    on an out-of-scope row).  Every other diagnostic stays as recorded.  A
+    differing row may instead be one :data:`ROUTING_RECORD_STOP_REASON_CHANGE`
+    explains, so a recording made before both changes passes.  At least one
+    row must differ, or nothing is allowed.  The scenario
     realization may then differ only in its accounting pin and digest; the
     synthesis manifest only in the *manifest_digests* of those two files and
     in its obligation disposition counts, stop-reason counts, resolution
@@ -447,6 +458,55 @@ ACCOUNTING_STOP_REASON_CHANGE = AccountingStopReasonChange(
     reason="accounting applies the risk scope, then risk alignment, then the "
     "mechanism, adds mechanism_absent, and keeps one semantic diagnostic per "
     "row, so recorded stop reasons and diagnostics move with no request change",
+)
+
+
+@dataclass(frozen=True)
+class RoutingRecordStopReasonChange:
+    """Accounting rows moved by counting a failed routing record.
+
+    Structural routing writes *record_diagnostic* on a route whose own record
+    failed validation beside valid siblings.  Accounting once stopped such a
+    route at *recorded_reason*, and now stops it at *replayed_reason*, as it
+    already did for the batch code.  Accounting runs after every model
+    request, so no request changes.  A differing row is explained when it
+    moved from *recorded_reason* to *replayed_reason* with no other field
+    changed, and the replay's obligation consideration holds exactly one
+    final route for its obligation, with the row's disposition
+    *route_disposition*, from which accounting derives *replayed_reason*:
+    its semantic assessment derives no semantic stop, which accounting
+    applies first; its diagnostics carry *record_diagnostic* and none of
+    *earlier_diagnostics*, which set the reason before the change; and they
+    open the row's diagnostics, as accounting copies them.  An out-of-scope
+    risk, which accounting applies last, needs no check here: such a row
+    must stop at ``risk_out_of_scope`` or the accounting file fails its
+    integrity check, and nothing is allowed.  Such rows join
+    the rows :data:`ACCOUNTING_STOP_REASON_CHANGE` explains: the gate accepts
+    the accounting when each differing row is explained by one of the two,
+    and the realization, manifest and report must follow all of them through
+    that allowance's checks.  This temporary allowance remains until
+    recordings made before the change are replaced.
+    """
+
+    recorded_reason: str
+    replayed_reason: str
+    record_diagnostic: str
+    earlier_diagnostics: frozenset[str]
+    route_disposition: str
+    reason: str
+
+
+ROUTING_RECORD_STOP_REASON_CHANGE = RoutingRecordStopReasonChange(
+    recorded_reason="no_structural_route",
+    replayed_reason="provider_contract_failure",
+    record_diagnostic=ROUTING_RECORD_VALIDATION_FAILED,
+    earlier_diagnostics=frozenset(
+        {"prompt_budget_exceeded", ROUTING_VALIDATION_FAILED}
+    ),
+    route_disposition="unresolved",
+    reason="accounting counts a route whose own routing record failed "
+    "validation as a provider contract failure, as it counted a failed batch, "
+    "so those rows' recorded stop reason moves with no request change",
 )
 
 # A calls.jsonl entry names the provider-calls.jsonl records its call wrote
@@ -1509,10 +1569,6 @@ def _derived_diagnostic(
     route: dict[str, Any], obligation_id: Any, code: str
 ) -> dict[str, Any] | None:
     """Return the diagnostic accounting writes for *code* on the route's row."""
-    from asago_scenario_generator.models.obligation_consideration import (
-        ConsiderationDiagnostic,
-        ObligationSemanticAssessment,
-    )
     from asago_scenario_generator.pipeline.obligation_consideration import (
         _semantic_stop_detail,
     )
@@ -1569,6 +1625,57 @@ def _expected_diagnostics(
     return kept
 
 
+def _failed_record_row_explained(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    routes: dict[Any, Any],
+    change: RoutingRecordStopReasonChange,
+) -> bool:
+    """Tell whether *after* is *before* moved by its route's failed record."""
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        _semantic_stop_detail,
+    )
+
+    if {k: v for k, v in before.items() if k != "stop_reason"} != {
+        k: v for k, v in after.items() if k != "stop_reason"
+    }:
+        return False
+    if (before.get("stop_reason"), after.get("stop_reason")) != (
+        change.recorded_reason,
+        change.replayed_reason,
+    ):
+        return False
+    route = routes.get(after.get("obligation_id"))
+    if not isinstance(route, dict) or not (
+        route.get("disposition") == change.route_disposition == after.get("disposition")
+    ):
+        return False
+    items = route.get("diagnostics", [])
+    row_items = after.get("diagnostics", [])
+    if not isinstance(items, list) or not isinstance(row_items, list):
+        return False
+    assessment = route.get("semantic_assessment")
+    try:
+        semantic = (
+            None
+            if assessment is None
+            else ObligationSemanticAssessment.model_validate(assessment)
+        )
+        diagnostics = [ConsiderationDiagnostic.model_validate(i) for i in items]
+        opening = [
+            ConsiderationDiagnostic.model_validate(i) for i in row_items[: len(items)]
+        ]
+    except (TypeError, ValueError):
+        return False
+    codes = {item.code for item in diagnostics}
+    return (
+        _semantic_stop_detail(route.get("disposition"), semantic) is None
+        and change.record_diagnostic in codes
+        and not codes & change.earlier_diagnostics
+        and opening == diagnostics
+    )
+
+
 def _considered_reason(row: dict[str, Any]) -> str | None:
     """Return the row's stop reason when the manifest counts it."""
     if row.get("disposition") in {"governance_only", "capability_excluded"}:
@@ -1581,8 +1688,13 @@ def _accounting_stop_reason_change(
     recorded: Path,
     replayed: Path,
     change: AccountingStopReasonChange = ACCOUNTING_STOP_REASON_CHANGE,
+    routing: RoutingRecordStopReasonChange | None = ROUTING_RECORD_STOP_REASON_CHANGE,
 ) -> _AccountingChange | None:
-    """Validate that the accounting differs only as the stop order derives."""
+    """Validate that the accounting differs only as the two changes derive.
+
+    Each differing row must be the one the stop order derives or, unless
+    *routing* is ``None``, the one its failed routing record explains.
+    """
     from asago_scenario_generator.models.obligation_accounting import (
         ObligationAccounting,
     )
@@ -1607,6 +1719,14 @@ def _accounting_stop_reason_change(
         for route in final_routes
         if isinstance(route, dict)
     }
+    owners = Counter(
+        route.get("obligation_id") for route in final_routes if isinstance(route, dict)
+    )
+    routes_of = {
+        route.get("obligation_id"): route
+        for route in final_routes
+        if isinstance(route, dict) and owners[route.get("obligation_id")] == 1
+    }
     header = ("rows", "summary", "semantic_digest")
     if {k: v for k, v in before.items() if k not in header} != {
         k: v for k, v in after.items() if k not in header
@@ -1626,7 +1746,13 @@ def _accounting_stop_reason_change(
     if not changed:
         return None
     for old, new in changed:
-        if not _changed_row_explained(old, new, routes, change):
+        if not (
+            _changed_row_explained(old, new, routes, change)
+            or (
+                routing is not None
+                and _failed_record_row_explained(old, new, routes_of, routing)
+            )
+        ):
             return None
         for row, counter in ((old, removed), (new, added)):
             reason = _considered_reason(row)

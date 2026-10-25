@@ -1559,11 +1559,9 @@ def _routed_accounting(
         ObligationSemanticAssessment,
     )
     from asago_scenario_generator.pipeline.obligation_consideration import (
-        build_consideration_artifact,
         build_neutral_briefs,
-        build_obligation_accounting,
     )
-    from tests.helpers.governance import _accounting_pins, _plan_with_non_stpa_rows
+    from tests.helpers.governance import _plan_with_non_stpa_rows
     from tests.helpers.projection_factory import get_test_raw_pattern
 
     plan = _plan_with_non_stpa_rows()
@@ -1582,8 +1580,19 @@ def _routed_accounting(
         rationale="The routing rationale.",
         evidence=("route evidence",),
     )
+    return (plan, *_considered(plan, briefs, (route,)))
+
+
+def _considered(plan: Any, briefs: Any, routes: tuple[Any, ...]) -> tuple[Any, Any]:
+    """Return the consideration and the current accounting of *routes*."""
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        build_consideration_artifact,
+        build_obligation_accounting,
+    )
+    from tests.helpers.governance import _accounting_pins
+
     consideration = build_consideration_artifact(
-        plan=plan, briefs=briefs, initial_routes=(route,), final_routes=(route,)
+        plan=plan, briefs=briefs, initial_routes=routes, final_routes=routes
     )
     accounting = build_obligation_accounting(
         plan=plan,
@@ -1591,7 +1600,7 @@ def _routed_accounting(
         ica_considerations=(),
         source_pins=_accounting_pins(plan),
     )
-    return plan, consideration, accounting
+    return consideration, accounting
 
 
 def _row_as_recorded(accounting: Any, obligation_id: str, **fields: Any) -> Any:
@@ -2049,3 +2058,492 @@ def test_the_stop_order_states_its_reason() -> None:
     change = replay_gate.ACCOUNTING_STOP_REASON_CHANGE
     assert change.reason and change.stop_order and change.superseded_diagnostics
     assert len(change.files) == len(set(change.files))
+
+
+# Counting a failed routing record as a provider contract failure moves
+# accounting rows, not requests.
+
+_RECORD_FAILED = "routing_record_validation_failed"
+_BATCH_FAILED = "routing_validation_failed"
+
+
+def _two_applicable_rows() -> tuple[Any, Any]:
+    """Return a plan with a second applicable row and the plan's briefs."""
+    from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+    from asago_scenario_generator.models.obligation_plan import (
+        TaxonomyObligation,
+        TaxonomyObligationPlan,
+        derive_obligation_summary,
+    )
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        build_neutral_briefs,
+    )
+    from tests.helpers.governance import _plan_with_non_stpa_rows
+    from tests.helpers.projection_factory import get_test_raw_pattern
+
+    plan = _plan_with_non_stpa_rows()
+    source = next(
+        row for row in plan.obligations if row.scope_disposition == "applicable"
+    )
+    payload = source.model_dump(mode="json")
+    payload.update(obligation_id="ob:v1:" + "f" * 64)
+    payload["risk_ref"] = {**payload["risk_ref"], "risk_id": "risk-second"}
+    rows = (*plan.obligations, TaxonomyObligation.model_validate(payload))
+    values = plan.model_dump(mode="json")
+    values.update(
+        obligations=[row.model_dump(mode="json") for row in rows],
+        summary=derive_obligation_summary(rows),
+    )
+    unchecked = TaxonomyObligationPlan.model_validate(values)
+    plan = TaxonomyObligationPlan.model_validate(
+        {**values, "semantic_digest": unchecked.compute_semantic_digest()}
+    )
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    return plan, build_neutral_briefs(plan, (pattern,))
+
+
+def _failed_record_route(
+    brief: Any,
+    *codes: str,
+    disposition: str = "unresolved",
+    semantic_assessment: Any = None,
+) -> Any:
+    """Return a route whose routing diagnostics carry *codes*."""
+    from asago_scenario_generator.models.obligation_consideration import (
+        ConsiderationDiagnostic,
+        ObligationRoute,
+    )
+
+    return ObligationRoute(
+        obligation_id=brief.obligation_id,
+        disposition=disposition,
+        semantic_assessment=semantic_assessment,
+        rationale="This obligation's routing record failed local validation.",
+        evidence=("routing-validation",),
+        diagnostics=tuple(
+            ConsiderationDiagnostic(
+                code=code,
+                detail=f"ValueError: {code}",
+                obligation_ids=(brief.obligation_id,),
+                refs=("batch-1",),
+            )
+            for code in codes
+        ),
+    )
+
+
+def _failed_record_accounting(*codes: str) -> tuple[Any, Any, Any, str]:
+    """Return a plan, its consideration, its accounting, and the row's ID."""
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        build_neutral_briefs,
+    )
+    from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+    from tests.helpers.governance import _plan_with_non_stpa_rows
+    from tests.helpers.projection_factory import get_test_raw_pattern
+
+    plan = _plan_with_non_stpa_rows()
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(plan, (pattern,))
+    route = _failed_record_route(briefs[0], *codes)
+    consideration, accounting = _considered(plan, briefs, (route,))
+    return plan, consideration, accounting, briefs[0].obligation_id
+
+
+def _failed_record_run(
+    trees, recorded_fields: dict[str, Any], replayed_fields: dict[str, Any], *codes
+) -> tuple[Path, Path, dict[str, str]]:
+    """Record and replay the failed-record row, each with these fields changed."""
+    recorded, replayed, path_map = trees
+    plan, consideration, current, obligation_id = _failed_record_accounting(
+        *(codes or (_RECORD_FAILED,))
+    )
+    for root, fields in ((recorded, recorded_fields), (replayed, replayed_fields)):
+        accounting = (
+            _row_as_recorded(current, obligation_id, **fields) if fields else current
+        )
+        _write_accounting_run(root, plan, consideration, accounting)
+    return recorded, replayed, path_map
+
+
+_BEFORE_THE_FIX = {"stop_reason": "no_structural_route"}
+
+
+@pytest.fixture
+def failed_record_trees(trees) -> tuple[Path, Path, dict[str, str]]:
+    """A recording made before the failed record counted and its replay."""
+    return _failed_record_run(trees, _BEFORE_THE_FIX, {})
+
+
+def test_the_failed_record_accepts_only_its_accounting_outputs(
+    failed_record_trees,
+) -> None:
+    recorded, replayed, path_map = failed_record_trees
+    rows = yaml.safe_load((replayed / "obligation-accounting.yaml").read_text())
+    assert [row.get("stop_reason") for row in rows["rows"]].count(
+        "provider_contract_failure"
+    ) == 1
+    expected: list[Difference] = []
+
+    _, differences = compare_trees(
+        recorded, replayed, path_map, expected_differences=expected
+    )
+
+    assert differences == []
+    assert sorted(item.path for item in expected) == _STOP_ORDER_FILES
+
+
+def test_the_failed_record_composes_with_the_stop_order(trees) -> None:
+    from asago_scenario_generator.models.obligation_consideration import (
+        ObligationRoute,
+        ObligationSemanticAssessment,
+    )
+
+    recorded, replayed, path_map = trees
+    plan, briefs = _two_applicable_rows()
+    semantic = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="proposed_not_applicable",
+        semantic_assessment=ObligationSemanticAssessment(
+            mechanism_assessment="absent_from_system",
+            risk_alignment="supported",
+            mapping_strength="broad_category_expansion",
+            mechanism_rationale="The mechanism judgement.",
+            risk_alignment_rationale="The alignment judgement.",
+        ),
+        rationale="The routing rationale.",
+        evidence=("route evidence",),
+    )
+    failed = _failed_record_route(briefs[1], _RECORD_FAILED)
+    consideration, current = _considered(plan, briefs, (semantic, failed))
+    obligation_id, old_fields = _old_mechanism_absent_row(current)
+    before = _row_as_recorded(current, obligation_id, **old_fields)
+    before = _row_as_recorded(before, briefs[1].obligation_id, **_BEFORE_THE_FIX)
+    _write_accounting_run(recorded, plan, consideration, before)
+    _write_accounting_run(replayed, plan, consideration, current)
+    expected: list[Difference] = []
+
+    _, differences = compare_trees(
+        recorded, replayed, path_map, expected_differences=expected
+    )
+
+    assert differences == []
+    assert sorted(item.path for item in expected) == _STOP_ORDER_FILES
+
+
+@pytest.mark.parametrize(
+    "reason", ["prompt_budget_exceeded", "ica_consideration_unresolved"]
+)
+def test_the_failed_record_does_not_hide_a_move_to_another_reason(
+    trees, reason: str
+) -> None:
+    recorded, replayed, path_map = _failed_record_run(
+        trees, _BEFORE_THE_FIX, {"stop_reason": reason}
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_failed_record_does_not_hide_a_move_from_another_reason(trees) -> None:
+    recorded, replayed, path_map = _failed_record_run(
+        trees, {"stop_reason": "ica_consideration_unresolved"}, {}
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+@pytest.mark.parametrize(
+    "codes",
+    [
+        ("slot_pair_unresolved",),
+        (_BATCH_FAILED,),
+        (_RECORD_FAILED, _BATCH_FAILED),
+        (_RECORD_FAILED, "prompt_budget_exceeded"),
+    ],
+    ids=["other", "batch", "record-and-batch", "record-and-budget"],
+)
+def test_the_failed_record_does_not_hide_a_move_its_route_does_not_explain(
+    trees, codes: tuple[str, ...]
+) -> None:
+    recorded, replayed, path_map = _failed_record_run(
+        trees,
+        _BEFORE_THE_FIX,
+        {"stop_reason": "provider_contract_failure"},
+        *codes,
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_failed_record_does_not_hide_a_route_of_another_disposition(
+    trees,
+) -> None:
+    from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        build_neutral_briefs,
+    )
+    from tests.helpers.governance import _plan_with_non_stpa_rows
+    from tests.helpers.projection_factory import get_test_raw_pattern
+
+    recorded, replayed, path_map = trees
+    plan = _plan_with_non_stpa_rows()
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(plan, (pattern,))
+    route = _failed_record_route(
+        briefs[0], _RECORD_FAILED, disposition="proposed_not_applicable"
+    )
+    consideration, current = _considered(plan, briefs, (route,))
+    obligation_id = briefs[0].obligation_id
+    for root, reason in (
+        (recorded, "no_structural_route"),
+        (replayed, "provider_contract_failure"),
+    ):
+        accounting = _row_as_recorded(current, obligation_id, stop_reason=reason)
+        _write_accounting_run(root, plan, consideration, accounting)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+@pytest.mark.parametrize(
+    ("mechanism", "alignment", "semantic_reason"),
+    [
+        ("absent_from_system", "supported", "mechanism_absent"),
+        ("plausible_in_system", "mismatch", "risk_pattern_mismatch"),
+    ],
+    ids=["mechanism_absent", "risk_pattern_mismatch"],
+)
+def test_the_failed_record_does_not_hide_a_route_whose_semantic_stop_wins(
+    trees, mechanism: str, alignment: str, semantic_reason: str
+) -> None:
+    """A failed record keeps its semantic assessment, whose stop comes first."""
+    from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+    from asago_scenario_generator.models.obligation_consideration import (
+        ObligationSemanticAssessment,
+    )
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        build_neutral_briefs,
+    )
+    from tests.helpers.governance import _plan_with_non_stpa_rows
+    from tests.helpers.projection_factory import get_test_raw_pattern
+
+    recorded, replayed, path_map = trees
+    plan = _plan_with_non_stpa_rows()
+    pattern = AttackPattern.model_validate(get_test_raw_pattern())
+    briefs = build_neutral_briefs(plan, (pattern,))
+    route = _failed_record_route(
+        briefs[0],
+        _RECORD_FAILED,
+        semantic_assessment=ObligationSemanticAssessment(
+            mechanism_assessment=mechanism,
+            risk_alignment=alignment,
+            mapping_strength="broad_category_expansion",
+            mechanism_rationale="The mechanism judgement.",
+            risk_alignment_rationale="The alignment judgement.",
+        ),
+    )
+    consideration, current = _considered(plan, briefs, (route,))
+    obligation_id = briefs[0].obligation_id
+    row = next(row for row in current.rows if row.obligation_id == obligation_id)
+    assert row.stop_reason == semantic_reason
+    assert row.diagnostics[0] == route.diagnostics[0]
+    for root, reason in (
+        (recorded, "no_structural_route"),
+        (replayed, "provider_contract_failure"),
+    ):
+        accounting = _row_as_recorded(current, obligation_id, stop_reason=reason)
+        _write_accounting_run(root, plan, consideration, accounting)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_failed_record_does_not_hide_an_out_of_scope_row(trees) -> None:
+    """An out-of-scope row stops at risk_out_of_scope or fails its integrity."""
+    from asago_scenario_generator.models.canonical import compute_framed_digest
+    from asago_scenario_generator.models.obligation_accounting import (
+        OBLIGATION_ACCOUNTING_DIGEST_DOMAIN,
+        ObligationAccounting,
+    )
+
+    recorded, replayed, path_map = _failed_record_run(trees, {}, {})
+    current = ObligationAccounting.from_yaml(
+        (replayed / "obligation-accounting.yaml").read_text()
+    )
+    obligation_id = next(
+        row.obligation_id
+        for row in current.rows
+        if row.stop_reason == "provider_contract_failure"
+    )
+    for root, reason in (
+        (recorded, "no_structural_route"),
+        (replayed, "provider_contract_failure"),
+    ):
+        payload = current.model_dump(mode="json", exclude={"semantic_digest"})
+        for row in payload["rows"]:
+            if row["obligation_id"] == obligation_id:
+                row.update(scope="outside_boundary", stop_reason=reason)
+        payload["semantic_digest"] = compute_framed_digest(
+            OBLIGATION_ACCOUNTING_DIGEST_DOMAIN, payload
+        )
+        text = yaml.safe_dump(payload, sort_keys=False)
+        with pytest.raises(ValueError, match="must stop at risk_out_of_scope"):
+            ObligationAccounting.from_yaml(text)
+        (root / "obligation-accounting.yaml").write_text(text)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["obligation-accounting.yaml"]
+
+
+def test_the_failed_record_does_not_hide_a_row_without_its_diagnostic(
+    trees,
+) -> None:
+    other = _diagnostic(_OTHER_OBLIGATION, "slot_pair_unresolved", "other")
+    recorded, replayed, path_map = _failed_record_run(
+        trees,
+        {**_BEFORE_THE_FIX, "diagnostics": (other,)},
+        {"diagnostics": (other,)},
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {"evidence": ("other evidence",)},
+        {"disposition": "upstream_gap"},
+        {"route_refs": ("route-other",)},
+    ],
+    ids=["evidence", "disposition", "route_refs"],
+)
+def test_the_failed_record_does_not_hide_another_field_on_a_moved_row(
+    trees, fields: dict[str, Any]
+) -> None:
+    recorded, replayed, path_map = _failed_record_run(
+        trees, {**_BEFORE_THE_FIX, **fields}, {}
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_failed_record_does_not_hide_an_edited_routing_diagnostic(
+    trees,
+) -> None:
+    recorded, replayed, path_map = trees
+    plan, consideration, current, obligation_id = _failed_record_accounting(
+        _RECORD_FAILED
+    )
+    row = next(row for row in current.rows if row.obligation_id == obligation_id)
+    edited = row.diagnostics[0].model_copy(update={"detail": "changed detail"})
+    before = _row_as_recorded(current, obligation_id, **_BEFORE_THE_FIX)
+    after = _row_as_recorded(current, obligation_id, diagnostics=(edited,))
+    _write_accounting_run(recorded, plan, consideration, before)
+    _write_accounting_run(replayed, plan, consideration, after)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def _rewrite_manifest(root: Path, **fields: Any) -> None:
+    document = yaml.safe_load((root / "synthesis-manifest.yaml").read_text())
+    document.pop("semantic_digest")
+    document.update(fields)
+    document["semantic_digest"] = _digest_payload(_MANIFEST_DOMAIN, document)
+    _write_manifest(root, document)
+
+
+def test_the_failed_record_does_not_hide_counts_without_a_row_change(
+    trees,
+) -> None:
+    recorded, replayed, path_map = _failed_record_run(trees, {}, {})
+    _rewrite_manifest(
+        replayed, obligation_stop_reason_counts={"no_structural_route": 1}
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["synthesis-manifest.yaml"]
+
+
+def test_the_failed_record_does_not_hide_a_digest_without_a_row_change(
+    trees,
+) -> None:
+    recorded, replayed, path_map = _failed_record_run(trees, {}, {})
+    realization = yaml.safe_load((replayed / "scenario-realization.yaml").read_text())
+    realization["semantic_digest"] = "f" * 64
+    (replayed / "scenario-realization.yaml").write_text(yaml.safe_dump(realization))
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["scenario-realization.yaml"]
+
+
+def test_the_failed_record_does_not_hide_a_manifest_count_the_rows_do_not_give(
+    failed_record_trees,
+) -> None:
+    recorded, replayed, path_map = failed_record_trees
+    _rewrite_manifest(
+        replayed, obligation_stop_reason_counts={"provider_contract_failure": 2}
+    )
+    _obligation_report(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["synthesis-manifest.yaml"]
+
+
+def test_the_failed_record_does_not_hide_a_section_edit_the_rows_do_not_explain(
+    failed_record_trees,
+) -> None:
+    recorded, replayed, path_map = failed_record_trees
+    section = _obligations_section(replayed)
+    _obligation_report(replayed, section.replace("</h2>", "</h2>edited", 1))
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["report/index.html"]
+
+
+def test_the_failed_record_does_not_hide_a_provider_record_difference(
+    failed_record_trees,
+) -> None:
+    recorded, replayed, path_map = failed_record_trees
+    records = [_provider_call(1, "A", "for A"), _provider_call(2, "B", "changed")]
+    _jsonl(replayed / RECORD_FILENAME, records)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == [RECORD_FILENAME]
+
+
+def test_the_failed_record_does_not_hide_a_call_log_difference(
+    failed_record_trees,
+) -> None:
+    recorded, replayed, path_map = failed_record_trees
+    _jsonl(replayed / "calls.jsonl", [{"stage": "s", "step": "b", "success": True}])
+    _obligation_report(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert "calls.jsonl" in [item.path for item in differences]
+
+
+def test_the_failed_record_states_its_reason() -> None:
+    change = replay_gate.ROUTING_RECORD_STOP_REASON_CHANGE
+    assert change.reason and change.route_disposition
+    assert change.recorded_reason != change.replayed_reason
+    assert change.record_diagnostic not in change.earlier_diagnostics
