@@ -2547,3 +2547,462 @@ def test_the_failed_record_states_its_reason() -> None:
     assert change.reason and change.route_disposition
     assert change.recorded_reason != change.replayed_reason
     assert change.record_diagnostic not in change.earlier_diagnostics
+
+
+# Counting a lost ICA slot reply as a provider contract failure renames the
+# lost slots' diagnostics and moves accounting rows, not requests.
+
+_LOST_SLOT = "RESP-1:CA-1-1:INCORRECT"
+_ANALYTIC_SLOT = "RESP-1:CA-1-1:NOT_PROVIDED"
+_LOST_REPLY = "slot_provider_contract_failed"
+_BEFORE_LOST_REPLY = "slot_pair_unresolved"
+_GOVERNANCE_ROW = "ob:v1:" + "b" * 64
+_LOST_DETAIL = (
+    "Slot response could not be validated: ValueError: JSONDecodeError: "
+    "Unterminated string starting at: line 1 column 27905 (char 27904)"
+)
+
+
+def _targeted_route(obligation_id: str, *slots: str, mechanism: str | None) -> Any:
+    """Return a targeted route, with a semantic assessment when *mechanism*."""
+    from asago_scenario_generator.models.obligation_consideration import (
+        ObligationRoute,
+        ObligationSemanticAssessment,
+    )
+
+    return ObligationRoute(
+        obligation_id=obligation_id,
+        disposition="targeted",
+        slot_ids=slots,
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        semantic_assessment=None
+        if mechanism is None
+        else ObligationSemanticAssessment(
+            mechanism_assessment=mechanism,
+            risk_alignment="supported",
+            mapping_strength="broad_category_expansion",
+            mechanism_rationale="The mechanism judgement.",
+            risk_alignment_rationale="The alignment judgement.",
+        ),
+        rationale="The routing rationale.",
+        evidence=("route evidence",),
+    )
+
+
+def _slot_pair(route: Any, slot: str, code: str | None) -> Any:
+    """Return an unresolved pair; without *code* the analysis left it bare."""
+    from asago_scenario_generator.models.obligation_consideration import (
+        ConsiderationDiagnostic,
+        ObligationIcaConsideration,
+    )
+
+    detail = _LOST_DETAIL if code is not None else "The slot cannot decide."
+    return ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=slot,
+        disposition="unresolved",
+        evidence=("slot-analysis-validation",),
+        rationale=detail,
+        diagnostics=()
+        if code is None
+        else (
+            ConsiderationDiagnostic(
+                code=code,
+                detail=detail,
+                obligation_ids=(route.obligation_id,),
+                refs=(route.route_id, slot),
+            ),
+        ),
+    )
+
+
+def _lost_reply_accounting(
+    code: str, *, analytic: str | None = None, out_of_scope: bool = False
+) -> tuple[Any, Any, Any, str]:
+    """Return a plan, its consideration, its accounting, and the moving row's ID.
+
+    Each lost slot reply carries *code*.  The first applicable row is routed
+    to one lost slot, and to a slot whose pair carries *analytic* when given;
+    the second, whose mechanism is not established, to one lost slot; the
+    governance-only row to a lost slot and a slot the analysis left
+    unresolved.  With *out_of_scope*, the first row's risk is out of scope.
+    """
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        build_consideration_artifact,
+        build_obligation_accounting,
+    )
+    from tests.helpers.governance import _accounting_pins
+
+    plan, briefs = _two_applicable_rows()
+    first = briefs[0].obligation_id
+    analytic_slots = (_ANALYTIC_SLOT,) if analytic is not None else ()
+    moved = _targeted_route(first, _LOST_SLOT, *analytic_slots, mechanism=None)
+    kept = _targeted_route(
+        briefs[1].obligation_id, _LOST_SLOT, mechanism="insufficient_evidence"
+    )
+    governance = _targeted_route(
+        _GOVERNANCE_ROW, _LOST_SLOT, _ANALYTIC_SLOT, mechanism=None
+    )
+    pairs = [
+        _slot_pair(moved, _LOST_SLOT, code),
+        _slot_pair(kept, _LOST_SLOT, code),
+        _slot_pair(governance, _LOST_SLOT, code),
+        _slot_pair(governance, _ANALYTIC_SLOT, None),
+    ]
+    if analytic is not None:
+        pairs.append(_slot_pair(moved, _ANALYTIC_SLOT, analytic))
+    risk = next(
+        o.risk_ref.risk_id for o in plan.obligations if o.obligation_id == first
+    )
+    consideration = build_consideration_artifact(
+        plan=plan,
+        briefs=briefs,
+        initial_routes=(moved, kept),
+        final_routes=(moved, kept),
+    )
+    accounting = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=tuple(pairs),
+        source_pins=_accounting_pins(plan),
+        governance_routes=(governance,),
+        risk_scopes={risk: "outside_boundary"} if out_of_scope else None,
+    )
+    return plan, consideration, accounting, first
+
+
+def _lost_reply_run(
+    trees,
+    *,
+    recorded_fields: dict[str, Any] | None = None,
+    replayed_fields: dict[str, Any] | None = None,
+    **options: Any,
+) -> tuple[Path, Path, dict[str, str]]:
+    """Record before the change and replay after it, the moving row edited."""
+    recorded, replayed, path_map = trees
+    for root, code, fields in (
+        (recorded, _BEFORE_LOST_REPLY, recorded_fields),
+        (replayed, _LOST_REPLY, replayed_fields),
+    ):
+        plan, consideration, accounting, first = _lost_reply_accounting(code, **options)
+        if fields:
+            accounting = _row_as_recorded(
+                accounting, first, **fields(accounting, first)
+            )
+        _write_accounting_run(root, plan, consideration, accounting)
+    return recorded, replayed, path_map
+
+
+def _shapes(root: Path) -> list[tuple[str, str | None, list[str]]]:
+    rows = yaml.safe_load((root / "obligation-accounting.yaml").read_text())["rows"]
+    return [
+        (
+            row["disposition"],
+            row.get("stop_reason"),
+            [d["code"] for d in row["diagnostics"]],
+        )
+        for row in rows
+        if any(
+            d["code"] in {_LOST_REPLY, _BEFORE_LOST_REPLY} for d in row["diagnostics"]
+        )
+    ]
+
+
+def _row_of(accounting: Any, obligation_id: str) -> Any:
+    return next(row for row in accounting.rows if row.obligation_id == obligation_id)
+
+
+def test_the_lost_reply_accepts_only_its_accounting_outputs(trees) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees)
+    unresolved = "unresolved_ica_consideration"
+    assert sorted(_shapes(recorded)) == [
+        ("governance_only", "governance_routed_no_finding", [_BEFORE_LOST_REPLY]),
+        (
+            "unresolved",
+            "ica_consideration_unresolved",
+            [_BEFORE_LOST_REPLY, unresolved],
+        ),
+        (
+            "unresolved",
+            "mechanism_path_unsubstantiated",
+            [_BEFORE_LOST_REPLY, "mechanism_path_unsubstantiated"],
+        ),
+    ]
+    assert sorted(_shapes(replayed)) == [
+        ("governance_only", "governance_routed_no_finding", [_LOST_REPLY]),
+        (
+            "unresolved",
+            "mechanism_path_unsubstantiated",
+            [_LOST_REPLY, "mechanism_path_unsubstantiated"],
+        ),
+        ("unresolved", "provider_contract_failure", [_LOST_REPLY]),
+    ]
+    expected: list[Difference] = []
+
+    _, differences = compare_trees(
+        recorded, replayed, path_map, expected_differences=expected
+    )
+
+    assert differences == []
+    assert sorted(item.path for item in expected) == _STOP_ORDER_FILES
+
+
+def test_the_lost_reply_accepts_an_out_of_scope_row_that_drops_its_diagnostic(
+    trees,
+) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees, out_of_scope=True)
+    moved = [shape for shape in _shapes(replayed) if shape[1] == "risk_out_of_scope"]
+    assert moved == [("unresolved", "risk_out_of_scope", [_LOST_REPLY])]
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_the_lost_reply_keeps_the_reason_of_an_analytic_slot_beside_it(
+    trees,
+) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees, analytic=_BEFORE_LOST_REPLY)
+    assert (
+        "unresolved",
+        "ica_consideration_unresolved",
+        [_LOST_REPLY, _BEFORE_LOST_REPLY, "unresolved_ica_consideration"],
+    ) in _shapes(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_the_lost_reply_composes_with_the_fill_provenance(trees) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees)
+    records = [
+        {**_provider_call(1, "A", "for A"), "source": "live"},
+        {**_provider_call(2, "B", "for B"), "source": "live"},
+    ]
+    _jsonl(recorded / RECORD_FILENAME, records)
+    _rewrite_manifest(
+        recorded,
+        provider_replay_fill={
+            "mode": "fill",
+            "replay_source": "/elsewhere/empty-record",
+            "live_stages": [],
+            "max_live_requests": 750,
+            "served_requests": 0,
+            "live_requests": 2,
+            "live_requests_by_stage": {"s": 2},
+            "unused_recorded_responses": 0,
+            "refused_requests": 0,
+        },
+    )
+
+    _, strict = compare_trees(recorded, replayed, path_map, replay_fill=True)
+    _, without_flag = compare_trees(recorded, replayed, path_map)
+
+    assert strict == []
+    assert sorted(item.path for item in without_flag) == [
+        RECORD_FILENAME,
+        "synthesis-manifest.yaml",
+    ]
+
+
+def _moved_to(reason: str, *, drop: bool = True):
+    """Move the replayed row to *reason*, without its last diagnostic if *drop*."""
+
+    def fields(accounting: Any, obligation_id: str) -> dict[str, Any]:
+        row = _row_of(accounting, obligation_id)
+        items = row.diagnostics[:-1] if drop else row.diagnostics
+        return {"stop_reason": reason, "diagnostics": items}
+
+    return fields
+
+
+def test_the_lost_reply_does_not_hide_a_move_beside_an_analytic_slot(trees) -> None:
+    """A diagnosed analytic slot keeps the row unresolved; no move is allowed."""
+    recorded, replayed, path_map = _lost_reply_run(
+        trees,
+        analytic=_BEFORE_LOST_REPLY,
+        replayed_fields=_moved_to("provider_contract_failure"),
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["prompt_budget_exceeded", "no_structural_route", "ica_hazard_contradictory"],
+)
+def test_the_lost_reply_does_not_hide_a_move_to_another_reason(
+    trees, reason: str
+) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees)
+    plan, consideration, accounting, first = _lost_reply_accounting(_LOST_REPLY)
+    row = _row_of(accounting, first)
+    moved = _row_as_recorded(accounting, first, stop_reason=reason)
+    assert row.stop_reason == "provider_contract_failure"
+    _write_accounting_run(replayed, plan, consideration, moved)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_lost_reply_does_not_hide_a_move_from_another_reason(trees) -> None:
+    recorded, replayed, path_map = _lost_reply_run(
+        trees,
+        recorded_fields=lambda accounting, first: {
+            "stop_reason": "no_structural_route"
+        },
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_lost_reply_does_not_hide_a_move_past_a_verification_stop(trees) -> None:
+    """A verification stop comes first, so a row carrying one never moves."""
+    from asago_scenario_generator.models.obligation_consideration import (
+        ConsiderationDiagnostic,
+    )
+
+    def with_verification(accounting: Any, first: str) -> dict[str, Any]:
+        row = _row_of(accounting, first)
+        stop = ConsiderationDiagnostic(
+            code="ica_hazard_contradictory",
+            detail="The verifier found the hazard contradictory.",
+            obligation_ids=(first,),
+        )
+        items = list(row.diagnostics)
+        items.insert(1, stop)
+        return {"diagnostics": tuple(items)}
+
+    recorded, replayed, path_map = _lost_reply_run(
+        trees, recorded_fields=with_verification, replayed_fields=with_verification
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def _edited_diagnostic(index: int, **update: Any):
+    def fields(accounting: Any, first: str) -> dict[str, Any]:
+        items = list(_row_of(accounting, first).diagnostics)
+        items[index] = items[index].model_copy(update=update)
+        return {"diagnostics": tuple(items)}
+
+    return fields
+
+
+@pytest.mark.parametrize(
+    ("side", "fields"),
+    [
+        ("replayed", _edited_diagnostic(0, detail="another detail")),
+        ("replayed", _edited_diagnostic(0, refs=("route-other",))),
+        ("recorded", _edited_diagnostic(-1, detail="another detail")),
+        ("recorded", _edited_diagnostic(0, code="slot_response_unresolved")),
+        (
+            "replayed",
+            lambda accounting, first: {"evidence": ("other evidence",)},
+        ),
+        (
+            "replayed",
+            lambda accounting, first: {"diagnostics": ()},
+        ),
+    ],
+    ids=[
+        "lost-slot-detail",
+        "lost-slot-refs",
+        "dropped-diagnostic-detail",
+        "recorded-slot-code",
+        "evidence",
+        "no-renamed-slot",
+    ],
+)
+def test_the_lost_reply_does_not_hide_another_change_on_a_moved_row(
+    trees, side: str, fields: Any
+) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees, **{f"{side}_fields": fields})
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_lost_reply_does_not_hide_a_kept_row_that_drops_its_diagnostic(
+    trees,
+) -> None:
+    """Only a moved or out-of-scope row loses the unresolved diagnostic."""
+    recorded, replayed, path_map = _lost_reply_run(
+        trees,
+        analytic=_BEFORE_LOST_REPLY,
+        replayed_fields=_moved_to("ica_consideration_unresolved"),
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    # The report renders the row's first diagnostic, which stays the same.
+    assert sorted(item.path for item in differences) == [
+        "obligation-accounting.yaml",
+        "scenario-realization.yaml",
+        "synthesis-manifest.yaml",
+    ]
+
+
+def test_the_lost_reply_does_not_hide_a_manifest_count_the_rows_do_not_give(
+    trees,
+) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees)
+    _rewrite_manifest(
+        replayed, obligation_stop_reason_counts={"provider_contract_failure": 2}
+    )
+    _obligation_report(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["synthesis-manifest.yaml"]
+
+
+def test_the_lost_reply_does_not_hide_a_section_edit_the_rows_do_not_explain(
+    trees,
+) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees)
+    section = _obligations_section(replayed)
+    _obligation_report(replayed, section.replace("</h2>", "</h2>edited", 1))
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["report/index.html"]
+
+
+def test_the_lost_reply_does_not_hide_a_realization_change(trees) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees)
+    realization = yaml.safe_load((replayed / "scenario-realization.yaml").read_text())
+    realization["records"] = [{"obligation_id": "ob:v1:" + "c" * 64}]
+    (replayed / "scenario-realization.yaml").write_text(yaml.safe_dump(realization))
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [item.path for item in differences] == ["scenario-realization.yaml"]
+
+
+def test_the_lost_reply_does_not_hide_a_call_log_difference(trees) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees)
+    _jsonl(replayed / "calls.jsonl", [{"stage": "s", "step": "b", "success": True}])
+    _obligation_report(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert "calls.jsonl" in [item.path for item in differences]
+
+
+def test_the_lost_reply_states_its_reason() -> None:
+    change = replay_gate.LOST_REPLY_STOP_REASON_CHANGE
+    assert change.reason
+    assert change.recorded_pair_code != change.replayed_pair_code
+    assert change.analytic_reason != change.replayed_reason

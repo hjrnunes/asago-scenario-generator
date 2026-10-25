@@ -18,7 +18,11 @@ names the accounting outputs the fixed order of the semantic stop reasons
 changes, accepted only as that order derives them from unchanged routes;
 :data:`ROUTING_RECORD_STOP_REASON_CHANGE` names those that counting a failed
 routing record as a provider contract failure changes, accepted only on rows
-whose replayed route carries that record's diagnostic.
+whose replayed route carries that record's diagnostic;
+:data:`LOST_REPLY_STOP_REASON_CHANGE` names those that counting a lost ICA slot
+reply as a provider contract failure changes, accepted only on rows whose
+recorded slot diagnostics the replay renames and, for a moved row, whose every
+unresolved slot lost its reply.
 The named versions in
 :data:`VERSION_CHAINS` compare as the
 sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
@@ -69,6 +73,7 @@ import asago_scenario_generator
 from asago_scenario_generator.models.obligation_consideration import (
     ROUTING_RECORD_VALIDATION_FAILED,
     ROUTING_VALIDATION_FAILED,
+    SLOT_PROVIDER_CONTRACT_FAILED,
     ConsiderationDiagnostic,
     ObligationSemanticAssessment,
 )
@@ -442,7 +447,8 @@ class AccountingStopReasonChange:
     own reason: the first recorded copy, or the one accounting derives (none
     on an out-of-scope row).  Every other diagnostic stays as recorded.  A
     differing row may instead be one :data:`ROUTING_RECORD_STOP_REASON_CHANGE`
-    explains, so a recording made before both changes passes.  At least one
+    or :data:`LOST_REPLY_STOP_REASON_CHANGE` explains, so a recording made
+    before these changes passes.  At least one
     row must differ, or nothing is allowed.  The scenario
     realization may then differ only in its accounting pin and digest; the
     synthesis manifest only in the *manifest_digests* of those two files and
@@ -547,6 +553,58 @@ ROUTING_RECORD_STOP_REASON_CHANGE = RoutingRecordStopReasonChange(
     reason="accounting counts a route whose own routing record failed "
     "validation as a provider contract failure, as it counted a failed batch, "
     "so those rows' recorded stop reason moves with no request change",
+)
+
+
+@dataclass(frozen=True)
+class LostReplyStopReasonChange:
+    """Accounting rows changed by counting a lost ICA slot reply.
+
+    Slot filling once wrote *recorded_pair_code* on each routed pair of a
+    request whose last provider reply broke its contract, and now writes
+    *replayed_pair_code*.  Accounting copies a pair's diagnostic onto its
+    row, and the row's diagnostics are the only record of its slot results.
+    Accounting runs after every model request, so no request changes.  A
+    differing row is explained when only its stop reason and diagnostics
+    changed, at least one diagnostic carries *replayed_pair_code*, and,
+    with each of those back at *recorded_pair_code*, its diagnostics are the
+    recorded ones in one of these ways:
+
+    * equal, with the same stop reason: a row whose stop another reason
+      explains, such as a semantic stop, a governance-only route, or another
+      slot left unresolved on the analysis;
+    * the recorded ones less a final *analytic_diagnostic* accounting writes
+      for the row's one route, on an unresolved row moved from
+      *analytic_reason* to *replayed_reason*, or on one an out-of-scope risk
+      kept at ``risk_out_of_scope``.
+
+    That drop requires that every slot diagnostic of the replayed row
+    carries *replayed_pair_code*, none *recorded_pair_code*, and that no
+    diagnostic carries an ICA verification stop reason, which comes first.
+    Such rows join the rows :data:`ACCOUNTING_STOP_REASON_CHANGE` explains,
+    and the realization, manifest and report must follow all of them through
+    that allowance's checks.  This temporary allowance remains until
+    recordings made before the change are replaced.
+    """
+
+    recorded_pair_code: str
+    replayed_pair_code: str
+    analytic_reason: str
+    replayed_reason: str
+    analytic_diagnostic: str
+    reason: str
+
+
+LOST_REPLY_STOP_REASON_CHANGE = LostReplyStopReasonChange(
+    recorded_pair_code="slot_pair_unresolved",
+    replayed_pair_code=SLOT_PROVIDER_CONTRACT_FAILED,
+    analytic_reason="ica_consideration_unresolved",
+    replayed_reason="provider_contract_failure",
+    analytic_diagnostic="unresolved_ica_consideration",
+    reason="slot filling names a routed pair whose slot reply broke its contract "
+    "and accounting counts a row whose every unresolved slot lost its reply as "
+    "a provider contract failure, so those rows' recorded diagnostics and stop "
+    "reasons move with no request change",
 )
 
 # A calls.jsonl entry names the provider-calls.jsonl records its call wrote
@@ -1792,6 +1850,66 @@ def _failed_record_row_explained(
     )
 
 
+def _lost_reply_row_explained(
+    before: dict[str, Any],
+    after: dict[str, Any],
+    change: LostReplyStopReasonChange,
+) -> bool:
+    """Tell whether *after* is *before* with its lost slot replies counted."""
+    from asago_scenario_generator.models.obligation_accounting import (
+        OUT_OF_SCOPE,
+        RISK_OUT_OF_SCOPE,
+    )
+    from asago_scenario_generator.pipeline.obligation_consideration import (
+        _ICA_VERIFICATION_STOP_REASONS,
+        _unresolved_ica_diagnostic,
+    )
+
+    moved = ("stop_reason", "diagnostics")
+    if {k: v for k, v in before.items() if k not in moved} != {
+        k: v for k, v in after.items() if k not in moved
+    }:
+        return False
+    before_items, after_items = before.get("diagnostics"), after.get("diagnostics")
+    if not isinstance(before_items, list) or not isinstance(after_items, list):
+        return False
+    if not all(isinstance(item, dict) for item in after_items):
+        return False
+    codes = [item.get("code") for item in after_items]
+    if change.replayed_pair_code not in codes:
+        return False
+    restored = [
+        {**item, "code": change.recorded_pair_code}
+        if item.get("code") == change.replayed_pair_code
+        else item
+        for item in after_items
+    ]
+    every_slot_lost = change.recorded_pair_code not in codes and not set(codes) & set(
+        _ICA_VERIFICATION_STOP_REASONS
+    )
+    reasons = (before.get("stop_reason"), after.get("stop_reason"))
+    if before_items == restored:
+        return reasons[0] == reasons[1]
+    refs = after.get("route_refs") or []
+    if not (
+        every_slot_lost and after.get("disposition") == "unresolved" and len(refs) == 1
+    ):
+        return False
+    if reasons != (change.analytic_reason, change.replayed_reason) and not (
+        reasons == (RISK_OUT_OF_SCOPE, RISK_OUT_OF_SCOPE)
+        and after.get("scope") in OUT_OF_SCOPE
+    ):
+        return False
+    try:
+        dropped = _unresolved_ica_diagnostic(after.get("obligation_id"), refs[0])
+    except (TypeError, ValueError):
+        return False
+    return dropped.code == change.analytic_diagnostic and before_items == [
+        *restored,
+        dropped.model_dump(mode="json"),
+    ]
+
+
 def _considered_reason(row: dict[str, Any]) -> str | None:
     """Return the row's stop reason when the manifest counts it."""
     if row.get("disposition") in {"governance_only", "capability_excluded"}:
@@ -1805,11 +1923,13 @@ def _accounting_stop_reason_change(
     replayed: Path,
     change: AccountingStopReasonChange = ACCOUNTING_STOP_REASON_CHANGE,
     routing: RoutingRecordStopReasonChange | None = ROUTING_RECORD_STOP_REASON_CHANGE,
+    lost_reply: LostReplyStopReasonChange | None = LOST_REPLY_STOP_REASON_CHANGE,
 ) -> _AccountingChange | None:
-    """Validate that the accounting differs only as the two changes derive.
+    """Validate that the accounting differs only as the three changes derive.
 
     Each differing row must be the one the stop order derives or, unless
-    *routing* is ``None``, the one its failed routing record explains.
+    *routing* is ``None``, the one its failed routing record explains, or,
+    unless *lost_reply* is ``None``, the one its lost slot replies explain.
     """
     from asago_scenario_generator.models.obligation_accounting import (
         ObligationAccounting,
@@ -1867,6 +1987,10 @@ def _accounting_stop_reason_change(
             or (
                 routing is not None
                 and _failed_record_row_explained(old, new, routes_of, routing)
+            )
+            or (
+                lost_reply is not None
+                and _lost_reply_row_explained(old, new, lost_reply)
             )
         ):
             return None
@@ -1962,12 +2086,20 @@ def _manifest_follows(
     aliases: dict[str, str],
     accounting: _AccountingChange,
     change: AccountingStopReasonChange,
+    *,
+    replay_fill: bool = False,
 ) -> bool:
-    """Accept a manifest whose accounting-derived fields match the changed rows."""
+    """Accept a manifest whose accounting-derived fields match the changed rows.
+
+    With *replay_fill*, the recording's :data:`REPLAY_FILL_PROVENANCE` is
+    dropped first, as :func:`compare_file` drops it.
+    """
     before = _manifest_document(recorded / _MANIFEST_FILENAME, None)
     after = _manifest_document(replayed / _MANIFEST_FILENAME, aliases)
     if not isinstance(before, dict) or not isinstance(after, dict):
         return False
+    if replay_fill:
+        before = _without_fill_provenance(before, after, _MANIFEST_FILENAME, recorded)
     sources = {
         "obligation_accounting": change.accounting_file,
         "scenario_realization": change.realization_file,
@@ -2061,8 +2193,13 @@ def _is_accounting_stop_reason_difference(
     aliases: dict[str, str],
     accounting: _AccountingChange | None,
     change: AccountingStopReasonChange = ACCOUNTING_STOP_REASON_CHANGE,
+    *,
+    replay_fill: bool = False,
 ) -> bool:
-    """Accept only the validated accounting change and the files it derives."""
+    """Accept only the validated accounting change and the files it derives.
+
+    *replay_fill* says the recorded arguments carried ``--replay-fill``.
+    """
     if accounting is None or relative not in change.files:
         return False
     if relative == change.report_file:
@@ -2075,7 +2212,9 @@ def _is_accounting_stop_reason_difference(
         return True
     if relative == change.realization_file:
         return _realization_follows(recorded, replayed, accounting, change)
-    return _manifest_follows(recorded, replayed, aliases, accounting, change)
+    return _manifest_follows(
+        recorded, replayed, aliases, accounting, change, replay_fill=replay_fill
+    )
 
 
 def _is_expected_content_difference(
@@ -2206,7 +2345,13 @@ def compare_trees(
             if _is_expected_content_difference(
                 recorded, replayed, relative, detail, aliases, expected
             ) or _is_accounting_stop_reason_difference(
-                recorded, replayed, relative, detail, aliases, accounting
+                recorded,
+                replayed,
+                relative,
+                detail,
+                aliases,
+                accounting,
+                replay_fill=replay_fill,
             ):
                 if expected_differences is not None:
                     expected_differences.append(difference)
