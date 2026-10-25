@@ -579,15 +579,17 @@ class LostReplyStopReasonChange:
       *analytic_reason* to *replayed_reason*, or on one an out-of-scope risk
       kept at ``risk_out_of_scope``.
 
-    That drop requires that every slot of the row's one route carries
-    exactly one *replayed_pair_code* diagnostic of that route, that none
-    carries *recorded_pair_code*, and that no diagnostic carries an ICA
-    verification stop reason, which comes first.  No output records a slot
-    result without a diagnostic, such as a slot the analysis left
-    unresolved, so a row with any other routed slot cannot show that its
-    every unresolved slot lost its reply, and fails.  A row carrying one of
-    *excluded_pair_codes*, which name slots never analyzed for another
-    reason, is never explained.
+    Every *replayed_pair_code* diagnostic must name the row's obligation, its
+    one route and one of its routed slots, each slot once, on either path.
+    The drop further requires that every routed slot is named by one, or is
+    a slot slot filling answers locally in the recorded final control
+    structure, that no diagnostic carries *recorded_pair_code*, and that no
+    diagnostic carries an ICA verification stop reason, which comes first.
+    No output records a slot result without a diagnostic, such as a slot
+    the analysis left unresolved, so a row with any other routed slot cannot
+    show that its every unresolved slot lost its reply, and fails.  A row
+    carrying one of *excluded_pair_codes*, which name slots never analyzed
+    for another reason, is never explained.
     Such rows join the rows :data:`ACCOUNTING_STOP_REASON_CHANGE` explains,
     and the realization, manifest and report must follow all of them through
     that allowance's checks.  This temporary allowance remains until
@@ -1863,8 +1865,13 @@ def _lost_reply_row_explained(
     before: dict[str, Any],
     after: dict[str, Any],
     change: LostReplyStopReasonChange,
+    local_slots: frozenset[str] = frozenset(),
 ) -> bool:
-    """Tell whether *after* is *before* with its lost slot replies counted."""
+    """Tell whether *after* is *before* with its lost slot replies counted.
+
+    *local_slots* are the slots slot filling decides without the provider,
+    as :func:`_locally_decided_slots` derives them.
+    """
     from asago_scenario_generator.models.obligation_accounting import (
         OUT_OF_SCOPE,
         RISK_OUT_OF_SCOPE,
@@ -1895,14 +1902,18 @@ def _lost_reply_row_explained(
     ]
     if set(codes) & change.excluded_pair_codes:
         return False
+    lost = _bound_lost_slots(after, change)
+    if lost is None:
+        return False
     reasons = (before.get("stop_reason"), after.get("stop_reason"))
     if before_items == restored:
         return reasons[0] == reasons[1]
     refs = after.get("route_refs") or []
     if not (
         after.get("disposition") == "unresolved"
+        and change.recorded_pair_code not in codes
         and not set(codes) & set(_ICA_VERIFICATION_STOP_REASONS)
-        and _every_routed_slot_lost(after, change)
+        and _every_routed_slot_lost(after, lost, local_slots)
     ):
         return False
     if reasons != (change.analytic_reason, change.replayed_reason) and not (
@@ -1920,45 +1931,117 @@ def _lost_reply_row_explained(
     ]
 
 
-def _every_routed_slot_lost(
+def _bound_lost_slots(
     row: dict[str, Any], change: LostReplyStopReasonChange
-) -> bool:
-    """Tell whether the row's diagnostics show that every routed slot lost its reply.
+) -> list[str] | None:
+    """Return the slots the row's *replayed_pair_code* diagnostics name.
 
-    No output records a slot result without a diagnostic, such as a slot the
-    analysis left unresolved, so the row's diagnostics cannot show that no
-    such slot exists beside a lost one.  Every slot of the row's one route
-    must therefore carry exactly one *replayed_pair_code* diagnostic of that
-    route and obligation, and no diagnostic *recorded_pair_code*; any other
-    row fails closed.
+    Slot filling writes one such diagnostic per lost routed slot, naming the
+    row's obligation, its one route and that slot.  ``None`` when any of them
+    names another obligation or route, no slot or several of the row's
+    slots, or a slot another one already names.
     """
     slots, refs = row.get("slot_ids"), row.get("route_refs")
     items = row.get("diagnostics")
     if not (
         isinstance(slots, list)
-        and slots
         and isinstance(refs, list)
         and len(refs) == 1
         and isinstance(items, list)
     ):
-        return False
+        return None
     lost: list[str] = []
     for item in items:
-        code = item.get("code") if isinstance(item, dict) else None
-        if code == change.recorded_pair_code:
-            return False
-        if code != change.replayed_pair_code:
+        if not isinstance(item, dict) or item.get("code") != change.replayed_pair_code:
             continue
-        item_refs = item.get("refs") or []
+        item_refs = item.get("refs")
+        if not isinstance(item_refs, list):
+            return None
         named = [ref for ref in item_refs if ref in slots]
         if (
             refs[0] not in item_refs
             or item.get("obligation_ids") != [row.get("obligation_id")]
             or len(named) != 1
+            or named[0] in lost
         ):
-            return False
+            return None
         lost.extend(named)
-    return sorted(lost) == sorted(slots) and len(set(lost)) == len(lost)
+    return lost
+
+
+def _every_routed_slot_lost(
+    row: dict[str, Any], lost: list[str], local_slots: frozenset[str]
+) -> bool:
+    """Tell whether every routed slot of the row lost its reply or is local.
+
+    No output records a slot result without a diagnostic, such as a slot the
+    analysis left unresolved, so the row's diagnostics cannot show that no
+    such slot exists beside a lost one.  Every routed slot must therefore be
+    a *lost* one or one of *local_slots*, which slot filling never sends to
+    the provider and always answers not applicable.  Any other routed slot
+    fails closed, even where the producer moved the row correctly: a slot the
+    provider answered not applicable is indistinguishable from one it left
+    unresolved.
+    """
+    slots = row.get("slot_ids")
+    return (
+        isinstance(slots, list)
+        and bool(lost)
+        and not set(lost) & local_slots
+        and set(slots) == set(lost) | (set(slots) & local_slots)
+    )
+
+
+def _locally_decided_slots(root: Path) -> frozenset[str]:
+    """Return the slots slot filling answered without the provider in *root*.
+
+    Slot filling decides a slot locally from its control action's typed
+    temporality, in the final control structure; such a slot's routed pairs
+    are always not applicable.  The run writes only the baseline structure,
+    so it counts only where its digest is the final structure the synthesis
+    manifest pins, that is where no structural revision changed it; otherwise
+    no slot counts and a row with another routed slot fails closed.
+    """
+    from asago_scenario_generator.pipeline.synthesis_manifest import (
+        _manifest_artifact_identity,
+    )
+    from asago_scenario_generator.stpa.models.control_structure import (
+        ControlStructure,
+    )
+    from asago_scenario_generator.stpa.threat_enum.slot_creation import (
+        create_slots,
+        requires_provider_slot_analysis,
+    )
+
+    structure_path = root / _CONTROL_STRUCTURE_FILENAME
+    manifest_path = root / _MANIFEST_FILENAME
+    if not structure_path.is_file() or not manifest_path.is_file():
+        return frozenset()
+    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
+    artifacts = manifest.get("source_artifacts") if isinstance(manifest, dict) else None
+    pin = artifacts.get(_FINAL_STRUCTURE) if isinstance(artifacts, dict) else None
+    if not isinstance(pin, dict):
+        return frozenset()
+    try:
+        structure = ControlStructure.model_validate(
+            yaml.safe_load(structure_path.read_text(encoding="utf-8"))
+        )
+        identity = _manifest_artifact_identity(
+            pin.get("artifact_id"), pin.get("schema_version"), structure
+        )
+    except (TypeError, ValueError):
+        return frozenset()
+    if identity != pin:
+        return frozenset()
+    return frozenset(
+        slot.slot_id
+        for slot in create_slots(structure)
+        if not requires_provider_slot_analysis(slot)
+    )
+
+
+_CONTROL_STRUCTURE_FILENAME = "control-structure.yaml"
+_FINAL_STRUCTURE = "final_control_structure"
 
 
 def _considered_reason(row: dict[str, Any]) -> str | None:
@@ -2029,6 +2112,9 @@ def _accounting_stop_reason_change(
         return None
     removed: Counter[str] = Counter()
     added: Counter[str] = Counter()
+    local_slots = (
+        _locally_decided_slots(recorded) if lost_reply is not None else frozenset()
+    )
     changed = [(old, new) for old, new in zip(before_rows, after_rows) if old != new]
     if not changed:
         return None
@@ -2041,7 +2127,7 @@ def _accounting_stop_reason_change(
             )
             or (
                 lost_reply is not None
-                and _lost_reply_row_explained(old, new, lost_reply)
+                and _lost_reply_row_explained(old, new, lost_reply, local_slots)
             )
         ):
             return None

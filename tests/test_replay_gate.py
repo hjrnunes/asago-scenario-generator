@@ -2557,6 +2557,8 @@ _ANALYTIC_SLOT = "RESP-1:CA-1-1:NOT_PROVIDED"
 _LOST_REPLY = "slot_provider_contract_failed"
 _BEFORE_LOST_REPLY = "slot_pair_unresolved"
 _GOVERNANCE_ROW = "ob:v1:" + "b" * 64
+# The duration slot of an action whose temporality cannot express one.
+_LOCAL_SLOT = "RESP-1:CA-1-1:WRONG_DURATION"
 _LOST_DETAIL = (
     "Slot response could not be validated: ValueError: JSONDecodeError: "
     "Unterminated string starting at: line 1 column 27905 (char 27904)"
@@ -2618,8 +2620,29 @@ def _slot_pair(route: Any, slot: str, code: str | None) -> Any:
     )
 
 
+def _local_pair(route: Any) -> Any:
+    """Return the not-applicable pair slot filling writes for the local slot."""
+    from asago_scenario_generator.models.obligation_consideration import (
+        ObligationIcaConsideration,
+    )
+
+    return ObligationIcaConsideration(
+        route_id=route.route_id,
+        obligation_id=route.obligation_id,
+        slot_id=_LOCAL_SLOT,
+        disposition="proposed_not_applicable",
+        evidence=("typed-action-temporality",),
+        structural_inventory_complete=True,
+        rationale="The action temporality is not continuous or bounded_duration.",
+    )
+
+
 def _lost_reply_accounting(
-    code: str, *, analytic: str | None = None, out_of_scope: bool = False
+    code: str,
+    *,
+    analytic: str | None = None,
+    out_of_scope: bool = False,
+    local: bool = False,
 ) -> tuple[Any, Any, Any, str]:
     """Return a plan, its consideration, its accounting, and the moving row's ID.
 
@@ -2629,6 +2652,8 @@ def _lost_reply_accounting(
     the second, whose mechanism is not established, to one lost slot; the
     governance-only row to a lost slot and a slot the analysis left
     unresolved.  With *out_of_scope*, the first row's risk is out of scope.
+    With *local*, the first row is also routed to the slot slot filling
+    answers not applicable without the provider.
     """
     from asago_scenario_generator.pipeline.obligation_consideration import (
         build_consideration_artifact,
@@ -2639,7 +2664,10 @@ def _lost_reply_accounting(
     plan, briefs = _two_applicable_rows()
     first = briefs[0].obligation_id
     analytic_slots = (_ANALYTIC_SLOT,) if analytic is not None else ()
-    moved = _targeted_route(first, _LOST_SLOT, *analytic_slots, mechanism=None)
+    local_slots = (_LOCAL_SLOT,) if local else ()
+    moved = _targeted_route(
+        first, _LOST_SLOT, *analytic_slots, *local_slots, mechanism=None
+    )
     kept = _targeted_route(
         briefs[1].obligation_id, _LOST_SLOT, mechanism="insufficient_evidence"
     )
@@ -2654,6 +2682,8 @@ def _lost_reply_accounting(
     ]
     if analytic is not None:
         pairs.append(_slot_pair(moved, _ANALYTIC_SLOT, analytic or None))
+    if local:
+        pairs.append(_local_pair(moved))
     risk = next(
         o.risk_ref.risk_id for o in plan.obligations if o.obligation_id == first
     )
@@ -2679,9 +2709,14 @@ def _lost_reply_run(
     *,
     recorded_fields: dict[str, Any] | None = None,
     replayed_fields: dict[str, Any] | None = None,
+    target: str = "moved",
     **options: Any,
 ) -> tuple[Path, Path, dict[str, str]]:
-    """Record before the change and replay after it, the moving row edited."""
+    """Record before the change and replay after it, the *target* row edited.
+
+    *target* names the first applicable row (``moved``), the second
+    (``kept``), or the governance-only row (``governance``).
+    """
     recorded, replayed, path_map = trees
     for root, code, fields in (
         (recorded, _BEFORE_LOST_REPLY, recorded_fields),
@@ -2689,8 +2724,17 @@ def _lost_reply_run(
     ):
         plan, consideration, accounting, first = _lost_reply_accounting(code, **options)
         if fields:
+            edited = {
+                "moved": first,
+                "kept": next(
+                    row.obligation_id
+                    for row in accounting.rows
+                    if row.stop_reason == "mechanism_path_unsubstantiated"
+                ),
+                "governance": _GOVERNANCE_ROW,
+            }[target]
             accounting = _row_as_recorded(
-                accounting, first, **fields(accounting, first)
+                accounting, edited, **fields(accounting, edited)
             )
         _write_accounting_run(root, plan, consideration, accounting)
     return recorded, replayed, path_map
@@ -3152,3 +3196,139 @@ def test_an_accounting_change_fails_a_derived_file_neither_side_wrote(
         "scenario-realization.yaml",
         "does not follow the accepted accounting change",
     ) in [(item.path, item.detail) for item in differences]
+
+
+def _wrong_diagnostic_binding(**update: Any):
+    """Edit the row's renamed slot diagnostic on both sides alike."""
+
+    def fields(accounting: Any, obligation_id: str) -> dict[str, Any]:
+        items = list(_row_of(accounting, obligation_id).diagnostics)
+        index = next(
+            i
+            for i, item in enumerate(items)
+            if item.code in {_LOST_REPLY, _BEFORE_LOST_REPLY}
+        )
+        items[index] = items[index].model_copy(
+            update={key: value(items[index]) for key, value in update.items()}
+        )
+        return {"diagnostics": tuple(items)}
+
+    return fields
+
+
+def _duplicated_diagnostic(accounting: Any, obligation_id: str) -> dict[str, Any]:
+    items = list(_row_of(accounting, obligation_id).diagnostics)
+    index = next(
+        i
+        for i, item in enumerate(items)
+        if item.code in {_LOST_REPLY, _BEFORE_LOST_REPLY}
+    )
+    items.insert(index, items[index])
+    return {"diagnostics": tuple(items)}
+
+
+@pytest.mark.parametrize("target", ["kept", "governance"])
+@pytest.mark.parametrize(
+    "fields",
+    [
+        _wrong_diagnostic_binding(
+            refs=lambda item: tuple(
+                "route:v1:" + "9" * 64 if ref.startswith("route:") else ref
+                for ref in item.refs
+            )
+        ),
+        _wrong_diagnostic_binding(
+            refs=lambda item: tuple(
+                ref if ref.startswith("route:") else "RESP-9:CA-9-1:INCORRECT"
+                for ref in item.refs
+            )
+        ),
+        _wrong_diagnostic_binding(obligation_ids=lambda item: ("ob:v1:" + "d" * 64,)),
+        _duplicated_diagnostic,
+    ],
+    ids=["other-route", "slot-not-routed", "other-obligation", "duplicate"],
+)
+def test_the_lost_reply_does_not_hide_a_kept_row_with_a_misbound_diagnostic(
+    trees, target: str, fields: Any
+) -> None:
+    """A row that keeps its reason still needs each renamed slot bound to it."""
+    recorded, replayed, path_map = _lost_reply_run(
+        trees, target=target, recorded_fields=fields, replayed_fields=fields
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert "obligation-accounting.yaml" in [item.path for item in differences]
+
+
+def _pin_final_structure(root: Path, *, revised: bool = False) -> None:
+    """Write the control structure and pin it as the final one in the manifest.
+
+    With *revised*, the pin is another structure's, as after a revision.
+    """
+    from asago_scenario_generator.pipeline.synthesis_manifest import (
+        _manifest_artifact_identity,
+    )
+    from tests.helpers.obligation_aware import _control_structure
+
+    structure = _control_structure()
+    (root / "control-structure.yaml").write_text(
+        yaml.safe_dump(structure.model_dump(mode="json"), sort_keys=False)
+    )
+    pin = _manifest_artifact_identity(
+        "stpa-control-structure-final", "stpa-control-structure-v1", structure
+    )
+    if revised:
+        pin["semantic_digest"] = "a" * 64
+    document = yaml.safe_load((root / "synthesis-manifest.yaml").read_text())
+    _rewrite_manifest(
+        root,
+        source_artifacts={
+            **document["source_artifacts"],
+            "final_control_structure": pin,
+        },
+    )
+
+
+def test_the_lost_reply_accepts_a_move_beside_a_locally_answered_slot(trees) -> None:
+    """The final structure the manifest pins shows the slot was never sent."""
+    recorded, replayed, path_map = _lost_reply_run(trees, local=True)
+    for root in (recorded, replayed):
+        _pin_final_structure(root)
+    assert ("unresolved", "provider_contract_failure", [_LOST_REPLY]) in _shapes(
+        replayed
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_the_lost_reply_does_not_hide_a_local_slot_of_a_revised_structure(
+    trees,
+) -> None:
+    """Deliberate false negative: the run writes no revised final structure."""
+    recorded, replayed, path_map = _lost_reply_run(trees, local=True)
+    for root in (recorded, replayed):
+        _pin_final_structure(root, revised=True)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_lost_reply_does_not_hide_a_bare_slot_beside_a_locally_answered_one(
+    trees,
+) -> None:
+    recorded, replayed, path_map = _lost_reply_run(
+        trees,
+        analytic="",
+        local=True,
+        replayed_fields=_moved_to("provider_contract_failure"),
+    )
+    for root in (recorded, replayed):
+        _pin_final_structure(root)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
