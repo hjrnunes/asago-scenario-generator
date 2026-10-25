@@ -1641,6 +1641,7 @@ class _PreservedStageKeys:
     stage_1a: dict[str, Any] = field(default_factory=dict)
     post_review_loss_analysis_digest: str | None = None
     uncited_security_constraints: list[str] | None = None
+    critic_revision: dict[str, str] | None = None
     loss_analysis_input_hash: str | None = None
 
 
@@ -1650,10 +1651,10 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
     ``scenario_prod`` writes the last ``run-manifest.yaml`` of a product run
     and rebuilds ``stage_summary`` from ``calls.jsonl``.  That rebuild drops
     the keys SP1 owns: the Stage 1a ``source`` and call count, the advisory
-    coverage-review record, the Stage 2 post-review digest, and the Stage 2
-    uncited security constraints.  A pinned run
-    also owns ``input_hashes.loss_analysis``, which must stay the digest of
-    the supplied file rather than the canonical model hash.
+    coverage-review record, the Stage 2 post-review digest, the Stage 2
+    uncited security constraints, and the Stage 2 critic-revision record.  A
+    pinned run also owns ``input_hashes.loss_analysis``, which must stay the
+    digest of the supplied file rather than the canonical model hash.
     """
     manifest = _load_yaml_mapping(run_dir / "run-manifest.yaml") or {}
     stage_summary = manifest.get("stage_summary")
@@ -1662,6 +1663,7 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
     stage_1a = dict(_mapping_or_empty(stage_summary.get("stage_1a")))
     stage_2 = _mapping_or_empty(stage_summary.get("stage_2"))
     uncited = stage_2.get("uncited_security_constraints")
+    critic_revision = stage_2.get("critic_revision")
     input_hashes = _mapping_or_empty(manifest.get("input_hashes"))
     pinned_hash = (
         input_hashes.get("loss_analysis")
@@ -1675,6 +1677,11 @@ def _preserved_stage_keys(run_dir: Path) -> _PreservedStageKeys:
         ),
         uncited_security_constraints=(
             [str(item) for item in uncited] if isinstance(uncited, list) else None
+        ),
+        critic_revision=(
+            {str(key): str(value) for key, value in critic_revision.items()}
+            if isinstance(critic_revision, dict)
+            else None
         ),
         loss_analysis_input_hash=_text_or_none(pinned_hash),
     )
@@ -1726,6 +1733,8 @@ def _manifest_stage_summary(
         stage_summary["stage_2"]["uncited_security_constraints"] = (
             preserved.uncited_security_constraints
         )
+    if preserved.critic_revision is not None:
+        stage_summary["stage_2"]["critic_revision"] = preserved.critic_revision
     stage_1a_summary = dict(stage_summary.get("stage_1a") or {})
     # ``count_calls_by_stage`` owns the call and token totals; the SP1 block
     # supplies every key it cannot rebuild (``source``, the review record,

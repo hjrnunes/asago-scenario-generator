@@ -48,6 +48,7 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
 )
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
+    discarded_revision_reason,
     run_completeness_critic,
     run_revision,
     sanitize_critic_ids,
@@ -335,6 +336,7 @@ def run_sp1(
         target_evidence=target_evidence,
         stated_rule_coverage=stated_rule_coverage,
         uncited_constraints=stage2_result.uncited_constraints,
+        critic_revision=stage2_result.critic_revision,
     )
 
     return SP1RunResult(
@@ -469,6 +471,8 @@ class _Stage2Result:
     revised: bool = False
     model_call_count: int = 0
     uncited_constraints: list[str] = field(default_factory=list)
+    # None when the critic found no gap, so no revision was requested.
+    critic_revision: dict[str, str] | None = None
 
 
 def _try_derive_loss_analysis(
@@ -934,6 +938,15 @@ def _run_stage_2_steps(
         target_evidence=target_evidence,
     )
     versions.add(control_structure, "control-structure-revised.yaml")
+    critic_revision = _critic_revision_record(
+        critic_findings, post_revision_warnings, revised=revised
+    )
+    if critic_revision is not None and "reason" in critic_revision:
+        stage_warnings.append(
+            "stage_2/critic_revision: the critic revision was discarded and the "
+            "reviewed control structure was published instead: "
+            f"{critic_revision['reason']}"
+        )
 
     control_structure, placement_warnings = attach_to_sole_reply_responsibility(
         control_structure, loss_analysis
@@ -967,7 +980,28 @@ def _run_stage_2_steps(
         heuristic_warnings=list(heuristic_result.warnings),
         post_revision_warnings=post_revision_warnings,
         revised=revised,
+        critic_revision=critic_revision,
     )
+
+
+def _critic_revision_record(
+    critic_findings: CriticFindings,
+    post_revision_warnings: list[str],
+    *,
+    revised: bool,
+) -> dict[str, str] | None:
+    """Say whether the requested critic revision was applied or discarded.
+
+    ``applied`` changed the structure; ``unchanged`` was accepted but changed
+    nothing.  A ``discarded`` revision leaves the reviewed structure in force;
+    its reason is the warning ``run_revision`` recorded for the rejected reply.
+    """
+    if not critic_findings.gaps:
+        return None
+    reason = discarded_revision_reason(post_revision_warnings)
+    if reason is not None:
+        return {"status": "discarded", "reason": reason}
+    return {"status": "applied" if revised else "unchanged"}
 
 
 def _compute_input_hashes(
@@ -1025,6 +1059,7 @@ def _write_manifest(
     target_evidence: TargetEvidence | None = None,
     stated_rule_coverage: StatedRuleCoverageArtifact | None = None,
     uncited_constraints: list[str] | None = None,
+    critic_revision: dict[str, str] | None = None,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
     input_hashes = _compute_input_hashes(
@@ -1065,6 +1100,7 @@ def _write_manifest(
         run_dir,
         stage_2_call_count=_stage_2_call_count,
         uncited_constraints=uncited_constraints,
+        critic_revision=critic_revision,
         risk_coverage_review=risk_coverage_review,
         stage_1a_pinned=stage_1a_pinned,
     )
@@ -1183,13 +1219,16 @@ def _stage_2_summary(
     uncited_constraints: list[str] | None,
     risk_coverage_review: RiskCoverageReviewOutcome | None,
     stage_1a_pinned: bool,
+    critic_revision: dict[str, str] | None = None,
 ) -> dict[str, object]:
-    """Summarize Stage 2 calls, uncited constraints, and a post-review digest."""
+    """Summarize Stage 2 calls, uncited constraints, revision, review digest."""
     stage_2_summary: dict[str, object] = {
         "call_count": stage_2_call_count,
     }
     if uncited_constraints:
         stage_2_summary["uncited_security_constraints"] = list(uncited_constraints)
+    if critic_revision is not None:
+        stage_2_summary["critic_revision"] = dict(critic_revision)
     # One adaptive analysis: the manifest records no generation-mode field,
     # because no supplied input selects a different generation algorithm.
     # Target-blind Call 3 may reword the graph after the review.  Record the

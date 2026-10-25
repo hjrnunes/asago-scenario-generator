@@ -51,6 +51,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     CoordinationLink,
     FeedbackSourceKind,
     FeedbackUpdateAuthority,
+    ReferenceType,
     Responsibility,
     check_structural_heuristics,
 )
@@ -480,9 +481,30 @@ def sanitize_critic_ids(findings: CriticFindings) -> CriticFindings:
 # ---------------------------------------------------------------------------
 
 
+# A revision whose reply is not applied leaves one warning with one of these
+# prefixes; ``discarded_revision_reason`` reads it back for the stage record.
+_REVISION_FAILED = "Revision failed: "
+_REVISION_MERGE_DEGRADED = "Revision delta merge degraded: "
+
+
+def discarded_revision_reason(warnings: list[str]) -> str | None:
+    """Return the warning that says why ``run_revision`` kept the baseline.
+
+    ``None`` means the reply was applied, whether or not it changed anything.
+    """
+    return next(
+        (
+            warning
+            for warning in warnings
+            if warning.startswith((_REVISION_FAILED, _REVISION_MERGE_DEGRADED))
+        ),
+        None,
+    )
+
+
 def _revision_failure_warnings(error_msg: str) -> list[str]:
     """Describe a failed revision while distinguishing validation degradation."""
-    warnings = [f"Revision failed: {error_msg}"]
+    warnings = [f"{_REVISION_FAILED}{error_msg}"]
     if "ValidationError" in error_msg:
         warnings.append(
             "Revision degraded: the validated delta was rejected; the "
@@ -523,7 +545,7 @@ def _finish_revision(
             control_structure, revision_delta
         )
     except Exception as exc:
-        warning = f"Revision delta merge degraded: {type(exc).__name__}: {exc}"
+        warning = f"{_REVISION_MERGE_DEGRADED}{type(exc).__name__}: {exc}"
         return control_structure, [warning]
 
     # Warnings are accumulated in chronological order: dismissal → merge →
@@ -618,7 +640,7 @@ def run_revision(
     if error_msg is not None:
         return control_structure, _revision_failure_warnings(error_msg)
     if revision_delta is None:
-        return control_structure, ["Revision failed: unexpected None response"]
+        return control_structure, [f"{_REVISION_FAILED}unexpected None response"]
     return _finish_revision(
         control_structure,
         revision_delta,
@@ -763,9 +785,9 @@ def _carry_forward_context(original: Responsibility, revised: Responsibility) ->
 
     A revision restates a whole responsibility; the model may drop the
     optional context fields (PM values and evidence, CA target, effect,
-    temporality, operation and PM refs, FB source kind and authority) of an
-    element it did not mean to change.  An authority assessment is about the
-    variable a channel updates, so it is kept only while the channel still
+    temporality, operation and PM refs, FB source, source kind and authority)
+    of an element it did not mean to change.  An authority assessment is about
+    the variable a channel updates, so it is kept only while the channel still
     updates that variable.
     """
     _carry_forward_process_model_context(original, revised)
@@ -775,6 +797,8 @@ def _carry_forward_context(original: Responsibility, revised: Responsibility) ->
         old = old_fbs.get(fb.fb_id)
         if old is None:
             continue
+        if fb.source is None:
+            fb.source = old.source
         if fb.source_kind is None:
             fb.source_kind = old.source_kind
         if fb.authority_for_update is None and fb.updates == old.updates:
@@ -946,10 +970,51 @@ def _merge_revision_delta(
     resolvable references are rewritten; unresolved references fail
     validation and degrade the revision.
 
-    Returns a tuple of (merged ControlStructure, stitch warnings).
+    Returns a tuple of (merged ControlStructure, repair and stitch warnings).
     """
+    delta, kind_warnings = _move_source_kinds_out_of_source_refs(delta)
     stitched, stitch_warnings = _stitch_revision_delta(cs, delta)
-    return validate_normalized_control_structure(stitched), stitch_warnings
+    return (
+        validate_normalized_control_structure(stitched),
+        kind_warnings + stitch_warnings,
+    )
+
+
+_SOURCE_KINDS = {kind.value: kind for kind in FeedbackSourceKind}
+
+
+def _move_source_kinds_out_of_source_refs(
+    delta: RevisionDelta,
+) -> tuple[RevisionDelta, list[str]]:
+    """Read a source kind given as a feedback source's reference type.
+
+    A source reference names a responsibility or controlled process.  A reply
+    may instead write the channel's source kind (``session_context``,
+    ``operation_result``, ...) as the reference ``type``; the two vocabularies
+    are disjoint, so that reference names no element.  Its kind becomes the
+    channel's ``source_kind`` and the reference is dropped, so a restated
+    channel keeps its earlier source.  A kind that contradicts the channel's
+    own ``source_kind`` is left for validation to reject.
+    """
+    delta = delta.model_copy(deep=True)
+    warnings: list[str] = []
+    for resp in (*delta.new_responsibilities, *delta.modified_responsibilities):
+        for fb in resp.feedback_channels:
+            if fb.source is None or isinstance(fb.source.type, ReferenceType):
+                continue
+            kind = _SOURCE_KINDS.get(fb.source.type)
+            if kind is None or fb.source_kind not in (None, kind):
+                continue
+            warnings.append(
+                f"Revision feedback channel {fb.fb_id} of {resp.resp_id} gave the "
+                f"source kind '{kind.value}' as its source type; it is kept as "
+                "the channel's source_kind and the source reference "
+                f"'{fb.source.id}', which names no responsibility or controlled "
+                "process, is dropped."
+            )
+            fb.source_kind = kind
+            fb.source = None
+    return delta, warnings
 
 
 # ---------------------------------------------------------------------------
