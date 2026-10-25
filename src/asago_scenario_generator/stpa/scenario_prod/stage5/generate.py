@@ -495,7 +495,8 @@ def _call_bdi_with_bounded_length_retry(
     content that failed to parse. Only the empty case reports the exhausted
     prefix that stops the remaining Stage 5 candidates: an empty reply points
     at the serving runtime, while a partial one is one scenario's repetition
-    loop.
+    loop. The retry's call-log entry names the attempt it repeats in
+    ``retry_of``.
     """
     policy = CorrectionPolicy(
         validation_retries=1,
@@ -504,7 +505,9 @@ def _call_bdi_with_bounded_length_retry(
         include_response=True,
     )
 
-    def call(prompt: str, max_completion_tokens: int | None):
+    def call(
+        prompt: str, max_completion_tokens: int | None, retry_of: str | None = None
+    ):
         return call_with_policy(
             llm_client=llm_client,
             system_prompt=system_prompt,
@@ -522,6 +525,7 @@ def _call_bdi_with_bounded_length_retry(
             response_parser=lambda value, _cleanup: _parse_context_bdi_result(
                 value, response_format
             ),
+            retry_of=retry_of,
         )
 
     first = call(user_prompt, _BDI_MAX_COMPLETION_TOKENS)
@@ -536,7 +540,9 @@ def _call_bdi_with_bounded_length_retry(
             first.attempt_number,
         )
     retry = call(
-        user_prompt + _LENGTH_RETRY_PROMPT, _LENGTH_RETRY_MAX_COMPLETION_TOKENS
+        user_prompt + _LENGTH_RETRY_PROMPT,
+        _LENGTH_RETRY_MAX_COMPLETION_TOKENS,
+        retry_of=first.attempt_id,
     )
     if retry.error is None:
         return _BdiCall(retry.value, None, retry.result, ())

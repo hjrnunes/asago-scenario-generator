@@ -9,6 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from asago_scenario_generator.stpa.infra.call_log import call_entries
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
@@ -148,3 +149,24 @@ def test_the_client_reports_the_provider_finish_reason() -> None:
 
     assert result.finish_reason == "length"
     assert result.raw_response == '{"answer": '
+
+
+def test_the_concise_retry_names_the_truncated_attempt_it_repeats(
+    tmp_path: Path,
+) -> None:
+    client = _TruncatingClient(_setup_mock_client(num_threats=1), truncated={0})
+
+    run_sp3(
+        llm_client=client,
+        enriched_threat_set=_make_ets(num_threats=1),
+        control_structure=make_cs(),
+        loss_analysis=make_loss_analysis(),
+        run_dir=tmp_path,
+    )
+
+    entries = call_entries((tmp_path / "calls.jsonl").read_text(encoding="utf-8"))
+    truncated, retry = [e for e in entries if e["step"] == "bdi_generation"]
+    assert (truncated["success"], retry["success"]) == (False, True)
+    assert "retry_of" not in truncated
+    assert retry["retry_of"] == truncated["attempt_id"]
+    assert retry["attempt_number"] == truncated["attempt_number"]
