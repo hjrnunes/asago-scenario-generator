@@ -229,12 +229,15 @@ The reasons that come from the route's structure or its slot results, such as
 `no_structural_route`, `not_applicable_evidence_incomplete`, and
 `ica_consideration_unresolved`, apply only when none of these does. A row
 carries the diagnostic of its own semantic reason once and none of a reason it
-did not stop at. A routed slot whose request ended in a reply that broke its
-contract, such as one cut off at its completion cap that no longer decodes, was
-never analyzed: its pairs carry `slot_provider_contract_failed`, and a row
-whose every unresolved slot carries it stops at `provider_contract_failure`.
+did not stop at. Two kinds of routed slot were never analyzed. A slot whose
+request its prompt budget rejected before dispatch has pairs carrying
+`slot_prompt_budget_exceeded`. A slot whose request ended in a reply that broke
+its contract, such as one cut off at its completion cap that no longer decodes,
+has pairs carrying `slot_provider_contract_failed`. A row whose every
+unresolved slot is of these kinds stops at `prompt_budget_exceeded` when one of
+them was rejected by its budget, and at `provider_contract_failure` otherwise.
 A slot left unresolved on the analysis, or an ICA verification stop, keeps its
-own reason beside it.
+own reason beside such a slot.
 
 ICA prose length and repetition are presentation diagnostics only:
 semantically valid findings remain available with `ica_prose_quality_warning`.

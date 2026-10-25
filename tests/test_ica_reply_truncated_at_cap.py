@@ -1,10 +1,12 @@
-"""An ICA slot reply cut off at its completion cap is a provider contract failure.
+"""An ICA slot that was never analyzed stops at its own reason.
 
-The reply never decodes, so the call log records ``provider_contract_failure``
-for the request. Accounting gives the obligations routed to that slot the same
-stop reason instead of ``ica_consideration_unresolved``, which names a slot the
-analysis left unresolved. A slot left unresolved on the analysis keeps its
-reason, also beside a slot whose reply was lost.
+A reply cut off at its completion cap never decodes, so the call log records
+``provider_contract_failure`` for the request. A request its prompt budget
+rejects is never sent. Accounting gives the obligations routed to such a slot
+``provider_contract_failure`` or ``prompt_budget_exceeded`` instead of
+``ica_consideration_unresolved``, which names a slot the analysis left
+unresolved. A slot left unresolved on the analysis keeps its reason, also
+beside a slot that was never analyzed.
 """
 
 from __future__ import annotations
@@ -28,6 +30,7 @@ from asago_scenario_generator.pipeline.obligation_consideration import (
     build_obligation_accounting,
 )
 from asago_scenario_generator.stpa.infra.llm import LLMResult
+from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudget
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     IcaDeviationDraft,
     IcaFindingDraft,
@@ -154,7 +157,12 @@ def _unresolved_reply(
     return {"filled_slots": [provider_slot_payload(draft)]}
 
 
-def _routed_fill(tmp_path: Path, replies: dict[str, Any], *slot_ids: str):
+def _routed_fill(
+    tmp_path: Path,
+    replies: dict[str, Any],
+    *slot_ids: str,
+    prompt_budget: PromptBudget | None = None,
+):
     """Fill the small structure's slots with one obligation routed to *slot_ids*."""
     plan = make_plan()
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
@@ -173,7 +181,10 @@ def _routed_fill(tmp_path: Path, replies: dict[str, Any], *slot_ids: str):
     )
     filled = fill_synthesis_slots(
         ObligationAwareLLMAdapter(
-            _SlotClient(replies), run_dir=tmp_path, controls=_controls()
+            _SlotClient(replies),
+            run_dir=tmp_path,
+            controls=_controls(),
+            prompt_budget=prompt_budget,
         ),
         briefs=briefs,
         routes=(route,),
@@ -327,6 +338,129 @@ def test_lost_reply_beside_another_unresolved_pair_yields_to_it(
             pair(_ROUTED_SLOT, "slot_provider_contract_failed"),
             pair(_SECOND_SLOT, verification_code),
         ),
+        source_pins=_accounting_pins(plan),
+    ).rows[0]
+
+    assert (row.disposition, row.stop_reason) == ("unresolved", stop_reason)
+
+
+def test_slot_request_rejected_by_its_prompt_budget_stops_at_the_budget(
+    tmp_path: Path,
+) -> None:
+    """A request its budget rejects is never sent, so no analysis ran."""
+    budget = PromptBudget(
+        context_window=8192 + 64, maximum_completion_tokens=8192, safety_margin=0
+    )
+
+    filled, row = _routed_fill(tmp_path, {}, _ROUTED_SLOT, prompt_budget=budget)
+
+    entries = read_calls_jsonl(tmp_path)
+    assert entries and not any(item["success"] for item in entries)
+    assert all(
+        item["error"].startswith("PromptBudgetExceeded: prompt_budget_exceeded")
+        for item in entries
+    )
+    assert [pair.disposition for pair in filled.considerations] == ["unresolved"]
+    assert [item.code for item in filled.considerations[0].diagnostics] == [
+        "slot_prompt_budget_exceeded"
+    ]
+    assert (row.disposition, row.stop_reason) == (
+        "unresolved",
+        "prompt_budget_exceeded",
+    )
+    assert [item.code for item in row.diagnostics] == ["slot_prompt_budget_exceeded"]
+    assert "rendered prompt uses" in row.diagnostics[0].detail
+
+
+def test_budget_rejection_inside_the_provider_call_is_classified_by_its_cause() -> None:
+    """A rejection the provider call reports reaches slot filling as the cause."""
+    from asago_scenario_generator.stpa.infra.prompt_preflight import (
+        PromptBudgetExceeded,
+    )
+    from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
+        _unresolved_diagnostic_code,
+        _unresolved_pair_code,
+    )
+
+    budget = PromptBudgetExceeded(
+        input_tokens=10,
+        usable_input_tokens=5,
+        context_window=15,
+        maximum_completion_tokens=5,
+        safety_margin=0,
+    )
+    wrapped = ValueError(str(budget))
+    wrapped.__cause__ = budget
+
+    for error in (budget, wrapped):
+        assert _unresolved_pair_code(error) == "slot_prompt_budget_exceeded"
+        assert _unresolved_diagnostic_code(error) == "prompt_budget_exceeded"
+    assert _unresolved_pair_code(ValueError("other")) == "slot_pair_unresolved"
+
+
+@pytest.mark.parametrize(
+    ("codes", "stop_reason"),
+    [
+        (("slot_prompt_budget_exceeded",), "prompt_budget_exceeded"),
+        (
+            ("slot_prompt_budget_exceeded", "slot_provider_contract_failed"),
+            "prompt_budget_exceeded",
+        ),
+        (
+            ("slot_prompt_budget_exceeded", "slot_pair_unresolved"),
+            "ica_consideration_unresolved",
+        ),
+        (
+            ("slot_prompt_budget_exceeded", "ica_hazard_contradictory"),
+            "ica_hazard_contradictory",
+        ),
+    ],
+    ids=["budget", "budget-and-lost-reply", "beside-analytic", "beside-verification"],
+)
+def test_budget_rejected_slot_yields_to_an_analytic_or_verification_stop(
+    codes: tuple[str, ...], stop_reason: str
+) -> None:
+    """A budget rejection comes before a lost reply; analysis outranks both."""
+    plan = make_plan()
+    briefs = build_neutral_briefs(
+        plan, (AttackPattern.model_validate(get_test_raw_pattern()),)
+    )
+    slots = (_ROUTED_SLOT, _SECOND_SLOT)
+    route = ObligationRoute(
+        obligation_id=briefs[0].obligation_id,
+        disposition="targeted",
+        slot_ids=slots[: len(codes)],
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        evidence=("route",),
+    )
+    consideration = build_consideration_artifact(
+        plan=plan, briefs=briefs, initial_routes=(route,), final_routes=(route,)
+    )
+    pairs = tuple(
+        ObligationIcaConsideration(
+            route_id=route.route_id,
+            obligation_id=route.obligation_id,
+            slot_id=slot_id,
+            disposition="unresolved",
+            evidence=("slot-analysis-validation",),
+            rationale="The slot stayed unresolved.",
+            diagnostics=(
+                ConsiderationDiagnostic(
+                    code=code,
+                    detail="The slot stayed unresolved.",
+                    obligation_ids=(route.obligation_id,),
+                    refs=(route.route_id, slot_id),
+                ),
+            ),
+        )
+        for slot_id, code in zip(slots, codes)
+    )
+
+    row = build_obligation_accounting(
+        plan=plan,
+        consideration=consideration,
+        ica_considerations=pairs,
         source_pins=_accounting_pins(plan),
     ).rows[0]
 

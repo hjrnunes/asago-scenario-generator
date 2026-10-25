@@ -23,6 +23,7 @@ from asago_scenario_generator.models.obligation_accounting import (
 from asago_scenario_generator.models.obligation_consideration import (
     ROUTING_RECORD_VALIDATION_FAILED,
     ROUTING_VALIDATION_FAILED,
+    SLOT_PROMPT_BUDGET_EXCEEDED,
     SLOT_PROVIDER_CONTRACT_FAILED,
     BoundedStructuralRevision,
     ConsiderationDiagnostic,
@@ -344,22 +345,50 @@ _ICA_VERIFICATION_STOP_REASONS = (
 )
 
 
-def _provider_contract_failed(
-    pairs: tuple[ObligationIcaConsideration, ...],
-) -> bool:
-    """Tell whether every unresolved routed slot lost its provider reply.
+# The pair code slot filling writes on a routed slot its request never had
+# analyzed, and the stop reason it gives, in order of precedence.
+_UNANALYZED_SLOT_STOPS = (
+    (SLOT_PROMPT_BUDGET_EXCEEDED, "prompt_budget_exceeded"),
+    (SLOT_PROVIDER_CONTRACT_FAILED, "provider_contract_failure"),
+)
 
-    A slot whose request ended in a provider contract failure was never
-    analyzed. When another routed slot stayed analytically unresolved, that
-    slot explains the stop whatever the failed reply would have held.
+
+def _unanalyzed_stop_reason(
+    pairs: tuple[ObligationIcaConsideration, ...],
+) -> str | None:
+    """Name the stop of a row whose every unresolved routed slot went unanalyzed.
+
+    A slot whose request its prompt budget rejected, or whose request ended in
+    a provider contract failure, was never analyzed. When another routed slot
+    stayed analytically unresolved, that slot explains the stop whatever the
+    unanalyzed slot would have held, and this returns ``None``. A budget
+    rejection comes before a lost reply, as on a route.
     """
     unresolved = [item for item in pairs if item.disposition == "unresolved"]
-    return bool(unresolved) and all(
-        any(
-            diagnostic.code == SLOT_PROVIDER_CONTRACT_FAILED
-            for diagnostic in item.diagnostics
+    reasons: set[str] = set()
+    for item in unresolved:
+        codes = {diagnostic.code for diagnostic in item.diagnostics}
+        reason = next(
+            (reason for code, reason in _UNANALYZED_SLOT_STOPS if code in codes),
+            None,
         )
-        for item in unresolved
+        if reason is None:
+            return None
+        reasons.add(reason)
+    return next(
+        (reason for _, reason in _UNANALYZED_SLOT_STOPS if reason in reasons), None
+    )
+
+
+def _unresolved_ica_diagnostic(
+    obligation_id: str, route_id: str
+) -> ConsiderationDiagnostic:
+    """Return the diagnostic of a row a slot left analytically unresolved."""
+    return ConsiderationDiagnostic(
+        code="unresolved_ica_consideration",
+        detail="at least one routed slot remains analytically unresolved",
+        obligation_ids=(obligation_id,),
+        refs=(route_id,),
     )
 
 
@@ -373,8 +402,9 @@ def _account_unresolved_ica(
     """Retain unresolved routed slots as unresolved accounting.
 
     A verification stop reason comes first. A row whose every unresolved slot
-    lost its reply to a provider contract failure stops at
-    ``provider_contract_failure``; any other row stops at
+    went unanalyzed stops at that slot's reason: ``prompt_budget_exceeded``
+    for a request its budget rejected, ``provider_contract_failure`` for a
+    reply that broke its contract. Any other row stops at
     ``ica_consideration_unresolved``.
     """
     diagnostic_codes = {item.code for item in diagnostics}
@@ -382,24 +412,18 @@ def _account_unresolved_ica(
         (code for code in _ICA_VERIFICATION_STOP_REASONS if code in diagnostic_codes),
         None,
     )
-    if stop_reason is None and _provider_contract_failed(pairs):
+    unanalyzed = None if stop_reason is not None else _unanalyzed_stop_reason(pairs)
+    if unanalyzed is not None:
         return _account_route_row(
             row,
             route,
             disposition="unresolved",
-            stop_reason="provider_contract_failure",
+            stop_reason=unanalyzed,
             evidence=evidence or ("route:targeted",),
             diagnostics=diagnostics,
         )
     stop_reason = stop_reason or "ica_consideration_unresolved"
-    diagnostics.append(
-        ConsiderationDiagnostic(
-            code="unresolved_ica_consideration",
-            detail="at least one routed slot remains analytically unresolved",
-            obligation_ids=(row.obligation_id,),
-            refs=(route.route_id,),
-        )
-    )
+    diagnostics.append(_unresolved_ica_diagnostic(row.obligation_id, route.route_id))
     return _account_route_row(
         row,
         route,
