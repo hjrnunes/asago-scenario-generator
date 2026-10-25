@@ -219,7 +219,7 @@ def test_link_record_names_the_link_target_as_receiver(tmp_path: Path) -> None:
 
 
 def _authority_structure() -> dict:
-    """Three user-message channels: assessed, absent, and authoritative."""
+    """User-message channels (assessed, absent, authoritative) and an own check."""
     data = _structure("user_message")
     first = data["responsibilities"][0]
     first["process_model_parts"] += [
@@ -239,6 +239,7 @@ def _authority_structure() -> dict:
             "fb_id": "FB-1-3",
             "updates": "PM-1-3",
             "source": {"type": "responsibility", "id": "RESP-1"},
+            "source_kind": "conversation_history",
         },
     ]
     del first["feedback_channels"][1]["authority_for_update"]

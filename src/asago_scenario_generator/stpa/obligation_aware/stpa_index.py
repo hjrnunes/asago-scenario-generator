@@ -298,24 +298,31 @@ def mechanism_candidates(
 class ReachBasis(str, Enum):
     """The structure field that decided whether an adversary reaches a channel.
 
-    - ``argument_evidence``: the updated variable cites an ``argument:``
-      evidence reference.  Its value is a tool argument the controller fills
-      from the conversation, so the user can shape it: reachable, whatever
-      ``source_kind`` says.
+    Only the channel's own fields decide.  The updated variable's
+    ``evidence_refs`` describe the variable, not this channel, so they decide
+    no channel's reach.
+
     - ``own_controller``: the channel's ``source`` is the responsibility that
-      owns the channel.  The controller produces the information itself (its
-      own check, classification, or draft), so no adversary authors it:
-      not reachable, whatever ``source_kind`` says.  Adversary influence on
-      such a value enters through the controller's other channels, which the
-      join follows on their own.
-    - ``source_kind``: neither applies, so ``source_kind`` decides, as in the
-      unfiltered join.  A source that is a controlled process or another
-      controller names where the information enters, not who authors it.
+      owns the channel and its ``source_kind`` is ``retrieved_content`` or
+      ``conversation_history``: not reachable.  ``source`` says who holds the
+      information, and here the controller holds it itself, so the external
+      kind labels the controller's own check or state rather than content an
+      adversary authored.  A ``user_message`` channel sourced from its own
+      controller stays with ``source_kind``: the user authored the text even
+      when the controller relays or classifies it.
+    - ``source_kind``: otherwise ``source_kind`` decides, as in the unfiltered
+      join.  A source that is a controlled process or another controller names
+      where the information enters, not who authors it.
     """
 
-    argument_evidence = "argument_evidence"
     own_controller = "own_controller"
     source_kind = "source_kind"
+
+
+OWN_CONTROLLER_KINDS = frozenset(
+    {FeedbackSourceKind.retrieved_content, FeedbackSourceKind.conversation_history}
+)
+"""The untrusted kinds that a source on the channel's own controller overrides."""
 
 
 class DropReason(str, Enum):
@@ -323,8 +330,9 @@ class DropReason(str, Enum):
 
     - ``authoritative``: an adversary reaches the channel, but its
       ``authority_for_update`` says it is entitled to set the variable;
-    - ``own_controller``: ``source_kind`` is untrusted, but the channel's
-      source is its own controller (:attr:`ReachBasis.own_controller`).
+    - ``own_controller``: ``source_kind`` is ``retrieved_content`` or
+      ``conversation_history``, but the channel's source is its own
+      controller (:attr:`ReachBasis.own_controller`).
     """
 
     authoritative = "authoritative"
@@ -390,13 +398,9 @@ def mechanism_join(control_structure: ControlStructure) -> MechanismJoin:
     filter changes only which channels start a path:
 
     1. Reach.  A channel is adversary-reachable as :class:`ReachBasis`
-       decides, in its order: the updated variable's ``evidence_refs``, then
-       the channel's ``source`` against the responsibility that owns the
-       channel, then ``source_kind``.  A channel the ``argument:`` rule makes
-       reachable takes its source kind's mechanism, or ``user_claim`` when the
-       kind names none.  Other evidence prefixes (``state:``, ``session:``,
-       ``policy:``, ``operation:``) decide nothing: a variable can cite them
-       and still hold what the user wrote.
+       decides: its ``source`` against the responsibility that owns it, for
+       the kinds in :data:`OWN_CONTROLLER_KINDS`, then its ``source_kind``.
+       The filter never makes reachable a channel the unfiltered join skips.
     2. Authority.  A reachable channel is kept unless its
        ``update_authority`` status is ``authoritative``; ``non_authoritative``,
        ``conditional`` and ``unknown`` (recorded or absent) keep it.
@@ -408,17 +412,14 @@ def mechanism_join(control_structure: ControlStructure) -> MechanismJoin:
     kept: dict[MechanismCandidate, KeptCandidate] = {}
     dropped: dict[MechanismCandidate, DroppedCandidate] = {}
     for owner in control_structure.responsibilities:
-        variables = _first_by_id(owner.process_model_parts, "pm_id")
         for channel in owner.feedback_channels:
-            reach, reachable = _channel_reach(owner, channel, variables)
+            if not channel.untrusted:
+                continue
+            reach = _channel_reach(owner, channel)
             mechanism = SOURCE_MECHANISMS.get(channel.source_kind)
-            if mechanism is None and reach is ReachBasis.argument_evidence:
-                mechanism = SOURCE_MECHANISMS[FeedbackSourceKind.user_message]
             status = channel.update_authority.status
             reason: DropReason | None = None
-            if not reachable:
-                if reach is not ReachBasis.own_controller or not channel.untrusted:
-                    continue
+            if reach is ReachBasis.own_controller:
                 reason = DropReason.own_controller
             elif status is FeedbackAuthorityStatus.authoritative:
                 reason = DropReason.authoritative
@@ -441,24 +442,16 @@ def mechanism_join(control_structure: ControlStructure) -> MechanismJoin:
     return MechanismJoin(tuple(kept.values()), tuple(dropped.values()))
 
 
-def _channel_reach(
-    owner: Responsibility,
-    channel: FeedbackChannel,
-    variables: Mapping[str, ProcessModelPart],
-) -> tuple[ReachBasis, bool]:
-    variable = variables.get(channel.updates)
-    if variable is not None and any(
-        ref.startswith("argument:") for ref in variable.evidence_refs
-    ):
-        return ReachBasis.argument_evidence, True
+def _channel_reach(owner: Responsibility, channel: FeedbackChannel) -> ReachBasis:
     source = channel.source
     if (
-        source is not None
+        channel.source_kind in OWN_CONTROLLER_KINDS
+        and source is not None
         and source.type is ReferenceType.responsibility
         and source.id == owner.resp_id
     ):
-        return ReachBasis.own_controller, False
-    return ReachBasis.source_kind, channel.untrusted
+        return ReachBasis.own_controller
+    return ReachBasis.source_kind
 
 
 def _channel_paths(
@@ -513,6 +506,7 @@ def _add_candidates(
 __all__ = [
     "ASSESSED_AUTHORITY",
     "CROSS_CONTROLLER_MECHANISM",
+    "OWN_CONTROLLER_KINDS",
     "SOURCE_MECHANISMS",
     "DropReason",
     "DroppedCandidate",
