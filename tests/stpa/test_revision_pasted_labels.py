@@ -29,7 +29,6 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.critic import (
     _compute_next_ids,
-    _is_original_with_pasted_labels,
     _merge_revision_delta,
     _revision_delta_from_wire,
     _validate_revision_wire,
@@ -54,9 +53,13 @@ def _reply() -> dict:
     )
 
 
-def _merge(reply: dict) -> tuple[ControlStructure, list[str]]:
+def _merge(
+    reply: dict, reviewed: ControlStructure | None = None
+) -> tuple[ControlStructure, list[str]]:
     _validate_revision_wire(reply)
-    return _merge_revision_delta(_reviewed(), _revision_delta_from_wire(reply))
+    return _merge_revision_delta(
+        reviewed or _reviewed(), _revision_delta_from_wire(reply)
+    )
 
 
 def _restated(reply: dict, key: str, element_id: str) -> dict:
@@ -163,36 +166,104 @@ def test_a_revised_description_without_labels_is_kept() -> None:
     assert merged.responsibilities[0].control_actions[0].description == revised
 
 
+def _merged_description(
+    key: str,
+    element_id: str,
+    restated: str,
+    reviewed: ControlStructure | None = None,
+) -> str:
+    reply = _reply()
+    _restated(reply, key, element_id)["description"] = restated
+    merged, _ = _merge(reply, reviewed)
+    return _descriptions(merged)[element_id]
+
+
 @pytest.mark.parametrize(
     "restated",
     [
         f"{_RESPONSE} (effect: model_output)",
         f"{_RESPONSE}. (target: controlled_process CP-1)",
         f"  {_RESPONSE}\n  (effect_kind: model_output) (temporality: instantaneous) ",
-        f"{_RESPONSE} (operation: answer_query)",
-        f"{_RESPONSE} (process_model_refs: PM-1-1)",
-        "The identity (values: a; b) (evidence: session:customer_id)",
-        "Report it (updates: PM-1-1, source: controlled_process CP-1, "
-        "source kind: session_context)",
+        f"{_RESPONSE} (process_model_refs: PM-1-1, PM-1-3)",
+        f"{_RESPONSE} (target: controlled_process CP-1, effect: model_output)",
     ],
 )
-def test_pasted_label_forms_are_recognised(restated: str) -> None:
-    original = restated.split("(")[0].strip().rstrip(".")
+def test_pasted_action_fields_are_removed(restated: str) -> None:
+    assert _merged_description("control_actions", "CA-1-1", restated) == _RESPONSE
 
-    assert _is_original_with_pasted_labels(original, restated)
+
+@pytest.mark.parametrize(
+    ("key", "element_id", "suffix"),
+    [
+        (
+            "process_model_parts",
+            "PM-1-1",
+            "(values: matches session identity; does not match session "
+            "identity; unknown) (evidence_refs: session:authenticated_customer_id)",
+        ),
+        (
+            "feedback_channels",
+            "FB-1-1",
+            "(updates: PM-1-1) (source: controlled_process CP-1) "
+            "(source_kind: session_context)",
+        ),
+        ("control_actions", "CA-4-1", "(operation: process_refund)"),
+    ],
+)
+def test_pasted_fields_of_each_element_kind_are_removed(
+    key: str, element_id: str, suffix: str
+) -> None:
+    original = _descriptions(_reviewed())[element_id]
+
+    merged = _merged_description(key, element_id, f"{original} {suffix}")
+
+    assert merged == original
 
 
 @pytest.mark.parametrize(
     "restated",
     [
-        _RESPONSE,
+        f"{_RESPONSE} (effect: clearer disclosure)",
+        f"{_RESPONSE} (target: the customer)",
+        f"{_RESPONSE} (temporality: discrete)",
+        f"{_RESPONSE} (operation: answer_query)",
+        f"{_RESPONSE} (process-model refs: the session identity)",
         f"{_RESPONSE} (for the authenticated customer)",
         f"{_RESPONSE} (effect: model_output) only for verified customers",
+        f"{_RESPONSE}s (effect: model_output)",
+        f"{_RESPONSE} (effect: model_output",
         f"Generate response (effect: model_output) {_RESPONSE}",
     ],
 )
-def test_other_descriptions_are_not_label_pastes(restated: str) -> None:
-    assert not _is_original_with_pasted_labels(_RESPONSE, restated)
+def test_a_genuine_revision_shaped_like_a_label_is_kept(restated: str) -> None:
+    assert _merged_description("control_actions", "CA-1-1", restated) == restated
+
+
+def test_a_pasted_value_with_nested_parentheses_is_removed() -> None:
+    reviewed = _reviewed()
+    reviewed.responsibilities[0].control_actions[0].operation = "lookup(order_id)"
+    restated = f"{_RESPONSE} (effect: model_output) (operation: lookup(order_id))"
+
+    merged = _merged_description("control_actions", "CA-1-1", restated, reviewed)
+
+    assert merged == _RESPONSE
+
+
+def test_only_the_text_appended_to_the_original_description_is_read() -> None:
+    reviewed = _reviewed()
+    original = f"{_RESPONSE} (effect: model_output)"
+    reviewed.responsibilities[0].control_actions[0].description = original
+
+    pasted = _merged_description(
+        "control_actions",
+        "CA-1-1",
+        f"{original} (temporality: instantaneous)",
+        reviewed,
+    )
+    shortened = _merged_description("control_actions", "CA-1-1", _RESPONSE, reviewed)
+
+    assert pasted == original
+    assert shortened == _RESPONSE
 
 
 def _revision_system_prompt() -> str:
@@ -220,5 +291,18 @@ def test_revision_prompt_shows_typed_fields_apart_from_the_description() -> None
         "      source: controlled_process CP-1\n"
         "      source_kind: session_context\n"
     ) in prompt
-    for label in ("(target:", "(effect:", "(temporality:", "(values:", "(updates:"):
+    for label in (
+        "(target:",
+        "(effect:",
+        "(temporality:",
+        "(operation:",
+        "(process-model refs:",
+        "(values:",
+        "(evidence:",
+        "(source:",
+        "(updates:",
+        "source kind:",
+        "authority for update:",
+        "authority basis:",
+    ):
         assert label not in prompt, label
