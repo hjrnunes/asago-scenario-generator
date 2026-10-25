@@ -17,6 +17,10 @@ the obligation-aware prompt builders (``OBLIGATION_AWARE_BUILDS``) for the
 obligation-aware templates. Phrases and rendered text are compared with runs of
 whitespace collapsed to one space, so template line wrapping does not matter.
 
+A request built in Python rather than from one template (``REQUESTS``) has a
+table named after it that gives ``request`` in place of ``template``; its cases
+render the request the producer sends.
+
 Wording that depends on a test's input (an identifier, a value or a list from
 its fixture) stays as a code assert next to that fixture.
 """
@@ -106,6 +110,13 @@ from tests.helpers.feedback_authority import (
 )
 from tests.helpers.stage2_source_selection import USE_CASE as CALL3_USE_CASE
 from tests.stpa.test_ica_context_coverage import _structure as _coverage_structure
+from tests.stpa.test_stage5_condition_contradictions import (
+    _kind_mismatch_condition as _record_kind_mismatch_condition,
+)
+from tests.stpa.test_stage5_condition_contradictions import (
+    _ordering_text_condition,
+    correction_request,
+)
 from tests.helpers.stpa_builders import make_capability_profile
 from tests.helpers.normal_authoring_wire import (
     _record_observations,
@@ -137,6 +148,8 @@ PROMPT_DIRS = (
     OBLIGATION_AWARE_PROMPTS_DIR,
     TARGET_REALIZATION_PROMPTS_DIR,
 )
+# Requests built in Python, each pinned by the table of the same name.
+REQUESTS = ("stage5_condition_correction",)
 
 _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
 _NARRATE_TEMPLATES = ("stage6_narrate_system.j2", "stage6_narrate_user.j2")
@@ -537,6 +550,18 @@ def _authority_beliefs() -> Callable[[str], str]:
     return render
 
 
+def _stage5_correction(condition: Callable[[], dict]) -> Callable[[str], str]:
+    """Render the Stage 5 correction request that follows a refused condition."""
+
+    def render(request: str) -> str:
+        assert request == "stage5_condition_correction"
+        # Stage 5 writes its call log into a run directory.
+        with tempfile.TemporaryDirectory() as run_dir:
+            return correction_request(condition(), Path(run_dir))
+
+    return render
+
+
 # The critic request for a structure whose feedback channel is assessed.
 FEEDBACK_AUTHORITY_CRITIC = {
     "use_case_text": "Test use case",
@@ -640,6 +665,10 @@ CASES: dict[str, Callable[[str], str]] = {
             ),
         ]
     ),
+    "record-kind-mismatch-correction": _stage5_correction(
+        _record_kind_mismatch_condition
+    ),
+    "ordering-not-numeric-correction": _stage5_correction(_ordering_text_condition),
     **{case: _obligation_aware(case) for case in OBLIGATION_AWARE_BUILDS},
 }
 
@@ -690,7 +719,7 @@ def phrase_checks() -> list[PhraseCheck]:
                 checks.append(
                     PhraseCheck(
                         table=path.stem,
-                        template=table["template"],
+                        template=table.get("template") or table["request"],
                         case=case,
                         kind=kind,
                         phrases=tuple(

@@ -597,6 +597,25 @@ def _kind_mismatch_condition() -> dict:
     return condition
 
 
+def _ordering_text_condition() -> dict:
+    """A refund condition that orders the amount by the foreign owner's ID."""
+
+    condition = _ownership_condition("ORD-2")
+    condition["comparisons"].append(
+        {
+            "kind": "value",
+            "left": {
+                "source": "argument",
+                "operation": "refund_payment",
+                "argument": "amount",
+            },
+            "op": "gt",
+            "right": {"source": "fact", "path": "TARGET-STATE.orders.ORD-2.owner_id"},
+        }
+    )
+    return condition
+
+
 def _observations_with_order_read() -> TargetObservationSnapshot:
     state = {
         "session": {"customer_id": "cus-1"},
@@ -711,22 +730,51 @@ def test_contradiction_module_names_no_target() -> None:
         assert word not in source.lower()
 
 
-def test_the_repair_guidance_of_each_new_code_is_pinned() -> None:
+def correction_request(condition: dict, run_dir: Path) -> str:
+    """Return the Stage 5 correction request sent after ``condition``'s refusal."""
+
+    client = MockLLMClient()
+    client.set_response_queue(
+        [_payload_with(condition), _payload_with(_ownership_condition("ORD-2"))]
+    )
+    _generate(client, run_dir, target_observations=_observations_with_order_read())
+    assert client.call_count == 2
+    return client.calls[1].user_prompt
+
+
+@pytest.mark.parametrize(
+    ("code", "condition", "finding"),
+    [
+        (
+            IssueCode.discriminating_condition_record_kind_mismatch,
+            _kind_mismatch_condition,
+            "record_selection.argument_values[0] binds refund_payment.order_id "
+            'eq "cus-9" in the tool-call condition, but the values supplied reads '
+            'passed for order_id ("ORD-1") are keys of TARGET-STATE.orders, and '
+            '"cus-9" is a value of TARGET-STATE.orders.<record_key>.owner_id',
+        ),
+        (
+            IssueCode.discriminating_condition_ordering_not_numeric,
+            _ordering_text_condition,
+            'comparisons[1] binds refund_payment.amount gt "cus-9" in the '
+            "tool-call condition, but tool-call-condition-v1 orders only numbers",
+        ),
+    ],
+)
+def test_the_correction_request_carries_the_guidance_of_the_refusing_code(
+    code, condition, finding, tmp_path
+) -> None:
+    # The fixed guidance wording is pinned in
+    # tests/phrases/stage5_condition_correction.yaml; this checks that the
+    # request sent after the refusal carries it under its own code only.
+    request = correction_request(condition(), tmp_path)
     guidance = _repair_guidance("TARGET-STATE")
 
-    assert guidance[IssueCode.discriminating_condition_record_kind_mismatch] == (
-        "compare an argument only with a value of the kind it takes: a value of "
-        "its declared schema type and, when supplied reads passed values for it, "
-        "a key of the collection those values key or a field whose values are "
-        "such keys. In record_selection.argument_values, map an argument to the "
-        "selected record's path or to such a field, not to a field that holds "
-        "another kind of value. Keep observation_criteria and "
-        "safe_observable_outcome unchanged."
+    assert f"- {code.value}: {guidance[code]}\n" in request
+    assert f"ValueError: {code.value}: " in request
+    assert f"\n- {finding}" in request
+    others = (
+        IssueCode.discriminating_condition_record_kind_mismatch,
+        IssueCode.discriminating_condition_ordering_not_numeric,
     )
-    assert guidance[IssueCode.discriminating_condition_ordering_not_numeric].startswith(
-        "use gt, ge, lt, and le only between numbers: an argument whose input "
-        "schema declares number or integer, or a numeric supplied value. The "
-        "tool-call condition cannot order dates or other text; state the rule "
-        "with eq, ne, in, or not_in on supplied values instead. If no supplied "
-        "argument, fact, call order, or omitted call separates the unsafe case, "
-    )
+    assert [other for other in others if other.value in request] == [code]

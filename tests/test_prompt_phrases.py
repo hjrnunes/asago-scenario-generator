@@ -10,6 +10,7 @@ from tests.phrase_tables import (
     OBLIGATION_AWARE_BUILDS,
     OBLIGATION_AWARE_PROMPTS_DIR,
     PhraseCheck,
+    REQUESTS,
     failures,
     load_table,
     phrase_checks,
@@ -30,8 +31,12 @@ def test_rendered_prompt_matches_its_phrase_table(check: PhraseCheck) -> None:
 @pytest.mark.parametrize("path", table_paths(), ids=lambda path: path.stem)
 def test_phrase_table_is_well_formed(path) -> None:
     table = load_table(path)
-    assert set(table) == {"template", "cases"}
-    assert path.stem == template_path(table["template"]).stem
+    if "request" in table:
+        assert set(table) == {"request", "cases"}
+        assert table["request"] == path.stem and path.stem in REQUESTS
+    else:
+        assert set(table) == {"template", "cases"}
+        assert path.stem == template_path(table["template"]).stem
     assert set(table["cases"]) <= set(CASES)
     for kinds in table["cases"].values():
         assert kinds and set(kinds) <= set(KINDS)
