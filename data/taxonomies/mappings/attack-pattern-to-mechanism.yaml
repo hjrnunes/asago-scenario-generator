@@ -5,9 +5,9 @@
 # the pattern needs. The relation is many to many: one pattern can realize
 # several mechanisms and one mechanism can serve many patterns. A pattern
 # without a link realizes no known mechanism, which is not a claim that it
-# realizes none; stale_history, stale_feedback and forged_completion have no
-# pattern whose text meets all of their required evidence yet, so no link
-# names them.
+# realizes none; stale_history, delegated_authority, stale_feedback and
+# forged_completion have no pattern whose text and chain meet all of their
+# required evidence yet, so no link names them.
 #
 # pattern_semantic_digest pins the pattern's canonical_chain.semantic_digest
 # at review time; a revised pattern fails the reference test until its link is
@@ -49,10 +49,11 @@ links:
       actions.
   - pattern_id: AP-T12-01
     pattern_semantic_digest: 5ddb645c06bb49afd7ad0bee36cb6c73b599085c886cab8fe7e15e97cdbfb4a7
-    mechanisms: [delegated_authority]
+    mechanisms: [retrieved_instructions]
     rationale: >-
-      Each agent takes a peer's message as trusted input, so injected content
-      in one agent's messages decides another agent's actions.
+      Peer agents read attacker-crafted messages from a shared channel as
+      trusted input, and the instructions those messages carry steer their
+      reasoning.
   - pattern_id: AP-T15-01
     pattern_semantic_digest: 11997cb51190fdf2718b97dae4598a59abf85de22bbf9b2674022176a24df050
     mechanisms: [retrieved_instructions]
@@ -71,4 +72,4 @@ links:
     rationale: >-
       The receiving agent retrieves an attacker-crafted protocol response and
       takes the context it injects as trusted, acting on it.
-semantic_digest: c92d538b883f7951edf9a11c18c5a288c955e1338546c97debea6c708beb9dae
+semantic_digest: 656b8c9ec971601eb06a321198c6a2f2cc2d391632be6c03f3d0ecd5d4c599a4

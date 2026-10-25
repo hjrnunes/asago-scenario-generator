@@ -80,6 +80,7 @@ def test_mechanisms_without_a_fitting_pattern_have_no_link() -> None:
 
     assert set(MechanismId) - linked == {
         MechanismId.stale_history,
+        MechanismId.delegated_authority,
         MechanismId.stale_feedback,
         MechanismId.forged_completion,
     }

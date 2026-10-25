@@ -5,8 +5,8 @@ whose pattern cannot meet an entry's required evidence would force every
 valid route of that pattern to ``unresolved``.  Two checks guard against it:
 
 - ``FIT`` pins, for each link, one verbatim phrase of the pattern's
-  description per ``required_evidence`` item, naming the pattern feature that
-  meets it.  A new link needs a reviewed row here.
+  description or a step postcondition per ``required_evidence`` item, naming
+  the pattern feature that meets it.  A new link needs a reviewed row here.
 - ``MARKERS`` checks pattern fields or text for what the entry's signature
   needs: content that arrives through a source the agent ingests, an
   attacker's own message, a peer agent relaying a belief, or a state that
@@ -77,16 +77,26 @@ FIT: dict[tuple[str, MechanismId], tuple[str, ...]] = {
         "into innocuous parts. The attack stays inside one conversation",
         "another user's records, credentials, personal data, or proprietary content",
     ),
-    ("AP-T12-01", MechanismId.delegated_authority): (
-        "inter-agent communication channels",
-        "each agent treats incoming peer messages as trusted input",
-        "the injected content compounds through successive reasoning steps",
+    ("AP-T12-01", MechanismId.retrieved_instructions): (
+        "Peer agents consume the persisted messages and the injected instructions "
+        "influence their reasoning processes.",
+        "An attacker injects crafted messages into inter-agent communication channels",
     ),
 }
 
 
 def _flat(text: str) -> str:
     return " ".join(text.split())
+
+
+def _pattern_text(pattern: Any) -> str:
+    """The description and every step postcondition, whitespace collapsed."""
+    postconditions = (
+        condition.description
+        for step in pattern.canonical_chain.steps
+        for condition in step.observable_postconditions
+    )
+    return _flat(" ".join((pattern.description, *postconditions)))
 
 
 def _chain_ids(pattern: Any) -> set[str]:
@@ -149,12 +159,12 @@ def test_the_pattern_text_meets_every_required_evidence_item(
     link: tuple[str, MechanismId],
 ) -> None:
     pattern_id, mechanism_id = link
-    description = _flat(_catalog()[pattern_id].description)
+    text = _pattern_text(_catalog()[pattern_id])
     evidence = bundled_mechanism_library().entry(mechanism_id).required_evidence
 
     assert len(FIT[link]) == len(evidence)
     for phrase in FIT[link]:
-        assert _flat(phrase) in description, phrase
+        assert _flat(phrase) in text, phrase
 
 
 @pytest.mark.parametrize("link", sorted(FIT), ids=lambda link: f"{link[0]}")
