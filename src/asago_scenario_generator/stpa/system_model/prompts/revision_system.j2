@@ -4,6 +4,12 @@ Your task is to address gaps identified by the completeness critic. This is a si
 
 {% include "_control_loop_method.j2" %}
 
+{% if use_case_text is defined %}
+## Supplied Use-Case Evidence
+
+{{ use_case_text }}
+
+{% endif %}
 ## Existing Control Structure
 ### Responsibilities
 {% for resp in control_structure.responsibilities %}
@@ -170,9 +176,18 @@ evidence makes the channel a source that may set the value), `non_authoritative`
 (the evidence shows it can report the value but not establish it),
 `conditional` (it may establish the value only within a scope or under
 conditions the evidence states), or `unknown` (the evidence bears on the
-question but leaves it open). `basis` states the scope and any conditions in
-domain words, without control-structure IDs, and cites the use-case wording or
-the exact `ref` of a discovered target-evidence record; it is required unless
+question but leaves it open). Assess the particular value: an untrusted user
+message may be authoritative for that user's own request, requested date,
+answers, or operation arguments, while remaining non-authoritative for a value
+the system must establish independently, such as eligibility, record ownership,
+available capacity, or another person's approval.
+
+`basis` states the scope and any conditions in domain words, without
+control-structure IDs, and cites evidence the request actually supplies: say
+`Use case: ...` and identify the relevant wording, or include the exact `ref` of
+a discovered target-evidence record. A bare ref such as
+`state:records.owner_id`, `user input is unverified`, and `user-provided text`
+are not sufficient bases. It is required unless
 `status` is `unknown`. Assess it for a new channel, and for a restated channel
 shown without one, where the supplied evidence bears on it; omit it otherwise.
 An omitted assessment means `unknown`. An
@@ -276,7 +291,12 @@ example with one new greenhouse responsibility and its controlled process is:
           "fb_id": "FB-3-1",
           "description": "Report current greenhouse temperature",
           "updates": "PM-3-1",
-          "source": {"type": "controlled_process", "id": "CP-3"}
+          "source": {"type": "controlled_process", "id": "CP-3"},
+          "source_kind": "operation_result",
+          "authority_for_update": {
+            "status": "authoritative",
+            "basis": "Use case: the greenhouse sensor reading establishes the current greenhouse temperature."
+          }
         }
       ]
     }

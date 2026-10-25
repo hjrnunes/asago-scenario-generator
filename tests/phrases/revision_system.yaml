@@ -3,6 +3,8 @@ cases:
   empty-structure:
     required:
       - Do not turn an "only when" condition into an unconditional denial
+      - "## Supplied Use-Case Evidence"
+      - Test use case
       - >-
         Keep a critic's proposed safeguard in the dismissed-gaps rationale
         unless the source establishes the omitted function
@@ -58,5 +60,17 @@ cases:
       - "An assessment covers only the PM shown with it"
       - "when a restated channel updates a different PM, assess it again or omit it"
       - "Do not derive authority from `source_kind`"
+      - >-
+        an untrusted user message may be authoritative for that user's own
+        request, requested date, answers, or operation arguments
+      - a value the system must establish independently
+      - cites evidence the request actually supplies
+      - "say `Use case: ...` and identify the relevant wording"
+      - A bare ref such as `state:records.owner_id`
+      - "`user input is unverified`"
+      - "`user-provided text`"
+      - >-
+        Use case: the greenhouse sensor reading establishes the current
+        greenhouse temperature.
     forbidden:
       - STPA-Sec

@@ -53,6 +53,11 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_completeness_critic,
     run_revision,
 )
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    EvidenceSessionField,
+    TargetEvidence,
+)
+from tests.phrase_tables import CASES
 from tests.helpers.stpa_builders import make_capability_profile
 from tests.stpa.sp1_helpers import MockLLMClient, valid_critic_findings_dict_no_gaps
 
@@ -74,6 +79,11 @@ _NON_AUTHORITATIVE = FeedbackUpdateAuthority(
     status=FeedbackAuthorityStatus.non_authoritative, basis=_BASIS
 )
 _PROCESS = ElementRef(type=ReferenceType.controlled_process, id="CP-1")
+_AUTHORITY_EVIDENCE = TargetEvidence(
+    session_fields=(
+        EvidenceSessionField(name="authenticated_reviewer", value="reviewer-1"),
+    )
+)
 
 
 def _channel(**fields: Any) -> FeedbackChannel:
@@ -287,7 +297,12 @@ def _message(kwargs: dict[str, Any], role: str) -> str:
     return next(m["content"] for m in kwargs["messages"] if m["role"] == role)
 
 
-def _call_2b(client: LLMClient, tmp_path: Path):
+def _call_2b(
+    client: LLMClient,
+    tmp_path: Path,
+    *,
+    target_evidence: TargetEvidence | None = None,
+):
     return _call_2b_control_elements(
         llm_client=client,
         use_case_text=(
@@ -309,6 +324,7 @@ def _call_2b(client: LLMClient, tmp_path: Path):
         run_dir=tmp_path,
         loader=TemplateLoader(PROMPTS_DIR),
         temperature=0.4,
+        target_evidence=target_evidence,
     )
 
 
@@ -353,6 +369,82 @@ def test_call_2b_corrects_a_settled_status_without_a_basis(tmp_path: Path) -> No
     assert "requires a basis" in _message(second, "user")
     [channel] = elements.feedback_channels
     assert channel.authority_for_update == _NON_AUTHORITATIVE
+
+
+@pytest.mark.parametrize(
+    ("invalid_basis", "error_text", "target_evidence"),
+    [
+        pytest.param(
+            "user input is unverified",
+            "only restates source kind",
+            None,
+            id="source-kind-restatement",
+        ),
+        pytest.param(
+            "The finance reviewer decides refund approvals.",
+            "must cite the supplied use case",
+            None,
+            id="no-offered-evidence-citation",
+        ),
+        pytest.param(
+            "session:authenticated_reviewer",
+            "scope in domain words",
+            _AUTHORITY_EVIDENCE,
+            id="bare-ref-without-domain-scope",
+        ),
+        pytest.param(
+            "Refund approval is decided by state:refunds.approved",
+            "not offered in this request",
+            _AUTHORITY_EVIDENCE,
+            id="invented-evidence-ref",
+        ),
+    ],
+)
+def test_call_2b_corrects_invalid_authority_bases_through_validation_retry(
+    tmp_path: Path,
+    invalid_basis: str,
+    error_text: str,
+    target_evidence: TargetEvidence | None,
+) -> None:
+    invalid = {
+        **_CALL_2B_FEEDBACK,
+        "authority_for_update": {
+            "status": "non_authoritative",
+            "basis": invalid_basis,
+        },
+    }
+    corrected = {
+        **_CALL_2B_FEEDBACK,
+        "authority_for_update": {
+            "status": "non_authoritative",
+            "basis": _BASIS,
+        },
+    }
+    client = _client(_call_2b_reply(invalid), _call_2b_reply(corrected))
+
+    elements = _call_2b(client, tmp_path, target_evidence=target_evidence)
+
+    _, correction = _sent(client)
+    assert error_text in _message(correction, "user")
+    assert elements.feedback_channels[0].authority_for_update == _NON_AUTHORITATIVE
+
+
+def test_call_2b_accepts_an_offered_ref_with_domain_scope(tmp_path: Path) -> None:
+    basis = (
+        "Reviewer identity from session:authenticated_reviewer establishes the "
+        "reviewer who may approve refunds."
+    )
+    feedback = {
+        **_CALL_2B_FEEDBACK,
+        "authority_for_update": {"status": "authoritative", "basis": basis},
+    }
+    client = _client(_call_2b_reply(feedback))
+
+    elements = _call_2b(client, tmp_path, target_evidence=_AUTHORITY_EVIDENCE)
+
+    assert elements.feedback_channels[0].authority_for_update == (
+        FeedbackUpdateAuthority(status="authoritative", basis=basis)
+    )
 
 
 def test_the_call_2b_request_offers_and_explains_the_field(tmp_path: Path) -> None:
@@ -431,6 +523,14 @@ def test_the_critic_request_without_an_assessment_does_not_mention_it(
     assert "authority" not in prompt.casefold()
 
 
+def test_the_unassessed_critic_request_keeps_its_exact_bytes() -> None:
+    prompt = CASES["unassessed-critic"]("critic_user.j2")
+
+    assert hashlib.sha256(prompt.encode()).hexdigest() == (
+        "5894b11f6f9102be7791fdd604c45a825a26384f9230b62f8ff0f83389a24393"
+    )
+
+
 _FINDINGS = CriticFindings(
     gaps=[
         {
@@ -456,6 +556,24 @@ def _revision_request(
     )
     [sent] = _sent(client)
     return revised, sent
+
+
+def _revision_attempts(
+    tmp_path: Path,
+    structure: ControlStructure,
+    *replies: dict[str, Any],
+    target_evidence: TargetEvidence | None = None,
+) -> tuple[ControlStructure, list[dict[str, Any]]]:
+    client = _client(*replies)
+    revised, _ = run_revision(
+        llm_client=client,
+        control_structure=structure,
+        critic_findings=_FINDINGS,
+        use_case_text="A refund assistant issues refunds the finance reviewer approved.",
+        run_dir=tmp_path,
+        target_evidence=target_evidence,
+    )
+    return revised, _sent(client)
 
 
 _NO_CHANGE = {
@@ -485,6 +603,10 @@ def test_the_revision_request_shows_offers_and_explains_the_field(
         f"authority_for_update.basis: {_BASIS}"
     ) in system
     assert "A feedback channel may also carry `authority_for_update`" in system
+    assert "## Supplied Use-Case Evidence" in system
+    assert "A refund assistant issues refunds" in system
+    user = " ".join(_message(sent, "user").split())
+    assert "A refund assistant issues refunds" not in user
     schema = sent["response_format"]["json_schema"]["schema"]
     revision_channel = schema["$defs"]["_RevisionFeedbackChannel"]
     assert "authority_for_update" in revision_channel["properties"]
@@ -545,6 +667,61 @@ def test_a_revision_may_assess_a_channel_that_had_no_assessment(
 
     revised, _ = _revision_request(tmp_path, original, _restated(assessed))
 
+    [channel] = revised.responsibilities[0].feedback_channels
+    assert channel.authority_for_update == _NON_AUTHORITATIVE
+
+
+@pytest.mark.parametrize(
+    ("invalid_basis", "error_text", "target_evidence"),
+    [
+        pytest.param(
+            "user-provided text",
+            "only restates source kind",
+            None,
+            id="source-kind-restatement",
+        ),
+        pytest.param(
+            "Refund approval is decided by state:refunds.approved",
+            "not offered in this request",
+            _AUTHORITY_EVIDENCE,
+            id="invented-evidence-ref",
+        ),
+    ],
+)
+def test_revision_corrects_invalid_authority_bases_through_existing_retry(
+    tmp_path: Path,
+    invalid_basis: str,
+    error_text: str,
+    target_evidence: TargetEvidence | None,
+) -> None:
+    original = _structure(_channel())
+    invalid = {
+        **_RESTATED_CHANNEL,
+        "source_kind": "user_message",
+        "authority_for_update": {
+            "status": "non_authoritative",
+            "basis": invalid_basis,
+        },
+    }
+    corrected = {
+        **_RESTATED_CHANNEL,
+        "source_kind": "user_message",
+        "authority_for_update": {
+            "status": "non_authoritative",
+            "basis": _BASIS,
+        },
+    }
+
+    revised, sent = _revision_attempts(
+        tmp_path,
+        original,
+        _restated(invalid),
+        _restated(corrected),
+        target_evidence=target_evidence,
+    )
+
+    assert len(sent) == 2
+    assert error_text in _message(sent[1], "user")
     [channel] = revised.responsibilities[0].feedback_channels
     assert channel.authority_for_update == _NON_AUTHORITATIVE
 

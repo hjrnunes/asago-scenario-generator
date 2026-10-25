@@ -45,8 +45,25 @@ cases:
       - an omitted assessment means `unknown`
       - "Do not derive authority from `source_kind`"
       - >-
+        A person may be authoritative for values they legitimately choose or
+        supply for themselves
+      - their own request, requested date, answers, or operation arguments
+      - >-
+        The same person is not authoritative for a value the system must
+        establish independently
+      - their message is authoritative for that user's requested date
+      - "say `Use case: ...` and identify the relevant wording"
+      - A bare ref such as `state:records.owner_id` is not a basis
+      - >-
+        A source-kind restatement such as `user input is unverified` or
+        `user-provided text` is not a basis
+      - >-
         a trusted source kind does not make a channel authoritative, and an
         untrusted one does not by itself make it non-authoritative
+      - '"authority_for_update": {'
+      - >-
+        Use case: the greenhouse sensor reading establishes the current
+        greenhouse temperature.
     forbidden:
       - Poh
       - STPA-Sec

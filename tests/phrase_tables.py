@@ -228,6 +228,7 @@ MISSING_CONTROL_ACTIONS = {
 }
 
 EMPTY_STRUCTURE = {
+    "use_case_text": "Test use case",
     "control_structure": SimpleNamespace(
         responsibilities=[], controlled_processes=[], coordination_links=[]
     ),

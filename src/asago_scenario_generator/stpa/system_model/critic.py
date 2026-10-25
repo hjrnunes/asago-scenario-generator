@@ -57,6 +57,9 @@ from asago_scenario_generator.stpa.models.control_structure import (
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.system_model.feedback_authority import (
+    validate_feedback_authority_assessments,
+)
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     TargetEvidence,
 )
@@ -287,9 +290,25 @@ class _RevisionDeltaProviderSet(RevisionDelta):
     dismissed_gaps: list[_Text] = []
 
 
-def _validate_revision_wire(value: Any) -> None:
+def _validate_revision_wire(
+    value: Any,
+    *,
+    target_evidence: TargetEvidence | None = None,
+) -> None:
     """Reject a revision response whose carrier breaks the wire models."""
-    _RevisionDeltaProviderSet.model_validate(value)
+    wire = _RevisionDeltaProviderSet.model_validate(value)
+    validate_feedback_authority_assessments(
+        (
+            channel
+            for responsibility in (
+                *wire.new_responsibilities,
+                *wire.modified_responsibilities,
+            )
+            for channel in responsibility.feedback_channels
+        ),
+        target_evidence=target_evidence,
+        require_domain_scope=True,
+    )
 
 
 def _revision_delta_from_wire(value: Any) -> RevisionDelta:
@@ -608,6 +627,7 @@ def run_revision(
     system_prompt = loader.render_prompt(
         "revision_system.j2",
         control_structure=control_structure,
+        use_case_text=use_case_text,
         **next_ids,
     )
     user_prompt = loader.render_prompt(
@@ -633,7 +653,9 @@ def run_revision(
         ),
         temperature=temperature,
         max_completion_tokens=REVISION_MAX_COMPLETION_TOKENS,
-        raw_result_validator=_validate_revision_wire,
+        raw_result_validator=lambda value: _validate_revision_wire(
+            value, target_evidence=target_evidence
+        ),
         response_parser=_parse_revision_result,
     )
     revision_delta, error_msg = outcome.value, outcome.error

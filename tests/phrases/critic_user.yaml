@@ -7,7 +7,16 @@ cases:
         recorded assessment of whether it is entitled to establish the value of
         the named PM, as opposed to only reporting it
       - A channel shown without one is `unknown`.
-      - Authority is separate from source kind and trust.
+      - "Authority is separate from source kind and trust:"
+      - >-
+        untrusted user input may legitimately establish the user's own request,
+        requested dates, answers, or operation arguments
+      - a value the system must establish independently
+      - Check the shown assessments against the supplied use case
+      - >-
+        Report as a `missing_feedback` gap an omitted assessment when that
+        evidence settles authority, or a recorded status that the evidence
+        contradicts.
       - >-
         Report as a `missing_feedback` gap a PM that decides a control action
         when its only feedback is non-authoritative, or conditional outside its

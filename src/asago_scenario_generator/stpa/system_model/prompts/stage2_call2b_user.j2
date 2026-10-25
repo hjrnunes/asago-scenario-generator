@@ -81,6 +81,10 @@ typed `temporality` fields, plus `operation` (exact observed operation name or
 feedback item must have separate `fb_id`, `description`, `updates`, `source`,
 and `source_kind` fields, plus `authority_for_update` (`status` and `basis`)
 where the supplied evidence bears on whether the channel may establish the
-value of the PM it updates.
+value of the PM it updates. An untrusted user message may still be authoritative
+for the user's own request, requested dates, answers, or operation arguments;
+it is non-authoritative for a value the system must establish independently.
+Every settled basis must cite `Use case: ...` or an exact target-evidence `ref`,
+state the scope in domain words, and do more than restate `source_kind`.
 Never combine an ID and description in an `action` string and never use an
 `action` property.
