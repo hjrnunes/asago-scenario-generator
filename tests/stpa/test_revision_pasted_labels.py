@@ -239,10 +239,13 @@ def test_a_genuine_revision_shaped_like_a_label_is_kept(restated: str) -> None:
     assert _merged_description("control_actions", "CA-1-1", restated) == restated
 
 
-def test_a_pasted_value_with_nested_parentheses_is_removed() -> None:
+@pytest.mark.parametrize(
+    "operation", ["lookup(order_id)", "lookup(order_id, target: customer)"]
+)
+def test_a_pasted_value_with_nested_parentheses_is_removed(operation: str) -> None:
     reviewed = _reviewed()
-    reviewed.responsibilities[0].control_actions[0].operation = "lookup(order_id)"
-    restated = f"{_RESPONSE} (effect: model_output) (operation: lookup(order_id))"
+    reviewed.responsibilities[0].control_actions[0].operation = operation
+    restated = f"{_RESPONSE} (effect: model_output) (operation: {operation})"
 
     merged = _merged_description("control_actions", "CA-1-1", restated, reviewed)
 

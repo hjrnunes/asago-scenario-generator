@@ -1084,6 +1084,25 @@ def _is_pasted_field(
     return any(_rendered_field(element, field) == value for element in elements)
 
 
+def _label_items(group: str, labels: dict[str, str]) -> list[str]:
+    """Split a group at each comma that a known label follows.
+
+    Only a comma outside nested parentheses separates items, so a value may
+    itself contain ``, label:``.
+    """
+    marker = "|".join(re.escape(label) for label in sorted(labels, key=len)[::-1])
+    next_label = re.compile(rf",\s*(?:{marker}):")
+    items: list[str] = []
+    depth = start = 0
+    for index, char in enumerate(group):
+        depth += {"(": 1, ")": -1}.get(char, 0)
+        if char == "," and depth == 0 and next_label.match(group, index):
+            items.append(group[start:index])
+            start = index + 1
+    items.append(group[start:])
+    return [item.strip() for item in items]
+
+
 def _is_pasted_group(
     group: str,
     labels: dict[str, str],
@@ -1091,9 +1110,7 @@ def _is_pasted_group(
     pm_ids: set[str],
 ) -> bool:
     """Whether a parenthesised group lists only typed fields of *elements*."""
-    marker = "|".join(re.escape(label) for label in sorted(labels, key=len)[::-1])
-    items = re.split(rf",\s*(?=(?:{marker}):)", group.strip())
-    for item in items:
+    for item in _label_items(group.strip(), labels):
         match = _LABEL_ITEM.match(item)
         if match is None or not _is_pasted_field(
             match.group(1), match.group(2), labels, elements, pm_ids
