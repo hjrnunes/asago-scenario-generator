@@ -5,8 +5,9 @@
 # the pattern needs. The relation is many to many: one pattern can realize
 # several mechanisms and one mechanism can serve many patterns. A pattern
 # without a link realizes no known mechanism, which is not a claim that it
-# realizes none; stale_feedback and forged_completion have no clear pattern
-# yet, so no link names them.
+# realizes none; stale_history, stale_feedback and forged_completion have no
+# pattern whose text meets all of their required evidence yet, so no link
+# names them.
 #
 # pattern_semantic_digest pins the pattern's canonical_chain.semantic_digest
 # at review time; a revised pattern fails the reference test until its link is
@@ -16,12 +17,6 @@
 version: 1
 predicate: realizes
 links:
-  - pattern_id: AP-T1-02
-    pattern_semantic_digest: 69ee8bd89d63381bfcf02c7b2a957b3a8fa197880852250ca8b3c74fb6efb09a
-    mechanisms: [stale_history]
-    rationale: >-
-      Fragments spread over earlier turns stand in for an authorization state
-      the agent no longer checks when it grants access.
   - pattern_id: AP-T1-06
     pattern_semantic_digest: e5541cfc97717eb1577c2240bc27646fb5bb2614a5c909d5443d248f4757638f
     mechanisms: [retrieved_instructions]
@@ -72,8 +67,8 @@ links:
       generating instructions that send users to malicious actions.
   - pattern_id: AP-T16-02
     pattern_semantic_digest: 0a9380b91a6b141b71109e08d3b90ecdf847a0b5164c4b46b8f237378bd6b8ba
-    mechanisms: [delegated_authority]
+    mechanisms: [retrieved_instructions]
     rationale: >-
-      The receiving agent takes another party's protocol response as trusted
-      context and acts on what it injects.
-semantic_digest: 67e4b94d08f97747c671e83a4f8ea9a11acaf083eff08c2026014beeee23fe7c
+      The receiving agent retrieves an attacker-crafted protocol response and
+      takes the context it injects as trusted, acting on it.
+semantic_digest: c92d538b883f7951edf9a11c18c5a288c955e1338546c97debea6c708beb9dae

@@ -71,7 +71,7 @@ def test_an_unlinked_pattern_realizes_no_known_mechanism() -> None:
     assert pattern_mechanisms("AP-UNKNOWN") == ()
 
 
-def test_mechanisms_without_a_clear_pattern_have_no_link() -> None:
+def test_mechanisms_without_a_fitting_pattern_have_no_link() -> None:
     linked = {
         mechanism_id
         for link in bundled_pattern_mechanism_relation().links
@@ -79,6 +79,7 @@ def test_mechanisms_without_a_clear_pattern_have_no_link() -> None:
     }
 
     assert set(MechanismId) - linked == {
+        MechanismId.stale_history,
         MechanismId.stale_feedback,
         MechanismId.forged_completion,
     }
@@ -105,7 +106,7 @@ def test_a_repeated_pattern_fails(tmp_path: Path) -> None:
     raw = _raw()
     raw["links"].append(dict(raw["links"][0]))
 
-    with pytest.raises(ValidationError, match="repeats patterns: \\['AP-T1-02'\\]"):
+    with pytest.raises(ValidationError, match="repeats patterns: \\['AP-T1-06'\\]"):
         _load(tmp_path, _redigested(raw))
 
 
