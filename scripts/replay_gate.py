@@ -66,7 +66,7 @@ import tempfile
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterable, Sequence
+from typing import Any, Callable, Iterable, Sequence, TypeGuard
 
 import yaml
 from pydantic import ValidationError
@@ -247,9 +247,20 @@ _EVIDENCE_BOUND_VERSION = "control-structure-evidence-bound.yaml"
 _NONE_REVISION_REASON = f"{REVISION_FAILED}unexpected None response"
 
 
-# ``_baseline_diagnostics`` carries each Stage 2 post-revision warning into
-# the synthesis manifest's stage warnings under this prefix.
+# Stage 2's run manifest keeps the post-revision warnings until scenario
+# production replaces that manifest; ``_baseline_diagnostics`` carries each
+# into the synthesis manifest's stage warnings under this prefix.
+_RUN_MANIFEST_FILENAME = "run-manifest.yaml"
 _BASELINE_REVISION_WARNING = "Baseline post_revision_warnings: "
+# ``check_evidence_bindings`` owns one field of each listed element of a
+# responsibility: it drops a process-model part's unsupported
+# ``evidence_refs`` and a control action's unobserved ``operation``, and
+# strips an ``operation:`` prefix from an observed one.
+_REBOUND_FIELDS = {
+    "process_model_parts": "evidence_refs",
+    "control_actions": "operation",
+}
+_OPERATION_PREFIX = "operation:"
 
 
 def _critic_revision_problem(
@@ -269,12 +280,9 @@ def _critic_revision_problem(
     if problem:
         return problem
     status, reason = value["status"], value.get("reason")
-    warnings = _post_revision_warnings(root, aliases)
-    if warnings is None:
-        return (
-            f"the run's {_MANIFEST_FILENAME} holds no stage warnings to check "
-            "the critic revision against"
-        )
+    warnings, problem = _post_revision_warnings(root, aliases)
+    if problem:
+        return problem
     expected = discarded_revision_reason(warnings)
     if reason != expected:
         found = f"discard it with {_short(expected)}" if expected else "keep it"
@@ -315,20 +323,66 @@ def _critic_revision_shape_problem(value: Any) -> str | None:
     return None
 
 
-def _post_revision_warnings(root: Path, aliases: dict[str, str]) -> list[str] | None:
-    """Return the Stage 2 post-revision warnings the synthesis manifest keeps."""
-    path = root / _MANIFEST_FILENAME
+def _post_revision_warnings(
+    root: Path, aliases: dict[str, str]
+) -> tuple[list[str], str | None]:
+    """Return the run's Stage 2 post-revision warnings, or why they are unknown.
+
+    The run manifest Stage 2 wrote holds them as ``post_revision_warnings``;
+    once scenario production has replaced it, only the synthesis manifest's
+    prefixed copy remains.  When both hold them, they must agree.
+    """
+    sources: list[tuple[str, list[str]]] = []
+    run_manifest = _yaml_mapping(root / _RUN_MANIFEST_FILENAME, aliases)
+    if run_manifest is not None and "post_revision_warnings" in run_manifest:
+        warnings = run_manifest["post_revision_warnings"]
+        if not _is_text_list(warnings):
+            return [], (
+                f"the run's {_RUN_MANIFEST_FILENAME} post_revision_warnings is "
+                f"not a list of warnings: {_short(warnings)}"
+            )
+        sources.append((_RUN_MANIFEST_FILENAME, warnings))
+    synthesis = _yaml_mapping(root / _MANIFEST_FILENAME, aliases)
+    if synthesis is not None:
+        stage_warnings = synthesis.get("stage_warnings")
+        if not _is_text_list(stage_warnings):
+            return [], (
+                f"the run's {_MANIFEST_FILENAME} holds no stage warnings to check "
+                "the critic revision against"
+            )
+        sources.append(
+            (
+                _MANIFEST_FILENAME,
+                [
+                    warning.removeprefix(_BASELINE_REVISION_WARNING)
+                    for warning in stage_warnings
+                    if warning.startswith(_BASELINE_REVISION_WARNING)
+                ],
+            )
+        )
+    if not sources:
+        return [], (
+            f"neither {_RUN_MANIFEST_FILENAME} nor {_MANIFEST_FILENAME} keeps the "
+            "post-revision warnings to check the critic revision against"
+        )
+    if len(sources) == 2 and sources[0][1] != sources[1][1]:
+        return [], (
+            f"the post-revision warnings in {_RUN_MANIFEST_FILENAME} and "
+            f"{_MANIFEST_FILENAME} disagree: {_short(sources[0][1])} != "
+            f"{_short(sources[1][1])}"
+        )
+    return sources[0][1], None
+
+
+def _yaml_mapping(path: Path, aliases: dict[str, str]) -> dict[str, Any] | None:
     if not path.is_file():
         return None
     document = yaml.safe_load(_substitute(path.read_text(encoding="utf-8"), aliases))
-    warnings = document.get("stage_warnings") if isinstance(document, dict) else None
-    if not isinstance(warnings, list):
-        return None
-    return [
-        warning.removeprefix(_BASELINE_REVISION_WARNING)
-        for warning in warnings
-        if isinstance(warning, str) and warning.startswith(_BASELINE_REVISION_WARNING)
-    ]
+    return document if isinstance(document, dict) else None
+
+
+def _is_text_list(value: Any) -> TypeGuard[list[str]]:
+    return isinstance(value, list) and all(isinstance(item, str) for item in value)
 
 
 def _revision_request_problem(
@@ -368,36 +422,106 @@ def _revision_structure_problem(status: str, root: Path) -> str | None:
 
     The step's input is the evidence-bound version and its output the revised
     one.  Whatever the reply, the step strips any responsibility with no
-    process-model part, control action or feedback channel, so an input that
-    holds one always changes.  An applied revision changed the structure and
-    an unchanged one did not.  A discarded revision keeps its input, so it
-    changes the structure only by that stripping.
+    process-model part, control action or feedback channel, so its output
+    holds none.  An applied revision changed the structure and an unchanged
+    one did not.  A discarded revision keeps its input, so its output is the
+    input with those responsibilities stripped: see
+    :func:`_discarded_structure_problem`.
     """
     versions = _revision_versions(root)
     if versions is None:
         return "the run published no control structure to check the revision against"
-    before, after = versions
-    changed = before != after
-    holds_empty = _holds_empty_responsibility(before)
-    if holds_empty is None:
-        return f"the evidence-bound control structure does not load: {_short(before)}"
-    if holds_empty and not changed:
+    before_text, after_text = versions
+    before, after = _loaded_structure(before_text), _loaded_structure(after_text)
+    if before is None or after is None:
+        return "the revision step's control structure versions do not load"
+    if strip_empty_responsibilities(after)[1]:
         return (
-            "the evidence-bound control structure holds an empty responsibility "
-            "that the revision step did not strip"
+            "the revised control structure holds an empty responsibility, which "
+            "the revision step always strips"
         )
+    changed = before_text != after_text
     if status == "applied" and not changed:
         return (
             "a critic revision recorded as applied left the control structure unchanged"
         )
     if status == "unchanged" and changed:
         return "a critic revision recorded as unchanged changed the control structure"
-    if status == "discarded" and changed and not holds_empty:
+    if status == "discarded" and changed:
+        return _discarded_structure_problem(before, after)
+    return None
+
+
+def _discarded_structure_problem(
+    before: ControlStructure, after: ControlStructure
+) -> str | None:
+    """Check that a discarded revision's output is its input, stripped.
+
+    The step strips the input's empty responsibilities and, only when that
+    changed it, binds the result to the target evidence again.  The
+    :data:`_REBOUND_FIELDS` may then differ from the stripped input, but only
+    as that binding changes them: evidence refs dropped, an operation dropped
+    or its ``operation:`` prefix removed.  Everything else is equal.
+    """
+    stripped, removed = strip_empty_responsibilities(before)
+    if not removed:
         return (
             "a discarded critic revision changed the control structure, though "
             "the evidence-bound structure holds no empty responsibility to strip"
         )
+    if _without_rebound_fields(stripped) != _without_rebound_fields(after):
+        return (
+            "a discarded critic revision changed the control structure beyond "
+            "stripping its empty responsibilities"
+        )
+    for kept, bound in zip(stripped.responsibilities, after.responsibilities):
+        for part, bound_part in zip(
+            kept.process_model_parts, bound.process_model_parts
+        ):
+            refs = iter(part.evidence_refs)
+            if not all(ref in refs for ref in bound_part.evidence_refs):
+                return (
+                    "a discarded critic revision gave process-model part "
+                    f"{bound_part.pm_id} evidence refs it did not hold"
+                )
+        for action, bound_action in zip(kept.control_actions, bound.control_actions):
+            operation = action.operation
+            allowed = {None, operation}
+            if operation is not None:
+                allowed.add(operation.removeprefix(_OPERATION_PREFIX))
+            if bound_action.operation not in allowed:
+                return (
+                    "a discarded critic revision gave control action "
+                    f"{bound_action.ca_id} the operation "
+                    f"{bound_action.operation!r}, not {operation!r}"
+                )
     return None
+
+
+def _without_rebound_fields(structure: ControlStructure) -> ControlStructure:
+    """Return *structure* with each :data:`_REBOUND_FIELDS` value at its default."""
+    return structure.model_copy(
+        update={
+            "responsibilities": [
+                resp.model_copy(
+                    update={
+                        elements: [
+                            item.model_copy(
+                                update={
+                                    owned: type(item)
+                                    .model_fields[owned]
+                                    .get_default(call_default_factory=True)
+                                }
+                            )
+                            for item in getattr(resp, elements)
+                        ]
+                        for elements, owned in _REBOUND_FIELDS.items()
+                    }
+                )
+                for resp in structure.responsibilities
+            ]
+        }
+    )
 
 
 def _revision_attempts(root: Path, aliases: dict[str, str]) -> list[dict[str, Any]]:
@@ -429,13 +553,11 @@ def _revision_versions(root: Path) -> tuple[str, str] | None:
     return before, after
 
 
-def _holds_empty_responsibility(text: str) -> bool | None:
-    """Say whether a control structure holds a responsibility the step strips."""
+def _loaded_structure(text: str) -> ControlStructure | None:
     try:
-        structure = ControlStructure.model_validate(yaml.safe_load(text))
+        return ControlStructure.model_validate(yaml.safe_load(text))
     except (yaml.YAMLError, ValidationError):
         return None
-    return bool(strip_empty_responsibilities(structure)[1])
 
 
 def _version_text(root: Path, names: Sequence[str]) -> str | None:

@@ -54,6 +54,9 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticGap,
     RevisionDelta,
 )
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    check_evidence_bindings,
+)
 from asago_scenario_generator.stpa.system_model.run import (
     _critic_revision_record,
     _maybe_apply_revision,
@@ -1537,41 +1540,96 @@ _REVIEWED_STRUCTURE = (
     / "stpa"
     / "control_structure_reviewed_occiai.yaml"
 )
+_UNSET = object()
 
 
 def _reviewed_structure() -> ControlStructure:
     return read_yaml(_REVIEWED_STRUCTURE, ControlStructure)  # type: ignore[return-value]
 
 
-def _with_empty_responsibility(structure: ControlStructure) -> ControlStructure:
-    empty = Responsibility(resp_id="RESP-99", description="Escalate to a human")
+def _with_empty_responsibility(
+    structure: ControlStructure, *resp_ids: str
+) -> ControlStructure:
+    empties = [
+        Responsibility(resp_id=resp_id, description="Escalate to a human")
+        for resp_id in resp_ids or ("RESP-99",)
+    ]
     return structure.model_copy(
-        update={"responsibilities": [*structure.responsibilities, empty]}
+        update={"responsibilities": [*structure.responsibilities, *empties]}
     )
 
 
-def _edited(structure: ControlStructure) -> ControlStructure:
+def _with_first(structure: ControlStructure, **update: Any) -> ControlStructure:
     first, *rest = structure.responsibilities
-    edited = first.model_copy(update={"description": "Answer from policy only"})
-    return structure.model_copy(update={"responsibilities": [edited, *rest]})
+    return structure.model_copy(
+        update={"responsibilities": [first.model_copy(update=update), *rest]}
+    )
+
+
+def _rebound(
+    structure: ControlStructure, *, refs: Any = _UNSET, operation: Any = _UNSET
+) -> ControlStructure:
+    """Set PM-1-2's evidence refs and CA-1-2's operation, the bound fields."""
+    first = structure.responsibilities[0]
+    parts = list(first.process_model_parts)
+    actions = list(first.control_actions)
+    if refs is not _UNSET:
+        parts[1] = parts[1].model_copy(update={"evidence_refs": refs})
+    if operation is not _UNSET:
+        actions[1] = actions[1].model_copy(update={"operation": operation})
+    return _with_first(structure, process_model_parts=parts, control_actions=actions)
 
 
 def _revision_versions(kind: str) -> tuple[ControlStructure, ControlStructure]:
     """Return the evidence-bound and revised structures a revision step left.
 
     ``changed`` edits a responsibility, ``stripped`` removes an empty one,
-    ``unchanged`` keeps the structure, and ``kept_empty`` keeps an empty
-    responsibility the step would have stripped.
+    ``unchanged`` keeps the structure, and ``rebound`` and ``rebound_dropped``
+    strip one and then change only what binding to the target evidence may.
+    The other kinds are what no revision step leaves.
     """
     reviewed = _reviewed_structure()
-    if kind == "changed":
-        return reviewed, _edited(reviewed)
-    if kind == "stripped":
-        return _with_empty_responsibility(reviewed), reviewed
-    if kind == "kept_empty":
-        holding = _with_empty_responsibility(reviewed)
-        return holding, holding
-    return reviewed, reviewed
+    holding = _with_empty_responsibility(reviewed)
+    first = reviewed.responsibilities[0]
+    pm_refs = first.process_model_parts[1].evidence_refs
+    versions = {
+        "changed": (reviewed, _with_first(reviewed, description="Answer only")),
+        "stripped": (holding, reviewed),
+        "unchanged": (reviewed, reviewed),
+        "rebound": (
+            _rebound(holding, operation="operation:ask_clinical_question"),
+            _rebound(reviewed, refs=pm_refs[1:], operation="ask_clinical_question"),
+        ),
+        "rebound_dropped": (holding, _rebound(reviewed, refs=[], operation=None)),
+        "kept_empty": (holding, holding),
+        "kept_one_empty": (
+            _with_empty_responsibility(reviewed, "RESP-98", "RESP-99"),
+            _with_empty_responsibility(reviewed, "RESP-98"),
+        ),
+        "applied_kept_empty": (reviewed, holding),
+        "stripped_and_edited": (
+            holding,
+            _with_first(reviewed, description="Answer only"),
+        ),
+        "stripped_and_added": (
+            holding,
+            _with_first(
+                reviewed,
+                process_model_parts=[
+                    *first.process_model_parts,
+                    first.process_model_parts[0].model_copy(update={"pm_id": "PM-1-9"}),
+                ],
+            ),
+        ),
+        "rebound_gained": (
+            holding,
+            _rebound(reviewed, refs=[*pm_refs, "state:education.audience"]),
+        ),
+        "rebound_reordered": (holding, _rebound(reviewed, refs=pm_refs[::-1])),
+        "rebound_renamed": (holding, _rebound(reviewed, operation="lookup_order")),
+        "rebound_without_strip": (reviewed, _rebound(reviewed, operation=None)),
+    }
+    return versions[kind]
 
 
 def _write_revision_versions(
@@ -1606,18 +1664,27 @@ def _critic_run(
     attempts: tuple[bool, ...],
     versions: str,
     warnings: list[str],
+    sources: tuple[str, ...] = ("synthesis",),
+    run_manifest_warnings: Any = _UNSET,
 ) -> None:
     """Write one side's Stage 2 critic-revision evidence and manifest record.
 
     *attempts* gives each revision request's success, in order; a failed one
     logs :data:`_MISS`.  *versions* names a :func:`_revision_versions` kind,
-    and *warnings* are the run's post-revision warnings.
+    and *warnings* are the run's post-revision warnings.  *sources* says
+    where the run keeps them: ``run`` in the run manifest Stage 2 wrote,
+    ``synthesis`` in the synthesis manifest (which is otherwise removed);
+    *run_manifest_warnings* replaces the run manifest's copy.
     """
     document = yaml.safe_load((root / "run-manifest.yaml").read_text())
     stage_2: dict[str, Any] = {"call_count": 2 + len(attempts)}
     if record is not None:
         stage_2["critic_revision"] = record
     document["stage_summary"] = {"stage_2": stage_2}
+    if "run" in sources:
+        document["post_revision_warnings"] = (
+            warnings if run_manifest_warnings is _UNSET else run_manifest_warnings
+        )
     (root / "run-manifest.yaml").write_text(yaml.safe_dump(document))
     with (root / "calls.jsonl").open("a", encoding="utf-8") as calls:
         for number, success in enumerate(attempts, start=1):
@@ -1631,7 +1698,12 @@ def _critic_run(
                 entry["error"] = _MISS
             calls.write(json.dumps(entry) + "\n")
     _write_revision_versions(root, *_revision_versions(versions))
-    _write_post_revision_warnings(root, warnings)
+    if "synthesis" in sources:
+        _write_post_revision_warnings(root, warnings)
+    else:
+        # A run that stopped before synthesis wrote neither file.
+        (root / "synthesis-manifest.yaml").unlink()
+        (root / "synthesis-report.html").unlink()
 
 
 def _critic_differences(
@@ -1642,6 +1714,8 @@ def _critic_differences(
     attempts: tuple[bool, ...] = (True,),
     versions: str = "changed",
     warnings: list[str] | None = None,
+    sources: tuple[str, ...] = ("synthesis",),
+    run_manifest_warnings: Any = _UNSET,
 ) -> list[Difference]:
     """Compare a run whose replay holds *record* and whose recording may not.
 
@@ -1655,7 +1729,13 @@ def _critic_differences(
         )
     for root, side_record in ((recorded, recorded_record), (replayed, record)):
         _critic_run(
-            root, side_record, attempts=attempts, versions=versions, warnings=warnings
+            root,
+            side_record,
+            attempts=attempts,
+            versions=versions,
+            warnings=warnings,
+            sources=sources,
+            run_manifest_warnings=run_manifest_warnings,
         )
     return compare_trees(recorded, replayed, path_map)[1]
 
@@ -1669,8 +1749,10 @@ def _critic_differences(
         ({"status": "unchanged"}, (True,), "unchanged"),
         ({"status": "discarded", "reason": _FAILED}, (False,), "unchanged"),
         ({"status": "discarded", "reason": _FAILED}, (False,), "stripped"),
+        ({"status": "discarded", "reason": _FAILED}, (False,), "rebound"),
         ({"status": "discarded", "reason": _DEGRADED}, (True,), "unchanged"),
         ({"status": "discarded", "reason": _DEGRADED}, (True,), "stripped"),
+        ({"status": "discarded", "reason": _DEGRADED}, (True,), "rebound_dropped"),
         ({"status": "discarded", "reason": _NO_RESPONSE}, (True,), "unchanged"),
         ({"status": "discarded", "reason": _NO_RESPONSE}, (True,), "stripped"),
     ],
@@ -1683,6 +1765,55 @@ def test_a_recording_without_the_critic_revision_accepts_a_consistent_one(
     )
 
     assert differences == []
+
+
+@pytest.mark.parametrize("sources", [("run",), ("synthesis",), ("run", "synthesis")])
+def test_an_added_critic_revision_reads_the_warnings_wherever_the_run_keeps_them(
+    trees, sources: tuple[str, ...]
+) -> None:
+    differences = _critic_differences(
+        trees,
+        {"status": "discarded", "reason": _DEGRADED},
+        versions="stripped",
+        sources=sources,
+    )
+
+    assert differences == []
+
+
+@pytest.mark.parametrize(
+    ("sources", "run_manifest_warnings", "message"),
+    [
+        ((), _UNSET, "neither run-manifest.yaml nor synthesis-manifest.yaml"),
+        (("run",), [], "keep it, but the critic revision is recorded as discarded"),
+        (("run", "synthesis"), [], "disagree"),
+        (
+            ("run", "synthesis"),
+            [_DEGRADED, "Orphan PM PM-9-1"],
+            "disagree",
+        ),
+        (("run",), "Revision failed", "is not a list of warnings"),
+        (("run",), [_DEGRADED, 7], "is not a list of warnings"),
+    ],
+)
+def test_an_added_critic_revision_with_unusable_warnings_fails(
+    trees,
+    sources: tuple[str, ...],
+    run_manifest_warnings: Any,
+    message: str,
+) -> None:
+    differences = _critic_differences(
+        trees,
+        {"status": "discarded", "reason": _DEGRADED},
+        versions="stripped",
+        warnings=[_DEGRADED],
+        sources=sources,
+        run_manifest_warnings=run_manifest_warnings,
+    )
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "$.stage_summary.stage_2.critic_revision" in differences[0].detail
+    assert message in differences[0].detail
 
 
 @pytest.mark.parametrize(
@@ -1767,13 +1898,19 @@ def test_an_added_critic_revision_needs_the_synthesis_stage_warnings(trees) -> N
     assert "holds no stage warnings" in differences[0].detail
 
 
+_HOLDS_EMPTY = "holds an empty responsibility, which the revision step always strips"
+_BEYOND_STRIPPING = "beyond stripping its empty responsibilities"
+
+
 @pytest.mark.parametrize(
     ("record", "attempts", "versions", "message"),
     [
         ({"status": "applied"}, (), "changed", "made no revision request"),
         ({"status": "applied"}, (True,), "unchanged", "as applied left"),
         ({"status": "unchanged"}, (True,), "changed", "as unchanged changed"),
-        ({"status": "unchanged"}, (True,), "kept_empty", "did not strip"),
+        ({"status": "unchanged"}, (True,), "kept_empty", _HOLDS_EMPTY),
+        ({"status": "applied"}, (True,), "applied_kept_empty", _HOLDS_EMPTY),
+        ({"status": "applied"}, (True,), "kept_one_empty", _HOLDS_EMPTY),
         (
             {"status": "applied"},
             (True, False),
@@ -1825,8 +1962,50 @@ def test_an_added_critic_revision_needs_the_synthesis_stage_warnings(trees) -> N
         (
             {"status": "discarded", "reason": _DEGRADED},
             (True,),
+            "rebound_without_strip",
+            "holds no empty responsibility to strip",
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (True,),
             "kept_empty",
-            "did not strip",
+            _HOLDS_EMPTY,
+        ),
+        (
+            {"status": "discarded", "reason": _FAILED},
+            (False,),
+            "kept_one_empty",
+            _HOLDS_EMPTY,
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (True,),
+            "stripped_and_edited",
+            _BEYOND_STRIPPING,
+        ),
+        (
+            {"status": "discarded", "reason": _FAILED},
+            (False,),
+            "stripped_and_added",
+            _BEYOND_STRIPPING,
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (True,),
+            "rebound_gained",
+            "gave process-model part PM-1-2 evidence refs it did not hold",
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED},
+            (True,),
+            "rebound_reordered",
+            "gave process-model part PM-1-2 evidence refs it did not hold",
+        ),
+        (
+            {"status": "discarded", "reason": _NO_RESPONSE},
+            (True,),
+            "rebound_renamed",
+            "gave control action CA-1-2 the operation 'lookup_order'",
         ),
     ],
 )
@@ -1870,8 +2049,8 @@ def test_an_added_critic_revision_needs_a_published_structure(trees) -> None:
 def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
     tmp_path: Path, reply: str | None
 ) -> None:
-    """Run the producer's revision step on a structure with an empty
-    responsibility and a reply it discards, then check its record."""
+    """Run the producer's revision step on an evidence-bound structure with an
+    empty responsibility and a reply it discards, then check its record."""
     findings = CriticFindings(
         gaps=[
             CriticGap(
@@ -1899,7 +2078,11 @@ def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
                 "dismissed_gaps": [],
             },
         )
-    baseline = _with_empty_responsibility(_reviewed_structure())
+    # Stage 2 binds the derived structure to the target evidence before the
+    # critic, and the revision step binds again with the same evidence.
+    baseline, _ = check_evidence_bindings(
+        _with_empty_responsibility(_reviewed_structure()), None
+    )
 
     revised_structure, warnings, revised = _maybe_apply_revision(
         baseline,
@@ -1913,6 +2096,9 @@ def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
     )
     record = _critic_revision_record(findings, warnings, revised=revised)
     _write_revision_versions(tmp_path, baseline, revised_structure)
+    (tmp_path / "run-manifest.yaml").write_text(
+        yaml.safe_dump({"post_revision_warnings": warnings})
+    )
     (tmp_path / "synthesis-manifest.yaml").write_text(
         yaml.safe_dump({"run_id": "r", "created_at": "t"})
     )
