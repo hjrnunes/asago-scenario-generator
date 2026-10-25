@@ -1,0 +1,95 @@
+Mechanism/path comparisons:
+- distinctive_mechanism:
+    description: 'Ask the system questions designed to make the model reveal sensitive
+      information that it holds or can reach, such as another user''s records, credentials,
+      personal data, or proprietary content, by claiming authority, asserting a pretext,
+      or splitting the request into innocuous parts. The attack stays inside one conversation
+      and needs no tool, retrieval source, or memory beyond what the model already
+      sees; it ends at the first response that contains the sensitive information.
+      Exact ATLAS chain identity: AML.T0057 - crafting prompts that induce the model
+      to leak private user data or proprietary information is AML.T0057''s exact defined
+      operation (LLM Data Leakage); evidence: pinned technique definition AML.T0057.
+      Exfiltration through tool chains belongs to AP-T2-02 and exfiltration through
+      rendered output belongs to AP-T1-06.'
+    name: Conversational sensitive-data elicitation
+  item_handle: R1
+  known_mechanism_refs:
+  - user_claim
+  selected_structural_path:
+  - description: Answer customer requests.
+    id: RESP-1
+  - description: Compose the reply to the customer.
+    id: CA-1-1
+  - description: A reply discloses another customer's records.
+    id: H-1
+- distinctive_mechanism:
+    description: Return poisoned output from a compromised or malicious data source
+      so the agent misinterprets the hidden instructions as part of its operational
+      goal, incorporating the injected objective into its plan. Owns goal redirection
+      via data-instruction confusion within OG-03; downstream tool misuse as the cataloged
+      core belongs to AP-T2-05.
+    name: Indirect goal redirection via poisoned tool output
+  item_handle: R2
+  known_mechanism_refs:
+  - retrieved_instructions
+  selected_structural_path:
+  - description: Answer customer requests.
+    id: RESP-1
+  - description: Compose the reply to the customer.
+    id: CA-1-1
+  - description: A reply discloses another customer's records.
+    id: H-1
+
+
+Known mechanism glossary (each mechanism is defined once; items refer to it by
+known_mechanism_refs):
+- counterexamples:
+  - 'The user is the legitimate source of the value: their own request, preferences,
+    dates, or answers about themselves.'
+  - The result goes back only to the same user and harms no one else, so a wrong value
+    gives a worse answer rather than a hazard.
+  - A read-only lookup or a cosmetic label that no hazardous decision depends on.
+  - The selected hazard and constraint govern a different consequence of the same
+    reply, for example unequal treatment of groups of users and a constraint that
+    requires even-handed wording.
+  id: user_claim
+  question: Can a claim in the current user message stand in for a value the controller
+    should establish from a source entitled to set it, such as who the requester is,
+    what they may see or do, an approval, or a fact about another party?
+  required_evidence:
+  - Either a supplied process-model, feedback or control-action description in which
+    a value the selected action relies on (the requester's identity, entitlement or
+    approval, or a fact about another party) is taken from the current user message
+    instead of a source entitled to set it; or, when the attack stays within one conversation
+    and needs no tool, retrieval or memory, a selected control action that produces
+    the reply the attack ends in.
+  - The selected hazard and constraint govern harm that acting on a false claim causes
+    to a party other than the claimant, or a rule the claimant cannot waive, for example
+    a reply that discloses another party's records and a constraint that forbids that
+    disclosure.
+- counterexamples:
+  - 'Authentication, or an authentication rejection: it establishes who supplied the
+    data, not that data stays separate from instructions.'
+  - 'Schema validation: it establishes the data''s shape, not what the controller
+    does with its meaning.'
+  - 'Generic input sanitization at the user-input boundary: it does not govern retrieved
+    content or tool output being read as an instruction.'
+  - Ingesting external content, with no description of how the controller interprets
+    it.
+  - 'A backend record or internal state field described as retrieved content: no adversary
+    authors it.'
+  - Retrieval from an internal policy or knowledge source that the structure gives
+    no adversary a way to write.
+  id: retrieved_instructions
+  question: Can text an adversary authored, arriving as retrieved content or tool
+    output, change what the controller takes as its instructions, goal or authority?
+  required_evidence:
+  - An exact supplied process-model, feedback or control-action description that governs
+    untrusted retrieved content or tool output being interpreted as an instruction,
+    a goal or a grant of authority.
+  - 'The content can be authored by an adversary: the description names an external
+    document, page, message or tool result, not the controller''s own check or stored
+    state.'
+
+
+Return a JSON object with a `verdicts` array. Copy every item handle unchanged.

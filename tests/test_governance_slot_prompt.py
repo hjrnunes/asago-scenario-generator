@@ -57,9 +57,10 @@ _GOLDEN_SLOT_USER_EMPTY = (
 # describing the flat route form (null for fields a disposition does not use),
 # and again when its examples stopped naming a NOT_PROVIDED slot and it began
 # defining the four UCA types, and again when its example slot stopped
-# matching a real slot.
+# matching a real slot, and again when the goal-redirection rule moved into
+# the mechanism library's entries.
 _GOLDEN_ROUTING_SYSTEM = (
-    "3cb0838594298426f080ac7bba9e1623b96e2e24eb6074fa8a1a88af60470b5c"
+    "d7cfa8f9e5177b420f91699c626ec47a9caf3e31ef9a71696b751fdc94d0354f"
 )
 # The routing user digest was recaptured when slot IDs left the ID glossary for
 # a UCA type legend, when routing stopped offering WRONG_DURATION slots that

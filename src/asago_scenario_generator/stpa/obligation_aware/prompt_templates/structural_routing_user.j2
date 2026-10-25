@@ -1,7 +1,11 @@
 Known concern glossary (each pattern is defined once; questions refer to it by
 known_concern_ref):
 {{ known_concern_catalog_yaml }}
-
+{% if known_mechanism_glossary_yaml %}
+Known mechanism glossary (each mechanism is defined once; concerns refer to it by
+known_mechanism_refs):
+{{ known_mechanism_glossary_yaml }}
+{% endif %}
 Compact obligation questions:
 {{ obligation_questions_yaml }}
 Every obligation_handle is an opaque reference: copy unchanged.

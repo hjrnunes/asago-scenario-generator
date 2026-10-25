@@ -16,9 +16,10 @@
 #                        without a recorded assessment is unknown);
 #     process_model_refs how the path uses the updated variable;
 #     crossing           whether the path reaches another controller.
-#   required_evidence  what a supplied structural description must govern
-#                      before a path carries the mechanism. Shown to the
-#                      routing and mechanism-verification prompts.
+#   required_evidence  conditions the supplied structural descriptions must
+#                      meet before a path carries the mechanism; every item
+#                      must hold. Shown to the routing and
+#                      mechanism-verification prompts.
 #   counterexamples    structures that resemble the mechanism but do not carry
 #                      it. Shown to the same prompts.
 #   safe_behavior      what a controller does so that the path does not carry
@@ -42,19 +43,18 @@ mechanisms:
       crossing: may_cross
     required_evidence:
       - >-
-        A supplied process-model, feedback or control-action description in
-        which a value the selected action relies on (the requester's identity,
-        entitlement or approval, or a fact about another party) is taken from
-        the current user message instead of a source entitled to set it.
+        Either a supplied process-model, feedback or control-action description
+        in which a value the selected action relies on (the requester's
+        identity, entitlement or approval, or a fact about another party) is
+        taken from the current user message instead of a source entitled to
+        set it; or, when the attack stays within one conversation and needs no
+        tool, retrieval or memory, a selected control action that produces the
+        reply the attack ends in.
       - >-
-        Acting on a false claim of that value is hazardous: it harms a party
-        other than the claimant, or breaks a rule the claimant cannot waive.
-      - >-
-        When the attack stays within one conversation, the selected action
-        produces the reply the attack ends in, and the selected hazard and
-        constraint govern the consequence the mechanism names, for example a
-        reply that discloses another party's records and a constraint that
-        forbids that disclosure.
+        The selected hazard and constraint govern harm that acting on a false
+        claim causes to a party other than the claimant, or a rule the claimant
+        cannot waive, for example a reply that discloses another party's
+        records and a constraint that forbids that disclosure.
     counterexamples:
       - >-
         The user is the legitimate source of the value: their own request,

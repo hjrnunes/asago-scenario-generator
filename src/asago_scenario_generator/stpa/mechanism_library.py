@@ -11,8 +11,8 @@ An entry records:
 - ``question``: what the mechanism asks of a system, in one sentence;
 - ``signature``: the typed structure that makes the mechanism worth
   considering on a path (:class:`MechanismSignature`);
-- ``required_evidence``: what a supplied structural description must govern
-  before a path carries the mechanism;
+- ``required_evidence``: conditions the supplied structural descriptions must
+  meet before a path carries the mechanism, every one of them;
 - ``counterexamples``: structures that resemble the mechanism but do not
   carry it;
 - ``safe_behavior``: what a controller does so that the path does not carry
@@ -44,6 +44,7 @@ from asago_scenario_generator.data.paths import DATA_ROOT
 from asago_scenario_generator.models.canonical import (
     ClosedCanonicalModel,
     SemanticDigestMixin,
+    compute_framed_digest,
 )
 from asago_scenario_generator.stpa.models.control_structure import (
     FeedbackAuthorityStatus,
@@ -59,6 +60,7 @@ PATTERN_MECHANISM_RELATION_PATH = (
 PATTERN_MECHANISM_DIGEST_DOMAIN = (
     "asago-scenario-generator:pattern-mechanism-relation:v1"
 )
+MECHANISM_DATA_DIGEST_DOMAIN = "asago-scenario-generator:mechanism-data:v1"
 
 
 class MechanismId(StrEnum):
@@ -296,7 +298,24 @@ def pattern_mechanisms(pattern_id: str) -> tuple[MechanismEntry, ...]:
     )
 
 
+@cache
+def bundled_mechanism_data_digest() -> str:
+    """One digest of the bundled library and relation content.
+
+    Prompts render entry text from these files, so a call that shows it
+    records this digest beside its template hashes.
+    """
+    return compute_framed_digest(
+        MECHANISM_DATA_DIGEST_DOMAIN,
+        {
+            "library": bundled_mechanism_library().model_dump(mode="json"),
+            "relation": bundled_pattern_mechanism_relation().semantic_digest,
+        },
+    )
+
+
 __all__ = [
+    "MECHANISM_DATA_DIGEST_DOMAIN",
     "MECHANISM_LIBRARY_PATH",
     "PATTERN_MECHANISM_DIGEST_DOMAIN",
     "PATTERN_MECHANISM_RELATION_PATH",
@@ -308,6 +327,7 @@ __all__ = [
     "PatternMechanismLink",
     "PatternMechanismRelation",
     "ProcessModelUse",
+    "bundled_mechanism_data_digest",
     "bundled_mechanism_library",
     "bundled_pattern_mechanism_relation",
     "load_mechanism_library",

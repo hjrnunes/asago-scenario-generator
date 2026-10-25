@@ -7,11 +7,9 @@ that can lead to the cited hazard. The distinctive mechanism is the specific ope
 that separates the taxonomy concern from other concerns with similar consequences.
 
 Similar risk, hazard, consequence, ingress, capability, or security purpose is not mechanism
-evidence. Authentication establishes identity, schema validation establishes shape, and
-generic input sanitization governs a user-input boundary; none by itself governs poisoned
-tool or source output being interpreted as an instruction or goal. Judge only the supplied
-mechanism description and exact selected structural descriptions. Do not infer missing
-architecture or use the proposed route rationale as evidence.
+evidence. Judge only the supplied mechanism description and exact selected structural
+descriptions. Do not infer missing architecture or use the proposed route rationale as
+evidence.
 
 When the mechanism description says the attack stays within one conversation and needs no
 tool, retrieval, or memory, the user's wording is not something a control can govern, so
@@ -23,18 +21,16 @@ fact. A constraint on that consequence is not an adjacent concern. Use `adjacent
 when the hazard or constraint concerns a different consequence, or when the action does not
 produce that response. The rules above still apply to mechanisms that act through tool
 output, retrieved content, or a redirected goal.
-
-Accepted example: the mechanism is a user coaxing an assistant into revealing another
-party's records within the conversation. The path's action composes the assistant's
-replies, its hazard is a reply that discloses another party's records, and its constraint
-forbids that disclosure. The constraint governs the named consequence, so the verdict is
-`mechanism_specific`.
-
-Rejected example: the same mechanism. The path's action composes the assistant's replies,
-but its hazard is a reply that treats groups of users unequally and its constraint
-requires even-handed wording. The hazard and constraint govern a different consequence, so
-the verdict is `adjacent_control`.
-
+{% if has_known_mechanisms %}
+An item may list `known_mechanism_refs`: the control-loop mechanisms its distinctive
+mechanism is known to realize, each defined once in the known mechanism glossary of the user
+message. A glossary entry's `id` is the reference, `question` says what the mechanism asks of
+the system, `required_evidence` lists conditions that the selected descriptions must meet
+before the path carries the mechanism, every one of them, and `counterexamples` lists paths
+that resemble the mechanism but do not carry it. For such an item, `mechanism_specific` requires selected descriptions that
+meet the required evidence of one listed mechanism. A path that matches only a counterexample
+governs an adjacent concern, so its verdict is `adjacent_control`.
+{% endif %}
 Return exactly one verdict for each supplied item handle. Use relationship
 `mechanism_specific`, `adjacent_control`, or `insufficient_evidence`, and give one concise
 plain-language rationale.

@@ -103,6 +103,9 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     requires_absence_evidence,
     unproven_absence_verdict,
 )
+from asago_scenario_generator.stpa.mechanism_library import (
+    bundled_mechanism_data_digest,
+)
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     PROHIBITED_PROMPT_KEYS,
     PROHIBITED_PROMPT_WORDS,
@@ -110,6 +113,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_ica_hazard_correction_prompts,
     build_ica_hazard_verification_prompts,
     build_mechanism_verification_prompts,
+    known_mechanism_refs,
     local_obligation_handles,
     mapping_strength_for_brief,
     obligation_prompt_template_hashes,
@@ -744,6 +748,22 @@ def _structural_descriptions(request: StructuralRoutingRequest) -> dict[str, str
     }
 
 
+MECHANISM_DATA_HASH_KEY = "mechanism_library"
+"""The prompt-hash key of the mechanism data the routing and verifier calls show."""
+
+
+def _mechanism_prompt_hashes() -> dict[str, str]:
+    """The template hashes plus the digest of the mechanism data.
+
+    The routing and mechanism-verification prompts render entry text from the
+    mechanism library, which no template hash covers.
+    """
+    return {
+        **obligation_prompt_template_hashes(),
+        MECHANISM_DATA_HASH_KEY: bundled_mechanism_data_digest(),
+    }
+
+
 def _verification_handles(routes: Sequence[ObligationRoute]) -> dict[str, str]:
     """Name each verified route ``R1``..``Rn`` in the order it is shown."""
     return {route.obligation_id: f"R{index}" for index, route in enumerate(routes, 1)}
@@ -774,19 +794,21 @@ def _mechanism_verification_items(
             )
         )
         selected_ids.extend(_slot_path_ids(request, route))
-        items.append(
-            {
-                "item_handle": handles[route.obligation_id],
-                "distinctive_mechanism": {
-                    "name": brief.attack_pattern_name,
-                    "description": brief.attack_pattern_description,
-                },
-                "selected_structural_path": [
-                    {"id": identity, "description": descriptions[identity]}
-                    for identity in dict.fromkeys(selected_ids)
-                ],
-            }
-        )
+        item: dict[str, Any] = {
+            "item_handle": handles[route.obligation_id],
+            "distinctive_mechanism": {
+                "name": brief.attack_pattern_name,
+                "description": brief.attack_pattern_description,
+            },
+            "selected_structural_path": [
+                {"id": identity, "description": descriptions[identity]}
+                for identity in dict.fromkeys(selected_ids)
+            ],
+        }
+        refs = known_mechanism_refs(brief.attack_pattern_id or "")
+        if refs:
+            item["known_mechanism_refs"] = list(refs)
+        items.append(item)
     return tuple(items)
 
 
@@ -911,7 +933,12 @@ def _verification_key(item: Mapping[str, Any]) -> tuple:
         (entry["id"], entry["description"])
         for entry in item["selected_structural_path"]
     )
-    return (mechanism["name"], mechanism["description"], tuple(path))
+    return (
+        mechanism["name"],
+        mechanism["description"],
+        tuple(path),
+        tuple(item.get("known_mechanism_refs", ())),
+    )
 
 
 def _verdict_map(
@@ -1026,7 +1053,7 @@ def _ask_mechanism_verifier(
         temperature=0.0,
         max_completion_tokens=_MECHANISM_VERIFICATION_MAX_COMPLETION_TOKENS,
         result_validator=partial(_require_verdict_handles, handles),
-        prompt_template_hashes=obligation_prompt_template_hashes(),
+        prompt_template_hashes=_mechanism_prompt_hashes(),
     )
     if outcome.error is not None or outcome.value is None:
         return None
@@ -1765,7 +1792,7 @@ class ObligationAwareLLMAdapter:
             ),
             temperature=request.controls.temperature,
             max_completion_tokens=_SYNTHESIS_MAX_COMPLETION_TOKENS,
-            prompt_template_hashes=obligation_prompt_template_hashes(),
+            prompt_template_hashes=_mechanism_prompt_hashes(),
         )
         if outcome.error is not None or outcome.value is None:
             raise ValueError(

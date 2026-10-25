@@ -96,6 +96,7 @@ from asago_scenario_generator.stpa.target_realization.provider import (
     PROMPTS_DIR as TARGET_REALIZATION_PROMPTS_DIR,
 )
 from tests.helpers.belief_step import belief_spec
+from tests.helpers.known_mechanism import linked_brief
 from tests.helpers.feedback_authority import (
     authority_belief_spec,
     authority_context,
@@ -325,11 +326,15 @@ def _authority_slot_request() -> tuple[str, str]:
     )
 
 
-def _routing_batch() -> tuple[str, str]:
+def _routing_batch(pattern_id: str | None = None) -> tuple[str, str]:
+    """Route one brief; with *pattern_id*, its concern is that bundled pattern."""
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
     structure = _obligation_structure()
+    briefs = build_neutral_briefs(make_plan(), (pattern,))[:1]
+    if pattern_id is not None:
+        briefs = [linked_brief(briefs[0], pattern_id)]
     return build_structural_routing_prompts(
-        briefs=build_neutral_briefs(make_plan(), (pattern,))[:1],
+        briefs=briefs,
         loss_analysis=_obligation_losses(),
         control_structure=structure,
         slots=create_slots(structure),
@@ -363,6 +368,10 @@ MECHANISM_ITEM = {
     "distinctive_mechanism": {"name": "Pattern", "description": "Canonical"},
     "selected_structural_path": [{"id": "CP-1", "description": "Request process."}],
 }
+MECHANISM_ITEM_WITH_KNOWN_MECHANISM = {
+    **MECHANISM_ITEM,
+    "known_mechanism_refs": ["retrieved_instructions"],
+}
 
 # Each obligation-aware case calls the builder a request uses and names the
 # templates of the (system, user) pair it returns.
@@ -371,6 +380,10 @@ OBLIGATION_AWARE_BUILDS: dict[
 ] = {
     "routing-batch": (
         _routing_batch,
+        ("structural_routing_system.j2", "structural_routing_user.j2"),
+    ),
+    "routing-batch-known-mechanism": (
+        lambda: _routing_batch("AP-T6-03"),
         ("structural_routing_system.j2", "structural_routing_user.j2"),
     ),
     "slot-request": (
@@ -387,6 +400,12 @@ OBLIGATION_AWARE_BUILDS: dict[
     ),
     "mechanism-item": (
         lambda: build_mechanism_verification_prompts([MECHANISM_ITEM]),
+        ("mechanism_verification_system.j2", "mechanism_verification_user.j2"),
+    ),
+    "mechanism-item-known-mechanism": (
+        lambda: build_mechanism_verification_prompts(
+            [MECHANISM_ITEM_WITH_KNOWN_MECHANISM]
+        ),
         ("mechanism_verification_system.j2", "mechanism_verification_user.j2"),
     ),
     "governance-rows": (

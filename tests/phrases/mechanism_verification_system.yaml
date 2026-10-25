@@ -7,9 +7,38 @@ cases:
       - the selected control action produces the response the attack ends in
       - govern the consequence the mechanism names
       - A constraint on that consequence is not an adjacent concern
-      - poisoned tool or source output being interpreted as an instruction
       - Do not infer missing architecture
       - "`insufficient_evidence`"
+    forbidden:
+      - "Accepted example:"
+      - "Rejected example:"
+      - Authentication establishes identity
+      - known_mechanism_refs
+      - known mechanism glossary
+  mechanism-item-known-mechanism:
+    required:
+      - stays within one conversation
+      - Do not infer missing architecture
+      - >-
+        An item may list `known_mechanism_refs`: the control-loop mechanisms its
+        distinctive mechanism is known to realize, each defined once in the known
+        mechanism glossary of the user message.
+      - A glossary entry's `id` is the reference
+      - "`question` says what the mechanism asks of the system"
+      - >-
+        `required_evidence` lists conditions that the selected descriptions must
+        meet before the path carries the mechanism, every one of them
+      - >-
+        `counterexamples` lists paths that resemble the mechanism but do not
+        carry it
+      - >-
+        For such an item, `mechanism_specific` requires selected descriptions
+        that meet the required evidence of one listed mechanism.
+      - >-
+        A path that matches only a counterexample governs an adjacent concern,
+        so its verdict is `adjacent_control`.
     once:
+      - known_mechanism_refs
+    forbidden:
       - "Accepted example:"
       - "Rejected example:"
