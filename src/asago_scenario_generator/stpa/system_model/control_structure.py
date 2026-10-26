@@ -2398,27 +2398,34 @@ def _merge_missing_actions(
 ) -> dict[str, Any]:
     """Add a repair reply's control actions to the response it repairs.
 
-    The reply holds only ``control_actions``, each with a well-formed ID, and
-    every action belongs to an owner that was missing.  The merged response
-    still goes through the full Call 2b parser.
+    The reply holds only ``control_actions``, each with a well-formed ID.  An
+    action identical to one of the prior response is a restatement: the
+    prior response keeps it and it is not added again.  Every other action
+    belongs to an owner that was missing.  The merged response still goes
+    through the full Call 2b parser.
     """
     reply = _decode_control_element_payload(reply_content)
     wire = _Call2bMissingActions.model_validate(
         reply,
         context={_OWNER_CONTEXT_KEY: _responsibility_owner_numbers(responsibilities)},
     )
-    strangers = {
-        _owner_number(action.ca_id, prefix="CA") for action in wire.control_actions
-    } - set(owners)
+    prior = _decode_control_element_payload(prior_content)
+    added = [
+        (raw, action)
+        for raw, action in zip(reply["control_actions"], wire.control_actions)
+        if raw not in prior["control_actions"]
+    ]
+    strangers = {_owner_number(action.ca_id, prefix="CA") for _, action in added} - set(
+        owners
+    )
     if strangers:
         raise ValueError(
             "the repair covers only the owners without a control action; "
             "not requested: " + ", ".join(f"RESP-{n}" for n in sorted(strangers))
         )
-    prior = _decode_control_element_payload(prior_content)
     return {
         **prior,
-        "control_actions": [*prior["control_actions"], *reply["control_actions"]],
+        "control_actions": [*prior["control_actions"], *(raw for raw, _ in added)],
     }
 
 

@@ -5,7 +5,9 @@ with ``every responsibility requires a control action``.  The generic
 correction carries that text only, and a reply may still miss the owner.  The
 stage then sends one repair request that asks for control actions for exactly
 the missing owners, merges them into the last reply, and checks the result
-again.  A repair that fails stops the unit as before.
+again.  A repair reply may restate actions of the last reply unchanged; those
+are the last reply's own and are not added twice.  A repair that fails stops
+the unit as before.
 """
 
 from __future__ import annotations
@@ -121,6 +123,24 @@ def test_a_reply_that_misses_an_owner_twice_earns_one_repair(tmp_path: Path) -> 
     assert client.calls[2].response_format is _MissingActionProviderSet
 
 
+def test_a_repair_reply_may_restate_the_prior_actions_unchanged(
+    tmp_path: Path,
+) -> None:
+    # The recorded shape: the reply repeats every action of the last reply
+    # verbatim and adds the missing owner's action between them.
+    client = _client(_reply(1, 3), _reply(1, 3), _repair_reply(1, 2, 3))
+
+    parsed = _run(client, tmp_path)
+
+    assert [action.ca_id for action in parsed.control_actions] == [
+        "CA-1-1",
+        "CA-3-1",
+        "CA-2-1",
+    ]
+    assert len(client.calls) == 3
+    assert _attempts(tmp_path)[2]["success"] is True
+
+
 def test_the_repair_follows_a_correction_that_fixes_another_defect(
     tmp_path: Path,
 ) -> None:
@@ -209,6 +229,13 @@ def test_the_repair_gets_no_second_request(tmp_path: Path) -> None:
     [
         {"control_actions": []},
         {"control_actions": [_action(1)]},
+        {
+            "control_actions": [
+                {**_action(1), "description": "Deliver a changed result"},
+                _action(3),
+            ]
+        },
+        {"control_actions": [{**_action(1), "ca_id": "CA-1-2"}, _action(3)]},
         {"control_actions": [_action(3)], "feedback": []},
         "not json {",
         {"control_actions": [{**_action(3), "ca_id": "CA-9-1"}]},
@@ -221,6 +248,8 @@ def test_the_repair_gets_no_second_request(tmp_path: Path) -> None:
     ids=[
         "empty",
         "action-for-a-served-owner",
+        "changed-action-for-a-served-owner",
+        "new-action-for-a-served-owner",
         "extra-collection",
         "undecodable",
         "unknown-owner",
