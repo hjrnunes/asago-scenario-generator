@@ -14,8 +14,11 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.system_model.target_evidence import TargetEvidence
 
 
+# A ref is ``kind:name``.  The kind is one of five fixed words, so a basis
+# that opens a sentence with ``State:`` still cites a state record; the name
+# is the target's own identifier and must match exactly.
 _EVIDENCE_REF_RE = re.compile(
-    r"(?<![A-Za-z0-9_])(?:operation|argument|session|state|policy):"
+    r"(?<![A-Za-z0-9_])(?i:operation|argument|session|state|policy):"
     r"[A-Za-z0-9](?:[A-Za-z0-9_.:-]*[A-Za-z0-9])?"
 )
 _USE_CASE_CITATION_RE = re.compile(r"\buse[ -]case\b", re.IGNORECASE)
@@ -161,7 +164,7 @@ def _basis_defect(
     if assessment is None or assessment.basis is None:
         return None
     basis = assessment.basis
-    cited_refs = tuple(dict.fromkeys(_EVIDENCE_REF_RE.findall(basis)))
+    cited_refs = _cited_refs(basis)
     unknown_refs = tuple(ref for ref in cited_refs if ref not in offered_refs)
     if unknown_refs:
         return (
@@ -191,12 +194,23 @@ def _basis_defect(
             f"feedback channel {channel.fb_id} settled authority basis must "
             "cite the supplied use case or an exact target-evidence ref"
         )
-    if require_domain_scope and not _states_domain_scope(basis, cited_refs):
+    if require_domain_scope and not _states_domain_scope(basis):
         return (
             f"feedback channel {channel.fb_id} authority basis must state "
             "its scope in domain words, not only evidence refs"
         )
     return None
+
+
+def _cited_refs(basis: str) -> tuple[str, ...]:
+    """Return the evidence refs *basis* cites, each with its kind in lower case."""
+    refs = (
+        f"{kind.lower()}:{name}"
+        for kind, _, name in (
+            match.partition(":") for match in _EVIDENCE_REF_RE.findall(basis)
+        )
+    )
+    return tuple(dict.fromkeys(refs))
 
 
 def _only_restates_source_kind(
@@ -214,12 +228,9 @@ def _only_restates_source_kind(
     return bool(words & kind_words) and words <= _GENERIC_RESTATEMENT_WORDS | kind_words
 
 
-def _states_domain_scope(basis: str, cited_refs: tuple[str, ...]) -> bool:
+def _states_domain_scope(basis: str) -> bool:
     """Return whether a basis contains meaning beyond citations and labels."""
-    prose = basis
-    for ref in cited_refs:
-        prose = prose.replace(ref, " ")
-    prose = _USE_CASE_CITATION_RE.sub(" ", prose)
+    prose = _USE_CASE_CITATION_RE.sub(" ", _EVIDENCE_REF_RE.sub(" ", basis))
     words = set(_WORD_RE.findall(prose.casefold()))
     return bool(words - _SCOPE_FILLER_WORDS)
 
