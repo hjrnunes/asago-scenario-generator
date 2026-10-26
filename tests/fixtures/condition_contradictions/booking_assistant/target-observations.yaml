@@ -1,4 +1,4 @@
-target_profile_digest: b17ef9897c2042f06503b092708306eccdbd449ac1f48d6bd0cd7b4554a406f6
+target_profile_digest: 4ea03210a3c5091b9abdb80a547bdac48eba10c43b5d26da75dfd4dffc679849
 observations:
 - observation_ref: TARGET-STATE
   kind: state
@@ -50,4 +50,4 @@ observations:
   content_format: json
   content: '{"check_in":"2026-09-03","check_out":"2026-09-07","guest_id":"GST001","host_id":"HST001","listing_id":"LST-104","modification_allowed":false,"payment_status":"paid","reservation_id":"RES-104","status":"confirmed"}'
 read_status: observed
-content_digest: 9671345e994158ea30180b6fb190844c003cebc8ec43c59c0364e4eec5a38d29
+content_digest: a9d72e1d7741ba22dda6177563b5dfc680f23b08fb67740fe9a910849267da52

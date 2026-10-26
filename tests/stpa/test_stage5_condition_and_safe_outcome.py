@@ -53,6 +53,7 @@ def _payload(criteria: list[dict], safe_outcome: dict, not_called: str) -> dict:
     payload = _normal_payload()
     outcome = payload["unsafe_outcome"]
     outcome["observation_criteria"] = criteria
+    outcome["failure_call"] = None
     outcome["safe_observable_outcome"] = safe_outcome
     outcome["discriminating_condition"] = {
         "statement": f"The {not_called} operation is never called.",
@@ -108,6 +109,7 @@ def test_a_safe_outcome_mismatch_is_corrected_before_the_condition(tmp_path) -> 
     declared = _safe_outcome("command_attempt", "tool_call", "update_gadget")
     wrong = _payload([_REPLY, second_reply], declared, "get_gadget")
     fixed = copy.deepcopy(wrong)
+    fixed["unsafe_outcome"]["failure_call"] = None
     fixed["unsafe_outcome"]["safe_observable_outcome"] = _safe_outcome(
         "reply", "assistant_message", None
     )

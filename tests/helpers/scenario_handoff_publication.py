@@ -100,6 +100,7 @@ def _normal_semantics_payload() -> dict:
                     ),
                 }
             ],
+            "failure_call": None,
             "safe_observable_outcome": {
                 "observable": True,
                 "statement": (

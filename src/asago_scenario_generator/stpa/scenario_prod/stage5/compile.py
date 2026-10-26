@@ -167,6 +167,7 @@ def compile_scenario_spec(
         causal_factors=factors,
         attacker_bdi=attacker_bdi,
         unsafe_outcome_semantic_proposition=outcome.semantic_proposition,
+        unsafe_outcome_failure_call=getattr(outcome, "failure_call", None),
         adversary=adversary,
         observation_criteria=criteria,
         observation_assessment=assessment,

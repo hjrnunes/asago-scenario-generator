@@ -1347,6 +1347,7 @@ def _run_stage5_for_threat(
                     else None
                 ),
                 safe_outcome=spec.safe_observable_outcome,
+                failure_call=spec.unsafe_outcome_failure_call,
             ),
         ),
     )

@@ -103,3 +103,68 @@ def test_rendered_report_states_what_happens_to_a_refused_condition() -> None:
         "handoffs (SCN-001); scenarios dropped: 0\n"
     ) in rendered
     assert rendered.count("  - recovery: the existing Stage 5 condition") == 2
+
+
+def _fixture_profile_and_universe(target: str):
+    import json
+
+    import yaml
+
+    from asago_scenario_generator.stpa.models.execution_classification import (
+        ExecutionTargetProfile,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.condition_check import (
+        build_condition_universe,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.target_observations import (
+        TargetObservationSnapshot,
+    )
+
+    directory = (
+        Path(__file__).resolve().parent / "fixtures/condition_contradictions" / target
+    )
+    profile = ExecutionTargetProfile.model_validate(
+        json.loads((directory / "execution-target-profile.json").read_text())
+    )
+    observations = TargetObservationSnapshot.model_validate(
+        yaml.safe_load((directory / "target-observations.yaml").read_text())
+    )
+    universe = build_condition_universe(
+        execution_target_profile=profile,
+        target_operation=None,
+        target_observations=observations,
+    )
+    return profile, universe
+
+
+def test_a_profiles_own_value_facts_come_before_an_overlay() -> None:
+    from asago_scenario_generator.stpa.models.value_facts import TargetValueFacts
+
+    profile, universe = _fixture_profile_and_universe("refund_assistant")
+    overlay = {profile.target_id: TargetValueFacts()}
+
+    checked, source = _script().with_declared_facts(universe, profile, overlay)
+
+    assert source == "profile"
+    assert checked.value_facts == profile.value_facts
+
+
+def test_an_overlay_declares_facts_for_a_profile_without_them() -> None:
+    from dataclasses import replace
+
+    from asago_scenario_generator.stpa.models.value_facts import TargetValueFacts
+
+    profile, universe = _fixture_profile_and_universe("refund_assistant")
+    bare = profile.model_copy(update={"value_facts": None})
+    universe = replace(universe, value_facts=None)
+    facts = TargetValueFacts.model_validate(
+        {"state_keys": [{"path": "orders", "record_kind": "order_id"}]}
+    )
+
+    overlaid, source = _script().with_declared_facts(
+        universe, bare, {bare.target_id: facts}
+    )
+    other, none = _script().with_declared_facts(universe, bare, {"elsewhere": facts})
+
+    assert (source, overlaid.value_facts) == ("overlay", facts)
+    assert (none, other.value_facts) == ("none", None)

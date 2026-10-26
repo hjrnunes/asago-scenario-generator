@@ -444,6 +444,63 @@ def test_cli_file_shares_the_mcp_options(tmp_path: Path):
     assert discover.call_args.kwargs["interpreter_factory"] is interpreter
 
 
+VALUE_FACTS = """
+arguments:
+  - {operation_id: process_refund, argument: order_id, record_kind: order_id}
+state_keys:
+  - {path: orders, record_kind: order_id}
+"""
+
+
+@pytest.mark.usefixtures("offline")
+def test_cli_file_scan_carries_declared_value_facts_onto_the_profile(tmp_path: Path):
+    path = _write(tmp_path / "t.json", {"tools": _annotated_tools()})
+    facts = tmp_path / "value-facts.yaml"
+    facts.write_text(VALUE_FACTS, encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    completed = PlainCliRunner().invoke(
+        app, _cli_args(path, output_dir, "--value-facts", str(facts))
+    )
+
+    assert completed.exit_code == 0, completed.output
+    profile = ExecutionTargetProfile.model_validate(
+        json.loads(
+            (output_dir / "execution-target-profile.json").read_text(encoding="utf-8")
+        )
+    )
+    profile.assert_integrity()
+    assert profile.value_facts is not None
+    assert profile.value_facts.argument("process_refund", "order_id") is not None
+    assert profile.value_facts.state_key(["orders"]) is not None
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        "arguments: [{operation_id: process_refund, argument: order_id}]",
+        "arguments: [",
+        "unknown: []",
+    ],
+    ids=["no-declaration", "not-yaml", "unknown-key"],
+)
+def test_cli_file_scan_rejects_bad_value_facts_before_scanning(
+    tmp_path: Path, content: str
+):
+    path = _write(tmp_path / "t.json", {"tools": _annotated_tools()})
+    facts = tmp_path / "value-facts.yaml"
+    facts.write_text(content, encoding="utf-8")
+    output_dir = tmp_path / "out"
+
+    completed = PlainCliRunner().invoke(
+        app, _cli_args(path, output_dir, "--value-facts", str(facts))
+    )
+
+    assert completed.exit_code == 2
+    assert "could not read value facts" in completed.output
+    assert not output_dir.exists()
+
+
 def test_cli_file_rejects_other_modes_before_reading_the_file(tmp_path: Path):
     completed = PlainCliRunner().invoke(
         app, _cli_args(tmp_path / "absent.json", tmp_path / "out", "--mode", "full")

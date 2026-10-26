@@ -12,6 +12,7 @@ from pydantic import (
     create_model,
 )
 from asago_scenario_generator.stpa.observation_contract import (
+    FailureCall,
     SafeObservableOutcome,
 )
 from asago_scenario_generator.stpa.discriminating_condition import (
@@ -40,12 +41,16 @@ def _scenario_semantics_payload_type(
     duration_eligible: bool = False,
     observation_criteria_required: bool = False,
     condition_references_supplied: bool = False,
+    failure_call_supported: bool = False,
 ) -> type[BaseModel]:
     """Return the normal-path response schema: semantics and evidence only.
 
     The payload closes the request-local causal handles to the exact supplied
     choices and keeps the evidence-status branches, but exposes no stimulus,
     execution route, factor-route binding or unsafe-outcome condition.
+    ``failure_call_supported`` adds the required, nullable ``failure_call``
+    of the failure criterion, which the prompt explains only when the
+    contract captures tool calls.
     """
     _require_positive_schema_count(choice_count, "choice_count")
     suffix = f"{choice_count}"
@@ -86,6 +91,13 @@ def _scenario_semantics_payload_type(
             if condition_references_supplied
             else {}
         )
+        # Required and nullable: the reply states the failure call, or null
+        # when the failure is not a call of one inventory operation.
+        failure_call_field: dict[str, object] = (
+            {"failure_call": (FailureCall | None, ...)}
+            if failure_call_supported
+            else {}
+        )
         outcome_type = create_model(
             f"_ContextSemanticOutcomeDraft{suffix}",
             __base__=_ContextSemanticOutcomeDraft,
@@ -94,6 +106,7 @@ def _scenario_semantics_payload_type(
                 ...,
             ),
             safe_observable_outcome=(SafeObservableOutcome, ...),
+            **failure_call_field,
             **condition_field,
         )
     return create_model(

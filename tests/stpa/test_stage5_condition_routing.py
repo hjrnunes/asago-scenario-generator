@@ -201,6 +201,7 @@ def test_a_reply_scenario_drops_its_failing_condition_and_keeps_its_claim(
 ) -> None:
     payload = _payload_with(_ownership_condition("ORD-1"))
     payload["unsafe_outcome"]["observation_criteria"] = [dict(REPLY_CRITERION)]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": "The assistant refuses the refund in its reply.",

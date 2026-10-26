@@ -57,6 +57,7 @@ def _command_attempt_payload(record_refs, fact_refs) -> dict:
             "reason": "The runtime captures decoded tool calls.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": "The selected refund operation remains policy-compliant.",

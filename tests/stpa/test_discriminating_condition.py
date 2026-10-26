@@ -773,6 +773,7 @@ def test_analytical_only_condition_is_discarded_with_a_note(tmp_path) -> None:
             "reason": "The contract does not capture backend settlement.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": False,
         "statement": "The backend settlement is not captured by the contract.",

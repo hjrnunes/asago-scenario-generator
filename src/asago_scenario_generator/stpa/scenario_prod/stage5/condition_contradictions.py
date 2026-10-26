@@ -3,9 +3,12 @@
 The bound tool-call condition is what the consumer runs, so a contradiction
 that only binding makes visible (a record selection resolved to a literal) is
 checked on the bound form. Each rule reads typed data only: the scenario's
-control-action category and claims, the input schemas of the target profile,
-and the observed target state and reads. Where that data is silent the case
-is reported undecidable, never refused.
+control-action category, claims, and failure call, the input schemas of the
+target profile, the record kinds and formats it declares (``value_facts``,
+:mod:`~asago_scenario_generator.stpa.models.value_facts`), and the observed
+target state and reads. Nothing is inferred from a name, a value, or a
+description. Where that data is silent the case is reported undecidable,
+never refused.
 
 - (a) Kind fits the category. An ``INCORRECT`` action is provided, so its
   unsafe behavior is a call; ``not_called`` on the action's own operation is
@@ -14,7 +17,12 @@ is reported undecidable, never refused.
   ``not_called`` on the operation the command-attempt claim names is
   undecidable in every category: that call may be the downstream safe action
   whose absence is the failure, or the wrongly provided call itself, and only
-  the prose says which.
+  the prose says which. The failure criterion's failure call says which:
+  ``not_called`` on the operation of an ``incorrect_call`` is refused in
+  every category, whether or not the action maps to an operation and
+  whatever the safe outcome claims, since the unsafe behavior is that call; on the operation of a ``missing_call`` it is
+  what the criterion states, so it is not judged further. Without a failure
+  call on that operation the case stays undecidable.
 - (b) Operands of one kind. A call argument compared with a literal (from a
   literal, a fact, or a record selection) is refused only when the input
   schema of the argument's own operation proves the literal is never equal to
@@ -34,6 +42,17 @@ is reported undecidable, never refused.
   each by the schema of its own operation, by the same facts: refused when
   the compared values share no JSON type or no listed value, and otherwise
   undecidable.
+- (b) Declared record kinds decide what schemas cannot. Two different
+  declared record kinds are disjoint. An argument whose value is compared
+  (``eq``, ``ne``, or a ``where`` item) with a literal resolved from a
+  ``TARGET-STATE`` value (a fact operand, or the path a record selection
+  names; a path to a record binds the record's key, whose kind the mapping's
+  ``state_keys`` entry declares) is refused when the profile declares a
+  record kind for both and the kinds differ, and is clean when they are the
+  same. Two compared arguments are judged the same way. A literal that is
+  not what its path resolves to, a literal stated as a literal, or a side
+  with no declared kind (or with two declarations that disagree) keeps the
+  rules above. Membership (``in``, ``not_in``) reads no record kind.
 - (c) Ordering needs numbers. ``tool-call-condition-v1`` orders only
   numbers, converting a string that ``float()`` accepts, and every
   comparison with NaN is false. ``gt``, ``ge``, ``lt``, or ``le`` is
@@ -43,7 +62,12 @@ is reported undecidable, never refused.
   number or NaN. A side is clean only when its schema admits numbers alone:
   a numeric type without ``null``, or listed numbers or numeric strings.
   Any other side is undecidable: a string, a nullable number, or an
-  untyped argument.
+  untyped argument. An argument the profile declares as ``date`` or
+  ``date-time`` text admits no number, since RFC 3339 text always has a
+  ``-`` after its first digits, which ``float()`` never accepts; an ordering
+  on it is refused, as tool-call-condition-v1 cannot order dates. A declared
+  format on an argument whose schema admits no string contradicts the schema
+  and is no fact.
 
 A refusal proves that the comparison is never true, or that it is true on
 every call. Under ``tool-call-condition-v1`` an argument a call omits leaves
@@ -122,7 +146,7 @@ import json
 import math
 import re
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Any, Literal
 
 from asago_scenario_generator.stpa.discriminating_condition import (
@@ -130,12 +154,17 @@ from asago_scenario_generator.stpa.discriminating_condition import (
     ORDERED_OPERATORS,
     ArgumentOperand,
     DiscriminatingCondition,
+    FactOperand,
     NotCalledComparison,
     ObservedRecordSelection,
     ValueComparison,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
-from asago_scenario_generator.stpa.observation_contract import SafeObservableOutcome
+from asago_scenario_generator.stpa.models.value_facts import DeclaredValue
+from asago_scenario_generator.stpa.observation_contract import (
+    FailureCall,
+    SafeObservableOutcome,
+)
 from asago_scenario_generator.stpa.tool_call_condition import (
     ToolCallArgumentOperand,
     ToolCallCondition,
@@ -150,8 +179,9 @@ from ..condition_check import (
     ConditionUniverse,
     kind_mismatch,
     malformed_annotations,
+    resolve_fact,
 )
-from ..condition_index import StateIndex, collection_path, id_prefix
+from ..condition_index import STATE_REF, StateIndex, collection_path, id_prefix
 from ..tool_call_binding import bind_tool_call_condition, numeric_value
 from .condition_claims import ConditionClaim, condition_claim_findings
 from .issues import IssueCode
@@ -219,6 +249,43 @@ class _Equality:
     consequence: str
     role: Literal["value", "member", "list"] = "value"
     literal: object = None
+    literal_fact: _LiteralFact | None = None
+
+
+@dataclass(frozen=True)
+class _Origin:
+    """The state path a bound literal was resolved from.
+
+    ``selected`` marks a path a record selection names: a path to a record
+    binds the record's key.
+    """
+
+    path: str
+    selected: bool = False
+
+
+@dataclass(frozen=True)
+class _LiteralFact:
+    """What the target profile declares about the state value a literal is.
+
+    ``path`` is that value's path, or, when ``key`` is set, the path of the
+    mapping whose key the literal is.
+    """
+
+    path: str
+    key: bool
+    declared: DeclaredValue
+
+    def text(self) -> str:
+        if self.key:
+            return (
+                f"a key of {self.path}, whose keys the target profile declares as "
+                f"{self.declared.record_kind}"
+            )
+        return (
+            f"the value at {self.path}, which the target profile declares as "
+            f"{self.declared.record_kind}"
+        )
 
 
 def tool_call_condition_findings(
@@ -250,6 +317,7 @@ def assess_condition(
             uca_type=claim.uca_type,
             unsafe_operation=claim.unsafe_operation,
             safe_outcome=claim.safe_outcome,
+            failure_call=claim.failure_call,
         )
         if item.code == IssueCode.discriminating_condition_polarity_inverted
     )
@@ -300,6 +368,7 @@ def assess_handoff(
     if not raw_condition or not raw_bound:
         return None
     raw_safe = handoff.get("safe_observable_outcome")
+    raw_failure_call = handoff.get("semantic_failure_call")
     uca_type = _handoff_uca_type(handoff)
     condition = DiscriminatingCondition.model_validate(raw_condition)
     bound = ToolCallCondition.model_validate(raw_bound)
@@ -310,6 +379,9 @@ def assess_handoff(
         unsafe_operation=control_action_operation,
         safe_outcome=(
             SafeObservableOutcome.model_validate(raw_safe) if raw_safe else None
+        ),
+        failure_call=(
+            FailureCall.model_validate(raw_failure_call) if raw_failure_call else None
         ),
     )
     return assess_condition(condition, universe, claim=claim, bound=bound)
@@ -328,7 +400,12 @@ def _handoff_uca_type(handoff: Mapping[str, Any]) -> UCAType | None:
 def _unmapped_not_called(
     condition: DiscriminatingCondition, claim: ConditionClaim
 ) -> tuple[RuleFinding, ...]:
-    """Report rule (a) as undecidable where only the claim names the operation."""
+    """Report rule (a) as undecidable where only the claim names the operation.
+
+    A failure call on that operation decides the case: an incorrect call is
+    refused (:mod:`.condition_claims`), and a missing call is what
+    ``not_called`` states.
+    """
 
     outcome = claim.safe_outcome
     if (
@@ -340,6 +417,9 @@ def _unmapped_not_called(
     ):
         return ()
     operation = outcome.operation_name
+    failure_call = claim.failure_call
+    if failure_call is not None and failure_call.operation_name == operation:
+        return ()
     return tuple(
         RuleFinding(
             "a",
@@ -347,7 +427,8 @@ def _unmapped_not_called(
             f"action of category {claim.uca_type.value} that maps to no "
             "operation: "
             f"the typed fields do not say whether a call of {operation} is that "
-            "action or a downstream effect of it, so whether not_called fits "
+            "action or a downstream effect of it, and the failure criterion "
+            f"states no failure call of {operation}, so whether not_called fits "
             "the category is unknown",
         )
         for index, comparison in enumerate(condition.comparisons)
@@ -367,7 +448,7 @@ def _bound_contradictions(
         bound = bind_tool_call_condition(condition, universe.fact_values).condition
     if bound is None:
         return ConditionContradictions()
-    labels, where_labels = _bound_labels(condition, bound)
+    labels, where_labels, origins, where_origins = _bound_labels(condition, bound)
     state = StateIndex.from_fact_values(universe.fact_values)
     results: list[tuple[RuleFinding | None, RuleFinding | None]] = []
     for index, comparison in enumerate(bound.comparisons):
@@ -386,7 +467,10 @@ def _bound_contradictions(
                 if isinstance(equality, RuleFinding):
                     result = (equality, None)
                 elif equality is not None:
-                    result = _kinds(equality, universe, state)
+                    fact = _literal_fact(origins[index], equality.literal, universe)
+                    result = _kinds(
+                        replace(equality, literal_fact=fact), universe, state
+                    )
                 else:
                     result = _argument_pair(label, comparison, universe)
             if result is not None:
@@ -420,6 +504,9 @@ def _bound_contradictions(
                     op_word="a where item",
                     consequence=_WHERE_NEVER_MATCHES,
                     literal=item.value,
+                    literal_fact=_literal_fact(
+                        where_origins.get((index, position)), item.value, universe
+                    ),
                 )
                 results.append(
                     _unambiguous(
@@ -477,23 +564,35 @@ def _unambiguous(
 
 def _bound_labels(
     condition: DiscriminatingCondition, bound: ToolCallCondition
-) -> tuple[list[str], dict[tuple[int, int], str]]:
+) -> tuple[
+    list[str],
+    dict[tuple[int, int], str],
+    list[_Origin | None],
+    dict[tuple[int, int], _Origin],
+]:
     """Name the part of the authored condition each bound comparison comes from.
 
     Binding keeps the call-level comparisons in order, then appends one
     ``eq`` per selected argument, or a ``where`` item on every ``not_called``
     of that argument's operation. A layout that does not match falls back to
-    the bound condition's own paths.
+    the bound condition's own paths and knows no origin. Beside each label
+    is the state path its literal was resolved from: the fact an authored
+    comparison compares an argument with, or the path a selected argument
+    names.
     """
 
-    labels = [
-        f"comparisons[{index}]"
+    authored = [
+        (index, comparison)
         for index, comparison in enumerate(condition.comparisons)
         if not isinstance(comparison, ValueComparison)
         or any(
             isinstance(side, ArgumentOperand)
             for side in (comparison.left, comparison.right)
         )
+    ]
+    labels = [f"comparisons[{index}]" for index, _ in authored]
+    origins: list[_Origin | None] = [
+        _fact_origin(comparison) for _, comparison in authored
     ]
     selection = condition.record_selection
     items = (
@@ -507,23 +606,73 @@ def _bound_labels(
         if isinstance(comparison, ToolCallNotCalledComparison)
     }
     where_labels: dict[tuple[int, int], str] = {}
+    where_origins: dict[tuple[int, int], _Origin] = {}
     counts = dict.fromkeys(not_called, 0)
     for position, item in enumerate(items):
         label = f"record_selection.argument_values[{position}]"
+        origin = _Origin(item.path, selected=True)
         targets = [
             index for index, name in not_called.items() if name == item.operation
         ]
         for index in targets:
             where_labels[(index, counts[index])] = label
+            where_origins[(index, counts[index])] = origin
             counts[index] += 1
         if not targets:
             labels.append(label)
+            origins.append(origin)
     if len(labels) != len(bound.comparisons):
         labels = [
             f"tool_call_condition.comparisons[{index}]"
             for index in range(len(bound.comparisons))
         ]
-    return labels, where_labels
+        origins = [None] * len(bound.comparisons)
+    return labels, where_labels, origins, where_origins
+
+
+def _fact_origin(comparison: object) -> _Origin | None:
+    """Return the fact path an argument is compared with, if it is one."""
+
+    if not isinstance(comparison, ValueComparison):
+        return None
+    sides = (comparison.left, comparison.right)
+    if not any(isinstance(side, ArgumentOperand) for side in sides):
+        return None
+    facts = [side for side in sides if isinstance(side, FactOperand)]
+    return _Origin(facts[0].path) if len(facts) == 1 else None
+
+
+def _literal_fact(
+    origin: _Origin | None, literal: object, universe: ConditionUniverse
+) -> _LiteralFact | None:
+    """Return what the target profile declares about the value a literal is.
+
+    The literal is the value at a ``TARGET-STATE`` path, a scalar there, or,
+    when a record selection names a record, the record's key. A literal that
+    is not what its path resolves to now has no fact.
+    """
+
+    facts = universe.value_facts
+    prefix = f"{STATE_REF}."
+    if origin is None or facts is None or not origin.path.startswith(prefix):
+        return None
+    found, value = resolve_fact(universe.fact_values, origin.path)
+    if not found:
+        return None
+    segments = origin.path[len(prefix) :].split(".")
+    if not isinstance(value, (Mapping, list)):
+        if not _same(value, literal) or _json_type(value) != _json_type(literal):
+            return None
+        declared = facts.state_field(segments)
+        path, key = origin.path, False
+    elif origin.selected and len(segments) > 1 and literal == segments[-1]:
+        declared = facts.state_key(segments[:-1])
+        path, key = f"{STATE_REF}.{'.'.join(segments[:-1])}", True
+    else:
+        return None
+    if declared is None:
+        return None
+    return _LiteralFact(path, key, declared)
 
 
 def _value_equality(
@@ -621,6 +770,12 @@ def _kinds(
         and not _common_values(tuple(candidates), view.values)
     ):
         refusal = _value_refusal(equality, view.values)
+    kinds = _literal_kinds(equality, universe) if refusal is None else None
+    if kinds is not None:
+        argument_kind, literal_fact = kinds
+        if argument_kind == literal_fact.declared.record_kind:
+            return None, None
+        refusal = _record_kind_refusal(equality, argument_kind, literal_fact)
     if refusal is not None:
         if equality.consequence == _NEVER_HOLDS:
             return refusal, None
@@ -658,6 +813,48 @@ def _kinds(
     ):
         return None, _kind_unknown(equality, types, identifiers, state)
     return None, None
+
+
+def _argument_kind(
+    universe: ConditionUniverse, argument: ToolCallArgumentOperand
+) -> str | None:
+    """Return the record kind the target profile declares for an argument."""
+
+    facts = universe.value_facts
+    declared = facts.argument(argument.operation, argument.argument) if facts else None
+    return declared.record_kind if declared is not None else None
+
+
+def _literal_kinds(
+    equality: _Equality, universe: ConditionUniverse
+) -> tuple[str, _LiteralFact] | None:
+    """Return the argument's declared record kind and the literal's fact.
+
+    Both must declare a record kind, and the argument's value (not an element
+    of it) must be what is compared.
+    """
+
+    fact = equality.literal_fact
+    if equality.role != "value" or fact is None or fact.declared.record_kind is None:
+        return None
+    kind = _argument_kind(universe, equality.argument)
+    return (kind, fact) if kind is not None else None
+
+
+def _record_kind_refusal(
+    equality: _Equality, argument_kind: str, literal: _LiteralFact
+) -> RuleFinding:
+    argument = equality.argument
+    return RuleFinding(
+        "b",
+        f"{equality.label} binds {equality.subject} in the tool-call condition, "
+        f"but the target profile declares {_operand_text(argument)} as "
+        f"{argument_kind}, and {_render(equality.literal)} is {literal.text()}; "
+        "a value of one declared record kind is never a value of another, so "
+        f"{equality.consequence}. Compare {argument.argument} with a supplied "
+        f"{argument_kind} value",
+        IssueCode.discriminating_condition_record_kind_mismatch,
+    )
 
 
 def _type_refusal(
@@ -990,6 +1187,13 @@ def _ordering(
                 nans.append(f"the literal {_render(side.value)} converts to NaN")
             continue
         schema = _argument_schema(universe, side)
+        text_format = _declared_format(universe, side, schema)
+        if text_format is not None:
+            not_numbers.append(
+                f"the target profile declares {_operand_text(side)} as {text_format} "
+                "text, which is never a number"
+            )
+            continue
         facts = _admitted(schema, side.argument).number
         source = f"the input schema of {side.operation} {facts.reason}"
         if facts.classes == {_OTHER}:
@@ -1046,6 +1250,25 @@ def _ordering(
     if open_sides:
         return None, _ordering_open(label, call, open_sides)
     return None, None
+
+
+def _declared_format(
+    universe: ConditionUniverse, argument: ToolCallArgumentOperand, schema: object
+) -> str | None:
+    """Return the date format the target profile declares for an argument.
+
+    A declared format says every value is RFC 3339 text, so a schema that
+    admits no string contradicts it, and the argument then has no format fact.
+    """
+
+    facts = universe.value_facts
+    declared = facts.argument(argument.operation, argument.argument) if facts else None
+    if declared is None or declared.format is None:
+        return None
+    types = _admitted(schema, argument.argument).types
+    if types is not None and "string" not in types:
+        return None
+    return declared.format.value
 
 
 def _ordering_open(
@@ -1162,11 +1385,36 @@ def _argument_pair(
         f"that passes both, but {'; '.join(gaps)}, so whether the comparison holds "
         "on every call is unknown",
     )
+    kinds = (
+        None
+        if membership
+        else (_argument_kind(universe, left), _argument_kind(universe, right))
+    )
+    if kinds is not None and None not in kinds and kinds[0] != kinds[1]:
+        if gaps:
+            return None, not_always
+        return (
+            RuleFinding(
+                "b",
+                f"{label} binds {call} in the tool-call condition, but the target "
+                f"profile declares {_operand_text(left)} as {kinds[0]} and "
+                f"{_operand_text(right)} as {kinds[1]}; a value of one declared "
+                "record kind is never a value of another, so no value of one "
+                f"equals a value of the other and {consequence}. Compare "
+                f"{left.argument} with an argument or a supplied value of kind "
+                f"{kinds[0]}",
+                IssueCode.discriminating_condition_record_kind_mismatch,
+            ),
+            None,
+        )
+    same_kind = kinds is not None and None not in kinds
     declared = (
         f"{_declares(left, left_admitted, membership)} and "
         f"{_declares(right, right_admitted, membership)}"
     )
     if left_view.types is None or right_view.types is None:
+        if same_kind:
+            return None, None
         question = (
             f"whether a value of {_operand_text(left)} can be a member of "
             f"{_operand_text(right)}"
@@ -1224,6 +1472,8 @@ def _argument_pair(
             ),
             None,
         )
+    if same_kind:
+        return None, None
     return None, RuleFinding(
         "b",
         f"{label} binds {call}: {declared}, so both admit "

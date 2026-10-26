@@ -62,6 +62,7 @@ from asago_scenario_generator.stpa.models.scenario_envelope import (
 )
 from asago_scenario_generator.stpa.observation_contract import (
     OBSERVATION_CONTRACT_SCHEMA,
+    FailureCall,
     ObservationAssessment,
     ObservationCriterion,
     SafeObservableOutcome,
@@ -343,6 +344,16 @@ class _HandoffTail(HandoffModel):
 
     gherkin: HandoffGherkin
     semantic_failure_criterion: StrictStr
+    semantic_failure_call: FailureCall | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "The call the semantic failure criterion is about: its exact "
+            "operation, and whether the failure is an incorrect call of it "
+            "(incorrect_call) or that it is not called (missing_call). Absent "
+            "when the criterion states no such call."
+        ),
+    )
     safe_alternative: StrictStr
     safe_observable_outcome: SafeObservableOutcome | None = Field(
         default=None,
@@ -1227,6 +1238,7 @@ def scenario_handoff_fields(
             then_unsafe_alternative=list(gherkin_spec.then_actual),
         ),
         semantic_failure_criterion=_semantic_failure_criterion(envelope),
+        semantic_failure_call=envelope.scenario_spec.unsafe_outcome_failure_call,
         safe_alternative=_safe_alternative(envelope),
         safe_observable_outcome=envelope.scenario_spec.safe_observable_outcome,
         deduplication=deduplication,

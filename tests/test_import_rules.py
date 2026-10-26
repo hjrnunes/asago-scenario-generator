@@ -533,6 +533,8 @@ STPA_MODEL_LAYERS: dict[str, int] = {
     "semantic_conditions": 0,
     # The attack shape is a pure pydantic leaf; ScenarioSpec carries it.
     "attack_shape": 0,
+    # Declared value facts are a pydantic leaf; the target profile carries them.
+    "value_facts": 0,
     "execution_classification": 0,
     "causal_factor": 1,
     "loss_analysis": 1,

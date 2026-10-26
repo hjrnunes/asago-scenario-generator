@@ -250,6 +250,10 @@ def _generate_semantics(
         ),
         observation_criteria_required=observation_contract is not None,
         condition_references_supplied=condition_universe.grounded,
+        failure_call_supported=(
+            observation_contract is not None
+            and observation_contract.supports_evidence("tool_call")
+        ),
     )
     checks: list[_NormalDraftCheck] = []
 

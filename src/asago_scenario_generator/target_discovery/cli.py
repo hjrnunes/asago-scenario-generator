@@ -7,8 +7,11 @@ from pathlib import Path
 from typing import Annotated
 
 import typer
+import yaml
+from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.execution_classification import DiscoveryMode
+from asago_scenario_generator.stpa.models.value_facts import TargetValueFacts
 
 from .contracts import McpInventoryAdapter, McpTargetDiscoveryInputs
 from .discovery import discover_mcp_target
@@ -72,6 +75,17 @@ InterpretationBatchSizeOption = Annotated[
         help="Maximum tools included in each semantic interpretation call.",
     ),
 ]
+ValueFactsOption = Annotated[
+    Path | None,
+    typer.Option(
+        "--value-facts",
+        help=(
+            "YAML or JSON file of the record kinds and date formats the target "
+            "declares for its argument and state values; the profile carries "
+            "it as value_facts."
+        ),
+    ),
+]
 
 
 @app.callback()
@@ -95,6 +109,7 @@ def scan_mcp(
     mode: ModeOption = DiscoveryMode.schema_only.value,
     interpretation_batch_size: InterpretationBatchSizeOption = 8,
     timeout: float = typer.Option(30.0, "--timeout", min=0.1),
+    value_facts: ValueFactsOption = None,
 ) -> None:
     """Scan one MCP tools/list inventory and write a self-contained profile."""
     _scan(
@@ -106,6 +121,7 @@ def scan_mcp(
         profiles_file=profiles_file,
         mode=mode,
         interpretation_batch_size=interpretation_batch_size,
+        value_facts=value_facts,
     )
 
 
@@ -127,6 +143,7 @@ def scan_file(
     profiles_file: ProfilesFileOption = Path("config/model-profiles.yaml"),
     mode: ModeOption = DiscoveryMode.schema_only.value,
     interpretation_batch_size: InterpretationBatchSizeOption = 8,
+    value_facts: ValueFactsOption = None,
 ) -> None:
     """Profile a declared target from an MCP tools/list file without a server."""
     _scan(
@@ -138,6 +155,7 @@ def scan_file(
         profiles_file=profiles_file,
         mode=mode,
         interpretation_batch_size=interpretation_batch_size,
+        value_facts=value_facts,
     )
 
 
@@ -151,12 +169,14 @@ def _scan(
     profiles_file: Path,
     mode: str,
     interpretation_batch_size: int,
+    value_facts: Path | None = None,
 ) -> None:
     """Discover one inventory, persist its artifacts and set the exit code."""
     if mode != DiscoveryMode.schema_only.value:
         raise typer.BadParameter(
             f"only schema_only is supported, got {mode!r}", param_hint="--mode"
         )
+    facts = _load_value_facts(value_facts) if value_facts is not None else None
     adapter = adapter_factory()
     inputs = McpTargetDiscoveryInputs(
         target_id=target_id,
@@ -164,6 +184,7 @@ def _scan(
         mode=DiscoveryMode.schema_only,
         model_profile=profile,
         interpretation_batch_size=interpretation_batch_size,
+        value_facts=facts,
     )
     interpreter_factory = None
     if profile is not None:
@@ -196,6 +217,19 @@ def _file_adapter(tools_list: Path) -> FileMcpInventoryAdapter:
     except McpToolsListFileError as exc:
         typer.echo(f"Error: invalid --tools-list: {exc}", err=True)
         raise typer.Exit(code=2) from exc
+
+
+def _load_value_facts(path: Path) -> TargetValueFacts:
+    """Read the declared value facts; a bad file stops the scan before it starts."""
+    try:
+        return TargetValueFacts.model_validate(
+            yaml.safe_load(path.read_text(encoding="utf-8"))
+        )
+    except (OSError, yaml.YAMLError, ValidationError) as exc:
+        raise typer.BadParameter(
+            f"could not read value facts from {path}: {exc}",
+            param_hint="--value-facts",
+        ) from exc
 
 
 def _load_interpreter(

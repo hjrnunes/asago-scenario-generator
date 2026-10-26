@@ -21,6 +21,7 @@ from asago_scenario_generator.models.canonical import (
     canonical_json_bytes,
     freeze_json,
 )
+from asago_scenario_generator.stpa.models.value_facts import TargetValueFacts
 
 
 EXECUTION_TARGET_PROFILE_SCHEMA_VERSION = "execution-target-profile-v1"
@@ -623,6 +624,13 @@ class ExecutionTargetProfile(_DigestModel):
     resources: tuple[TargetProfileResource, ...] = ()
     interpretations: tuple[TargetSemanticInterpretation, ...] = ()
     diagnostics: tuple[TargetDiscoveryDiagnostic, ...] = ()
+    # The record kinds and formats the target declares for its argument and
+    # state values. Omitted when absent, so profiles without it keep their
+    # bytes and digests.
+    value_facts: TargetValueFacts | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
 
     @model_validator(mode="after")
     def validate_execution_target_profile(self) -> "ExecutionTargetProfile":
@@ -650,6 +658,7 @@ class ExecutionTargetProfile(_DigestModel):
             )
         )
         object.__setattr__(self, "diagnostics", diagnostics)
+        _validate_value_fact_arguments(self.value_facts, resources)
         self._attest_semantic_digest("semantic_digest does not match target profile")
         return self
 
@@ -697,6 +706,30 @@ class ExecutionTargetProfile(_DigestModel):
                 raise ValueError(
                     "simulation profiles require simulation_behavior for every resource"
                 )
+
+
+def _validate_value_fact_arguments(
+    facts: TargetValueFacts | None, resources: Sequence[TargetProfileResource]
+) -> None:
+    """Require each argument value fact to name an argument a resource exposes."""
+    if facts is None:
+        return
+    exposed = {
+        (operation.operation_id, name)
+        for resource in resources
+        for operation in resource.operations
+        for name in (operation.argument_names or resource.argument_names)
+    }
+    unknown = sorted(
+        f"{item.operation_id}.{item.argument}"
+        for item in facts.arguments
+        if (item.operation_id, item.argument) not in exposed
+    )
+    if unknown:
+        raise ValueError(
+            "argument value facts must name an argument of a profile operation: "
+            + ", ".join(unknown)
+        )
 
 
 def mcp_resource_id(target_id: str, tool_name: str) -> str:

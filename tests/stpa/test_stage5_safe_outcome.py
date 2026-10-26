@@ -89,6 +89,7 @@ def test_stage5_materializes_the_supplied_safe_observable_outcome(tmp_path) -> N
             "reason": "The runtime captures decoded tool calls.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": (
@@ -142,6 +143,7 @@ def test_not_provided_observation_uses_expected_call_as_safe_boundary(tmp_path) 
             "reason": "A complete tool-call capture can establish an omitted operation.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": (
@@ -192,6 +194,7 @@ def test_handoff_and_gherkin_use_the_safe_outcome_statement(tmp_path) -> None:
             "reason": "The runtime captures decoded tool calls.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": safe_statement,
@@ -270,6 +273,7 @@ def test_safe_outcome_rejects_references_outside_supplied_inputs(
             "reason": "The runtime captures decoded tool calls.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": "The selected refund operation remains policy-compliant.",
@@ -396,6 +400,7 @@ def test_analytical_only_safe_outcome_is_coerced_to_not_observable(tmp_path) -> 
             "reason": "The live contract captures no backend state effect.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": "The selected operation preserves the required state.",
@@ -467,6 +472,7 @@ def test_executable_reply_only_safe_outcome_is_coerced_to_observable(
             "reason": "The runtime captures assistant messages.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = (
         _not_observable_safe_outcome()
     )
@@ -531,6 +537,7 @@ _COERCION_REASON = "safe_outcome_differs_from_only_supported_criterion"
 def _outcome_payload(criteria: list[dict], safe_outcome: dict) -> dict:
     payload = _normal_payload()
     payload["unsafe_outcome"]["observation_criteria"] = criteria
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = safe_outcome
     return payload
 
@@ -710,6 +717,7 @@ def test_executable_command_attempt_safe_outcome_must_be_observable(
             "reason": "The runtime captures assistant messages.",
         },
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = (
         _not_observable_safe_outcome()
     )
@@ -789,6 +797,7 @@ def test_analytical_only_safe_outcome_has_no_executable_references(tmp_path) -> 
             "reason": "The live contract captures no backend state effect.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": False,
         "statement": (
@@ -826,6 +835,7 @@ def test_observable_safe_outcome_can_omit_operation_reference(tmp_path) -> None:
             "reason": "The runtime captures assistant messages.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": "The assistant reply remains within the required policy.",
@@ -857,6 +867,7 @@ def test_command_attempt_observation_requires_exact_inventory_operation(
             "reason": "The runtime captures decoded tool calls.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": "The selected operation remains within policy.",
@@ -871,6 +882,7 @@ def test_command_attempt_observation_requires_exact_inventory_operation(
             "operation_name": "refund_payment",
         }
     ]
+    corrected["unsafe_outcome"]["failure_call"] = None
     corrected["unsafe_outcome"]["safe_observable_outcome"] = payload["unsafe_outcome"][
         "safe_observable_outcome"
     ]
@@ -900,6 +912,7 @@ def test_non_null_reply_operation_must_be_in_inventory(tmp_path) -> None:
             "reason": "The runtime captures assistant messages.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": "The assistant reply remains within policy.",
@@ -982,6 +995,7 @@ def test_handoff_names_an_operation_once_when_two_authorities_agree(tmp_path) ->
             "reason": "The runtime captures decoded tool calls.",
         }
     ]
+    payload["unsafe_outcome"]["failure_call"] = None
     payload["unsafe_outcome"]["safe_observable_outcome"] = {
         "observable": True,
         "statement": "The refund_payment operation is attempted only when eligible.",

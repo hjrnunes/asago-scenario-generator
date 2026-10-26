@@ -1146,6 +1146,24 @@ V5_TAXONOMY = {
 }
 
 
+#: The optional failure call: the call the semantic failure criterion is
+#: about. Only its own fixture carries it.
+FAILURE_CALL = {"kind": "incorrect_call", "operation_name": "update_item"}
+
+
+def _failure_call(payload: dict) -> None:
+    payload["semantic_failure_call"] = copy.deepcopy(FAILURE_CALL)
+
+
+V5_FAILURE_CALL = {
+    "valid/failure-call.json": (
+        "valid/adversarial-direct-single.json",
+        "SCN-111",
+        _failure_call,
+    ),
+}
+
+
 def attack_path(payload: dict) -> dict:
     """The attack path of a v5 fixture, built from the fixture's own v5 fields."""
 
@@ -1270,7 +1288,11 @@ def valid_payloads(shaped: dict[str, dict]) -> dict[str, dict]:
         payloads[relative] = finalize(
             with_path(relative, copy.deepcopy(staged_payload))
         )
-    for relative, (base, scenario_id, vary) in {**V5_STATED, **V5_TAXONOMY}.items():
+    for relative, (base, scenario_id, vary) in {
+        **V5_STATED,
+        **V5_TAXONOMY,
+        **V5_FAILURE_CALL,
+    }.items():
         payload = renumber(copy.deepcopy(staged[base]), scenario_id)
         vary(payload)
         payloads[relative] = finalize(with_path(relative, payload))
@@ -1398,6 +1420,12 @@ TAXONOMY_CASES = {
 }
 
 
+FAILURE_CALL_CASES = {
+    "failure-call-kind-not-enumerated": put("semantic_failure_call.kind", "wrong_call"),
+    "failure-call-blank-operation": put("semantic_failure_call.operation_name", " "),
+}
+
+
 def invalid_payloads(valid: dict[str, dict]) -> dict[str, dict]:
     """The shape, ownership and schema cases, plus one case per v5 rule."""
 
@@ -1417,6 +1445,10 @@ def invalid_payloads(valid: dict[str, dict]) -> dict[str, dict]:
     taxonomy = valid["valid/taxonomy-block.json"]
     cases.update(
         {name: resigned(cut(taxonomy, m)) for name, m in TAXONOMY_CASES.items()}
+    )
+    failure_call = valid["valid/failure-call.json"]
+    cases.update(
+        {name: resigned(cut(failure_call, m)) for name, m in FAILURE_CALL_CASES.items()}
     )
     invalid.update({f"invalid/{name}.json": payload for name, payload in cases.items()})
     return invalid
