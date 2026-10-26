@@ -2,6 +2,28 @@
   "$defs": {
     "ArgumentValueFact": {
       "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "record_kind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "record_kind"
+          ]
+        },
+        {
+          "properties": {
+            "format": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "format"
+          ]
+        }
+      ],
       "description": "The values one argument of one operation takes.",
       "properties": {
         "argument": {
@@ -411,6 +433,28 @@
     },
     "StateValueFact": {
       "additionalProperties": false,
+      "anyOf": [
+        {
+          "properties": {
+            "record_kind": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "record_kind"
+          ]
+        },
+        {
+          "properties": {
+            "format": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "format"
+          ]
+        }
+      ],
       "description": "The values at a state path, or the keys of the mapping at it.",
       "properties": {
         "format": {

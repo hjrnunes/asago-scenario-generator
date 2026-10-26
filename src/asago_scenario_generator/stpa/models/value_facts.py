@@ -24,7 +24,7 @@ from __future__ import annotations
 from collections.abc import Sequence
 from enum import Enum
 
-from pydantic import Field, StrictStr, model_validator
+from pydantic import ConfigDict, Field, StrictStr, model_validator
 
 from asago_scenario_generator.models.canonical import ClosedCanonicalModel
 
@@ -42,6 +42,23 @@ class ValueFormat(str, Enum):
 
 class DeclaredValue(ClosedCanonicalModel):
     """A record kind, a format, or both, declared for one set of values."""
+
+    # The JSON Schema states the same rule as ``_declares_a_fact``: at least
+    # one of the two is present and not null.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "anyOf": [
+                {
+                    "required": ["record_kind"],
+                    "properties": {"record_kind": {"type": "string"}},
+                },
+                {
+                    "required": ["format"],
+                    "properties": {"format": {"type": "string"}},
+                },
+            ]
+        }
+    )
 
     record_kind: StrictStr | None = Field(default=None, pattern=RECORD_KIND_PATTERN)
     format: ValueFormat | None = None
