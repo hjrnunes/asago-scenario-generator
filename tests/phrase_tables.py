@@ -32,6 +32,10 @@ from types import SimpleNamespace
 
 import yaml
 
+from asago_scenario_generator.models.mechanism_suggestion import (
+    MechanismSuggestion,
+    MechanismSuggestionPath,
+)
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
@@ -57,6 +61,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_ica_hazard_verification_prompts,
+    build_mechanism_suggestion_verification_prompts,
     build_mechanism_verification_prompts,
     build_structural_routing_prompts,
     build_synthesis_slot_prompts,
@@ -354,6 +359,31 @@ def _slot_request() -> tuple[str, str]:
     )
 
 
+def _mechanism_slot_request() -> tuple[str, str]:
+    """Render a slot request that carries one verified mechanism suggestion."""
+    request = _provider_slot_request()
+    suggestion = MechanismSuggestion(
+        mechanism_id="user_claim",
+        slot_id=request.slots[0].slot_id,
+        paths=(
+            MechanismSuggestionPath(
+                feedback_channel_id="FB-1-1",
+                process_model_part_id="PM-1-1",
+                end_id="CA-1-1",
+            ),
+        ),
+    )
+    return build_synthesis_slot_prompts(
+        target_id=request.target_id,
+        slots=request.slots,
+        routed_briefs=request.routed_briefs,
+        routed_routes=request.routed_routes,
+        loss_analysis=request.loss_analysis,
+        control_structure=request.control_structure,
+        mechanism_suggestions=(suggestion,),
+    )
+
+
 def _governance_rows() -> tuple[str, str]:
     briefs, _, losses, structure = _governance_setup("risk-b")
     return build_governance_routing_prompts(
@@ -373,6 +403,17 @@ MECHANISM_ITEM_WITH_KNOWN_MECHANISM = {
     **MECHANISM_ITEM,
     "known_mechanism_refs": ["retrieved_instructions"],
 }
+SUGGESTION_ITEM = {
+    "item_handle": "S1",
+    "distinctive_mechanism": {"name": "Mechanism", "description": "Question?"},
+    "selected_structural_path": [{"id": "CA-1", "description": "Refund."}],
+    "known_mechanism_refs": ["user_claim"],
+}
+SYSTEM_HAZARD = {
+    "id": "H-1",
+    "description": "A refund reaches the wrong party.",
+    "governing_constraints": [{"id": "SC-1", "description": "Refund the payer."}],
+}
 
 # Each obligation-aware case calls the builder a request uses and names the
 # templates of the (system, user) pair it returns.
@@ -391,6 +432,10 @@ OBLIGATION_AWARE_BUILDS: dict[
         _slot_request,
         ("synthesis_ica_system.j2", "synthesis_ica_user.j2"),
     ),
+    "slot-request-mechanism-suggestion": (
+        _mechanism_slot_request,
+        ("synthesis_ica_system.j2", "synthesis_ica_user.j2"),
+    ),
     "slot-request-feedback-authority": (
         _authority_slot_request,
         ("synthesis_ica_system.j2", "synthesis_ica_user.j2"),
@@ -406,6 +451,12 @@ OBLIGATION_AWARE_BUILDS: dict[
     "mechanism-item-known-mechanism": (
         lambda: build_mechanism_verification_prompts(
             [MECHANISM_ITEM_WITH_KNOWN_MECHANISM]
+        ),
+        ("mechanism_verification_system.j2", "mechanism_verification_user.j2"),
+    ),
+    "mechanism-suggestion": (
+        lambda: build_mechanism_suggestion_verification_prompts(
+            [SUGGESTION_ITEM], [SYSTEM_HAZARD]
         ),
         ("mechanism_verification_system.j2", "mechanism_verification_user.j2"),
     ),
@@ -467,6 +518,45 @@ def _stage5(
         return dict(zip(_STAGE5_TEMPLATES, (system, user)))[template]
 
     return render
+
+
+def _mechanism_context() -> object:
+    """The WRONG_TIMING context with one mechanism suggestion finding."""
+    from asago_scenario_generator.stpa.models.scenario_context import (
+        ScenarioObligationConsideration,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.context import (
+        build_scenario_generation_context,
+    )
+    from asago_scenario_generator.stpa.mechanism_library import (
+        bundled_mechanism_library,
+    )
+    from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+    from tests.helpers.normal_authoring_wire import _wrong_timing_structure
+    from tests.helpers.sp3_scenario_continuity import (
+        _loss_analysis as _continuity_losses,
+        _threat_of_type,
+    )
+
+    threat = _threat_of_type(UCAType.wrong_timing)
+    entry = bundled_mechanism_library().entry("user_claim")
+    return build_scenario_generation_context(
+        threat,
+        _wrong_timing_structure(),
+        _continuity_losses(),
+        scenario_id="SCN-001",
+        obligation_considerations=(
+            ScenarioObligationConsideration(
+                kind="mechanism",
+                mechanism_id=entry.id.value,
+                mechanism_name=entry.name,
+                concise_concern=entry.question,
+                disposition="finding",
+                rationale="Finding 0 expresses the mechanism.",
+                finding_ica_id=threat.ica_id,
+            ),
+        ),
+    )
 
 
 def _narrate_stated() -> Callable[[str], str]:
@@ -612,6 +702,7 @@ CASES: dict[str, Callable[[str], str]] = {
         **{**MISSING_CONTROL_ACTIONS, "controlled_processes": []}
     ),
     "target-blind": _stage5(dict),
+    "mechanism-consideration": _stage5(dict, _mechanism_context),
     "operation": _stage5(lambda: {"target_operation": _target_operation()}),
     "observations": _stage5(lambda: {"target_observations": _record_observations()}),
     "operation-and-observations": _stage5(

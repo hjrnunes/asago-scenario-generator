@@ -44,6 +44,10 @@ from asago_scenario_generator.pipeline.synthesis_defaults import (
 from asago_scenario_generator.pipeline.synthesis_governance import (
     _run_governance_routing,
 )
+from asago_scenario_generator.pipeline.synthesis_mechanisms import (
+    _mechanism_accounting,
+    _run_mechanism_suggestions,
+)
 
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _boundary_decisions,
@@ -54,6 +58,7 @@ from asago_scenario_generator.pipeline.synthesis_persist import (
     _persist_manifest,
     _persist_final_control_structure,
     _persist_ica_merges,
+    _persist_mechanism_accounting,
     _persist_plan,
     _persist_prepared_profile,
     _persist_sidecar,
@@ -89,7 +94,10 @@ from asago_scenario_generator.pipeline.synthesis_types import (
     SynthesisRunStatus,
     _systemic_inputs,
 )
-from asago_scenario_generator.pipeline.synthesis_values import _ica_considerations
+from asago_scenario_generator.pipeline.synthesis_values import (
+    _ica_considerations,
+    _mechanism_considerations,
+)
 from asago_scenario_generator.stpa.infra.provider_record import provider_call_session
 
 
@@ -272,6 +280,17 @@ def _run_synthesis(
     slot_briefs = (*briefs, *governance.briefs)
     slot_routes = (*final_routes, *governance_routes)
 
+    # Mechanism suggestions are proposed bottom up from the final structure
+    # and gated by the mechanism verifier; they are never routed and never
+    # count toward obligation coverage.
+    mechanism_stage = log.take(
+        _run_mechanism_suggestions(
+            loss_analysis=final_loss,
+            control_structure=final_control,
+            adapters=resolved,
+        )
+    )
+
     # One adaptive analysis: enrichment (capability profile, execution target
     # profile, target observations) feeds ICA enumeration and Stage 5; it
     # never selects a different generation algorithm.
@@ -286,9 +305,15 @@ def _run_synthesis(
             inputs,
             capability_snapshot,
             resolved,
+            mechanism_suggestions=mechanism_stage.survivors,
         )
     )
     hazard_offers = _slot_hazard_offers(ica_enumeration)
+    # Kept apart from obligation accounting: a suggestion makes no coverage
+    # claim, so no obligation row counts it.
+    mechanism_accounting = _mechanism_accounting(
+        mechanism_stage, final_control, _mechanism_considerations(ica_enumeration)
+    )
     target_realization = log.take(
         _run_target_realization(
             ica_enumeration=ica_enumeration,
@@ -373,6 +398,9 @@ def _run_synthesis(
     final_control_path = _persist_final_control_structure(
         output_dir, revision_result, final_control
     )
+    mechanism_accounting_path = _persist_mechanism_accounting(
+        output_dir, mechanism_accounting
+    )
     target_realization_path = _persist_target_realization(
         output_dir,
         target_realization,
@@ -438,6 +466,7 @@ def _run_synthesis(
         policy_coverage_path=policy_coverage_path,
         ica_merges_path=ica_merges_path,
         final_control_path=final_control_path,
+        mechanism_accounting_path=mechanism_accounting_path,
     )
 
     return SynthesisResult(
@@ -461,6 +490,7 @@ def _run_synthesis(
         stage_errors=log.errors,
         stage_warnings=stage_warnings,
         ica_hazard_verification=ica_enumeration.ica_hazard_verification,
+        mechanism_suggestion_accounting=mechanism_accounting,
     )
 
 

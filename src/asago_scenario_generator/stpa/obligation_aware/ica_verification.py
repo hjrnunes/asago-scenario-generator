@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
-from typing import Any, ClassVar, Literal, Sequence
+from typing import Any, ClassVar, Literal, Sequence, TypeVar
 
 from pydantic import Field, field_validator, model_validator
 
@@ -20,6 +20,9 @@ from asago_scenario_generator.models.canonical import (
     unique_sorted_strings,
 )
 from asago_scenario_generator.models.artifact_pin import Digest
+from asago_scenario_generator.models.mechanism_suggestion import (
+    MechanismIcaConsideration,
+)
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
@@ -48,6 +51,11 @@ from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
 )
 
 
+_SlotResult = TypeVar(
+    "_SlotResult", ObligationIcaConsideration, MechanismIcaConsideration
+)
+"""An obligation or mechanism slot result; the verifier withholds both alike."""
+
 ICA_HAZARD_VERIFICATION_REQUEST_SCHEMA_VERSION = (
     "stpa-ica-hazard-verification-request-v1"
 )
@@ -61,6 +69,15 @@ ICA_HAZARD_VERIFICATION_BATCH_DIGEST_DOMAIN = (
 
 ABSENCE_CONSEQUENCE_MAX_CHARS = 300
 ABSENCE_EVIDENCE_MISSING_CODE = "ica_hazard_absence_evidence_missing"
+ICA_VERIFICATION_EXCLUSION_CODES = frozenset(
+    {
+        "ica_hazard_verification_provider_failure",
+        "ica_hazard_not_applicable",
+        ABSENCE_EVIDENCE_MISSING_CODE,
+        "ica_hazard_correction_exhausted",
+    }
+)
+"""The diagnostic codes a finding receives when the verifier excludes its ICAs."""
 
 IcaHazardVerdictValue = Literal["supported", "contradictory", "insufficient_evidence"]
 IcaHazardAttemptStatus = Literal[
@@ -2082,6 +2099,30 @@ def filter_ica_considerations(
     return tuple(sorted(result, key=lambda item: (item.obligation_id, item.slot_id)))
 
 
+def filter_mechanism_considerations(
+    considerations: Sequence[MechanismIcaConsideration],
+    batch: IcaHazardVerificationBatch,
+    *,
+    enumeration: ICAEnumeration | None = None,
+) -> tuple[MechanismIcaConsideration, ...]:
+    """Apply the same withholding to mechanism suggestion results.
+
+    A mechanism finding keeps only the ICAs the verifier supports; a finding
+    whose every ICA it excludes is no longer a finding, as for an obligation.
+    """
+    excluded = _excluded_ica_ids(batch)
+    if not excluded:
+        return tuple(considerations)
+    result = _filter_consideration_pairs(
+        considerations,
+        excluded=excluded,
+        records_by_id={record.ica_id: record for record in batch.records},
+        diagnostics=batch.diagnostics,
+        ica_by_id=_enumerated_icas(enumeration),
+    )
+    return tuple(sorted(result, key=lambda item: (item.slot_id, item.suggestion_id)))
+
+
 def _enumerated_icas(
     enumeration: ICAEnumeration | None,
 ) -> dict[str, ICA]:
@@ -2093,13 +2134,13 @@ def _enumerated_icas(
 
 
 def _filter_consideration_pairs(
-    considerations: Sequence[ObligationIcaConsideration],
+    considerations: Sequence[_SlotResult],
     *,
     excluded: set[str],
     records_by_id: Mapping[str, IcaHazardVerificationRecord],
     diagnostics: Sequence[ConsiderationDiagnostic],
     ica_by_id: Mapping[str, ICA],
-) -> list[ObligationIcaConsideration]:
+) -> list[_SlotResult]:
     return [
         _filter_ica_consideration(
             pair,
@@ -2123,13 +2164,13 @@ def _excluded_ica_ids(batch: IcaHazardVerificationBatch) -> set[str]:
 
 
 def _filter_ica_consideration(
-    pair: ObligationIcaConsideration,
+    pair: _SlotResult,
     *,
     excluded: set[str],
     records_by_id: Mapping[str, IcaHazardVerificationRecord],
     diagnostics: Sequence[ConsiderationDiagnostic],
     ica_by_id: Mapping[str, ICA],
-) -> ObligationIcaConsideration:
+) -> _SlotResult:
     if pair.disposition != "finding":
         return pair
     retained, affected = _partition_ica_ids(pair.ica_ids, excluded)
@@ -2138,14 +2179,16 @@ def _filter_ica_consideration(
     affected_records = _affected_records(affected, records_by_id)
     terminal_not_applicable = _terminal_not_applicable(affected_records)
     code = _consideration_exclusion_code(affected, diagnostics, terminal_not_applicable)
+    obligation_id = getattr(pair, "obligation_id", None)
     diagnostic = ConsiderationDiagnostic(
         code=code,
         detail="independent ICA hazard verification excluded " + ", ".join(affected),
-        obligation_ids=(pair.obligation_id,),
+        obligation_ids=() if obligation_id is None else (obligation_id,),
         refs=affected,
     )
     payload = _filtered_consideration_payload(pair, diagnostic)
     return _complete_filtered_consideration(
+        type(pair),
         payload,
         retained,
         affected_records,
@@ -2172,19 +2215,20 @@ def _affected_records(
 
 
 def _complete_filtered_consideration(
+    kind: type[_SlotResult],
     payload: dict[str, Any],
     retained: Sequence[str],
     affected_records: Sequence[IcaHazardVerificationRecord],
     terminal_not_applicable: bool,
     ica_by_id: Mapping[str, ICA],
-) -> ObligationIcaConsideration:
+) -> _SlotResult:
     if not retained:
         _mark_fully_excluded_consideration(
             payload, affected_records, terminal_not_applicable
         )
     else:
         _retain_ica_siblings(payload, retained, ica_by_id)
-    return ObligationIcaConsideration.model_validate(payload)
+    return kind.model_validate(payload)
 
 
 def _terminal_not_applicable(
@@ -2215,7 +2259,7 @@ def _consideration_exclusion_code(
 
 
 def _filtered_consideration_payload(
-    pair: ObligationIcaConsideration,
+    pair: _SlotResult,
     diagnostic: ConsiderationDiagnostic,
 ) -> dict[str, Any]:
     payload = pair.model_dump(mode="python", exclude={"pair_id"})
@@ -2291,6 +2335,7 @@ def _uca_definition(uca_type: UCAType) -> str:
 
 
 __all__ = [
+    "ICA_VERIFICATION_EXCLUSION_CODES",
     "ICA_HAZARD_VERIFICATION_BATCH_DIGEST_DOMAIN",
     "ICA_HAZARD_VERIFICATION_BATCH_SCHEMA_VERSION",
     "ICA_HAZARD_VERIFICATION_REQUEST_DIGEST_DOMAIN",
@@ -2307,5 +2352,6 @@ __all__ = [
     "build_ica_hazard_verification_request",
     "apply_ica_hazard_verification_correction",
     "filter_ica_considerations",
+    "filter_mechanism_considerations",
     "verify_final_ica_batch",
 ]

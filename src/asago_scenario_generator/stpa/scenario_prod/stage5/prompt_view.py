@@ -124,6 +124,10 @@ def build_context_bdi_prompts(
             has_feedback_authority=any(
                 choice.authority_for_update is not None for choice in source_choices
             ),
+            has_mechanism_consideration=any(
+                item.kind == "mechanism"
+                for item in scenario_context.obligation_considerations
+            ),
         ),
         loader.render_prompt(
             "stage5_context_user.j2",
@@ -414,12 +418,13 @@ def _stage5_taxonomy_considerations(
 def _stage5_taxonomy_consideration(
     item: ScenarioObligationConsideration,
 ) -> Mapping[str, object]:
-    """Name the pattern, or for a governance risk the risk, and keep the rest."""
-    name = (
-        {"risk_name": item.risk_name}
-        if item.kind == "governance"
-        else {"pattern_name": item.attack_pattern_name}
-    )
+    """Name the pattern, the governance risk, or the mechanism; keep the rest."""
+    if item.kind == "governance":
+        name = {"risk_name": item.risk_name}
+    elif item.kind == "mechanism":
+        name = {"mechanism_name": item.mechanism_name}
+    else:
+        name = {"pattern_name": item.attack_pattern_name}
     return {
         **name,
         "concern": item.concise_concern,

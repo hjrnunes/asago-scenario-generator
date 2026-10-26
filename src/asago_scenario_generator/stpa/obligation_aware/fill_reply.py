@@ -17,6 +17,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotRequest,
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    local_mechanism_handles,
     local_obligation_handles,
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
@@ -37,7 +38,8 @@ class FillScope:
     process_model_ids: tuple[str, ...]
     feedback_ids: tuple[str, ...]
     # The local handles (R1..Rn) of the obligations routed to these slots,
-    # which key ``consideration_results``. With one slot every handle is
+    # then those (M1..Mn) of their mechanism suggestions, which key
+    # ``consideration_results``. With one slot every handle is
     # required; with several, each slot answers its own subset, so none is.
     handles: tuple[str, ...] = ()
     every_handle_required: bool = True
@@ -72,7 +74,10 @@ def fill_scope(request: SynthesisSlotRequest) -> FillScope:
         context_row_ids=tuple(dict.fromkeys(rows)),
         process_model_ids=tuple(sorted(process_models)),
         feedback_ids=tuple(sorted(feedback)),
-        handles=routed_handles(request),
+        handles=(
+            *routed_handles(request),
+            *local_mechanism_handles(request.mechanism_suggestions).values(),
+        ),
         every_handle_required=len(request.slots) == 1,
     )
 

@@ -29,6 +29,15 @@ maps those handles to exact structural IDs after response validation.
   flooding, or other mechanism from taxonomy names, concerns, or rationales.
   Those records are analysis provenance. A mechanism needs exact supplied
   capability/access evidence or an explicit bounded assumption.
+{%- if has_mechanism_consideration is defined and has_mechanism_consideration %}
+- A taxonomy consideration with `mechanism_name` names a known control-loop
+  mechanism that code proposed on the selected control path and ICA analysis
+  found in the selected ICA; its `concern` is the mechanism's question. It is
+  analysis provenance like the others: it is not a causal-source handle and not
+  capability or access evidence, so select causal sources only from the
+  supplied handles and keep each factor's evidence status as its evidence
+  supports.
+{%- endif %}
 - Ordinary adversarial wording such as “take advantage of a timing gap” is not
   proof of a new access path. Never infer a capability from a verb.
 

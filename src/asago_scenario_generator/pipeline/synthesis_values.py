@@ -84,6 +84,27 @@ def _ica_verification(value: Any) -> Any | None:
     return value.ica_hazard_verification
 
 
+def _mechanism_considerations(value: Any) -> tuple[Any, ...]:
+    """Expose each mechanism suggestion's slot result from the final ICA result.
+
+    A result whose ICAs the independent verifier excluded is withheld as an
+    obligation pair would be.
+    """
+    if isinstance(value, ICAEnumeration):
+        return ()
+    values = tuple(getattr(value, "mechanism_considerations", ()) or ())
+    verification = getattr(value, "ica_hazard_verification", None)
+    if verification is None or not values:
+        return values
+    from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+        filter_mechanism_considerations,
+    )
+
+    return filter_mechanism_considerations(
+        values, verification, enumeration=value.ica_enumeration
+    )
+
+
 def _ica_considerations(value: Any) -> tuple[Any, ...]:
     """Expose exact obligation/slot evidence from the final ICA result."""
     if isinstance(value, ICAEnumeration):

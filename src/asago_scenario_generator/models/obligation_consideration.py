@@ -727,24 +727,7 @@ class ObligationIcaConsideration(_ConsiderationModel):
 
     @model_validator(mode="after")
     def canonicalize_and_validate(self) -> "ObligationIcaConsideration":
-        for field_name in (
-            "ica_ids",
-            "exec_candidate_ids",
-            "hazard_ids",
-            "constraint_ids",
-            "evidence",
-            "model_call_refs",
-        ):
-            object.__setattr__(
-                self,
-                field_name,
-                _canonical_strings(getattr(self, field_name), field_name),
-            )
-        for candidate_id in self.exec_candidate_ids:
-            if not candidate_id.startswith("EXEC:"):
-                raise ValueError(
-                    "execution candidate IDs must use canonical EXEC:* identity"
-                )
+        canonical_consideration_strings(self)
         payload = self.model_dump(mode="json", exclude={"pair_id"})
         expected = (
             f"pair:v1:{compute_framed_digest(ICA_CONSIDERATION_ID_DOMAIN, payload)}"
@@ -754,37 +737,60 @@ class ObligationIcaConsideration(_ConsiderationModel):
                 "pair_id does not match obligation/slot consideration content"
             )
         object.__setattr__(self, "pair_id", expected)
-        self._validate_ica_disposition()
+        validate_ica_consideration_disposition(self)
         return self
 
-    def _validate_ica_disposition(self) -> None:
-        if self.disposition == "finding":
-            self._validate_ica_finding()
-        elif self.disposition == "proposed_not_applicable":
-            self._validate_ica_not_applicable()
-        elif self.ica_ids or self.exec_candidate_ids:
-            raise ValueError("unresolved ICA considerations cannot retain findings")
 
-    def _validate_ica_finding(self) -> None:
-        if not self.ica_ids or not self.exec_candidate_ids:
+_CONSIDERATION_SET_FIELDS = (
+    "ica_ids",
+    "exec_candidate_ids",
+    "hazard_ids",
+    "constraint_ids",
+    "evidence",
+    "model_call_refs",
+)
+
+
+def canonical_consideration_strings(item: Any) -> None:
+    """Sort a slot result's set-like fields and check its EXEC identities."""
+    for field_name in _CONSIDERATION_SET_FIELDS:
+        object.__setattr__(
+            item,
+            field_name,
+            _canonical_strings(getattr(item, field_name), field_name),
+        )
+    for candidate_id in item.exec_candidate_ids:
+        if not candidate_id.startswith("EXEC:"):
+            raise ValueError(
+                "execution candidate IDs must use canonical EXEC:* identity"
+            )
+
+
+def validate_ica_consideration_disposition(item: Any) -> None:
+    """Require the evidence each slot-result disposition needs, and no more."""
+    if item.disposition == "finding":
+        if not item.ica_ids or not item.exec_candidate_ids:
             raise ValueError("finding considerations require ICA and EXEC identities")
-        if not self.hazard_ids or not self.constraint_ids:
+        if not item.hazard_ids or not item.constraint_ids:
             raise ValueError(
                 "finding considerations require hazard and constraint identities"
             )
-
-    def _validate_ica_not_applicable(self) -> None:
-        if self.ica_ids or self.exec_candidate_ids:
+    elif item.disposition == "proposed_not_applicable":
+        if item.ica_ids or item.exec_candidate_ids:
             raise ValueError("non-applicable ICA considerations cannot retain findings")
-        if not self.structural_inventory_complete:
+        if not item.structural_inventory_complete:
             raise ValueError(
                 "proposed non-applicability requires complete structural inventory"
             )
-        if not self.rationale:
+        if not item.rationale:
             raise ValueError("proposed non-applicability requires a rationale")
+    elif item.ica_ids or item.exec_candidate_ids:
+        raise ValueError("unresolved ICA considerations cannot retain findings")
 
 
 __all__ = [
+    "canonical_consideration_strings",
+    "validate_ica_consideration_disposition",
     "BriefKind",
     "BoundedStructuralRevision",
     "ConsiderationCallEvidence",

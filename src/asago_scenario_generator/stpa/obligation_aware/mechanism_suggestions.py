@@ -1,0 +1,287 @@
+"""Mechanism suggestions: library mechanisms the graph join proposes for slots.
+
+A suggestion works bottom up.  The authority-filtered join
+(:func:`~asago_scenario_generator.stpa.obligation_aware.stpa_index.mechanism_candidates`)
+finds typed paths from untrusted feedback to the control actions and
+coordination links that read its variable, and each path proposes its
+mechanisms for the ICA slots of that action or link.  A suggestion carries no
+risk and makes no coverage claim: no routing call is made for it, it never
+enters a routing prompt, and obligation accounting never counts it.
+
+The join's fit is not evidence that a path carries a mechanism, so a proposal
+reaches slot filling only after the mechanism verifier judges its path
+against the mechanism's library entry.
+"""
+
+from __future__ import annotations
+
+from collections.abc import Iterable, Mapping, Sequence
+from dataclasses import dataclass
+from types import MappingProxyType
+from typing import Literal
+
+from asago_scenario_generator.models.mechanism_suggestion import (
+    MechanismSuggestion,
+    MechanismSuggestionPath,
+)
+from asago_scenario_generator.stpa.mechanism_library import (
+    MechanismId,
+    bundled_mechanism_library,
+)
+from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
+from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    DropReason,
+    MechanismCandidate,
+    mechanism_join,
+)
+from asago_scenario_generator.stpa.threat_enum.slot_creation import (
+    SlotPlaceholder,
+    create_slots,
+    requires_provider_slot_analysis,
+)
+
+MECHANISM_SUGGESTIONS_PER_SLOT = 2
+"""The most verified suggestions one slot request carries.
+
+A slot keeps its first suggestions in library order; the rest are over the
+cap.  The cap bounds what a suggestion adds to a slot request; it never
+limits the slot's own hazards or routed obligations.
+"""
+
+MechanismPath = tuple[str, str, str]
+"""``(FB, PM, CA)`` or ``(FB, PM, CL)``, as :class:`MechanismCandidate` names it."""
+
+
+def library_order() -> Mapping[MechanismId, int]:
+    """The position of each mechanism in the bundled library."""
+    return MappingProxyType(
+        {
+            entry.id: index
+            for index, entry in enumerate(bundled_mechanism_library().mechanisms)
+        }
+    )
+
+
+@dataclass(frozen=True)
+class ProposedSuggestion:
+    """One mechanism the join proposes for one slot, with every path it took.
+
+    ``paths`` follow the join's structure order; a slot reached by several
+    channels has one path per channel.
+    """
+
+    mechanism: MechanismId
+    slot_id: str
+    paths: tuple[MechanismPath, ...]
+
+
+@dataclass(frozen=True)
+class MechanismProposal:
+    """What the join proposes for a slot universe, and what it holds back.
+
+    - ``proposed``: suggestions for slots the provider analyzes;
+    - ``structural``: suggestions for slots decided by structure alone (an
+      ineligible ``WRONG_DURATION``), which no request carries;
+    - ``filtered``: the ``(mechanism, slot)`` pairs only the unfiltered join
+      reaches, with the authority filter's reasons for dropping each path.
+
+    ``proposed`` and ``structural`` are ordered by slot ID, then library order.
+    """
+
+    proposed: tuple[ProposedSuggestion, ...] = ()
+    structural: tuple[ProposedSuggestion, ...] = ()
+    filtered: Mapping[tuple[MechanismId, str], tuple[DropReason, ...]] = (
+        MappingProxyType({})
+    )
+
+    def candidates(self) -> tuple[MechanismCandidate, ...]:
+        """The distinct ``(mechanism, path)`` pairs the proposed slots need judged.
+
+        They are ordered by first appearance in ``proposed``.
+        """
+        found: dict[MechanismCandidate, None] = {}
+        for item in self.proposed:
+            for path in item.paths:
+                found.setdefault(MechanismCandidate(item.mechanism, path), None)
+        return tuple(found)
+
+
+def _slots_by_path_end(
+    slots: Iterable[SlotPlaceholder],
+) -> dict[str, list[SlotPlaceholder]]:
+    """Index slots by the action or link a join path ends at."""
+    result: dict[str, list[SlotPlaceholder]] = {}
+    for slot in slots:
+        end = slot.coordination_link or slot.control_action
+        result.setdefault(end, []).append(slot)
+    return result
+
+
+def _pair_paths(
+    candidates: Iterable[MechanismCandidate],
+    slots_by_end: Mapping[str, Sequence[SlotPlaceholder]],
+) -> dict[tuple[MechanismId, str], list[MechanismPath]]:
+    result: dict[tuple[MechanismId, str], list[MechanismPath]] = {}
+    for candidate in candidates:
+        for slot in slots_by_end.get(candidate.path[2], ()):
+            paths = result.setdefault((candidate.mechanism, slot.slot_id), [])
+            if candidate.path not in paths:
+                paths.append(candidate.path)
+    return result
+
+
+def propose_mechanism_suggestions(
+    control_structure: ControlStructure,
+    slots: Sequence[SlotPlaceholder] | None = None,
+) -> MechanismProposal:
+    """Propose each filtered join candidate for every slot of its action or link.
+
+    A path ``(FB, PM, CA)`` reaches the four slots of ``CA``; a path ``(FB,
+    PM, CL)`` the four slots of ``CL``.  *slots* defaults to every slot of
+    the structure.  The join runs with its authority filter on; the
+    unfiltered candidates it drops are reported in ``filtered`` and propose
+    nothing.
+    """
+    universe = (
+        tuple(slots) if slots is not None else tuple(create_slots(control_structure))
+    )
+    by_end = _slots_by_path_end(universe)
+    slot_by_id = {slot.slot_id: slot for slot in universe}
+    join = mechanism_join(control_structure)
+    kept = _pair_paths((item.candidate for item in join.kept), by_end)
+    dropped: dict[tuple[MechanismId, str], list[DropReason]] = {}
+    for item in join.dropped:
+        for slot in by_end.get(item.candidate.path[2], ()):
+            key = (item.candidate.mechanism, slot.slot_id)
+            if key in kept:
+                continue
+            reasons = dropped.setdefault(key, [])
+            if item.reason not in reasons:
+                reasons.append(item.reason)
+    rank = library_order()
+    proposed: list[ProposedSuggestion] = []
+    structural: list[ProposedSuggestion] = []
+    for (mechanism, slot_id), paths in sorted(
+        kept.items(), key=lambda item: (item[0][1], rank[item[0][0]])
+    ):
+        suggestion = ProposedSuggestion(mechanism, slot_id, tuple(paths))
+        if requires_provider_slot_analysis(slot_by_id[slot_id]):
+            proposed.append(suggestion)
+        else:
+            structural.append(suggestion)
+    return MechanismProposal(
+        proposed=tuple(proposed),
+        structural=tuple(structural),
+        filtered=MappingProxyType(
+            {key: tuple(value) for key, value in sorted(dropped.items())}
+        ),
+    )
+
+
+SuggestionRelationship = Literal[
+    "mechanism_specific", "adjacent_control", "insufficient_evidence"
+]
+
+
+@dataclass(frozen=True)
+class SuggestionVerificationRequest:
+    """The candidates the mechanism verifier judges, and the analysis around them.
+
+    ``candidates`` are distinct; ``loss_analysis`` supplies the hazards and
+    constraints a suggestion's path may lead to, because a suggestion cites
+    none of its own.
+    """
+
+    candidates: tuple[MechanismCandidate, ...]
+    control_structure: ControlStructure
+    loss_analysis: LossAnalysis
+
+
+@dataclass(frozen=True)
+class SuggestionVerdict:
+    """The verifier's judgement of one candidate path against its mechanism.
+
+    ``relationship`` is ``None`` when the verification did not complete, so
+    no verdict exists.  Only ``mechanism_specific`` lets the suggestion
+    survive.
+    """
+
+    candidate: MechanismCandidate
+    relationship: SuggestionRelationship | None
+    rationale: str
+
+    @property
+    def survives(self) -> bool:
+        """Whether the verifier found the path carries the mechanism."""
+        return self.relationship == "mechanism_specific"
+
+
+@dataclass(frozen=True)
+class MechanismSelection:
+    """The verified suggestions slot filling receives, and those over the cap.
+
+    A suggestion keeps only the paths the verifier judged
+    ``mechanism_specific``; a proposal with none is not a suggestion.  Both
+    tuples are ordered by slot, then library order.
+    """
+
+    survivors: tuple[MechanismSuggestion, ...] = ()
+    over_cap: tuple[MechanismSuggestion, ...] = ()
+
+
+def select_mechanism_suggestions(
+    proposal: MechanismProposal,
+    verdicts: Iterable[SuggestionVerdict],
+    *,
+    per_slot: int = MECHANISM_SUGGESTIONS_PER_SLOT,
+) -> MechanismSelection:
+    """Keep each proposal's verified paths, then at most *per_slot* per slot."""
+    by_candidate = {verdict.candidate: verdict for verdict in verdicts}
+    by_slot: dict[str, list[MechanismSuggestion]] = {}
+    for item in proposal.proposed:
+        paths = tuple(
+            path
+            for path in item.paths
+            if (verdict := by_candidate.get(MechanismCandidate(item.mechanism, path)))
+            is not None
+            and verdict.survives
+        )
+        if paths:
+            by_slot.setdefault(item.slot_id, []).append(
+                MechanismSuggestion(
+                    mechanism_id=item.mechanism,
+                    slot_id=item.slot_id,
+                    paths=tuple(
+                        MechanismSuggestionPath(
+                            feedback_channel_id=path[0],
+                            process_model_part_id=path[1],
+                            end_id=path[2],
+                        )
+                        for path in paths
+                    ),
+                )
+            )
+    return MechanismSelection(
+        survivors=tuple(
+            item for slot_id in sorted(by_slot) for item in by_slot[slot_id][:per_slot]
+        ),
+        over_cap=tuple(
+            item for slot_id in sorted(by_slot) for item in by_slot[slot_id][per_slot:]
+        ),
+    )
+
+
+__all__ = [
+    "MECHANISM_SUGGESTIONS_PER_SLOT",
+    "MechanismPath",
+    "MechanismSelection",
+    "MechanismProposal",
+    "ProposedSuggestion",
+    "SuggestionRelationship",
+    "SuggestionVerdict",
+    "SuggestionVerificationRequest",
+    "library_order",
+    "propose_mechanism_suggestions",
+    "select_mechanism_suggestions",
+]

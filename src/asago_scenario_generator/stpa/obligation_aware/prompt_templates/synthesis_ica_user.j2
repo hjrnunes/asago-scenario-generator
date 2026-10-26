@@ -7,4 +7,10 @@ Routed route evidence (opaque handles; copy unchanged):
 {{ routed_routes_yaml }}
 Required routed consideration pairs:
 {{ required_pairs_yaml }}
+{%- if mechanism_suggestions_yaml %}
+Mechanism suggestions for this target (hypotheses only; no coverage claim):
+{{ mechanism_suggestions_yaml }}
+Required mechanism consideration pairs:
+{{ required_mechanism_pairs_yaml }}
+{%- endif %}
 Return the structured slot-draft schema described above.

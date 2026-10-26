@@ -255,11 +255,14 @@ governance-only obligations before ordinary SP3 scenario realization.
 The output contains atomically published
 `taxonomy-obligation-plan.yaml`, `obligation-consideration.yaml`,
 `obligation-accounting.yaml`, `scenario-realization.yaml`, and
-`synthesis-manifest.yaml`, plus a report, and `ica-merges.yaml` when slot
-compilation merged findings that differ only by context row or pair. After an
-applied structural revision it also contains `control-structure-final.yaml`,
-the final control structure slot filling read (the one the manifest pins as
-`final_control_structure`); `control-structure.yaml` keeps the baseline.
+`synthesis-manifest.yaml`, plus a report, `ica-merges.yaml` when slot
+compilation merged findings that differ only by context row or pair, and
+`mechanism-suggestion-accounting.yaml` when the mechanism verifier judged
+graph-join suggestions (one row per mechanism and slot, apart from obligation
+accounting). After an applied structural revision it also contains
+`control-structure-final.yaml`, the final control structure slot filling read
+(the one the manifest pins as `final_control_structure`);
+`control-structure.yaml` keeps the baseline.
 `scenario-realization.yaml` records
 whether each accepted ICA was actually carried into a generated scenario; it
 does not change the separate obligation/STPA accounting result. An ICA whose

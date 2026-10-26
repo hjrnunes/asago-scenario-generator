@@ -15,6 +15,9 @@ from asago_scenario_generator.models.capability_profile import (
     inject_kc_subcodes_display,
 )
 from asago_scenario_generator.models.ica_merge import ICA_MERGES_FILENAME
+from asago_scenario_generator.models.mechanism_suggestion_accounting import (
+    MECHANISM_SUGGESTION_ACCOUNTING_FILENAME,
+)
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.models.slot_hazard_offer import (
     SLOT_HAZARD_OFFERS_FILENAME,
@@ -111,6 +114,17 @@ def _persist_final_control_structure(
     return _persist_sidecar(output_dir, FINAL_CONTROL_STRUCTURE_FILENAME, final_control)
 
 
+def _persist_mechanism_accounting(
+    output_dir: Path, accounting: Any | None
+) -> Path | None:
+    """Publish mechanism suggestion accounting when the verifier was asked."""
+    if accounting is None:
+        return None
+    return _persist_sidecar(
+        output_dir, MECHANISM_SUGGESTION_ACCOUNTING_FILENAME, accounting
+    )
+
+
 def _persist_target_realization(
     output_dir: Path,
     artifact: Any | None,
@@ -189,11 +203,13 @@ def _artifact_paths(
     policy_coverage_path: Path | None = None,
     ica_merges_path: Path | None = None,
     final_control_path: Path | None = None,
+    mechanism_accounting_path: Path | None = None,
 ) -> dict[str, Path]:
     """Add each optional published artifact to the always-written ones."""
     for sidecar in (
         hazard_offers_path,
         ica_merges_path,
+        mechanism_accounting_path,
         policy_coverage_path,
         final_control_path,
     ):

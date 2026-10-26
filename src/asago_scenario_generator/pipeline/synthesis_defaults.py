@@ -356,9 +356,14 @@ def _default_fill_icas(
     control_structure: Any,
     inputs: SynthesisInputs,
     obligation_adapter: Any,
+    mechanism_suggestions: tuple[Any, ...] = (),
     **_: Any,
 ) -> Any:
-    """Fill final ICA slots with exact routed obligation evidence."""
+    """Fill final ICA slots with exact routed obligation evidence.
+
+    Verified mechanism suggestions join their slots' requests beside the
+    routed obligations.
+    """
     from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
         fill_synthesis_slots,
     )
@@ -370,6 +375,7 @@ def _default_fill_icas(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         controls=_provider_controls(obligation_adapter, inputs),
+        mechanism_suggestions=mechanism_suggestions,
     )
 
 
@@ -498,6 +504,7 @@ def _default_scenarios(
     enriched_operations: Mapping[str, str] | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
+    mechanism_considerations: tuple[Any, ...] = (),
     model_runtime: ModelRuntime,
     **_: Any,
 ) -> Any:
@@ -538,6 +545,7 @@ def _default_scenarios(
         loss_analysis,
         briefs=briefs,
         ica_considerations=ica_considerations,
+        mechanism_considerations=mechanism_considerations,
     )
     return run_sp3(
         llm_client=client,

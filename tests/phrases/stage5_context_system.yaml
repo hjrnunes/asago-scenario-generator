@@ -46,6 +46,7 @@ cases:
     once:
       - A negative or empty feedback result can be valid
     forbidden:
+      - A taxonomy consideration with `mechanism_name`
       - omit `gain`
       - authority_for_update
       - Security mechanism
@@ -186,3 +187,16 @@ cases:
         reported.
     once:
       - "`authority_for_update`"
+  mechanism-consideration:
+    required:
+      - Those records are analysis provenance.
+      - >-
+        A taxonomy consideration with `mechanism_name` names a known
+        control-loop mechanism that code proposed on the selected control path
+        and ICA analysis found in the selected ICA; its `concern` is the
+        mechanism's question.
+      - >-
+        It is analysis provenance like the others: it is not a causal-source
+        handle and not capability or access evidence, so select causal sources
+        only from the supplied handles and keep each factor's evidence status
+        as its evidence supports.

@@ -23,6 +23,9 @@ from pydantic import (
 
 from asago_scenario_generator.models.artifact_pin import ObligationId
 from asago_scenario_generator.models.ica_merge import IcaMerge
+from asago_scenario_generator.models.mechanism_suggestion import (
+    MechanismIcaConsideration,
+)
 from asago_scenario_generator.models.obligation_consideration import (
     ConsiderationDiagnostic,
     ObligationIcaConsideration,
@@ -106,6 +109,10 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
 from asago_scenario_generator.stpa.mechanism_library import (
     bundled_mechanism_data_digest,
 )
+from asago_scenario_generator.stpa.obligation_aware.mechanism_suggestions import (
+    SuggestionVerdict,
+    SuggestionVerificationRequest,
+)
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     PROHIBITED_PROMPT_KEYS,
     PROHIBITED_PROMPT_WORDS,
@@ -114,11 +121,13 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_ica_hazard_verification_prompts,
     build_mechanism_verification_prompts,
     known_mechanism_refs,
+    local_mechanism_handles,
     local_obligation_handles,
     mapping_strength_for_brief,
     obligation_prompt_template_hashes,
     project_obligation_routing_context,
     project_ica_target_context,
+    project_mechanism_suggestions,
     project_revision_context,
     render_structural_revision_prompts,
     render_structural_routing_prompts,
@@ -126,6 +135,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     _draft_considerations,
+    _draft_mechanism_considerations,
     _finding_context,
     _slot_authority,
     _validate_finding_type,
@@ -216,6 +226,7 @@ def _slot_prompt_handles(
     target_id: str,
     questions: tuple[Any, ...],
     routes: tuple[Any, ...],
+    mechanism_views: tuple[Any, ...] = (),
 ) -> tuple[str, ...]:
     """Return every opaque handle copied by one ICA target prompt."""
     return (
@@ -224,6 +235,7 @@ def _slot_prompt_handles(
             (
                 *(item.obligation_handle for item in questions),
                 *(item.route_handle for item in routes),
+                *(item.mechanism_handle for item in mechanism_views),
             )
         ),
     )
@@ -260,7 +272,7 @@ def _resolve_slot_handles(payload: _Model, by_local: Mapping[str, str]) -> _Mode
 
 
 def _localized_slot_error(message: str, request: SynthesisSlotRequest) -> str:
-    """Say each route and obligation identity in a message as its local handle."""
+    """Say each route, obligation, and suggestion identity as its local handle."""
     handles = local_obligation_handles(
         request.routed_routes,
         {brief.obligation_id: brief for brief in request.routed_briefs},
@@ -270,6 +282,10 @@ def _localized_slot_error(message: str, request: SynthesisSlotRequest) -> str:
         if route.route_id:
             message = message.replace(route.route_id, handle)
         message = message.replace(route.obligation_id, handle)
+    for suggestion_id, handle in local_mechanism_handles(
+        request.mechanism_suggestions
+    ).items():
+        message = message.replace(suggestion_id, handle)
     return message
 
 
@@ -1344,12 +1360,24 @@ def _optional_id(ids: tuple[str, ...]) -> tuple[Any, Any]:
 def _required_pair_keys(
     request: SynthesisSlotRequest,
 ) -> frozenset[tuple[str, str, str]]:
-    """Return exact routed pair identities required by one slot request."""
+    """Return exact routed pair identities required by one slot request.
+
+    A mechanism suggestion's pair is keyed by its suggestion ID in both the
+    route and the obligation position.
+    """
     slot_ids = {slot.slot_id for slot in request.slots}
     return frozenset(
-        (route.route_id or "", route.obligation_id, slot_id)
-        for route in request.routed_routes
-        for slot_id in set(route.slot_ids).intersection(slot_ids)
+        (
+            *(
+                (route.route_id or "", route.obligation_id, slot_id)
+                for route in request.routed_routes
+                for slot_id in set(route.slot_ids).intersection(slot_ids)
+            ),
+            *(
+                (str(item.suggestion_id), str(item.suggestion_id), item.slot_id)
+                for item in request.mechanism_suggestions
+            ),
+        )
     )
 
 
@@ -1412,11 +1440,15 @@ def _raise_itemized(errors: Sequence[str]) -> None:
 def _slot_payload_errors(payload: _Model, request: SynthesisSlotRequest) -> list[str]:
     """List every semantic rule each slot, finding, and result breaks."""
     expected_by_id = {slot.slot_id: slot for slot in request.slots}
-    route_by_pair = {
+    route_by_pair: dict[tuple[str, str], Any] = {
         (route.obligation_id, slot_id): route
         for route in request.routed_routes
         for slot_id in route.slot_ids
     }
+    route_by_pair.update(
+        ((str(item.suggestion_id), item.slot_id), item)
+        for item in request.mechanism_suggestions
+    )
     index = build_stpa_index(request.control_structure)
     errors: list[str] = []
     for value in payload.filled_slots:
@@ -1511,9 +1543,12 @@ def _pair_order(
     Route IDs and obligation IDs are hashes, so ordering by them would change
     the correction text whenever the obligation IDs are renamed.
     """
-    handles = local_obligation_handles(
-        request.routed_routes,
-        {brief.obligation_id: brief for brief in request.routed_briefs},
+    handles = (
+        *local_obligation_handles(
+            request.routed_routes,
+            {brief.obligation_id: brief for brief in request.routed_briefs},
+        ),
+        *local_mechanism_handles(request.mechanism_suggestions),
     )
     rank = {obligation_id: index for index, obligation_id in enumerate(handles)}
 
@@ -1610,6 +1645,7 @@ def _compile_slot_payload(
 ) -> tuple[
     dict[str, ICASlot],
     tuple[ObligationIcaConsideration, ...],
+    tuple[MechanismIcaConsideration, ...],
     tuple[IcaMerge, ...],
 ]:
     """Compile one validated provider payload at the retry boundary.
@@ -1646,12 +1682,10 @@ def _compile_slot_payload(
                 [ica.ica_id for ica in slots[value.slot_id].icas],
             )
         )
-    considerations = _draft_considerations(
-        sorted(drafts, key=lambda item: item.slot_id),
-        request,
-        slots,
-    )
-    return slots, considerations, tuple(merges)
+    ordered = sorted(drafts, key=lambda item: item.slot_id)
+    considerations = _draft_considerations(ordered, request, slots)
+    mechanism_considerations = _draft_mechanism_considerations(ordered, request, slots)
+    return slots, considerations, mechanism_considerations, tuple(merges)
 
 
 def _routing_response(
@@ -1850,6 +1884,23 @@ class ObligationAwareLLMAdapter:
             )
         return _merge_verified_routes(routes, verified)
 
+    def verify_mechanism_suggestions(
+        self,
+        request: SuggestionVerificationRequest,
+    ) -> tuple[SuggestionVerdict, ...]:
+        """Judge structural mechanism suggestions against their library entries.
+
+        Unlike :meth:`verify_mechanisms` this gate never asks for
+        ``risk_alignment: supported``: a suggestion carries no risk.  It
+        returns one verdict per distinct candidate, in request order.
+        """
+        # Imported here: the suggestion module imports this one for its helpers.
+        from asago_scenario_generator.stpa.obligation_aware.mechanism_suggestion_provider import (
+            run_suggestion_verification,
+        )
+
+        return run_suggestion_verification(self, request)
+
     def verify_ica_hazards(
         self,
         requests: Sequence[IcaHazardVerificationRequest],
@@ -2041,8 +2092,14 @@ class ObligationAwareLLMAdapter:
             loss_analysis=request.loss_analysis,
             control_structure=request.control_structure,
         )
+        mechanism_views = project_mechanism_suggestions(
+            request.mechanism_suggestions, request.control_structure
+        )
         system_prompt, user_prompt = render_synthesis_slot_prompts(
-            projection, target_id=request.target_id, slots=request.slots
+            projection,
+            target_id=request.target_id,
+            slots=request.slots,
+            mechanism_views=mechanism_views,
         )
         target_view, target_questions, target_routes = projection
         # The target index is the typed view; obligation and route handles are
@@ -2053,7 +2110,7 @@ class ObligationAwareLLMAdapter:
             user_prompt=user_prompt,
             stage="obligation-ica",
             handles=_slot_prompt_handles(
-                request.target_id, target_questions, target_routes
+                request.target_id, target_questions, target_routes, mechanism_views
             ),
             stage_max_completion_tokens=_SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS,
             client=self.llm_client,
@@ -2081,11 +2138,14 @@ class ObligationAwareLLMAdapter:
             scope=fill_scope(request),
         )
         by_local = {
-            handle: obligation_id
-            for obligation_id, handle in local_obligation_handles(
-                request.routed_routes,
-                {brief.obligation_id: brief for brief in request.routed_briefs},
-            ).items()
+            handle: identity
+            for identity, handle in (
+                *local_obligation_handles(
+                    request.routed_routes,
+                    {brief.obligation_id: brief for brief in request.routed_briefs},
+                ).items(),
+                *local_mechanism_handles(request.mechanism_suggestions).items(),
+            )
         }
 
         def validate(value: _Model) -> None:
@@ -2143,11 +2203,14 @@ class ObligationAwareLLMAdapter:
         # The payload is provider-local and deliberately permits no arbitrary
         # object: pair values are validated into the authoritative model here,
         # after derived identities are attached from the exact supplied slots.
-        slots, considerations, merges = _compile_slot_payload(payload, request)
+        slots, considerations, mechanism_considerations, merges = _compile_slot_payload(
+            payload, request
+        )
         response = SynthesisSlotResponse(
             request_digest=request.semantic_digest,
             filled_slots=tuple(slots.values()),
             considerations=considerations,
+            mechanism_considerations=mechanism_considerations,
             adapter_kind="provider",
             provider_calls=outcome.calls + supplement_calls,
             ica_merges=merges,
