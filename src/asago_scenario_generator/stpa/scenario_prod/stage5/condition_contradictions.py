@@ -104,8 +104,8 @@ Copies agree only when their whole input schemas are the same JSON, with
 
 An operation's input schema is read only when its root holds ``type:
 object``, ``properties``, ``required``, ``additionalProperties`` (it
-governs only properties the schema does not declare), and annotations of
-their meta-schema type. Any other root keyword (``allOf``, ``anyOf``,
+governs only properties the schema does not declare), and the annotations
+the flat grammar allows, with values of their meta-schema type. Any other root keyword (``allOf``, ``anyOf``,
 ``oneOf``, ``if``, ``dependentRequired``, ``not``, ``$ref``, ``$schema``,
 and the rest), or a malformed value of one of these, may change what an
 argument admits or whether it is required, so the operation then has no
@@ -144,7 +144,13 @@ from asago_scenario_generator.stpa.tool_call_condition import (
     ToolCallValueComparison,
 )
 
-from ..condition_check import ConditionFinding, ConditionUniverse, kind_mismatch
+from ..condition_check import (
+    SCHEMA_ANNOTATIONS,
+    ConditionFinding,
+    ConditionUniverse,
+    kind_mismatch,
+    malformed_annotations,
+)
 from ..condition_index import StateIndex, collection_path, id_prefix
 from ..tool_call_binding import bind_tool_call_condition, numeric_value
 from .condition_claims import ConditionClaim, condition_claim_findings
@@ -156,20 +162,9 @@ _NUMERIC_TYPES = frozenset({"number", "integer"})
 _JSON_TYPES = frozenset(
     {"array", "boolean", "integer", "null", "number", "object", "string"}
 )
-# The keywords of the flat grammar, and the annotations it allows beside
-# them with the JSON type of their value (``object``: any value).
+# The keywords of the flat grammar; beside them it allows the annotations
+# of ``SCHEMA_ANNOTATIONS``, as the input schema's root does.
 _GRAMMAR_KEYWORDS = frozenset({"type", "nullable", "enum", "const", "items", "pattern"})
-_ANNOTATIONS: Mapping[str, type] = {
-    "title": str,
-    "description": str,
-    "$comment": str,
-    "format": str,
-    "examples": list,
-    "default": object,
-    "deprecated": bool,
-    "readOnly": bool,
-    "writeOnly": bool,
-}
 _NEVER_HOLDS = (
     "the comparison holds on no call and the condition never detects the unsafe call"
 )
@@ -1374,14 +1369,10 @@ def _flat(schema: object, name: str) -> _Admitted | None:
     """
 
     if not isinstance(schema, Mapping) or not set(schema) <= (
-        _GRAMMAR_KEYWORDS | set(_ANNOTATIONS)
+        _GRAMMAR_KEYWORDS | set(SCHEMA_ANNOTATIONS)
     ):
         return None
-    if any(
-        not isinstance(schema[key], shape)
-        for key, shape in _ANNOTATIONS.items()
-        if key in schema
-    ):
+    if malformed_annotations(schema):
         return None
     types: frozenset[str] | None = None
     if "type" in schema:

@@ -1961,6 +1961,7 @@ def test_properties_that_are_not_a_map_give_no_argument_schema() -> None:
         ({"$schema": "https://json-schema.org/draft/2020-12/schema"}, "$schema"),
         ({"type": ["object", "null"]}, "type"),
         ({"title": 7}, "title"),
+        ({"format": 7}, "format"),
     ],
 )
 def test_a_root_keyword_the_check_does_not_read_proves_nothing(root, keys) -> None:
@@ -1983,13 +1984,49 @@ def test_a_root_keyword_the_check_does_not_read_proves_nothing(root, keys) -> No
     ]
 
 
+# A well-formed value of every annotation a schema may carry.
+WELL_FORMED_ANNOTATIONS = {
+    "title": "Arguments",
+    "description": "The call.",
+    "$comment": "x",
+    "format": "custom",
+    "examples": [{"x": "a"}],
+    "default": {"x": "a"},
+    "deprecated": False,
+    "readOnly": True,
+    "writeOnly": False,
+}
+# A value of the wrong JSON type for each annotation that has a type.
+MALFORMED_ANNOTATIONS = [
+    ("title", 7),
+    ("description", ["a"]),
+    ("$comment", 1),
+    ("format", 5),
+    ("examples", "a"),
+    ("examples", {"a": 1}),
+    ("deprecated", "yes"),
+    ("readOnly", 1),
+    ("writeOnly", None),
+]
+
+
+def test_the_annotation_tables_cover_every_annotation_the_check_accepts() -> None:
+    assert set(WELL_FORMED_ANNOTATIONS) == set(condition_check.SCHEMA_ANNOTATIONS)
+    assert {key for key, _ in MALFORMED_ANNOTATIONS} == {
+        key
+        for key, shape in condition_check.SCHEMA_ANNOTATIONS.items()
+        if shape is not object
+    }
+
+
 @pytest.mark.parametrize(
     "root",
     [
         {},
         {"additionalProperties": False},
         {"additionalProperties": {"type": "string"}},
-        {"title": "Arguments", "description": "The call.", "$comment": "x"},
+        WELL_FORMED_ANNOTATIONS,
+        *({key: value} for key, value in WELL_FORMED_ANNOTATIONS.items()),
     ],
 )
 def test_a_root_the_check_reads_keeps_its_proofs(root) -> None:
@@ -2000,6 +2037,32 @@ def test_a_root_the_check_reads_keeps_its_proofs(root) -> None:
     assert universe.unread_roots == {}
     for op in ("eq", "ne"):
         assert _rules(_judged(_value_condition(op, 7, argument="x"), universe)) == B
+
+
+def test_a_root_format_is_an_annotation() -> None:
+    universe = _input_schema_universe(
+        {
+            "type": "object",
+            "format": "custom",
+            "properties": {"x": {"type": "string"}},
+            "required": ["x"],
+        }
+    )
+
+    result = _judged(_value_condition("eq", 7, argument="x"), universe)
+
+    assert _rules(result) == B
+    assert result.undecidable == ()
+
+
+@pytest.mark.parametrize(("key", "value"), MALFORMED_ANNOTATIONS)
+def test_a_malformed_root_annotation_proves_nothing(key, value) -> None:
+    universe = _input_schema_universe(
+        {**_x_schema({"type": "string"}, required=True), key: value}
+    )
+
+    assert universe.unread_roots == {"refund_payment": (key,)}
+    assert _rules(_judged(_value_condition("eq", 7, argument="x"), universe)) == OPEN_B
 
 
 def _dotted_state(nested: object, dotted: object) -> TargetObservationSnapshot:
@@ -2133,20 +2196,7 @@ def test_equality_with_a_list_that_holds_no_element_states_why() -> None:
     ]
 
 
-@pytest.mark.parametrize(
-    ("key", "value"),
-    [
-        ("title", 7),
-        ("description", ["a"]),
-        ("$comment", 1),
-        ("format", 5),
-        ("examples", "a"),
-        ("examples", {"a": 1}),
-        ("deprecated", "yes"),
-        ("readOnly", 1),
-        ("writeOnly", None),
-    ],
-)
+@pytest.mark.parametrize(("key", "value"), MALFORMED_ANNOTATIONS)
 def test_a_malformed_annotation_makes_the_schema_prove_nothing(key, value) -> None:
     universe = _lattice_universe({"type": "string", key: value}, {})
 
@@ -2155,18 +2205,7 @@ def test_a_malformed_annotation_makes_the_schema_prove_nothing(key, value) -> No
 
 
 def test_well_formed_annotations_leave_the_proof_standing() -> None:
-    schema = {
-        "type": "string",
-        "title": "Name",
-        "description": "The name.",
-        "$comment": "note",
-        "format": "hostname",
-        "examples": ["a"],
-        "default": 7,
-        "deprecated": False,
-        "readOnly": True,
-        "writeOnly": False,
-    }
+    schema = {"type": "string", **WELL_FORMED_ANNOTATIONS}
     universe = _lattice_universe(schema, {})
 
     assert _rules(_judge(_membership(SUBJECT, "eq", _lit(7)), universe)) == B

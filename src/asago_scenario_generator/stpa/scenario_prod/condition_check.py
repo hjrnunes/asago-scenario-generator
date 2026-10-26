@@ -241,19 +241,30 @@ def build_condition_universe(
     )
 
 
-# The root keywords of an input schema the check reads, besides
-# ``additionalProperties`` (it governs only undeclared properties), with the
-# JSON type of each annotation's value.
-_ROOT_ANNOTATIONS: Mapping[str, type] = {
+# The annotations a schema may carry, at its root or in an argument's
+# schema, since they never restrict a value, with the JSON type the
+# meta-schema gives each one's value (``object``: any value).
+SCHEMA_ANNOTATIONS: Mapping[str, type] = {
     "title": str,
     "description": str,
     "$comment": str,
+    "format": str,
     "examples": list,
     "default": object,
     "deprecated": bool,
     "readOnly": bool,
     "writeOnly": bool,
 }
+
+
+def malformed_annotations(schema: Mapping[Any, object]) -> tuple[str, ...]:
+    """Return the annotations of a schema whose value has the wrong JSON type."""
+
+    return tuple(
+        key
+        for key, shape in SCHEMA_ANNOTATIONS.items()
+        if key in schema and not isinstance(schema[key], shape)
+    )
 
 
 def _canonical(schema: object) -> str | None:
@@ -272,14 +283,15 @@ def _unread_root_keywords(schema: object) -> tuple[str, ...]:
     """Return the root keywords of an input schema the check does not read.
 
     The root may hold ``type: object``, ``properties`` (a map), ``required``
-    (read on its own), ``additionalProperties``, and annotations of their
-    meta-schema type. Any other keyword, or a malformed value of one of
+    (read on its own), ``additionalProperties``, and ``SCHEMA_ANNOTATIONS``
+    of their meta-schema type. Any other keyword, or a malformed value of one of
     these, is returned: it may change what an argument admits or whether it
     is required.
     """
 
     if not isinstance(schema, Mapping):
         return ("<root>",)
+    malformed = malformed_annotations(schema)
     unread = []
     for key, value in schema.items():
         if key == "type":
@@ -290,8 +302,8 @@ def _unread_root_keywords(schema: object) -> tuple[str, ...]:
                 unread.append(key)
         elif key in ("required", "additionalProperties"):
             continue
-        elif key in _ROOT_ANNOTATIONS:
-            if not isinstance(value, _ROOT_ANNOTATIONS[key]):
+        elif key in SCHEMA_ANNOTATIONS:
+            if key in malformed:
                 unread.append(key)
         else:
             unread.append(str(key))
