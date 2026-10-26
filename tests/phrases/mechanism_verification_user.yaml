@@ -1,0 +1,26 @@
+template: mechanism_verification_user.j2
+cases:
+  mechanism-item:
+    required:
+      - "Mechanism/path comparisons:"
+      - Return a JSON object with a `verdicts` array.
+    forbidden:
+      - System hazards
+      - Known mechanism glossary
+  mechanism-item-known-mechanism:
+    required:
+      - Known mechanism glossary
+    forbidden:
+      - System hazards
+  mechanism-suggestion:
+    required:
+      - Known mechanism glossary
+      - >-
+        System hazards (no suggestion cites one; each lists its governing
+        constraints):
+      - governing_constraints
+    ordered:
+      - - "Mechanism/path comparisons:"
+        - Known mechanism glossary
+        - System hazards
+        - Return a JSON object

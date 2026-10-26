@@ -18,12 +18,14 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass
 from types import MappingProxyType
+from typing import Literal
 
 from asago_scenario_generator.stpa.mechanism_library import (
     MechanismId,
     bundled_mechanism_library,
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
     DropReason,
     MechanismCandidate,
@@ -165,10 +167,51 @@ def propose_mechanism_suggestions(
     )
 
 
+SuggestionRelationship = Literal[
+    "mechanism_specific", "adjacent_control", "insufficient_evidence"
+]
+
+
+@dataclass(frozen=True)
+class SuggestionVerificationRequest:
+    """The candidates the mechanism verifier judges, and the analysis around them.
+
+    ``candidates`` are distinct; ``loss_analysis`` supplies the hazards and
+    constraints a suggestion's path may lead to, because a suggestion cites
+    none of its own.
+    """
+
+    candidates: tuple[MechanismCandidate, ...]
+    control_structure: ControlStructure
+    loss_analysis: LossAnalysis
+
+
+@dataclass(frozen=True)
+class SuggestionVerdict:
+    """The verifier's judgement of one candidate path against its mechanism.
+
+    ``relationship`` is ``None`` when the verification did not complete, so
+    no verdict exists.  Only ``mechanism_specific`` lets the suggestion
+    survive.
+    """
+
+    candidate: MechanismCandidate
+    relationship: SuggestionRelationship | None
+    rationale: str
+
+    @property
+    def survives(self) -> bool:
+        """Whether the verifier found the path carries the mechanism."""
+        return self.relationship == "mechanism_specific"
+
+
 __all__ = [
     "MechanismPath",
     "MechanismProposal",
     "ProposedSuggestion",
+    "SuggestionRelationship",
+    "SuggestionVerdict",
+    "SuggestionVerificationRequest",
     "library_order",
     "propose_mechanism_suggestions",
 ]

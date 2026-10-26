@@ -106,6 +106,10 @@ from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
 from asago_scenario_generator.stpa.mechanism_library import (
     bundled_mechanism_data_digest,
 )
+from asago_scenario_generator.stpa.obligation_aware.mechanism_suggestions import (
+    SuggestionVerdict,
+    SuggestionVerificationRequest,
+)
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     PROHIBITED_PROMPT_KEYS,
     PROHIBITED_PROMPT_WORDS,
@@ -1849,6 +1853,23 @@ class ObligationAwareLLMAdapter:
                 call_log_of(self.llm_client),
             )
         return _merge_verified_routes(routes, verified)
+
+    def verify_mechanism_suggestions(
+        self,
+        request: SuggestionVerificationRequest,
+    ) -> tuple[SuggestionVerdict, ...]:
+        """Judge structural mechanism suggestions against their library entries.
+
+        Unlike :meth:`verify_mechanisms` this gate never asks for
+        ``risk_alignment: supported``: a suggestion carries no risk.  It
+        returns one verdict per distinct candidate, in request order.
+        """
+        # Imported here: the suggestion module imports this one for its helpers.
+        from asago_scenario_generator.stpa.obligation_aware.mechanism_suggestion_provider import (
+            run_suggestion_verification,
+        )
+
+        return run_suggestion_verification(self, request)
 
     def verify_ica_hazards(
         self,

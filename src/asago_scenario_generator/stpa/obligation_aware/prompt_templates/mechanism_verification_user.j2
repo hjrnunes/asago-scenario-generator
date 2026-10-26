@@ -4,5 +4,8 @@ Mechanism/path comparisons:
 Known mechanism glossary (each mechanism is defined once; items refer to it by
 known_mechanism_refs):
 {{ known_mechanism_glossary_yaml }}
+{% endif %}{% if system_hazards_yaml %}
+System hazards (no suggestion cites one; each lists its governing constraints):
+{{ system_hazards_yaml }}
 {% endif %}
 Return a JSON object with a `verdicts` array. Copy every item handle unchanged.

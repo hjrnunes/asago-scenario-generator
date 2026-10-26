@@ -1599,18 +1599,46 @@ def build_mechanism_verification_prompts(
     An item may name library mechanisms in ``known_mechanism_refs``; the user
     message then defines each once in a known mechanism glossary.
     """
+    return _render_mechanism_verification(verification_items, system_hazards=None)
+
+
+def build_mechanism_suggestion_verification_prompts(
+    verification_items: Sequence[Mapping[str, Any]],
+    system_hazards: Sequence[Mapping[str, Any]],
+) -> tuple[str, str]:
+    """Render the same comparison for structural suggestions.
+
+    Every item is a suggestion: it names one library mechanism in
+    ``known_mechanism_refs`` and cites no hazard, so the user message lists
+    the system hazards, each with its governing constraints, once.
+    """
+    return _render_mechanism_verification(
+        verification_items, system_hazards=tuple(system_hazards)
+    )
+
+
+def _render_mechanism_verification(
+    verification_items: Sequence[Mapping[str, Any]],
+    *,
+    system_hazards: tuple[Mapping[str, Any], ...] | None,
+) -> tuple[str, str]:
     items = tuple(dict(item) for item in verification_items)
     if not items:
         raise ValueError("mechanism verification requires at least one item")
     mechanism_glossary_yaml = _known_mechanism_glossary_yaml(items)
+    suggestions = system_hazards is not None
     system = _TEMPLATE_LOADER.render_prompt(
         "mechanism_verification_system.j2",
         has_known_mechanisms=bool(mechanism_glossary_yaml),
+        has_suggestions=suggestions,
     )
     user = _TEMPLATE_LOADER.render_prompt(
         "mechanism_verification_user.j2",
         verification_items_yaml=_yaml(items),
         known_mechanism_glossary_yaml=mechanism_glossary_yaml,
+        system_hazards_yaml=_yaml([dict(item) for item in system_hazards])
+        if suggestions
+        else "",
     )
     return system, user
 
@@ -1793,6 +1821,7 @@ __all__ = [
     "audit_prompt_contract",
     "build_structural_revision_prompts",
     "build_structural_routing_prompts",
+    "build_mechanism_suggestion_verification_prompts",
     "build_mechanism_verification_prompts",
     "known_mechanism_glossary",
     "known_mechanism_refs",

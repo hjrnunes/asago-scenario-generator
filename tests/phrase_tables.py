@@ -57,6 +57,7 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 )
 from asago_scenario_generator.stpa.obligation_aware.prompts import (
     build_ica_hazard_verification_prompts,
+    build_mechanism_suggestion_verification_prompts,
     build_mechanism_verification_prompts,
     build_structural_routing_prompts,
     build_synthesis_slot_prompts,
@@ -373,6 +374,17 @@ MECHANISM_ITEM_WITH_KNOWN_MECHANISM = {
     **MECHANISM_ITEM,
     "known_mechanism_refs": ["retrieved_instructions"],
 }
+SUGGESTION_ITEM = {
+    "item_handle": "S1",
+    "distinctive_mechanism": {"name": "Mechanism", "description": "Question?"},
+    "selected_structural_path": [{"id": "CA-1", "description": "Refund."}],
+    "known_mechanism_refs": ["user_claim"],
+}
+SYSTEM_HAZARD = {
+    "id": "H-1",
+    "description": "A refund reaches the wrong party.",
+    "governing_constraints": [{"id": "SC-1", "description": "Refund the payer."}],
+}
 
 # Each obligation-aware case calls the builder a request uses and names the
 # templates of the (system, user) pair it returns.
@@ -406,6 +418,12 @@ OBLIGATION_AWARE_BUILDS: dict[
     "mechanism-item-known-mechanism": (
         lambda: build_mechanism_verification_prompts(
             [MECHANISM_ITEM_WITH_KNOWN_MECHANISM]
+        ),
+        ("mechanism_verification_system.j2", "mechanism_verification_user.j2"),
+    ),
+    "mechanism-suggestion": (
+        lambda: build_mechanism_suggestion_verification_prompts(
+            [SUGGESTION_ITEM], [SYSTEM_HAZARD]
         ),
         ("mechanism_verification_system.j2", "mechanism_verification_user.j2"),
     ),
