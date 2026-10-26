@@ -99,6 +99,7 @@ def _scenario(
         update={
             "observation_criteria": [criterion],
             "observation_assessment": assessment,
+            "failure_call": None,
             "safe_observable_outcome": safe,
         }
     )

@@ -103,6 +103,7 @@ def test_the_analytical_path_the_correction_names_validates_in_one_request(
             "reason": "No supplied value separates the unsafe call.",
         }
     ]
+    outcome["failure_call"] = None
     outcome["safe_observable_outcome"] = {
         "observable": False,
         "statement": "No supplied value separates the unsafe call.",

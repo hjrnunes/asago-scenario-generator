@@ -48,9 +48,9 @@ def _scenario_semantics_payload_type(
     The payload closes the request-local causal handles to the exact supplied
     choices and keeps the evidence-status branches, but exposes no stimulus,
     execution route, factor-route binding or unsafe-outcome condition.
-    ``failure_call_supported`` adds the optional ``failure_call`` of the
-    failure criterion, which the prompt explains only when the contract
-    captures tool calls.
+    ``failure_call_supported`` adds the required, nullable ``failure_call``
+    of the failure criterion, which the prompt explains only when the
+    contract captures tool calls.
     """
     _require_positive_schema_count(choice_count, "choice_count")
     suffix = f"{choice_count}"
@@ -91,9 +91,10 @@ def _scenario_semantics_payload_type(
             if condition_references_supplied
             else {}
         )
-        # Optional, so a reply that omits it states no failure call.
+        # Required and nullable: the reply states the failure call, or null
+        # when the failure is not a call of one inventory operation.
         failure_call_field: dict[str, object] = (
-            {"failure_call": (FailureCall | None, None)}
+            {"failure_call": (FailureCall | None, ...)}
             if failure_call_supported
             else {}
         )

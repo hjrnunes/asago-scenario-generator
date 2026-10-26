@@ -877,6 +877,7 @@ def test_run_sp3_realizes_coordination_slot_without_relabeled_identity(
                                 ),
                             }
                         ],
+                        "failure_call": None,
                         "safe_observable_outcome": {
                             "observable": True,
                             "statement": (

@@ -34,10 +34,14 @@ def test_a_failure_call_names_an_operation_and_how_the_call_fails() -> None:
         FailureCall.model_validate({**INCORRECT, "extra": 1})
 
 
-def _outcome_properties(**options: bool) -> dict:
+def _outcome_schema(**options: bool) -> dict:
     schema = _scenario_semantics_payload_type(1, **options).model_json_schema()
     outcome = schema["properties"]["unsafe_outcome"]["$ref"].rsplit("/", 1)[-1]
-    return schema["$defs"][outcome]["properties"]
+    return schema["$defs"][outcome]
+
+
+def _outcome_properties(**options: bool) -> dict:
+    return _outcome_schema(**options)["properties"]
 
 
 def test_the_response_schema_offers_the_failure_call_only_with_tool_calls() -> None:
@@ -46,6 +50,12 @@ def test_the_response_schema_offers_the_failure_call_only_with_tool_calls() -> N
     )
 
     assert "failure_call" in supported
+    assert (
+        "failure_call"
+        in _outcome_schema(
+            observation_criteria_required=True, failure_call_supported=True
+        )["required"]
+    )
     assert "failure_call" not in _outcome_properties(observation_criteria_required=True)
     assert "failure_call" not in _outcome_properties()
 
@@ -60,9 +70,28 @@ def test_the_request_offers_the_failure_call_when_the_contract_captures_tool_cal
 
     fields = client.calls[0].response_format.model_json_schema()["$defs"]
     assert any("failure_call" in item.get("properties", {}) for item in fields.values())
-    assert "Also return `failure_call` under `unsafe_outcome`" in (
+    assert "Always return `failure_call` under `unsafe_outcome`" in (
         client.calls[0].user_prompt
     )
+
+
+def test_a_reply_that_omits_the_failure_call_is_rejected() -> None:
+    payload_type = _scenario_semantics_payload_type(
+        1,
+        observation_criteria_required=True,
+        condition_references_supplied=True,
+        failure_call_supported=True,
+    )
+    payload = _payload_with(_ownership_condition("ORD-2"))
+    payload["causal_factors"] = payload["causal_factors"][:1]
+    payload["causal_factors"][0]["source_handle"] = "cause_1"
+    for intention in payload["attacker_bdi"]["intentions"]:
+        intention["source_handles"] = ["cause_1"]
+
+    payload_type.model_validate(payload)
+    del payload["unsafe_outcome"]["failure_call"]
+    with pytest.raises(ValidationError, match="failure_call"):
+        payload_type.model_validate(payload)
 
 
 def test_stage5_carries_the_failure_call_onto_the_spec(tmp_path) -> None:

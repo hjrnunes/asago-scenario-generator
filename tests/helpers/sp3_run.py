@@ -104,6 +104,7 @@ def _semantics_wire(payload: dict) -> dict:
                 "reason": "The qualification adapter captures assistant messages.",
             }
         ],
+        "failure_call": None,
         "safe_observable_outcome": {
             "observable": True,
             "statement": "The assistant reply preserves the requested action.",

@@ -130,8 +130,12 @@ def _handoff_for(
         loss_analysis,
         scenario_id="SCN-001",
     )
+    # No observation contract is supplied, so the reply schema has no
+    # failure_call.
+    payload = _normal_semantics_payload()
+    del payload["unsafe_outcome"]["failure_call"]
     client = MockLLMClient()
-    client.set_response_queue([_normal_semantics_payload()])
+    client.set_response_queue([payload])
     spec, error = generate_bdi_for_context(
         client,
         context,

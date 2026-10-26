@@ -125,7 +125,7 @@ cases:
         ordering)
       - contents of model-to-model prompts
       - >-
-        Also return `failure_call` under `unsafe_outcome`: the one call that
+        Always return `failure_call` under `unsafe_outcome`: the one call that
         `semantic_proposition` is about. Set `kind` to `incorrect_call` when
         the failure is a call that is made but should not be, or is made with
         wrong arguments or at the wrong time; set it to `missing_call` when the
@@ -135,8 +135,9 @@ cases:
       - >-
         Decide it from what the failure is, not from the control action's
         category: an omitted control action can fail through an incorrect call
-        of another operation. Set `failure_call` to `null` when the failure is
-        not a call of one inventory operation, for example a reply.
+        of another operation. When the failure is not a call of one inventory
+        operation, for example a reply, set `failure_call` to `null`; never
+        omit the key.
       - '`{"kind":"incorrect_call","operation_name":"documented_operation"}`'
       - Also return `discriminating_condition` under `unsafe_outcome`
       - '{"source":"argument","operation":<name>,"argument":<name>}'
@@ -275,10 +276,10 @@ cases:
           "record_selection":{"status":"observed","record_path":"TARGET-STATE.tanks.T-3",
           "argument_values":[{"operation":"refill_tank","argument":"tank_id","path":"TARGET-STATE.tanks.T-3"}]}}`
       - - Also return one `safe_observable_outcome` object
-        - Also return `failure_call` under `unsafe_outcome`
+        - Always return `failure_call` under `unsafe_outcome`
         - Also return `discriminating_condition` under `unsafe_outcome`
     once:
-      - Also return `failure_call` under `unsafe_outcome`
+      - Always return `failure_call` under `unsafe_outcome`
     forbidden:
       - "## Exact Target Operation"
       - Use only supplied `record_refs` and
