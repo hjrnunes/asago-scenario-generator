@@ -14,6 +14,16 @@ counts, per directory and in total, the bound conditions checked, the
 scenarios refused under each rule, which are the scenarios at risk of losing
 their tool-call condition, and the undecidable cases under each rule, with
 every example.
+
+``--value-facts TARGET_ID=PATH`` (repeatable) checks the directories whose
+profile has that ``target_id`` and declares no ``value_facts`` of its own as
+if the profile declared the facts in PATH (a ``TargetValueFacts`` YAML or
+JSON document). The profile file and its digest are not changed; each
+directory reports where its facts came from (``profile``, ``overlay``, or
+``none``)::
+
+    uv run python scripts/condition_contradiction_sweep.py OUTPUT_DIR \
+        --value-facts miniklarna=docs/handoffs/typed-condition-facts/klarna.yaml
 """
 
 from __future__ import annotations
@@ -22,6 +32,8 @@ import argparse
 import json
 import sys
 from collections import Counter
+from collections.abc import Mapping
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +45,9 @@ from asago_scenario_generator.models.target_realization import (
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
+from asago_scenario_generator.stpa.models.value_facts import TargetValueFacts
 from asago_scenario_generator.stpa.scenario_prod.condition_check import (
+    ConditionUniverse,
     build_condition_universe,
 )
 from asago_scenario_generator.stpa.scenario_prod.realized_operation import (
@@ -62,8 +76,30 @@ RECOVERY = (
 )
 
 
+def with_declared_facts(
+    universe: ConditionUniverse,
+    profile: ExecutionTargetProfile,
+    overlays: Mapping[str, TargetValueFacts],
+) -> tuple[ConditionUniverse, str]:
+    """Return the universe with the value facts the sweep checks it under.
+
+    The profile's own value facts come first; otherwise the overlay declared
+    for its target, if any. The second value says which: ``profile``,
+    ``overlay``, or ``none``.
+    """
+
+    if profile.value_facts is not None:
+        return universe, "profile"
+    facts = overlays.get(profile.target_id)
+    if facts is None:
+        return universe, "none"
+    return replace(universe, value_facts=facts), "overlay"
+
+
 def sweep_directory(
-    output_dir: Path, target_profile: Path | None = None
+    output_dir: Path,
+    target_profile: Path | None = None,
+    value_facts: Mapping[str, TargetValueFacts] | None = None,
 ) -> dict[str, Any]:
     """Check every handoff of one ``generate`` output directory."""
 
@@ -82,10 +118,14 @@ def sweep_directory(
     realization = TargetRealizationResult.model_validate(
         yaml.safe_load((output_dir / "target-realization.yaml").read_text())
     )
-    universe = build_condition_universe(
-        execution_target_profile=profile,
-        target_operation=None,
-        target_observations=observations,
+    universe, facts_source = with_declared_facts(
+        build_condition_universe(
+            execution_target_profile=profile,
+            target_operation=None,
+            target_observations=observations,
+        ),
+        profile,
+        value_facts or {},
     )
     handoffs = sorted((output_dir / "scenarios").glob("*.yaml"))
     rows = []
@@ -117,16 +157,21 @@ def sweep_directory(
                 ],
             }
         )
-    return _summary(output_dir, profile_path, len(handoffs), rows)
+    return _summary(output_dir, profile_path, len(handoffs), rows, facts_source)
 
 
 def _summary(
-    output_dir: Path, profile_path: Path, handoffs: int, rows: list[dict]
+    output_dir: Path,
+    profile_path: Path,
+    handoffs: int,
+    rows: list[dict],
+    value_facts: str = "none",
 ) -> dict[str, Any]:
     refused = [row for row in rows if row["refused"]]
     return {
         "directory": str(output_dir),
         "target_profile": str(profile_path),
+        "value_facts": value_facts,
         "handoffs": handoffs,
         "checked": len(rows),
         "refused_scenarios": len(refused),
@@ -231,7 +276,7 @@ def render(summaries: list[dict[str, Any]]) -> str:
             f"## {summary['directory']}",
             "",
             f"- handoffs: {summary['handoffs']}; bound conditions checked: "
-            f"{summary['checked']}",
+            f"{summary['checked']}; value facts: {summary['value_facts']}",
             "- refused scenarios: "
             f"{summary['refused_scenarios']} (rule a: "
             f"{summary['refused_by_rule']['a']}, rule b: "
@@ -275,10 +320,26 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         help="profile to use for every directory instead of its own copy",
     )
+    parser.add_argument(
+        "--value-facts",
+        action="append",
+        default=[],
+        metavar="TARGET_ID=PATH",
+        help="value facts to check a target's directories under when its "
+        "profile declares none",
+    )
     parser.add_argument("--json", action="store_true", help="print JSON")
     args = parser.parse_args(argv)
+    overlays = {}
+    for item in args.value_facts:
+        target_id, separator, path = item.partition("=")
+        if not separator or not target_id or not path:
+            parser.error(f"--value-facts takes TARGET_ID=PATH, got {item!r}")
+        overlays[target_id] = TargetValueFacts.model_validate(
+            yaml.safe_load(Path(path).read_text())
+        )
     summaries = [
-        sweep_directory(directory, args.target_profile)
+        sweep_directory(directory, args.target_profile, overlays)
         for directory in args.output_dirs
     ]
     if args.json:
