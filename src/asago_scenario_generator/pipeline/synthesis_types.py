@@ -44,6 +44,11 @@ ACCOUNTING_FILENAME = "obligation-accounting.yaml"
 SCENARIO_REALIZATION_FILENAME = "scenario-realization.yaml"
 
 
+# The final control structure, written only after an applied structural
+# revision; the baseline stays in Stage 2's ``control-structure.yaml``.
+FINAL_CONTROL_STRUCTURE_FILENAME = "control-structure-final.yaml"
+
+
 MANIFEST_FILENAME = "synthesis-manifest.yaml"
 
 

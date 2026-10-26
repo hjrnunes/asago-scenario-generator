@@ -22,7 +22,10 @@ whose replayed route carries that record's diagnostic;
 :data:`LOST_REPLY_STOP_REASON_CHANGE` names those that counting a lost ICA slot
 reply as a provider contract failure changes, accepted only on rows whose
 recorded slot diagnostics the replay renames and, for a moved row, whose every
-routed slot carries a lost-reply diagnostic.
+routed slot carries a lost-reply diagnostic;
+:data:`BUDGET_REJECTION_STOP_REASON_CHANGE` names those that counting a slot
+request its prompt budget rejected changes, under the same proof, with every
+routed slot of a moved row budget-rejected or lost.
 The named versions in
 :data:`VERSION_CHAINS` compare as the
 sequence of distinct versions each side holds; :data:`RETIRED_FIELDS`,
@@ -79,6 +82,9 @@ from asago_scenario_generator.models.obligation_consideration import (
     SLOT_PROVIDER_CONTRACT_FAILED,
     ConsiderationDiagnostic,
     ObligationSemanticAssessment,
+)
+from asago_scenario_generator.pipeline.synthesis_types import (
+    FINAL_CONTROL_STRUCTURE_FILENAME,
 )
 from asago_scenario_generator.stpa.infra.call_log import (
     CALLS_FILENAME,
@@ -663,21 +669,70 @@ REMOVED_TEXT: tuple[RemovedText, ...] = (
 
 @dataclass(frozen=True)
 class AllowedFileChange:
-    """A file one side may lack because recordings predate the report rewrite.
+    """A file one side may lack because recordings predate the change that wrote it.
 
     *side* names the side that holds the file: ``"recording"`` for a file the
-    replay no longer writes, ``"replay"`` for one a recording lacks.
+    replay no longer writes, ``"replay"`` for one a recording lacks.  When
+    *check* is given, a replay-only file is allowed only when
+    ``check(replay_root)`` returns ``None``; otherwise its message fails the
+    file.
     """
 
     file: str
     side: str
     reason: str
+    check: Callable[[Path], str | None] | None = None
+
+
+_FINAL_STRUCTURE = "final_control_structure"
+_FINAL_STRUCTURE_COPY = FINAL_CONTROL_STRUCTURE_FILENAME
+
+
+def _final_structure_pin(root: Path) -> dict[str, Any] | None:
+    """Return the final control structure pin of *root*'s synthesis manifest."""
+    path = root / _MANIFEST_FILENAME
+    if not path.is_file():
+        return None
+    manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
+    artifacts = manifest.get("source_artifacts") if isinstance(manifest, dict) else None
+    pin = artifacts.get(_FINAL_STRUCTURE) if isinstance(artifacts, dict) else None
+    return pin if isinstance(pin, dict) else None
+
+
+def _pinned_structure(path: Path, pin: dict[str, Any]) -> ControlStructure | None:
+    """Return the control structure at *path* when *pin* is its identity."""
+    from asago_scenario_generator.pipeline.synthesis_manifest import (
+        _manifest_artifact_identity,
+    )
+
+    if not path.is_file():
+        return None
+    try:
+        structure = ControlStructure.model_validate(
+            yaml.safe_load(path.read_text(encoding="utf-8"))
+        )
+        identity = _manifest_artifact_identity(
+            pin.get("artifact_id"), pin.get("schema_version"), structure
+        )
+    except (TypeError, ValueError):
+        return None
+    return structure if identity == pin else None
+
+
+def _final_structure_copy_problem(root: Path) -> str | None:
+    """Require the replay's final structure copy to be the one its manifest pins."""
+    pin = _final_structure_pin(root)
+    if pin is None or _pinned_structure(root / _FINAL_STRUCTURE_COPY, pin) is None:
+        return "is not the final control structure the synthesis manifest pins"
+    return None
 
 
 # Recordings made before the generate report moved to the shared report kit
 # hold synthesis-report.html and neither report/ nor policy-coverage.json.
 # Recordings made before the run stopped copying its inputs hold those
-# copies.  Re-record the corpus to retire these entries.
+# copies.  Recordings made before the run wrote its final control structure
+# after a structural revision lack that copy.  Re-record the corpus to retire
+# these entries.
 ALLOWED_FILE_CHANGES: tuple[AllowedFileChange, ...] = (
     AllowedFileChange(
         "synthesis-report.html",
@@ -707,6 +762,13 @@ ALLOWED_FILE_CHANGES: tuple[AllowedFileChange, ...] = (
         "target-evidence.yaml",
         "recording",
         "a projection of the target profile input that nothing read",
+    ),
+    AllowedFileChange(
+        _FINAL_STRUCTURE_COPY,
+        "replay",
+        "the final control structure a run writes after an applied structural "
+        "revision, so the gate can read the slots slot filling answered locally",
+        check=_final_structure_copy_problem,
     ),
 )
 
@@ -937,6 +999,12 @@ class LostReplyStopReasonChange:
     show that its every unresolved slot lost its reply, and fails.  A row
     carrying one of *excluded_pair_codes*, which name slots never analyzed
     for another reason, is never explained.
+
+    *companion_pair_codes* name the other unanalyzed slots a row may carry
+    beside its own, of a lower precedence: each counts as a slot named for
+    the drop, bound the same way, and the recording holds it either renamed
+    to *recorded_pair_code*, all of them alike, or as replayed, when the
+    recording was made after its own change.
     Such rows join the rows :data:`ACCOUNTING_STOP_REASON_CHANGE` explains,
     and the realization, manifest and report must follow all of them through
     that allowance's checks.  This temporary allowance remains until
@@ -950,6 +1018,12 @@ class LostReplyStopReasonChange:
     analytic_diagnostic: str
     excluded_pair_codes: frozenset[str]
     reason: str
+    companion_pair_codes: frozenset[str] = frozenset()
+
+    @property
+    def unanalyzed_pair_codes(self) -> frozenset[str]:
+        """The pair codes that name a routed slot never analyzed."""
+        return frozenset({self.replayed_pair_code, *self.companion_pair_codes})
 
 
 LOST_REPLY_STOP_REASON_CHANGE = LostReplyStopReasonChange(
@@ -962,6 +1036,24 @@ LOST_REPLY_STOP_REASON_CHANGE = LostReplyStopReasonChange(
     reason="slot filling names a routed pair whose slot reply broke its contract "
     "and accounting counts a row whose every unresolved slot lost its reply as "
     "a provider contract failure, so those rows' recorded diagnostics and stop "
+    "reasons move with no request change",
+)
+
+# Counting a slot request its prompt budget rejected follows the same proof:
+# the budget allowance is the lost-reply allowance for the budget's pair code,
+# whose rows may also carry lost replies, which a budget rejection precedes.
+BUDGET_REJECTION_STOP_REASON_CHANGE = LostReplyStopReasonChange(
+    recorded_pair_code="slot_pair_unresolved",
+    replayed_pair_code=SLOT_PROMPT_BUDGET_EXCEEDED,
+    analytic_reason="ica_consideration_unresolved",
+    replayed_reason="prompt_budget_exceeded",
+    analytic_diagnostic="unresolved_ica_consideration",
+    excluded_pair_codes=frozenset(),
+    companion_pair_codes=frozenset({SLOT_PROVIDER_CONTRACT_FAILED}),
+    reason="slot filling names a routed pair whose slot request its prompt "
+    "budget rejected before dispatch and accounting counts a row whose every "
+    "unresolved slot went unanalyzed, one of them budget-rejected, as "
+    "prompt_budget_exceeded, so those rows' recorded diagnostics and stop "
     "reasons move with no request change",
 )
 
@@ -1722,6 +1814,21 @@ def _file_change_allowed(name: str, side: str) -> bool:
     )
 
 
+def _replay_only_problem(name: str, replayed: Path) -> str | None:
+    """Return why a file only the replay holds fails, or ``None`` if allowed."""
+    change = next(
+        (
+            item
+            for item in ALLOWED_FILE_CHANGES
+            if item.side == "replay" and item.file == name
+        ),
+        None,
+    )
+    if change is None:
+        return "only in replay"
+    return None if change.check is None else change.check(replayed)
+
+
 _OBLIGATION_PLAN_FILENAME = "taxonomy-obligation-plan.yaml"
 
 
@@ -2255,19 +2362,19 @@ def _lost_reply_row_explained(
     codes = [item.get("code") for item in after_items]
     if change.replayed_pair_code not in codes:
         return False
-    restored = [
-        {**item, "code": change.recorded_pair_code}
-        if item.get("code") == change.replayed_pair_code
-        else item
-        for item in after_items
-    ]
     if set(codes) & change.excluded_pair_codes:
         return False
     lost = _bound_lost_slots(after, change)
     if lost is None:
         return False
+    restorations = [
+        _restored_pair_codes(after_items, renamed, change.recorded_pair_code)
+        for renamed in dict.fromkeys(
+            (frozenset({change.replayed_pair_code}), change.unanalyzed_pair_codes)
+        )
+    ]
     reasons = (before.get("stop_reason"), after.get("stop_reason"))
-    if before_items == restored:
+    if before_items in restorations:
         return reasons[0] == reasons[1]
     refs = after.get("route_refs") or []
     if not (
@@ -2286,21 +2393,32 @@ def _lost_reply_row_explained(
         dropped = _unresolved_ica_diagnostic(after.get("obligation_id"), refs[0])
     except (TypeError, ValueError):
         return False
-    return dropped.code == change.analytic_diagnostic and before_items == [
-        *restored,
-        dropped.model_dump(mode="json"),
+    return dropped.code == change.analytic_diagnostic and any(
+        before_items == [*restored, dropped.model_dump(mode="json")]
+        for restored in restorations
+    )
+
+
+def _restored_pair_codes(
+    items: list[dict[str, Any]], renamed: frozenset[str], recorded_code: str
+) -> list[dict[str, Any]]:
+    """Return *items* with each *renamed* pair code back at *recorded_code*."""
+    return [
+        {**item, "code": recorded_code} if item.get("code") in renamed else item
+        for item in items
     ]
 
 
 def _bound_lost_slots(
     row: dict[str, Any], change: LostReplyStopReasonChange
 ) -> list[str] | None:
-    """Return the slots the row's *replayed_pair_code* diagnostics name.
+    """Return the slots the row's unanalyzed-slot diagnostics name.
 
-    Slot filling writes one such diagnostic per lost routed slot, naming the
-    row's obligation, its one route and that slot.  ``None`` when any of them
-    names another obligation or route, no slot or several of the row's
-    slots, or a slot another one already names.
+    Slot filling writes one diagnostic of a code in *unanalyzed_pair_codes*
+    per unanalyzed routed slot, naming the row's obligation, its one route
+    and that slot.  ``None`` when any of them names another obligation or
+    route, no slot or several of the row's slots, or a slot another one
+    already names.
     """
     slots, refs = row.get("slot_ids"), row.get("route_refs")
     items = row.get("diagnostics")
@@ -2313,7 +2431,10 @@ def _bound_lost_slots(
         return None
     lost: list[str] = []
     for item in items:
-        if not isinstance(item, dict) or item.get("code") != change.replayed_pair_code:
+        if (
+            not isinstance(item, dict)
+            or item.get("code") not in change.unanalyzed_pair_codes
+        ):
             continue
         item_refs = item.get("refs")
         if not isinstance(item_refs, list):
@@ -2353,46 +2474,43 @@ def _every_routed_slot_lost(
     )
 
 
-def _locally_decided_slots(root: Path) -> frozenset[str]:
-    """Return the slots slot filling answered without the provider in *root*.
+def _locally_decided_slots(
+    recorded: Path, replayed: Path | None = None
+) -> frozenset[str]:
+    """Return the slots slot filling answered without the provider.
 
     Slot filling decides a slot locally from its control action's typed
     temporality, in the final control structure; such a slot's routed pairs
-    are always not applicable.  The run writes only the baseline structure,
-    so it counts only where its digest is the final structure the synthesis
-    manifest pins, that is where no structural revision changed it; otherwise
-    no slot counts and a row with another routed slot fails closed.
+    are always not applicable.  The structure counts only where its identity
+    is the final structure the recorded synthesis manifest pins.  After an
+    applied structural revision a run writes that structure as
+    :data:`_FINAL_STRUCTURE_COPY`; the recording's copy is read first, then
+    the replay's, which a recording made before the copy was written lacks.
+    Without either, the baseline ``control-structure.yaml`` counts where no
+    revision or enrichment changed it.  When no structure matches the pin, no
+    slot counts and a row with another routed slot fails closed.
     """
-    from asago_scenario_generator.pipeline.synthesis_manifest import (
-        _manifest_artifact_identity,
-    )
-    from asago_scenario_generator.stpa.models.control_structure import (
-        ControlStructure,
-    )
     from asago_scenario_generator.stpa.threat_enum.slot_creation import (
         create_slots,
         requires_provider_slot_analysis,
     )
 
-    structure_path = root / _CONTROL_STRUCTURE_FILENAME
-    manifest_path = root / _MANIFEST_FILENAME
-    if not structure_path.is_file() or not manifest_path.is_file():
+    pin = _final_structure_pin(recorded)
+    if pin is None:
         return frozenset()
-    manifest = yaml.safe_load(manifest_path.read_text(encoding="utf-8"))
-    artifacts = manifest.get("source_artifacts") if isinstance(manifest, dict) else None
-    pin = artifacts.get(_FINAL_STRUCTURE) if isinstance(artifacts, dict) else None
-    if not isinstance(pin, dict):
-        return frozenset()
-    try:
-        structure = ControlStructure.model_validate(
-            yaml.safe_load(structure_path.read_text(encoding="utf-8"))
-        )
-        identity = _manifest_artifact_identity(
-            pin.get("artifact_id"), pin.get("schema_version"), structure
-        )
-    except (TypeError, ValueError):
-        return frozenset()
-    if identity != pin:
+    candidates = [recorded / _FINAL_STRUCTURE_COPY]
+    if replayed is not None:
+        candidates.append(replayed / _FINAL_STRUCTURE_COPY)
+    candidates.append(recorded / _CONTROL_STRUCTURE_FILENAME)
+    structure = next(
+        (
+            found
+            for path in candidates
+            if (found := _pinned_structure(path, pin)) is not None
+        ),
+        None,
+    )
+    if structure is None:
         return frozenset()
     return frozenset(
         slot.slot_id
@@ -2402,7 +2520,6 @@ def _locally_decided_slots(root: Path) -> frozenset[str]:
 
 
 _CONTROL_STRUCTURE_FILENAME = "control-structure.yaml"
-_FINAL_STRUCTURE = "final_control_structure"
 
 
 def _considered_reason(row: dict[str, Any]) -> str | None:
@@ -2419,12 +2536,15 @@ def _accounting_stop_reason_change(
     change: AccountingStopReasonChange = ACCOUNTING_STOP_REASON_CHANGE,
     routing: RoutingRecordStopReasonChange | None = ROUTING_RECORD_STOP_REASON_CHANGE,
     lost_reply: LostReplyStopReasonChange | None = LOST_REPLY_STOP_REASON_CHANGE,
+    budget: LostReplyStopReasonChange | None = BUDGET_REJECTION_STOP_REASON_CHANGE,
 ) -> _AccountingChange | None:
-    """Validate that the accounting differs only as the three changes derive.
+    """Validate that the accounting differs only as the four changes derive.
 
     Each differing row must be the one the stop order derives or, unless
     *routing* is ``None``, the one its failed routing record explains, or,
-    unless *lost_reply* is ``None``, the one its lost slot replies explain.
+    unless *lost_reply* is ``None``, the one its lost slot replies explain,
+    or, unless *budget* is ``None``, the one its budget-rejected slot
+    requests explain.
     """
     from asago_scenario_generator.models.obligation_accounting import (
         ObligationAccounting,
@@ -2474,7 +2594,9 @@ def _accounting_stop_reason_change(
     removed: Counter[str] = Counter()
     added: Counter[str] = Counter()
     local_slots = (
-        _locally_decided_slots(recorded) if lost_reply is not None else frozenset()
+        _locally_decided_slots(recorded, replayed)
+        if lost_reply is not None or budget is not None
+        else frozenset()
     )
     changed = [(old, new) for old, new in zip(before_rows, after_rows) if old != new]
     if not changed:
@@ -2489,6 +2611,10 @@ def _accounting_stop_reason_change(
             or (
                 lost_reply is not None
                 and _lost_reply_row_explained(old, new, lost_reply, local_slots)
+            )
+            or (
+                budget is not None
+                and _lost_reply_row_explained(old, new, budget, local_slots)
             )
         ):
             return None
@@ -2819,9 +2945,9 @@ def compare_trees(
             and not _expected_recording_only_file(name, expected)
         ]
         + [
-            Difference(name, "only in replay")
+            Difference(name, problem)
             for name in sorted(right - left)
-            if not _file_change_allowed(name, "replay")
+            if (problem := _replay_only_problem(name, replayed)) is not None
         ]
     )
     if expected_differences is not None:

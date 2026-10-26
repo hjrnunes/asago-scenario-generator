@@ -52,6 +52,7 @@ from asago_scenario_generator.pipeline.synthesis_manifest import (
 from asago_scenario_generator.pipeline.synthesis_persist import (
     _artifact_paths,
     _persist_manifest,
+    _persist_final_control_structure,
     _persist_ica_merges,
     _persist_plan,
     _persist_prepared_profile,
@@ -369,6 +370,9 @@ def _run_synthesis(
     ica_merges_path = _persist_ica_merges(
         output_dir, _ica_merge_report(ica_enumeration)
     )
+    final_control_path = _persist_final_control_structure(
+        output_dir, revision_result, final_control
+    )
     target_realization_path = _persist_target_realization(
         output_dir,
         target_realization,
@@ -433,6 +437,7 @@ def _run_synthesis(
         hazard_offers_path=hazard_offers_path,
         policy_coverage_path=policy_coverage_path,
         ica_merges_path=ica_merges_path,
+        final_control_path=final_control_path,
     )
 
     return SynthesisResult(

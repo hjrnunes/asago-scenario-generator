@@ -23,6 +23,7 @@ from asago_scenario_generator.pipeline.obligation_persistence import (
     write_taxonomy_obligation_plan,
 )
 from asago_scenario_generator.pipeline.synthesis_types import (
+    FINAL_CONTROL_STRUCTURE_FILENAME,
     MANIFEST_FILENAME,
     REPORT_FILENAME,
     StageRun,
@@ -91,6 +92,23 @@ def _persist_ica_merges(output_dir: Path, report: Any | None) -> Path | None:
     if report is None:
         return None
     return _persist_sidecar(output_dir, ICA_MERGES_FILENAME, report)
+
+
+def _persist_final_control_structure(
+    output_dir: Path, revision: Any, final_control: Any
+) -> Path | None:
+    """Publish the final control structure when a structural revision applied.
+
+    Slot filling reads the structure the manifest pins as
+    ``final_control_structure``: the baseline, as revised and then enriched.
+    Stage 2's ``control-structure.yaml`` keeps the baseline, so after an
+    applied revision this copy is the only record of the structure slot
+    filling analyzed.  Without one the final structure is the baseline, plus
+    any control-action enrichment, and no copy is written.
+    """
+    if getattr(revision, "status", None) != "applied":
+        return None
+    return _persist_sidecar(output_dir, FINAL_CONTROL_STRUCTURE_FILENAME, final_control)
 
 
 def _persist_target_realization(
@@ -170,9 +188,15 @@ def _artifact_paths(
     hazard_offers_path: Path | None = None,
     policy_coverage_path: Path | None = None,
     ica_merges_path: Path | None = None,
+    final_control_path: Path | None = None,
 ) -> dict[str, Path]:
     """Add each optional published artifact to the always-written ones."""
-    for sidecar in (hazard_offers_path, ica_merges_path, policy_coverage_path):
+    for sidecar in (
+        hazard_offers_path,
+        ica_merges_path,
+        policy_coverage_path,
+        final_control_path,
+    ):
         if sidecar is not None:
             artifact_paths[sidecar.name] = sidecar
     if target_realization_path is not None:

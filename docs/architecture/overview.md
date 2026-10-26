@@ -291,6 +291,10 @@ The root atomically publishes `taxonomy-obligation-plan.yaml`,
 filling sent requests, `slot-hazard-offers.yaml`, and, when slot compilation
 merged findings that differ only by context row or pair, `ica-merges.yaml`
 (one entry per merged ICA, with the as-written findings it stands for).
+After an applied structural revision it also publishes
+`control-structure-final.yaml`, the final control structure the manifest pins
+as `final_control_structure` and slot filling read; Stage 2's
+`control-structure.yaml` keeps the baseline.
 Accounting joins
 exact obligation/slot, ICA,
 `EXEC:*`, hazard, and constraint evidence but makes no correspondence

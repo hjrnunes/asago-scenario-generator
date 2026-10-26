@@ -3865,24 +3865,49 @@ def test_the_lost_reply_does_not_hide_an_out_of_scope_drop_beside_a_bare_slot(
     ]
 
 
+def _budget_beside_lost_reply(reason: str):
+    """Move the replayed row to *reason*, its analytic slot budget-rejected."""
+
+    def fields(accounting: Any, first: str) -> dict[str, Any]:
+        lost, analytic, _ = _row_of(accounting, first).diagnostics
+        return {
+            "stop_reason": reason,
+            "diagnostics": (
+                lost,
+                analytic.model_copy(update={"code": _BUDGET}),
+            ),
+        }
+
+    return fields
+
+
 @pytest.mark.parametrize(
     "reason", ["provider_contract_failure", "prompt_budget_exceeded"]
 )
 def test_the_lost_reply_does_not_hide_a_slot_its_budget_rejected(
     trees, reason: str
 ) -> None:
-    def budget_rejected(accounting: Any, first: str) -> dict[str, Any]:
-        lost, analytic, _ = _row_of(accounting, first).diagnostics
-        return {
-            "stop_reason": reason,
-            "diagnostics": (
-                lost,
-                analytic.model_copy(update={"code": "slot_prompt_budget_exceeded"}),
-            ),
-        }
-
+    """Only the budget allowance explains a budget-rejected slot."""
     recorded, replayed, path_map = _lost_reply_run(
-        trees, analytic=_BEFORE_LOST_REPLY, replayed_fields=budget_rejected
+        trees,
+        analytic=_BEFORE_LOST_REPLY,
+        replayed_fields=_budget_beside_lost_reply(reason),
+    )
+
+    assert (
+        replay_gate._accounting_stop_reason_change(recorded, replayed, budget=None)
+        is None
+    )
+
+
+def test_the_budget_does_not_hide_a_lost_reply_move_past_its_precedence(
+    trees,
+) -> None:
+    """A budget rejection precedes a lost reply beside it."""
+    recorded, replayed, path_map = _lost_reply_run(
+        trees,
+        analytic=_BEFORE_LOST_REPLY,
+        replayed_fields=_budget_beside_lost_reply("provider_contract_failure"),
     )
 
     _, differences = compare_trees(recorded, replayed, path_map)
@@ -3926,8 +3951,15 @@ def lost_reply_trees(trees) -> tuple[Path, Path, dict[str, str]]:
     return _lost_reply_run(trees)
 
 
+@pytest.fixture
+def budget_trees(trees) -> tuple[Path, Path, dict[str, str]]:
+    """A recording made before budget-rejected slots counted and its replay."""
+    return _budget_run(trees)
+
+
 @pytest.mark.parametrize(
-    "allowance", ["stop_order_trees", "failed_record_trees", "lost_reply_trees"]
+    "allowance",
+    ["stop_order_trees", "failed_record_trees", "lost_reply_trees", "budget_trees"],
 )
 @pytest.mark.parametrize(
     "derived",
@@ -4077,10 +4109,136 @@ def test_the_lost_reply_accepts_a_move_beside_a_locally_answered_slot(trees) -> 
 def test_the_lost_reply_does_not_hide_a_local_slot_of_a_revised_structure(
     trees,
 ) -> None:
-    """Deliberate false negative: the run writes no revised final structure."""
+    """Without the run's copy of the revised structure, no slot counts as local."""
     recorded, replayed, path_map = _lost_reply_run(trees, local=True)
     for root in (recorded, replayed):
         _pin_final_structure(root, revised=True)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+_FINAL_COPY = "control-structure-final.yaml"
+
+
+def _revised_structure(*, temporality: str | None = None) -> Any:
+    """Return the test structure as a structural revision left it.
+
+    The revision rewords the responsibility; with *temporality*, it also
+    types the routed action's temporality, which decides the local slot.
+    """
+    from tests.helpers.obligation_aware import _control_structure
+
+    structure = _control_structure()
+    responsibility = structure.responsibilities[0]
+    action = responsibility.control_actions[0].model_dump(mode="json")
+    if temporality is not None:
+        action["temporality"] = temporality
+    return type(structure).model_validate(
+        {
+            **structure.model_dump(mode="json"),
+            "responsibilities": [
+                {
+                    **responsibility.model_dump(mode="json"),
+                    "description": "Validate and review incoming requests.",
+                    "control_actions": [action],
+                }
+            ],
+        }
+    )
+
+
+def _pin_revised_structure(root: Path, pinned: Any, copy: Any | None) -> None:
+    """Pin *pinned* as the final structure and write *copy* as the run's copy.
+
+    The baseline ``control-structure.yaml`` stays the unrevised structure.
+    """
+    from asago_scenario_generator.pipeline.synthesis_manifest import (
+        _manifest_artifact_identity,
+    )
+
+    _pin_final_structure(root)
+    pin = _manifest_artifact_identity(
+        "stpa-control-structure-final", "stpa-control-structure-v1", pinned
+    )
+    document = yaml.safe_load((root / "synthesis-manifest.yaml").read_text())
+    _rewrite_manifest(
+        root,
+        source_artifacts={
+            **document["source_artifacts"],
+            "final_control_structure": pin,
+        },
+    )
+    if copy is not None:
+        (root / _FINAL_COPY).write_text(
+            yaml.safe_dump(copy.model_dump(mode="json"), sort_keys=False)
+        )
+
+
+@pytest.mark.parametrize("sides", ["replay", "both"])
+def test_the_lost_reply_accepts_a_move_beside_a_slot_local_in_the_revised_structure(
+    trees, sides: str
+) -> None:
+    """The run's copy of the revised structure shows the slot was never sent.
+
+    A recording made before the copy was written lacks it; the replay's copy
+    counts when it is the structure the recording pins.
+    """
+    recorded, replayed, path_map = _lost_reply_run(trees, local=True)
+    revised = _revised_structure()
+    _pin_revised_structure(recorded, revised, revised if sides == "both" else None)
+    _pin_revised_structure(replayed, revised, revised)
+    assert ("unresolved", "provider_contract_failure", [_LOST_REPLY]) in _shapes(
+        replayed
+    )
+    assert replay_gate._locally_decided_slots(recorded, replayed) == {_LOCAL_SLOT}
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_the_lost_reply_does_not_hide_a_copy_the_manifest_does_not_pin(
+    trees,
+) -> None:
+    """A copy that is not the pinned final structure is no evidence and fails."""
+    recorded, replayed, path_map = _lost_reply_run(trees, local=True)
+    for root in (recorded, replayed):
+        _pin_revised_structure(
+            root,
+            _revised_structure(),
+            None
+            if root == recorded
+            else _revised_structure(temporality="instantaneous"),
+        )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == sorted(
+        [*_STOP_ORDER_FILES, _FINAL_COPY]
+    )
+    assert (
+        _FINAL_COPY,
+        "is not the final control structure the synthesis manifest pins",
+    ) in [(item.path, item.detail) for item in differences]
+
+
+def test_the_lost_reply_does_not_hide_a_slot_the_revised_structure_sends(
+    trees,
+) -> None:
+    """The revision typed the action continuous, so its duration slot was sent."""
+    recorded, replayed, path_map = _lost_reply_run(trees, local=True)
+    revised = _revised_structure(temporality="continuous")
+    for root in (recorded, replayed):
+        _pin_revised_structure(root, revised, revised)
+    assert (
+        replay_gate._pinned_structure(
+            replayed / _FINAL_COPY, replay_gate._final_structure_pin(recorded)
+        )
+        == revised
+    )
+    assert _LOCAL_SLOT not in replay_gate._locally_decided_slots(recorded, replayed)
 
     _, differences = compare_trees(recorded, replayed, path_map)
 
@@ -4102,3 +4260,237 @@ def test_the_lost_reply_does_not_hide_a_bare_slot_beside_a_locally_answered_one(
     _, differences = compare_trees(recorded, replayed, path_map)
 
     assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+# Counting a slot request its prompt budget rejected renames the rejected
+# slots' diagnostics and moves accounting rows, not requests.
+
+_BUDGET = "slot_prompt_budget_exceeded"
+
+
+def _budget_run(
+    trees,
+    *,
+    recorded_analytic: str | None = None,
+    replayed_analytic: str | None = None,
+    replayed_fields: Any = None,
+    **options: Any,
+) -> tuple[Path, Path, dict[str, str]]:
+    """Record before the budget change and replay after it.
+
+    Each budget-rejected slot carries ``slot_pair_unresolved`` in the
+    recording and the budget's pair code in the replay.  The first
+    applicable row's second slot carries *recorded_analytic* and
+    *replayed_analytic*, as :func:`_lost_reply_accounting` reads *analytic*;
+    *replayed_fields* edits that row in the replay.
+    """
+    recorded, replayed, path_map = trees
+    for root, code, analytic, fields in (
+        (recorded, _BEFORE_LOST_REPLY, recorded_analytic, None),
+        (replayed, _BUDGET, replayed_analytic, replayed_fields),
+    ):
+        plan, consideration, accounting, first = _lost_reply_accounting(
+            code, analytic=analytic, **options
+        )
+        if fields:
+            accounting = _row_as_recorded(
+                accounting, first, **fields(accounting, first)
+            )
+        _write_accounting_run(root, plan, consideration, accounting)
+    return recorded, replayed, path_map
+
+
+def _budget_shapes(root: Path) -> list[tuple[str, str | None, list[str]]]:
+    rows = yaml.safe_load((root / "obligation-accounting.yaml").read_text())["rows"]
+    unanalyzed = {_BUDGET, _LOST_REPLY, _BEFORE_LOST_REPLY}
+    return sorted(
+        (
+            row["disposition"],
+            row.get("stop_reason"),
+            [d["code"] for d in row["diagnostics"]],
+        )
+        for row in rows
+        if any(d["code"] in unanalyzed for d in row["diagnostics"])
+    )
+
+
+def test_the_budget_accepts_only_its_accounting_outputs(trees) -> None:
+    recorded, replayed, path_map = _budget_run(trees)
+    assert _budget_shapes(recorded) == [
+        ("governance_only", "governance_routed_no_finding", [_BEFORE_LOST_REPLY]),
+        (
+            "unresolved",
+            "ica_consideration_unresolved",
+            [_BEFORE_LOST_REPLY, "unresolved_ica_consideration"],
+        ),
+        (
+            "unresolved",
+            "mechanism_path_unsubstantiated",
+            [_BEFORE_LOST_REPLY, "mechanism_path_unsubstantiated"],
+        ),
+    ]
+    assert _budget_shapes(replayed) == [
+        ("governance_only", "governance_routed_no_finding", [_BUDGET]),
+        (
+            "unresolved",
+            "mechanism_path_unsubstantiated",
+            [_BUDGET, "mechanism_path_unsubstantiated"],
+        ),
+        ("unresolved", "prompt_budget_exceeded", [_BUDGET]),
+    ]
+    expected: list[Difference] = []
+
+    _, differences = compare_trees(
+        recorded, replayed, path_map, expected_differences=expected
+    )
+
+    assert differences == []
+    assert sorted(item.path for item in expected) == _STOP_ORDER_FILES
+    assert (
+        replay_gate._accounting_stop_reason_change(recorded, replayed, budget=None)
+        is None
+    )
+
+
+@pytest.mark.parametrize(
+    "recorded_lost",
+    [_BEFORE_LOST_REPLY, _LOST_REPLY],
+    ids=["before-lost-replies-counted", "after-lost-replies-counted"],
+)
+def test_the_budget_accepts_a_move_beside_a_lost_reply(
+    trees, recorded_lost: str
+) -> None:
+    """Every unresolved slot went unanalyzed, and the budget comes first."""
+    recorded, replayed, path_map = _budget_run(
+        trees, recorded_analytic=recorded_lost, replayed_analytic=_LOST_REPLY
+    )
+    assert (
+        "unresolved",
+        "prompt_budget_exceeded",
+        [_BUDGET, _LOST_REPLY],
+    ) in _budget_shapes(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_the_budget_accepts_an_out_of_scope_row_that_drops_its_diagnostic(
+    trees,
+) -> None:
+    recorded, replayed, path_map = _budget_run(trees, out_of_scope=True)
+    assert ("unresolved", "risk_out_of_scope", [_BUDGET]) in _budget_shapes(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_the_budget_keeps_the_reason_of_an_analytic_slot_beside_it(trees) -> None:
+    recorded, replayed, path_map = _budget_run(
+        trees,
+        recorded_analytic=_BEFORE_LOST_REPLY,
+        replayed_analytic=_BEFORE_LOST_REPLY,
+    )
+    assert (
+        "unresolved",
+        "ica_consideration_unresolved",
+        [_BUDGET, _BEFORE_LOST_REPLY, "unresolved_ica_consideration"],
+    ) in _budget_shapes(replayed)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+@pytest.mark.parametrize(
+    "analytic", [_BEFORE_LOST_REPLY, ""], ids=["diagnosed", "bare"]
+)
+def test_the_budget_does_not_hide_a_move_beside_an_analytic_slot(
+    trees, analytic: str
+) -> None:
+    """The recording cannot show the analytic slot went unanalyzed."""
+    recorded, replayed, path_map = _budget_run(
+        trees,
+        recorded_analytic=analytic,
+        replayed_analytic=analytic,
+        replayed_fields=_moved_to("prompt_budget_exceeded"),
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["provider_contract_failure", "no_structural_route", "ica_hazard_contradictory"],
+)
+def test_the_budget_does_not_hide_a_move_to_another_reason(trees, reason: str) -> None:
+    recorded, replayed, path_map = _budget_run(
+        trees, replayed_fields=_moved_to(reason, drop=False)
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert "obligation-accounting.yaml" in [item.path for item in differences]
+
+
+def test_the_budget_does_not_hide_a_misbound_diagnostic(trees) -> None:
+    """A renamed diagnostic must name the row's own route."""
+
+    def other_route(accounting: Any, first: str) -> dict[str, Any]:
+        (item,) = _row_of(accounting, first).diagnostics
+        return {
+            "diagnostics": (
+                item.model_copy(
+                    update={
+                        "refs": tuple(
+                            "route:v1:" + "9" * 64 if ref.startswith("route:") else ref
+                            for ref in item.refs
+                        )
+                    }
+                ),
+            )
+        }
+
+    recorded, replayed, path_map = _budget_run(trees, replayed_fields=other_route)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_budget_accepts_a_move_beside_a_locally_answered_slot(trees) -> None:
+    recorded, replayed, path_map = _budget_run(trees, local=True)
+    revised = _revised_structure()
+    for root in (recorded, replayed):
+        _pin_revised_structure(root, revised, None if root == recorded else revised)
+    assert ("unresolved", "prompt_budget_exceeded", [_BUDGET]) in _budget_shapes(
+        replayed
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert differences == []
+
+
+def test_the_budget_does_not_hide_a_local_slot_without_its_structure(
+    trees,
+) -> None:
+    recorded, replayed, path_map = _budget_run(trees, local=True)
+    for root in (recorded, replayed):
+        _pin_revised_structure(root, _revised_structure(), None)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert sorted(item.path for item in differences) == _STOP_ORDER_FILES
+
+
+def test_the_budget_states_its_reason() -> None:
+    change = replay_gate.BUDGET_REJECTION_STOP_REASON_CHANGE
+    lost = replay_gate.LOST_REPLY_STOP_REASON_CHANGE
+    assert change.reason
+    assert change.replayed_pair_code in lost.excluded_pair_codes
+    assert change.companion_pair_codes == {lost.replayed_pair_code}
+    assert change.replayed_reason == "prompt_budget_exceeded"

@@ -37,11 +37,15 @@ from asago_scenario_generator.pipeline.synthesis import (
     run_synthesis,
 )
 from asago_scenario_generator.pipeline.synthesis_manifest import (
+    _manifest_artifact_identity,
     _manifest_provider_evidence,
     _scenario_generation_status,
     _total_prompt_tokens,
 )
-from asago_scenario_generator.pipeline.synthesis_types import _systemic_inputs
+from asago_scenario_generator.pipeline.synthesis_types import (
+    FINAL_CONTROL_STRUCTURE_FILENAME,
+    _systemic_inputs,
+)
 from asago_scenario_generator.stpa.infra.call_log import append_call_log
 from asago_scenario_generator.pipeline.synthesis_baseline import (
     _assert_taxonomy_input_identity,
@@ -661,6 +665,55 @@ def test_synthesis_rechecks_every_applicable_obligation_once_after_revision(
     assert loss_analysis is fake.revision.final_loss_analysis
     assert control_structure is fake.revision.final_control_structure
     assert len(loss_analysis.hazards) == len(fake.loss_analysis.hazards) + 1
+
+
+def test_an_applied_revision_publishes_the_final_control_structure(
+    tmp_path: Path,
+) -> None:
+    """The copy is the structure slot filling read; the baseline stays as written."""
+    inputs = _inputs(tmp_path)
+    baseline = Path(inputs.output_dir) / "control-structure.yaml"
+    baseline.parent.mkdir(parents=True, exist_ok=True)
+    baseline.write_text("the baseline Stage 2 published\n", encoding="utf-8")
+    fake = _FakeAdapters(calls=[], gap=True)
+
+    result = run_synthesis(inputs, SynthesisAdapters.from_object(fake))
+
+    path = result.artifact_paths[FINAL_CONTROL_STRUCTURE_FILENAME]
+    assert path == Path(inputs.output_dir) / FINAL_CONTROL_STRUCTURE_FILENAME
+    structure = ControlStructure.model_validate(
+        yaml.safe_load(path.read_text(encoding="utf-8"))
+    )
+    filled = next(value for name, value in fake.calls if name == "fill_icas")
+    assert structure == filled[2]
+    assert fake.revision is not None
+    assert structure == fake.revision.final_control_structure
+    assert (
+        _manifest_artifact_identity(
+            "stpa-control-structure-final", "stpa-control-structure-v1", structure
+        )
+        == result.manifest["source_artifacts"]["final_control_structure"]
+    )
+    assert baseline.read_text(encoding="utf-8") == "the baseline Stage 2 published\n"
+
+
+@pytest.mark.parametrize(
+    ("gap", "revision_outcome"),
+    ((False, "applied"), (True, "rejected"), (True, "compile_failure")),
+    ids=("no-gap", "rejected-revision", "failed-revision"),
+)
+def test_a_run_without_an_applied_revision_publishes_no_final_control_structure(
+    tmp_path: Path, gap: bool, revision_outcome: RevisionOutcome
+) -> None:
+    """The final structure is then the baseline, so no copy is written."""
+    fake = _FakeAdapters(calls=[], gap=gap, revision_outcome=revision_outcome)
+
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    assert FINAL_CONTROL_STRUCTURE_FILENAME not in result.artifact_paths
+    assert not (
+        Path(result.inputs.output_dir) / FINAL_CONTROL_STRUCTURE_FILENAME
+    ).exists()
 
 
 @pytest.mark.parametrize(
