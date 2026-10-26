@@ -41,6 +41,7 @@ from asago_scenario_generator.stpa.tool_call_condition import (
     ToolCallConditionStatus,
 )
 from asago_scenario_generator.stpa.observation_contract import (
+    FailureCall,
     ObservationAssessment,
     ObservationCriterion,
     SafeObservableOutcome,
@@ -166,6 +167,13 @@ class ScenarioSpec(BaseModel):
     # ScenarioSpec values; contextual v2 preparation rejects it before Stage 6.
     unsafe_outcome_condition: SemanticCondition | None = None
     unsafe_outcome_semantic_proposition: StrictStr | None = None
+    # The call the semantic proposition is about, and whether the failure is
+    # an incorrect call or a missing one. Omitted when absent so spec digests
+    # written before it hold.
+    unsafe_outcome_failure_call: FailureCall | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+    )
     unsafe_outcome_hazard_refs: list[str] = Field(default_factory=list)
     unsafe_outcome_constraint_refs: list[str] = Field(default_factory=list)
     scenario_context: ScenarioGenerationContext | None = None

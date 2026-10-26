@@ -20,6 +20,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
 from asago_scenario_generator.stpa.observation_contract import (
+    FailureCall,
     ObservationAssessment,
     ObservationContract,
     ObservationCriterion,
@@ -158,6 +159,7 @@ def _validate_normal_provider_payload(
         getattr(outcome, "safe_observable_outcome", None),
         target_operation=target_operation,
         execution_target_profile=execution_target_profile,
+        failure_call=getattr(outcome, "failure_call", None),
     )
     _validate_normal_adversary_response(adversary, context, content_surface)
     _validate_attacker_bdi_cardinality(value.attacker_bdi, adversary)
@@ -218,6 +220,7 @@ def _validate_normal_provider_payload(
                         else None
                     ),
                     safe_outcome=safe_outcome,
+                    failure_call=getattr(outcome, "failure_call", None),
                 ),
             )
         except ValidationIssueError as error:
@@ -810,6 +813,7 @@ def _raise_condition_findings(
             uca_type=claim.uca_type,
             unsafe_operation=claim.unsafe_operation,
             safe_outcome=claim.safe_outcome,
+            failure_call=claim.failure_call,
         )
     findings += tool_call_condition_findings(condition, universe)
     if findings:
@@ -834,8 +838,13 @@ def _validate_observation_operation_names(
     *,
     target_operation: TargetOperationObservation | None,
     execution_target_profile: ExecutionTargetProfile | None,
+    failure_call: FailureCall | None = None,
 ) -> None:
-    """Require exact operation identities for command-attempt observations."""
+    """Require exact operation identities for command-attempt observations.
+
+    The failure call of the failure criterion, when there is one, names an
+    exact operation too.
+    """
 
     allowed_operations = set(
         _stage5_observed_operation_names(
@@ -863,6 +872,14 @@ def _validate_observation_operation_names(
             "as analytical_only",
             "safe observable outcome operation_name must name an exact "
             "operation from the supplied inventory",
+        )
+    if failure_call is not None and failure_call.operation_name not in (
+        allowed_operations
+    ):
+        raise ValidationIssueError(
+            IssueCode.observation_operation_not_in_inventory,
+            "failure_call operation_name must name an exact operation from the "
+            "supplied inventory, or failure_call must be null",
         )
 
 

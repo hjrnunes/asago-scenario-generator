@@ -40,6 +40,7 @@ VALID = {
     "adversarial-observed-record.json",
     "adversarial-stated-beliefs.json",
     "analytical-only.json",
+    "failure-call.json",
     "functional-not-called.json",
     "functional-null-shape.json",
     "functional-record-unavailable.json",
@@ -51,6 +52,7 @@ SHAPE = "schema_violation:attack_shape"
 PATH = "schema_violation:attack_path"
 ROOT_CODE = "schema_violation:<root>"
 TAXONOMY = "schema_violation:taxonomy"
+FAILURE_CALL = "schema_violation:semantic_failure_call"
 
 # fixture -> (typed codes, rule named by the model error or None, schema rejects)
 INVALID: dict[str, tuple[list[str], str | None, bool]] = {
@@ -139,6 +141,8 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
     "taxonomy-llm-scheme-asi-id.json": ([TAXONOMY], "belong", True),
     # The schema cannot state the order; the model and the consumer's hand rule do.
     "taxonomy-unsorted-references.json": ([TAXONOMY], "sorted", False),
+    "failure-call-kind-not-enumerated.json": ([FAILURE_CALL], None, True),
+    "failure-call-blank-operation.json": ([FAILURE_CALL], "blank", False),
 }
 
 
@@ -160,7 +164,7 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
         if not path.name.startswith(("schema-", "v5-"))
     }
     assert listed == set(INVALID)
-    assert len(INVALID) == 44
+    assert len(INVALID) == 46
 
 
 @pytest.mark.parametrize("name", sorted(VALID))
@@ -191,6 +195,18 @@ def test_valid_fixtures_cover_each_channel_and_the_downgrade_and_null_cases() ->
     forged = shapes["adversarial-forged-transcript.json"]
     assert forged["threat_label"] == "forged_transcript_threat"
     assert forged["turn_plan"][-1]["speaker"] == "attacker_user"
+
+
+def test_only_the_failure_call_fixture_carries_a_failure_call() -> None:
+    carrying = {
+        name for name in VALID if "semantic_failure_call" in _load(f"valid/{name}")
+    }
+
+    assert carrying == {"failure-call.json"}
+    assert _load("valid/failure-call.json")["semantic_failure_call"] == {
+        "kind": "incorrect_call",
+        "operation_name": "update_item",
+    }
 
 
 def test_only_the_taxonomy_fixture_carries_the_optional_block() -> None:

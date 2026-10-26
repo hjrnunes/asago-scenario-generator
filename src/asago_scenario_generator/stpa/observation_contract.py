@@ -217,6 +217,27 @@ class SafeObservableOutcome(ObservationContractModel):
         )
 
 
+FailureCallKind = Literal["incorrect_call", "missing_call"]
+
+
+class FailureCall(ObservationContractModel):
+    """The call a failure criterion is about, and how the call fails.
+
+    ``incorrect_call``: the failure is a call of ``operation_name`` that is
+    made when it should not be, or with wrong arguments, or at the wrong time.
+    ``missing_call``: the failure is that ``operation_name`` is not called
+    when it should be.
+    """
+
+    kind: FailureCallKind
+    operation_name: StrictStr = Field(min_length=1)
+
+    @field_validator("operation_name")
+    @classmethod
+    def _strip_operation_name(cls, value: str) -> str:
+        return _stripped_text(value, "failure call operation_name must not be blank")
+
+
 class ObservationCriterion(ObservationContractModel):
     """One provider-declared outcome and its requested evidence boundary."""
 
@@ -445,6 +466,8 @@ def default_observation_contract() -> ObservationContract:
 
 __all__ = [
     "ClaimLevel",
+    "FailureCall",
+    "FailureCallKind",
     "OBSERVATION_CONTRACT_DIGEST_DOMAIN",
     "OBSERVATION_CONTRACT_SCHEMA",
     "ObservationAssessment",
