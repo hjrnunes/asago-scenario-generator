@@ -343,10 +343,25 @@ def _orders_universe(
     )
 
 
-def _with_schemas(schemas: dict) -> ConditionUniverse:
-    """The orders universe with other input-schema properties per operation."""
+def _with_schemas(
+    schemas: dict, optional: frozenset[tuple[str, str]] = frozenset()
+) -> ConditionUniverse:
+    """The orders universe with other input-schema properties per operation.
 
-    return replace(_orders_universe(), argument_schemas=schemas)
+    Every property is required unless ``optional`` names its
+    ``(operation, argument)``.
+    """
+
+    return replace(
+        _orders_universe(),
+        argument_schemas=schemas,
+        required_arguments={
+            operation: frozenset(
+                name for name in properties if (operation, name) not in optional
+            )
+            for operation, properties in schemas.items()
+        },
+    )
 
 
 def _value_condition(
@@ -955,6 +970,8 @@ def test_membership_in_a_schema_narrowed_to_no_list_is_refused(right) -> None:
             {"type": "string"},
             {"type": "array", "items": {"type": "array", "items": False}},
         ),
+        # items: false: the list has no element, so nothing is a member.
+        ({"type": "number"}, {"type": "array", "items": False}),
     ],
 )
 def test_membership_of_a_value_no_element_type_admits_is_refused(left, right) -> None:
@@ -997,7 +1014,6 @@ def test_membership_of_a_disjoint_element_type_states_why() -> None:
             {"type": "number"},
             {"type": "array", "items": {"anyOf": [{"type": "string"}]}},
         ),
-        ({"type": "number"}, {"type": "array", "items": False}),
         ({"type": "number"}, {"type": ["array", "boolean"]}),
         ({"type": "number"}, {"title": "untyped"}),
         ({"type": "array"}, {"type": "array", "items": {"type": "string"}}),
@@ -1515,9 +1531,10 @@ UNSATISFIABLE = [
     {"const": [True], "enum": [[1]]},
 ]
 
-# Flat list schemas no element can be part of: only the empty list is admitted.
+# Flat list schemas whose items admit nothing: only the empty list is
+# admitted, and an unsatisfiable items schema proves nothing of the elements.
+# (items: false states that a list has no element; the lattice covers it.)
 EMPTY_LISTS = [
-    {"type": "array", "items": False},
     {"type": "array", "items": {"type": "string", "const": 1}},
     {"type": "array", "items": {"enum": ["x"], "pattern": "^y"}},
 ]
@@ -1571,12 +1588,15 @@ def _every_position() -> list[dict]:
     return comparisons
 
 
-def _lattice_universe(subject: dict, partner: dict) -> ConditionUniverse:
+def _lattice_universe(
+    subject: dict, partner: dict, *, optional: bool = False
+) -> ConditionUniverse:
     return _with_schemas(
         {
             "refund_payment": {"subject": subject},
             "lookup_order": {"partner": partner},
-        }
+        },
+        optional=frozenset({("refund_payment", "subject")} if optional else ()),
     )
 
 
@@ -1664,7 +1684,9 @@ LATTICE = {
     "number classes, NaN or text": (B, C, B, B),
     "element facts from items": (B, C, CLEAN, B),
     "element facts from listed lists": (B, C, CLEAN, B),
-    "only the empty list": (B, C, CLEAN, B),
+    # items: false states that a list has no element, so no value is a
+    # member of it.
+    "only the empty list": (B, C, B, B),
 }
 
 
@@ -1678,6 +1700,199 @@ def test_the_flat_grammar_lattice_for_rules_b_and_c(subject) -> None:
     )
 
     assert judged == LATTICE[subject]
+
+
+# Optional against required operands, and a right side that is a list or
+# null. A "holds on every call" proof needs every operand passed on every call
+# and every admitted alternative to make the comparison true; a "never holds"
+# proof does not, since an omitted argument leaves the comparison unknown.
+
+OPTIONAL_SUBJECTS = {
+    "string": {"type": "string"},
+    "string list": {"type": "array", "items": {"type": "string"}},
+    "string list or null": {
+        "type": "array",
+        "nullable": True,
+        "items": {"type": "string"},
+    },
+}
+OPTIONAL_COMPARISONS = {
+    "subject ne 7": _membership(SUBJECT, "ne", _lit(7)),
+    "subject eq 7": _membership(SUBJECT, "eq", _lit(7)),
+    "subject not_in [7]": _membership(SUBJECT, "not_in", _lit([7])),
+    "1 not_in subject": _membership(_lit(1), "not_in", SUBJECT),
+    "1 in subject": _membership(_lit(1), "in", SUBJECT),
+    "subject ne number partner": _membership(SUBJECT, "ne", PARTNER),
+    "where subject = 7": {
+        "kind": "not_called",
+        "operation": "refund_payment",
+        "where": [{"argument": "subject", "value": 7}],
+    },
+}
+OPTIONAL_LATTICE = {
+    ("string", "required"): (B, B, B, B, B, B, B),
+    ("string", "optional"): (OPEN_B, B, OPEN_B, B, B, OPEN_B, OPEN_B),
+    ("string list", "required"): (B, B, B, B, B, B, B),
+    ("string list", "optional"): (OPEN_B, B, OPEN_B, OPEN_B, B, OPEN_B, OPEN_B),
+    # null is a non-member of [7], but makes "1 not_in subject" unknown.
+    ("string list or null", "required"): (B, B, B, OPEN_B, B, B, B),
+    ("string list or null", "optional"): (
+        OPEN_B,
+        B,
+        OPEN_B,
+        OPEN_B,
+        B,
+        OPEN_B,
+        OPEN_B,
+    ),
+}
+
+
+@pytest.mark.parametrize(("subject", "presence"), sorted(OPTIONAL_LATTICE))
+def test_the_lattice_for_optional_operands_and_lists_or_null(subject, presence) -> None:
+    universe = _lattice_universe(
+        OPTIONAL_SUBJECTS[subject], {"type": "number"}, optional=presence == "optional"
+    )
+
+    judged = tuple(
+        _rules(_judge(comparison, universe))
+        for comparison in OPTIONAL_COMPARISONS.values()
+    )
+
+    assert judged == OPTIONAL_LATTICE[(subject, presence)]
+
+
+def test_not_in_a_list_that_may_be_null_is_undecidable() -> None:
+    universe = _lattice_universe(OPTIONAL_SUBJECTS["string list or null"], {})
+
+    result = _judge(_membership(_lit(1), "not_in", SUBJECT), universe)
+
+    assert result.refused == ()
+    assert [item.detail for item in result.undecidable] == [
+        "comparisons[0] binds 1 not_in refund_payment.subject: no element of "
+        "refund_payment.subject equals 1, so the comparison holds on every call "
+        "that passes a list, but the input schema of refund_payment admits "
+        "subject as array of string or null, not only a list, and "
+        "tool-call-condition-v1 gives unknown where it is not one, so whether "
+        "the comparison holds on every call is unknown"
+    ]
+
+
+def test_ne_on_an_optional_argument_is_undecidable() -> None:
+    # The argument is not in the input schema's required list.
+    universe = _with_schemas(
+        {"refund_payment": {"x": {"type": "string"}}},
+        optional=frozenset({("refund_payment", "x")}),
+    )
+
+    result = _judged(_value_condition("ne", 7, argument="x"), universe)
+
+    assert result.refused == ()
+    assert [item.detail for item in result.undecidable] == [
+        "comparisons[0] binds refund_payment.x ne 7: no value of "
+        "refund_payment.x equals 7, so the comparison holds on every call that "
+        "passes x, but the input schema of refund_payment does not require x, "
+        "and tool-call-condition-v1 gives unknown on a call that omits it, so "
+        "whether the comparison holds on every call is unknown"
+    ]
+
+
+def test_eq_on_an_optional_argument_is_still_refused() -> None:
+    # An omitted argument leaves eq unknown, which is still not true.
+    universe = _with_schemas(
+        {"refund_payment": {"x": {"type": "string"}}},
+        optional=frozenset({("refund_payment", "x")}),
+    )
+
+    assert _rules(_judged(_value_condition("eq", 7, argument="x"), universe)) == B
+
+
+def test_requiredness_comes_from_the_input_schema() -> None:
+    universe = build_condition_universe(
+        execution_target_profile=None,
+        target_operation=_operation().model_copy(
+            update={
+                "input_schema": {
+                    "type": "object",
+                    "properties": {"x": {"type": "string"}, "y": {"type": "string"}},
+                    "required": ["y"],
+                }
+            }
+        ),
+        target_observations=None,
+    )
+
+    assert universe.required_arguments == {"refund_payment": frozenset({"y"})}
+    malformed = build_condition_universe(
+        execution_target_profile=None,
+        target_operation=_operation().model_copy(
+            update={"input_schema": {"type": "object", "required": "xy"}}
+        ),
+        target_observations=None,
+    )
+    assert malformed.required_arguments == {"refund_payment": frozenset()}
+    for argument, expected in (("x", OPEN_B), ("y", B)):
+        condition = _value_condition("ne", 7, argument=argument)
+        assert _rules(_judged(condition, universe)) == expected
+
+
+@pytest.mark.parametrize(
+    ("op", "optional", "expected"),
+    [
+        ("in", False, B),
+        ("in", True, B),
+        ("not_in", False, B),
+        ("not_in", True, OPEN_B),
+    ],
+)
+def test_membership_in_an_empty_literal_list(op, optional, expected) -> None:
+    universe = _lattice_universe({"type": "string"}, {}, optional=optional)
+
+    result = _judge(_membership(SUBJECT, op, _lit([])), universe)
+
+    assert _rules(result) == expected
+
+
+def test_membership_in_an_empty_literal_list_states_why() -> None:
+    universe = _lattice_universe({"type": "string"}, {})
+
+    result = _judge(_membership(SUBJECT, "in", _lit([])), universe)
+
+    assert [item.detail for item in result.refused] == [
+        "comparisons[0] binds refund_payment.subject in [] in the tool-call "
+        "condition, but the list [] is empty, so no value is a member of it and "
+        "the comparison holds on no call and the condition never detects the "
+        "unsafe call. Compare subject with a list of supplied values that is "
+        "not empty"
+    ]
+
+
+@pytest.mark.parametrize(("op", "expected"), [("in", B), ("not_in", B)])
+def test_an_empty_literal_list_is_a_member_of_no_list(op, expected) -> None:
+    universe = _lattice_universe({"type": "array", "items": {"type": "string"}}, {})
+
+    assert _rules(_judge(_membership(_lit([]), op, SUBJECT), universe)) == expected
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {"type": ["array", "string"], "items": False},
+        {"type": "array", "items": False},
+        {"enum": [[], "a"]},
+    ],
+)
+def test_a_list_with_no_element_is_a_member_of_nothing(schema) -> None:
+    # Strings and the empty list never equal 7.
+    universe = _lattice_universe(schema, {})
+
+    assert _rules(_judge(_membership(SUBJECT, "in", _lit([7])), universe)) == B
+
+
+def test_a_value_is_a_member_of_no_list_with_no_element() -> None:
+    universe = _lattice_universe({"type": "array", "items": False}, {})
+
+    assert _rules(_judge(_membership(_lit(7), "in", SUBJECT), universe)) == B
 
 
 # The counterexamples of the last two reviews.
@@ -1749,7 +1964,8 @@ def test_listed_data_is_never_read_as_a_schema(schema, value, expected) -> None:
                 {"type": "array", "items": {"type": "string"}},
             ]
         },
-        {"type": "array", "items": False},
+        # Items that admit nothing prove nothing of the elements.
+        {"type": "array", "items": {"type": "string", "const": 1}},
     ],
 )
 def test_a_list_that_may_be_empty_proves_nothing_of_its_elements(schema) -> None:

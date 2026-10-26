@@ -21,10 +21,11 @@ is reported undecidable, never refused.
   a value it admits: the literal has no JSON type that schema admits, or is
   none of the values it lists. Membership compares each element: a list
   argument on the left by its ``items``, and the list on the right by its
-  own, types and listed values alike (``not_in`` with no common element
-  holds on every call, as ``ne`` does); a right side that is never a list (a
-  literal, or an argument whose schema admits no array) makes ``in`` and
-  ``not_in`` unknown on every call, so it is refused. A kind mismatch that
+  own, types and listed values alike; a list with no element (``items:
+  false``, or listed lists that are all empty, and the literal ``[]``) has
+  no member. A right side that is never a list (a literal, or an argument
+  whose schema admits no array) makes ``in`` and ``not_in`` unknown on
+  every call, so it is refused. A kind mismatch that
   only values, names, or descriptions suggest is undecidable: an identifier
   literal of another kind than the values reads of that operation passed, or
   than the values reads of another operation passed for an argument of the
@@ -43,6 +44,19 @@ is reported undecidable, never refused.
   a numeric type without ``null``, or listed numbers or numeric strings.
   Any other side is undecidable: a string, a nullable number, or an
   untyped argument.
+
+A refusal proves that the comparison is never true, or that it is true on
+every call. Under ``tool-call-condition-v1`` an argument a call omits leaves
+the comparison unknown, which is not true, so a "never true" proof (``eq``,
+``in``, a right side that is never a list, an ordering) stands whether or
+not the argument is required. A "true on every call" proof (``ne``,
+``not_in``, or a ``where`` item that matches no call, so that ``not_called``
+holds) needs every argument operand to be in its operation's ``required``
+list and every value its schema admits to make the comparison true: for
+``not_in``, the right side must admit only lists, since a null or other
+non-list right side gives unknown. Otherwise the case is undecidable. The
+check takes a required argument to be passed on every call, as it takes a
+passed value to meet its schema.
 
 A schema proves something only when it is of a flat grammar:
 
@@ -501,18 +515,28 @@ def _kinds(
         )
     view = _compared(admitted, equality.role)
     candidates = list(equality.values)
-    if (
+    refusal = None
+    if equality.role != "value" and equality.literal == []:
+        refusal = _empty_list_refusal(equality)
+    elif (
         view.types is not None
         and candidates
         and not any(_fits(value, view.types) for value in candidates)
     ):
-        return _type_refusal(equality, admitted, view.types, candidates), None
-    if (
+        refusal = _type_refusal(equality, admitted, view.types, candidates)
+    elif (
         view.values is not None
         and candidates
         and not _common_values(tuple(candidates), view.values)
     ):
-        return _value_refusal(equality, view.values), None
+        refusal = _value_refusal(equality, view.values)
+    if refusal is not None:
+        if equality.consequence == _NEVER_HOLDS:
+            return refusal, None
+        gaps = _always_gaps(universe, [(argument, admitted, equality.role == "list")])
+        if not gaps:
+            return refusal, None
+        return None, _not_always(equality, gaps)
     types = view.types
     identifiers = [
         value
@@ -569,6 +593,8 @@ def _type_refusal(
         advice = (
             f"Compare {argument.argument} with supplied values of type "
             f"{' or '.join(sorted(types))}"
+            if types
+            else f"Compare {argument.argument} where it can hold a value"
         )
     else:
         declared = " or ".join(sorted(types))
@@ -581,6 +607,97 @@ def _type_refusal(
         "tool-call-condition-v1 never converts a value for "
         f"{equality.op_word}, so {equality.consequence}. {advice}",
         IssueCode.discriminating_condition_record_kind_mismatch,
+    )
+
+
+def _empty_list_refusal(equality: _Equality) -> RuleFinding:
+    argument = equality.argument
+    if equality.role == "member":
+        reason = "the list [] is empty, so no value is a member of it"
+        advice = (
+            f"Compare {argument.argument} with a list of supplied values that is "
+            "not empty"
+        )
+    else:
+        reason = "the empty list [] is a member of no list"
+        advice = f"Test membership in {argument.argument} of a value that is not []"
+    return RuleFinding(
+        "b",
+        f"{equality.label} binds {equality.subject} in the tool-call condition, "
+        f"but {reason} and {equality.consequence}. {advice}",
+        IssueCode.discriminating_condition_record_kind_mismatch,
+    )
+
+
+def _always_gaps(
+    universe: ConditionUniverse,
+    operands: Sequence[tuple[ToolCallArgumentOperand, _Admitted, bool]],
+) -> list[str]:
+    """Say why a comparison that holds when it resolves may not hold on every call.
+
+    Each operand is an argument, its facts, and whether it must be a list
+    (the right side of ``not_in``). v1 gives unknown for an argument a call
+    omits and for a right side that is not a list, so a "holds on every
+    call" proof needs every argument required and such a side only a list.
+    """
+
+    gaps: list[str] = []
+    for argument, admitted, listed in operands:
+        if argument.argument not in universe.required_arguments.get(
+            argument.operation, frozenset()
+        ):
+            gaps.append(
+                f"the input schema of {argument.operation} does not require "
+                f"{argument.argument}, and tool-call-condition-v1 gives unknown on "
+                "a call that omits it"
+            )
+        if listed and (admitted.types is None or admitted.types - {"array"}):
+            kind = (
+                f"admits {argument.argument} as {_list_text(admitted)}"
+                if admitted.types is not None
+                else f"declares no type for {argument.argument}"
+            )
+            gaps.append(
+                f"the input schema of {argument.operation} {kind}, not only a list, "
+                "and tool-call-condition-v1 gives unknown where it is not one"
+            )
+    return gaps
+
+
+def _not_always(equality: _Equality, gaps: Sequence[str]) -> RuleFinding:
+    """Report a comparison that holds when resolved but may not on every call."""
+
+    argument = equality.argument
+    name = _operand_text(argument)
+    literal = _render(equality.literal)
+    if equality.role == "list":
+        premise = (
+            "the empty list [] is a member of no list"
+            if equality.literal == []
+            else f"no element of {name} equals {literal}"
+        )
+        passes = "a list"
+    elif equality.role == "member":
+        premise = (
+            "the list [] is empty"
+            if equality.literal == []
+            else f"no value of {name} is a member of {literal}"
+        )
+        passes = argument.argument
+    else:
+        premise = f"no value of {name} equals {literal}"
+        passes = argument.argument
+    holds = (
+        "the where item matches no call, so not_called holds"
+        if equality.op_word == "a where item"
+        else "the comparison holds"
+    )
+    return RuleFinding(
+        "b",
+        f"{equality.label} binds {equality.subject}: {premise}, so {holds} on "
+        f"every call that passes {passes}, but {'; '.join(gaps)}, so whether "
+        f"{'not_called' if equality.op_word == 'a where item' else 'the comparison'}"
+        " holds on every call is unknown",
     )
 
 
@@ -890,6 +1007,28 @@ def _argument_pair(
     left_view = _compared(left_admitted, "member" if membership else "value")
     right_view = _compared(right_admitted, "list" if membership else "value")
     consequence = _NEVER_HOLDS if op in {"eq", "in"} else _ALWAYS_HOLDS
+    gaps = (
+        _always_gaps(
+            universe,
+            [(left, left_admitted, False), (right, right_admitted, membership)],
+        )
+        if consequence == _ALWAYS_HOLDS
+        else []
+    )
+    premise = (
+        f"no value of {_operand_text(left)} equals an element of {_operand_text(right)}"
+        if membership
+        else (
+            f"no value of {_operand_text(left)} equals a value of "
+            f"{_operand_text(right)}"
+        )
+    )
+    not_always = RuleFinding(
+        "b",
+        f"{label} binds {call}: {premise}, so the comparison holds on every call "
+        f"that passes both, but {'; '.join(gaps)}, so whether the comparison holds "
+        "on every call is unknown",
+    )
     declared = (
         f"{_declares(left, left_admitted, membership)} and "
         f"{_declares(right, right_admitted, membership)}"
@@ -905,6 +1044,8 @@ def _argument_pair(
             "b", f"{label} binds {call}: {declared}, so {question} is unknown"
         )
     common = _equality_classes(left_view.types) & _equality_classes(right_view.types)
+    if not common and gaps:
+        return None, not_always
     if not common:
         compared = (
             f"no value of {_operand_text(left)} equals an element of "
@@ -929,6 +1070,8 @@ def _argument_pair(
         and right_view.values is not None
         and not _common_values(left_view.values, right_view.values)
     ):
+        if gaps:
+            return None, not_always
         restricted = (
             f"the input schema of {left.operation} restricts {left.argument} to "
             f"{_render(list(left_view.values))} and the input schema of "
@@ -986,10 +1129,13 @@ def _list_text(admitted: _Admitted) -> str:
     names = sorted(types - {"array"})
     if "array" in types:
         elements = admitted.elements.types if admitted.elements else None
-        names.append(
-            f"array of {' or '.join(sorted(elements))}" if elements else "array"
-        )
-    return " or ".join(names)
+        if admitted.elements is _NO_ELEMENT:
+            names.append("empty array")
+        else:
+            names.append(
+                f"array of {' or '.join(sorted(elements))}" if elements else "array"
+            )
+    return " or ".join(sorted(names))
 
 
 def _equality_classes(types: frozenset[str]) -> frozenset[str]:
@@ -1063,6 +1209,10 @@ class _Admitted:
 
 _ANY = _Admitted()
 _NOTHING = _Admitted(nothing=True)
+# The elements of a list that holds none: ``items: false``, or listed lists
+# that are all empty. Unlike ``_NOTHING`` it is a stated fact, so it proves
+# that no value is a member of such a list.
+_NO_ELEMENT = _Admitted(types=frozenset(), values=())
 
 
 def _admitted(schema: object, name: str) -> _Admitted:
@@ -1131,9 +1281,11 @@ def _flat(schema: object, name: str) -> _Admitted | None:
     if listed is None:
         if items is None or items is True:
             elements = None
-        elif items is False or items.nothing:
-            elements = _NOTHING
+        elif items is False:
+            elements = _NO_ELEMENT
         else:
+            # Items that admit nothing prove nothing; ``_NOTHING`` keeps
+            # ``_holds`` exact.
             elements = items
         return _Admitted(types, None, elements, declared)
     values = tuple(
@@ -1194,7 +1346,7 @@ def _listed_facts(items: tuple[object, ...]) -> _Admitted:
     """Return the facts of exactly the listed values ``items``."""
 
     if not items:
-        return _NOTHING
+        return _NO_ELEMENT
     lists = [item for item in items if isinstance(item, list)]
     return _Admitted(
         types=frozenset(_json_type(item) for item in items),
@@ -1302,7 +1454,10 @@ def _compared(admitted: _Admitted, role: str) -> _Admitted:
     """Return the types and values an equality compares for an argument's role.
 
     ``value`` compares the argument; ``list`` the elements of the list it
-    must be; ``member`` the argument, or each element when it is a list.
+    must be; ``member`` the argument, or each element when it is a list. An
+    empty list adds no member, so a list with no element (``_NO_ELEMENT``)
+    leaves only the other alternatives; empty types then mean that no value
+    is ever compared.
     """
 
     if role == "value":
@@ -1329,7 +1484,7 @@ def _compared(admitted: _Admitted, role: str) -> _Admitted:
         listed = elements.values
     else:
         listed = None
-    return _Admitted(types=compared or None, values=listed or None)
+    return _Admitted(types=compared, values=listed)
 
 
 def _same(left: object, right: object) -> bool:

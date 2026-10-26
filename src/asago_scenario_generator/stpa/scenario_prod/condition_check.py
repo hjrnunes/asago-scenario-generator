@@ -205,7 +205,12 @@ def build_condition_universe(
 
 
 def _required_arguments(schema: Mapping[str, Any]) -> frozenset[str]:
-    return frozenset(schema.get("required", ()))
+    """Return the names a schema's ``required`` list holds; any other form, none."""
+
+    required = schema.get("required") if isinstance(schema, Mapping) else None
+    if not isinstance(required, list):
+        return frozenset()
+    return frozenset(item for item in required if isinstance(item, str))
 
 
 def _argument_schemas(schema: object) -> dict[str, Mapping[str, Any]]:
