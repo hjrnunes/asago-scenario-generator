@@ -445,7 +445,7 @@ def compare(op: str, left: Any, right: Any) -> Truth:
         return _membership(op, left, right)
     if op in {"eq", "ne"}:
         return _equal(left, right) if op == "eq" else not _equal(left, right)
-    a, b = _number(left), _number(right)
+    a, b = numeric_value(left), numeric_value(right)
     if a is None or b is None:
         return None
     return {"gt": a > b, "ge": a >= b, "lt": a < b, "le": a <= b}.get(op)
@@ -469,7 +469,9 @@ def _equal(left: Any, right: Any) -> bool:
     return bool(left == right)
 
 
-def _number(value: Any) -> float | None:
+def numeric_value(value: Any) -> float | None:
+    """Return the number an ordering converts ``value`` to, or ``None``."""
+
     if isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -486,5 +488,6 @@ __all__ = [
     "ToolCallBinding",
     "bind_tool_call_condition",
     "compare",
+    "numeric_value",
     "selection_wanted_value",
 ]

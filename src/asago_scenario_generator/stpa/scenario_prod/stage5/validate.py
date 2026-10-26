@@ -61,6 +61,7 @@ from .conditions import (
     _resolve_temporal_condition,
 )
 from .condition_claims import ConditionClaim, condition_claim_findings
+from .condition_contradictions import tool_call_condition_findings
 from .issues import ExactIssueError, IssueCode, ValidationIssueError
 from .records import (
     Stage5Normalization,
@@ -810,6 +811,7 @@ def _raise_condition_findings(
             unsafe_operation=claim.unsafe_operation,
             safe_outcome=claim.safe_outcome,
         )
+    findings += tool_call_condition_findings(condition, universe)
     if findings:
         raise ExactIssueError(
             IssueCode(findings[0].code), condition_findings_message(findings)

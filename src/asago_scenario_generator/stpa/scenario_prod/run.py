@@ -82,6 +82,8 @@ from .stage5.assemble import (
     ScenarioAssemblyError,
     parse_ica_slot_id,
 )
+from .stage5.condition_claims import ConditionClaim
+from .stage5.condition_contradictions import undecidable_diagnostics
 from .stage5.generate import generate_bdi_for_context, is_bdi_length_retry_exhausted
 from .stage5.defender import populate_defender_bdi
 from .stage5.shape_step import (
@@ -91,6 +93,7 @@ from .stage5.shape_step import (
 )
 from .context import build_scenario_generation_context
 from .realized_operation import realized_operation
+from .condition_check import build_condition_universe
 from .presentation import render_scenario_presentation
 from .attack_path import attack_path_errors, reduce_to_attack_path
 from .and_or_tree import (
@@ -216,6 +219,8 @@ class _Stage5ThreatResult:
 
     scenario_spec: ScenarioSpec | None
     abort_remaining: bool = False
+    # The undecidable cases of the spec's tool-call condition, reported only.
+    condition_diagnostics: tuple[str, ...] = ()
 
 
 def run_sp3(
@@ -778,6 +783,7 @@ def _record_stage5_candidate(
         else:
             # Stage 6 assigns the terminal rendering/publication result.
             builder.status = None
+            builder.diagnostics.extend(result.condition_diagnostics)
         return
     builder.status = SP3CandidateStatus.generation_failed
     builder.diagnostics.extend(
@@ -1323,7 +1329,27 @@ def _run_stage5_for_threat(
     _validate_stage5_spec(spec, control_structure, stage_errors)
     if len(stage_errors) != prior_error_count:
         return _Stage5ThreatResult(None)
-    return _Stage5ThreatResult(spec)
+    return _Stage5ThreatResult(
+        spec,
+        condition_diagnostics=undecidable_diagnostics(
+            spec.discriminating_condition,
+            spec.tool_call_condition,
+            build_condition_universe(
+                execution_target_profile=execution_target_profile,
+                target_operation=target_operation,
+                target_observations=target_observations,
+            ),
+            claim=ConditionClaim(
+                uca_type=context.ica.uca_type,
+                unsafe_operation=(
+                    target_operation.reference.operation_id
+                    if target_operation is not None
+                    else None
+                ),
+                safe_outcome=spec.safe_observable_outcome,
+            ),
+        ),
+    )
 
 
 def _stage5_bdi(

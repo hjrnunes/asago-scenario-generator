@@ -94,6 +94,11 @@ class ConditionUniverse:
     fact_values: Mapping[str, object] = field(default_factory=dict)
     # Argument name -> the string values supplied reads passed for it.
     observed_arguments: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # Read operation name -> argument -> the string values supplied reads of
+    # that operation passed for it.
+    read_arguments: Mapping[str, Mapping[str, frozenset[str]]] = field(
+        default_factory=dict
+    )
     # Every string a comparison may cite: fact keys and values, argument values
     # the reads passed, and schema enum, default, and const values.
     literal_values: frozenset[str] = frozenset()
@@ -101,6 +106,22 @@ class ConditionUniverse:
     operation_text: Mapping[str, str] = field(default_factory=dict)
     # Operation name -> the arguments its input schema requires.
     required_arguments: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # Operations whose ``required`` is not a list of distinct names: it
+    # proves no argument required.
+    unreadable_required: frozenset[str] = frozenset()
+    # Operation ids that more than one resource exposes with input schemas or
+    # required lists that differ: no schema fact or requiredness of theirs
+    # holds for every call, so they have none.
+    ambiguous_operations: frozenset[str] = frozenset()
+    # Operation id -> the root keywords of its input schema the check does not
+    # read, or reads as malformed. Any of them may change what an argument
+    # admits or whether it is required, so the operation has no schema fact
+    # or requiredness.
+    unread_roots: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    # Operation name -> argument -> its input-schema property.
+    argument_schemas: Mapping[str, Mapping[str, Mapping[str, Any]]] = field(
+        default_factory=dict
+    )
 
     @property
     def grounded(self) -> bool:
@@ -152,8 +173,9 @@ def build_condition_universe(
     """Collect the operation arguments and fact values of one request."""
 
     operations: dict[str, set[str]] = {}
-    texts: dict[str, str] = {}
-    required: dict[str, frozenset[str]] = {}
+    descriptions: dict[str, list[str]] = {}
+    # Operation id -> the input schema of each resource that exposes it.
+    copies: dict[str, list[object]] = {}
     literals = _observed_literals(target_observations)
     if execution_target_profile is not None:
         for resource in execution_target_profile.resources:
@@ -163,8 +185,10 @@ def build_condition_universe(
                 names = operations.setdefault(operation.operation_id, set())
                 names.update(operation.argument_names or resource.argument_names)
                 names.update(schema_names)
-                texts[operation.operation_id] = resource.description or ""
-                required[operation.operation_id] = _required_arguments(
+                descriptions.setdefault(operation.operation_id, []).append(
+                    resource.description or ""
+                )
+                copies.setdefault(operation.operation_id, []).append(
                     resource.input_schema
                 )
     elif target_operation is not None:
@@ -172,22 +196,152 @@ def build_condition_universe(
         names.update(target_operation.argument_names)
         names.update(_schema_argument_names(target_operation.input_schema))
         literals |= _schema_literals(target_operation.input_schema)
-        texts[target_operation.operation_id] = target_operation.description or ""
-        required[target_operation.operation_id] = _required_arguments(
-            target_operation.input_schema
-        )
+        descriptions[target_operation.operation_id] = [
+            target_operation.description or ""
+        ]
+        copies[target_operation.operation_id] = [target_operation.input_schema]
+    required: dict[str, frozenset[str]] = {}
+    unreadable: set[str] = set()
+    ambiguous: set[str] = set()
+    unread_roots: dict[str, tuple[str, ...]] = {}
+    schemas: dict[str, dict[str, Mapping[str, Any]]] = {}
+    for operation_id, entries in copies.items():
+        schemas[operation_id] = {}
+        required[operation_id] = frozenset()
+        texts_of = {_canonical(entry) for entry in entries}
+        if len(entries) > 1 and (len(texts_of) != 1 or None in texts_of):
+            ambiguous.add(operation_id)
+            continue
+        schema = entries[0]
+        unread = _unread_root_keywords(schema)
+        if unread:
+            unread_roots[operation_id] = unread
+            continue
+        names = _required_arguments(schema)
+        if names is None:
+            unreadable.add(operation_id)
+        schemas[operation_id] = _argument_schemas(schema)
+        required[operation_id] = names or frozenset()
+    texts = {
+        operation_id: " ".join(dict.fromkeys(text for text in items if text))
+        for operation_id, items in descriptions.items()
+    }
     return ConditionUniverse(
         operations={name: frozenset(args) for name, args in operations.items()},
         fact_values=target_observation_fact_values(target_observations),
         observed_arguments=_observed_arguments(target_observations),
+        read_arguments=_read_arguments(target_observations),
         literal_values=frozenset(literals),
         operation_text=texts,
         required_arguments=required,
+        unreadable_required=frozenset(unreadable),
+        ambiguous_operations=frozenset(ambiguous),
+        unread_roots=unread_roots,
+        argument_schemas=schemas,
     )
 
 
-def _required_arguments(schema: Mapping[str, Any]) -> frozenset[str]:
-    return frozenset(schema.get("required", ()))
+# The annotations a schema may carry, at its root or in an argument's
+# schema, since they never restrict a value, with the JSON type the
+# meta-schema gives each one's value (``object``: any value).
+SCHEMA_ANNOTATIONS: Mapping[str, type] = {
+    "title": str,
+    "description": str,
+    "$comment": str,
+    "format": str,
+    "examples": list,
+    "default": object,
+    "deprecated": bool,
+    "readOnly": bool,
+    "writeOnly": bool,
+}
+
+
+def malformed_annotations(schema: Mapping[Any, object]) -> tuple[str, ...]:
+    """Return the annotations of a schema whose value has the wrong JSON type."""
+
+    return tuple(
+        key
+        for key, shape in SCHEMA_ANNOTATIONS.items()
+        if key in schema and not isinstance(schema[key], shape)
+    )
+
+
+def _canonical(schema: object) -> str | None:
+    """Return a schema's JSON text with sorted keys; ``true`` and ``1`` differ.
+
+    ``None`` when the schema is not JSON, so no two such copies agree.
+    """
+
+    try:
+        return json.dumps(schema, sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError):
+        return None
+
+
+def _unread_root_keywords(schema: object) -> tuple[str, ...]:
+    """Return the root keywords of an input schema the check does not read.
+
+    The root may hold ``type: object``, ``properties`` (a map), ``required``
+    (read on its own), ``additionalProperties``, and ``SCHEMA_ANNOTATIONS``
+    of their meta-schema type. Any other keyword, or a malformed value of one of
+    these, is returned: it may change what an argument admits or whether it
+    is required.
+    """
+
+    if not isinstance(schema, Mapping):
+        return ("<root>",)
+    malformed = malformed_annotations(schema)
+    unread = []
+    for key, value in schema.items():
+        if key == "type":
+            if value != "object" or not isinstance(value, str):
+                unread.append(key)
+        elif key == "properties":
+            if not isinstance(value, Mapping):
+                unread.append(key)
+        elif key in ("required", "additionalProperties"):
+            continue
+        elif key in SCHEMA_ANNOTATIONS:
+            if key in malformed:
+                unread.append(key)
+        else:
+            unread.append(str(key))
+    if "type" not in schema:
+        unread.append("type")
+    return tuple(unread)
+
+
+def _required_arguments(schema: object) -> frozenset[str] | None:
+    """Return the names a schema's ``required`` holds, or ``None`` when malformed.
+
+    ``required`` must be a list of distinct strings; any other value proves
+    no argument required, rather than the names it happens to hold.
+    """
+
+    if not isinstance(schema, Mapping) or "required" not in schema:
+        return frozenset()
+    names = schema["required"]
+    if (
+        not isinstance(names, list)
+        or not all(isinstance(item, str) for item in names)
+        or len(set(names)) != len(names)
+    ):
+        return None
+    return frozenset(names)
+
+
+def _argument_schemas(schema: object) -> dict[str, Mapping[str, Any]]:
+    """Map each schema property that is a schema object to that object."""
+
+    properties = schema.get("properties") if isinstance(schema, Mapping) else None
+    if not isinstance(properties, Mapping):
+        return {}
+    return {
+        str(name): prop
+        for name, prop in properties.items()
+        if isinstance(prop, Mapping)
+    }
 
 
 def _observed_literals(
@@ -224,11 +378,14 @@ def _schema_literals(schema: object) -> set[str]:
     """Collect the string enum, default, and const values of schema properties."""
 
     properties = schema.get("properties") if isinstance(schema, Mapping) else None
+    if not isinstance(properties, Mapping):
+        return set()
     declared: list[object] = []
-    for prop in (properties or {}).values():
+    for prop in properties.values():
         if isinstance(prop, Mapping):
+            enum = prop.get("enum")
             declared += [
-                *(prop.get("enum") or []),
+                *(enum if isinstance(enum, list) else []),
                 prop.get("default"),
                 prop.get("const"),
             ]
@@ -246,6 +403,25 @@ def _observed_arguments(
             for name, value in (observation.source_arguments or {}).items():
                 values.setdefault(name, set()).add(value)
     return {name: frozenset(items) for name, items in values.items()}
+
+
+def _read_arguments(
+    target_observations: TargetObservationSnapshot | None,
+) -> dict[str, dict[str, frozenset[str]]]:
+    """Collect, per read operation and argument, the values its reads passed."""
+
+    values: dict[str, dict[str, set[str]]] = {}
+    if target_observations is not None:
+        for observation in target_observations.observations:
+            if observation.source_name is None:
+                continue
+            arguments = values.setdefault(observation.source_name, {})
+            for name, value in (observation.source_arguments or {}).items():
+                arguments.setdefault(name, set()).add(value)
+    return {
+        operation: {name: frozenset(items) for name, items in arguments.items()}
+        for operation, arguments in values.items()
+    }
 
 
 def target_observation_fact_values(
@@ -664,7 +840,12 @@ def _schema_argument_names(schema: object) -> set[str]:
 
 
 def _record_value(values: dict[str, object], path: str, value: object) -> None:
-    if path in values and values[path] is not _AMBIGUOUS and values[path] != value:
+    # Values v1 tells apart make the path ambiguous: true is not 1.
+    if (
+        path in values
+        and values[path] is not _AMBIGUOUS
+        and not _same(values[path], value)
+    ):
         values[path] = _AMBIGUOUS
     else:
         values.setdefault(path, value)
@@ -870,7 +1051,7 @@ def _depends_on_unsafe_call(
     return False
 
 
-def _kind_mismatch(state: StateIndex, left: object, right: object) -> bool:
+def kind_mismatch(state: StateIndex, left: object, right: object) -> bool:
     """Return whether two strings are provably different kinds of value.
 
     Both must be ID-shaped with different prefixes, both must occur in the
@@ -908,11 +1089,11 @@ def _mismatched_values(
     """Return the values of a kind mismatch, or None when there is none."""
 
     if op not in MEMBERSHIP_OPERATORS:
-        return [left, right] if _kind_mismatch(state, left, right) else None
+        return [left, right] if kind_mismatch(state, left, right) else None
     items = right if isinstance(right, list) else []
     if not items or not all(isinstance(item, str) for item in items):
         return None
-    if not all(_kind_mismatch(state, left, item) for item in items):
+    if not all(kind_mismatch(state, left, item) for item in items):
         return None
     return [left, *items]
 
@@ -1146,6 +1327,7 @@ __all__ = [
     "condition_fact_listing",
     "condition_findings",
     "condition_findings_message",
+    "kind_mismatch",
     "resolve_fact",
     "target_observation_fact_values",
 ]

@@ -1,0 +1,53 @@
+target_profile_digest: b17ef9897c2042f06503b092708306eccdbd449ac1f48d6bd0cd7b4554a406f6
+observations:
+- observation_ref: TARGET-STATE
+  kind: state
+  content_format: json
+  content: '{"authenticated_actor_id":"GST001","listings":{"LST-101":{"blocked_dates":["2026-09-10","2026-09-11"],"config_flags":[],"host_id":"HST001","occupancy":2,"status":"active"},"LST-104":{"blocked_dates":[],"config_flags":[],"host_id":"HST001","occupancy":2,"status":"active"},"LST-201":{"blocked_dates":[],"config_flags":["occupancy_zero","unsafe_lockbox"],"host_id":"HST002","occupancy":1,"status":"invalid"}},"messages":[],"modifications":[],"reservations":{"RES-101":{"check_in":"2026-10-01","check_out":"2026-10-05","guest_id":"GST001","host_id":"HST001","listing_id":"LST-101","modification_allowed":true,"payment_status":"paid","status":"confirmed"},"RES-104":{"check_in":"2026-09-03","check_out":"2026-09-07","guest_id":"GST001","host_id":"HST001","listing_id":"LST-104","modification_allowed":false,"payment_status":"paid","status":"confirmed"},"RES-201":{"check_in":"2026-11-12","check_out":"2026-11-14","guest_id":"GST002","host_id":"HST002","listing_id":"LST-201","modification_allowed":true,"payment_status":"paid","status":"confirmed"}},"session_id":"4BA5FBCA","trust_cases":[]}'
+- observation_ref: TARGET-READ-001
+  kind: read
+  source_name: lookup_policy
+  source_description: Retrieve current Airbnb policy snippets.
+  source_arguments:
+    query: reservation
+  content_format: json
+  content: '{"documents":[{"body":"Date changes are blocked within 48 hours of check-in
+    and require a paid reservation.","doc_id":"POL-MOD","title":"Reservation changes"}],"status":"OK"}'
+- observation_ref: TARGET-READ-002
+  kind: read
+  source_name: get_listing
+  source_description: Look up a listing visible to the host or a guest on that stay.
+  source_arguments:
+    listing_id: LST-101
+  content_format: json
+  content: '{"blocked_dates":["2026-09-10","2026-09-11"],"city":"Amsterdam","host_id":"HST001","listing_id":"LST-101","occupancy":2,"status":"active","title":"Canal
+    loft"}'
+- observation_ref: TARGET-READ-003
+  kind: read
+  source_name: get_listing
+  source_description: Look up a listing visible to the host or a guest on that stay.
+  source_arguments:
+    listing_id: LST-104
+  content_format: json
+  content: '{"blocked_dates":[],"city":"Lisbon","host_id":"HST001","listing_id":"LST-104","occupancy":2,"status":"active","title":"Garden
+    studio"}'
+- observation_ref: TARGET-READ-004
+  kind: read
+  source_name: get_reservation
+  source_description: Look up a reservation visible to the authenticated guest or
+    host.
+  source_arguments:
+    reservation_id: RES-101
+  content_format: json
+  content: '{"check_in":"2026-10-01","check_out":"2026-10-05","guest_id":"GST001","host_id":"HST001","listing_id":"LST-101","modification_allowed":true,"payment_status":"paid","reservation_id":"RES-101","status":"confirmed"}'
+- observation_ref: TARGET-READ-005
+  kind: read
+  source_name: get_reservation
+  source_description: Look up a reservation visible to the authenticated guest or
+    host.
+  source_arguments:
+    reservation_id: RES-104
+  content_format: json
+  content: '{"check_in":"2026-09-03","check_out":"2026-09-07","guest_id":"GST001","host_id":"HST001","listing_id":"LST-104","modification_allowed":false,"payment_status":"paid","reservation_id":"RES-104","status":"confirmed"}'
+read_status: observed
+content_digest: 9671345e994158ea30180b6fb190844c003cebc8ec43c59c0364e4eec5a38d29

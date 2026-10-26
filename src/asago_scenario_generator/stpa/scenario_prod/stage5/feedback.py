@@ -152,6 +152,21 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "the record the comparisons describe. Keep observation_criteria "
             "and safe_observable_outcome unchanged."
         ),
+        IssueCode.discriminating_condition_record_kind_mismatch: (
+            "compare an argument only with a value of a type the input "
+            "schema of its own operation declares for it; the tool-call "
+            "condition never converts a value for eq, ne, in, or not_in. In "
+            "record_selection.argument_values, map an argument only to a path "
+            "whose value has such a type. Keep observation_criteria and "
+            "safe_observable_outcome unchanged."
+        ),
+        IssueCode.discriminating_condition_ordering_not_numeric: (
+            "use gt, ge, lt, and le only between numbers: an argument whose "
+            "input schema declares number or integer, or a numeric supplied "
+            "value. The tool-call condition cannot order dates or other text; "
+            "state the rule with eq, ne, in, or not_in on supplied values "
+            "instead. " + _NO_SEPARATING_CONDITION
+        ),
         IssueCode.safe_outcome_record_ref_not_supplied: (
             "safe_observable_outcome.record_refs lists only top-level supplied "
             f"observation_ref values ({supplied_records}); put record and field "
