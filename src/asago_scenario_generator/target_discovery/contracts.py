@@ -27,6 +27,7 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     TargetStateEffect,
     TargetDiscoveryDiagnostic,
 )
+from asago_scenario_generator.stpa.models.value_facts import TargetValueFacts
 
 
 class McpTargetDiscoveryInputs(ClosedCanonicalModel):
@@ -43,6 +44,9 @@ class McpTargetDiscoveryInputs(ClosedCanonicalModel):
     verifier_id: StrictStr = Field(default="asago-target-verifier-v1", min_length=1)
     model_profile: StrictStr | None = Field(default=None, min_length=1)
     model_name: StrictStr | None = Field(default=None, min_length=1)
+    # The record kinds and formats the target declares for its argument and
+    # state values, carried unchanged onto the profile.
+    value_facts: TargetValueFacts | None = None
 
 
 class McpInventoryPage(ClosedCanonicalModel):

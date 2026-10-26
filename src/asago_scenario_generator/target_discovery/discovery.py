@@ -209,6 +209,7 @@ def _build_profile(
         resources=tuple(resources),
         interpretations=tuple(interpretations),
         diagnostics=tuple(diagnostics),
+        value_facts=inputs.value_facts,
     )
 
 
