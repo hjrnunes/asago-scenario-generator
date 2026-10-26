@@ -99,7 +99,17 @@ An operation id that more than one resource of the target profile exposes,
 with input schemas or required lists that differ, has no schema fact and no
 requiredness: a call may go to either resource. A comparison on it that is
 not refused on other grounds is undecidable, and the reason names the id.
-Copies that agree prove what one would.
+Copies agree only when their whole input schemas are the same JSON, with
+``true`` and ``1`` told apart; copies that agree prove what one would.
+
+An operation's input schema is read only when its root holds ``type:
+object``, ``properties``, ``required``, ``additionalProperties`` (it
+governs only properties the schema does not declare), and annotations of
+their meta-schema type. Any other root keyword (``allOf``, ``anyOf``,
+``oneOf``, ``if``, ``dependentRequired``, ``not``, ``$ref``, ``$schema``,
+and the rest), or a malformed value of one of these, may change what an
+argument admits or whether it is required, so the operation then has no
+schema fact and no requiredness, with the same kind of reason.
 
 A refusal is a Stage 5 validation failure, corrected through the existing
 correction request. Undecidable cases are reported only: in the run's
@@ -438,26 +448,36 @@ def _unambiguous(
     operations: Sequence[str],
     universe: ConditionUniverse,
 ) -> tuple[RuleFinding | None, RuleFinding | None]:
-    """Name the repeated operation id behind a comparison the check cannot judge.
+    """Name the operation behind a comparison the check cannot judge.
 
-    An operation that resources describe apart has no schema fact or
+    An operation that resources describe apart, or whose input schema has a
+    root keyword the check does not read, has no schema fact or
     requiredness, so a comparison on it that is not refused on other grounds
     is undecidable for that reason.
     """
 
     refusal, _ = result
-    shared = sorted(
-        {name for name in operations if name in universe.ambiguous_operations}
-    )
-    if refusal is not None or not shared:
+    if refusal is not None:
         return result
-    reasons = "; ".join(
-        f"the target profile lists {name} in more than one resource, with input "
-        "schemas or required lists that differ, so the check reads no schema "
-        f"fact or requiredness of {name}"
-        for name in shared
-    )
-    return None, RuleFinding(rule, f"{binds}: {reasons}")
+    reasons = []
+    for name in sorted(set(operations)):
+        if name in universe.ambiguous_operations:
+            reasons.append(
+                f"the target profile lists {name} in more than one resource, with "
+                "input schemas or required lists that differ, so the check reads "
+                f"no schema fact or requiredness of {name}"
+            )
+        elif name in universe.unread_roots:
+            unread = ", ".join(universe.unread_roots[name])
+            reasons.append(
+                f"the input schema of {name} has a root keyword the check does not "
+                f"read, or a malformed one ({unread}), which may change what an "
+                "argument admits or whether it is required, so the check reads no "
+                f"schema fact or requiredness of {name}"
+            )
+    if not reasons:
+        return result
+    return None, RuleFinding(rule, f"{binds}: {'; '.join(reasons)}")
 
 
 def _bound_labels(

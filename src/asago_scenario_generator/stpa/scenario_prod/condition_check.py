@@ -113,6 +113,11 @@ class ConditionUniverse:
     # required lists that differ: no schema fact or requiredness of theirs
     # holds for every call, so they have none.
     ambiguous_operations: frozenset[str] = frozenset()
+    # Operation id -> the root keywords of its input schema the check does not
+    # read, or reads as malformed. Any of them may change what an argument
+    # admits or whether it is required, so the operation has no schema fact
+    # or requiredness.
+    unread_roots: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
     # Operation name -> argument -> its input-schema property.
     argument_schemas: Mapping[str, Mapping[str, Mapping[str, Any]]] = field(
         default_factory=dict
@@ -169,9 +174,8 @@ def build_condition_universe(
 
     operations: dict[str, set[str]] = {}
     descriptions: dict[str, list[str]] = {}
-    # Operation id -> (argument schemas, required names) of each resource.
-    copies: dict[str, list[tuple[dict[str, Mapping[str, Any]], frozenset[str] | None]]]
-    copies = {}
+    # Operation id -> the input schema of each resource that exposes it.
+    copies: dict[str, list[object]] = {}
     literals = _observed_literals(target_observations)
     if execution_target_profile is not None:
         for resource in execution_target_profile.resources:
@@ -185,10 +189,7 @@ def build_condition_universe(
                     resource.description or ""
                 )
                 copies.setdefault(operation.operation_id, []).append(
-                    (
-                        _argument_schemas(resource.input_schema),
-                        _required_arguments(resource.input_schema),
-                    )
+                    resource.input_schema
                 )
     elif target_operation is not None:
         names = operations.setdefault(target_operation.operation_id, set())
@@ -198,25 +199,28 @@ def build_condition_universe(
         descriptions[target_operation.operation_id] = [
             target_operation.description or ""
         ]
-        copies[target_operation.operation_id] = [
-            (
-                _argument_schemas(target_operation.input_schema),
-                _required_arguments(target_operation.input_schema),
-            )
-        ]
+        copies[target_operation.operation_id] = [target_operation.input_schema]
     required: dict[str, frozenset[str]] = {}
     unreadable: set[str] = set()
     ambiguous: set[str] = set()
+    unread_roots: dict[str, tuple[str, ...]] = {}
     schemas: dict[str, dict[str, Mapping[str, Any]]] = {}
     for operation_id, entries in copies.items():
-        if any(entry != entries[0] for entry in entries[1:]):
+        schemas[operation_id] = {}
+        required[operation_id] = frozenset()
+        texts_of = {_canonical(entry) for entry in entries}
+        if len(entries) > 1 and (len(texts_of) != 1 or None in texts_of):
             ambiguous.add(operation_id)
-            schemas[operation_id] = {}
-            required[operation_id] = frozenset()
             continue
-        schemas[operation_id], names = entries[0]
+        schema = entries[0]
+        unread = _unread_root_keywords(schema)
+        if unread:
+            unread_roots[operation_id] = unread
+            continue
+        names = _required_arguments(schema)
         if names is None:
             unreadable.add(operation_id)
+        schemas[operation_id] = _argument_schemas(schema)
         required[operation_id] = names or frozenset()
     texts = {
         operation_id: " ".join(dict.fromkeys(text for text in items if text))
@@ -232,8 +236,68 @@ def build_condition_universe(
         required_arguments=required,
         unreadable_required=frozenset(unreadable),
         ambiguous_operations=frozenset(ambiguous),
+        unread_roots=unread_roots,
         argument_schemas=schemas,
     )
+
+
+# The root keywords of an input schema the check reads, besides
+# ``additionalProperties`` (it governs only undeclared properties), with the
+# JSON type of each annotation's value.
+_ROOT_ANNOTATIONS: Mapping[str, type] = {
+    "title": str,
+    "description": str,
+    "$comment": str,
+    "examples": list,
+    "default": object,
+    "deprecated": bool,
+    "readOnly": bool,
+    "writeOnly": bool,
+}
+
+
+def _canonical(schema: object) -> str | None:
+    """Return a schema's JSON text with sorted keys; ``true`` and ``1`` differ.
+
+    ``None`` when the schema is not JSON, so no two such copies agree.
+    """
+
+    try:
+        return json.dumps(schema, sort_keys=True, allow_nan=False)
+    except (TypeError, ValueError):
+        return None
+
+
+def _unread_root_keywords(schema: object) -> tuple[str, ...]:
+    """Return the root keywords of an input schema the check does not read.
+
+    The root may hold ``type: object``, ``properties`` (a map), ``required``
+    (read on its own), ``additionalProperties``, and annotations of their
+    meta-schema type. Any other keyword, or a malformed value of one of
+    these, is returned: it may change what an argument admits or whether it
+    is required.
+    """
+
+    if not isinstance(schema, Mapping):
+        return ("<root>",)
+    unread = []
+    for key, value in schema.items():
+        if key == "type":
+            if value != "object" or not isinstance(value, str):
+                unread.append(key)
+        elif key == "properties":
+            if not isinstance(value, Mapping):
+                unread.append(key)
+        elif key in ("required", "additionalProperties"):
+            continue
+        elif key in _ROOT_ANNOTATIONS:
+            if not isinstance(value, _ROOT_ANNOTATIONS[key]):
+                unread.append(key)
+        else:
+            unread.append(str(key))
+    if "type" not in schema:
+        unread.append("type")
+    return tuple(unread)
 
 
 def _required_arguments(schema: object) -> frozenset[str] | None:
@@ -764,7 +828,12 @@ def _schema_argument_names(schema: object) -> set[str]:
 
 
 def _record_value(values: dict[str, object], path: str, value: object) -> None:
-    if path in values and values[path] is not _AMBIGUOUS and values[path] != value:
+    # Values v1 tells apart make the path ambiguous: true is not 1.
+    if (
+        path in values
+        and values[path] is not _AMBIGUOUS
+        and not _same(values[path], value)
+    ):
         values[path] = _AMBIGUOUS
     else:
         values.setdefault(path, value)

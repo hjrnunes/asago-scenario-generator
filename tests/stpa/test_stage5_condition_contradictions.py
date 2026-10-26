@@ -33,6 +33,7 @@ from asago_scenario_generator.stpa.scenario_prod.condition_check import (
     ConditionUniverse,
     build_condition_universe,
 )
+from asago_scenario_generator.stpa.scenario_prod import condition_check
 from asago_scenario_generator.stpa.scenario_prod import run
 from asago_scenario_generator.stpa.scenario_prod.run import SP3CandidateStatus
 from asago_scenario_generator.stpa.scenario_prod.stage5 import (
@@ -1939,11 +1940,118 @@ def test_properties_that_are_not_a_map_give_no_argument_schema() -> None:
     universe = _input_schema_universe({"type": "object", "properties": ["x"]})
 
     assert universe.argument_schemas == {"refund_payment": {}}
+    assert universe.unread_roots == {"refund_payment": ("properties",)}
     # A malformed enum does not stop the universe from being built.
     assert _input_schema_universe(
         {"type": "object", "properties": {"x": {"enum": 5}}}
     ).argument_schemas == {"refund_payment": {"x": {"enum": 5}}}
-    assert _rules(_judged(_value_condition("ne", 7, argument="x"), universe)) == CLEAN
+    assert _rules(_judged(_value_condition("ne", 7, argument="x"), universe)) == OPEN_B
+
+
+@pytest.mark.parametrize(
+    ("root", "keys"),
+    [
+        ({"allOf": [{"required": ["x"]}]}, "allOf"),
+        ({"anyOf": [{"properties": {"x": {"type": "number"}}}]}, "anyOf"),
+        ({"oneOf": [{"required": ["x"]}]}, "oneOf"),
+        ({"if": {}, "then": {}}, "if, then"),
+        ({"dependentRequired": {"x": ["y"]}}, "dependentRequired"),
+        ({"not": {"required": ["x"]}}, "not"),
+        ({"$ref": "#/$defs/Arguments"}, "$ref"),
+        ({"$schema": "https://json-schema.org/draft/2020-12/schema"}, "$schema"),
+        ({"type": ["object", "null"]}, "type"),
+        ({"title": 7}, "title"),
+    ],
+)
+def test_a_root_keyword_the_check_does_not_read_proves_nothing(root, keys) -> None:
+    universe = _input_schema_universe(
+        {**_x_schema({"type": "string"}, required=True), **root}
+    )
+
+    result = _judged(_value_condition("eq", 7, argument="x"), universe)
+
+    assert universe.unread_roots == {"refund_payment": tuple(keys.split(", "))}
+    assert universe.argument_schemas["refund_payment"] == {}
+    assert universe.required_arguments["refund_payment"] == frozenset()
+    assert result.refused == ()
+    assert [item.detail for item in result.undecidable] == [
+        "comparisons[0] binds refund_payment.x eq 7: the input schema of "
+        "refund_payment has a root keyword the check does not read, or a "
+        f"malformed one ({keys}), which may change what an argument admits or "
+        "whether it is required, so the check reads no schema fact or "
+        "requiredness of refund_payment"
+    ]
+
+
+@pytest.mark.parametrize(
+    "root",
+    [
+        {},
+        {"additionalProperties": False},
+        {"additionalProperties": {"type": "string"}},
+        {"title": "Arguments", "description": "The call.", "$comment": "x"},
+    ],
+)
+def test_a_root_the_check_reads_keeps_its_proofs(root) -> None:
+    universe = _input_schema_universe(
+        {**_x_schema({"type": "string"}, required=True), **root}
+    )
+
+    assert universe.unread_roots == {}
+    for op in ("eq", "ne"):
+        assert _rules(_judged(_value_condition(op, 7, argument="x"), universe)) == B
+
+
+def _dotted_state(nested: object, dotted: object) -> TargetObservationSnapshot:
+    """One state whose path TARGET-STATE.a.b is given twice: nested and dotted."""
+
+    return TargetObservationSnapshot.create(
+        target_profile_digest="b" * 64,
+        observations=[
+            TargetObservation(
+                observation_ref="TARGET-STATE",
+                kind="state",
+                content_format="json",
+                content=json.dumps({"a": {"b": nested}, "a.b": dotted}),
+            )
+        ],
+    )
+
+
+@pytest.mark.parametrize(
+    ("nested", "dotted", "ambiguous"),
+    [
+        # JSON true is not the number 1, so the path has two values.
+        (True, 1, True),
+        (False, 0, True),
+        # v1 equality: 1 and 1.0 are one number; inside a list true is 1.
+        (1, 1.0, False),
+        ([True], [1], False),
+    ],
+)
+def test_a_fact_seen_twice_is_ambiguous_only_when_v1_tells_its_values_apart(
+    nested, dotted, ambiguous
+) -> None:
+    values = condition_check.target_observation_fact_values(
+        _dotted_state(nested, dotted)
+    )
+
+    assert (values["TARGET-STATE.a.b"] is condition_check._AMBIGUOUS) is ambiguous
+
+
+def test_a_fact_seen_as_true_and_as_1_binds_to_neither() -> None:
+    universe = build_condition_universe(
+        execution_target_profile=None,
+        target_operation=_operation(),
+        target_observations=_dotted_state(True, 1),
+    )
+    condition = _value_condition("eq", 0, argument="amount")
+    condition["comparisons"][0]["right"] = {
+        "source": "fact",
+        "path": "TARGET-STATE.a.b",
+    }
+
+    assert _findings(condition, universe) == ()
 
 
 def test_a_malformed_required_list_keeps_a_never_true_refusal() -> None:
@@ -2137,6 +2245,45 @@ def test_an_operation_its_resources_describe_apart_proves_nothing(
         assert result.refused == ()
         assert [item.detail for item in result.undecidable] == [
             f"comparisons[0] binds shared.x {op} 7: {SHARED_REASON}"
+        ]
+
+
+@pytest.mark.parametrize(
+    ("first", "second"),
+    [
+        # The copies agree on the argument but not on the whole input schema.
+        (
+            {**_x_schema({"type": "string"}, required=True), "title": "A"},
+            {**_x_schema({"type": "string"}, required=True), "title": "B"},
+        ),
+        (
+            _x_schema({"type": "string"}, required=True),
+            {
+                **_x_schema({"type": "string"}, required=True),
+                "additionalProperties": False,
+            },
+        ),
+        # JSON true is not the number 1, and 1 is not written as 1.0.
+        (
+            _x_schema({"enum": [1]}, required=True),
+            _x_schema({"enum": [True]}, required=True),
+        ),
+        (
+            _x_schema({"enum": [1]}, required=True),
+            _x_schema({"enum": [1.0]}, required=True),
+        ),
+    ],
+)
+def test_copies_agree_only_on_identical_input_schemas(first, second) -> None:
+    for universe in (_shared_universe(first, second), _shared_universe(second, first)):
+        condition = _value_condition("eq", 7, argument="x", operation="shared")
+
+        result = _judged(condition, universe)
+
+        assert universe.ambiguous_operations == frozenset({"shared"})
+        assert result.refused == ()
+        assert [item.detail for item in result.undecidable] == [
+            f"comparisons[0] binds shared.x eq 7: {SHARED_REASON}"
         ]
 
 
