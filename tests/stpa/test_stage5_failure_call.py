@@ -243,3 +243,21 @@ def test_a_reply_claims_not_called_on_its_missing_call_is_kept(tmp_path) -> None
     assert error is None
     assert result.discriminating_condition is not None
     assert result.condition_omitted_reason is None
+
+
+def test_a_reply_without_the_failure_call_goes_through_the_correction(
+    tmp_path,
+) -> None:
+    omitted = _payload_with(_ownership_condition("ORD-2"))
+    del omitted["unsafe_outcome"]["failure_call"]
+    client = MockLLMClient()
+    client.set_response_queue([omitted, _payload_with(_ownership_condition("ORD-2"))])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert client.call_count == 2
+    assert "- unsafe_outcome.failure_call: Field required (missing)" in (
+        client.calls[1].user_prompt
+    )
+    assert result.unsafe_outcome_failure_call is None
