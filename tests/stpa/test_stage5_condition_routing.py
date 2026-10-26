@@ -230,8 +230,8 @@ def test_a_routed_draft_that_fails_validation_publishes_unrouted(
         route_without_condition as real,
     )
 
-    def broken(draft, contract, code):
-        routed = real(draft, contract, code)
+    def broken(draft, contract, code, **kwargs):
+        routed = real(draft, contract, code, **kwargs)
         routed.draft.unsafe_outcome.observation_criteria = []
         return routed
 

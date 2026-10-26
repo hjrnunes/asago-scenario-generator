@@ -71,6 +71,7 @@ from .schema import (
 from .validate import (
     UNPARSED_CONDITION_CODE,
     _NormalDraftCheck,
+    _stage5_observed_operation_names,
     _validate_normal_provider_payload,
     claims_only_replies,
 )
@@ -282,7 +283,14 @@ def _generate_semantics(
         """
         draft = validate(value, condition_required=False)
         first = checks[-1]
-        routed = route_without_condition(draft, contract, failure_code)
+        routed = route_without_condition(
+            draft,
+            contract,
+            failure_code,
+            recorded_operations=_stage5_observed_operation_names(
+                execution_target_profile, target_operation=target_operation
+            ),
+        )
         if routed is None:
             return draft
         try:
@@ -630,6 +638,11 @@ _ROUTE_NOTES = {
     "reply": (
         "the scenario is published without a condition and its claim moved "
         "from command_attempt to reply."
+    ),
+    "failure_call": (
+        "the failure call names an operation the target records, so the "
+        "command_attempt claim stays observable and the scenario is published "
+        "without a condition."
     ),
     "analytical_only": (
         "the response declares no reply criterion the contract supports, so "

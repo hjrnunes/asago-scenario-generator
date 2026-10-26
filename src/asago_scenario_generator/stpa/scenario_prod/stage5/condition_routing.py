@@ -6,6 +6,10 @@ correction has none, so publishing the claim leaves the consumer nothing to
 execute. The routing below is deterministic code over the response the model
 already wrote: no model request. Code writes no reply wording; the only text
 it adds is the note on a criterion it withdrew.
+
+A failure call of an operation the target records is observed whatever the
+condition, so such a draft keeps its command-attempt claim: a failed
+condition never makes an observable call analytical.
 """
 
 from __future__ import annotations
@@ -21,11 +25,12 @@ from asago_scenario_generator.stpa.observation_contract import (
     ObservationCriterion,
     SafeObservableOutcome,
     assess_observation_criteria,
+    failure_call_criterion,
 )
 from .records import Stage5Normalization
 from .validate import _replace_safe_outcome
 
-ConditionRoute = Literal["reply", "analytical_only"]
+ConditionRoute = Literal["reply", "failure_call", "analytical_only"]
 
 _COMMAND_ATTEMPT = "command_attempt"
 _CRITERION_FIELDS = (
@@ -80,24 +85,32 @@ def route_without_condition(
     draft: BaseModel,
     contract: ObservationContract,
     failure_code: str,
+    *,
+    recorded_operations: tuple[str, ...] = (),
 ) -> RoutedDraft | None:
     """Move a condition-less command-attempt draft to a claim it can run at.
 
     Returns ``None`` when the safe outcome is not an observable command
     attempt, so every other draft publishes unchanged. The draft goes to
     ``reply`` when the response itself declares a reply criterion the contract
-    supports, and to ``analytical_only`` otherwise: a reply claim needs the
-    model's own reply-level observation, and code never writes one.
+    supports: a reply claim needs the model's own reply-level observation,
+    and code never writes one. Otherwise a draft whose failure call names one
+    of ``recorded_operations`` takes the ``failure_call`` route, which keeps
+    the draft unchanged, and every other draft goes to ``analytical_only``.
     """
 
-    safe_outcome = draft.unsafe_outcome.safe_observable_outcome
+    outcome = draft.unsafe_outcome
+    safe_outcome = outcome.safe_observable_outcome
     if not _is_command_attempt(safe_outcome):
         return None
-    route: ConditionRoute = (
-        "reply"
-        if _declares_supported_reply(draft.unsafe_outcome, contract)
-        else "analytical_only"
-    )
+    if _declares_supported_reply(outcome, contract):
+        route: ConditionRoute = "reply"
+    elif failure_call_criterion(
+        getattr(outcome, "failure_call", None), contract, recorded_operations
+    ):
+        return RoutedDraft(copy.deepcopy(draft), "failure_call", ())
+    else:
+        route = "analytical_only"
     reason = _route_reason(route, failure_code)
     note = _DEMOTION_NOTES[route].format(code=failure_code)
     routed = copy.deepcopy(draft)
