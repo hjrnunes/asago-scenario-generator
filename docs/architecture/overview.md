@@ -181,8 +181,8 @@ Phase 1 planning always executes; a run never resumes from a prior plan.
 The fixed order is capability preparation and snapshot pinning, Phase 1
 planning, ordinary SP1 baseline, neutral-brief consideration, at most one
 additive revision, one complete recheck only when that revision is `applied`,
-final obligation-aware ICA filling, ordinary SP3 realization, and provisional
-accounting. The shared provider adapter is constructed lazily after planning
+mechanism suggestion proposal and verification, final obligation-aware ICA
+filling, ordinary SP3 realization, and provisional accounting. The shared provider adapter is constructed lazily after planning
 and baseline preparation. An SP3 failure is recorded without discarding final
 ICA or accounting evidence.
 
@@ -262,6 +262,11 @@ through the typed causal evidence fields against the immutable context;
 free-text verb matching is not a publication gate. Obligation pattern names,
 concerns, and rationales are analysis provenance: `finding` means that STPA
 found a related unsafe-control path, not that the taxonomy mechanism happened.
+A verified mechanism suggestion finding reaches Stage 5 the same way, as an
+`obligation_considerations` entry of kind `mechanism` that names the library
+mechanism and has no obligation or risk. A library ID never replaces a PM, FB,
+or CA causal source (or a justified CL source), and a library match never
+upgrades a causal factor's evidence status.
 The ICA keeps the unsafe control condition mechanism-neutral unless the compact
 STPA structure independently supplies that mechanism, and later scenario
 renderers may use a mechanism only from exact causal or capability/access
@@ -285,10 +290,63 @@ the routed hazards whenever a route named the slot); accounting carries its
 summary as `slot_hazard_offers`. Nested structural-revision objects are validated before merge,
 and the run distinguishes a requested revision from one actually applied.
 
+A slot request can carry a third consideration kind beside its own hazards and
+its routed obligations: a mechanism suggestion. Obligations work top down and
+each one needs a risk; a suggestion works bottom up and carries none. Code
+proposes it: the authority-filtered graph join
+(`stpa_index.mechanism_candidates(..., authority_filter=True)`) follows
+adversary-reachable feedback that lacks authority over its variable to every
+control action that reads the variable and every coordination link that
+carries it, and each path proposes its mechanism library entries for the slots
+of that action or link. No routing call is made for a suggestion, and none
+enters a routing prompt. A slot decided by structure alone (an ineligible
+`WRONG_DURATION`) is carried by no request.
+
+The join's fit is not evidence, so the mechanism verifier gates every proposed
+path through its own entry point, `verify_mechanism_suggestions`. It reuses
+the obligation verifier's prompt, payload, repair, and completion cap, but it
+never asks for `risk_alignment: supported`, which is undefined for a
+suggestion. Each item names the library entry by its name and question and
+lists it in `known_mechanism_refs`, so the glossary shows the entry's required
+evidence and counterexamples; the path carries exact structural descriptions
+only, never a source kind or authority status. A paragraph rendered only for
+suggestion calls says the typed fit is not evidence, and because a suggestion
+cites no hazard, the user message lists the system hazards once with their
+governing constraints. Calls judge at most eight suggestions; a failed call
+leaves its suggestions without a verdict. Only a path judged
+`mechanism_specific` survives.
+
+At most `MECHANISM_SUGGESTIONS_PER_SLOT` (two) verified suggestions per slot
+reach ICA filling, the first in library order. A suggestion rides on its
+slot's first request and never displaces the slot's own hazards or its routed
+obligations: requests are split for budget without suggestions, and a request
+that would no longer fit with them is sent without them. The slot prompt lists
+each suggestion under a local handle (`M1`..`Mn`) with the mechanism's name,
+question, and explained path, in sections and a paragraph that render only
+when a suggestion is present, so every request without one keeps its exact
+bytes. The model answers each suggestion in `consideration_results` with the
+obligation outcomes (`finding`, `proposed_not_applicable`, `unresolved`),
+validated and repaired like a routed pair. The result is a separate
+`MechanismIcaConsideration`, never an obligation pair. The independent ICA
+verifier judges only the resulting ICAs; no mechanism, taxonomy, or routing
+material reaches its prompt, and its exclusions withhold a mechanism finding
+exactly as they withhold an obligation finding.
+
+Suggestions are accounted apart from obligation coverage, which never counts
+them. `mechanism-suggestion-accounting.yaml`, written only when the verifier
+was asked, gives every (library mechanism, final slot) pair one row with the
+first stop reason that applies: `not_proposed`, `authority_filtered`,
+`slot_not_analyzed`, `verifier_rejected` (every path `adjacent_control`),
+`verifier_unresolved`, `over_cap`, `prompt_budget_exceeded`,
+`slot_fill_unresolved`, `slot_fill_not_applicable`, `ica_verifier_rejected`,
+or `finding`. A row past the proposal keeps each path's verdict and rationale,
+and its summary counts rows per reason.
+
 The root atomically publishes `taxonomy-obligation-plan.yaml`,
 `obligation-consideration.yaml`, `obligation-accounting.yaml`,
 `scenario-realization.yaml`, `synthesis-manifest.yaml`, when slot
-filling sent requests, `slot-hazard-offers.yaml`, and, when slot compilation
+filling sent requests, `slot-hazard-offers.yaml`, when the mechanism verifier
+was asked, `mechanism-suggestion-accounting.yaml`, and, when slot compilation
 merged findings that differ only by context row or pair, `ica-merges.yaml`
 (one entry per merged ICA, with the as-written findings it stands for).
 Accounting joins
