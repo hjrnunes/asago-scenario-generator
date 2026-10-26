@@ -410,6 +410,13 @@ class _RoutingProviderRouteBase(_Model):
     """Fields shared by each disposition-specific routing branch."""
 
     obligation_id: ObligationId
+    attack_pattern_id: str = Field(
+        min_length=1,
+        description=(
+            "The attack_pattern_id stated on this obligation's own question, "
+            "copied unchanged: the pattern this route judges."
+        ),
+    )
     semantic_assessment: _RoutingProviderSemanticAssessment
     rationale: str = Field(min_length=1)
     evidence: tuple[str, ...] = Field(min_length=1)
@@ -481,7 +488,10 @@ _RoutingProviderPayload.model_rebuild()
 
 @lru_cache(maxsize=16)
 def _routing_provider_payload_type(
-    route_count: int, *, obligation_ids: tuple[str, ...] = ()
+    route_count: int,
+    *,
+    obligation_ids: tuple[str, ...] = (),
+    attack_pattern_ids: tuple[str, ...] = (),
 ) -> type[_Model]:
     """Build a strict provider payload for exactly one route per brief.
 
@@ -497,21 +507,35 @@ def _routing_provider_payload_type(
         f"_RoutingProviderPayload{route_count}",
         _RoutingProviderPayload,
         "routes",
-        _routing_exact_identity_union(obligation_ids),
+        _routing_exact_identity_union(obligation_ids, attack_pattern_ids),
         route_count,
         module=__name__,
     )
 
 
-def _routing_exact_identity_union(obligation_ids: tuple[str, ...]) -> object:
-    """Give guided decoding the exact supplied IDs, never digest-shaped guesses."""
+def _routing_exact_identity_union(
+    obligation_ids: tuple[str, ...], attack_pattern_ids: tuple[str, ...] = ()
+) -> object:
+    """Give guided decoding the exact supplied IDs, never digest-shaped guesses.
+
+    The pattern echo is limited to the batch's own pattern IDs; which one
+    belongs to which obligation is checked after the reply is parsed.
+    """
     if not obligation_ids:
         return _RoutingProviderRouteUnion
+    exact: dict[str, Any] = {
+        "obligation_id": (Literal.__getitem__(obligation_ids), ...)
+    }
+    if attack_pattern_ids:
+        exact["attack_pattern_id"] = (
+            Literal.__getitem__(attack_pattern_ids),
+            _RoutingProviderRouteBase.model_fields["attack_pattern_id"],
+        )
     variants = tuple(
         create_model(
             base.__name__,
             __base__=base,
-            obligation_id=(Literal.__getitem__(obligation_ids), ...),
+            **exact,
         )
         for base in (
             _RoutingProviderRoute,
@@ -1773,6 +1797,7 @@ class ObligationAwareLLMAdapter:
             output_schema=(
                 "routes",
                 "obligation_id",
+                "attack_pattern_id",
                 "disposition",
                 "targeting",
                 "slot_ids",
@@ -1785,6 +1810,7 @@ class ObligationAwareLLMAdapter:
                 "routes": [
                     {
                         "obligation_id": "<obligation_handle>",
+                        "attack_pattern_id": "<attack_pattern_id>",
                         "disposition": "unresolved",
                         "semantic_assessment": {
                             "mechanism_assessment": "insufficient_evidence",
@@ -1804,6 +1830,15 @@ class ObligationAwareLLMAdapter:
         response_format = _routing_provider_payload_type(
             len(request.briefs),
             obligation_ids=tuple(brief.obligation_id for brief in request.briefs),
+            attack_pattern_ids=tuple(
+                sorted(
+                    {
+                        brief.attack_pattern_id
+                        for brief in request.briefs
+                        if brief.attack_pattern_id is not None
+                    }
+                )
+            ),
         )
         outcome = call_with_policy(
             llm_client=self.llm_client,

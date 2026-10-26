@@ -84,7 +84,7 @@ def _routing(brief) -> tuple[str, str]:
 def test_a_routing_concern_names_and_the_glossary_defines_its_mechanisms() -> None:
     system, user = _routing(linked_brief(_brief(), "AP-T6-03"))
 
-    (concern,) = _block(user, "known_concern_ref):\n", _ROUTING_GLOSSARY)
+    (concern,) = _block(user, "attack_pattern_name):\n", _ROUTING_GLOSSARY)
     glossary = _block(user, _ROUTING_GLOSSARY, "Compact obligation questions:")
     assert concern["known_mechanism_refs"] == ["retrieved_instructions"]
     assert glossary == [_entry_view("retrieved_instructions")]

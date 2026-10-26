@@ -54,6 +54,7 @@ def _flat_route(disposition: str, **fields: Any) -> dict[str, Any]:
         "routes": [
             {
                 "obligation_id": _OB,
+                "attack_pattern_id": "AP-T1-01",
                 "semantic_assessment": {
                     "mechanism_assessment": "plausible_in_system",
                     "risk_alignment": "supported",

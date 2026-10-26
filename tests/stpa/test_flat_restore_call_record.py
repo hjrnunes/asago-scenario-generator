@@ -38,6 +38,7 @@ _IDS = (
 def _flat_route(**changes: Any) -> dict[str, Any]:
     route: dict[str, Any] = {
         "obligation_id": "ob:v1:" + "0" * 64,
+        "attack_pattern_id": "AP-T1-01",
         "semantic_assessment": {
             "mechanism_assessment": "plausible_in_system",
             "risk_alignment": "supported",

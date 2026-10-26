@@ -82,7 +82,16 @@ disposition. It is separate from the two semantic-assessment rationales:
 `mechanism_rationale` explains only whether the known mechanism is plausible in
 the supplied system, while `risk_alignment_rationale` explains only whether it
 would realize the reviewed risk. Every route also requires non-empty
-`obligation_id`, `evidence`, and the literal `disposition`.
+`obligation_id`, `attack_pattern_id`, `evidence`, and the literal `disposition`.
+
+`attack_pattern_id` binds the route to its own question: copy unchanged the
+`attack_pattern_id` stated on the question whose `obligation_handle` the route
+copies. Questions in one batch can name different, similar patterns. Judge each
+route on its own question's pattern only: its rationale, evidence, and both
+semantic-assessment rationales describe that pattern's mechanism and name no
+other question's `attack_pattern_id`. A route whose `attack_pattern_id` is not
+its own question's, or whose text names another question's pattern ID, fails
+local validation.
 
 The provider wire shape is disposition-specific. A `targeted` route requires a
 `targeting` object in addition to its rationale, evidence, and semantic
@@ -99,8 +108,8 @@ disposition; set each route field that the selected disposition does not use to
 `null`, as the unresolved example shows, never to an empty list. Category
 expansion is a way to discover questions, never mechanism evidence.
 
-Complete targeted example (the handle is only a schema-valid fixture; copy the
-actual supplied handle unchanged):
+Complete targeted example (the handle and `attack_pattern_id` are only
+schema-valid fixtures; copy the actual supplied values unchanged):
 
 ```json
 {{ routing_targeted_example }}

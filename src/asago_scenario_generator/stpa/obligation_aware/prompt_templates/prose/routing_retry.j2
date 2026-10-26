@@ -1,6 +1,8 @@
 {#- Correction text appended to a structural-routing retry, one section per branch. Each section is one unwrapped line, so the rendered text has no line break. -#}
 {%- if section == "repair_opaque_identity" -%}
 Repair code copied_opaque_identity_mismatch: copy every supplied obligation_id byte-for-byte, including its final character; do not normalize, regenerate, or substitute an opaque handle.
+{%- elif section == "repair_attack_pattern" -%}
+Repair code attack_pattern_crossover: give every route the attack_pattern_id stated on its own question, copied unchanged, and judge only that pattern; its rationale, evidence, and semantic-assessment rationales describe that pattern's mechanism and name no other question's attack_pattern_id.
 {%- elif section == "repair_rationale" -%}
 Repair code missing_route_rationale: every route branch must contain a non-empty string rationale explaining the selected disposition. For example: {"disposition":"unresolved","rationale":"the required system path is not supplied","evidence":["evidence is insufficient"]}.
 {%- elif section == "repair_disposition" -%}

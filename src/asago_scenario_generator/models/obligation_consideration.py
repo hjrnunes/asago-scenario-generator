@@ -368,6 +368,12 @@ class ObligationRoute(_ConsiderationModel):
 
     route_id: str | None = None
     obligation_id: ObligationId
+    # The attack pattern a provider route says it judged.  Routing refuses a
+    # route whose echo is not its obligation's own pattern; an adapter that
+    # does not echo one leaves it unset, which keeps its route identity.
+    attack_pattern_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
     disposition: ObligationRouteDisposition
     semantic_assessment: ObligationSemanticAssessment | None = Field(
         default=None, exclude_if=lambda value: value is None

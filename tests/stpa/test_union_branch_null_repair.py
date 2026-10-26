@@ -41,6 +41,7 @@ _ERROR_BLOCK = "Exact validation error from the prior response:\n"
 def _upstream_gap_route(missing_concepts: Any) -> dict[str, Any]:
     return {
         "obligation_id": "ob:v1:" + "0" * 64,
+        "attack_pattern_id": "AP-T1-01",
         "semantic_assessment": {
             "mechanism_assessment": "absent_from_system",
             "risk_alignment": "supported",
