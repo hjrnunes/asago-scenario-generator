@@ -728,7 +728,19 @@ def _account_governance_without_finding(
     pairs: tuple[ObligationIcaConsideration, ...],
     evidence: tuple[str, ...],
 ) -> ObligationAccountingRow:
-    """Record the route of a governance row whose routed slots found nothing."""
+    """Record the route of a governance row whose routed slots found nothing.
+
+    The row stops at ``governance_routed_no_finding`` whatever its slots
+    held: not applicable, left unresolved on the analysis, or never analyzed
+    because the prompt budget rejected the request or its reply broke its
+    contract.  This is deliberate.  The unanalyzed-slot stop reasons belong
+    to the applicable funnel, where a row's stop reason is its terminal
+    reason; a governance-only row stays outside that funnel, keeps its own
+    outcome whatever the risk scope, and has one uncredited outcome.  The
+    synthesis manifest counts no governance-only row among the terminal
+    reasons.  Each pair's diagnostic is copied onto the row, so a
+    budget-rejected or lost slot stays named there.
+    """
     return ObligationAccountingRow(
         obligation_id=obligation.obligation_id,
         disposition="governance_only",

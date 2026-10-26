@@ -256,6 +256,70 @@ def test_governance_lost_reply_beside_an_analytic_slot_found_nothing() -> None:
     assert [item.code for item in row.diagnostics] == ["slot_provider_contract_failed"]
 
 
+@pytest.mark.parametrize(
+    "codes",
+    (
+        ("slot_prompt_budget_exceeded", "slot_prompt_budget_exceeded"),
+        ("slot_provider_contract_failed", "slot_provider_contract_failed"),
+        ("slot_prompt_budget_exceeded", "slot_provider_contract_failed"),
+    ),
+    ids=("budget", "lost-reply", "budget-and-lost-reply"),
+)
+def test_a_governance_row_whose_every_slot_went_unanalyzed_keeps_its_reason(
+    codes: tuple[str, str],
+) -> None:
+    """A governance row has one uncredited outcome; its slot codes say why.
+
+    Every unresolved routed slot went unanalyzed, which stops an applicable
+    row at ``prompt_budget_exceeded`` or ``provider_contract_failure``.  A
+    governance-only row stays outside that funnel: it stops at
+    ``governance_routed_no_finding`` and carries each slot's code, and a
+    routed governance row may carry no other stop reason.
+    """
+    from asago_scenario_generator.models.obligation_consideration import (
+        ConsiderationDiagnostic,
+    )
+
+    slots = ("RESP-1:CA-1-1:INCORRECT", _SLOT)
+    route = _governance_route(slots=slots)
+    pairs = tuple(
+        ObligationIcaConsideration(
+            route_id=route.route_id,
+            obligation_id=_GOVERNANCE_ID,
+            slot_id=slot,
+            disposition="unresolved",
+            rationale="The slot request was never analyzed.",
+            evidence=("slot-analysis-validation",),
+            diagnostics=(
+                ConsiderationDiagnostic(
+                    code=code,
+                    detail="The slot request was never analyzed.",
+                    obligation_ids=(_GOVERNANCE_ID,),
+                    refs=(route.route_id, slot),
+                ),
+            ),
+        )
+        for slot, code in zip(slots, codes)
+    )
+
+    accounting = _build(pairs=pairs, governance_routes=(route,))
+
+    row = _row(accounting, _GOVERNANCE_ID)
+    assert row.disposition == "governance_only"
+    assert row.stop_reason == "governance_routed_no_finding"
+    assert row.slot_ids == tuple(sorted(slots))
+    assert row.route_refs == (route.route_id,)
+    assert [item.code for item in row.diagnostics] == list(codes)
+    assert accounting.summary.governance_routed_no_finding == 1
+    assert accounting.summary.unresolved == 0
+    accounting.assert_integrity()
+    for reason in ("prompt_budget_exceeded", "provider_contract_failure"):
+        with pytest.raises(ValueError, match="must be complete"):
+            ObligationAccountingRow.model_validate(
+                {**row.model_dump(mode="json"), "stop_reason": reason}
+            )
+
+
 def test_a_governance_route_for_an_unknown_row_is_rejected() -> None:
     stray = _governance_route().model_copy(
         update={"obligation_id": "ob:v1:" + "e" * 64}
