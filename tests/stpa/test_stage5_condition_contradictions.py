@@ -207,7 +207,7 @@ def test_each_case_gets_its_expected_classification(case) -> None:
         ("not_provided_summary_as_not_called", SUMMARY_DETAIL),
     ],
 )
-def test_each_issue_case_is_undecidable_with_its_reason(case, detail) -> None:
+def test_each_published_case_is_undecidable_with_its_reason(case, detail) -> None:
     result = _assess(case)
 
     assert result.refused == ()
@@ -1899,7 +1899,7 @@ def test_a_value_is_a_member_of_no_list_with_no_element() -> None:
     assert _rules(_judge(_membership(_lit(7), "in", SUBJECT), universe)) == B
 
 
-# Round-eight counterexamples.
+# Required lists, pinned values, and annotations.
 
 
 def _input_schema_universe(input_schema: dict) -> ConditionUniverse:
@@ -1973,8 +1973,17 @@ def _empty_list_value(op: str, value: object) -> dict:
         ({"type": "array", "items": False}, "ne", [], False, CLEAN),
         ({"type": ["array", "null"], "items": False}, "eq", [7], False, B),
         ({"type": ["array", "null"], "items": False}, "eq", None, False, CLEAN),
-        # Strings are not pinned: equality keeps reading the types alone.
-        ({"type": ["array", "string"], "items": False}, "eq", [7], False, CLEAN),
+        # Each type is judged on its own: the only list is [], and strings
+        # stay open.
+        ({"type": ["array", "string"], "items": False}, "eq", [7], False, B),
+        ({"type": ["array", "string"], "items": False}, "eq", [], False, CLEAN),
+        ({"type": ["array", "string"], "items": False}, "eq", "s", False, CLEAN),
+        ({"type": ["array", "string"], "items": False}, "ne", [7], False, B),
+        ({"type": ["array", "string"], "items": False}, "ne", [7], True, OPEN_B),
+        # Without a type every type stays open, but its only list is [].
+        ({"items": False}, "eq", [7], False, B),
+        ({"items": False}, "eq", 7, False, CLEAN),
+        ({"items": False}, "ne", [7], False, B),
         ({"type": "array", "items": {"type": "number"}}, "eq", [7], False, CLEAN),
     ],
 )
@@ -1984,6 +1993,22 @@ def test_equality_reads_the_values_a_schema_pins(
     universe = _lattice_universe(schema, {}, optional=optional)
 
     assert _rules(_judge(_empty_list_value(op, value), universe)) == expected
+
+
+def test_equality_with_a_list_among_open_types_states_why() -> None:
+    universe = _lattice_universe({"type": ["array", "string"], "items": False}, {})
+
+    result = _judge(_empty_list_value("eq", [7]), universe)
+
+    assert [item.detail for item in result.refused] == [
+        "comparisons[0] binds refund_payment.subject eq [7] in the tool-call "
+        "condition, but the input schema of refund_payment declares subject as "
+        "array or string with items false, so the only list it admits is [], "
+        "and [7] is a list that is not empty; tool-call-condition-v1 never "
+        "converts a value for eq, so the comparison holds on no call and the "
+        "condition never detects the unsafe call. Compare subject with [] or a "
+        "supplied value of another type it admits"
+    ]
 
 
 def test_equality_with_a_list_that_holds_no_element_states_why() -> None:
@@ -2039,7 +2064,102 @@ def test_well_formed_annotations_leave_the_proof_standing() -> None:
     assert _rules(_judge(_membership(SUBJECT, "eq", _lit(7)), universe)) == B
 
 
-# The counterexamples of the last two reviews.
+# An operation id that more than one resource exposes.
+
+
+def _shared_universe(first: dict, second: dict) -> ConditionUniverse:
+    """Two resources expose the operation ``shared``, with these input schemas."""
+
+    profile = _profile(tools=("lookup_order",))
+    base = profile.resources[0]
+    operation = base.operations[0].model_copy(update={"operation_id": "shared"})
+    resources = tuple(
+        base.model_copy(
+            update={
+                "resource_id": f"{base.resource_id}-{index}",
+                "input_schema": schema,
+                "description": text,
+                "operations": (operation,),
+            }
+        )
+        for index, (schema, text) in enumerate(
+            ((first, "First copy."), (second, "Second copy."))
+        )
+    )
+    return build_condition_universe(
+        execution_target_profile=profile.model_copy(update={"resources": resources}),
+        target_operation=None,
+        target_observations=None,
+    )
+
+
+def _x_schema(schema: dict, *, required: bool) -> dict:
+    return {
+        "type": "object",
+        "properties": {"x": schema},
+        **({"required": ["x"]} if required else {}),
+    }
+
+
+SHARED_REASON = (
+    "the target profile lists shared in more than one resource, with input "
+    "schemas or required lists that differ, so the check reads no schema fact "
+    "or requiredness of shared"
+)
+
+
+@pytest.mark.parametrize(
+    ("first", "second", "op"),
+    [
+        (
+            _x_schema({"type": "number"}, required=True),
+            _x_schema({"type": "string"}, required=True),
+            "eq",
+        ),
+        (
+            _x_schema({"type": "string"}, required=False),
+            _x_schema({"type": "string"}, required=True),
+            "ne",
+        ),
+    ],
+)
+def test_an_operation_its_resources_describe_apart_proves_nothing(
+    first, second, op
+) -> None:
+    for universe in (_shared_universe(first, second), _shared_universe(second, first)):
+        condition = _value_condition(op, 7, argument="x", operation="shared")
+
+        result = _judged(condition, universe)
+
+        assert universe.ambiguous_operations == frozenset({"shared"})
+        assert universe.argument_schemas["shared"] == {}
+        assert universe.required_arguments["shared"] == frozenset()
+        assert result.refused == ()
+        assert [item.detail for item in result.undecidable] == [
+            f"comparisons[0] binds shared.x {op} 7: {SHARED_REASON}"
+        ]
+
+
+def test_an_operation_its_resources_describe_alike_still_proves() -> None:
+    schema = _x_schema({"type": "string"}, required=True)
+    universe = _shared_universe(schema, schema)
+
+    assert universe.ambiguous_operations == frozenset()
+    for op in ("eq", "ne"):
+        condition = _value_condition(op, 7, argument="x", operation="shared")
+        assert _rules(_judged(condition, universe)) == B
+
+
+def test_an_operation_its_resources_share_keeps_every_description() -> None:
+    universe = _shared_universe(
+        _x_schema({"type": "string"}, required=True),
+        _x_schema({"type": "number"}, required=True),
+    )
+
+    assert universe.operation_text["shared"] == "First copy. Second copy."
+
+
+# Schemas outside the grammar, or that admit nothing, refuse no equality.
 
 BIG_ITEMS = {"allOf": [{"anyOf": [{"type": "string"}, {"type": "string"}]}] * 9}
 
@@ -2060,7 +2180,7 @@ BIG_ITEMS = {"allOf": [{"anyOf": [{"type": "string"}, {"type": "string"}]}] * 9}
         {"enum": [["x"]], "items": BIG_ITEMS},
     ],
 )
-def test_the_review_counterexamples_refuse_nothing(schema) -> None:
+def test_a_schema_that_proves_nothing_refuses_no_equality(schema) -> None:
     universe = _with_schemas({"refund_payment": {"amount": schema}})
 
     for value in ("x", 5, 7):

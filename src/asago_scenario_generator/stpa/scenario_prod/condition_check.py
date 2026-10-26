@@ -109,6 +109,10 @@ class ConditionUniverse:
     # Operations whose ``required`` is not a list of distinct names: it
     # proves no argument required.
     unreadable_required: frozenset[str] = frozenset()
+    # Operation ids that more than one resource exposes with input schemas or
+    # required lists that differ: no schema fact or requiredness of theirs
+    # holds for every call, so they have none.
+    ambiguous_operations: frozenset[str] = frozenset()
     # Operation name -> argument -> its input-schema property.
     argument_schemas: Mapping[str, Mapping[str, Mapping[str, Any]]] = field(
         default_factory=dict
@@ -164,10 +168,10 @@ def build_condition_universe(
     """Collect the operation arguments and fact values of one request."""
 
     operations: dict[str, set[str]] = {}
-    texts: dict[str, str] = {}
-    required: dict[str, frozenset[str]] = {}
-    unreadable: set[str] = set()
-    schemas: dict[str, dict[str, Mapping[str, Any]]] = {}
+    descriptions: dict[str, list[str]] = {}
+    # Operation id -> (argument schemas, required names) of each resource.
+    copies: dict[str, list[tuple[dict[str, Mapping[str, Any]], frozenset[str] | None]]]
+    copies = {}
     literals = _observed_literals(target_observations)
     if execution_target_profile is not None:
         for resource in execution_target_profile.resources:
@@ -177,28 +181,47 @@ def build_condition_universe(
                 names = operations.setdefault(operation.operation_id, set())
                 names.update(operation.argument_names or resource.argument_names)
                 names.update(schema_names)
-                texts[operation.operation_id] = resource.description or ""
-                _record_required(
-                    required, unreadable, operation.operation_id, resource.input_schema
+                descriptions.setdefault(operation.operation_id, []).append(
+                    resource.description or ""
                 )
-                schemas[operation.operation_id] = _argument_schemas(
-                    resource.input_schema
+                copies.setdefault(operation.operation_id, []).append(
+                    (
+                        _argument_schemas(resource.input_schema),
+                        _required_arguments(resource.input_schema),
+                    )
                 )
     elif target_operation is not None:
         names = operations.setdefault(target_operation.operation_id, set())
         names.update(target_operation.argument_names)
         names.update(_schema_argument_names(target_operation.input_schema))
         literals |= _schema_literals(target_operation.input_schema)
-        texts[target_operation.operation_id] = target_operation.description or ""
-        _record_required(
-            required,
-            unreadable,
-            target_operation.operation_id,
-            target_operation.input_schema,
-        )
-        schemas[target_operation.operation_id] = _argument_schemas(
-            target_operation.input_schema
-        )
+        descriptions[target_operation.operation_id] = [
+            target_operation.description or ""
+        ]
+        copies[target_operation.operation_id] = [
+            (
+                _argument_schemas(target_operation.input_schema),
+                _required_arguments(target_operation.input_schema),
+            )
+        ]
+    required: dict[str, frozenset[str]] = {}
+    unreadable: set[str] = set()
+    ambiguous: set[str] = set()
+    schemas: dict[str, dict[str, Mapping[str, Any]]] = {}
+    for operation_id, entries in copies.items():
+        if any(entry != entries[0] for entry in entries[1:]):
+            ambiguous.add(operation_id)
+            schemas[operation_id] = {}
+            required[operation_id] = frozenset()
+            continue
+        schemas[operation_id], names = entries[0]
+        if names is None:
+            unreadable.add(operation_id)
+        required[operation_id] = names or frozenset()
+    texts = {
+        operation_id: " ".join(dict.fromkeys(text for text in items if text))
+        for operation_id, items in descriptions.items()
+    }
     return ConditionUniverse(
         operations={name: frozenset(args) for name, args in operations.items()},
         fact_values=target_observation_fact_values(target_observations),
@@ -208,25 +231,9 @@ def build_condition_universe(
         operation_text=texts,
         required_arguments=required,
         unreadable_required=frozenset(unreadable),
+        ambiguous_operations=frozenset(ambiguous),
         argument_schemas=schemas,
     )
-
-
-def _record_required(
-    required: dict[str, frozenset[str]],
-    unreadable: set[str],
-    operation: str,
-    schema: object,
-) -> None:
-    """Record the arguments an operation requires, or that none is proven."""
-
-    names = _required_arguments(schema)
-    if names is None:
-        unreadable.add(operation)
-        required[operation] = frozenset()
-    else:
-        unreadable.discard(operation)
-        required[operation] = names
 
 
 def _required_arguments(schema: object) -> frozenset[str] | None:

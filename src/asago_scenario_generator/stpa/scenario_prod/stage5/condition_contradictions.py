@@ -88,9 +88,18 @@ element ``items`` admits; with no value listed, it admits a value of every
 type it declares. A schema that admits no value proves nothing either. A
 list schema whose ``items`` admit nothing admits only the empty list: its
 type counts, but it proves nothing about its elements. ``items: false``
-states that a list holds no element, so such a schema admits ``[]`` alone;
-where its types pin a finite set this way (with ``null`` and the two
-booleans), equality compares against exactly that set.
+states that a list holds no element, so the only list such a schema admits
+is ``[]``. Equality judges each JSON type on its own, since v1 equality never
+crosses types: a literal of a type the schema does not admit, or a list other
+than ``[]`` where its lists hold no element, equals no admitted value; where
+every admitted type is pinned this way (with ``null`` and the two booleans),
+equality compares against exactly that set.
+
+An operation id that more than one resource of the target profile exposes,
+with input schemas or required lists that differ, has no schema fact and no
+requiredness: a call may go to either resource. A comparison on it that is
+not refused on other grounds is undecidable, and the reason names the id.
+Copies that agree prove what one would.
 
 A refusal is a Stage 5 validation failure, corrected through the existing
 correction request. Undecidable cases are reported only: in the run's
@@ -358,18 +367,34 @@ def _bound_contradictions(
     results: list[tuple[RuleFinding | None, RuleFinding | None]] = []
     for index, comparison in enumerate(bound.comparisons):
         if isinstance(comparison, ToolCallValueComparison):
+            label = labels[index]
+            operations = [
+                side.operation
+                for side in (comparison.left, comparison.right)
+                if isinstance(side, ToolCallArgumentOperand)
+            ]
+            result: tuple[RuleFinding | None, RuleFinding | None] | None
             if comparison.op in ORDERED_OPERATORS:
-                results.append(_ordering(labels[index], comparison, universe))
+                result = _ordering(label, comparison, universe)
             else:
-                equality = _value_equality(labels[index], comparison)
+                equality = _value_equality(label, comparison)
                 if isinstance(equality, RuleFinding):
-                    results.append((equality, None))
+                    result = (equality, None)
                 elif equality is not None:
-                    results.append(_kinds(equality, universe, state))
+                    result = _kinds(equality, universe, state)
                 else:
-                    pair = _argument_pair(labels[index], comparison, universe)
-                    if pair is not None:
-                        results.append(pair)
+                    result = _argument_pair(label, comparison, universe)
+            if result is not None:
+                rule: Rule = "c" if comparison.op in ORDERED_OPERATORS else "b"
+                results.append(
+                    _unambiguous(
+                        result,
+                        rule,
+                        f"{label} binds {_comparison_text(comparison)}",
+                        operations,
+                        universe,
+                    )
+                )
         elif isinstance(comparison, ToolCallNotCalledComparison):
             for position, item in enumerate(comparison.where):
                 equality = _Equality(
@@ -391,11 +416,48 @@ def _bound_contradictions(
                     consequence=_WHERE_NEVER_MATCHES,
                     literal=item.value,
                 )
-                results.append(_kinds(equality, universe, state))
+                results.append(
+                    _unambiguous(
+                        _kinds(equality, universe, state),
+                        "b",
+                        f"{equality.label} binds {equality.subject}",
+                        [comparison.operation],
+                        universe,
+                    )
+                )
     return ConditionContradictions(
         refused=tuple(refusal for refusal, _ in results if refusal is not None),
         undecidable=tuple(case for _, case in results if case is not None),
     )
+
+
+def _unambiguous(
+    result: tuple[RuleFinding | None, RuleFinding | None],
+    rule: Rule,
+    binds: str,
+    operations: Sequence[str],
+    universe: ConditionUniverse,
+) -> tuple[RuleFinding | None, RuleFinding | None]:
+    """Name the repeated operation id behind a comparison the check cannot judge.
+
+    An operation that resources describe apart has no schema fact or
+    requiredness, so a comparison on it that is not refused on other grounds
+    is undecidable for that reason.
+    """
+
+    refusal, _ = result
+    shared = sorted(
+        {name for name in operations if name in universe.ambiguous_operations}
+    )
+    if refusal is not None or not shared:
+        return result
+    reasons = "; ".join(
+        f"the target profile lists {name} in more than one resource, with input "
+        "schemas or required lists that differ, so the check reads no schema "
+        f"fact or requiredness of {name}"
+        for name in shared
+    )
+    return None, RuleFinding(rule, f"{binds}: {reasons}")
 
 
 def _bound_labels(
@@ -531,6 +593,14 @@ def _kinds(
     ):
         refusal = _type_refusal(equality, admitted, view.types, candidates)
     elif (
+        equality.role == "value"
+        and view.values is None
+        and admitted.elements is _NO_ELEMENT
+        and candidates
+        and not any(_admits_value(value, admitted) for value in candidates)
+    ):
+        refusal = _only_empty_list_refusal(equality, admitted)
+    elif (
         view.values is not None
         and candidates
         and not _common_values(tuple(candidates), view.values)
@@ -612,6 +682,41 @@ def _type_refusal(
         f"{argument.argument} as {declared} and {literal}; "
         "tool-call-condition-v1 never converts a value for "
         f"{equality.op_word}, so {equality.consequence}. {advice}",
+        IssueCode.discriminating_condition_record_kind_mismatch,
+    )
+
+
+def _admits_value(value: object, admitted: _Admitted) -> bool:
+    """Return whether some admitted value of the literal's own JSON type may equal it.
+
+    v1 equality never crosses JSON types (an integer and a number are one),
+    so each type is judged alone: the type must be admitted, and a list must
+    be ``[]`` when the schema's lists hold no element.
+    """
+
+    if admitted.types is not None and not _fits(value, admitted.types):
+        return False
+    return not (
+        isinstance(value, list) and admitted.elements is _NO_ELEMENT and value != []
+    )
+
+
+def _only_empty_list_refusal(equality: _Equality, admitted: _Admitted) -> RuleFinding:
+    argument = equality.argument
+    declared = (
+        f"declares {argument.argument} as {' or '.join(sorted(admitted.types))}"
+        if admitted.types
+        else f"declares no type for {argument.argument}"
+    )
+    return RuleFinding(
+        "b",
+        f"{equality.label} binds {equality.subject} in the tool-call condition, "
+        f"but the input schema of {argument.operation} {declared} with items "
+        f"false, so the only list it admits is [], and "
+        f"{_render(equality.values[0])} is a list that is not empty; "
+        "tool-call-condition-v1 never converts a value for "
+        f"{equality.op_word}, so {equality.consequence}. Compare "
+        f"{argument.argument} with [] or a supplied value of another type it admits",
         IssueCode.discriminating_condition_record_kind_mismatch,
     )
 
