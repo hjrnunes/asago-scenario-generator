@@ -3,6 +3,8 @@
 {{ uca_type }} slot for {{ action }}; copy this slot handle unchanged in the response.
 {%- elif section == "route_instruction" -%}
 Copy route_handle and obligation_handle unchanged. These references are evidence to consider; they do not force an ICA finding.
+{%- elif section == "mechanism_instruction" -%}
+Copy mechanism_handle unchanged. A separate check found this known mechanism on the listed path; it does not force an ICA finding, makes no coverage claim, and never replaces the slot's own hazards or routed obligations.
 {%- elif section == "copy_handles" -%}
 copy each opaque handle unchanged
 {%- endif -%}

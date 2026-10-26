@@ -20,6 +20,10 @@ from dataclasses import dataclass
 from types import MappingProxyType
 from typing import Literal
 
+from asago_scenario_generator.models.mechanism_suggestion import (
+    MechanismSuggestion,
+    MechanismSuggestionPath,
+)
 from asago_scenario_generator.stpa.mechanism_library import (
     MechanismId,
     bundled_mechanism_library,
@@ -36,6 +40,14 @@ from asago_scenario_generator.stpa.threat_enum.slot_creation import (
     create_slots,
     requires_provider_slot_analysis,
 )
+
+MECHANISM_SUGGESTIONS_PER_SLOT = 2
+"""The most verified suggestions one slot request carries.
+
+A slot keeps its first suggestions in library order; the rest are over the
+cap.  The cap bounds what a suggestion adds to a slot request; it never
+limits the slot's own hazards or routed obligations.
+"""
 
 MechanismPath = tuple[str, str, str]
 """``(FB, PM, CA)`` or ``(FB, PM, CL)``, as :class:`MechanismCandidate` names it."""
@@ -205,8 +217,65 @@ class SuggestionVerdict:
         return self.relationship == "mechanism_specific"
 
 
+@dataclass(frozen=True)
+class MechanismSelection:
+    """The verified suggestions slot filling receives, and those over the cap.
+
+    A suggestion keeps only the paths the verifier judged
+    ``mechanism_specific``; a proposal with none is not a suggestion.  Both
+    tuples are ordered by slot, then library order.
+    """
+
+    survivors: tuple[MechanismSuggestion, ...] = ()
+    over_cap: tuple[MechanismSuggestion, ...] = ()
+
+
+def select_mechanism_suggestions(
+    proposal: MechanismProposal,
+    verdicts: Iterable[SuggestionVerdict],
+    *,
+    per_slot: int = MECHANISM_SUGGESTIONS_PER_SLOT,
+) -> MechanismSelection:
+    """Keep each proposal's verified paths, then at most *per_slot* per slot."""
+    by_candidate = {verdict.candidate: verdict for verdict in verdicts}
+    by_slot: dict[str, list[MechanismSuggestion]] = {}
+    for item in proposal.proposed:
+        paths = tuple(
+            path
+            for path in item.paths
+            if (verdict := by_candidate.get(MechanismCandidate(item.mechanism, path)))
+            is not None
+            and verdict.survives
+        )
+        if paths:
+            by_slot.setdefault(item.slot_id, []).append(
+                MechanismSuggestion(
+                    mechanism_id=item.mechanism,
+                    slot_id=item.slot_id,
+                    paths=tuple(
+                        MechanismSuggestionPath(
+                            feedback_channel_id=path[0],
+                            process_model_part_id=path[1],
+                            end_id=path[2],
+                        )
+                        for path in paths
+                    ),
+                )
+            )
+    return MechanismSelection(
+        survivors=tuple(
+            item for slot_id in sorted(by_slot) for item in by_slot[slot_id][:per_slot]
+        ),
+        over_cap=tuple(
+            item for slot_id in sorted(by_slot) for item in by_slot[slot_id][per_slot:]
+        ),
+    )
+
+
 __all__ = [
+    "MECHANISM_SUGGESTIONS_PER_SLOT",
     "MechanismPath",
+    "MechanismSelection",
     "MechanismProposal",
     "ProposedSuggestion",
     "SuggestionRelationship",
@@ -214,4 +283,5 @@ __all__ = [
     "SuggestionVerificationRequest",
     "library_order",
     "propose_mechanism_suggestions",
+    "select_mechanism_suggestions",
 ]

@@ -17,6 +17,7 @@ from typing import Any
 
 import yaml
 
+from asago_scenario_generator.models.mechanism_suggestion import MechanismSuggestion
 from asago_scenario_generator.models.obligation_consideration import (
     MissingStructuralConcept,
     NeutralObligationBrief,
@@ -62,6 +63,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     ProviderHazard,
     ProviderKnownConcern,
     ProviderMappingStrength,
+    ProviderMechanismSuggestion,
     ProviderObligationQuestion,
     ProviderProcessModelPart,
     ProviderResponsibility,
@@ -1357,6 +1359,58 @@ def local_obligation_handles(
     }
 
 
+def local_mechanism_handles(
+    suggestions: Iterable[MechanismSuggestion],
+) -> dict[str, str]:
+    """Name each mechanism suggestion ``M1``..``Mn`` for one slot request.
+
+    The names follow the request's order of its suggestions: slot, then
+    library order.  The model copies them back as ``consideration_results``
+    keys, and the caller maps them to suggestion identities.
+    """
+    return {
+        str(item.suggestion_id): f"M{index}"
+        for index, item in enumerate(suggestions, 1)
+    }
+
+
+def project_mechanism_suggestions(
+    suggestions: Sequence[MechanismSuggestion],
+    control_structure: ControlStructure,
+) -> tuple[ProviderMechanismSuggestion, ...]:
+    """Project each suggestion with its mechanism question and explained path.
+
+    The path lists each verified feedback channel and the variable it
+    updates, with their descriptions; the entry's required evidence,
+    counterexamples, and the verifier's rationale stay out.
+    """
+    library = bundled_mechanism_library()
+    descriptions = build_stpa_index(control_structure).structural_descriptions()
+    handles = local_mechanism_handles(suggestions)
+    views: list[ProviderMechanismSuggestion] = []
+    for item in suggestions:
+        entry = library.entry(item.mechanism_id)
+        path_ids = dict.fromkeys(
+            identity
+            for path in item.paths
+            for identity in (path.feedback_channel_id, path.process_model_part_id)
+        )
+        views.append(
+            ProviderMechanismSuggestion(
+                mechanism_handle=handles[str(item.suggestion_id)],
+                name=entry.name,
+                question=entry.question,
+                slot_ids=(item.slot_id,),
+                path=tuple(
+                    PromptReference(id=identity, description=descriptions[identity])
+                    for identity in path_ids
+                ),
+                instruction=render_prose(_SLOT_PROSE, "mechanism_instruction"),
+            )
+        )
+    return tuple(views)
+
+
 class _RoutingGlossary:
     """Collect each prompt reference's meaning exactly once."""
 
@@ -1758,6 +1812,7 @@ def build_synthesis_slot_prompts(
     routed_routes: Sequence[ObligationRoute],
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
+    mechanism_suggestions: Sequence[MechanismSuggestion] = (),
 ) -> tuple[str, str]:
     """Build an ordinary-Stage-3, target-scoped structured ICA prompt."""
     projection = project_ica_target_context(
@@ -1768,7 +1823,14 @@ def build_synthesis_slot_prompts(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
     )
-    return render_synthesis_slot_prompts(projection, target_id=target_id, slots=slots)
+    return render_synthesis_slot_prompts(
+        projection,
+        target_id=target_id,
+        slots=slots,
+        mechanism_views=project_mechanism_suggestions(
+            mechanism_suggestions, control_structure
+        ),
+    )
 
 
 def render_synthesis_slot_prompts(
@@ -1780,8 +1842,13 @@ def render_synthesis_slot_prompts(
     *,
     target_id: str,
     slots: Sequence[SlotPlaceholder],
+    mechanism_views: Sequence[ProviderMechanismSuggestion] = (),
 ) -> tuple[str, str]:
-    """Render the ICA target prompt from an already projected target view."""
+    """Render the ICA target prompt from an already projected target view.
+
+    Mechanism suggestions render in their own sections, after the routed
+    pairs, only when the request carries one.
+    """
     target_index, questions, routes = projection
     slot_ids = {slot.slot_id for slot in slots}
     copy_instruction = render_prose(_SLOT_PROSE, "copy_handles")
@@ -1795,12 +1862,23 @@ def render_synthesis_slot_prompts(
         for route in routes
         for slot_id in sorted(set(route.slot_ids).intersection(slot_ids))
     ]
+    required_mechanism_pairs = [
+        {
+            "mechanism_handle": view.mechanism_handle,
+            "slot_id": slot_id,
+            "copy_instruction": copy_instruction,
+        }
+        for view in mechanism_views
+        for slot_id in view.slot_ids
+        if slot_id in slot_ids
+    ]
     system = _TEMPLATE_LOADER.render_prompt(
         "synthesis_ica_system.j2",
         has_governance_question=any(
             isinstance(item, ProviderGovernanceQuestion) for item in questions
         ),
         has_feedback_authority=_has_feedback_authority(target_index),
+        has_mechanism_suggestion=bool(mechanism_views),
     )
     user = _TEMPLATE_LOADER.render_prompt(
         "synthesis_ica_user.j2",
@@ -1811,6 +1889,12 @@ def render_synthesis_slot_prompts(
         ),
         routed_routes_yaml=_yaml([item.model_dump(mode="json") for item in routes]),
         required_pairs_yaml=_yaml(required_pairs),
+        mechanism_suggestions_yaml=_yaml(
+            [item.model_dump(mode="json") for item in mechanism_views]
+        )
+        if mechanism_views
+        else "",
+        required_mechanism_pairs_yaml=_yaml(required_mechanism_pairs),
     )
     return system, user
 
@@ -1832,9 +1916,11 @@ __all__ = [
     "render_structural_routing_prompts",
     "render_synthesis_slot_prompts",
     "authoritative_hazard_constraint_pairs",
+    "local_mechanism_handles",
     "local_obligation_handles",
     "project_control_structure_context",
     "project_ica_target_context",
+    "project_mechanism_suggestions",
     "project_obligation_question",
     "project_obligation_routing_context",
     "project_revision_context",

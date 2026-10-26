@@ -46,6 +46,8 @@ cases:
       - "With no required pair it is the empty object `{}`."
     forbidden:
       - For a NOT_PROVIDED slot marked N/A
+      - Mechanism suggestions for this target
+      - mechanism_handle
       - authority_for_update
       - absence cannot be hazardous
       - lacks a requirement
@@ -65,3 +67,46 @@ cases:
         a wrong process-model value even when the report is accurate.
     once:
       - "`authority_for_update`"
+  slot-request-mechanism-suggestion:
+    required:
+      - A routed obligation is advisory
+      - "The slot's `consideration_results` is an object with one key for each item"
+      - >-
+        An entry under `Mechanism suggestions for this target` is a known
+        control-loop mechanism that code found on a typed path to this slot's
+        control action or coordination link, and that a separate check judged
+        the path's descriptions to carry.
+      - >-
+        It is a hypothesis, not established evidence: it names no reviewed risk
+        or taxonomy concern and makes no coverage claim.
+      - >-
+        Its `mechanism_handle` is an opaque handle; `name` and `question` say
+        what the mechanism asks of the system; `slot_ids` are the slots it is
+        suggested for; `path` lists, with their descriptions, the feedback
+        channels on which it was found and the process-model variables they
+        update; `instruction` repeats how to treat it.
+      - >-
+        A path entry explains context: cite it in `process_model_refs` or
+        `feedback_refs` only when the rules above already make it citable for
+        the slot.
+      - >-
+        Analyze the slot's own hazards and its routed obligations exactly as
+        you would without a suggestion. A suggestion adds a question; it never
+        removes or replaces a finding, a hazard, or a routed result.
+      - >-
+        The slot's `consideration_results` also has one key for each item under
+        `Required mechanism consideration pairs`: the item's
+        `mechanism_handle`, whose value is that suggestion's one result, with
+        the same `disposition`, `finding_indexes`, and `rationale` as a routed
+        obligation's result.
+      - >-
+        Choose `finding` only when a finding in that slot expresses the
+        mechanism on the named path through a supplied hazard and governing
+        constraint, `proposed_not_applicable` only under the N/A rule above,
+        and `unresolved` when the supplied evidence cannot decide.
+      - >-
+        Keep the mechanism out of the `deviation` and `hazardous_context`, as
+        for any routed concern, and state the relationship in the result's
+        `rationale`.
+    once:
+      - Mechanism suggestions for this target

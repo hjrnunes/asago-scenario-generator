@@ -44,6 +44,9 @@ from asago_scenario_generator.pipeline.synthesis_defaults import (
 from asago_scenario_generator.pipeline.synthesis_governance import (
     _run_governance_routing,
 )
+from asago_scenario_generator.pipeline.synthesis_mechanisms import (
+    _run_mechanism_suggestions,
+)
 
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _boundary_decisions,
@@ -271,6 +274,17 @@ def _run_synthesis(
     slot_briefs = (*briefs, *governance.briefs)
     slot_routes = (*final_routes, *governance_routes)
 
+    # Mechanism suggestions are proposed bottom up from the final structure
+    # and gated by the mechanism verifier; they are never routed and never
+    # count toward obligation coverage.
+    mechanism_stage = log.take(
+        _run_mechanism_suggestions(
+            loss_analysis=final_loss,
+            control_structure=final_control,
+            adapters=resolved,
+        )
+    )
+
     # One adaptive analysis: enrichment (capability profile, execution target
     # profile, target observations) feeds ICA enumeration and Stage 5; it
     # never selects a different generation algorithm.
@@ -285,6 +299,7 @@ def _run_synthesis(
             inputs,
             capability_snapshot,
             resolved,
+            mechanism_suggestions=mechanism_stage.survivors,
         )
     )
     hazard_offers = _slot_hazard_offers(ica_enumeration)

@@ -8,6 +8,10 @@ import re
 from typing import Any, Literal, cast
 
 from asago_scenario_generator.models.ica_merge import IcaMerge, IcaMergedFinding
+from asago_scenario_generator.models.mechanism_suggestion import (
+    MechanismIcaConsideration,
+    MechanismSuggestion,
+)
 from asago_scenario_generator.models.obligation_consideration import (
     SLOT_PROMPT_BUDGET_EXCEEDED,
     SLOT_PROVIDER_CONTRACT_FAILED,
@@ -97,6 +101,7 @@ def _slot_request_with_parts(
     *,
     slots: Sequence[SlotPlaceholder],
     routes: Sequence[ObligationRoute],
+    mechanism_suggestions: Sequence[MechanismSuggestion] = (),
 ) -> SynthesisSlotRequest:
     """Build a new digest-bound target request for one deterministic part."""
     route_ids = {route.obligation_id for route in routes}
@@ -112,6 +117,7 @@ def _slot_request_with_parts(
         loss_analysis=request.loss_analysis,
         control_structure=request.control_structure,
         controls=request.controls,
+        mechanism_suggestions=tuple(mechanism_suggestions),
     )
 
 
@@ -127,6 +133,7 @@ def _slot_request_fits(
         routed_routes=request.routed_routes,
         loss_analysis=request.loss_analysis,
         control_structure=request.control_structure,
+        mechanism_suggestions=request.mechanism_suggestions,
     )
     return budget.count(f"{system_prompt}\n{user_prompt}") <= budget.usable_input_tokens
 
@@ -226,6 +233,50 @@ def _budgeted_candidates(
     if budget is None or _slot_request_fits(candidate, budget):
         return (candidate,)
     return _split_target_routes(candidate, budget) or (candidate,)
+
+
+def _attach_mechanism_suggestions(
+    adapter: Any,
+    requests: Sequence[SynthesisSlotRequest],
+    suggestions: Sequence[MechanismSuggestion],
+) -> tuple[tuple[SynthesisSlotRequest, ...], tuple[MechanismSuggestion, ...]]:
+    """Give each slot's suggestions to the first request that carries the slot.
+
+    The requests are already split to fit their budget without suggestions,
+    so a suggestion never moves a routed obligation to another part or
+    removes a slot's own hazards.  A request whose prompt would no longer fit
+    with them is sent without them, and they are returned as dropped.
+    """
+    by_slot: dict[str, list[MechanismSuggestion]] = {}
+    for item in suggestions:
+        by_slot.setdefault(item.slot_id, []).append(item)
+    result: list[SynthesisSlotRequest] = []
+    dropped: list[MechanismSuggestion] = []
+    for request in requests:
+        wanted = tuple(
+            item for slot in request.slots for item in by_slot.pop(slot.slot_id, ())
+        )
+        if not wanted:
+            result.append(request)
+            continue
+        candidate = _slot_request_with_parts(
+            request,
+            slots=request.slots,
+            routes=request.routed_routes,
+            mechanism_suggestions=wanted,
+        )
+        budget = _slot_prompt_budget(adapter, candidate.controls)
+        if budget is not None and not _slot_request_fits(candidate, budget):
+            dropped.extend(wanted)
+            result.append(request)
+            continue
+        result.append(candidate)
+    if by_slot:
+        raise ValueError(
+            "mechanism suggestions name slots no request carries: "
+            + ", ".join(sorted(by_slot))
+        )
+    return tuple(result), tuple(dropped)
 
 
 def final_slot_universe(
@@ -999,6 +1050,33 @@ def _unresolved_pair(
     )
 
 
+def _unresolved_mechanism_pair(
+    suggestion: MechanismSuggestion,
+    detail: str,
+    *,
+    call_ref: str | None = None,
+    code: str = "slot_pair_unresolved",
+) -> MechanismIcaConsideration:
+    """Record a suggestion whose slot gave it no valid result."""
+    refs = () if call_ref is None else (call_ref,)
+    return MechanismIcaConsideration(
+        suggestion_id=str(suggestion.suggestion_id),
+        mechanism_id=suggestion.mechanism_id,
+        slot_id=suggestion.slot_id,
+        disposition="unresolved",
+        evidence=("slot-analysis-validation",),
+        model_call_refs=refs,
+        rationale=detail,
+        diagnostics=(
+            ConsiderationDiagnostic(
+                code=code,
+                detail=detail,
+                refs=(str(suggestion.suggestion_id), suggestion.slot_id),
+            ),
+        ),
+    )
+
+
 def _draft_considerations(
     filled_slots: Iterable[SlotProviderEntry],
     request: SynthesisSlotRequest,
@@ -1010,6 +1088,7 @@ def _draft_considerations(
         for route in request.routed_routes
         for slot_id in route.slot_ids
     }
+    suggestion_ids = {item.suggestion_id for item in request.mechanism_suggestions}
     values: list[ObligationIcaConsideration] = []
     for entry in filled_slots:
         if not isinstance(entry, SlotIcaDraft):
@@ -1018,6 +1097,8 @@ def _draft_considerations(
         if slot is None:
             continue
         for result in entry.consideration_results:
+            if result.obligation_handle in suggestion_ids:
+                continue
             route = routes.get((result.obligation_handle, entry.slot_id))
             if route is None:
                 raise ValueError(
@@ -1034,39 +1115,74 @@ def _draft_consideration(
     slot: ICASlot,
 ) -> ObligationIcaConsideration:
     """Compile one structured model disposition into exact slot evidence."""
-    if result.disposition == "finding":
-        return _draft_finding_consideration(result, route, slot)
-    if result.disposition == "proposed_not_applicable":
-        if not slot.is_na:
-            raise ValueError("proposed non-applicability requires an N/A slot draft")
-        return ObligationIcaConsideration(
-            route_id=route.route_id,
-            obligation_id=route.obligation_id,
-            slot_id=slot.slot_id,
-            disposition="proposed_not_applicable",
-            evidence=("provider-structured-consideration",),
-            structural_inventory_complete=True,
-            rationale=result.rationale,
-        )
     return ObligationIcaConsideration(
         route_id=route.route_id,
         obligation_id=route.obligation_id,
-        slot_id=slot.slot_id,
-        disposition="unresolved",
-        evidence=("provider-structured-consideration",),
-        rationale=result.rationale,
+        **_draft_result_fields(result, slot),
     )
+
+
+def _draft_mechanism_considerations(
+    filled_slots: Iterable[SlotProviderEntry],
+    request: SynthesisSlotRequest,
+    compiled_slots: Mapping[str, ICASlot],
+) -> tuple[MechanismIcaConsideration, ...]:
+    """Materialize the results a slot draft gives its mechanism suggestions.
+
+    A result is keyed by the suggestion ID that its local handle resolves to;
+    a key that is no suggestion of this slot belongs to an obligation.
+    """
+    suggestions = {
+        (item.suggestion_id, item.slot_id): item
+        for item in request.mechanism_suggestions
+    }
+    values: list[MechanismIcaConsideration] = []
+    for entry in filled_slots:
+        if not isinstance(entry, SlotIcaDraft):
+            continue
+        slot = compiled_slots.get(entry.slot_id)
+        if slot is None:
+            continue
+        for result in entry.consideration_results:
+            suggestion = suggestions.get((result.obligation_handle, entry.slot_id))
+            if suggestion is not None:
+                values.append(
+                    MechanismIcaConsideration(
+                        suggestion_id=str(suggestion.suggestion_id),
+                        mechanism_id=suggestion.mechanism_id,
+                        **_draft_result_fields(result, slot),
+                    )
+                )
+    return tuple(values)
+
+
+def _draft_result_fields(result: ObligationIcaDraft, slot: ICASlot) -> dict[str, Any]:
+    """The slot evidence of one structured result, for either result kind."""
+    if result.disposition == "finding":
+        return _draft_finding_fields(result, slot)
+    if result.disposition == "proposed_not_applicable":
+        if not slot.is_na:
+            raise ValueError("proposed non-applicability requires an N/A slot draft")
+        return {
+            "slot_id": slot.slot_id,
+            "disposition": "proposed_not_applicable",
+            "evidence": ("provider-structured-consideration",),
+            "structural_inventory_complete": True,
+            "rationale": result.rationale,
+        }
+    return {
+        "slot_id": slot.slot_id,
+        "disposition": "unresolved",
+        "evidence": ("provider-structured-consideration",),
+        "rationale": result.rationale,
+    }
 
 
 def _reference_union(icas: Iterable[ICA], attr: str) -> set[str]:
     return {reference for item in icas for reference in getattr(item, attr)}
 
 
-def _draft_finding_consideration(
-    result: ObligationIcaDraft,
-    route: ObligationRoute,
-    slot: ICASlot,
-) -> ObligationIcaConsideration:
+def _draft_finding_fields(result: ObligationIcaDraft, slot: ICASlot) -> dict[str, Any]:
     """Compile a finding disposition and copy exact selected ICA references."""
     if any(index >= len(slot.icas) for index in result.finding_indexes):
         raise ValueError("structured consideration finding index is outside its slot")
@@ -1074,20 +1190,20 @@ def _draft_finding_consideration(
     controller = slot.responsibility or slot.coordination_link
     if controller is None:
         raise ValueError(f"slot {slot.slot_id} has no controller")
-    return ObligationIcaConsideration(
-        route_id=route.route_id,
-        obligation_id=route.obligation_id,
-        slot_id=slot.slot_id,
-        disposition="finding",
-        ica_ids=tuple(item.ica_id for item in selected),
-        exec_candidate_ids=(
+    return {
+        "slot_id": slot.slot_id,
+        "disposition": "finding",
+        "ica_ids": tuple(item.ica_id for item in selected),
+        "exec_candidate_ids": (
             candidate_id_for(controller, slot.control_action, slot.uca_type),
         ),
-        hazard_ids=tuple(sorted(_reference_union(selected, "related_hazards"))),
-        constraint_ids=tuple(sorted(_reference_union(selected, "related_constraints"))),
-        evidence=("provider-structured-consideration",),
-        rationale=result.rationale,
-    )
+        "hazard_ids": tuple(sorted(_reference_union(selected, "related_hazards"))),
+        "constraint_ids": tuple(
+            sorted(_reference_union(selected, "related_constraints"))
+        ),
+        "evidence": ("provider-structured-consideration",),
+        "rationale": result.rationale,
+    }
 
 
 def _prompt_budget_exceeded(error: BaseException | None) -> bool:
@@ -1189,6 +1305,7 @@ def _record_request_unresolved(
     error: BaseException | None = None,
     requests_sent: int,
     lost: dict[str, SlotLoss] | None = None,
+    mechanism_pairs: list[MechanismIcaConsideration] | None = None,
 ) -> None:
     """Retain one failed target request as unresolved local evidence."""
     diagnostics.append(
@@ -1227,6 +1344,13 @@ def _record_request_unresolved(
         call_ref=call_ref,
         code=_unresolved_pair_code(error),
     )
+    if mechanism_pairs is not None:
+        mechanism_pairs.extend(
+            _unresolved_mechanism_pair(
+                item, detail, call_ref=call_ref, code=_unresolved_pair_code(error)
+            )
+            for item in request.mechanism_suggestions
+        )
 
 
 def _validate_pair(
@@ -1293,6 +1417,26 @@ def _validate_non_applicable_pair(
         raise ValueError("non-applicability evidence must attest complete inventory")
 
 
+def _validate_mechanism_pair(
+    pair: MechanismIcaConsideration,
+    suggestion: MechanismSuggestion,
+    slot: SlotPlaceholder,
+    filled: Mapping[str, ICASlot],
+) -> MechanismIcaConsideration:
+    """Validate one suggestion's result as a routed pair is validated."""
+    if pair.suggestion_id != suggestion.suggestion_id:
+        raise ValueError("slot evidence is bound to another mechanism suggestion")
+    if pair.slot_id != slot.slot_id:
+        raise ValueError("slot evidence is bound to another slot")
+    if pair.disposition == "finding":
+        _validate_finding_pair(pair, slot, filled)
+    elif pair.disposition == "proposed_not_applicable":
+        _validate_non_applicable_pair(pair, slot, filled)
+    elif pair.ica_ids or pair.exec_candidate_ids:
+        raise ValueError("unresolved evidence cannot retain findings")
+    return pair
+
+
 @dataclass(frozen=True, slots=True)
 class SlotFillRunResult:
     """Final slot enumeration, pair evidence, and target requests."""
@@ -1308,6 +1452,11 @@ class SlotFillRunResult:
     def considerations(self) -> tuple[ObligationIcaConsideration, ...]:
         """Expose exact obligation/slot evidence."""
         return self.result.considerations
+
+    @property
+    def mechanism_considerations(self) -> tuple[MechanismIcaConsideration, ...]:
+        """Expose each mechanism suggestion's slot result, apart from obligations."""
+        return self.result.mechanism_considerations
 
     @property
     def ica_hazard_verification(self) -> Any | None:
@@ -1353,6 +1502,7 @@ class _SlotFillState:
     requests_sent: int = 0  # for the target request being processed
     lost: dict[str, SlotLoss] = field(default_factory=dict)
     ica_merges: list[IcaMerge] = field(default_factory=list)
+    mechanism_pairs: list[MechanismIcaConsideration] = field(default_factory=list)
 
 
 def _initial_slot_fill_state(
@@ -1673,6 +1823,7 @@ def _record_request_failure(
         error=error,
         requests_sent=state.requests_sent,
         lost=state.lost,
+        mechanism_pairs=state.mechanism_pairs,
     )
 
 
@@ -1872,6 +2023,68 @@ def _record_accepted_request(
         state=state,
         part_fills=part_fills,
     )
+    _record_mechanism_pairs(response, request, by_id, call_ref=call_ref, state=state)
+
+
+def _record_mechanism_pairs(
+    response: SynthesisSlotResponse,
+    request: SynthesisSlotRequest,
+    by_id: Mapping[str, ICASlot],
+    *,
+    call_ref: str,
+    state: _SlotFillState,
+) -> None:
+    """Validate each suggestion's result, or retain it as unresolved.
+
+    Suggestions ride only on a slot's first request, so its accepted fill is
+    the slot's authoritative fill and the results need no rebinding.
+    """
+    if not request.mechanism_suggestions:
+        return
+    try:
+        structured = _draft_mechanism_considerations(
+            response.filled_slots, request, {**state.all_filled, **by_id}
+        )
+    except (TypeError, ValueError) as exc:
+        detail = (
+            f"Mechanism results failed exact validation: {type(exc).__name__}: {exc}"
+        )
+        state.mechanism_pairs.extend(
+            _unresolved_mechanism_pair(item, detail, call_ref=call_ref)
+            for item in request.mechanism_suggestions
+        )
+        return
+    by_key = {
+        (pair.suggestion_id, pair.slot_id): pair
+        for pair in (*response.mechanism_considerations, *structured)
+    }
+    expected = _expected_slot_map(request)
+    for suggestion in request.mechanism_suggestions:
+        pair = by_key.get((str(suggestion.suggestion_id), suggestion.slot_id))
+        if pair is None:
+            state.mechanism_pairs.append(
+                _unresolved_mechanism_pair(
+                    suggestion,
+                    "Mechanism suggestion/slot pair was not returned by the adapter.",
+                    call_ref=call_ref,
+                )
+            )
+            continue
+        try:
+            state.mechanism_pairs.append(
+                _validate_mechanism_pair(
+                    pair, suggestion, expected[suggestion.slot_id], state.all_filled
+                )
+            )
+        except (TypeError, ValueError) as exc:
+            state.mechanism_pairs.append(
+                _unresolved_mechanism_pair(
+                    suggestion,
+                    "Mechanism pair failed exact validation: "
+                    f"{type(exc).__name__}: {exc}",
+                    call_ref=call_ref,
+                )
+            )
 
 
 def _process_slot_request(
@@ -1917,8 +2130,14 @@ def fill_synthesis_slots(
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
     controls: AnalysisControls | None = None,
+    mechanism_suggestions: Sequence[MechanismSuggestion] = (),
 ) -> SlotFillRunResult:
-    """Fill all final slots, sending each target only its routed briefs."""
+    """Fill all final slots, sending each target only its routed briefs.
+
+    Each verified mechanism suggestion rides on the first request of its
+    slot, beside that slot's own hazards and routed obligations, and gets
+    exactly one result.  Without suggestions every request is unchanged.
+    """
     requests = build_synthesis_slot_requests(
         briefs=briefs,
         routes=routes,
@@ -1927,9 +2146,21 @@ def fill_synthesis_slots(
         controls=controls,
     )
     requests = _budgeted_synthesis_slot_requests(adapter, requests)
+    requests, dropped = _attach_mechanism_suggestions(
+        adapter, requests, mechanism_suggestions
+    )
     method = adapter.fill
     all_slots = final_slot_universe(control_structure)
     _slot_by_id, state = _initial_slot_fill_state(routes, all_slots)
+    state.mechanism_pairs.extend(
+        _unresolved_mechanism_pair(
+            item,
+            "The slot request could not carry this mechanism suggestion within "
+            "its prompt budget.",
+            code=SLOT_PROMPT_BUDGET_EXCEEDED,
+        )
+        for item in dropped
+    )
     target_totals = _request_totals(requests)
     target_parts: dict[str, int] = {}
 
@@ -1957,6 +2188,7 @@ def fill_synthesis_slots(
         diagnostics=tuple(state.diagnostics),
         lost_slots=tuple(state.lost.values()),
         ica_merges=tuple(state.ica_merges),
+        mechanism_considerations=tuple(state.mechanism_pairs),
     )
     return SlotFillRunResult(result=final)
 

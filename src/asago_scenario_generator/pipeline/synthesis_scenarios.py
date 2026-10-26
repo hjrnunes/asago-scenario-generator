@@ -22,6 +22,7 @@ from asago_scenario_generator.pipeline.synthesis_values import (
     _declared_capability_labels,
     _dump,
     _ica_considerations,
+    _mechanism_considerations,
     _ica_verification,
     _ordinary_icas,
     _semantic_digest,
@@ -38,8 +39,19 @@ def _run_ica(
     inputs: SynthesisInputs,
     snapshot: Any,
     adapters: SynthesisAdapters,
+    *,
+    mechanism_suggestions: tuple[Any, ...] = (),
 ) -> StageRun:
-    """Run obligation-aware final ICA analysis over every final slot."""
+    """Run obligation-aware final ICA analysis over every final slot.
+
+    Verified mechanism suggestions reach the ICA port only when there is one,
+    so a run without them calls it exactly as before.
+    """
+    extra: dict[str, Any] = (
+        {"mechanism_suggestions": mechanism_suggestions}
+        if mechanism_suggestions
+        else {}
+    )
     result = adapters.fill_icas(
         routes=routes,
         briefs=briefs,
@@ -52,6 +64,7 @@ def _run_ica(
         obligation_adapter=adapters.obligation_adapter,
         output_dir=inputs.output_dir,
         max_workers=inputs.max_workers,
+        **extra,
     )
     if result is None:
         raise ValueError("obligation-aware ICA adapter returned no enumeration")
@@ -101,6 +114,7 @@ def _run_ica_verification(
     """Run the independent ICA verifier before ordinary Stage 5."""
     from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
         filter_ica_considerations,
+        filter_mechanism_considerations,
         verify_final_ica_batch,
     )
 
@@ -121,7 +135,12 @@ def _run_ica_verification(
             batch,
             enumeration=filtered,
         )
-    return _attach_ica_verification(result, filtered, batch, pairs)
+    mechanism_pairs = _mechanism_considerations(result)
+    if mechanism_pairs:
+        mechanism_pairs = filter_mechanism_considerations(
+            mechanism_pairs, batch, enumeration=filtered
+        )
+    return _attach_ica_verification(result, filtered, batch, pairs, mechanism_pairs)
 
 
 def _attach_ica_verification(
@@ -129,19 +148,25 @@ def _attach_ica_verification(
     enumeration: Any,
     batch: Any,
     considerations: tuple[Any, ...],
+    mechanism_considerations: tuple[Any, ...] = (),
 ) -> Any:
-    """Return the slot-fill result with the verifier's evidence attached."""
+    """Return the slot-fill result with the verifier's evidence attached.
+
+    Mechanism suggestion results are gated by the same verdicts as the
+    obligation pairs; the verifier's own requests never see them.
+    """
     from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
         SlotFillRunResult,
     )
 
-    updated = result.result.model_copy(
-        update={
-            "ica_enumeration": enumeration,
-            "considerations": considerations,
-            "ica_hazard_verification": batch,
-        }
-    )
+    update: dict[str, Any] = {
+        "ica_enumeration": enumeration,
+        "considerations": considerations,
+        "ica_hazard_verification": batch,
+    }
+    if mechanism_considerations:
+        update["mechanism_considerations"] = mechanism_considerations
+    updated = result.result.model_copy(update=update)
     return SlotFillRunResult(result=updated)
 
 

@@ -32,6 +32,10 @@ from types import SimpleNamespace
 
 import yaml
 
+from asago_scenario_generator.models.mechanism_suggestion import (
+    MechanismSuggestion,
+    MechanismSuggestionPath,
+)
 from asago_scenario_generator.models.risk_card import RiskCard
 from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
@@ -355,6 +359,31 @@ def _slot_request() -> tuple[str, str]:
     )
 
 
+def _mechanism_slot_request() -> tuple[str, str]:
+    """Render a slot request that carries one verified mechanism suggestion."""
+    request = _provider_slot_request()
+    suggestion = MechanismSuggestion(
+        mechanism_id="user_claim",
+        slot_id=request.slots[0].slot_id,
+        paths=(
+            MechanismSuggestionPath(
+                feedback_channel_id="FB-1-1",
+                process_model_part_id="PM-1-1",
+                end_id="CA-1-1",
+            ),
+        ),
+    )
+    return build_synthesis_slot_prompts(
+        target_id=request.target_id,
+        slots=request.slots,
+        routed_briefs=request.routed_briefs,
+        routed_routes=request.routed_routes,
+        loss_analysis=request.loss_analysis,
+        control_structure=request.control_structure,
+        mechanism_suggestions=(suggestion,),
+    )
+
+
 def _governance_rows() -> tuple[str, str]:
     briefs, _, losses, structure = _governance_setup("risk-b")
     return build_governance_routing_prompts(
@@ -401,6 +430,10 @@ OBLIGATION_AWARE_BUILDS: dict[
     ),
     "slot-request": (
         _slot_request,
+        ("synthesis_ica_system.j2", "synthesis_ica_user.j2"),
+    ),
+    "slot-request-mechanism-suggestion": (
+        _mechanism_slot_request,
         ("synthesis_ica_system.j2", "synthesis_ica_user.j2"),
     ),
     "slot-request-feedback-authority": (

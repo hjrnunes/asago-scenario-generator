@@ -19,6 +19,10 @@ from asago_scenario_generator.models.canonical import (
 )
 from asago_scenario_generator.models.artifact_pin import ArtifactPin, Digest
 from asago_scenario_generator.models.ica_merge import IcaMerge
+from asago_scenario_generator.models.mechanism_suggestion import (
+    MechanismIcaConsideration,
+    MechanismSuggestion,
+)
 from asago_scenario_generator.models.obligation_consideration import (
     BoundedStructuralRevision,
     ConsiderationCallEvidence,
@@ -34,6 +38,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     StructuralConceptKind,
 )
 from asago_scenario_generator.stpa.infra.llm import DEFAULT_TEMPERATURE
+from asago_scenario_generator.stpa.mechanism_library import bundled_mechanism_library
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionTemporality,
     ControlStructure,
@@ -644,6 +649,17 @@ class ProviderRoutedRoute(_Model):
     instruction: str = Field(min_length=1)
 
 
+class ProviderMechanismSuggestion(_Model):
+    """Provider-facing view of one verified mechanism suggestion for a slot."""
+
+    mechanism_handle: str = Field(min_length=1)
+    name: str = Field(min_length=1)
+    question: str = Field(min_length=1)
+    slot_ids: tuple[str, ...] = Field(min_length=1)
+    path: tuple[PromptReference, ...] = Field(min_length=1)
+    instruction: str = Field(min_length=1)
+
+
 class ProviderRoutingContext(_Model):
     """Closed provider view for structural obligation routing."""
 
@@ -772,6 +788,11 @@ class SynthesisSlotRequest(_DigestModel):
     loss_analysis: LossAnalysis
     control_structure: ControlStructure
     controls: AnalysisControls
+    # Verified mechanism suggestions for these slots; absent from the
+    # serialized form when empty, so a request without one keeps its digest.
+    mechanism_suggestions: tuple[MechanismSuggestion, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
     _digest_domain = SLOT_REQUEST_DIGEST_DOMAIN
 
     @model_validator(mode="after")
@@ -779,6 +800,7 @@ class SynthesisSlotRequest(_DigestModel):
         object.__setattr__(
             self, "slots", tuple(sorted(self.slots, key=lambda item: item.slot_id))
         )
+        self._canonicalize_mechanism_suggestions()
         object.__setattr__(
             self,
             "routed_briefs",
@@ -791,6 +813,37 @@ class SynthesisSlotRequest(_DigestModel):
         )
         self._attest_semantic_digest("slot request semantic_digest does not match")
         return self
+
+    def _canonicalize_mechanism_suggestions(self) -> None:
+        """Order suggestions by slot, then library order; reject a stray one."""
+        slot_ids = {slot.slot_id for slot in self.slots}
+        stray = sorted(
+            item.slot_id
+            for item in self.mechanism_suggestions
+            if item.slot_id not in slot_ids
+        )
+        if stray:
+            raise ValueError(
+                "mechanism suggestions name slots outside the request: "
+                + ", ".join(stray)
+            )
+        identities = [item.suggestion_id for item in self.mechanism_suggestions]
+        if len(identities) != len(set(identities)):
+            raise ValueError("slot request repeats a mechanism suggestion")
+        rank = {
+            entry.id: index
+            for index, entry in enumerate(bundled_mechanism_library().mechanisms)
+        }
+        object.__setattr__(
+            self,
+            "mechanism_suggestions",
+            tuple(
+                sorted(
+                    self.mechanism_suggestions,
+                    key=lambda item: (item.slot_id, rank[item.mechanism_id]),
+                )
+            ),
+        )
 
 
 class SynthesisSlotResponse(_ProviderCallCounts):
@@ -810,6 +863,11 @@ class SynthesisSlotResponse(_ProviderCallCounts):
     # Run evidence of the findings the compiler folded into one ICA; no
     # request or schema carries it.
     ica_merges: tuple[IcaMerge, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    # Results of the request's mechanism suggestions, apart from the
+    # obligation pairs; absent from the serialized form when empty.
+    mechanism_considerations: tuple[MechanismIcaConsideration, ...] = Field(
         default=(), exclude_if=lambda value: not value
     )
 
@@ -835,7 +893,24 @@ class SynthesisSlotResponse(_ProviderCallCounts):
                 )
             ),
         )
+        object.__setattr__(
+            self,
+            "mechanism_considerations",
+            unique_mechanism_considerations(
+                self.mechanism_considerations, "slot response"
+            ),
+        )
         return self
+
+
+def unique_mechanism_considerations(
+    values: tuple[MechanismIcaConsideration, ...], label: str
+) -> tuple[MechanismIcaConsideration, ...]:
+    """Order mechanism results by slot and suggestion; reject a repeated pair."""
+    pairs = [(item.slot_id, item.suggestion_id) for item in values]
+    if len(pairs) != len(set(pairs)):
+        raise ValueError(f"{label} repeats a mechanism suggestion/slot pair")
+    return tuple(sorted(values, key=lambda item: (item.slot_id, item.suggestion_id)))
 
 
 class SlotLoss(_Model):
@@ -865,6 +940,11 @@ class SynthesisSlotFillResult(_Model):
         default=(), exclude_if=lambda value: not value
     )
     ica_merges: tuple[IcaMerge, ...] = Field(
+        default=(), exclude_if=lambda value: not value
+    )
+    # One result per mechanism suggestion a request carried, apart from the
+    # obligation pairs; absent from the serialized form when empty.
+    mechanism_considerations: tuple[MechanismIcaConsideration, ...] = Field(
         default=(), exclude_if=lambda value: not value
     )
 
@@ -913,6 +993,13 @@ class SynthesisSlotFillResult(_Model):
                     self.ica_merges,
                     key=lambda item: (item.target_id, item.slot_id, item.ica_id),
                 )
+            ),
+        )
+        object.__setattr__(
+            self,
+            "mechanism_considerations",
+            unique_mechanism_considerations(
+                self.mechanism_considerations, "slot fill result"
             ),
         )
         return self
@@ -986,6 +1073,7 @@ __all__ = [
     "ProviderHazard",
     "ProviderKnownConcern",
     "ProviderMappingStrength",
+    "ProviderMechanismSuggestion",
     "ProviderObligationQuestion",
     "ProviderProcessModelPart",
     "ProviderResponsibility",
@@ -1017,4 +1105,5 @@ __all__ = [
     "SynthesisSlotRequest",
     "SynthesisSlotResponse",
     "default_synthesis_controls",
+    "unique_mechanism_considerations",
 ]

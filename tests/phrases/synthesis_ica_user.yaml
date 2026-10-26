@@ -1,0 +1,29 @@
+template: synthesis_ica_user.j2
+cases:
+  slot-request:
+    required:
+      - "Required routed consideration pairs:"
+      - Return the structured slot-draft schema described above.
+    forbidden:
+      - Mechanism suggestions
+      - mechanism_handle
+  slot-request-mechanism-suggestion:
+    required:
+      - >-
+        Mechanism suggestions for this target (hypotheses only; no coverage
+        claim):
+      - "Required mechanism consideration pairs:"
+      - "mechanism_handle: M1"
+      - >-
+        Copy mechanism_handle unchanged. A separate check found this known
+        mechanism on the listed path; it does not force an ICA finding, makes
+        no coverage claim, and never replaces the slot's own hazards or routed
+        obligations.
+    forbidden:
+      - required_evidence
+      - counterexamples
+    ordered:
+      - - "Required routed consideration pairs:"
+        - Mechanism suggestions for this target
+        - "Required mechanism consideration pairs:"
+        - Return the structured slot-draft schema described above.
