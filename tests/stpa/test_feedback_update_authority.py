@@ -9,7 +9,8 @@ is never derived from ``source_kind`` and does not change ``untrusted``.
 Stage 2 Call 2b and the revision accept the field on their wires, the
 critic and revision requests show it beside the channel, and a revision that
 omits it keeps the earlier assessment while the channel updates the same
-variable.  Requests go through the real client with a mocked transport, or
+variable.  A basis that still fails the deterministic checks after the
+existing correction is dropped with a warning instead of stopping the step.  Requests go through the real client with a mocked transport, or
 the SP1 mock client; no request leaves the process.
 """
 
@@ -42,9 +43,21 @@ from asago_scenario_generator.stpa.models.control_structure import (
     Responsibility,
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
+from asago_scenario_generator.stpa.infra.llm_helpers import StageError
+from asago_scenario_generator.stpa.models.loss_analysis import (
+    Hazard,
+    Loss,
+    LossAnalysis,
+    LossProvenance,
+    SecurityConstraint,
+)
 from asago_scenario_generator.stpa.system_model.control_structure import (
+    ControlElementSet,
+    CoordinationAnalysis,
+    RequirementSet,
     ResponsibilitySet,
     _call_2b_control_elements,
+    derive_control_structure,
 )
 from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
@@ -59,7 +72,11 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
 )
 from tests.phrase_tables import CASES
 from tests.helpers.stpa_builders import make_capability_profile
-from tests.stpa.sp1_helpers import MockLLMClient, valid_critic_findings_dict_no_gaps
+from tests.stpa.sp1_helpers import (
+    MockLLMClient,
+    valid_critic_findings_dict_no_gaps,
+    valid_empty_coordination_analysis_dict,
+)
 
 _FIXTURES = Path(__file__).resolve().parents[1] / "fixtures"
 # A control structure saved before the field existed, and the SHA-256 of its
@@ -306,6 +323,7 @@ def _call_2b(
     tmp_path: Path,
     *,
     target_evidence: TargetEvidence | None = None,
+    warnings: list[str] | None = None,
 ):
     return _call_2b_control_elements(
         llm_client=client,
@@ -329,6 +347,7 @@ def _call_2b(
         loader=TemplateLoader(PROMPTS_DIR),
         temperature=0.4,
         target_evidence=target_evidence,
+        warnings=warnings,
     )
 
 
@@ -830,3 +849,317 @@ def test_an_assessment_is_dropped_when_the_channel_updates_another_variable() ->
     [channel] = revised.feedback_channels
     assert channel.updates == "PM-1-2"
     assert channel.authority_for_update is None
+
+
+# ---------------------------------------------------------------------------
+# A basis the correction does not fix is dropped
+# ---------------------------------------------------------------------------
+
+_UNSUPPORTED_BASES = [
+    pytest.param(
+        "user input is unverified",
+        "feedback channel FB-1-1 authority basis only restates source kind "
+        "'user_message'; state why that source may or may not establish this "
+        "value and cite supplied evidence",
+        None,
+        id="source-kind-restatement",
+    ),
+    pytest.param(
+        "The finance reviewer decides refund approvals.",
+        "feedback channel FB-1-1 settled authority basis must cite the supplied "
+        "use case or an exact target-evidence ref",
+        None,
+        id="no-offered-evidence-citation",
+    ),
+    pytest.param(
+        "session:authenticated_reviewer",
+        "feedback channel FB-1-1 authority basis must state its scope in domain "
+        "words, not only evidence refs",
+        _AUTHORITY_EVIDENCE,
+        id="bare-ref-without-domain-scope",
+    ),
+    pytest.param(
+        "Refund approval is decided by state:refunds.approved",
+        "feedback channel FB-1-1 authority basis cites target-evidence ref(s) "
+        "not offered in this request: state:refunds.approved",
+        _AUTHORITY_EVIDENCE,
+        id="invented-evidence-ref",
+    ),
+]
+
+
+def _assessed(basis: str, **fields: Any) -> dict[str, Any]:
+    return {
+        **_CALL_2B_FEEDBACK,
+        **fields,
+        "authority_for_update": {"status": "non_authoritative", "basis": basis},
+    }
+
+
+def _dropped_warning(reason: str) -> str:
+    return (
+        "stage_2/call_2b_control_elements: dropped the authority_for_update of "
+        f"feedback channel FB-1-1; its authority is unknown: {reason}"
+    )
+
+
+@pytest.mark.parametrize(("basis", "reason", "target_evidence"), _UNSUPPORTED_BASES)
+def test_call_2b_drops_a_basis_the_correction_does_not_fix(
+    tmp_path: Path,
+    basis: str,
+    reason: str,
+    target_evidence: TargetEvidence | None,
+) -> None:
+    reply = _call_2b_reply(_assessed(basis))
+    client = _client(reply, reply)
+    warnings: list[str] = []
+
+    elements = _call_2b(
+        client, tmp_path, target_evidence=target_evidence, warnings=warnings
+    )
+
+    first, correction = _sent(client)
+    assert (
+        f"Exact validation error from the prior response:\nValueError: {reason}"
+    ) in _message(correction, "user")
+    [channel] = elements.feedback_channels
+    assert channel.authority_for_update is None
+    assert channel.update_authority == UNKNOWN_UPDATE_AUTHORITY
+    assert channel.description == _CALL_2B_FEEDBACK["description"]
+    assert warnings == [_dropped_warning(reason)]
+
+
+def test_call_2b_drops_only_the_bases_that_fail(tmp_path: Path) -> None:
+    reply = _call_2b_reply(_assessed("user input is unverified"))
+    reply["feedback"].append(
+        {
+            **_assessed(_BASIS),
+            "fb_id": "FB-1-2",
+            "description": "The finance reviewer's recorded approval",
+        }
+    )
+    client = _client(reply, reply)
+    warnings: list[str] = []
+
+    elements = _call_2b(client, tmp_path, warnings=warnings)
+
+    assert len(_sent(client)) == 2
+    unsupported, supported = elements.feedback_channels
+    assert unsupported.authority_for_update is None
+    assert supported.authority_for_update == _NON_AUTHORITATIVE
+    [warning] = warnings
+    assert "feedback channel FB-1-1" in warning
+
+
+def test_call_2b_drops_a_basis_the_reference_correction_introduces(
+    tmp_path: Path,
+) -> None:
+    misreferenced = _call_2b_reply(_CALL_2B_FEEDBACK)
+    misreferenced["control_actions"][0]["target"] = {
+        "type": "controlled_process",
+        "id": "CP-9",
+    }
+    corrected = _call_2b_reply(_assessed("user input is unverified"))
+    client = _client(misreferenced, misreferenced, corrected)
+    warnings: list[str] = []
+
+    elements = _call_2b(client, tmp_path, warnings=warnings)
+
+    assert len(_sent(client)) == 3
+    assert elements.control_actions[0].target.id == "CP-1"
+    [channel] = elements.feedback_channels
+    assert channel.authority_for_update is None
+    [warning] = warnings
+    assert "only restates source kind 'user_message'" in warning
+
+
+def test_call_2b_keeps_a_supported_basis_without_warning(tmp_path: Path) -> None:
+    client = _client(_call_2b_reply(_assessed(_BASIS)))
+    warnings: list[str] = []
+
+    elements = _call_2b(client, tmp_path, warnings=warnings)
+
+    assert elements.feedback_channels[0].authority_for_update == _NON_AUTHORITATIVE
+    assert warnings == []
+
+
+@pytest.mark.parametrize(
+    "feedback",
+    [
+        pytest.param(
+            {**_assessed("user input is unverified"), "description": ""},
+            id="blank-description-beside-an-unsupported-basis",
+        ),
+        pytest.param(
+            {**_CALL_2B_FEEDBACK, "authority_for_update": {"status": "authoritative"}},
+            id="settled-status-without-basis",
+        ),
+    ],
+)
+def test_call_2b_still_stops_on_other_failures(
+    tmp_path: Path, feedback: dict[str, Any]
+) -> None:
+    reply = _call_2b_reply(feedback)
+    client = _client(reply, reply)
+    warnings: list[str] = []
+
+    with pytest.raises(StageError):
+        _call_2b(client, tmp_path, warnings=warnings)
+
+    assert len(_sent(client)) == 2
+    assert warnings == []
+
+
+def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
+    tmp_path: Path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_for(
+        RequirementSet,
+        {
+            "requirements": [
+                {
+                    "req_id": "REQ-1",
+                    "description": "Issue only approved refunds",
+                    "classification": "control",
+                    "source_constraint": "SC-1",
+                }
+            ]
+        },
+    )
+    client.set_response_for(
+        ResponsibilitySet,
+        {
+            "responsibilities": [
+                {
+                    "resp_id": "RESP-1",
+                    "description": "Issue approved refunds",
+                    "security_constraint_refs": [],
+                    "process_model_parts": [
+                        {"pm_id": "PM-1-1", "description": "Refund approval state"}
+                    ],
+                }
+            ]
+        },
+    )
+    client.set_response_for(
+        ControlElementSet, _call_2b_reply(_assessed("user input is unverified"))
+    )
+    client.set_response_for(
+        CoordinationAnalysis, valid_empty_coordination_analysis_dict()
+    )
+    loss_analysis = LossAnalysis(
+        risk_card_losses=[],
+        use_case_losses=[
+            Loss(
+                loss_id="L-1",
+                description="An unapproved refund is paid",
+                provenance=LossProvenance.use_case,
+            )
+        ],
+        hazards=[
+            Hazard(
+                hazard_id="H-1",
+                description="A refund is issued without approval",
+                related_losses=["L-1"],
+            )
+        ],
+        security_constraints=[
+            SecurityConstraint(
+                constraint_id="SC-1",
+                rule="Issue a refund only after approval",
+                related_hazards=["H-1"],
+            )
+        ],
+    )
+
+    result = derive_control_structure(
+        llm_client=client,
+        use_case_text="A refund assistant issues refunds the finance reviewer approved.",
+        loss_analysis=loss_analysis,
+        run_dir=tmp_path,
+    )
+
+    call_2b_requests = [
+        call
+        for call in client.calls
+        if call.response_format is not None
+        and issubclass(call.response_format, ControlElementSet)
+    ]
+    assert len(call_2b_requests) == 2
+    [channel] = result.control_structure.responsibilities[0].feedback_channels
+    assert channel.authority_for_update is None
+    assert result.warnings[0] == _dropped_warning(
+        "feedback channel FB-1-1 authority basis only restates source kind "
+        "'user_message'; state why that source may or may not establish this "
+        "value and cite supplied evidence"
+    )
+
+
+@pytest.mark.parametrize(("basis", "reason", "target_evidence"), _UNSUPPORTED_BASES)
+def test_revision_drops_a_basis_the_correction_does_not_fix(
+    tmp_path: Path,
+    basis: str,
+    reason: str,
+    target_evidence: TargetEvidence | None,
+) -> None:
+    invalid = _restated(
+        {
+            **_RESTATED_CHANNEL,
+            "source_kind": "user_message",
+            "authority_for_update": {"status": "non_authoritative", "basis": basis},
+        }
+    )
+    client = _client(invalid, invalid)
+
+    revised, warnings = run_revision(
+        llm_client=client,
+        control_structure=_structure(_channel()),
+        critic_findings=_FINDINGS,
+        use_case_text="A refund assistant issues refunds the finance reviewer approved.",
+        run_dir=tmp_path,
+        target_evidence=target_evidence,
+    )
+
+    sent = _sent(client)
+    assert len(sent) == 2
+    assert reason in _message(sent[1], "user")
+    [channel] = revised.responsibilities[0].feedback_channels
+    assert channel.source_kind is FeedbackSourceKind.user_message
+    assert channel.authority_for_update is None
+    assert [p.pm_id for p in revised.responsibilities[0].process_model_parts] == [
+        "PM-1-1",
+        "PM-1-2",
+    ]
+    assert warnings[0] == (
+        "Revision dropped the authority_for_update of feedback channel FB-1-1: "
+        f"{reason}"
+    )
+    assert not any(warning.startswith("Revision failed") for warning in warnings)
+
+
+def test_revision_still_discards_a_reply_with_another_failure(tmp_path: Path) -> None:
+    invalid = _restated(
+        {
+            **_RESTATED_CHANNEL,
+            "description": "",
+            "source_kind": "user_message",
+            "authority_for_update": {
+                "status": "non_authoritative",
+                "basis": "user input is unverified",
+            },
+        }
+    )
+    client = _client(invalid, invalid)
+    original = _structure(_channel())
+
+    revised, warnings = run_revision(
+        llm_client=client,
+        control_structure=original,
+        critic_findings=_FINDINGS,
+        use_case_text="A refund assistant issues refunds the finance reviewer approved.",
+        run_dir=tmp_path,
+    )
+
+    assert revised == original
+    assert warnings[0].startswith("Revision failed: ")
