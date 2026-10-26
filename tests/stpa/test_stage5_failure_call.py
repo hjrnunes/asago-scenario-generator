@@ -16,6 +16,8 @@ from tests.helpers.discriminating_condition import (
     _operation,
     _ownership_condition,
     _payload_with,
+    reply_only_dropped_note,
+    reply_only_payload,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
 
@@ -189,3 +191,55 @@ def test_not_called_on_the_incorrect_call_goes_through_the_correction(
         correction
     )
     assert result.unsafe_outcome_failure_call == FailureCall.model_validate(INCORRECT)
+
+
+def test_a_reply_claims_not_called_on_its_incorrect_call_is_removed(tmp_path) -> None:
+    # A reply-level claim is judged on the reply, so its failing condition
+    # is removed rather than corrected; the failure call alone refuses it.
+    payload = reply_only_payload(
+        {
+            "statement": "The refund is issued for an order the customer does not own.",
+            "comparisons": [{"kind": "not_called", "operation": "refund_payment"}],
+            "record_selection": {
+                "status": "unavailable",
+                "reason": "The unsafe call is not tied to one observed record.",
+            },
+        }
+    )
+    payload["unsafe_outcome"]["failure_call"] = INCORRECT
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert client.call_count == 1
+    assert result.discriminating_condition is None
+    assert result.condition_omitted_reason == reply_only_dropped_note(
+        IssueCode.discriminating_condition_polarity_inverted.value
+    )
+
+
+def test_a_reply_claims_not_called_on_its_missing_call_is_kept(tmp_path) -> None:
+    payload = reply_only_payload(
+        {
+            "statement": "The refund the customer is owed is never issued.",
+            "comparisons": [{"kind": "not_called", "operation": "refund_payment"}],
+            "record_selection": {
+                "status": "unavailable",
+                "reason": "The missing call is not tied to one observed record.",
+            },
+        }
+    )
+    payload["unsafe_outcome"]["failure_call"] = {
+        "kind": "missing_call",
+        "operation_name": "refund_payment",
+    }
+    client = MockLLMClient()
+    client.set_response_queue([payload])
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert result.discriminating_condition is not None
+    assert result.condition_omitted_reason is None

@@ -45,6 +45,7 @@ from asago_scenario_generator.stpa.scenario_prod.stage5 import (
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.condition_claims import (
     ConditionClaim,
+    condition_claim_findings,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.condition_contradictions import (
     assess_handoff,
@@ -3431,17 +3432,71 @@ def test_a_mapped_incorrect_action_and_its_failure_call_refuse_once() -> None:
     assert "provides refund_payment incorrectly" in result.refused[0].detail
 
 
-def test_a_failure_call_is_not_judged_without_a_command_attempt_claim() -> None:
-    reply = SafeObservableOutcome(
-        observable=True,
-        statement="The assistant declines the refund.",
-        claim_level="reply",
-        evidence="assistant_message",
+REPLY = SafeObservableOutcome(
+    observable=True,
+    statement="The assistant declines the refund.",
+    claim_level="reply",
+    evidence="assistant_message",
+)
+
+
+@pytest.mark.parametrize(
+    "outcome", [REPLY, None], ids=["reply-safe-outcome", "no-safe-outcome"]
+)
+def test_an_incorrect_call_refuses_not_called_whatever_the_safe_outcome_claims(
+    outcome,
+) -> None:
+    findings = condition_claim_findings(
+        _not_called(),
+        {},
+        uca_type=UCAType.not_provided,
+        unsafe_operation=None,
+        safe_outcome=outcome,
+        failure_call=INCORRECT_CALL,
     )
 
-    assert _assess_failure_call(INCORRECT_CALL, outcome=reply) == (
+    assert [item.code for item in findings] == [
+        IssueCode.discriminating_condition_polarity_inverted
+    ]
+    assert "the failure criterion states an incorrect call of refund_payment" in (
+        findings[0].detail
+    )
+
+
+def test_an_incorrect_call_under_a_reply_claim_is_refused_by_the_check() -> None:
+    result = _assess_failure_call(INCORRECT_CALL, outcome=REPLY)
+
+    assert [(item.rule, item.code) for item in result.refused] == [
+        ("a", IssueCode.discriminating_condition_polarity_inverted)
+    ]
+    assert result.undecidable == ()
+
+
+@pytest.mark.parametrize(
+    "failure_call",
+    [
+        MISSING_CALL,
+        FailureCall(kind="incorrect_call", operation_name="escalate_case"),
+        None,
+    ],
+    ids=["missing-call", "other-operation", "no-failure-call"],
+)
+def test_under_a_reply_claim_only_an_incorrect_call_of_that_operation_refuses(
+    failure_call,
+) -> None:
+    assert _assess_failure_call(failure_call, outcome=REPLY) == (
         condition_contradictions.ConditionContradictions()
     )
+
+
+def test_a_mapped_incorrect_action_alone_is_still_judged_only_under_a_command_attempt() -> (
+    None
+):
+    result = _assess_failure_call(
+        None, UCAType.incorrect, unsafe_operation="refund_payment", outcome=REPLY
+    )
+
+    assert result == condition_contradictions.ConditionContradictions()
 
 
 def test_a_handoff_failure_call_reaches_rule_a() -> None:

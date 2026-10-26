@@ -1,21 +1,23 @@
-"""Check that a discriminating condition agrees with its own command-attempt claim.
+"""Check that a discriminating condition agrees with its own scenario.
 
 The condition check (``condition_check``) asks whether a condition resolves
 and separates an unsafe call from a safe one. The checks here compare the
-condition with structured fields of its own scenario, and run only when the
-safe outcome claims a ``command_attempt``, which the consumer scores with the
-bound tool-call condition:
+condition with structured fields of its own scenario:
 
 - An ``INCORRECT`` unsafe control action is provided incorrectly, so the
   unsafe behavior calls the action's operation. A ``not_called`` on that
   operation holds only when the call never happens, which is the safe
-  behavior: the condition detects the opposite of the failure.
+  behavior: the condition detects the opposite of the failure. This check
+  runs only when the safe outcome claims a ``command_attempt``, which the
+  consumer scores with the bound tool-call condition.
 - A failure criterion whose failure call is an ``incorrect_call`` of an
   operation states the same of that operation, whatever the category of the
-  control action and whether or not it maps to an operation, so a
-  ``not_called`` on it is refused as well.
+  control action, whether or not it maps to an operation, and whatever the
+  safe outcome claims, so a ``not_called`` on it is refused as well: the
+  failure call alone proves that the unsafe behavior is that call.
 - A condition with no call-level part binds as ``state_only``: it names no
-  call, so the command-attempt claim has no tool-call condition to run.
+  call, so a command-attempt claim has no tool-call condition to run. This
+  check runs only under a ``command_attempt`` safe outcome.
 """
 
 from __future__ import annotations
@@ -63,9 +65,10 @@ def condition_claim_findings(
     safe_outcome: SafeObservableOutcome | None,
     failure_call: FailureCall | None = None,
 ) -> tuple[ConditionFinding, ...]:
-    """Return where a condition contradicts its scenario's command-attempt claim.
+    """Return where a condition contradicts its scenario.
 
-    The keyword arguments are the fields of :class:`ConditionClaim`.
+    The keyword arguments are the fields of :class:`ConditionClaim`. Only the
+    failure call is judged without a ``command_attempt`` safe outcome.
     """
 
     if (
@@ -73,7 +76,7 @@ def condition_claim_findings(
         or not safe_outcome.observable
         or safe_outcome.claim_level != "command_attempt"
     ):
-        return ()
+        return tuple(_inverted_not_called(condition, uca_type, None, failure_call))
     return (
         *_inverted_not_called(condition, uca_type, unsafe_operation, failure_call),
         *_no_call(condition, fact_values, safe_outcome.operation_name),
