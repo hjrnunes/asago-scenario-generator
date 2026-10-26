@@ -25,7 +25,16 @@ it decides:
   comparison unknown on every call;
 - `not_called` on the operation of an `incorrect_call` failure call is refused
   (`discriminating_condition_polarity_inverted`) in every control-action
-  category, whether or not the action maps to an operation.
+  category, whether or not the action maps to an operation, and whatever the
+  safe outcome claims (a reply-level condition so refused is removed rather
+  than corrected, as every failing reply-level condition is).
+
+When the observation contract captures tool calls, a Stage 5 reply must
+carry `unsafe_outcome.failure_call`: the object, or `null` when the failure
+is not a call of one inventory operation. A reply without the key fails
+validation and goes through the existing correction. The handoff's
+`semantic_failure_call` stays optional and is omitted when the reply's
+value is `null`, so a handoff reader must still accept its absence.
 
 Declaring a record kind therefore asserts disjointness: a target that declares
 `question` as `free_text` and `patient_id` as `patient_id` states that a
@@ -47,9 +56,12 @@ state_keys:         # the keys of the mapping at a path
 ```
 
 Each entry declares a `record_kind` (lower_snake), a `format` (`date` or
-`date-time`), or both. Each target value is declared once. An argument entry
+`date-time`), or both; the profile schema requires at least one of them to be
+present and a string. Each target value is declared once. An argument entry
 must name an argument of an operation the profile lists, or the profile is
-rejected. Two state entries that match one value and disagree give no fact.
+rejected; the schema cannot state this rule, so a schema-only reader must
+check it itself. Two state entries that match one value and disagree give no
+fact.
 
 The proposed documents for the three synthetic domains are
 [`typed-condition-facts/klarna.yaml`](typed-condition-facts/klarna.yaml),
@@ -114,7 +126,11 @@ category labels (`escalate_to_human.topic`, `escalate_trust_safety.topic`),
 ### The consumer (mirrors the producer's contracts)
 
 - Re-mirror `data/contracts/target-profile/` (the profile schema gains the
-  optional `value_facts`) and `data/contracts/scenario-handoff/` (the handoff
+  optional `value_facts`; the kit gains invalid vectors for a value fact
+  with no declaration, with null declarations, and naming an operation or
+  argument the profile does not list, coded `value_fact_without_declaration`
+  and `value_fact_unknown_argument` in `expected-violations.json`;
+  `scripts/gen_target_profile_kit.py` regenerates the kit) and `data/contracts/scenario-handoff/` (the handoff
   schema gains the optional `semantic_failure_call`, with
   `valid/failure-call.json` and two invalid cases). Both fields are omitted
   when absent, so existing profiles and handoffs keep their bytes and
@@ -131,8 +147,11 @@ category labels (`escalate_to_human.topic`, `escalate_trust_safety.topic`),
 2. mini-agents adds `value-facts.yaml`; the orchestrator passes it to the
    scanner. Profiles discovered afterwards carry `value_facts`; their digest
    changes, and the observations and runs pair with the new digest as usual.
-3. Stage 5 requests now offer `failure_call` when the contract captures tool
-   calls; scenarios generated afterwards may carry `semantic_failure_call`.
+3. Stage 5 requests now require `failure_call` (an object or `null`) when the
+   contract captures tool calls; scenarios generated afterwards may carry
+   `semantic_failure_call`. Every such Stage 5 request differs from a
+   recorded one (a new prompt paragraph and a new required schema property),
+   so recorded Stage 5 responses do not replay for those requests.
 
 Saved runs carry neither fact, so the offline sweep over them reports the
 same counts before and after; the decided cases are pinned in
