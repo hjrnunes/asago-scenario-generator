@@ -311,6 +311,9 @@ class SynthesisResult:
     stage_errors: list[str] = field(default_factory=list)
     stage_warnings: list[str] = field(default_factory=list)
     ica_hazard_verification: Any | None = None
+    # Mechanism suggestion rows, apart from obligation accounting; ``None``
+    # when the mechanism verifier was never asked.
+    mechanism_suggestion_accounting: Any | None = None
 
     @property
     def scenario_envelopes(self) -> tuple[Any, ...]:

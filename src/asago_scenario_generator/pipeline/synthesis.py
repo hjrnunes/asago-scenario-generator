@@ -45,6 +45,7 @@ from asago_scenario_generator.pipeline.synthesis_governance import (
     _run_governance_routing,
 )
 from asago_scenario_generator.pipeline.synthesis_mechanisms import (
+    _mechanism_accounting,
     _run_mechanism_suggestions,
 )
 
@@ -56,6 +57,7 @@ from asago_scenario_generator.pipeline.synthesis_persist import (
     _artifact_paths,
     _persist_manifest,
     _persist_ica_merges,
+    _persist_mechanism_accounting,
     _persist_plan,
     _persist_prepared_profile,
     _persist_sidecar,
@@ -91,7 +93,10 @@ from asago_scenario_generator.pipeline.synthesis_types import (
     SynthesisRunStatus,
     _systemic_inputs,
 )
-from asago_scenario_generator.pipeline.synthesis_values import _ica_considerations
+from asago_scenario_generator.pipeline.synthesis_values import (
+    _ica_considerations,
+    _mechanism_considerations,
+)
 from asago_scenario_generator.stpa.infra.provider_record import provider_call_session
 
 
@@ -303,6 +308,11 @@ def _run_synthesis(
         )
     )
     hazard_offers = _slot_hazard_offers(ica_enumeration)
+    # Kept apart from obligation accounting: a suggestion makes no coverage
+    # claim, so no obligation row counts it.
+    mechanism_accounting = _mechanism_accounting(
+        mechanism_stage, final_control, _mechanism_considerations(ica_enumeration)
+    )
     target_realization = log.take(
         _run_target_realization(
             ica_enumeration=ica_enumeration,
@@ -384,6 +394,9 @@ def _run_synthesis(
     ica_merges_path = _persist_ica_merges(
         output_dir, _ica_merge_report(ica_enumeration)
     )
+    mechanism_accounting_path = _persist_mechanism_accounting(
+        output_dir, mechanism_accounting
+    )
     target_realization_path = _persist_target_realization(
         output_dir,
         target_realization,
@@ -448,6 +461,7 @@ def _run_synthesis(
         hazard_offers_path=hazard_offers_path,
         policy_coverage_path=policy_coverage_path,
         ica_merges_path=ica_merges_path,
+        mechanism_accounting_path=mechanism_accounting_path,
     )
 
     return SynthesisResult(
@@ -471,6 +485,7 @@ def _run_synthesis(
         stage_errors=log.errors,
         stage_warnings=stage_warnings,
         ica_hazard_verification=ica_enumeration.ica_hazard_verification,
+        mechanism_suggestion_accounting=mechanism_accounting,
     )
 
 

@@ -15,6 +15,9 @@ from asago_scenario_generator.models.capability_profile import (
     inject_kc_subcodes_display,
 )
 from asago_scenario_generator.models.ica_merge import ICA_MERGES_FILENAME
+from asago_scenario_generator.models.mechanism_suggestion_accounting import (
+    MECHANISM_SUGGESTION_ACCOUNTING_FILENAME,
+)
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.models.slot_hazard_offer import (
     SLOT_HAZARD_OFFERS_FILENAME,
@@ -91,6 +94,17 @@ def _persist_ica_merges(output_dir: Path, report: Any | None) -> Path | None:
     if report is None:
         return None
     return _persist_sidecar(output_dir, ICA_MERGES_FILENAME, report)
+
+
+def _persist_mechanism_accounting(
+    output_dir: Path, accounting: Any | None
+) -> Path | None:
+    """Publish mechanism suggestion accounting when the verifier was asked."""
+    if accounting is None:
+        return None
+    return _persist_sidecar(
+        output_dir, MECHANISM_SUGGESTION_ACCOUNTING_FILENAME, accounting
+    )
 
 
 def _persist_target_realization(
@@ -170,9 +184,15 @@ def _artifact_paths(
     hazard_offers_path: Path | None = None,
     policy_coverage_path: Path | None = None,
     ica_merges_path: Path | None = None,
+    mechanism_accounting_path: Path | None = None,
 ) -> dict[str, Path]:
     """Add each optional published artifact to the always-written ones."""
-    for sidecar in (hazard_offers_path, ica_merges_path, policy_coverage_path):
+    for sidecar in (
+        hazard_offers_path,
+        ica_merges_path,
+        mechanism_accounting_path,
+        policy_coverage_path,
+    ):
         if sidecar is not None:
             artifact_paths[sidecar.name] = sidecar
     if target_realization_path is not None:
