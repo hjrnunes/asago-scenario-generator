@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.infra.llm import (
     LLMResult,
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    CallOutcome,
     CorrectionPolicy,
     call_with_policy,
     decode_content,
@@ -58,6 +59,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.feedback_authority import (
+    feedback_authority_defect,
     validate_feedback_authority_assessments,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
@@ -309,6 +311,55 @@ def _validate_revision_wire(
         target_evidence=target_evidence,
         require_domain_scope=True,
     )
+
+
+def _revision_without_unsupported_authority(
+    outcome: CallOutcome[RevisionDelta],
+    *,
+    target_evidence: TargetEvidence | None,
+) -> tuple[RevisionDelta, list[str]] | None:
+    """Return the last revision reply without its unsupported authority bases.
+
+    It applies only when the reply fails nothing but the authority basis
+    checks; any other failure returns ``None`` so the revision is discarded as
+    before.  No request is sent.  A dropped assessment is an omitted one, so
+    the merge treats the channel as any channel that states no assessment.
+    Each drop adds a warning naming the channel and the reason.
+    """
+    if outcome.result is None or not isinstance(outcome.failure, ValueError):
+        return None
+    try:
+        value = copy.deepcopy(decode_content(outcome.result))
+        wire = _RevisionDeltaProviderSet.model_validate(value)
+    except Exception:
+        return None
+    reasons: list[tuple[str, str]] = []
+    for key in ("new_responsibilities", "modified_responsibilities"):
+        for resp_index, responsibility in enumerate(getattr(wire, key)):
+            for fb_index, channel in enumerate(responsibility.feedback_channels):
+                reason = feedback_authority_defect(
+                    channel, target_evidence=target_evidence, require_domain_scope=True
+                )
+                if reason is None:
+                    continue
+                del value[key][resp_index]["feedback_channels"][fb_index][
+                    "authority_for_update"
+                ]
+                reasons.append((channel.fb_id, reason))
+    # The validator stopped on the first failing basis; any other failure is
+    # not this one, and dropping assessments would not answer it.
+    if not reasons or str(outcome.failure) != reasons[0][1]:
+        return None
+    try:
+        _validate_revision_wire(value, target_evidence=target_evidence)
+        delta = _revision_delta_from_wire(value)
+    except Exception:
+        return None
+    return delta, [
+        f"Revision dropped the authority_for_update of feedback channel {fb_id}: "
+        f"{reason}"
+        for fb_id, reason in reasons
+    ]
 
 
 def _revision_delta_from_wire(value: Any) -> RevisionDelta:
@@ -659,16 +710,23 @@ def run_revision(
         response_parser=_parse_revision_result,
     )
     revision_delta, error_msg = outcome.value, outcome.error
+    authority_warnings: list[str] = []
     if error_msg is not None:
-        return control_structure, _revision_failure_warnings(error_msg)
+        salvaged = _revision_without_unsupported_authority(
+            outcome, target_evidence=target_evidence
+        )
+        if salvaged is None:
+            return control_structure, _revision_failure_warnings(error_msg)
+        revision_delta, authority_warnings = salvaged
     if revision_delta is None:
         return control_structure, [f"{_REVISION_FAILED}unexpected None response"]
-    return _finish_revision(
+    revised, revision_warnings = _finish_revision(
         control_structure,
         revision_delta,
         critic_findings=critic_findings,
         loss_analysis=loss_analysis,
     )
+    return revised, [*authority_warnings, *revision_warnings]
 
 
 def _delta_has_changes(delta: RevisionDelta) -> bool:

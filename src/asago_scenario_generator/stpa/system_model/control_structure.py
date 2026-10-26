@@ -82,6 +82,7 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.feedback_authority import (
+    feedback_authority_defect,
     validate_feedback_authority_assessments,
 )
 from asago_scenario_generator.stpa.system_model.publication import (
@@ -1829,8 +1830,9 @@ def derive_control_structure(
 
     Returns:
         A named result containing the reviewed ``LossAnalysis``, validated
-        ``ControlStructure``, and warnings.  The warning tuple is empty when
-        the assembly succeeds.
+        ``ControlStructure``, and warnings.  The warnings name each Call 2b
+        authority assessment dropped as unsupported and each stub feedback
+        channel added for an orphan process model part.
 
     Raises:
         StageError: If a call fails, or, without *versions*, if a control
@@ -1899,6 +1901,7 @@ def _derive_control_structure(
     )
 
     # Call 2b — CAs + FBs + CPs
+    call_2b_warnings: list[str] = []
     control_element_set = _call_2b_control_elements(
         llm_client=llm_client,
         use_case_text=use_case_text,
@@ -1907,6 +1910,7 @@ def _derive_control_structure(
         loader=loader,
         temperature=temperature,
         target_evidence=target_evidence,
+        warnings=call_2b_warnings,
     )
 
     # Assembly: merge Call 2a + Call 2b → ControlStructure
@@ -2053,7 +2057,7 @@ def _derive_control_structure(
     return ControlStructureDerivationResult(
         loss_analysis=reviewed_loss_analysis,
         control_structure=control_structure,
-        warnings=repair_warnings,
+        warnings=[*call_2b_warnings, *repair_warnings],
     )
 
 
@@ -2229,8 +2233,13 @@ def _call_2b_control_elements(
     loader: TemplateLoader,
     temperature: float,
     target_evidence: TargetEvidence | None = None,
+    warnings: list[str] | None = None,
 ) -> ControlElementSet:
     """Run Call 2b: derive control actions, feedback channels, and controlled processes.
+
+    Authority is optional.  When the last reply fails only the authority basis
+    checks, every failing ``authority_for_update`` is dropped, so that
+    channel's authority is unknown, and *warnings* gets one line per channel.
 
     Raises:
         StageError: If the LLM call fails or the response fails validation.
@@ -2247,6 +2256,16 @@ def _call_2b_control_elements(
         )
         return elements
 
+    def drop_unsupported_authority(
+        outcome: CallOutcome[ControlElementSet],
+    ) -> ControlElementSet | None:
+        return _without_unsupported_authority(
+            outcome,
+            responsibilities=responsibility_set.responsibilities,
+            target_evidence=target_evidence,
+            warnings=warnings if warnings is not None else [],
+        )
+
     def recover(
         outcome: CallOutcome[ControlElementSet], system_prompt: str, user_prompt: str
     ) -> ControlElementSet | None:
@@ -2262,7 +2281,15 @@ def _call_2b_control_elements(
         repaired = _repair_call_2b_missing_actions(outcome, **request)
         if repaired is not None:
             return repaired
-        return _correct_call_2b_references(outcome, parse=parse, **request)
+        corrected = _correct_call_2b_references(
+            outcome,
+            parse=parse,
+            drop_unsupported_authority=drop_unsupported_authority,
+            **request,
+        )
+        if corrected is not None:
+            return corrected
+        return drop_unsupported_authority(outcome)
 
     return _run_stage2_llm_call(
         llm_client=llm_client,
@@ -2403,6 +2430,9 @@ def _correct_call_2b_references(
     user_prompt: str,
     responsibilities: Sequence[Responsibility],
     parse: Callable[[LLMResult, list[dict[str, Any]]], ControlElementSet],
+    drop_unsupported_authority: Callable[
+        [CallOutcome[ControlElementSet]], ControlElementSet | None
+    ],
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
@@ -2413,7 +2443,9 @@ def _correct_call_2b_references(
     still names unknown targets, sources or process model parts.  The request
     names each unknown reference, offers the valid IDs with their
     descriptions, and continues the step's attempt numbering.  Every other
-    failure is declined so the caller stops as before.
+    failure is declined so the caller stops as before.  A corrected reply
+    that fails only the authority basis checks goes to
+    *drop_unsupported_authority* instead of stopping the step.
     """
     failure = outcome.failure
     if not isinstance(failure, UnknownReferenceError) or outcome.result is None:
@@ -2443,10 +2475,58 @@ def _correct_call_2b_references(
         first_attempt_number=outcome.attempt_number + 1,
     )
     if corrected.error is not None:
+        degraded = drop_unsupported_authority(corrected)
+        if degraded is not None:
+            return degraded
         raise StageError(
             stage=STAGE, step="call_2b_control_elements", message=corrected.error
         )
     return corrected.value
+
+
+def _without_unsupported_authority(
+    outcome: CallOutcome[ControlElementSet],
+    *,
+    responsibilities: Sequence[Responsibility],
+    target_evidence: TargetEvidence | None,
+    warnings: list[str],
+) -> ControlElementSet | None:
+    """Return the last Call 2b reply without its unsupported authority bases.
+
+    It applies only when the reply parses and fails nothing but the authority
+    basis checks; any other failure returns ``None`` so the step stops as
+    before.  No request is sent.  Each dropped assessment leaves its channel's
+    authority unknown and adds a warning naming the channel and the reason.
+    """
+    if outcome.result is None or not isinstance(outcome.failure, ValueError):
+        return None
+    try:
+        elements = parse_control_element_set_response(
+            outcome.result.content, responsibilities=responsibilities
+        )
+    except Exception:
+        return None
+    channels: list[FeedbackChannel] = []
+    reasons: list[tuple[str, str]] = []
+    for channel in elements.feedback_channels:
+        reason = feedback_authority_defect(
+            channel, target_evidence=target_evidence, require_domain_scope=True
+        )
+        if reason is None:
+            channels.append(channel)
+            continue
+        channels.append(channel.model_copy(update={"authority_for_update": None}))
+        reasons.append((channel.fb_id, reason))
+    # The step stopped on the first failing basis; any other failure is not
+    # this one, and dropping assessments would not answer it.
+    if not reasons or str(outcome.failure) != reasons[0][1]:
+        return None
+    warnings.extend(
+        "stage_2/call_2b_control_elements: dropped the authority_for_update "
+        f"of feedback channel {fb_id}; its authority is unknown: {reason}"
+        for fb_id, reason in reasons
+    )
+    return elements.model_copy(update={"feedback": channels})
 
 
 def _call_2b_reference_feedback(
