@@ -149,7 +149,7 @@ def test_provider_question_is_compact_and_explains_opaque_handle() -> None:
 
 
 def test_routing_prompt_defines_repeated_concern_once_per_batch() -> None:
-    """Repeated pattern context is a glossary entry, not duplicated prose."""
+    """A repeated pattern is described once; each question names its own pattern."""
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
     brief = build_neutral_briefs(make_plan(), (pattern,))[0]
     second = brief.model_copy(update={"obligation_id": brief.obligation_id + "-2"})
@@ -161,8 +161,10 @@ def test_routing_prompt_defines_repeated_concern_once_per_batch() -> None:
         slots=create_slots(_control_structure()),
     )
 
-    assert user.count(brief.attack_pattern_name) == 1
-    assert user.count("known_concern_ref:") == 2
+    assert user.count(brief.attack_pattern_description) == 1
+    assert user.count(f"attack_pattern_id: {brief.attack_pattern_id}\n") == 3
+    assert user.count(f"attack_pattern_name: {brief.attack_pattern_name}\n") == 2
+    assert "known_concern_ref" not in user
     assert "analyst_instruction:" not in user
 
 
@@ -357,6 +359,7 @@ def test_focused_verifier_retains_path_without_granting_mechanism_credit(
     slot = create_slots(_control_structure())[0]
     route = ObligationRoute(
         obligation_id=brief.obligation_id,
+        attack_pattern_id=brief.attack_pattern_id,
         disposition="targeted",
         semantic_assessment={
             "mechanism_assessment": "plausible_in_system",

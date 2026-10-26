@@ -65,6 +65,7 @@ def test_routing_schema_cannot_retype_an_obligation_digest():
     wire = _routing_provider_payload_type(1, obligation_ids=(expected,))
     route = {
         "obligation_id": "ob:v1:" + "2" * 64,
+        "attack_pattern_id": "AP-T1-01",
         "disposition": "unresolved",
         "semantic_assessment": _routing_semantics(),
         "rationale": "No structural route supplied.",
@@ -119,6 +120,7 @@ def test_routing_wire_schema_requires_disposition_specific_fields() -> None:
     obligation_id = "ob:v1:" + "0" * 64
     base = {
         "obligation_id": obligation_id,
+        "attack_pattern_id": "AP-T1-01",
         "semantic_assessment": _routing_semantics(),
         "evidence": ["evidence is insufficient"],
     }

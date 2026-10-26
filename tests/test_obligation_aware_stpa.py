@@ -582,6 +582,7 @@ def test_provider_routing_retry_has_one_owner(tmp_path) -> None:
             elif self.calls == 2:
                 provider_route = ObligationRoute(
                     obligation_id=brief.obligation_id,
+                    attack_pattern_id=brief.attack_pattern_id,
                     disposition="targeted",
                     semantic_assessment=ObligationSemanticAssessment(
                         mechanism_assessment="plausible_in_system",

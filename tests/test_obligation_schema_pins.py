@@ -48,7 +48,7 @@ FACTORY_CASES = {
     "routing-1": lambda: provider._routing_provider_payload_type(1),
     "routing-3": lambda: provider._routing_provider_payload_type(3),
     "routing-exact": lambda: provider._routing_provider_payload_type(
-        2, obligation_ids=OB_IDS
+        2, obligation_ids=OB_IDS, attack_pattern_ids=("AP-T1-01", "AP-T2-02")
     ),
     "mechanism-1": lambda: provider._mechanism_verdict_payload_type(1),
     "mechanism-4": lambda: provider._mechanism_verdict_payload_type(4),
@@ -115,17 +115,17 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "routing-1": (
         "_RoutingProviderPayload1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "42268f443da3a03f61242a81887c18c3ec058549f14a8e2b749c7b84c799e110",
+        "55431576b4ffc720b05c42810ae07abbf872e545f55132cfe07c7ee3008ec94f",
     ),
     "routing-3": (
         "_RoutingProviderPayload3",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "8eb606e31024c3ebaea40c032ee1dbb78b128c25e6e41835efcd93d1a007dbf7",
+        "18dc71b9dd686ab2d9dfe7a8d758960baa5cdf3bf6f4c9394172a66dbdbf57b1",
     ),
     "routing-exact": (
         "_RoutingProviderPayload2",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "f6e528678529b869196dd6cc8966c5501b4b2add195a86cbf99fd085094f23ec",
+        "aaf6c189e593423cd3427ad42a10a3ac8b80bb286a681790de14b74d39eb4f18",
     ),
     "slot-1-0": (
         "_SlotProviderPayload1Pairs0",

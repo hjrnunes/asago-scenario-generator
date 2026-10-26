@@ -1,0 +1,13 @@
+template: structural_routing_user.j2
+cases:
+  routing-batch:
+    required:
+      - >-
+        Known concern glossary (each pattern is defined once under its
+        attack_pattern_id; each question states its own attack_pattern_id and
+        attack_pattern_name):
+      - >-
+        Every obligation_handle is an opaque reference: copy unchanged. Each
+        question's attack_pattern_id is the pattern its route judges and echoes.
+    forbidden:
+      - known_concern_ref

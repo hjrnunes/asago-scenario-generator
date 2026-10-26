@@ -1,5 +1,5 @@
-Known concern glossary (each pattern is defined once; questions refer to it by
-known_concern_ref):
+Known concern glossary (each pattern is defined once under its attack_pattern_id;
+each question states its own attack_pattern_id and attack_pattern_name):
 {{ known_concern_catalog_yaml }}
 {% if known_mechanism_glossary_yaml %}
 Known mechanism glossary (each mechanism is defined once; concerns refer to it by
@@ -8,7 +8,8 @@ known_mechanism_refs):
 {% endif %}
 Compact obligation questions:
 {{ obligation_questions_yaml }}
-Every obligation_handle is an opaque reference: copy unchanged.
+Every obligation_handle is an opaque reference: copy unchanged. Each question's
+attack_pattern_id is the pattern its route judges and echoes.
 {{ hazard_constraint_pair_ledger }}
 
 Compact STPA target index: relationships use IDs; the ID glossary explains each ID exactly once,

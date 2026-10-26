@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping, Sequence
 from dataclasses import dataclass, field
 import functools
+import re
 from typing import Any, Literal
 
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
@@ -228,6 +229,74 @@ def _validate_semantic_assessment(
     if assessment.mapping_strength != expected_strength:
         raise ValueError("route mapping_strength does not match the obligation path")
     _validate_disposition_mechanism(route.disposition, assessment)
+
+
+class AttackPatternBindingError(ValueError):
+    """A route judged another obligation's attack pattern instead of its own."""
+
+
+def _validate_pattern_binding(
+    route: ObligationRoute,
+    brief: NeutralObligationBrief,
+    batch: Sequence[NeutralObligationBrief],
+) -> None:
+    """Bind a route to its own obligation's attack pattern.
+
+    A route's echoed ``attack_pattern_id`` must be its obligation's pattern,
+    and its free text must name no pattern ID that belongs only to another
+    obligation of the batch.  IDs match exactly on token boundaries; pattern
+    names are not matched, since shared words are common between patterns.
+    """
+    own = brief.attack_pattern_id
+    if route.attack_pattern_id is not None and route.attack_pattern_id != own:
+        raise AttackPatternBindingError(
+            f"route {route.obligation_id} echoes attack_pattern_id "
+            f"{route.attack_pattern_id}, but its obligation's own attack "
+            f"pattern is {own or '<none>'}"
+        )
+    foreign = sorted(
+        {
+            item.attack_pattern_id
+            for item in batch
+            if item.attack_pattern_id is not None and item.attack_pattern_id != own
+        }
+    )
+    hits = [
+        f"{pattern_id} in {field_name}"
+        for field_name, text in _route_free_text(route)
+        for pattern_id in foreign
+        if _names_pattern_id(text, pattern_id)
+    ]
+    if hits:
+        raise AttackPatternBindingError(
+            f"route {route.obligation_id} for attack pattern {own or '<none>'} "
+            "names another batch obligation's attack pattern: " + "; ".join(hits)
+        )
+
+
+def _route_free_text(route: ObligationRoute) -> tuple[tuple[str, str], ...]:
+    """Return each free-text field of a route with its field name."""
+    texts: list[tuple[str, str]] = []
+    if route.rationale:
+        texts.append(("rationale", route.rationale))
+    texts.extend(("evidence", item) for item in route.evidence)
+    assessment = route.semantic_assessment
+    if assessment is not None:
+        texts.append(("mechanism_rationale", assessment.mechanism_rationale))
+        texts.append(("risk_alignment_rationale", assessment.risk_alignment_rationale))
+    texts.extend(
+        ("missing_concepts description", item.description)
+        for item in route.missing_concepts
+    )
+    return tuple(texts)
+
+
+def _names_pattern_id(text: str, pattern_id: str) -> bool:
+    """Whether *text* names *pattern_id* as a whole token, not inside a longer ID."""
+    return (
+        re.search(rf"(?<![A-Za-z0-9_-]){re.escape(pattern_id)}(?![A-Za-z0-9_-])", text)
+        is not None
+    )
 
 
 def _validate_disposition_mechanism(
@@ -566,6 +635,14 @@ def _repair_section(lowered_detail: str) -> str:
         )
     ):
         return "repair_opaque_identity"
+    if any(
+        marker in lowered_detail
+        for marker in (
+            "echoes attack_pattern_id",
+            "names another batch obligation's attack pattern",
+        )
+    ):
+        return "repair_attack_pattern"
     if "rationale" in lowered_detail:
         return "repair_rationale"
     if "disposition" in lowered_detail:
@@ -697,6 +774,8 @@ def _unresolved_route_record(
     cardinality is known, semantic/reference validation is record-local: keep
     the independent semantic assessment as evidence when available, but do
     not retain an untrusted structural path or hazard/constraint selection.
+    A route bound to another obligation's attack pattern keeps no assessment:
+    it judged that other pattern, so accounting must not stop on it.
     """
     detail = f"{type(error).__name__}: {error}"
     route_refs = () if route is None else (route.route_id or "",)
@@ -706,7 +785,11 @@ def _unresolved_route_record(
         obligation_ids=(brief.obligation_id,),
         refs=(request.batch_id, *route_refs),
     )
-    assessment = None if route is None else route.semantic_assessment
+    assessment = (
+        None
+        if route is None or isinstance(error, AttackPatternBindingError)
+        else route.semantic_assessment
+    )
     return ObligationRoute(
         obligation_id=brief.obligation_id,
         disposition="unresolved",
@@ -733,6 +816,7 @@ def _validate_route_records(
     for route in candidate.routes:
         brief = brief_by_id[route.obligation_id]
         try:
+            _validate_pattern_binding(route, brief, batch)
             _validate_semantic_assessment(route, brief)
             _validate_route(
                 route,

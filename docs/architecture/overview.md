@@ -202,7 +202,19 @@ and the hashes of every obligation-aware template, included partial, and
 
 Each structural route carries independent typed mechanism-plausibility and
 reviewed-risk-alignment decisions plus a plain mapping-strength label derived
-from the exact mapping path. The raw mapping path never enters the prompt. A
+from the exact mapping path. The raw mapping path never enters the prompt.
+A routing batch holds up to `max_batch_size` (default 8) questions, and each
+question states its own `attack_pattern_id` and `attack_pattern_name`; the
+concern glossary describes each pattern once. Each provider route echoes its
+question's `attack_pattern_id`. Routing refuses a route whose echo is not its
+obligation's own pattern, or whose rationale, evidence, semantic-assessment
+rationales, or missing-concept descriptions name, as a whole token, a pattern
+ID that belongs only to another obligation of the batch; pattern names are not
+matched. A refused route fails record validation like any other: the batch is
+asked again within `validation_retries`, and a route still refused stays
+`unresolved` with `routing_record_validation_failed`, keeps its valid
+siblings, and keeps no semantic assessment, so accounting never stops on a
+judgement of another pattern. A
 plausible mechanism with `risk_alignment: mismatch` remains eligible for
 ordinary STPA analysis, but it does not credit the obligation. Provider routes
 that would otherwise receive credit pass through a compact mechanism/path

@@ -221,6 +221,8 @@ def _routing_wire_examples() -> tuple[str, str]:
     payload_type = _routing_provider_payload_type(1)
     common = {
         "obligation_id": "ob:v1:" + "0" * 64,
+        # A pattern no real catalog is expected to hold, like the slot below.
+        "attack_pattern_id": "AP-T90-01",
         "evidence": ["sanitized structural evidence"],
     }
     semantic_assessment = {
@@ -373,11 +375,16 @@ def _plain_fact_name(fact: Any) -> str:
 
 
 def _routing_question_payload(item: ProviderObligationQuestion) -> dict[str, Any]:
-    """Remove repeated instructions and non-semantic fact keys from one row."""
+    """Remove repeated instructions and non-semantic fact keys from one row.
+
+    The row states its own attack pattern ID and name; the glossary keeps
+    the description, which several questions may share.
+    """
     payload = item.model_dump(mode="json")
     payload.pop("analyst_instruction", None)
     concern = payload.pop("known_concern")
-    payload["known_concern_ref"] = concern["attack_pattern_id"]
+    payload["attack_pattern_id"] = concern["attack_pattern_id"]
+    payload["attack_pattern_name"] = concern["name"]
     applicability = payload.get("applicability", {})
     for collection in ("relevant_facts", "missing_or_conflicting_facts"):
         for fact in applicability.get(collection, []):

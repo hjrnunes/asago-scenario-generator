@@ -47,6 +47,17 @@ request digest, the run diverges from that request on, and the comparison
 fails.  Re-record the corpus after such a change instead of listing the
 divergence.
 
+Requests changed on purpose since the corpus was last recorded, each needing
+a re-record before the gate passes on a run that sends it:
+
+- Obligation-aware structural routing (stage
+  ``synthesis_obligation_aware_routing``, steps ``initial-batch-N`` and
+  ``recheck-batch-N``, including their correction requests): each question
+  states its own ``attack_pattern_id`` and ``attack_pattern_name``, the system
+  prompt and its examples explain the route's ``attack_pattern_id`` echo, and
+  the response schema requires that echo.  Every later request of such a run
+  depends on the routing replies and diverges with them.
+
 A change that deletes a prompt template also drops that template's entry from
 the prompt-hash tables a run records.  A recorded entry whose ``.j2`` key the
 replay lacks passes only when no template of that name exists in the checkout;

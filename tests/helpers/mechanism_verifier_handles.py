@@ -26,9 +26,10 @@ from tests.helpers.obligation_aware import (
 )
 
 
-def _routing_answer(obligation_id: str) -> dict:
+def _routing_answer(obligation_id: str, attack_pattern_id: str) -> dict:
     route = ObligationRoute(
         obligation_id=obligation_id,
+        attack_pattern_id=attack_pattern_id,
         disposition="targeted",
         semantic_assessment=ObligationSemanticAssessment(
             mechanism_assessment="plausible_in_system",
@@ -81,7 +82,9 @@ class _VerifierClient:
                 "routes": [
                     route
                     for item in asked
-                    for route in _routing_answer(item.obligation_id)["routes"]
+                    for route in _routing_answer(
+                        item.obligation_id, item.attack_pattern_id
+                    )["routes"]
                 ]
             }
         return LLMResult(

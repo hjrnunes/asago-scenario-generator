@@ -225,6 +225,12 @@ CASES: dict[str, Callable[[], Messages]] = {
     "feedback-opaque-identity": lambda: _feedback(
         ValueError("opaque obligation identity mismatch: ob:v1:0")
     ),
+    "feedback-attack-pattern": lambda: _feedback(
+        ValueError(
+            "route ob:v1:0 for attack pattern AP-T10-01 names another batch "
+            "obligation's attack pattern: AP-T15-01 in rationale"
+        )
+    ),
     "feedback-rationale": lambda: _feedback(ValueError("rationale is required")),
     "feedback-disposition": lambda: _feedback(ValueError("disposition is missing")),
     "feedback-default": lambda: _feedback(

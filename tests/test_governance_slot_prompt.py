@@ -58,16 +58,18 @@ _GOLDEN_SLOT_USER_EMPTY = (
 # and again when its examples stopped naming a NOT_PROVIDED slot and it began
 # defining the four UCA types, and again when its example slot stopped
 # matching a real slot, and again when the goal-redirection rule moved into
-# the mechanism library's entries.
+# the mechanism library's entries, and again when each route began echoing its
+# question's attack_pattern_id.
 _GOLDEN_ROUTING_SYSTEM = (
-    "d7cfa8f9e5177b420f91699c626ec47a9caf3e31ef9a71696b751fdc94d0354f"
+    "793a5702eeb4794237b67d284c062f0b7333df1bce78b5c1c558a73062f9fd50"
 )
 # The routing user digest was recaptured when slot IDs left the ID glossary for
 # a UCA type legend, when routing stopped offering WRONG_DURATION slots that
-# slot filling never analyses, and when the LAAF axis left the mapping set and
-# so changed the obligation handles.
+# slot filling never analyses, when the LAAF axis left the mapping set and
+# so changed the obligation handles, and when each question began stating its
+# own attack pattern ID and name.
 _GOLDEN_ROUTING_USER = (
-    "d6f0b864a5e228ddee93a98c0a35313fb58cecd5f953f17826a7c5cf836ac6b8"
+    "a2b841a7e5d0fdcc0c86ca2dffd262c94d00b385979892097a4a4ad0769ce8de"
 )
 
 
