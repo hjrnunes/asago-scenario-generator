@@ -310,9 +310,11 @@ suggestion. Each item names the library entry by its name and question and
 lists it in `known_mechanism_refs`, so the glossary shows the entry's required
 evidence and counterexamples; the path carries exact structural descriptions
 only, never a source kind or authority status. A paragraph rendered only for
-suggestion calls says the typed fit is not evidence, and because a suggestion
-cites no hazard, the user message lists the system hazards once with their
-governing constraints. Calls judge at most eight suggestions; a failed call
+suggestion calls says that code proposed the candidate and that being proposed
+is not evidence, without saying how code chose it; the verifier judges from the
+path's descriptions, the entry's required evidence and counterexamples, and the
+system hazards. Because a suggestion cites no hazard, the user message lists
+those hazards once with their governing constraints. Calls judge at most eight suggestions; a failed call
 leaves its suggestions without a verdict. Only a path judged
 `mechanism_specific` survives.
 

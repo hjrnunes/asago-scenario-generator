@@ -52,14 +52,13 @@ cases:
         Every item in this request is a structural suggestion, not a taxonomy
         concern or a reviewed risk.
       - >-
-        Code proposed it because typed fields of the structure fit the listed
-        known mechanism: a feedback channel's source kind and recorded
-        authority, the variable it updates, and the action or coordination
-        link that reads that variable. That fit is not evidence.
+        Code proposed it as a structural candidate for the listed known
+        mechanism, and being proposed is not evidence that the path carries
+        that mechanism.
       - >-
-        A source kind does not show that an adversary can author the
-        information, and a channel labelled retrieved content may carry the
-        controller's own state or an internal source no adversary can write.
+        Judge it only from the descriptions in its `selected_structural_path`,
+        the listed mechanism's `required_evidence` and `counterexamples`, and
+        the system hazards and their governing constraints.
       - >-
         The item's `distinctive_mechanism` gives the known mechanism's `name`,
         its `description` is that mechanism's question, and its
@@ -85,3 +84,9 @@ cases:
     forbidden:
       - risk_alignment
       - "Accepted example:"
+      - source kind
+      - authority
+      - authoritative
+      - trust
+      - recorded
+      - filter

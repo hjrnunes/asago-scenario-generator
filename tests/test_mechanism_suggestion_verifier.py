@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 
 import pytest
+import yaml
 
 from asago_scenario_generator.stpa.mechanism_library import (
     MechanismId,
@@ -19,10 +20,16 @@ from asago_scenario_generator.stpa.obligation_aware.mechanism_suggestion_provide
 from asago_scenario_generator.stpa.obligation_aware.mechanism_suggestions import (
     SuggestionVerificationRequest,
 )
+from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    _known_mechanism_glossary_yaml,
+    _yaml,
+)
 from asago_scenario_generator.stpa.obligation_aware.provider import (
     ObligationAwareLLMAdapter,
 )
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    CROSS_CONTROLLER_MECHANISM,
+    SOURCE_MECHANISMS,
     MechanismCandidate,
 )
 from tests.helpers.mechanism_suggestions import (
@@ -62,6 +69,28 @@ def _request(*candidates: MechanismCandidate) -> SuggestionVerificationRequest:
 
 def _adapter(client, tmp_path) -> ObligationAwareLLMAdapter:
     return ObligationAwareLLMAdapter(client, run_dir=tmp_path, controls=_controls())
+
+
+# Every mechanism the join can name: one per untrusted source kind, and the
+# one for a path that reaches another controller.
+_SUGGESTABLE = (*dict.fromkeys(SOURCE_MECHANISMS.values()), CROSS_CONTROLLER_MECHANISM)
+
+
+def _suggestion_call(candidates, tmp_path) -> dict:
+    client = ScriptedClient([_verdicts(*["insufficient_evidence"] * len(candidates))])
+    _adapter(client, tmp_path).verify_mechanism_suggestions(_request(*candidates))
+    (call,) = client.calls
+    return call
+
+
+def _every_suggestable_mechanism() -> tuple[MechanismCandidate, ...]:
+    return tuple(
+        MechanismCandidate(
+            mechanism,
+            LINK_PATH if mechanism is CROSS_CONTROLLER_MECHANISM else ACTION_PATH,
+        )
+        for mechanism in _SUGGESTABLE
+    )
 
 
 def test_an_item_shows_the_entry_and_exact_path_descriptions_only() -> None:
@@ -215,3 +244,63 @@ def test_a_verdict_for_another_handle_is_repaired_once(tmp_path, handle) -> None
 
     assert verdict.relationship == "adjacent_control"
     assert len(client.calls) == 2
+
+
+def test_the_suggestion_request_never_speaks_of_how_code_nominated_it(
+    tmp_path,
+) -> None:
+    candidates = _every_suggestable_mechanism()
+    call = _suggestion_call(candidates, tmp_path)
+    items = suggestion_verification_items(candidates, suggestion_structure())
+
+    # Library entries and structure descriptions are data and may use these
+    # words; only the request's own instructions must not.
+    instructions = call["user_prompt"]
+    for block in (
+        _yaml([dict(item) for item in items]),
+        _known_mechanism_glossary_yaml(items),
+        _yaml(suggestion_system_hazards(_loss_analysis())),
+    ):
+        assert block in instructions
+        instructions = instructions.replace(block, "")
+    for text in (call["system_prompt"], instructions):
+        lowered = " ".join(text.lower().split())
+        for term in (
+            "source kind",
+            "source_kind",
+            "authority",
+            "authoritative",
+            "trust",
+            "recorded",
+            "filter",
+        ):
+            assert term not in lowered
+    for item in items:
+        assert set(item) == {
+            "item_handle",
+            "distinctive_mechanism",
+            "selected_structural_path",
+            "known_mechanism_refs",
+        }
+
+
+@pytest.mark.parametrize("mechanism", _SUGGESTABLE, ids=lambda item: item.value)
+def test_the_suggestion_request_shows_its_mechanisms_counterexamples(
+    tmp_path, mechanism
+) -> None:
+    (candidate,) = [
+        item for item in _every_suggestable_mechanism() if item.mechanism is mechanism
+    ]
+    call = _suggestion_call((candidate,), tmp_path)
+
+    # Read the glossary back from the rendered message, so YAML quoting of the
+    # entry's text cannot hide or fake a match.
+    user = call["user_prompt"]
+    start = user.index("known_mechanism_refs):\n") + len("known_mechanism_refs):\n")
+    end = user.index("\nSystem hazards (")
+    (shown,) = yaml.safe_load(user[start:end])
+    entry = bundled_mechanism_library().entry(mechanism)
+    assert entry.counterexamples
+    assert shown["id"] == mechanism.value
+    assert shown["counterexamples"] == list(entry.counterexamples)
+    assert shown["required_evidence"] == list(entry.required_evidence)
