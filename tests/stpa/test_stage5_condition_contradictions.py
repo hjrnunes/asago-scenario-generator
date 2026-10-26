@@ -1513,6 +1513,10 @@ NON_GRAMMAR = {
     "pattern without listed values": {"type": "string", "pattern": "^a"},
     "pattern that does not compile": {"type": "string", "enum": ["a"], "pattern": "("},
     "non-string pattern": {"type": "string", "enum": ["a"], "pattern": 5},
+    "repeated type name": {"type": ["string", "string"]},
+    "non-string title": {"type": "string", "title": 7},
+    "non-list examples": {"type": "string", "examples": "a"},
+    "non-boolean readOnly": {"type": "string", "readOnly": "yes"},
 }
 
 # Flat schemas that admit no value.
@@ -1893,6 +1897,146 @@ def test_a_value_is_a_member_of_no_list_with_no_element() -> None:
     universe = _lattice_universe({"type": "array", "items": False}, {})
 
     assert _rules(_judge(_membership(_lit(7), "in", SUBJECT), universe)) == B
+
+
+# Round-eight counterexamples.
+
+
+def _input_schema_universe(input_schema: dict) -> ConditionUniverse:
+    return build_condition_universe(
+        execution_target_profile=None,
+        target_operation=_operation().model_copy(update={"input_schema": input_schema}),
+        target_observations=None,
+    )
+
+
+@pytest.mark.parametrize("required", [["x", 7], ["x", "x"], "x", {"x": True}])
+def test_a_malformed_required_list_proves_no_argument_required(required) -> None:
+    universe = _input_schema_universe(
+        {
+            "type": "object",
+            "properties": {"x": {"type": "string"}},
+            "required": required,
+        }
+    )
+
+    result = _judged(_value_condition("ne", 7, argument="x"), universe)
+
+    assert universe.required_arguments == {"refund_payment": frozenset()}
+    assert universe.unreadable_required == frozenset({"refund_payment"})
+    assert result.refused == ()
+    assert [item.detail for item in result.undecidable] == [
+        "comparisons[0] binds refund_payment.x ne 7: no value of "
+        "refund_payment.x equals 7, so the comparison holds on every call that "
+        "passes x, but the input schema of refund_payment has a required list "
+        "that is not a list of distinct names, so it proves no argument "
+        "required, and tool-call-condition-v1 gives unknown on a call that "
+        "omits x, so whether the comparison holds on every call is unknown"
+    ]
+
+
+def test_properties_that_are_not_a_map_give_no_argument_schema() -> None:
+    universe = _input_schema_universe({"type": "object", "properties": ["x"]})
+
+    assert universe.argument_schemas == {"refund_payment": {}}
+    # A malformed enum does not stop the universe from being built.
+    assert _input_schema_universe(
+        {"type": "object", "properties": {"x": {"enum": 5}}}
+    ).argument_schemas == {"refund_payment": {"x": {"enum": 5}}}
+    assert _rules(_judged(_value_condition("ne", 7, argument="x"), universe)) == CLEAN
+
+
+def test_a_malformed_required_list_keeps_a_never_true_refusal() -> None:
+    universe = _input_schema_universe(
+        {
+            "type": "object",
+            "properties": {"x": {"type": "string"}},
+            "required": ["x", 7],
+        }
+    )
+
+    assert _rules(_judged(_value_condition("eq", 7, argument="x"), universe)) == B
+
+
+def _empty_list_value(op: str, value: object) -> dict:
+    return _membership(SUBJECT, op, _lit(value))
+
+
+@pytest.mark.parametrize(
+    ("schema", "op", "value", "optional", "expected"),
+    [
+        ({"type": "array", "items": False}, "eq", [7], False, B),
+        ({"type": "array", "items": False}, "eq", [7], True, B),
+        ({"type": "array", "items": False}, "ne", [7], False, B),
+        ({"type": "array", "items": False}, "ne", [7], True, OPEN_B),
+        ({"type": "array", "items": False}, "eq", [], False, CLEAN),
+        ({"type": "array", "items": False}, "ne", [], False, CLEAN),
+        ({"type": ["array", "null"], "items": False}, "eq", [7], False, B),
+        ({"type": ["array", "null"], "items": False}, "eq", None, False, CLEAN),
+        # Strings are not pinned: equality keeps reading the types alone.
+        ({"type": ["array", "string"], "items": False}, "eq", [7], False, CLEAN),
+        ({"type": "array", "items": {"type": "number"}}, "eq", [7], False, CLEAN),
+    ],
+)
+def test_equality_reads_the_values_a_schema_pins(
+    schema, op, value, optional, expected
+) -> None:
+    universe = _lattice_universe(schema, {}, optional=optional)
+
+    assert _rules(_judge(_empty_list_value(op, value), universe)) == expected
+
+
+def test_equality_with_a_list_that_holds_no_element_states_why() -> None:
+    universe = _lattice_universe({"type": "array", "items": False}, {})
+
+    result = _judge(_empty_list_value("eq", [7]), universe)
+
+    assert [item.detail for item in result.refused] == [
+        "comparisons[0] binds refund_payment.subject eq [7] in the tool-call "
+        "condition, but the input schema of refund_payment restricts subject to "
+        "[[]] and [7] is none of them; tool-call-condition-v1 never converts a "
+        "value for eq, so the comparison holds on no call and the condition "
+        "never detects the unsafe call. Compare subject with one of those values"
+    ]
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("title", 7),
+        ("description", ["a"]),
+        ("$comment", 1),
+        ("format", 5),
+        ("examples", "a"),
+        ("examples", {"a": 1}),
+        ("deprecated", "yes"),
+        ("readOnly", 1),
+        ("writeOnly", None),
+    ],
+)
+def test_a_malformed_annotation_makes_the_schema_prove_nothing(key, value) -> None:
+    universe = _lattice_universe({"type": "string", key: value}, {})
+
+    assert _rules(_judge(_membership(SUBJECT, "eq", _lit(7)), universe)) == CLEAN
+    assert _rules(_judge(_membership(SUBJECT, "gt", _lit(5)), universe)) == OPEN_C
+
+
+def test_well_formed_annotations_leave_the_proof_standing() -> None:
+    schema = {
+        "type": "string",
+        "title": "Name",
+        "description": "The name.",
+        "$comment": "note",
+        "format": "hostname",
+        "examples": ["a"],
+        "default": 7,
+        "deprecated": False,
+        "readOnly": True,
+        "writeOnly": False,
+    }
+    universe = _lattice_universe(schema, {})
+
+    assert _rules(_judge(_membership(SUBJECT, "eq", _lit(7)), universe)) == B
 
 
 # The counterexamples of the last two reviews.

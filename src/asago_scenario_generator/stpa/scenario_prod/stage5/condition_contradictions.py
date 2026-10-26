@@ -52,7 +52,9 @@ the comparison unknown, which is not true, so a "never true" proof (``eq``,
 not the argument is required. A "true on every call" proof (``ne``,
 ``not_in``, or a ``where`` item that matches no call, so that ``not_called``
 holds) needs every argument operand to be in its operation's ``required``
-list and every value its schema admits to make the comparison true: for
+list (a ``required`` that is not a list of distinct names proves no
+argument required) and every value its schema admits to make the comparison
+true: for
 ``not_in``, the right side must admit only lists, since a null or other
 non-list right side gives unknown. Otherwise the case is undecidable. The
 check takes a required argument to be passed on every call, as it takes a
@@ -61,10 +63,12 @@ passed value to meet its schema.
 A schema proves something only when it is of a flat grammar:
 
 - Its keys are ``type``, ``nullable``, ``enum``, ``const``, ``items``, and
-  ``pattern``, and annotations that never restrict a value (``title``,
-  ``description``, ``$comment``, ``examples``, ``default``, ``deprecated``,
-  ``readOnly``, ``writeOnly``, and ``format``).
-- ``type`` is a JSON type name or a non-empty list of them; ``nullable`` is
+  ``pattern``, and annotations that never restrict a value, each with a
+  value of the type the JSON Schema meta-schema gives it: text for
+  ``title``, ``description``, ``$comment``, and ``format``, a list for
+  ``examples``, a boolean for ``deprecated``, ``readOnly``, and
+  ``writeOnly``, and any value for ``default``.
+- ``type`` is a JSON type name or a non-empty list of distinct ones; ``nullable`` is
   a boolean, and ``true`` adds ``null``. ``enum`` is a non-empty list and
   ``const`` any value; both are data, whose keys are never read as
   keywords, and a value must be listed by both. ``items`` is a boolean or a
@@ -83,7 +87,10 @@ admits, whose text the ``pattern`` matches, and, for a list, whose every
 element ``items`` admits; with no value listed, it admits a value of every
 type it declares. A schema that admits no value proves nothing either. A
 list schema whose ``items`` admit nothing admits only the empty list: its
-type counts, but it proves nothing about its elements.
+type counts, but it proves nothing about its elements. ``items: false``
+states that a list holds no element, so such a schema admits ``[]`` alone;
+where its types pin a finite set this way (with ``null`` and the two
+booleans), equality compares against exactly that set.
 
 A refusal is a Stage 5 validation failure, corrected through the existing
 correction request. Undecidable cases are reported only: in the run's
@@ -130,21 +137,20 @@ _NUMERIC_TYPES = frozenset({"number", "integer"})
 _JSON_TYPES = frozenset(
     {"array", "boolean", "integer", "null", "number", "object", "string"}
 )
-# The keywords of the flat grammar, and the annotations it allows beside them.
+# The keywords of the flat grammar, and the annotations it allows beside
+# them with the JSON type of their value (``object``: any value).
 _GRAMMAR_KEYWORDS = frozenset({"type", "nullable", "enum", "const", "items", "pattern"})
-_ANNOTATIONS = frozenset(
-    {
-        "title",
-        "description",
-        "$comment",
-        "examples",
-        "default",
-        "deprecated",
-        "readOnly",
-        "writeOnly",
-        "format",
-    }
-)
+_ANNOTATIONS: Mapping[str, type] = {
+    "title": str,
+    "description": str,
+    "$comment": str,
+    "format": str,
+    "examples": list,
+    "default": object,
+    "deprecated": bool,
+    "readOnly": bool,
+    "writeOnly": bool,
+}
 _NEVER_HOLDS = (
     "the comparison holds on no call and the condition never detects the unsafe call"
 )
@@ -643,7 +649,14 @@ def _always_gaps(
 
     gaps: list[str] = []
     for argument, admitted, listed in operands:
-        if argument.argument not in universe.required_arguments.get(
+        if argument.operation in universe.unreadable_required:
+            gaps.append(
+                f"the input schema of {argument.operation} has a required list "
+                "that is not a list of distinct names, so it proves no argument "
+                "required, and tool-call-condition-v1 gives unknown on a call "
+                f"that omits {argument.argument}"
+            )
+        elif argument.argument not in universe.required_arguments.get(
             argument.operation, frozenset()
         ):
             gaps.append(
@@ -1236,7 +1249,13 @@ def _flat(schema: object, name: str) -> _Admitted | None:
     """
 
     if not isinstance(schema, Mapping) or not set(schema) <= (
-        _GRAMMAR_KEYWORDS | _ANNOTATIONS
+        _GRAMMAR_KEYWORDS | set(_ANNOTATIONS)
+    ):
+        return None
+    if any(
+        not isinstance(schema[key], shape)
+        for key, shape in _ANNOTATIONS.items()
+        if key in schema
     ):
         return None
     types: frozenset[str] | None = None
@@ -1247,6 +1266,7 @@ def _flat(schema: object, name: str) -> _Admitted | None:
             not isinstance(names, list)
             or not names
             or not all(isinstance(item, str) and item in _JSON_TYPES for item in names)
+            or len(set(names)) != len(names)
         ):
             return None
         types = frozenset(names)
@@ -1461,7 +1481,10 @@ def _compared(admitted: _Admitted, role: str) -> _Admitted:
     """
 
     if role == "value":
-        return admitted
+        pinned = _pinned(admitted)
+        if pinned is None or admitted.values is not None:
+            return admitted
+        return _Admitted(admitted.types, pinned, admitted.elements, admitted.number)
     elements = admitted.elements or _ANY
     if role == "list":
         return _Admitted(types=elements.types, values=elements.values)
@@ -1485,6 +1508,29 @@ def _compared(admitted: _Admitted, role: str) -> _Admitted:
     else:
         listed = None
     return _Admitted(types=compared, values=listed)
+
+
+def _pinned(admitted: _Admitted) -> tuple[object, ...] | None:
+    """Return every value a schema admits when its types pin a finite set.
+
+    ``null``, ``boolean``, and a list with no element (``items: false``)
+    each admit a fixed set; any other type leaves the set open (``None``).
+    """
+
+    types = admitted.types
+    if not types:
+        return None
+    pinned: list[object] = []
+    for name in sorted(types):
+        if name == "null":
+            pinned.append(None)
+        elif name == "boolean":
+            pinned.extend((False, True))
+        elif name == "array" and admitted.elements is _NO_ELEMENT:
+            pinned.append([])
+        else:
+            return None
+    return tuple(pinned)
 
 
 def _same(left: object, right: object) -> bool:

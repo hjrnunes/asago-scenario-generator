@@ -106,6 +106,9 @@ class ConditionUniverse:
     operation_text: Mapping[str, str] = field(default_factory=dict)
     # Operation name -> the arguments its input schema requires.
     required_arguments: Mapping[str, frozenset[str]] = field(default_factory=dict)
+    # Operations whose ``required`` is not a list of distinct names: it
+    # proves no argument required.
+    unreadable_required: frozenset[str] = frozenset()
     # Operation name -> argument -> its input-schema property.
     argument_schemas: Mapping[str, Mapping[str, Mapping[str, Any]]] = field(
         default_factory=dict
@@ -163,6 +166,7 @@ def build_condition_universe(
     operations: dict[str, set[str]] = {}
     texts: dict[str, str] = {}
     required: dict[str, frozenset[str]] = {}
+    unreadable: set[str] = set()
     schemas: dict[str, dict[str, Mapping[str, Any]]] = {}
     literals = _observed_literals(target_observations)
     if execution_target_profile is not None:
@@ -174,8 +178,8 @@ def build_condition_universe(
                 names.update(operation.argument_names or resource.argument_names)
                 names.update(schema_names)
                 texts[operation.operation_id] = resource.description or ""
-                required[operation.operation_id] = _required_arguments(
-                    resource.input_schema
+                _record_required(
+                    required, unreadable, operation.operation_id, resource.input_schema
                 )
                 schemas[operation.operation_id] = _argument_schemas(
                     resource.input_schema
@@ -186,8 +190,11 @@ def build_condition_universe(
         names.update(_schema_argument_names(target_operation.input_schema))
         literals |= _schema_literals(target_operation.input_schema)
         texts[target_operation.operation_id] = target_operation.description or ""
-        required[target_operation.operation_id] = _required_arguments(
-            target_operation.input_schema
+        _record_required(
+            required,
+            unreadable,
+            target_operation.operation_id,
+            target_operation.input_schema,
         )
         schemas[target_operation.operation_id] = _argument_schemas(
             target_operation.input_schema
@@ -200,26 +207,56 @@ def build_condition_universe(
         literal_values=frozenset(literals),
         operation_text=texts,
         required_arguments=required,
+        unreadable_required=frozenset(unreadable),
         argument_schemas=schemas,
     )
 
 
-def _required_arguments(schema: Mapping[str, Any]) -> frozenset[str]:
-    """Return the names a schema's ``required`` list holds; any other form, none."""
+def _record_required(
+    required: dict[str, frozenset[str]],
+    unreadable: set[str],
+    operation: str,
+    schema: object,
+) -> None:
+    """Record the arguments an operation requires, or that none is proven."""
 
-    required = schema.get("required") if isinstance(schema, Mapping) else None
-    if not isinstance(required, list):
+    names = _required_arguments(schema)
+    if names is None:
+        unreadable.add(operation)
+        required[operation] = frozenset()
+    else:
+        unreadable.discard(operation)
+        required[operation] = names
+
+
+def _required_arguments(schema: object) -> frozenset[str] | None:
+    """Return the names a schema's ``required`` holds, or ``None`` when malformed.
+
+    ``required`` must be a list of distinct strings; any other value proves
+    no argument required, rather than the names it happens to hold.
+    """
+
+    if not isinstance(schema, Mapping) or "required" not in schema:
         return frozenset()
-    return frozenset(item for item in required if isinstance(item, str))
+    names = schema["required"]
+    if (
+        not isinstance(names, list)
+        or not all(isinstance(item, str) for item in names)
+        or len(set(names)) != len(names)
+    ):
+        return None
+    return frozenset(names)
 
 
 def _argument_schemas(schema: object) -> dict[str, Mapping[str, Any]]:
     """Map each schema property that is a schema object to that object."""
 
     properties = schema.get("properties") if isinstance(schema, Mapping) else None
+    if not isinstance(properties, Mapping):
+        return {}
     return {
         str(name): prop
-        for name, prop in (properties or {}).items()
+        for name, prop in properties.items()
         if isinstance(prop, Mapping)
     }
 
@@ -258,11 +295,14 @@ def _schema_literals(schema: object) -> set[str]:
     """Collect the string enum, default, and const values of schema properties."""
 
     properties = schema.get("properties") if isinstance(schema, Mapping) else None
+    if not isinstance(properties, Mapping):
+        return set()
     declared: list[object] = []
-    for prop in (properties or {}).values():
+    for prop in properties.values():
         if isinstance(prop, Mapping):
+            enum = prop.get("enum")
             declared += [
-                *(prop.get("enum") or []),
+                *(enum if isinstance(enum, list) else []),
                 prop.get("default"),
                 prop.get("const"),
             ]
