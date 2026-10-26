@@ -1,4 +1,4 @@
-target_profile_digest: 0656f6b07ebc71bb53b2b17a7f6e1fbe181f7e36a2bbc7654b2730c49b222521
+target_profile_digest: 7ebfa53cd8b48844ff8b4ddb6d92de24bf108e761ef2b7101cf1f9efb57c1f0b
 observations:
 - observation_ref: TARGET-STATE
   kind: state
@@ -36,4 +36,4 @@ observations:
   content_format: json
   content: '{"patient_id":"PAT-104","reason":"first outpatient ophthalmology appointment","referral_id":"REF-104","specialty":"ophthalmology","status":"pre_appointment"}'
 read_status: observed
-content_digest: dc39cfc4c31988cbcf1bcd5df06dac360c3c7f820a5a530a9259600a38b5e2b9
+content_digest: bb2017a635af03c275c5288577bd3cb4677ad8f57c0a60c1e727d7d9f2a91f68

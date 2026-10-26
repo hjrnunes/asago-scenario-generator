@@ -1,4 +1,4 @@
-target_profile_digest: 9a190eaf70a86ffd24cf8559a3df6b6bbd76dc891085ad2f4399713fc7469f9f
+target_profile_digest: 8a3eac5acb8694cc2ca48928923790bfb727ab4010c3d7f0355fb8bad4cbad18
 observations:
 - observation_ref: TARGET-STATE
   kind: state
@@ -88,4 +88,4 @@ observations:
   content_format: json
   content: '{"customer_id":"CUST001","item":"Wireless earbuds","merchant":"QuickShip","order_id":"ORD-104","original_price":129.0,"refund_eligible":false,"remaining_to_pay":80.0,"status":"open"}'
 read_status: observed
-content_digest: a159b2281b370f9e51f870830559f7933a241efecf8b64c5571c37134e67966a
+content_digest: afba90c9888d58b17340315b0f19649c07047b67d721e4b8a22a4d73c8a6fb32

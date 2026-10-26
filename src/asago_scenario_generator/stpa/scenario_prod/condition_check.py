@@ -50,6 +50,7 @@ from asago_scenario_generator.stpa.discriminating_condition import (
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
+from asago_scenario_generator.stpa.models.value_facts import TargetValueFacts
 from asago_scenario_generator.stpa.scenario_prod.condition_index import (
     StateIndex,
     collection_path,
@@ -122,6 +123,9 @@ class ConditionUniverse:
     argument_schemas: Mapping[str, Mapping[str, Mapping[str, Any]]] = field(
         default_factory=dict
     )
+    # The record kinds and formats the target profile declares for argument
+    # and state values; ``None`` when it declares none.
+    value_facts: TargetValueFacts | None = None
 
     @property
     def grounded(self) -> bool:
@@ -238,6 +242,11 @@ def build_condition_universe(
         ambiguous_operations=frozenset(ambiguous),
         unread_roots=unread_roots,
         argument_schemas=schemas,
+        value_facts=(
+            execution_target_profile.value_facts
+            if execution_target_profile is not None
+            else None
+        ),
     )
 
 
