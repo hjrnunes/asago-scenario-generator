@@ -382,6 +382,18 @@ uv run asago-target-scan file \
   --output-dir build/target-discovery/my-planned-agent
 ```
 
+Both commands take `--value-facts PATH`: a YAML or JSON file of the record
+kinds (`order_id`, `free_text`, ...) and date formats (`date`, `date-time`)
+the target declares for its operation arguments (`arguments`), state values
+(`state_fields`, dotted paths under `TARGET-STATE` where `*` is any one key),
+and state mapping keys (`state_keys`). The profile carries it unchanged as
+`value_facts`; a profile without it keeps its bytes and digest. An argument
+fact must name an argument of a profiled operation. Stage 5's tool-call
+condition check reads only these declarations, never a name or a value, to
+refuse a comparison across two declared record kinds or an ordering on
+declared dates. [`docs/handoffs/typed-condition-facts.md`](docs/handoffs/typed-condition-facts.md)
+describes the declarations and who supplies them.
+
 The ordinary STPA baseline is completed without the profile. The profile is
 used only afterward by a separately attested target-realization step, which
 may select exact observed operations and add narrowly verified target-specific
