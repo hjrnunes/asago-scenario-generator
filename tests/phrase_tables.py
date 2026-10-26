@@ -520,6 +520,45 @@ def _stage5(
     return render
 
 
+def _mechanism_context() -> object:
+    """The WRONG_TIMING context with one mechanism suggestion finding."""
+    from asago_scenario_generator.stpa.models.scenario_context import (
+        ScenarioObligationConsideration,
+    )
+    from asago_scenario_generator.stpa.scenario_prod.context import (
+        build_scenario_generation_context,
+    )
+    from asago_scenario_generator.stpa.mechanism_library import (
+        bundled_mechanism_library,
+    )
+    from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
+    from tests.helpers.normal_authoring_wire import _wrong_timing_structure
+    from tests.helpers.sp3_scenario_continuity import (
+        _loss_analysis as _continuity_losses,
+        _threat_of_type,
+    )
+
+    threat = _threat_of_type(UCAType.wrong_timing)
+    entry = bundled_mechanism_library().entry("user_claim")
+    return build_scenario_generation_context(
+        threat,
+        _wrong_timing_structure(),
+        _continuity_losses(),
+        scenario_id="SCN-001",
+        obligation_considerations=(
+            ScenarioObligationConsideration(
+                kind="mechanism",
+                mechanism_id=entry.id.value,
+                mechanism_name=entry.name,
+                concise_concern=entry.question,
+                disposition="finding",
+                rationale="Finding 0 expresses the mechanism.",
+                finding_ica_id=threat.ica_id,
+            ),
+        ),
+    )
+
+
 def _narrate_stated() -> Callable[[str], str]:
     facts = ScenarioFacts(
         scenario_id="SCN-001",
@@ -663,6 +702,7 @@ CASES: dict[str, Callable[[str], str]] = {
         **{**MISSING_CONTROL_ACTIONS, "controlled_processes": []}
     ),
     "target-blind": _stage5(dict),
+    "mechanism-consideration": _stage5(dict, _mechanism_context),
     "operation": _stage5(lambda: {"target_operation": _target_operation()}),
     "observations": _stage5(lambda: {"target_observations": _record_observations()}),
     "operation-and-observations": _stage5(

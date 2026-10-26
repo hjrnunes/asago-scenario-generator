@@ -504,6 +504,7 @@ def _default_scenarios(
     enriched_operations: Mapping[str, str] | None = None,
     briefs: tuple[Any, ...] = (),
     ica_considerations: tuple[Any, ...] = (),
+    mechanism_considerations: tuple[Any, ...] = (),
     model_runtime: ModelRuntime,
     **_: Any,
 ) -> Any:
@@ -544,6 +545,7 @@ def _default_scenarios(
         loss_analysis,
         briefs=briefs,
         ica_considerations=ica_considerations,
+        mechanism_considerations=mechanism_considerations,
     )
     return run_sp3(
         llm_client=client,

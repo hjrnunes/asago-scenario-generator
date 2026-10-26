@@ -278,8 +278,15 @@ def _run_scenarios(
     projection keeps only the ICA enumeration.
     """
     diagnostics: tuple[str, ...] = ()
+    # Mechanism suggestion findings reach the scenario port only when there is
+    # one, so a run without them calls it exactly as before.
+    mechanism_pairs = _mechanism_considerations(slot_evidence)
+    extra: dict[str, Any] = (
+        {"mechanism_considerations": mechanism_pairs} if mechanism_pairs else {}
+    )
     try:
         result = adapters.scenarios(
+            **extra,
             model_runtime=adapters.model_runtime,
             ica_enumeration=ica_enumeration,
             briefs=briefs,
@@ -381,6 +388,49 @@ def _findings_by_ica(
     return by_ica
 
 
+def _mechanism_findings_by_ica(
+    mechanism_considerations: tuple[Any, ...],
+) -> dict[str, list[Any]]:
+    """Project each mechanism suggestion finding onto every ICA it names.
+
+    The consideration names the library mechanism and its question; it is
+    analysis provenance and never a causal source.  An ICA's mechanism
+    findings follow library order.
+    """
+    from asago_scenario_generator.stpa.mechanism_library import (
+        bundled_mechanism_library,
+    )
+    from asago_scenario_generator.stpa.models.scenario_context import (
+        ScenarioObligationConsideration,
+    )
+
+    library = bundled_mechanism_library()
+    rank = {entry.id: index for index, entry in enumerate(library.mechanisms)}
+    by_ica: dict[str, list[ScenarioObligationConsideration]] = {}
+    for pair in sorted(
+        (item for item in mechanism_considerations if item.disposition == "finding"),
+        key=lambda item: rank[item.mechanism_id],
+    ):
+        entry = library.entry(pair.mechanism_id)
+        for ica_id in pair.ica_ids:
+            by_ica.setdefault(ica_id, []).append(
+                ScenarioObligationConsideration(
+                    kind="mechanism",
+                    mechanism_id=entry.id.value,
+                    mechanism_name=entry.name,
+                    concise_concern=entry.question,
+                    disposition="finding",
+                    rationale=pair.rationale
+                    or (
+                        "STPA found this known mechanism in the selected ICA on "
+                        "the suggested control path."
+                    ),
+                    finding_ica_id=ica_id,
+                )
+            )
+    return by_ica
+
+
 def _build_synthesis_scenario_contexts(
     threats: Iterable[Any],
     control_structure: Any,
@@ -388,10 +438,12 @@ def _build_synthesis_scenario_contexts(
     *,
     briefs: tuple[Any, ...],
     ica_considerations: tuple[Any, ...],
+    mechanism_considerations: tuple[Any, ...] = (),
 ) -> dict[str, Any]:
     """Bind each Stage 5 candidate to the obligation findings its ICA carries.
 
-    Contexts are keyed by scenario ID because one ICA can yield several
+    Mechanism suggestion findings follow the obligation findings of the same
+    ICA.  Contexts are keyed by scenario ID because one ICA can yield several
     candidates, one per condition family.
     """
     from asago_scenario_generator.stpa.obligation_aware.briefs import (
@@ -402,6 +454,7 @@ def _build_synthesis_scenario_contexts(
     )
 
     by_ica = _findings_by_ica(briefs, ica_considerations)
+    mechanisms_by_ica = _mechanism_findings_by_ica(mechanism_considerations)
     brief_by_id = {
         brief.obligation_id: brief
         for brief in briefs
@@ -411,11 +464,12 @@ def _build_synthesis_scenario_contexts(
     for index, threat in enumerate(threats):
         if threat.ica_id is None:
             raise ValueError("synthesis scenario threat has no exact ICA identity")
-        considerations = tuple(
-            sorted(
+        considerations = (
+            *sorted(
                 by_ica.get(threat.ica_id, ()),
                 key=lambda item: obligation_order_key(brief_by_id[item.obligation_id]),
-            )
+            ),
+            *mechanisms_by_ica.get(threat.ica_id, ()),
         )
         scenario_id = f"SCN-{index + 1:03d}"
         try:

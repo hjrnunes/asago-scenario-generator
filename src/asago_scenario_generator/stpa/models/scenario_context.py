@@ -202,16 +202,21 @@ class ScenarioConstraint(ScenarioContextModel):
 
 
 class ScenarioObligationConsideration(ScenarioContextModel):
-    """One routed concern already adjudicated at the selected ICA.
+    """One routed concern, or one mechanism suggestion, adjudicated at the ICA.
 
     A pattern consideration names its attack pattern. A governance
     consideration names the reviewed risk instead and leaves the pattern
-    fields unset; the fields of the other kind are left out of the serialized
-    form, so existing contexts keep their bytes and digests.
+    fields unset. A mechanism consideration names a library mechanism that
+    the graph join proposed and the verifiers kept; it carries no obligation
+    and no risk, and it is analysis provenance like the others, never a
+    causal source. The fields of the other kinds are left out of the
+    serialized form, so existing contexts keep their bytes and digests.
     """
 
-    obligation_id: str = Field(min_length=1)
-    kind: Literal["pattern", "governance"] = Field(
+    obligation_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+    kind: Literal["pattern", "governance", "mechanism"] = Field(
         default="pattern", exclude_if=lambda value: value == "pattern"
     )
     attack_pattern_id: str | None = Field(
@@ -230,15 +235,48 @@ class ScenarioObligationConsideration(ScenarioContextModel):
     disposition: Literal["finding", "proposed_not_applicable", "unresolved"]
     rationale: str = Field(min_length=1)
     finding_ica_id: str | None = None
+    mechanism_id: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
+    mechanism_name: str | None = Field(
+        default=None, min_length=1, exclude_if=lambda value: value is None
+    )
 
     @model_validator(mode="after")
     def require_the_identity_of_its_kind(self) -> "ScenarioObligationConsideration":
-        pattern = (self.attack_pattern_id, self.attack_pattern_name)
-        risk = (self.risk_id, self.risk_name)
-        own, other = (pattern, risk) if self.kind == "pattern" else (risk, pattern)
-        if any(item is None for item in own):
+        identities = {
+            "pattern": (
+                self.obligation_id,
+                self.attack_pattern_id,
+                self.attack_pattern_name,
+            ),
+            "governance": (self.obligation_id, self.risk_id, self.risk_name),
+            "mechanism": (self.mechanism_id, self.mechanism_name),
+        }
+        if any(item is None for item in identities[self.kind]):
             raise ValueError(f"a {self.kind} consideration requires its identity")
-        if any(item is not None for item in other):
+        others = {
+            "pattern": (
+                self.risk_id,
+                self.risk_name,
+                self.mechanism_id,
+                self.mechanism_name,
+            ),
+            "governance": (
+                self.attack_pattern_id,
+                self.attack_pattern_name,
+                self.mechanism_id,
+                self.mechanism_name,
+            ),
+            "mechanism": (
+                self.obligation_id,
+                self.attack_pattern_id,
+                self.attack_pattern_name,
+                self.risk_id,
+                self.risk_name,
+            ),
+        }
+        if any(item is not None for item in others[self.kind]):
             raise ValueError(f"a {self.kind} consideration cannot carry the other kind")
         return self
 
