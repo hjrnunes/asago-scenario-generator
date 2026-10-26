@@ -19,54 +19,57 @@ is reported undecidable, never refused.
   literal, a fact, or a record selection) is refused only when the input
   schema of the argument's own operation proves the literal is never equal to
   a value it admits: the literal has no JSON type that schema admits, or is
-  none of the values its ``enum`` and ``const`` allow. Membership compares
-  each element: a list argument on the left by its ``items``, and the list on
-  the right by its own, types and listed values alike (``not_in`` with no
-  common element holds on every call, as ``ne`` does); a right side that is never a list (a literal, or an
-  argument whose schema admits no array) makes ``in`` and ``not_in`` unknown
-  on every call, so it is refused. A kind mismatch that only values, names,
-  or descriptions suggest is undecidable: an identifier literal of another
-  kind than the values reads of that operation passed, or than the values
-  reads of another operation passed for an argument of the same name, or an
-  identifier literal compared with an argument no read passed and whose
-  schema admits a string. Two compared arguments are judged each by the
-  schema of its own operation, by the same facts: refused when the compared
-  values share no JSON type or no listed value, and otherwise undecidable.
+  none of the values it lists. Membership compares each element: a list
+  argument on the left by its ``items``, and the list on the right by its
+  own, types and listed values alike (``not_in`` with no common element
+  holds on every call, as ``ne`` does); a right side that is never a list (a
+  literal, or an argument whose schema admits no array) makes ``in`` and
+  ``not_in`` unknown on every call, so it is refused. A kind mismatch that
+  only values, names, or descriptions suggest is undecidable: an identifier
+  literal of another kind than the values reads of that operation passed, or
+  than the values reads of another operation passed for an argument of the
+  same name, or an identifier literal compared with an argument no read
+  passed and whose schema admits a string. Two compared arguments are judged
+  each by the schema of its own operation, by the same facts: refused when
+  the compared values share no JSON type or no listed value, and otherwise
+  undecidable.
 - (c) Ordering needs numbers. ``tool-call-condition-v1`` orders only
   numbers, converting a string that ``float()`` accepts, and every
   comparison with NaN is false. ``gt``, ``ge``, ``lt``, or ``le`` is
   refused when a side admits no orderable number, each value being no
   number under that conversion or NaN: a literal, or an argument whose
-  schema admits no number and no numeric string (no numeric type and no
-  string, an ``enum`` or ``const`` of non-numbers, or a string ``pattern``
-  that no number matches), or only NaN text, or both. A side is clean only
-  when its schema admits numbers alone:
-  a numeric type without ``null``, or an ``enum`` or ``const`` of numbers or
-  numeric strings. Any other side is undecidable: a string, a nullable
-  number, or an untyped argument; a ``format`` only annotates, so it proves
-  nothing.
+  schema admits no number and no string, or lists only values that are no
+  number or NaN. A side is clean only when its schema admits numbers alone:
+  a numeric type without ``null``, or listed numbers or numeric strings.
+  Any other side is undecidable: a string, a nullable number, or an
+  untyped argument.
 
-Which schemas prove anything is a bounded contract:
+A schema proves something only when it is of a flat grammar:
 
-- The check reads a fixed fragment of keywords: ``type`` (with OpenAPI
-  ``nullable``), ``enum``, ``const``, ``items``, ``prefixItems``,
-  ``allOf``, and ``anyOf``, and ``pattern`` only as a pattern that no
-  numeric text can match, which removes numeric text from the values a
-  schema can take.
-- Within that fragment, whether a schema admits any value is judged
-  exactly, and a schema that admits no value proves nothing: every rule,
-  in every operand position, reads it as a schema without facts. A list
-  schema whose elements no position can hold admits only the empty list;
-  its type still counts, but it proves nothing about its elements.
-- ``oneOf`` proves nothing: a schema with ``oneOf`` anywhere in it, its
-  list elements included, is read as a schema without facts. So is a
-  schema whose read keywords are malformed (an unknown type name, say).
-- Outside the fragment, the check assumes the target profile's schemas
-  can be met. It does not evaluate the other keywords (``minLength``,
-  ``maximum``, ``not``, ``if``, ``contains``, ``$ref``, and the rest), nor
-  whether any text matches a ``pattern``. Such a keyword can only remove
-  values from what the read keywords admit, so this assumption never
-  stretches a proof beyond what the read keywords say.
+- Its keys are ``type``, ``nullable``, ``enum``, ``const``, ``items``, and
+  ``pattern``, and annotations that never restrict a value (``title``,
+  ``description``, ``$comment``, ``examples``, ``default``, ``deprecated``,
+  ``readOnly``, ``writeOnly``, and ``format``).
+- ``type`` is a JSON type name or a non-empty list of them; ``nullable`` is
+  a boolean, and ``true`` adds ``null``. ``enum`` is a non-empty list and
+  ``const`` any value; both are data, whose keys are never read as
+  keywords, and a value must be listed by both. ``items`` is a boolean or a
+  schema of the same grammar. ``pattern`` is text that Python ``re``
+  compiles, and it only removes the listed strings it does not match, so a
+  schema with a ``pattern`` must list its values.
+- Any other key (``allOf``, ``anyOf``, ``oneOf``, ``not``,
+  ``prefixItems``, ``$ref``, ``if``, ``contains``, ``minLength``,
+  ``maximum``, ``properties``, or one the check does not know), or a
+  malformed value of a grammar key, makes the schema prove nothing: every
+  rule, in every operand position, reads it as a schema without facts.
+
+What such a schema admits is then exact, and the check assumes nothing
+about satisfiability. Its listed values are those whose type the schema
+admits, whose text the ``pattern`` matches, and, for a list, whose every
+element ``items`` admits; with no value listed, it admits a value of every
+type it declares. A schema that admits no value proves nothing either. A
+list schema whose ``items`` admit nothing admits only the empty list: its
+type counts, but it proves nothing about its elements.
 
 A refusal is a Stage 5 validation failure, corrected through the existing
 correction request. Undecidable cases are reported only: in the run's
@@ -77,6 +80,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -112,12 +116,21 @@ _NUMERIC_TYPES = frozenset({"number", "integer"})
 _JSON_TYPES = frozenset(
     {"array", "boolean", "integer", "null", "number", "object", "string"}
 )
-_OWN_KEYWORDS = ("type", "nullable", "enum", "const", "pattern", "items", "prefixItems")
-# The disjunctive form of a schema is expanded up to this many conjunctions.
-_MAX_ATOMS = 256
-_REGEX_SPECIAL = frozenset("\\^$.|?*+()[]{}")
-# The first characters of a text ``float()`` accepts, besides digits and spaces.
-_NUMBER_STARTS = frozenset("+-.iInN")
+# The keywords of the flat grammar, and the annotations it allows beside them.
+_GRAMMAR_KEYWORDS = frozenset({"type", "nullable", "enum", "const", "items", "pattern"})
+_ANNOTATIONS = frozenset(
+    {
+        "title",
+        "description",
+        "$comment",
+        "examples",
+        "default",
+        "deprecated",
+        "readOnly",
+        "writeOnly",
+        "format",
+    }
+)
 _NEVER_HOLDS = (
     "the comparison holds on no call and the condition never detects the unsafe call"
 )
@@ -1033,9 +1046,8 @@ class _Admitted:
     Every field over-approximates the admitted values: ``types`` is every
     JSON type a value may have, ``values`` every value it may take when an
     ``enum`` or ``const`` lists them, and ``elements`` the facts of every
-    element of an admitted list; ``None`` means unknown. ``text_pattern`` is
-    a ``pattern`` no admitted string with a number's text matches, and
-    ``number`` the number classes of the admitted values.
+    element of an admitted list; ``None`` means unknown. ``number`` is the
+    number classes of the admitted values.
 
     ``nothing`` marks a schema that admits no value. It carries no other
     fact, so every rule reads it as unconstrained: a schema that admits
@@ -1046,7 +1058,6 @@ class _Admitted:
     values: tuple[object, ...] | None = None
     elements: _Admitted | None = None
     number: _NumberFacts = _ANY_NUMBER
-    text_pattern: str | None = None
     nothing: bool = False
 
 
@@ -1055,39 +1066,30 @@ _NOTHING = _Admitted(nothing=True)
 
 
 def _admitted(schema: object, name: str) -> _Admitted:
-    """Return what a schema admits, judged exactly over the read keywords.
+    """Return what a schema proves: ``_ANY`` unless it is of the flat grammar.
 
-    The schema is expanded into its disjunctive form: each conjunction (an
-    atom) holds the combinator-free keywords one value must meet, one
-    ``anyOf`` branch taken at a time. An atom that admits no value is
-    dropped, and a schema left with none is ``_NOTHING``. The facts of the
-    live atoms join. A schema with ``oneOf`` anywhere, a malformed read
-    keyword, or too many atoms proves nothing. ``name`` is the argument
-    named in a reason.
+    ``name`` is the argument named in a reason.
     """
 
-    if schema is False:
-        return _NOTHING
-    if not isinstance(schema, Mapping) or _outside_fragment(schema):
-        return _ANY
-    atoms = _atoms(schema)
-    if atoms is None:
-        return _ANY
-    live = [facts for atom in atoms if (facts := _closed(atom, name)) is not None]
-    if not live:
-        return _NOTHING
-    return _joined(live)
+    facts = _flat(schema, name)
+    return _ANY if facts is None else facts
 
 
-def _outside_fragment(schema: object) -> bool:
-    """Return whether a schema has ``oneOf`` or a malformed read keyword."""
+def _flat(schema: object, name: str) -> _Admitted | None:
+    """Read a schema of the flat grammar, or return ``None`` for any other.
 
-    if isinstance(schema, list):
-        return any(_outside_fragment(item) for item in schema)
-    if not isinstance(schema, Mapping):
-        return False
-    if "oneOf" in schema:
-        return True
+    The listed values are exactly those ``const`` and ``enum`` both list
+    that the type, the ``pattern``, and, element by element, ``items``
+    admit; a schema left with none is ``_NOTHING``. Without listed values,
+    the schema admits a value of every type it declares (a list schema the
+    empty list at least).
+    """
+
+    if not isinstance(schema, Mapping) or not set(schema) <= (
+        _GRAMMAR_KEYWORDS | _ANNOTATIONS
+    ):
+        return None
+    types: frozenset[str] | None = None
     if "type" in schema:
         names = schema["type"]
         names = [names] if isinstance(names, str) else names
@@ -1096,99 +1098,96 @@ def _outside_fragment(schema: object) -> bool:
             or not names
             or not all(isinstance(item, str) and item in _JSON_TYPES for item in names)
         ):
-            return True
-    if "enum" in schema and not isinstance(schema["enum"], list):
-        return True
-    for key in ("allOf", "anyOf", "prefixItems"):
-        if key in schema and not isinstance(schema[key], list):
-            return True
-    for key in ("allOf", "anyOf"):
-        if key in schema and not schema[key]:
-            return True
-    items = schema.get("items")
-    if "items" in schema and not isinstance(items, (Mapping, bool)):
-        return True
-    return any(_outside_fragment(value) for value in schema.values())
-
-
-def _atoms(schema: object) -> list[tuple[Mapping[str, Any], ...]] | None:
-    """Return the disjunctive form of a schema, or ``None`` past the bound.
-
-    ``allOf`` multiplies out its branches and ``anyOf`` concatenates them;
-    ``true`` (or any schema without a read keyword) is the empty conjunction
-    and ``false`` the empty disjunction.
-    """
-
-    if schema is False:
-        return []
-    if not isinstance(schema, Mapping):
-        return [()]
-    own = {key: schema[key] for key in _OWN_KEYWORDS if key in schema}
-    atoms: list[tuple[Mapping[str, Any], ...]] = [(own,) if own else ()]
-    for branch in schema.get("allOf") or ():
-        branch_atoms = _atoms(branch)
-        if branch_atoms is None:
             return None
-        atoms = [left + right for left in atoms for right in branch_atoms]
-        if len(atoms) > _MAX_ATOMS:
+        types = frozenset(names)
+    if "nullable" in schema:
+        if not isinstance(schema["nullable"], bool):
             return None
-    if "anyOf" in schema:
-        options: list[tuple[Mapping[str, Any], ...]] = []
-        for branch in schema["anyOf"]:
-            branch_atoms = _atoms(branch)
-            if branch_atoms is None:
-                return None
-            options.extend(branch_atoms)
-        atoms = [left + right for left in atoms for right in options]
-        if len(atoms) > _MAX_ATOMS:
+        if schema["nullable"] and types is not None:
+            types |= {"null"}
+    listed: tuple[object, ...] | None = None
+    if "const" in schema:
+        listed = (schema["const"],)
+    if "enum" in schema:
+        enum = schema["enum"]
+        if not isinstance(enum, list) or not enum:
             return None
-    return atoms
-
-
-def _closed(atom: tuple[Mapping[str, Any], ...], name: str) -> _Admitted | None:
-    """Return the facts of one conjunction, or ``None`` when it admits nothing.
-
-    With listed values, exactly the values every keyword of the atom admits
-    remain; the atom admits nothing when none does. Without them, a type
-    set that is not empty admits a value: any scalar type has one, and
-    every list schema admits the empty list.
-    """
-
-    types: frozenset[str] | None = None
-    values: tuple[object, ...] | None = None
-    pattern: str | None = None
-    for own in atom:
-        types = _meet(types, _declared_types(own))
-        listed = _enumerated(own)
-        if listed is not None:
-            values = listed if values is None else _schema_common(values, listed)
-        if pattern is None and _pattern_excludes_numbers(own.get("pattern")):
-            pattern = own["pattern"]
-    if types is not None and not types:
-        return None
-    numbers = [_type_number(types, pattern, name)]
-    if values is not None:
-        values = tuple(
-            value for value in values if all(_meets_own(value, own) for own in atom)
-        )
-        if not values:
+        listed = tuple(enum) if listed is None else _schema_common(listed, tuple(enum))
+    pattern: re.Pattern[str] | None = None
+    if "pattern" in schema:
+        if listed is None or not isinstance(schema["pattern"], str):
             return None
-        types = _meet(types, frozenset(_json_type(value) for value in values))
-        lists = [value for value in values if isinstance(value, list)]
-        elements = (
+        try:
+            pattern = re.compile(schema["pattern"])
+        except re.error:
+            return None
+    items: _Admitted | bool | None = None
+    if "items" in schema:
+        raw = schema["items"]
+        items = raw if isinstance(raw, bool) else _flat(raw, "")
+        if items is None:
+            return None
+    declared = _type_number(types, name)
+    if listed is None:
+        if items is None or items is True:
+            elements = None
+        elif items is False or items.nothing:
+            elements = _NOTHING
+        else:
+            elements = items
+        return _Admitted(types, None, elements, declared)
+    values = tuple(
+        value for value in listed if _listed_fits(value, types, pattern, items)
+    )
+    if not values:
+        return _NOTHING
+    lists = [value for value in values if isinstance(value, list)]
+    number = _conjoined([declared, _values_number(values, name)])
+    if number is None:
+        return _NOTHING
+    return _Admitted(
+        types=_meet(types, frozenset(_json_type(value) for value in values)),
+        values=values,
+        elements=(
             _listed_facts(tuple(item for value in lists for item in value))
             if lists
             else None
-        )
-        numbers.append(_values_number(values, name))
-    elif types is None or "array" in types:
-        elements = _element_facts(atom)
-    else:
-        elements = None
-    number = _conjoined(numbers)
-    if number is None:
-        return None
-    return _Admitted(types, values, elements, number, pattern)
+        ),
+        number=number,
+    )
+
+
+def _listed_fits(
+    value: object,
+    types: frozenset[str] | None,
+    pattern: re.Pattern[str] | None,
+    items: _Admitted | bool | None,
+) -> bool:
+    """Return whether the rest of a flat schema admits one of its listed values."""
+
+    if types is not None and not _fits(value, types):
+        return False
+    if pattern is not None and isinstance(value, str) and not pattern.search(value):
+        return False
+    if isinstance(value, list) and isinstance(items, _Admitted):
+        return all(_holds(items, element) for element in value)
+    if isinstance(value, list) and items is False:
+        return not value
+    return True
+
+
+def _holds(facts: _Admitted, value: object) -> bool:
+    """Return whether a flat schema's facts admit a value, exactly."""
+
+    if facts.nothing:
+        return False
+    if facts.values is not None:
+        return any(_schema_equal(value, item) for item in facts.values)
+    if facts.types is not None and not _fits(value, facts.types):
+        return False
+    if isinstance(value, list) and facts.elements is not None:
+        return all(_holds(facts.elements, element) for element in value)
+    return True
 
 
 def _listed_facts(items: tuple[object, ...]) -> _Admitted:
@@ -1207,119 +1206,6 @@ def _listed_facts(items: tuple[object, ...]) -> _Admitted:
         ),
         number=_values_number(items, ""),
     )
-
-
-def _element_facts(atom: tuple[Mapping[str, Any], ...]) -> _Admitted | None:
-    """Return the facts of every element an admitted list can hold.
-
-    Position ``i`` holds a value that meets, for every keyword set of the
-    atom, its ``prefixItems[i]`` or else its ``items``. A position no value
-    can hold ends the list there, so later positions are never reached;
-    ``items: false`` ends it after ``prefixItems``. ``None`` means no read
-    keyword bounds the elements; ``_NOTHING`` that only the empty list is
-    admitted, which proves nothing of its elements.
-    """
-
-    lists = [own for own in atom if "items" in own or "prefixItems" in own]
-    if not lists:
-        return None
-    prefixes = [list(own.get("prefixItems") or ()) for own in lists]
-    positions: list[_Admitted] = []
-    for index in range(max(len(prefix) for prefix in prefixes)):
-        branches: list[object] = []
-        for own, prefix in zip(lists, prefixes, strict=True):
-            if index < len(prefix):
-                branches.append(prefix[index])
-            elif "items" in own:
-                branches.append(own["items"])
-        facts = _admitted({"allOf": branches} if branches else {}, "")
-        if facts.nothing:
-            return _joined(positions) if positions else _NOTHING
-        positions.append(facts)
-    tail = [own["items"] for own in lists if "items" in own]
-    if not any(item is False for item in tail):
-        facts = _admitted({"allOf": tail} if tail else {}, "")
-        if not facts.nothing:
-            positions.append(facts)
-    return _joined(positions) if positions else _NOTHING
-
-
-def _joined(parts: Sequence[_Admitted]) -> _Admitted:
-    """Join the facts of live conjunctions, of which one holds of a value."""
-
-    if len(parts) == 1:
-        return parts[0]
-    types = (
-        None
-        if any(part.types is None for part in parts)
-        else frozenset().union(*(part.types or () for part in parts))
-    )
-    values = (
-        None
-        if any(part.values is None for part in parts)
-        else tuple(value for part in parts for value in part.values or ())
-    )
-    lists = [part for part in parts if part.types is None or "array" in part.types]
-    elements = None
-    if lists and all(part.elements is not None for part in lists):
-        elements = _joined(
-            [part.elements for part in lists if part.elements is not None]
-        )
-    texts = [part for part in parts if part.types is None or "string" in part.types]
-    pattern = (
-        " or ".join(dict.fromkeys(part.text_pattern or "" for part in texts))
-        if texts and all(part.text_pattern for part in texts)
-        else None
-    )
-    number = _NumberFacts(
-        frozenset().union(*(part.number.classes for part in parts)),
-        " or ".join(dict.fromkeys(part.number.reason for part in parts)),
-    )
-    return _Admitted(types, values, elements, number, pattern)
-
-
-def _meets(value: object, schema: object) -> bool:
-    """Return whether a value meets a schema's read keywords.
-
-    ``pattern`` is read only as a pattern no numeric text matches; every
-    other keyword outside the fragment is assumed to hold.
-    """
-
-    if isinstance(schema, bool):
-        return schema
-    if not isinstance(schema, Mapping):
-        return True
-    return (
-        _meets_own(value, schema)
-        and all(_meets(value, branch) for branch in schema.get("allOf") or ())
-        and (
-            "anyOf" not in schema
-            or any(_meets(value, branch) for branch in schema["anyOf"])
-        )
-    )
-
-
-def _meets_own(value: object, own: Mapping[str, Any]) -> bool:
-    types = _declared_types(own)
-    if types is not None and not _fits(value, types):
-        return False
-    listed = _enumerated(own)
-    if listed is not None and not any(_schema_equal(value, item) for item in listed):
-        return False
-    if (
-        isinstance(value, str)
-        and _pattern_excludes_numbers(own.get("pattern"))
-        and numeric_value(value) is not None
-    ):
-        return False
-    if isinstance(value, list):
-        prefix = own.get("prefixItems") or ()
-        items = own.get("items", True)
-        for index, element in enumerate(value):
-            schema = prefix[index] if index < len(prefix) else items
-            if not _meets(element, schema):
-                return False
-    return True
 
 
 def _schema_equal(left: object, right: object) -> bool:
@@ -1384,36 +1270,17 @@ def _meet(
     return frozenset(common)
 
 
-def _declared_types(schema: Mapping[str, Any]) -> frozenset[str] | None:
-    """Return the ``type`` of a schema, or ``None`` when it has none.
-
-    The OpenAPI ``nullable: true`` adds ``null``, so it is never left out.
-    """
-
-    names = _type_names(schema.get("type"))
-    if not names or not set(names) <= _JSON_TYPES:
-        return None
-    types = frozenset(names)
-    if schema.get("nullable") is True:
-        types |= {"null"}
-    return types
-
-
-def _type_number(
-    types: frozenset[str] | None, pattern: str | None, name: str
-) -> _NumberFacts:
+def _type_number(types: frozenset[str] | None, name: str) -> _NumberFacts:
     if not types:
         return _ANY_NUMBER
     classes: set[str] = set()
     if types & _NUMERIC_TYPES:
         classes.add(_ORDERABLE)
     if "string" in types:
-        classes |= {_OTHER} if pattern else _EVERY_CLASS
+        classes |= _EVERY_CLASS
     if types - _NUMERIC_TYPES - {"string"}:
         classes.add(_OTHER)
     declared = " or ".join(sorted(types))
-    if pattern and "string" in types:
-        declared += f" matching the pattern {pattern}"
     return _NumberFacts(frozenset(classes), f"declares {name} as {declared}")
 
 
@@ -1479,49 +1346,6 @@ def _common_values(
     left: tuple[object, ...], right: tuple[object, ...]
 ) -> tuple[object, ...]:
     return tuple(value for value in left if any(_same(value, other) for other in right))
-
-
-def _pattern_excludes_numbers(pattern: object) -> bool:
-    """Return whether an anchored pattern's first character starts no number.
-
-    Only a pattern without alternation that starts ``^`` and then a plain,
-    required character is judged; ``float()`` text starts with a space, a
-    digit, a sign, a point, or the ``inf`` or ``nan`` of either case.
-    """
-
-    if not isinstance(pattern, str) or len(pattern) < 2 or "|" in pattern:
-        return False
-    first = pattern[1]
-    if pattern[0] != "^" or first in _REGEX_SPECIAL or first in _NUMBER_STARTS:
-        return False
-    if first.isspace() or first.isdecimal():
-        return False
-    return pattern[2:3] not in {"?", "*", "{"}
-
-
-def _enumerated(schema: Mapping[str, Any]) -> tuple[object, ...] | None:
-    """Return the values ``const`` and ``enum`` both allow, or ``None``."""
-
-    listed: list[tuple[object, ...]] = []
-    if "const" in schema:
-        listed.append((schema["const"],))
-    values = schema.get("enum")
-    if isinstance(values, list):
-        listed.append(tuple(values))
-    if not listed:
-        return None
-    common = listed[0]
-    for other in listed[1:]:
-        common = _schema_common(common, other)
-    return common
-
-
-def _type_names(value: object) -> list[str]:
-    if isinstance(value, str):
-        return [value]
-    if isinstance(value, list):
-        return [item for item in value if isinstance(item, str)]
-    return []
 
 
 def _fits(value: object, types: frozenset[str]) -> bool:

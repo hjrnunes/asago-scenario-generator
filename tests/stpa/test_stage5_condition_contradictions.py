@@ -568,20 +568,16 @@ def _ordering_universe(schema: dict) -> ConditionUniverse:
     [
         ({"type": "boolean"}, "declares ref as boolean"),
         ({"type": ["object", "null"]}, "declares ref as null or object"),
+        # A pattern filters the listed values: "10" does not match it.
         (
-            {"type": "string", "pattern": "^RES-[0-9]+$"},
-            "declares ref as string matching the pattern ^RES-[0-9]+$",
+            {"type": "string", "enum": ["RES-1", "10"], "pattern": "^RES-"},
+            'restricts ref to ["RES-1"]',
         ),
         (
             {"type": "string", "enum": ["low", "high"]},
             'restricts ref to ["low", "high"]',
         ),
         ({"const": "open"}, 'restricts ref to ["open"]'),
-        (
-            {"anyOf": [{"type": "boolean"}, {"type": "string", "pattern": "^R-"}]},
-            "declares ref as boolean or declares ref as string matching the "
-            "pattern ^R-",
-        ),
     ],
 )
 def test_ordering_an_argument_its_schema_keeps_from_numbers_is_refused(
@@ -627,6 +623,12 @@ def test_ordering_an_argument_its_schema_keeps_from_numbers_is_refused(
         {"type": "string", "pattern": "^R|1"},
         {"type": "string", "pattern": "^nan$"},
         {"type": "string", "pattern": "RES-"},
+        # A pattern alone, and any combinator, proves nothing.
+        {"type": "string", "pattern": "^RES-[0-9]+$"},
+        {"anyOf": [{"type": "boolean"}, {"type": "string", "pattern": "^R-"}]},
+        {"anyOf": [{"type": "boolean"}]},
+        {"anyOf": [{"type": "number"}, {"type": "integer"}]},
+        {"allOf": [{"type": "integer"}]},
         {"title": "untyped"},
     ],
 )
@@ -641,8 +643,8 @@ def test_ordering_an_argument_its_schema_leaves_open_is_undecidable(schema) -> N
     [
         {"type": "integer"},
         {"type": ["number", "integer"]},
-        {"anyOf": [{"type": "number"}, {"type": "integer"}]},
         {"type": "string", "enum": ["10", "20"]},
+        {"type": "string", "enum": ["10", "x"], "pattern": "^[0-9]+$"},
         {"const": "5"},
         {"enum": [1, "2.5", " 7 "]},
         {"type": ["number", "null"], "enum": [1, 2]},
@@ -926,8 +928,8 @@ def test_membership_in_an_argument_that_is_never_a_list_is_refused(op) -> None:
     "right",
     [
         {"type": ["string", "null"]},
-        {"anyOf": [{"type": "string"}, {"type": "integer"}]},
         {"type": ["array", "string"], "const": "x"},
+        {"type": "boolean", "nullable": True},
     ],
 )
 def test_membership_in_a_schema_narrowed_to_no_list_is_refused(right) -> None:
@@ -942,12 +944,7 @@ def test_membership_in_a_schema_narrowed_to_no_list_is_refused(right) -> None:
         ({"type": "number"}, {"type": "array", "items": {"type": "string"}}),
         (
             {"type": "number"},
-            {
-                "anyOf": [
-                    {"type": "array", "items": {"type": "string"}},
-                    {"type": "null"},
-                ]
-            },
+            {"type": "array", "items": {"type": "string"}, "nullable": True},
         ),
         # A list on the left is a member when any of its elements is.
         (
@@ -956,7 +953,7 @@ def test_membership_in_a_schema_narrowed_to_no_list_is_refused(right) -> None:
         ),
         (
             {"type": "string"},
-            {"type": "array", "prefixItems": [{"type": "number"}], "items": False},
+            {"type": "array", "items": {"type": "array", "items": False}},
         ),
     ],
 )
@@ -992,6 +989,15 @@ def test_membership_of_a_disjoint_element_type_states_why() -> None:
         ({"type": "integer"}, {"type": "array", "items": {"type": "number"}}),
         ({"type": "number"}, {"type": "array"}),
         ({"type": "number"}, {"type": "array", "prefixItems": [{"type": "string"}]}),
+        (
+            {"type": "number"},
+            {"anyOf": [{"type": "array", "items": {"type": "string"}}]},
+        ),
+        (
+            {"type": "number"},
+            {"type": "array", "items": {"anyOf": [{"type": "string"}]}},
+        ),
+        ({"type": "number"}, {"type": "array", "items": False}),
         ({"type": "number"}, {"type": ["array", "boolean"]}),
         ({"type": "number"}, {"title": "untyped"}),
         ({"type": "array"}, {"type": "array", "items": {"type": "string"}}),
@@ -1061,7 +1067,7 @@ def test_ordering_two_open_arguments_states_each_reason() -> None:
     ]
 
 
-# -- conjunctive schema facts ---------------------------------------------------
+# -- listed values, types, and pattern ------------------------------------------
 
 
 def _bound(condition: dict, comparison: dict, universe: ConditionUniverse):
@@ -1094,16 +1100,11 @@ def test_a_const_narrows_the_declared_type_for_two_arguments() -> None:
     [
         {"type": ["number", "string"], "const": 1},
         {"type": ["number", "string"], "enum": [1, 2]},
-        {"type": ["number", "string"], "allOf": [{"type": ["number", "boolean"]}]},
-        {
-            "anyOf": [{"type": "string"}, {"type": "number"}],
-            "allOf": [{"anyOf": [{"type": "number"}, {"type": "boolean"}]}],
-        },
-        {"allOf": [{"type": ["number", "string"]}, {"type": ["integer", "null"]}]},
+        {"type": ["integer", "string"], "enum": [1, "a"], "pattern": "^b"},
         {"type": "number", "nullable": False},
     ],
 )
-def test_conjunctive_facts_narrow_an_argument_to_numbers(schema) -> None:
+def test_listed_values_narrow_an_argument_to_numbers(schema) -> None:
     universe = _with_schemas({"refund_payment": {"amount": schema}})
 
     assert _findings(_value_condition("eq", "forty", argument="amount"), universe)
@@ -1117,54 +1118,18 @@ def _ordering_on(argument: str) -> dict:
 @pytest.mark.parametrize(
     "schema",
     [
-        # anyOf and allOf are separate conjuncts: one does not hide the other.
-        {
-            "anyOf": [{"type": "string"}, {"type": "boolean"}],
-            "allOf": [{"anyOf": [{"type": "boolean"}, {"type": "null"}]}],
-        },
-        {
-            "allOf": [{"anyOf": [{"type": "boolean"}]}],
-            "anyOf": [{"type": "number"}, {"type": "boolean"}],
-        },
-        {"allOf": [{"type": ["number", "boolean"]}, {"type": ["boolean", "string"]}]},
         {"type": ["number", "string"], "const": "open"},
-        {"enum": [1, "low"], "allOf": [{"type": "string"}]},
+        {"type": "string", "enum": [1, "low"]},
         {"const": "low", "enum": ["low", 2]},
+        {"enum": ["10", "low"], "pattern": "^l"},
     ],
 )
-def test_conjunctive_facts_that_admit_no_number_refuse_an_ordering(schema) -> None:
+def test_listed_values_that_admit_no_number_refuse_an_ordering(schema) -> None:
     findings = _findings(_ordering(), _ordering_universe(schema))
 
     assert [item.code for item in findings] == [
         IssueCode.discriminating_condition_ordering_not_numeric
     ]
-
-
-@pytest.mark.parametrize(
-    ("schema", "reason"),
-    [
-        (
-            {"type": "string", "allOf": [{"pattern": "^R-"}]},
-            "declares ref as string matching the pattern ^R-",
-        ),
-        (
-            {"allOf": [{"type": "string"}, {"pattern": "^R-"}]},
-            "declares ref as string matching the pattern ^R-",
-        ),
-        (
-            {"type": "string", "anyOf": [{"pattern": "^R-"}, {"pattern": "^Q-"}]},
-            "declares ref as string matching the pattern ^R- or declares ref "
-            "as string matching the pattern ^Q-",
-        ),
-    ],
-)
-def test_a_pattern_in_one_conjunct_and_a_type_in_another_refuse(schema, reason) -> None:
-    findings = _findings(_ordering(), _ordering_universe(schema))
-
-    assert len(findings) == 1
-    assert f"the input schema of refund_payment {reason}, so no value" in (
-        findings[0].detail
-    )
 
 
 @pytest.mark.parametrize(
@@ -1178,11 +1143,49 @@ def test_a_pattern_only_some_branches_state_is_undecidable(schema) -> None:
     assert _rules(_judged(_ordering(), _ordering_universe(schema))) == ([], ["c"])
 
 
+def test_a_pattern_filters_the_listed_values() -> None:
+    universe = _with_schemas(
+        {
+            "refund_payment": {
+                "status": {"type": "string", "enum": ["RES-1", "x"], "pattern": "^RES-"}
+            }
+        }
+    )
+
+    findings = _findings(_value_condition("eq", "x", argument="status"), universe)
+
+    assert [item.detail for item in findings] == [
+        'comparisons[0] binds refund_payment.status eq "x" in the tool-call '
+        "condition, but the input schema of refund_payment restricts status to "
+        '["RES-1"] and "x" is none of them; tool-call-condition-v1 never '
+        "converts a value for eq, so the comparison holds on no call and the "
+        "condition never detects the unsafe call. Compare status with one of "
+        "those values"
+    ]
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        # A pattern without listed values proves nothing, not even the type.
+        {"type": "string", "pattern": "^R-"},
+        # A pattern Python re cannot compile proves nothing.
+        {"type": "string", "enum": ["a"], "pattern": "("},
+        {"type": "string", "enum": ["a"], "pattern": 5},
+    ],
+)
+def test_a_pattern_the_grammar_cannot_read_proves_nothing(schema) -> None:
+    universe = _with_schemas({"refund_payment": {"amount": schema}})
+
+    assert _findings(_value_condition("eq", 7, argument="amount"), universe) == ()
+    assert _rules(_judged(_ordering_on("amount"), universe)) == ([], ["c"])
+
+
 @pytest.mark.parametrize(
     "schema",
     [
         {"type": "string", "enum": ["10", True]},
-        {"enum": ["a", "1"], "allOf": [{"enum": ["1", "2"]}]},
+        {"enum": ["a", "1"], "pattern": "^[0-9]"},
         {"type": ["number", "boolean"], "enum": [1, "x"]},
     ],
 )
@@ -1206,15 +1209,6 @@ def test_an_enum_filtered_by_its_other_facts_admits_only_numbers(schema) -> None
 )
 def test_a_null_no_fact_rules_out_keeps_an_ordering_undecidable(schema) -> None:
     assert _rules(_judged(_ordering(), _ordering_universe(schema))) == ([], ["c"])
-
-
-def test_a_conjunct_without_null_rules_null_out() -> None:
-    schema = {
-        "anyOf": [{"type": "number"}],
-        "allOf": [{"anyOf": [{"type": "number"}, {"type": "null"}]}],
-    }
-
-    assert _rules(_judged(_ordering(), _ordering_universe(schema))) == ([], [])
 
 
 def test_a_literal_outside_the_enum_is_refused() -> None:
@@ -1407,12 +1401,8 @@ def test_a_literal_member_of_a_list_argument_reads_its_schema(schema, refused) -
     [
         {"const": "nan"},
         {"type": "string", "enum": ["nan", "NaN", " -nan "]},
-        {"anyOf": [{"const": "nan"}, {"const": "+NAN"}]},
-        {
-            "type": ["string", "number"],
-            "allOf": [{"enum": ["nan", "low"]}],
-            "enum": ["nan", 1],
-        },
+        {"type": ["string", "number"], "enum": ["nan", "low"], "pattern": "^n"},
+        {"type": "string", "enum": ["nan", 1]},
     ],
 )
 def test_ordering_an_argument_that_is_always_nan_is_refused(schema) -> None:
@@ -1468,90 +1458,68 @@ def test_ordering_by_a_nan_literal_is_refused(literal) -> None:
     ]
 
 
-# -- the schema-fact lattice ---------------------------------------------------
+# -- the flat grammar ------------------------------------------------------------
 #
-# A schema fact is unconstrained, admits nothing, or proves types, listed
-# values, a number verdict, or element facts. A refusal follows only from a
-# positive proof; a schema that admits nothing proves nothing anywhere.
+# A schema proves something only when it is of the flat grammar; any other
+# schema, and one that admits no value, classifies as a schema without facts
+# in every operand position.
 
 SUBJECT = {"source": "argument", "operation": "refund_payment", "argument": "subject"}
 PARTNER = {"source": "argument", "operation": "lookup_order", "argument": "partner"}
 
+# One schema per class of key or value outside the grammar. Each would prove
+# string (or more) if the grammar read it.
+NON_GRAMMAR = {
+    "allOf": {"type": "string", "allOf": [{"type": "string"}]},
+    "allOf with a malformed child": {"type": "string", "allOf": [7]},
+    "anyOf": {"type": "string", "anyOf": [{"type": "string"}]},
+    "oneOf": {"type": "string", "oneOf": [{"type": "string"}]},
+    "not": {"type": "string", "not": {"type": "number"}},
+    "prefixItems": {"type": "array", "prefixItems": [{"type": "string"}]},
+    "$ref": {"type": "string", "$ref": "#/$defs/Text"},
+    "if/then/else": {"type": "string", "if": {}, "then": {}, "else": {}},
+    "contains": {"type": "array", "contains": {"type": "string"}},
+    "minLength": {"type": "string", "minLength": 1},
+    "maximum": {"type": "number", "maximum": 9},
+    "properties": {"type": "object", "properties": {"a": {"type": "string"}}},
+    "additionalProperties": {"type": "object", "additionalProperties": False},
+    "unknown key": {"type": "string", "x-kind": "order"},
+    "unknown type name": {"type": "int"},
+    "empty type list": {"type": []},
+    "non-boolean nullable": {"type": "string", "nullable": "yes"},
+    "empty enum": {"type": "string", "enum": []},
+    "non-list enum": {"type": "string", "enum": "a"},
+    "items not a schema": {"type": "array", "items": 7},
+    "items outside the grammar": {
+        "type": "array",
+        "items": {"anyOf": [{"type": "string"}]},
+    },
+    "pattern without listed values": {"type": "string", "pattern": "^a"},
+    "pattern that does not compile": {"type": "string", "enum": ["a"], "pattern": "("},
+    "non-string pattern": {"type": "string", "enum": ["a"], "pattern": 5},
+}
+
+# Flat schemas that admit no value.
 UNSATISFIABLE = [
-    {"allOf": [{"type": "number"}, {"type": "boolean"}]},
-    {"allOf": [{"type": "integer"}, {"type": "string"}]},
-    {"const": "a", "enum": ["b"]},
     {"type": "string", "const": 1},
-    {"type": "string", "enum": [1, True]},
-    {"allOf": [{"enum": ["a"]}, {"enum": ["b"]}]},
-    # Numeric text only, but the pattern lets no numeric text through.
-    {"type": "string", "pattern": "^R-", "enum": ["1", "2"]},
-    {"anyOf": [{"allOf": [{"type": "number"}, {"type": "string"}]}]},
-    {"type": "string", "allOf": [{"allOf": [{"type": "number"}, {"type": "null"}]}]},
-    {"oneOf": [{"const": "a", "enum": ["b"]}, {"type": "boolean", "const": 1}]},
-    # A dead anyOf branch drops out; the live one meets the outer type.
-    {
-        "type": "number",
-        "anyOf": [
-            {"allOf": [{"type": "string"}, {"type": "boolean"}]},
-            {"type": "boolean"},
-        ],
-    },
-    {
-        "type": "number",
-        "allOf": [
-            {
-                "anyOf": [
-                    {"allOf": [{"type": "string"}, {"type": "boolean"}]},
-                    {"type": "boolean"},
-                ]
-            }
-        ],
-    },
-    # Each anyOf branch meets the outer facts on its own.
-    {"type": "integer", "anyOf": [{"enum": ["a", 1.5]}, {"type": "boolean"}]},
-    {
-        "type": "string",
-        "allOf": [{"anyOf": [{"const": "a"}, {"type": "number"}]}],
-        "enum": ["b"],
-    },
-    # A listed list must meet the element schemas, position by position.
+    {"type": "integer", "const": 1.5},
+    {"type": "boolean", "const": 1},
+    {"const": "a", "enum": ["b"]},
+    {"type": "number", "enum": ["a", True]},
+    {"enum": ["x"], "pattern": "^y"},
     {"const": ["x"], "items": {"const": "y"}},
-    {"type": "array", "anyOf": [{"const": ["x"], "items": {"const": "y"}}]},
-    {"enum": [["a", "b"]], "prefixItems": [{"const": "a"}], "items": False},
-    {"enum": [["a", 1]], "allOf": [{"items": {"type": "string"}}]},
-    {"const": [["x"]], "items": {"items": {"type": "number"}}},
+    {"const": ["x"], "items": False},
+    {"const": [["x"]], "items": {"type": "array", "items": {"type": "number"}}},
     # Listed values compare by JSON Schema equality: true is not 1.
     {"const": True, "enum": [1]},
     {"const": [True], "enum": [[1]]},
-    {"enum": []},
 ]
 
-# A schema with oneOf anywhere proves nothing, satisfiable or not.
-ONE_OF = [
-    {"oneOf": [{"const": "x"}, {"const": "x"}]},
-    {"oneOf": [{"type": "boolean"}]},
-    {"oneOf": [{"type": "number"}]},
-    {"type": "string", "allOf": [{"oneOf": [{"const": "a"}, {"const": "b"}]}]},
-    {"type": "array", "items": {"oneOf": [{"const": "x"}, {"const": "x"}]}},
-    {"type": "boolean", "anyOf": [{"oneOf": [{"type": "boolean"}]}]},
-]
-
-# Lists whose elements no position can hold: only the empty list is admitted.
+# Flat list schemas no element can be part of: only the empty list is admitted.
 EMPTY_LISTS = [
-    {"type": "array", "items": {"allOf": [{"type": "number"}, {"type": "string"}]}},
-    {
-        "type": "array",
-        "prefixItems": [{"allOf": [{"type": "number"}, {"type": "string"}]}],
-        "items": {"type": "string"},
-    },
-    {
-        "allOf": [
-            {"type": "array", "items": {"anyOf": [{"const": "a"}, {"type": "number"}]}},
-            {"type": "array", "items": {"type": "string", "enum": ["b"]}},
-        ]
-    },
-    {"type": "array", "prefixItems": [], "items": False},
+    {"type": "array", "items": False},
+    {"type": "array", "items": {"type": "string", "const": 1}},
+    {"type": "array", "items": {"enum": ["x"], "pattern": "^y"}},
 ]
 
 PARTNERS = [
@@ -1562,6 +1530,7 @@ PARTNERS = [
     {"type": "array", "items": {"type": "string"}},
     {"type": "array", "items": {"const": "y"}},
     {"enum": ["nan", "closed"]},
+    {"anyOf": [{"type": "string"}]},
 ]
 
 
@@ -1615,28 +1584,24 @@ def _judge(comparison: dict, universe: ConditionUniverse):
     return _bound(_value_condition("eq", "x", argument="subject"), comparison, universe)
 
 
+def _classified_alike(schema: dict, baseline: dict) -> None:
+    for partner in PARTNERS:
+        judged = _lattice_universe(schema, partner)
+        expected = _lattice_universe(baseline, partner)
+        for comparison in _every_position():
+            assert _rules(_judge(comparison, judged)) == _rules(
+                _judge(comparison, expected)
+            ), (comparison, partner)
+
+
+@pytest.mark.parametrize("key", sorted(NON_GRAMMAR))
+def test_a_schema_outside_the_grammar_classifies_as_no_schema(key) -> None:
+    _classified_alike(NON_GRAMMAR[key], {})
+
+
 @pytest.mark.parametrize("schema", UNSATISFIABLE)
-def test_a_schema_that_admits_nothing_is_judged_as_unconstrained(schema) -> None:
-    # In every operand position and against every partner, the schema gets
-    # exactly the classification of a schema with no fact at all.
-    for partner in PARTNERS:
-        nothing = _lattice_universe(schema, partner)
-        unconstrained = _lattice_universe({"title": "untyped"}, partner)
-        for comparison in _every_position():
-            assert _rules(_judge(comparison, nothing)) == _rules(
-                _judge(comparison, unconstrained)
-            ), (comparison, partner)
-
-
-@pytest.mark.parametrize("schema", ONE_OF)
-def test_a_schema_with_one_of_is_judged_as_unconstrained(schema) -> None:
-    for partner in PARTNERS:
-        one_of = _lattice_universe(schema, partner)
-        unconstrained = _lattice_universe({"title": "untyped"}, partner)
-        for comparison in _every_position():
-            assert _rules(_judge(comparison, one_of)) == _rules(
-                _judge(comparison, unconstrained)
-            ), (comparison, partner)
+def test_a_flat_schema_that_admits_nothing_classifies_as_no_schema(schema) -> None:
+    _classified_alike(schema, {})
 
 
 @pytest.mark.parametrize("schema", EMPTY_LISTS)
@@ -1644,33 +1609,17 @@ def test_a_list_with_no_possible_element_proves_nothing_of_its_elements(
     schema,
 ) -> None:
     # It admits the empty list alone: its type stands, its elements prove
-    # nothing, so it is judged as a list schema without items.
-    for partner in PARTNERS:
-        empty = _lattice_universe(schema, partner)
-        lists = _lattice_universe({"type": "array"}, partner)
-        for comparison in _every_position():
-            assert _rules(_judge(comparison, empty)) == _rules(
-                _judge(comparison, lists)
-            ), (comparison, partner)
+    # nothing, so it classifies as a list schema without items.
+    _classified_alike(schema, {"type": "array"})
 
 
-@pytest.mark.parametrize(
-    # A oneOf in the items makes the whole list schema unconstrained (ONE_OF).
-    "schema",
-    [item for item in UNSATISFIABLE if "oneOf" not in json.dumps(item)],
-)
-def test_list_items_that_admit_nothing_prove_nothing(schema) -> None:
-    for partner in PARTNERS:
-        nothing = _lattice_universe({"type": "array", "items": schema}, partner)
-        unconstrained = _lattice_universe({"type": "array"}, partner)
-        for comparison in _every_position():
-            assert _rules(_judge(comparison, nothing)) == _rules(
-                _judge(comparison, unconstrained)
-            ), (comparison, partner)
+@pytest.mark.parametrize("key", sorted(NON_GRAMMAR))
+def test_items_outside_the_grammar_prove_nothing(key) -> None:
+    _classified_alike({"type": "array", "items": NON_GRAMMAR[key]}, {})
 
 
-def test_an_unsatisfiable_numeric_conjunct_does_not_refuse_an_ordering() -> None:
-    universe = _ordering_universe({"allOf": [{"type": "number"}, {"type": "boolean"}]})
+def test_an_unsatisfiable_flat_schema_does_not_refuse_an_ordering() -> None:
+    universe = _ordering_universe({"type": "number", "const": "x"})
 
     result = _judged(_ordering(), universe)
 
@@ -1680,14 +1629,19 @@ def test_an_unsatisfiable_numeric_conjunct_does_not_refuse_an_ordering() -> None
 
 
 LATTICE_SUBJECTS = {
-    "unconstrained": {"title": "untyped"},
-    "admits nothing": {"allOf": [{"type": "number"}, {"type": "boolean"}]},
+    "no schema": {},
+    "outside the grammar": {"type": "string", "anyOf": [{"type": "string"}]},
+    "admits nothing": {"type": "number", "const": "x"},
     "typed string": {"type": "string"},
     "typed boolean": {"type": "boolean"},
     "typed integer": {"type": "integer"},
+    "nullable integer": {"type": "integer", "nullable": True},
     "listed values": {"enum": ["a", "b"]},
-    "number verdict, NaN or text": {"enum": ["nan", "closed"]},
-    "element facts": {"type": "array", "items": {"const": "y"}},
+    "listed values a pattern filters": {"enum": ["a", "b1"], "pattern": "^a"},
+    "number classes, NaN or text": {"enum": ["nan", "closed"]},
+    "element facts from items": {"type": "array", "items": {"const": "y"}},
+    "element facts from listed lists": {"enum": [["y"], []]},
+    "only the empty list": {"type": "array", "items": False},
 }
 LATTICE_COMPARISONS = {
     "subject eq 7": _membership(SUBJECT, "eq", _lit(7)),
@@ -1698,19 +1652,24 @@ LATTICE_COMPARISONS = {
 B, C = (["b"], []), (["c"], [])
 CLEAN, OPEN_B, OPEN_C = ([], []), ([], ["b"]), ([], ["c"])
 LATTICE = {
-    "unconstrained": (CLEAN, OPEN_C, CLEAN, OPEN_B),
+    "no schema": (CLEAN, OPEN_C, CLEAN, OPEN_B),
+    "outside the grammar": (CLEAN, OPEN_C, CLEAN, OPEN_B),
     "admits nothing": (CLEAN, OPEN_C, CLEAN, OPEN_B),
     "typed string": (B, OPEN_C, B, B),
     "typed boolean": (B, C, B, B),
     "typed integer": (CLEAN, CLEAN, B, OPEN_B),
+    "nullable integer": (CLEAN, OPEN_C, B, OPEN_B),
     "listed values": (B, C, B, B),
-    "number verdict, NaN or text": (B, C, B, B),
-    "element facts": (B, C, CLEAN, B),
+    "listed values a pattern filters": (B, C, B, B),
+    "number classes, NaN or text": (B, C, B, B),
+    "element facts from items": (B, C, CLEAN, B),
+    "element facts from listed lists": (B, C, CLEAN, B),
+    "only the empty list": (B, C, CLEAN, B),
 }
 
 
 @pytest.mark.parametrize("subject", sorted(LATTICE))
-def test_the_schema_fact_lattice_for_rules_b_and_c(subject) -> None:
+def test_the_flat_grammar_lattice_for_rules_b_and_c(subject) -> None:
     universe = _lattice_universe(LATTICE_SUBJECTS[subject], {"type": "number"})
 
     judged = tuple(
@@ -1719,6 +1678,11 @@ def test_the_schema_fact_lattice_for_rules_b_and_c(subject) -> None:
     )
 
     assert judged == LATTICE[subject]
+
+
+# The counterexamples of the last two reviews.
+
+BIG_ITEMS = {"allOf": [{"anyOf": [{"type": "string"}, {"type": "string"}]}] * 9}
 
 
 @pytest.mark.parametrize(
@@ -1733,28 +1697,65 @@ def test_the_schema_fact_lattice_for_rules_b_and_c(subject) -> None:
         },
         {"oneOf": [{"const": "x"}, {"const": "x"}]},
         {"const": ["x"], "items": {"const": "y"}},
+        {"type": "string", "allOf": [7]},
+        {"enum": [["x"]], "items": BIG_ITEMS},
     ],
 )
 def test_the_review_counterexamples_refuse_nothing(schema) -> None:
     universe = _with_schemas({"refund_payment": {"amount": schema}})
 
-    for value in ("x", 7):
+    for value in ("x", 5, 7):
         condition = _value_condition("eq", value, argument="amount")
         assert _findings(condition, universe) == ()
 
 
-def test_a_live_branch_still_meets_the_outer_facts() -> None:
-    # Dropping the dead branch leaves string meeting the outer string type.
-    schema = {
-        "type": "string",
-        "anyOf": [
-            {"allOf": [{"type": "string"}, {"type": "boolean"}]},
-            {"type": "string"},
-        ],
-    }
+@pytest.mark.parametrize(
+    ("schema", "value", "expected"),
+    [
+        # Listed values are data: their keys are never read as keywords.
+        ({"type": "string", "enum": ["a", {"oneOf": 1}]}, 7, B),
+        ({"const": {"type": "bogus", "oneOf": []}}, 7, B),
+        (
+            {"const": {"type": "bogus", "oneOf": []}},
+            {"type": "bogus", "oneOf": []},
+            CLEAN,
+        ),
+    ],
+)
+def test_listed_data_is_never_read_as_a_schema(schema, value, expected) -> None:
+    condition = DiscriminatingCondition.model_validate(
+        _value_condition("eq", "x", argument="amount")
+    )
+    bound = _membership(
+        {"source": "argument", "operation": "refund_payment", "argument": "amount"},
+        "eq",
+        _lit(value),
+    )
     universe = _with_schemas({"refund_payment": {"amount": schema}})
 
-    assert _rules(_judged(_value_condition("eq", 7, argument="amount"), universe)) == B
+    result = condition_contradictions._bound_contradictions(
+        condition, universe, ToolCallCondition.model_validate({"comparisons": [bound]})
+    )
+
+    assert _rules(result) == expected
+
+
+@pytest.mark.parametrize(
+    "schema",
+    [
+        {
+            "anyOf": [
+                {"type": "array", "items": False},
+                {"type": "array", "items": {"type": "string"}},
+            ]
+        },
+        {"type": "array", "items": False},
+    ],
+)
+def test_a_list_that_may_be_empty_proves_nothing_of_its_elements(schema) -> None:
+    universe = _arguments_universe({"type": "number"}, schema)
+
+    assert _rules(_judged(_arguments_condition("in"), universe)) == OPEN_B
 
 
 def test_a_listed_list_that_meets_its_items_keeps_its_facts() -> None:
@@ -1798,11 +1799,11 @@ def test_a_value_outside_the_listed_elements_is_refused(op, consequence) -> None
 @pytest.mark.parametrize(
     ("left", "right", "expected"),
     [
-        # prefixItems and items join: an element is "a" or "b".
+        # prefixItems and anyOf are outside the grammar: they prove nothing.
         (
             {"const": "c"},
             {"type": "array", "prefixItems": [{"const": "a"}], "items": {"const": "b"}},
-            B,
+            OPEN_B,
         ),
         (
             {"const": "b"},
@@ -1822,7 +1823,6 @@ def test_a_value_outside_the_listed_elements_is_refused(op, consequence) -> None
             {"type": "array", "items": {"enum": ["r"]}},
             OPEN_B,
         ),
-        # Elements listed by anyOf branches join.
         (
             {"const": "x"},
             {
@@ -1831,8 +1831,11 @@ def test_a_value_outside_the_listed_elements_is_refused(op, consequence) -> None
                     {"type": "array", "items": {"const": "z"}},
                 ]
             },
-            B,
+            OPEN_B,
         ),
+        # Listed lists give the elements as data.
+        ({"const": "x"}, {"enum": [["y"], ["z"]]}, B),
+        ({"const": "z"}, {"enum": [["y"], ["z"]]}, OPEN_B),
         (
             {"const": "z"},
             {
@@ -1864,7 +1867,6 @@ def test_membership_reads_the_listed_elements_of_both_lists(
     [
         {"enum": ["nan", "closed"]},
         {"enum": ["NaN", True, None]},
-        {"anyOf": [{"const": "nan"}, {"type": "boolean"}]},
         {"type": ["string", "boolean"], "enum": ["nan", "open", False]},
     ],
 )
