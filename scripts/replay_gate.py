@@ -688,15 +688,30 @@ _FINAL_STRUCTURE = "final_control_structure"
 _FINAL_STRUCTURE_COPY = FINAL_CONTROL_STRUCTURE_FILENAME
 
 
-def _final_structure_pin(root: Path) -> dict[str, Any] | None:
-    """Return the final control structure pin of *root*'s synthesis manifest."""
+def _synthesis_manifest(root: Path) -> dict[str, Any]:
+    """Return *root*'s synthesis manifest, empty when it has none."""
     path = root / _MANIFEST_FILENAME
     if not path.is_file():
-        return None
+        return {}
     manifest = yaml.safe_load(path.read_text(encoding="utf-8"))
-    artifacts = manifest.get("source_artifacts") if isinstance(manifest, dict) else None
+    return manifest if isinstance(manifest, dict) else {}
+
+
+def _final_structure_pin(root: Path) -> dict[str, Any] | None:
+    """Return the final control structure pin of *root*'s synthesis manifest."""
+    artifacts = _synthesis_manifest(root).get("source_artifacts")
     pin = artifacts.get(_FINAL_STRUCTURE) if isinstance(artifacts, dict) else None
     return pin if isinstance(pin, dict) else None
+
+
+def _revision_applied(root: Path) -> bool:
+    """Tell whether *root*'s synthesis manifest records an applied revision.
+
+    Every manifest pins a final control structure, so only the revision
+    status says whether the run had a revised structure to write.
+    """
+    revision = _synthesis_manifest(root).get("revision")
+    return isinstance(revision, dict) and revision.get("status") == "applied"
 
 
 def _pinned_structure(path: Path, pin: dict[str, Any]) -> ControlStructure | None:
@@ -720,7 +735,13 @@ def _pinned_structure(path: Path, pin: dict[str, Any]) -> ControlStructure | Non
 
 
 def _final_structure_copy_problem(root: Path) -> str | None:
-    """Require the replay's final structure copy to be the one its manifest pins."""
+    """Require *root*'s final structure copy to follow an applied revision.
+
+    A run writes the copy only after an applied structural revision, and the
+    copy is the structure its synthesis manifest pins as final.
+    """
+    if not _revision_applied(root):
+        return "is written though the synthesis manifest records no applied revision"
     pin = _final_structure_pin(root)
     if pin is None or _pinned_structure(root / _FINAL_STRUCTURE_COPY, pin) is None:
         return "is not the final control structure the synthesis manifest pins"
@@ -2486,9 +2507,11 @@ def _locally_decided_slots(
     applied structural revision a run writes that structure as
     :data:`_FINAL_STRUCTURE_COPY`; the recording's copy is read first, then
     the replay's, which a recording made before the copy was written lacks.
-    Without either, the baseline ``control-structure.yaml`` counts where no
-    revision or enrichment changed it.  When no structure matches the pin, no
-    slot counts and a row with another routed slot fails closed.
+    A copy counts only where the recorded manifest and that side's manifest
+    record an applied revision.  Without one, the baseline
+    ``control-structure.yaml`` counts where no revision or enrichment changed
+    it.  When no structure matches the pin, no slot counts and a row with
+    another routed slot fails closed.
     """
     from asago_scenario_generator.stpa.threat_enum.slot_creation import (
         create_slots,
@@ -2498,9 +2521,12 @@ def _locally_decided_slots(
     pin = _final_structure_pin(recorded)
     if pin is None:
         return frozenset()
-    candidates = [recorded / _FINAL_STRUCTURE_COPY]
-    if replayed is not None:
-        candidates.append(replayed / _FINAL_STRUCTURE_COPY)
+    sides = [recorded] if replayed is None else [recorded, replayed]
+    candidates = [
+        root / _FINAL_STRUCTURE_COPY
+        for root in sides
+        if _revision_applied(recorded) and _revision_applied(root)
+    ]
     candidates.append(recorded / _CONTROL_STRUCTURE_FILENAME)
     structure = next(
         (
@@ -2957,6 +2983,9 @@ def compare_trees(
             if _expected_recording_only_file(name, expected)
         )
     shared = sorted(left & right)
+    differences += _final_structure_copy_differences(
+        recorded, replayed, _FINAL_STRUCTURE_COPY in shared
+    )
     # An accepted accounting change requires every file it derives to follow
     # it, so those files are checked even when they equal the recording.
     derived = (
@@ -2996,6 +3025,24 @@ def compare_trees(
         else:
             differences.append(Difference(relative, detail or _NOT_FOLLOWING))
     return len(shared), differences
+
+
+def _final_structure_copy_differences(
+    recorded: Path, replayed: Path, shared: bool
+) -> list[Difference]:
+    """Check a final structure copy both sides hold, on each side.
+
+    Equal copies compare equal, so each side's copy must also follow an
+    applied revision and match its manifest's pin; a copy only one side
+    holds is checked by its file change.
+    """
+    if not shared:
+        return []
+    return [
+        Difference(_FINAL_STRUCTURE_COPY, f"{side}: {problem}")
+        for side, root in (("recording", recorded), ("replay", replayed))
+        if (problem := _final_structure_copy_problem(root)) is not None
+    ]
 
 
 _NOT_FOLLOWING = "does not follow the accepted accounting change"

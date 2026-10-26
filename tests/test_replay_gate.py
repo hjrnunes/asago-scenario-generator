@@ -4149,9 +4149,12 @@ def _revised_structure(*, temporality: str | None = None) -> Any:
     )
 
 
-def _pin_revised_structure(root: Path, pinned: Any, copy: Any | None) -> None:
+def _pin_revised_structure(
+    root: Path, pinned: Any, copy: Any | None, *, revision: str = "applied"
+) -> None:
     """Pin *pinned* as the final structure and write *copy* as the run's copy.
 
+    The manifest records the structural revision with status *revision*.
     The baseline ``control-structure.yaml`` stays the unrevised structure.
     """
     from asago_scenario_generator.pipeline.synthesis_manifest import (
@@ -4169,6 +4172,7 @@ def _pin_revised_structure(root: Path, pinned: Any, copy: Any | None) -> None:
             **document["source_artifacts"],
             "final_control_structure": pin,
         },
+        revision={**document.get("revision", {}), "status": revision},
     )
     if copy is not None:
         (root / _FINAL_COPY).write_text(
@@ -4197,6 +4201,78 @@ def test_the_lost_reply_accepts_a_move_beside_a_slot_local_in_the_revised_struct
     _, differences = compare_trees(recorded, replayed, path_map)
 
     assert differences == []
+
+
+_NO_APPLIED_REVISION = (
+    "is written though the synthesis manifest records no applied revision"
+)
+_UNAPPLIED_REVISIONS = ["not_required", "rejected", "technical_failure"]
+
+
+@pytest.mark.parametrize("revision", _UNAPPLIED_REVISIONS)
+def test_a_replay_only_copy_without_an_applied_revision_is_a_difference(
+    trees, revision: str
+) -> None:
+    """Every manifest pins a final structure; only an applied revision writes one."""
+    recorded, replayed, path_map = _lost_reply_run(trees, local=True)
+    revised = _revised_structure()
+    for root in (recorded, replayed):
+        _pin_revised_structure(
+            root, revised, None if root == recorded else revised, revision=revision
+        )
+    assert (
+        replay_gate._pinned_structure(
+            replayed / _FINAL_COPY, replay_gate._final_structure_pin(replayed)
+        )
+        == revised
+    )
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert (_FINAL_COPY, _NO_APPLIED_REVISION) in [
+        (item.path, item.detail) for item in differences
+    ]
+    # Nor does the copy count as evidence of a locally answered slot.
+    assert replay_gate._locally_decided_slots(recorded, replayed) == frozenset()
+    assert sorted(item.path for item in differences) == sorted(
+        [*_STOP_ORDER_FILES, _FINAL_COPY]
+    )
+
+
+@pytest.mark.parametrize("revision", _UNAPPLIED_REVISIONS)
+def test_a_copy_both_sides_hold_without_an_applied_revision_is_a_difference(
+    trees, revision: str
+) -> None:
+    recorded, replayed, path_map = _lost_reply_run(trees, local=True)
+    revised = _revised_structure()
+    for root in (recorded, replayed):
+        _pin_revised_structure(root, revised, revised, revision=revision)
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert [
+        (item.path, item.detail) for item in differences if item.path == _FINAL_COPY
+    ] == [
+        (_FINAL_COPY, f"recording: {_NO_APPLIED_REVISION}"),
+        (_FINAL_COPY, f"replay: {_NO_APPLIED_REVISION}"),
+    ]
+    assert replay_gate._locally_decided_slots(recorded, replayed) == frozenset()
+
+
+def test_a_replay_copy_does_not_count_when_the_recording_applied_no_revision(
+    trees,
+) -> None:
+    """The pin the copy matches is the recording's, so its revision must apply."""
+    recorded, replayed, path_map = _lost_reply_run(trees, local=True)
+    revised = _revised_structure()
+    _pin_revised_structure(recorded, revised, None, revision="not_required")
+    _pin_revised_structure(replayed, revised, revised)
+
+    assert replay_gate._locally_decided_slots(recorded, replayed) == frozenset()
+
+    _, differences = compare_trees(recorded, replayed, path_map)
+
+    assert set(_STOP_ORDER_FILES) <= {item.path for item in differences}
 
 
 def test_the_lost_reply_does_not_hide_a_copy_the_manifest_does_not_pin(
