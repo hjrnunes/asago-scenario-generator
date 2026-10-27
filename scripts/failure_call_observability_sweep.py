@@ -2,9 +2,10 @@
 """Count analytical-only handoffs before and after the failure-call rule, offline.
 
 Each argument is a ``generate`` output directory: ``scenarios/*.yaml``, the
-run's ``execution-target-profile.json`` and its ``observation-contract.yaml``
-(the default contract when the run wrote none). Nothing is sent anywhere: the
-sweep reads only these files::
+run's ``execution-target-profile.json``, its ``observation-contract.yaml``
+(the default contract when the run wrote none) and its
+``target-realization.yaml`` (optional; see ``context_unknown`` below).
+Nothing is sent anywhere: the sweep reads only these files::
 
     uv run python scripts/failure_call_observability_sweep.py OUTPUT_DIR [...] \
         [--example TARGET_ID:SCN-ID ...] [--json]
@@ -26,6 +27,31 @@ A handoff whose condition failed was demoted by the old routing; the new
 routing keeps its command-attempt claim, which the rule applied to the
 demoted criteria reproduces. A scenario the rule makes executable carries no
 bound condition in the saved handoff either way.
+
+Every handoff also gets a ``condition`` class: what Stage 5 now publishes as
+its tool-call condition. A handoff whose discriminating condition failed
+validation, that has no bound condition and no reply criterion the contract
+supports (Stage 5 routes such a draft to ``reply`` first), and whose failure
+call the rule makes observable is classified by that failure call:
+
+- ``derived_not_called``: a ``missing_call``; code derives
+  ``not_called(<operation>)``.
+- ``guarded_no_condition``: a ``missing_call`` whose ``not_called`` the
+  condition check refuses (``not_called_inversion``: an INCORRECT action
+  that provides the same operation); code derives nothing.
+- ``incorrect_call_no_condition``: an ``incorrect_call``; code derives
+  nothing.
+- ``context_unknown``: a ``missing_call`` the guard would decide differently
+  under the UCA types or mapped operations the saved material leaves open.
+  The UCA type is the last part of the handoff's ``lineage.ica_slot_id``;
+  the mapped operation is the one ``realized_operation`` selects in
+  ``target-realization.yaml`` for ``lineage.control_action_id``, as Stage 5
+  selects it. Neither is guessed.
+
+Every other handoff is ``unchanged``. ``condition_proxy`` marks an unchanged
+handoff with a failed condition and no failure call whose failure criterion
+names a recorded operation: its failure call would decide between the
+classes, so it bounds them from above.
 """
 
 from __future__ import annotations
@@ -39,9 +65,13 @@ from typing import Any
 
 import yaml
 
+from asago_scenario_generator.models.target_realization import (
+    TargetRealizationResult,
+)
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
+from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.observation_contract import (
     FailureCall,
     ObservationContract,
@@ -49,10 +79,32 @@ from asago_scenario_generator.stpa.observation_contract import (
     assess_observation_criteria,
     default_observation_contract,
     failure_call_criterion,
+    SafeObservableOutcome,
     load_observation_contract,
+    supports_reply_criterion,
+)
+from asago_scenario_generator.stpa.scenario_prod.realized_operation import (
+    realized_operation,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.condition_claims import (
+    ConditionClaim,
+    not_called_inversion,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.condition_contradictions import (
+    handoff_uca_type,
 )
 
 ANALYTICAL = "analytical_only"
+DERIVED = "derived_not_called"
+INCORRECT = "incorrect_call_no_condition"
+GUARDED = "guarded_no_condition"
+UNKNOWN_CONTEXT = "context_unknown"
+UNCHANGED = "unchanged"
+CONDITION_CLASSES = (DERIVED, GUARDED, INCORRECT, UNKNOWN_CONTEXT)
+# The operation a control action maps to when the saved material cannot say.
+UNKNOWN_OPERATION = object()
+# How a publication note begins when the condition failed after its corrections.
+_CONDITION_FAILED = "The discriminating condition failed validation after"
 PROXY_AUTHORITY = "criterion_observed_operation"
 # The demotion note the old routing wrote on a criterion whose condition failed.
 _CONDITION_DEMOTION = "Not observable: the discriminating condition failed"
@@ -120,12 +172,103 @@ def _population(criteria: list[ObservationCriterion]) -> str:
     return "provider_unobservable"
 
 
+def _condition_failed(
+    handoff: Mapping[str, Any], criteria: list[ObservationCriterion]
+) -> bool:
+    """Return whether the handoff lost a condition that failed validation."""
+
+    if handoff.get("tool_call_condition"):
+        return False
+    note = handoff.get("condition_omitted_reason") or ""
+    return note.startswith(_CONDITION_FAILED) or (
+        _population(criteria) == "condition_failed"
+    )
+
+
+def _failure_call_route(
+    handoff: Mapping[str, Any],
+    criteria: list[ObservationCriterion],
+    contract: ObservationContract,
+) -> bool:
+    """Return whether a failed condition leaves Stage 5 off the reply route."""
+
+    return _condition_failed(handoff, criteria) and not supports_reply_criterion(
+        criteria, contract
+    )
+
+
+def condition_class(
+    handoff: Mapping[str, Any],
+    criteria: list[ObservationCriterion],
+    failure_call: FailureCall | None,
+    contract: ObservationContract,
+    operations: tuple[str, ...],
+    control_action_operation: object = UNKNOWN_OPERATION,
+) -> str:
+    """Return the tool-call condition Stage 5 now publishes for the handoff.
+
+    ``control_action_operation`` is the operation the control action maps to
+    (``None`` when it maps to none), or ``UNKNOWN_OPERATION``.
+    """
+
+    if (
+        not _failure_call_route(handoff, criteria, contract)
+        or failure_call_criterion(failure_call, contract, operations) is None
+    ):
+        return UNCHANGED
+    if failure_call.kind != "missing_call":
+        return INCORRECT
+    return _missing_call_class(handoff, failure_call, control_action_operation)
+
+
+def _missing_call_class(
+    handoff: Mapping[str, Any], failure_call: FailureCall, mapped: object
+) -> str:
+    """Apply Stage 5's polarity guard under every context the saved material allows.
+
+    A known UCA type or mapped operation is used as is. An unknown one is
+    replaced by each value the guard can tell apart: every UCA type, and, for
+    the mapped operation, the failure call's own operation or none. The
+    class is decided when every such context agrees.
+    """
+
+    operation = failure_call.operation_name
+    uca_type = handoff_uca_type(handoff)
+    uca_types = tuple(UCAType) if uca_type is None else (uca_type,)
+    mapped_operations = (None, operation) if mapped is UNKNOWN_OPERATION else (mapped,)
+    # Stage 5 judges the failure call on the command-attempt route.
+    safe_outcome = SafeObservableOutcome(
+        observable=True,
+        statement="The failure call's operation is judged on the captured calls.",
+        claim_level="command_attempt",
+        evidence="tool_call",
+        operation_name=operation,
+    )
+    guarded = {
+        not_called_inversion(
+            operation,
+            ConditionClaim(uca, unsafe_operation, safe_outcome, failure_call),
+        )
+        is not None
+        for uca in uca_types
+        for unsafe_operation in mapped_operations
+    }
+    if len(guarded) > 1:
+        return UNKNOWN_CONTEXT
+    return GUARDED if guarded.pop() else DERIVED
+
+
 def assess_handoff(
     handoff: Mapping[str, Any],
     contract: ObservationContract,
     operations: tuple[str, ...],
+    *,
+    control_action_operation: object = UNKNOWN_OPERATION,
 ) -> dict[str, Any]:
-    """Return the before and after dispositions of one handoff."""
+    """Return the before and after dispositions of one handoff.
+
+    ``control_action_operation`` is as for :func:`condition_class`.
+    """
 
     assessment = (handoff.get("observation") or {}).get("assessment") or {}
     before = assessment.get("disposition")
@@ -144,6 +287,21 @@ def assess_handoff(
         )
     )
     status = handoff.get("tool_call_condition_status") or {}
+    condition = condition_class(
+        handoff,
+        criteria,
+        failure_call,
+        contract,
+        operations,
+        control_action_operation,
+    )
+    condition_proxy = (
+        condition == UNCHANGED
+        and failure_call is None
+        and _failure_call_route(handoff, criteria, contract)
+        and bool(proxies)
+        and failure_call_criterion(proxy_call, contract, operations) is not None
+    )
     row = {
         "scenario_id": handoff.get("scenario_id"),
         "before": before,
@@ -154,6 +312,8 @@ def assess_handoff(
         "after_proxy": before,
         "condition_status": status.get("status"),
         "criterion": handoff.get("semantic_failure_criterion"),
+        "condition": condition,
+        "condition_proxy": condition_proxy,
     }
     if before != ANALYTICAL:
         return row
@@ -171,11 +331,45 @@ def sweep_directory(output_dir: Path) -> dict[str, Any]:
     )
     contract = _contract(output_dir)
     operations = recorded_operations(profile)
-    rows = [
-        assess_handoff(yaml.safe_load(path.read_text()), contract, operations)
-        for path in sorted((output_dir / "scenarios").glob("*.yaml"))
-    ]
+    realization_path = output_dir / "target-realization.yaml"
+    realization = (
+        TargetRealizationResult.model_validate(
+            yaml.safe_load(realization_path.read_text())
+        )
+        if realization_path.exists()
+        else None
+    )
+    rows = []
+    for path in sorted((output_dir / "scenarios").glob("*.yaml")):
+        handoff = yaml.safe_load(path.read_text())
+        rows.append(
+            assess_handoff(
+                handoff,
+                contract,
+                operations,
+                control_action_operation=mapped_operation(realization, handoff),
+            )
+        )
     return summarize(output_dir, profile.target_id, rows)
+
+
+def mapped_operation(
+    realization: TargetRealizationResult | None, handoff: Mapping[str, Any]
+) -> object:
+    """Return the operation Stage 5 maps the handoff's control action to.
+
+    ``None`` when the action maps to none; ``UNKNOWN_OPERATION`` without a
+    realization or a control action, or when the selection conflicts.
+    """
+
+    action = (handoff.get("lineage") or {}).get("control_action_id")
+    if realization is None or not action:
+        return UNKNOWN_OPERATION
+    try:
+        operation = realized_operation(realization, action)
+    except ValueError:
+        return UNKNOWN_OPERATION
+    return operation.reference.operation_id if operation is not None else None
 
 
 def summarize(
@@ -184,6 +378,9 @@ def summarize(
     """Return the counts of one directory and its analytical rows."""
 
     analytical = [row for row in rows if row["before"] == ANALYTICAL]
+
+    def by_condition(name: str) -> list[str]:
+        return [row["scenario_id"] for row in rows if row["condition"] == name]
 
     def ids(key: str) -> list[str]:
         return [row["scenario_id"] for row in analytical if row[key] != ANALYTICAL]
@@ -200,6 +397,11 @@ def summarize(
         ),
         "executable_after": ids("after"),
         "executable_after_proxy": ids("after_proxy"),
+        **{name: by_condition(name) for name in CONDITION_CLASSES},
+        UNCHANGED: len(by_condition(UNCHANGED)),
+        "condition_proxy": [
+            row["scenario_id"] for row in rows if row["condition_proxy"]
+        ],
         "rows": analytical,
     }
 
@@ -244,7 +446,12 @@ def report(
                 "analytical_before",
                 "analytical_after",
                 "analytical_after_proxy",
+                UNCHANGED,
             )
+        }
+        | {
+            key: sum(len(item[key]) for item in summaries)
+            for key in (*CONDITION_CLASSES, "condition_proxy")
         },
         "examples": examples(summaries, wanted),
     }
@@ -283,6 +490,25 @@ def render(summaries: list[dict[str, Any]], wanted: Sequence[str] = ()) -> str:
                 f" [{', '.join(row['proxy_operations']) or 'no named operation'}]"
             )
         lines.append("")
+    lines += [
+        "## Tool-call condition after a failed condition",
+        "",
+        "| target | directory | derived not_called | missing call, guarded, no "
+        "condition | incorrect call, no condition | context unknown | unchanged "
+        "| of which undecided without a failure call |",
+        "| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for item in result["directories"]:
+        counts = " | ".join(str(len(item[name])) for name in CONDITION_CLASSES)
+        lines.append(
+            f"| {item['target_id']} | {item['directory']} | {counts} | "
+            f"{item[UNCHANGED]} | {len(item['condition_proxy'])} |"
+        )
+    counts = " | ".join(str(total[name]) for name in CONDITION_CLASSES)
+    lines += [
+        f"| total | | {counts} | {total[UNCHANGED]} | {total['condition_proxy']} |",
+        "",
+    ]
     if result["examples"]:
         lines += ["## Named examples", ""]
         for row in result["examples"]:

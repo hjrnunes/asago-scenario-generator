@@ -52,6 +52,7 @@ from asago_scenario_generator.stpa.tool_call_condition import (
     TOOL_CALL_CONDITION_NOT_EXECUTABLE,
     ToolCallCondition,
     ToolCallConditionStatus,
+    ToolCallNotCalledComparison,
 )
 
 Truth = bool | None
@@ -137,6 +138,32 @@ def bind_tool_call_condition(
             detail="every fact operand resolved and every state predicate holds",
         ),
         ToolCallCondition.model_validate({"comparisons": comparisons}),
+    )
+
+
+def bind_missing_call(operation: str) -> ToolCallBinding:
+    """Return the bound ``not_called`` condition a missing call states.
+
+    The failure is that ``operation`` is never called, which the contract's
+    ``not_called`` comparison expresses exactly: no captured call of the
+    operation, with no ``where`` scope. Code derives it only for a missing
+    call of an operation the target records; see ``condition_routing``.
+    """
+
+    return ToolCallBinding(
+        ToolCallConditionStatus(
+            status=TOOL_CALL_CONDITION_BOUND,
+            reason=REASON_BOUND,
+            detail=(
+                f"derived by code from the failure call: {operation} is never "
+                "called (missing_call)"
+            ),
+        ),
+        ToolCallCondition(
+            comparisons=[
+                ToolCallNotCalledComparison(kind="not_called", operation=operation)
+            ]
+        ),
     )
 
 
@@ -486,6 +513,7 @@ def numeric_value(value: Any) -> float | None:
 
 __all__ = [
     "ToolCallBinding",
+    "bind_missing_call",
     "bind_tool_call_condition",
     "compare",
     "numeric_value",

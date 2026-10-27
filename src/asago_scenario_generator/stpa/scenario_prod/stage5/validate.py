@@ -49,6 +49,7 @@ from ..condition_check import (
 )
 from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
+from ..tool_call_binding import ToolCallBinding
 from .wire import (
     _CausalSourceChoice,
     _ObservationCriterionDraft,
@@ -370,6 +371,9 @@ class _NormalDraftCheck:
     condition_outcome: ConditionCheckOutcome | None = None
     # Why a reply-only draft publishes without a condition; None otherwise.
     condition_omitted_reason: str | None = None
+    # The tool-call condition code derived for a draft without a condition;
+    # None when code derived none.
+    tool_call_binding: ToolCallBinding | None = None
 
 
 def _normal_adversary_and_outcome(
