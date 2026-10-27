@@ -52,6 +52,7 @@ from ..condition_check import (
 )
 from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
+from ..tool_call_binding import ToolCallBinding
 from .assemble import ScenarioAssembly, ScenarioAssemblyError
 from .wire import (
     _CausalSourceChoice,
@@ -296,14 +297,14 @@ def _generate_semantics(
                 execution_target_profile, target_operation=target_operation
             ),
         )
-        final, route, routing = draft, None, ()
+        final, route, routing, binding = draft, None, (), None
         if routed is not None:
             try:
                 final = validate(routed.draft, condition_required=False)
             except (TypeError, ValueError):
                 pass
             else:
-                route = routed.route
+                route, binding = routed.route, routed.binding
                 routing = (*routed.normalizations, *checks[-1].normalizations)
         # checks[-1] is the check of ``final``: a failed validation appends none.
         checks[-1] = replace(
@@ -314,6 +315,7 @@ def _generate_semantics(
                 *routing,
             ),
             route=route,
+            tool_call_binding=binding,
         )
         return final
 
@@ -352,15 +354,17 @@ def _generate_semantics(
     ) -> tuple[ScenarioSpec | None, str | None]:
         condition_omitted_reason: str | None = None
         if recovered is not None:
+            draft, route = recovered
+        published = next((check for check in checks if check.draft is draft), None)
+        binding = published.tool_call_binding if published is not None else None
+        if recovered is not None:
             # The condition must never be the reason a scenario is lost: after
             # the corrections, a draft that passes without its condition is
             # published without one.
-            draft, route = recovered
             error = None
             condition_omitted_reason = _condition_omitted_reason(
-                issues, route, corrections
+                issues, route, corrections, derived=binding
             )
-        published = next((check for check in checks if check.draft is draft), None)
         if condition_omitted_reason is None and published is not None:
             condition_omitted_reason = published.condition_omitted_reason
         try:
@@ -376,6 +380,7 @@ def _generate_semantics(
                 condition_outcome=(
                     published.condition_outcome if published is not None else None
                 ),
+                tool_call_binding=binding,
             )
         except ScenarioAssemblyError:
             # The draft compiled, so its normalizations are recorded even
@@ -460,6 +465,7 @@ def _finish_normal_context_bdi(
     condition_universe: ConditionUniverse | None = None,
     condition_omitted_reason: str | None = None,
     condition_outcome: ConditionCheckOutcome | None = None,
+    tool_call_binding: ToolCallBinding | None = None,
 ) -> tuple[ScenarioSpec | None, str | None]:
     """Compile one normal-path draft without any execution materialization.
 
@@ -479,6 +485,7 @@ def _finish_normal_context_bdi(
                 condition_universe=condition_universe,
                 condition_omitted_reason=condition_omitted_reason,
                 condition_outcome=condition_outcome,
+                tool_call_binding=tool_call_binding,
             ),
             None,
         )
@@ -659,24 +666,38 @@ _ROUTE_NOTES = {
         "scenario is published as analytical_only."
     ),
 }
+_DERIVED_NOTE = (
+    "the failure call is a missing call of {operation}, an operation the "
+    "target records, so the command_attempt claim stays observable and the "
+    "scenario is published with the tool-call condition code derived from "
+    "it, not_called({operation})."
+)
 
 
 def _condition_omitted_reason(
     issues: tuple[ValidationIssue, ...],
     route: str | None = None,
     corrections: int = 1,
+    *,
+    derived: ToolCallBinding | None = None,
 ) -> str:
     """Return the code-owned publication note for a condition that failed.
 
     The exact failure text stays in the Stage 5 call log; the note names only
     the stable code of the issue the final attempt raised, so published prose
-    carries no raw validator output. A routed scenario names where it went.
+    carries no raw validator output. A routed scenario names where it went,
+    and one that publishes a ``derived`` condition names that condition.
     """
 
     spent = "one correction" if corrections == 1 else "two corrections"
+    if derived is None:
+        note = _ROUTE_NOTES[route]
+    else:
+        [comparison] = derived.condition.comparisons
+        note = _DERIVED_NOTE.format(operation=comparison.operation)
     return (
         f"The discriminating condition failed validation after {spent} "
-        f"({_condition_failure_code(issues)}); {_ROUTE_NOTES[route]}"
+        f"({_condition_failure_code(issues)}); {note}"
     )
 
 

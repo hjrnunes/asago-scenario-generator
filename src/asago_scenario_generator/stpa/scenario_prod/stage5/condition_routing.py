@@ -9,7 +9,11 @@ it adds is the note on a criterion it withdrew.
 
 A failure call of an operation the target records is observed whatever the
 condition, so such a draft keeps its command-attempt claim: a failed
-condition never makes an observable call analytical.
+condition never makes an observable call analytical. When that failure call
+is a missing call, the failure is that the operation is never called, and
+code derives the tool-call condition ``not_called(<operation>)`` from it,
+recorded as a normalization. An incorrect call says only that the call is
+wrong, not what makes it wrong, so code derives nothing for it.
 """
 
 from __future__ import annotations
@@ -21,18 +25,23 @@ from typing import Literal
 from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.observation_contract import (
+    FailureCall,
     ObservationContract,
     ObservationCriterion,
     SafeObservableOutcome,
     assess_observation_criteria,
     failure_call_criterion,
 )
+from ..tool_call_binding import ToolCallBinding, bind_missing_call
 from .records import Stage5Normalization
 from .validate import _replace_safe_outcome
 
 ConditionRoute = Literal["reply", "failure_call", "analytical_only"]
 
 _COMMAND_ATTEMPT = "command_attempt"
+_MISSING_CALL = "missing_call"
+# The reason of the record of a condition derived from a missing call.
+MISSING_CALL_CONDITION_REASON = "missing_call_of_recorded_operation"
 _CRITERION_FIELDS = (
     "observable",
     "claim_level",
@@ -73,6 +82,9 @@ class RoutedDraft:
     draft: BaseModel
     route: ConditionRoute
     normalizations: tuple[Stage5Normalization, ...]
+    # The code-derived tool-call condition the draft publishes; None when
+    # code derived none.
+    binding: ToolCallBinding | None = None
 
 
 def _route_reason(route: ConditionRoute, failure_code: str) -> str:
@@ -124,19 +136,19 @@ def route_without_condition(
     supports: a reply claim needs the model's own reply-level observation,
     and code never writes one. Otherwise a draft whose failure call names one
     of ``recorded_operations`` takes the ``failure_call`` route, which keeps
-    the draft unchanged, and every other draft goes to ``analytical_only``.
+    the draft unchanged (a missing call also gets its derived condition), and
+    every other draft goes to ``analytical_only``.
     """
 
     outcome = draft.unsafe_outcome
     safe_outcome = outcome.safe_observable_outcome
     if not _is_command_attempt(safe_outcome):
         return None
+    failure_call = getattr(outcome, "failure_call", None)
     if _declares_supported_reply(outcome, contract):
         route: ConditionRoute = "reply"
-    elif failure_call_criterion(
-        getattr(outcome, "failure_call", None), contract, recorded_operations
-    ):
-        return RoutedDraft(copy.deepcopy(draft), "failure_call", ())
+    elif failure_call_criterion(failure_call, contract, recorded_operations):
+        return _failure_call_route(draft, failure_call)
     else:
         route = "analytical_only"
     reason = _route_reason(route, failure_code)
@@ -155,6 +167,25 @@ def route_without_condition(
         for index, criterion in enumerate(outcome.observation_criteria)
     ]
     return RoutedDraft(routed, route, tuple(normalizations))
+
+
+def _failure_call_route(draft: BaseModel, failure_call: FailureCall) -> RoutedDraft:
+    """Keep the draft; derive ``not_called`` when its failure call is a missing call.
+
+    The caller has checked that the target records the operation and that
+    the contract captures tool calls at ``command_attempt``.
+    """
+
+    if failure_call.kind != _MISSING_CALL:
+        return RoutedDraft(copy.deepcopy(draft), "failure_call", ())
+    binding = bind_missing_call(failure_call.operation_name)
+    record = Stage5Normalization(
+        field="tool_call_condition",
+        original=None,
+        normalized=binding.condition.model_dump(mode="json"),
+        reason=MISSING_CALL_CONDITION_REASON,
+    )
+    return RoutedDraft(copy.deepcopy(draft), "failure_call", (record,), binding)
 
 
 def _is_command_attempt(safe_outcome: SafeObservableOutcome | None) -> bool:

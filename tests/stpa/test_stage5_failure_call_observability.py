@@ -10,6 +10,9 @@ import yaml
 from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     _validate_normal_provider_payload,
 )
+from asago_scenario_generator.stpa.scenario_prod.stage5.condition_routing import (
+    route_without_condition,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.issues import (
     ValidationIssueError,
 )
@@ -561,3 +564,195 @@ def test_without_tool_call_capture_no_failure_call_is_asked_and_it_stays_analyti
     )
     assert result.observation_assessment.disposition == "analytical_only"
     assert result.safe_observable_outcome.observable is False
+
+
+# A failed condition of a missing call: code derives not_called from the
+# failure call. An incorrect call gets no derived condition.
+MISSING_REFUND = {"kind": "missing_call", "operation_name": "refund_payment"}
+DERIVED_NOT_CALLED = {
+    "comparisons": [{"kind": "not_called", "operation": "refund_payment", "where": []}]
+}
+DERIVED_RECORD = {
+    "field": "tool_call_condition",
+    "original": None,
+    "normalized": DERIVED_NOT_CALLED,
+    "reason": "missing_call_of_recorded_operation",
+}
+
+
+def _failed_condition_payload(failure_call: dict | None, condition=None) -> dict:
+    payload = _payload_with(condition)
+    payload["unsafe_outcome"]["failure_call"] = failure_call
+    return payload
+
+
+def test_a_failed_condition_of_a_missing_call_publishes_the_derived_not_called(
+    tmp_path,
+) -> None:
+    payload = _failed_condition_payload(MISSING_REFUND, _ownership_condition("ORD-1"))
+    client = _client(payload, payload, payload)
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert result is not None
+    # The second correction is still sent: the model's own condition can be
+    # narrower than the unscoped one code derives.
+    assert client.call_count == 3
+    assert result.observation_assessment.disposition == "executable"
+    assert result.safe_observable_outcome.claim_level == "command_attempt"
+    assert result.discriminating_condition is None
+    assert result.condition_check is None
+    status = result.tool_call_condition_status
+    assert (status.status, status.reason, status.detail) == (
+        "bound",
+        "bound",
+        "derived by code from the failure call: refund_payment is never called "
+        "(missing_call)",
+    )
+    assert result.tool_call_condition.model_dump(mode="json") == DERIVED_NOT_CALLED
+    assert result.condition_omitted_reason == (
+        f"The discriminating condition failed validation after two corrections "
+        f"({CHECK_FAILED}); the failure call is a missing call of "
+        "refund_payment, an operation the target records, so the "
+        "command_attempt claim stays observable and the scenario is published "
+        "with the tool-call condition code derived from it, "
+        "not_called(refund_payment)."
+    )
+
+
+def test_the_derived_condition_is_recorded_after_the_removed_one(tmp_path) -> None:
+    payload = _failed_condition_payload(MISSING_REFUND, _ownership_condition("ORD-1"))
+
+    result, error = _generate(_client(payload, payload, payload), tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert _normalizations(tmp_path) == [_removal("failure_call"), DERIVED_RECORD]
+
+
+def test_a_missing_condition_of_a_missing_call_records_only_the_derivation(
+    tmp_path,
+) -> None:
+    payload = _failed_condition_payload(MISSING_REFUND)
+    client = _client(payload, payload, payload)
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None
+    assert result is not None
+    # A reply that returned no condition earns no second correction.
+    assert client.call_count == 2
+    assert result.tool_call_condition_status.status == "bound"
+    assert result.tool_call_condition.model_dump(mode="json") == DERIVED_NOT_CALLED
+    assert _normalizations(tmp_path) == [DERIVED_RECORD]
+
+
+def test_a_failed_condition_of_an_incorrect_call_publishes_without_a_condition(
+    tmp_path,
+) -> None:
+    """An incorrect call states no condition, so code derives none.
+
+    The scenario publishes as an executable command attempt whose tool-call
+    condition is ``not_executable`` (``no_condition``); the consumer rejects
+    such a command-attempt handoff with ``tool_call_condition_missing``.
+    """
+    payload = _failed_condition_payload(INCORRECT_REFUND, _ownership_condition("ORD-1"))
+
+    result, error = _generate(_client(payload, payload, payload), tmp_path)
+
+    assert error is None
+    assert result is not None
+    assert result.observation_assessment.disposition == "executable"
+    assert result.safe_observable_outcome.claim_level == "command_attempt"
+    assert result.tool_call_condition is None
+    assert (
+        result.tool_call_condition_status.status,
+        result.tool_call_condition_status.reason,
+    ) == ("not_executable", "no_condition")
+    assert result.tool_call_condition_status.detail == (
+        "the handoff publishes no discriminating condition: "
+        f"{result.condition_omitted_reason}"
+    )
+    assert _normalizations(tmp_path) == [_removal("failure_call")]
+
+
+def _routing_draft(failure_call: dict):
+    payload = _failed_condition_payload(failure_call)
+    response_format = _scenario_semantics_payload_type(
+        1,
+        duration_eligible=False,
+        observation_criteria_required=True,
+        condition_references_supplied=True,
+        failure_call_supported=True,
+    )
+    return response_format.model_validate(payload)
+
+
+def test_the_routing_derives_not_called_for_a_recorded_missing_call() -> None:
+    routed = route_without_condition(
+        _routing_draft(MISSING_REFUND),
+        default_observation_contract(),
+        CHECK_FAILED,
+        recorded_operations=("refund_payment",),
+    )
+
+    assert routed is not None
+    assert routed.route == "failure_call"
+    assert routed.binding.condition.model_dump(mode="json") == DERIVED_NOT_CALLED
+    assert [item.model_dump(mode="json") for item in routed.normalizations] == [
+        DERIVED_RECORD
+    ]
+
+
+def test_the_routing_derives_nothing_for_an_incorrect_call() -> None:
+    routed = route_without_condition(
+        _routing_draft(INCORRECT_REFUND),
+        default_observation_contract(),
+        CHECK_FAILED,
+        recorded_operations=("refund_payment",),
+    )
+
+    assert routed is not None
+    assert routed.route == "failure_call"
+    assert routed.binding is None
+    assert routed.normalizations == ()
+
+
+@pytest.mark.parametrize(
+    ("recorded", "contract"),
+    (
+        pytest.param(("open_ticket",), None, id="operation_not_recorded"),
+        pytest.param((), None, id="no_recorded_operation"),
+        pytest.param(
+            ("refund_payment",),
+            "reply_only",
+            id="contract_without_command_attempt",
+        ),
+        pytest.param(
+            ("refund_payment",),
+            "no_tool_call_capture",
+            id="contract_without_tool_call_capture",
+        ),
+    ),
+)
+def test_the_routing_derives_nothing_for_an_ineligible_missing_call(
+    recorded, contract
+) -> None:
+    observation_contract = {
+        None: default_observation_contract,
+        "reply_only": lambda: _contract_with(supported_claim_levels=("reply",)),
+        "no_tool_call_capture": _without_tool_call_capture,
+    }[contract]()
+
+    routed = route_without_condition(
+        _routing_draft(MISSING_REFUND),
+        observation_contract,
+        CHECK_FAILED,
+        recorded_operations=recorded,
+    )
+
+    assert routed is not None
+    assert routed.route == "analytical_only"
+    assert routed.binding is None
+    assert all(item.field != "tool_call_condition" for item in routed.normalizations)

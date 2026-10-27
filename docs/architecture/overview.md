@@ -638,9 +638,16 @@ A failure call that names an operation the target records is a command attempt
 the contract captures, so it is never analytical-only: when the provider's
 own criteria are all unsupported, code adds the failure call's
 `command_attempt` criterion and makes the safe outcome observable on that
-call, and a scenario whose condition could not be kept keeps that claim and
-is published without a condition (`tool_call_condition_status`
-`not_executable`, reason `no_condition`).
+call, and a scenario whose condition could not be kept keeps that claim.
+When its failure call is a `missing_call`, the failure is that the operation
+is never called, so code derives the bound tool-call condition
+`{"comparisons": [{"kind": "not_called", "operation": <name>, "where": []}]}`
+and records it in the Stage 5 normalization record (field
+`tool_call_condition`, reason `missing_call_of_recorded_operation`). An
+`incorrect_call` states only that the call is wrong, not what makes it wrong,
+so code derives nothing: the scenario is published without a condition
+(`tool_call_condition_status` `not_executable`, reason `no_condition`), and
+the consumer rejects that command attempt as `tool_call_condition_missing`.
 Runtime-readiness
 concerns (chat surfaces, clocks, observers, locators, credentials, and endpoint
 details) belong to the consumer. A caller-requested environment basis

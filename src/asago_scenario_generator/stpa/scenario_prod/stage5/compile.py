@@ -38,7 +38,7 @@ from ..condition_check import (
     ConditionCheckOutcome,
     ConditionUniverse,
 )
-from ..tool_call_binding import bind_tool_call_condition
+from ..tool_call_binding import ToolCallBinding, bind_tool_call_condition
 from .assemble import ScenarioAssembly, assemble_scenario_spec
 from .wire import (
     CausalFactorDeclaration,
@@ -123,13 +123,16 @@ def compile_scenario_spec(
     condition_universe: ConditionUniverse | None = None,
     condition_omitted_reason: str | None = None,
     condition_outcome: ConditionCheckOutcome | None = None,
+    tool_call_binding: ToolCallBinding | None = None,
 ) -> ScenarioSpec:
     """Compile a normal-path draft into the published ScenarioSpec.
 
     The spec carries no execution contract and no executable unsafe-outcome
     condition; nothing is generated and later stripped.  Lineage stays
     compiler-owned: the exact hazard/constraint IDs derive from the immutable
-    context.
+    context. ``tool_call_binding`` is a condition code derived for a draft
+    that publishes no discriminating condition; it is published in place of
+    the ``no_condition`` binding.
 
     Raises:
         ScenarioAssemblyError: When the deterministic authority rejects the
@@ -152,11 +155,12 @@ def compile_scenario_spec(
         condition_outcome,
     )
     omitted_reason = condition_omitted_reason or discarded_reason
-    binding = bind_tool_call_condition(
-        condition,
-        condition_universe.fact_values if condition_universe is not None else {},
-        condition_omitted_reason=omitted_reason,
-    )
+    if tool_call_binding is None or condition is not None:
+        tool_call_binding = bind_tool_call_condition(
+            condition,
+            condition_universe.fact_values if condition_universe is not None else {},
+            condition_omitted_reason=omitted_reason,
+        )
     return assemble_scenario_spec(
         assembly,
         context,
@@ -179,8 +183,8 @@ def compile_scenario_spec(
         discriminating_condition=condition,
         condition_check=condition_check,
         condition_omitted_reason=omitted_reason,
-        tool_call_condition_status=binding.status,
-        tool_call_condition=binding.condition,
+        tool_call_condition_status=tool_call_binding.status,
+        tool_call_condition=tool_call_binding.condition,
     )
 
 
