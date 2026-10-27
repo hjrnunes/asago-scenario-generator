@@ -4,8 +4,8 @@
     python3 scripts/gen_tool_call_condition_vectors.py \\
         --garak-checkout <Garak checkout> --garak-python <Garak interpreter> [--check]
 
-The script holds only inputs (conditions, calls, completeness) and needs only
-the standard library. A child process started with the Garak interpreter runs
+The script holds the vector inputs (conditions, calls, completeness) and the v2
+reference evaluator, and needs only the standard library. A child process started with the Garak interpreter runs
 ``validate_condition`` and ``evaluate_condition`` on the inputs; every v1
 expected value, and every v2 validate value, comes from that run. The checkout
 must be at ``REVISION``. Garak at that revision evaluates v1, so the v2
