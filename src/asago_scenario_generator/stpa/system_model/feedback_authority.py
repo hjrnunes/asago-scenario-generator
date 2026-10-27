@@ -3,9 +3,10 @@
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+from collections.abc import Iterable, Sequence
 from typing import Protocol
 
+from asago_scenario_generator.stpa.infra.llm_helpers import ExactFeedbackError
 from asago_scenario_generator.stpa.models.control_structure import (
     FeedbackAuthorityStatus,
     FeedbackSourceKind,
@@ -131,6 +132,58 @@ def validate_feedback_authority_assessments(
             raise ValueError(reason)
 
 
+class FeedbackAuthorityError(ExactFeedbackError):
+    """Every channel whose authority basis fails the checks, in reply order.
+
+    ``defects`` holds ``(fb_id, reason)`` for each failing channel.  The
+    message lists every reason on a line of its own, so the one correction
+    request names each failing channel.
+    """
+
+    def __init__(self, defects: Sequence[tuple[str, str]]) -> None:
+        self.defects = tuple(defects)
+        count = len(self.defects)
+        heading = (
+            "1 feedback channel authority basis fails the checks:"
+            if count == 1
+            else f"{count} feedback channel authority bases fail the checks:"
+        )
+        super().__init__(
+            "\n".join([heading, *(f"- {reason}" for _, reason in self.defects)])
+        )
+
+
+def validate_all_feedback_authority_assessments(
+    channels: Iterable[_AuthorityChannel],
+    *,
+    target_evidence: TargetEvidence | None,
+    require_domain_scope: bool,
+) -> None:
+    """Check bases as :func:`validate_feedback_authority_assessments` does.
+
+    Unlike that function, it does not stop at the first failing channel.
+
+    Raises:
+        FeedbackAuthorityError: Naming each channel whose basis fails, in the
+            order of *channels*.
+    """
+    offered_refs = _offered_refs(target_evidence)
+    defects = [
+        (channel.fb_id, reason)
+        for channel in channels
+        if (
+            reason := _basis_defect(
+                channel,
+                offered_refs=offered_refs,
+                require_domain_scope=require_domain_scope,
+            )
+        )
+        is not None
+    ]
+    if defects:
+        raise FeedbackAuthorityError(defects)
+
+
 def feedback_authority_defect(
     channel: _AuthorityChannel,
     *,
@@ -236,6 +289,8 @@ def _states_domain_scope(basis: str) -> bool:
 
 
 __all__ = [
+    "FeedbackAuthorityError",
     "feedback_authority_defect",
+    "validate_all_feedback_authority_assessments",
     "validate_feedback_authority_assessments",
 ]

@@ -157,7 +157,10 @@ PROMPT_DIRS = (
     TARGET_REALIZATION_PROMPTS_DIR,
 )
 # Requests built in Python, each pinned by the table of the same name.
-REQUESTS = ("stage5_condition_correction",)
+REQUESTS = (
+    "stage5_condition_correction",
+    "stage2_call2b_authority_correction_request",
+)
 
 _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
 _NARRATE_TEMPLATES = ("stage6_narrate_system.j2", "stage6_narrate_user.j2")
@@ -704,6 +707,18 @@ def _stage5_correction(condition: Callable[[], dict | None]) -> Callable[[str], 
     return render
 
 
+def _call_2b_authority_correction(request: str) -> str:
+    """Render the Call 2b correction request that follows two failing bases."""
+    assert request == "stage2_call2b_authority_correction_request"
+    # Imported here: that test module reads CASES from this one.
+    from tests.stpa.test_feedback_update_authority import (
+        authority_correction_request,
+    )
+
+    with tempfile.TemporaryDirectory() as run_dir:
+        return authority_correction_request(Path(run_dir))
+
+
 # The critic request for a structure whose feedback channel is assessed.
 FEEDBACK_AUTHORITY_CRITIC = {
     "use_case_text": "Test use case",
@@ -817,6 +832,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "literal-unsupported-correction": _stage5_correction(
         _descriptive_literal_condition
     ),
+    "two-failing-authority-bases": _call_2b_authority_correction,
     **{case: _obligation_aware(case) for case in OBLIGATION_AWARE_BUILDS},
 }
 
