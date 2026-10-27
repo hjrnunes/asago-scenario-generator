@@ -898,9 +898,15 @@ def _run_stage_2_steps(
         derivation.control_structure, target_evidence
     )
     versions.add(control_structure, "control-structure-evidence-bound.yaml")
-    merge_warnings = list(derivation.warnings)
-    stage_warnings.extend(merge_warnings)
+    stage_warnings.extend(derivation.warnings)
     stage_warnings.extend(binding_warnings)
+    # A dropped authority assessment already reads as unknown in the
+    # structure; the reason it was dropped is for the record, not the critic.
+    critic_warnings = [
+        warning
+        for warning in derivation.warnings
+        if warning not in derivation.authority_warnings
+    ]
 
     # Structural heuristics (always run after Call 3)
     heuristic_result = check_structural_heuristics(control_structure, loss_analysis)
@@ -915,7 +921,7 @@ def _run_stage_2_steps(
         template_loader=loader,
         temperature=temperature,
         loss_analysis=loss_analysis,
-        call3_warnings=merge_warnings,
+        call3_warnings=critic_warnings,
         target_evidence=target_evidence,
     )
 

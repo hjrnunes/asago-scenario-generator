@@ -5,7 +5,11 @@ with ``every responsibility requires a control action``.  The generic
 correction carries that text only, and a reply may still miss the owner.  The
 stage then sends one repair request that asks for control actions for exactly
 the missing owners, merges them into the last reply, and checks the result
-again.  A repair that fails stops the unit as before.
+again.  A repair reply may restate actions of the last reply unchanged; those
+are the last reply's own and are not added twice.  The merged response gets
+the authority basis checks of every Call 2b reply, and an unsupported basis
+is dropped with a warning as on the other Call 2b paths.  A repair that fails
+stops the unit as before.
 """
 
 from __future__ import annotations
@@ -82,7 +86,9 @@ def _repair_reply(*numbers: int) -> dict[str, Any]:
     return {"control_actions": [_action(number) for number in numbers]}
 
 
-def _run(client: MockLLMClient, run_dir: Path) -> Any:
+def _run(
+    client: MockLLMClient, run_dir: Path, *, warnings: list[str] | None = None
+) -> Any:
     return _call_2b_control_elements(
         llm_client=client,
         use_case_text="Test use case",
@@ -90,6 +96,7 @@ def _run(client: MockLLMClient, run_dir: Path) -> Any:
         run_dir=run_dir,
         loader=TemplateLoader(PROMPTS_DIR),
         temperature=0.4,
+        warnings=warnings,
     )
 
 
@@ -119,6 +126,24 @@ def test_a_reply_that_misses_an_owner_twice_earns_one_repair(tmp_path: Path) -> 
     ]
     assert len(client.calls) == 3
     assert client.calls[2].response_format is _MissingActionProviderSet
+
+
+def test_a_repair_reply_may_restate_the_prior_actions_unchanged(
+    tmp_path: Path,
+) -> None:
+    # The recorded shape: the reply repeats every action of the last reply
+    # verbatim and adds the missing owner's action between them.
+    client = _client(_reply(1, 3), _reply(1, 3), _repair_reply(1, 2, 3))
+
+    parsed = _run(client, tmp_path)
+
+    assert [action.ca_id for action in parsed.control_actions] == [
+        "CA-1-1",
+        "CA-3-1",
+        "CA-2-1",
+    ]
+    assert len(client.calls) == 3
+    assert _attempts(tmp_path)[2]["success"] is True
 
 
 def test_the_repair_follows_a_correction_that_fixes_another_defect(
@@ -209,6 +234,13 @@ def test_the_repair_gets_no_second_request(tmp_path: Path) -> None:
     [
         {"control_actions": []},
         {"control_actions": [_action(1)]},
+        {
+            "control_actions": [
+                {**_action(1), "description": "Deliver a changed result"},
+                _action(3),
+            ]
+        },
+        {"control_actions": [{**_action(1), "ca_id": "CA-1-2"}, _action(3)]},
         {"control_actions": [_action(3)], "feedback": []},
         "not json {",
         {"control_actions": [{**_action(3), "ca_id": "CA-9-1"}]},
@@ -221,6 +253,8 @@ def test_the_repair_gets_no_second_request(tmp_path: Path) -> None:
     ids=[
         "empty",
         "action-for-a-served-owner",
+        "changed-action-for-a-served-owner",
+        "new-action-for-a-served-owner",
         "extra-collection",
         "undecodable",
         "unknown-owner",
@@ -283,3 +317,79 @@ def test_a_reply_that_serves_every_owner_sends_no_repair(tmp_path: Path) -> None
 
     assert len(parsed.control_actions) == 3
     assert len(client.calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# The merged response gets the authority basis checks
+# ---------------------------------------------------------------------------
+
+_SUPPORTED_BASIS = (
+    "Use case: the caller interface reports the result of responsibility 1."
+)
+
+
+def _assessed_reply(basis: str, *owners: int) -> dict[str, Any]:
+    reply = _reply(*owners)
+    reply["feedback"][0]["authority_for_update"] = {
+        "status": "authoritative",
+        "basis": basis,
+    }
+    return reply
+
+
+def test_the_repair_drops_an_unsupported_authority_basis(tmp_path: Path) -> None:
+    reply = _assessed_reply("tool result", 1, 2)
+    client = _client(reply, copy.deepcopy(reply), _repair_reply(3))
+    warnings: list[str] = []
+
+    parsed = _run(client, tmp_path, warnings=warnings)
+
+    assert len(client.calls) == 3
+    assert {action.ca_id for action in parsed.control_actions} == {
+        "CA-1-1",
+        "CA-2-1",
+        "CA-3-1",
+    }
+    unsupported = parsed.feedback_channels[0]
+    assert unsupported.fb_id == "FB-1-1"
+    assert unsupported.authority_for_update is None
+    reason = (
+        "feedback channel FB-1-1 authority basis only restates source kind "
+        "'operation_result'; state why that source may or may not establish "
+        "this value and cite supplied evidence"
+    )
+    assert warnings == [
+        "stage_2/call_2b_control_elements: dropped the authority_for_update of "
+        f"feedback channel FB-1-1; its authority is unknown: {reason}"
+    ]
+    repair_row = _attempts(tmp_path)[2]
+    assert repair_row["success"] is False
+    assert reason in repair_row["error"]
+
+
+def test_the_repair_keeps_a_supported_authority_basis(tmp_path: Path) -> None:
+    reply = _assessed_reply(_SUPPORTED_BASIS, 1, 2)
+    client = _client(reply, copy.deepcopy(reply), _repair_reply(3))
+    warnings: list[str] = []
+
+    parsed = _run(client, tmp_path, warnings=warnings)
+
+    assessment = parsed.feedback_channels[0].authority_for_update
+    assert assessment is not None
+    assert assessment.basis == _SUPPORTED_BASIS
+    assert warnings == []
+    assert _attempts(tmp_path)[2]["success"] is True
+
+
+def test_a_repair_that_still_misses_an_owner_is_not_saved_by_the_drop(
+    tmp_path: Path,
+) -> None:
+    reply = _assessed_reply("tool result", 1)
+    client = _client(reply, copy.deepcopy(reply), _repair_reply(2))
+    warnings: list[str] = []
+
+    with pytest.raises(StageError) as caught:
+        _run(client, tmp_path, warnings=warnings)
+
+    assert "missing owners: RESP-3" in str(caught.value)
+    assert warnings == []

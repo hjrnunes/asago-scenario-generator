@@ -10,8 +10,13 @@ Stage 2 Call 2b and the revision accept the field on their wires, the
 critic and revision requests show it beside the channel, and a revision that
 omits it keeps the earlier assessment while the channel updates the same
 variable.  A basis that still fails the deterministic checks after the
-existing correction is dropped with a warning instead of stopping the step.  Requests go through the real client with a mocked transport, or
-the SP1 mock client; no request leaves the process.
+existing correction is dropped with a warning instead of stopping the step.
+A revision whose stated assessment is dropped leaves that channel's authority
+unknown; one that only omits it keeps the earlier assessment.  A dropped
+assessment's warning stays in the derivation record and out of model prompts.
+A cited ref's kind (``state:``, ``session:`` ...) is read case-insensitively,
+its name exactly.  Requests go through the real client with a mocked
+transport, or the SP1 mock client; no request leaves the process.
 """
 
 from __future__ import annotations
@@ -51,8 +56,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.system_model import run as stage_2_run
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
+    ControlStructureDerivationResult,
     CoordinationAnalysis,
     RequirementSet,
     ResponsibilitySet,
@@ -66,7 +73,12 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_completeness_critic,
     run_revision,
 )
+from asago_scenario_generator.stpa.system_model.feedback_authority import (
+    feedback_authority_defect,
+)
 from asago_scenario_generator.stpa.system_model.target_evidence import (
+    EvidenceField,
+    EvidenceResource,
     EvidenceSessionField,
     TargetEvidence,
 )
@@ -1010,9 +1022,8 @@ def test_call_2b_still_stops_on_other_failures(
     assert warnings == []
 
 
-def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
-    tmp_path: Path,
-) -> None:
+def _stage_2_client() -> MockLLMClient:
+    """A Stage 2 run whose Call 2b basis fails the checks in both replies."""
     client = MockLLMClient()
     client.set_response_for(
         RequirementSet,
@@ -1048,7 +1059,12 @@ def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
     client.set_response_for(
         CoordinationAnalysis, valid_empty_coordination_analysis_dict()
     )
-    loss_analysis = LossAnalysis(
+    client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
+    return client
+
+
+def _refund_loss_analysis() -> LossAnalysis:
+    return LossAnalysis(
         risk_card_losses=[],
         use_case_losses=[
             Loss(
@@ -1073,6 +1089,20 @@ def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
         ],
     )
 
+
+_DROPPED_SOURCE_KIND_REASON = (
+    "feedback channel FB-1-1 authority basis only restates source kind "
+    "'user_message'; state why that source may or may not establish this "
+    "value and cite supplied evidence"
+)
+
+
+def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
+    tmp_path: Path,
+) -> None:
+    client = _stage_2_client()
+    loss_analysis = _refund_loss_analysis()
+
     result = derive_control_structure(
         llm_client=client,
         use_case_text="A refund assistant issues refunds the finance reviewer approved.",
@@ -1089,11 +1119,7 @@ def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
     assert len(call_2b_requests) == 2
     [channel] = result.control_structure.responsibilities[0].feedback_channels
     assert channel.authority_for_update is None
-    assert result.warnings[0] == _dropped_warning(
-        "feedback channel FB-1-1 authority basis only restates source kind "
-        "'user_message'; state why that source may or may not establish this "
-        "value and cite supplied evidence"
-    )
+    assert result.warnings[0] == _dropped_warning(_DROPPED_SOURCE_KIND_REASON)
 
 
 @pytest.mark.parametrize(("basis", "reason", "target_evidence"), _UNSUPPORTED_BASES)
@@ -1163,3 +1189,274 @@ def test_revision_still_discards_a_reply_with_another_failure(tmp_path: Path) ->
 
     assert revised == original
     assert warnings[0].startswith("Revision failed: ")
+
+
+# ---------------------------------------------------------------------------
+# A cited ref's kind is read case-insensitively, its name exactly
+# ---------------------------------------------------------------------------
+
+_PATIENT_EVIDENCE = TargetEvidence(
+    resources=(
+        EvidenceResource(
+            name="patients",
+            record_count=2,
+            record_keys=("p-1", "p-2"),
+            fields=(
+                EvidenceField(
+                    resource="patients",
+                    name="specialty",
+                    types=("string",),
+                    values=("cardiology",),
+                ),
+            ),
+        ),
+    )
+)
+# A basis written in a recorded run: the ref opens the sentence, so its kind
+# is capitalised.
+_CAPITALISED_KIND_BASIS = (
+    "State:patients.specialty provides the patient's clinical specialty"
+)
+
+
+def _operation_result_channel(basis: str) -> FeedbackChannel:
+    return _channel(
+        source_kind=FeedbackSourceKind.operation_result,
+        authority_for_update=FeedbackUpdateAuthority(
+            status="authoritative", basis=basis
+        ),
+    )
+
+
+@pytest.mark.parametrize(
+    "basis",
+    [
+        _CAPITALISED_KIND_BASIS,
+        "STATE:patients.specialty provides the patient's clinical specialty",
+        "state:patients.specialty provides the patient's clinical specialty",
+    ],
+    ids=["capitalised-kind", "upper-case-kind", "lower-case-kind"],
+)
+def test_a_cited_ref_kind_is_read_case_insensitively(basis: str) -> None:
+    channel = _operation_result_channel(basis)
+
+    assert (
+        feedback_authority_defect(
+            channel, target_evidence=_PATIENT_EVIDENCE, require_domain_scope=True
+        )
+        is None
+    )
+
+
+def test_an_unknown_ref_with_a_capitalised_kind_is_named_in_canonical_form() -> None:
+    channel = _operation_result_channel(
+        "State:patients.ward provides the patient's clinical specialty"
+    )
+
+    assert feedback_authority_defect(
+        channel, target_evidence=_PATIENT_EVIDENCE, require_domain_scope=True
+    ) == (
+        "feedback channel FB-1-1 authority basis cites target-evidence ref(s) "
+        "not offered in this request: state:patients.ward"
+    )
+
+
+def test_a_cited_ref_name_is_matched_exactly() -> None:
+    channel = _operation_result_channel(
+        "state:Patients.specialty provides the patient's clinical specialty"
+    )
+
+    assert feedback_authority_defect(
+        channel, target_evidence=_PATIENT_EVIDENCE, require_domain_scope=True
+    ) == (
+        "feedback channel FB-1-1 authority basis cites target-evidence ref(s) "
+        "not offered in this request: state:Patients.specialty"
+    )
+
+
+def test_a_capitalised_kind_ref_alone_still_states_no_domain_scope() -> None:
+    channel = _operation_result_channel("State:patients.specialty")
+
+    assert feedback_authority_defect(
+        channel, target_evidence=_PATIENT_EVIDENCE, require_domain_scope=True
+    ) == (
+        "feedback channel FB-1-1 authority basis must state its scope in domain "
+        "words, not only evidence refs"
+    )
+
+
+def test_call_2b_keeps_a_basis_whose_ref_opens_the_sentence(tmp_path: Path) -> None:
+    feedback = {
+        **_CALL_2B_FEEDBACK,
+        "source_kind": "operation_result",
+        "authority_for_update": {
+            "status": "authoritative",
+            "basis": _CAPITALISED_KIND_BASIS,
+        },
+    }
+    client = _client(_call_2b_reply(feedback))
+    warnings: list[str] = []
+
+    elements = _call_2b(
+        client, tmp_path, target_evidence=_PATIENT_EVIDENCE, warnings=warnings
+    )
+
+    assert len(_sent(client)) == 1
+    assert elements.feedback_channels[0].authority_for_update == (
+        FeedbackUpdateAuthority(status="authoritative", basis=_CAPITALISED_KIND_BASIS)
+    )
+    assert warnings == []
+
+
+# ---------------------------------------------------------------------------
+# A dropped revision assessment is unknown, an omitted one unchanged
+# ---------------------------------------------------------------------------
+
+
+def _unsupported(channel: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **channel,
+        "source_kind": "user_message",
+        "authority_for_update": {
+            "status": "non_authoritative",
+            "basis": "user input is unverified",
+        },
+    }
+
+
+def _revise(tmp_path: Path, structure: ControlStructure, reply: dict[str, Any]):
+    client = _client(reply, reply)
+    revised, warnings = run_revision(
+        llm_client=client,
+        control_structure=structure,
+        critic_findings=_FINDINGS,
+        use_case_text="A refund assistant issues refunds the finance reviewer approved.",
+        run_dir=tmp_path,
+    )
+    return revised, warnings, _sent(client)
+
+
+def test_a_dropped_revision_assessment_does_not_keep_the_earlier_one(
+    tmp_path: Path,
+) -> None:
+    original = _structure(_channel(authority_for_update=_NON_AUTHORITATIVE))
+
+    revised, warnings, sent = _revise(
+        tmp_path, original, _restated(_unsupported(_RESTATED_CHANNEL))
+    )
+
+    assert len(sent) == 2
+    [channel] = revised.responsibilities[0].feedback_channels
+    assert channel.authority_for_update is None
+    assert channel.update_authority == UNKNOWN_UPDATE_AUTHORITY
+    assert warnings[0].startswith(
+        "Revision dropped the authority_for_update of feedback channel FB-1-1: "
+    )
+
+
+def test_only_the_dropped_channel_loses_its_earlier_assessment(
+    tmp_path: Path,
+) -> None:
+    amount_basis = "The use case says the refund ledger records the refund amount."
+    amount = FeedbackUpdateAuthority(status="authoritative", basis=amount_basis)
+    original = _structure(_channel(authority_for_update=_NON_AUTHORITATIVE))
+    original.responsibilities[0].feedback_channels.append(
+        FeedbackChannel(
+            fb_id="FB-1-2",
+            description="The ledger's refund amount",
+            updates="PM-1-2",
+            source=_PROCESS,
+            authority_for_update=amount,
+        )
+    )
+    reply = _restated(_unsupported(_RESTATED_CHANNEL))
+    reply["modified_responsibilities"][0]["feedback_channels"].append(
+        {
+            "fb_id": "FB-1-2",
+            "description": "The ledger's refund amount",
+            "updates": "PM-1-2",
+            "source": {"type": "controlled_process", "id": "CP-1"},
+        }
+    )
+
+    revised, _, _ = _revise(tmp_path, original, reply)
+
+    dropped, omitted = revised.responsibilities[0].feedback_channels
+    assert dropped.fb_id == "FB-1-1"
+    assert dropped.authority_for_update is None
+    assert omitted.fb_id == "FB-1-2"
+    assert omitted.authority_for_update == amount
+
+
+# ---------------------------------------------------------------------------
+# A dropped assessment's warning stays out of the critic request
+# ---------------------------------------------------------------------------
+
+
+def _critic_request(client: MockLLMClient) -> str:
+    [critic] = [
+        call
+        for call in client.calls
+        if call.response_format is not None
+        and issubclass(call.response_format, CriticFindings)
+    ]
+    return critic.user_prompt
+
+
+def _run_stage_2(client: MockLLMClient, tmp_path: Path, stage_warnings: list[str]):
+    return stage_2_run._run_stage_2_block(
+        client,
+        "A refund assistant issues refunds the finance reviewer approved.",
+        _refund_loss_analysis(),
+        make_capability_profile(),
+        tmp_path,
+        TemplateLoader(PROMPTS_DIR),
+        0.4,
+        [],
+        stage_warnings,
+    )
+
+
+def test_the_critic_request_omits_the_dropped_assessment_warning(
+    tmp_path: Path,
+) -> None:
+    client = _stage_2_client()
+    stage_warnings: list[str] = []
+
+    result = _run_stage_2(client, tmp_path, stage_warnings)
+
+    assert result.control_structure is not None
+    critic_request = _critic_request(client)
+    assert "FB-1-1" in critic_request
+    assert "dropped the authority_for_update" not in critic_request
+    assert _DROPPED_SOURCE_KIND_REASON not in critic_request
+    assert "Coordination Analysis Warnings" not in critic_request
+    assert _dropped_warning(_DROPPED_SOURCE_KIND_REASON) in stage_warnings
+
+
+def test_other_derivation_warnings_still_reach_the_critic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dropped = _dropped_warning(_DROPPED_SOURCE_KIND_REASON)
+    stub = "stage_2/orphan_pm_repair: added stub feedback channel FB-1-2"
+    structure = _structure(_channel())
+
+    def derived(**_: Any) -> ControlStructureDerivationResult:
+        return ControlStructureDerivationResult(
+            loss_analysis=_refund_loss_analysis(),
+            control_structure=structure,
+            warnings=[dropped, stub],
+            authority_warnings=[dropped],
+        )
+
+    monkeypatch.setattr(stage_2_run, "derive_control_structure", derived)
+    client = MockLLMClient()
+    client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
+    stage_warnings: list[str] = []
+
+    _run_stage_2(client, tmp_path, stage_warnings)
+
+    critic_request = _critic_request(client)
+    assert f"- {stub}" in critic_request
+    assert dropped not in critic_request
+    assert stage_warnings[:2] == [dropped, stub]

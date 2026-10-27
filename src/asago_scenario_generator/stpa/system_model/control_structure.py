@@ -120,11 +120,17 @@ _INTERMEDIATE_VALIDATION_RETRY_FEEDBACK = (
 
 @dataclass(frozen=True)
 class ControlStructureDerivationResult:
-    """Named Stage 2 result carrying the reviewed upstream loss graph."""
+    """Named Stage 2 result carrying the reviewed upstream loss graph.
+
+    ``warnings`` is the derivation record.  ``authority_warnings`` are those
+    of its warnings that name a dropped authority assessment; they stay in
+    the record and out of model prompts.
+    """
 
     loss_analysis: LossAnalysis
     control_structure: ControlStructure
     warnings: list[str] = field(default_factory=list)
+    authority_warnings: list[str] = field(default_factory=list)
 
 
 def _assembly_source_id_maps(
@@ -2058,6 +2064,7 @@ def _derive_control_structure(
         loss_analysis=reviewed_loss_analysis,
         control_structure=control_structure,
         warnings=[*call_2b_warnings, *repair_warnings],
+        authority_warnings=list(call_2b_warnings),
     )
 
 
@@ -2240,14 +2247,16 @@ def _call_2b_control_elements(
     Authority is optional.  When the last reply fails only the authority basis
     checks, every failing ``authority_for_update`` is dropped, so that
     channel's authority is unknown, and *warnings* gets one line per channel.
+    The last reply is the reply itself, or for the missing control action
+    repair, the response it repairs with the repair's actions merged in.
 
     Raises:
         StageError: If the LLM call fails or the response fails validation.
     """
 
-    def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
+    def check(content: Any) -> ControlElementSet:
         elements = parse_control_element_set_response(
-            result.content, responsibilities=responsibility_set.responsibilities
+            content, responsibilities=responsibility_set.responsibilities
         )
         validate_feedback_authority_assessments(
             elements.feedback_channels,
@@ -2256,11 +2265,16 @@ def _call_2b_control_elements(
         )
         return elements
 
+    def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
+        return check(result.content)
+
     def drop_unsupported_authority(
         outcome: CallOutcome[ControlElementSet],
+        reply_content: Callable[[LLMResult], Any] = _reply_content,
     ) -> ControlElementSet | None:
         return _without_unsupported_authority(
             outcome,
+            reply_content=reply_content,
             responsibilities=responsibility_set.responsibilities,
             target_evidence=target_evidence,
             warnings=warnings if warnings is not None else [],
@@ -2278,7 +2292,12 @@ def _call_2b_control_elements(
             "loader": loader,
             "temperature": temperature,
         }
-        repaired = _repair_call_2b_missing_actions(outcome, **request)
+        repaired = _repair_call_2b_missing_actions(
+            outcome,
+            check=check,
+            drop_unsupported_authority=drop_unsupported_authority,
+            **request,
+        )
         if repaired is not None:
             return repaired
         corrected = _correct_call_2b_references(
@@ -2319,6 +2338,11 @@ def _repair_call_2b_missing_actions(
     system_prompt: str,
     user_prompt: str,
     responsibilities: Sequence[Responsibility],
+    check: Callable[[Any], ControlElementSet],
+    drop_unsupported_authority: Callable[
+        [CallOutcome[ControlElementSet], Callable[[LLMResult], Any]],
+        ControlElementSet | None,
+    ],
     run_dir: Path,
     loader: TemplateLoader,
     temperature: float,
@@ -2329,24 +2353,27 @@ def _repair_call_2b_missing_actions(
     still leaves a responsibility without an action.  The request names those
     owners and the rule, shows the last response, and asks for control actions
     for exactly those owners.  The reply is merged into the last response and
-    the stage post-check runs again.  There is no second request: a failed
-    repair stops the step, and every other failure is declined.
+    *check*, the stage post-check with the authority basis checks, runs
+    again.  There is no second request: a failed repair stops the step, and
+    every other failure is declined.  A merged response that fails only the
+    authority basis checks goes to *drop_unsupported_authority* instead of
+    stopping the step.
     """
     failure = outcome.failure
     if not isinstance(failure, MissingControlActionsError) or outcome.result is None:
         return None
     prior_content = outcome.result.content
 
-    def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
-        merged = _merge_missing_actions(
+    def merged(result: LLMResult) -> dict[str, Any]:
+        return _merge_missing_actions(
             prior_content,
             result.content,
             owners=failure.owners,
             responsibilities=responsibilities,
         )
-        return parse_control_element_set_response(
-            merged, responsibilities=responsibilities
-        )
+
+    def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
+        return check(merged(result))
 
     feedback = "\n\n" + loader.render_prompt(
         "stage2_call2b_missing_actions_correction.j2",
@@ -2381,6 +2408,9 @@ def _repair_call_2b_missing_actions(
         first_attempt_number=outcome.attempt_number + 1,
     )
     if repaired.error is not None:
+        degraded = drop_unsupported_authority(repaired, merged)
+        if degraded is not None:
+            return degraded
         raise StageError(
             stage=STAGE,
             step="call_2b_control_elements",
@@ -2398,27 +2428,34 @@ def _merge_missing_actions(
 ) -> dict[str, Any]:
     """Add a repair reply's control actions to the response it repairs.
 
-    The reply holds only ``control_actions``, each with a well-formed ID, and
-    every action belongs to an owner that was missing.  The merged response
-    still goes through the full Call 2b parser.
+    The reply holds only ``control_actions``, each with a well-formed ID.  An
+    action identical to one of the prior response is a restatement: the
+    prior response keeps it and it is not added again.  Every other action
+    belongs to an owner that was missing.  The merged response still goes
+    through the full Call 2b parser.
     """
     reply = _decode_control_element_payload(reply_content)
     wire = _Call2bMissingActions.model_validate(
         reply,
         context={_OWNER_CONTEXT_KEY: _responsibility_owner_numbers(responsibilities)},
     )
-    strangers = {
-        _owner_number(action.ca_id, prefix="CA") for action in wire.control_actions
-    } - set(owners)
+    prior = _decode_control_element_payload(prior_content)
+    added = [
+        (raw, action)
+        for raw, action in zip(reply["control_actions"], wire.control_actions)
+        if raw not in prior["control_actions"]
+    ]
+    strangers = {_owner_number(action.ca_id, prefix="CA") for _, action in added} - set(
+        owners
+    )
     if strangers:
         raise ValueError(
             "the repair covers only the owners without a control action; "
             "not requested: " + ", ".join(f"RESP-{n}" for n in sorted(strangers))
         )
-    prior = _decode_control_element_payload(prior_content)
     return {
         **prior,
-        "control_actions": [*prior["control_actions"], *reply["control_actions"]],
+        "control_actions": [*prior["control_actions"], *(raw for raw, _ in added)],
     }
 
 
@@ -2484,25 +2521,31 @@ def _correct_call_2b_references(
     return corrected.value
 
 
+def _reply_content(result: LLMResult) -> Any:
+    return result.content
+
+
 def _without_unsupported_authority(
     outcome: CallOutcome[ControlElementSet],
     *,
+    reply_content: Callable[[LLMResult], Any],
     responsibilities: Sequence[Responsibility],
     target_evidence: TargetEvidence | None,
     warnings: list[str],
 ) -> ControlElementSet | None:
     """Return the last Call 2b reply without its unsupported authority bases.
 
-    It applies only when the reply parses and fails nothing but the authority
-    basis checks; any other failure returns ``None`` so the step stops as
-    before.  No request is sent.  Each dropped assessment leaves its channel's
+    *reply_content* gives the response the last reply stands for.  It applies
+    only when that response parses and fails nothing but the authority basis
+    checks; any other failure returns ``None`` so the step stops as before.
+    No request is sent.  Each dropped assessment leaves its channel's
     authority unknown and adds a warning naming the channel and the reason.
     """
     if outcome.result is None or not isinstance(outcome.failure, ValueError):
         return None
     try:
         elements = parse_control_element_set_response(
-            outcome.result.content, responsibilities=responsibilities
+            reply_content(outcome.result), responsibilities=responsibilities
         )
     except Exception:
         return None
