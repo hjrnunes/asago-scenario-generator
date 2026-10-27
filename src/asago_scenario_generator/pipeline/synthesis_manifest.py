@@ -12,9 +12,6 @@ from datetime import UTC, datetime
 from typing import Any, Iterable, Mapping
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
-from asago_scenario_generator.models.obligation_consideration import (
-    REQUEST_SCHEMA_REJECTED,
-)
 from asago_scenario_generator.pipeline.synthesis_types import (
     SynthesisInputs,
     SynthesisRunStatus,
@@ -90,7 +87,7 @@ def _build_manifest(
     run_status, run_status_reason = _scenario_generation_status(
         scenario_counts,
         prompt_contract_failures=contract_failures,
-        schema_rejected_slots=_schema_rejected_slot_count(ica_enumeration),
+        fill_failure=getattr(ica_enumeration, "fill_failure", None),
     )
     payload: dict[str, Any] = {
         "schema_version": _MANIFEST_SCHEMA,
@@ -158,14 +155,6 @@ def _prompt_contract_failure_count(
     return sum(
         str(record.get("error") or "").startswith(_PROMPT_CONTRACT_ERROR_PREFIX)
         for record in call_records or ()
-    )
-
-
-def _schema_rejected_slot_count(ica_enumeration: Any) -> int:
-    """Count the slots ICA fill left unfilled when the provider rejected its schema."""
-    return sum(
-        getattr(item, "error_class", None) == REQUEST_SCHEMA_REJECTED
-        for item in getattr(ica_enumeration, "lost_slots", ()) or ()
     )
 
 
@@ -501,6 +490,9 @@ def _manifest_provider_evidence(
         lost_slots = getattr(stages[stage_name], "lost_slots", ())
         if lost_slots:
             result[stage_name]["lost_slots"] = [_dump(item) for item in lost_slots]
+        fill_failure = getattr(stages[stage_name], "fill_failure", None)
+        if fill_failure is not None:
+            result[stage_name]["fill_failure"] = _dump(fill_failure)
         verification = getattr(stages[stage_name], "ica_hazard_verification", None)
         if verification is not None:
             result[stage_name]["ica_hazard_verification"] = _dump(verification)
@@ -577,21 +569,23 @@ def _scenario_generation_status(
     counts: Mapping[str, int | None],
     *,
     prompt_contract_failures: int = 0,
-    schema_rejected_slots: int = 0,
+    fill_failure: Any | None = None,
 ) -> tuple[SynthesisRunStatus, str]:
     """Derive a truthful product status from candidate lifecycle counts.
 
     Zero requested candidates is a valid analysis unless the prompt contract
     check stopped calls before dispatch: those calls never asked for the
-    candidates, so the run failed rather than found none.  A provider that
-    rejected the ICA fill's request schema stopped the fill, so the run failed
-    whatever its candidates did.
+    candidates, so the run failed rather than found none.  A failure that
+    stopped the ICA fill, such as the provider rejecting its request schema,
+    stopped the run's model calls, so the run failed whatever its candidates
+    did.
     """
-    if schema_rejected_slots > 0:
+    if fill_failure is not None:
         return (
             SynthesisRunStatus.FAILED,
-            f"{REQUEST_SCHEMA_REJECTED}: the provider rejected the ICA fill "
-            f"request schema; {schema_rejected_slots} slots were left unfilled",
+            f"{fill_failure.code}: the provider rejected the ICA fill request "
+            f"schema at {fill_failure.call_id}; {fill_failure.unsent_requests} "
+            "slot requests were not sent and no later model call was made",
         )
     requested = counts.get("requested")
     attempted = counts.get("attempted")

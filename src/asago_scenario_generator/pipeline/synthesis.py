@@ -70,6 +70,7 @@ from asago_scenario_generator.pipeline.synthesis_persist import (
 )
 from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _accounting_source_pins,
+    _fill_failure,
     _ica_merge_report,
     _run_accounting,
     _run_ica,
@@ -77,6 +78,7 @@ from asago_scenario_generator.pipeline.synthesis_scenarios import (
     _run_realization,
     _run_scenarios,
     _run_target_realization,
+    _skipped_scenarios,
     _slot_hazard_offers,
     _target_realized_stpa_inputs,
 )
@@ -314,15 +316,22 @@ def _run_synthesis(
     mechanism_accounting = _mechanism_accounting(
         mechanism_stage, final_control, _mechanism_considerations(ica_enumeration)
     )
-    target_realization = log.take(
-        _run_target_realization(
-            ica_enumeration=ica_enumeration,
-            loss_analysis=final_loss,
-            control_structure=final_control,
-            capability_profile=capability_profile,
-            inputs=inputs,
-            adapters=resolved,
-            operation_enrichment=operation_enrichment,
+    # A stopped ICA fill is terminal for model use: target realization and
+    # scenarios are skipped, and the deterministic outputs are still written.
+    fill_failure = _fill_failure(ica_enumeration)
+    target_realization = (
+        None
+        if fill_failure is not None
+        else log.take(
+            _run_target_realization(
+                ica_enumeration=ica_enumeration,
+                loss_analysis=final_loss,
+                control_structure=final_control,
+                capability_profile=capability_profile,
+                inputs=inputs,
+                adapters=resolved,
+                operation_enrichment=operation_enrichment,
+            )
         )
     )
     effective_control, effective_icas = _target_realized_stpa_inputs(
@@ -333,7 +342,9 @@ def _run_synthesis(
         capability_profile=capability_profile,
     )
     scenario_result = log.take(
-        _run_scenarios(
+        _skipped_scenarios(fill_failure)
+        if fill_failure is not None
+        else _run_scenarios(
             effective_icas,
             slot_briefs,
             slot_routes,

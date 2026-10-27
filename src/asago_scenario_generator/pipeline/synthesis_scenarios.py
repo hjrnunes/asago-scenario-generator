@@ -68,6 +68,11 @@ def _run_ica(
     )
     if result is None:
         raise ValueError("obligation-aware ICA adapter returned no enumeration")
+    failure = _fill_failure(result)
+    if failure is not None:
+        # A stopped fill is terminal: the independent verifier sends no
+        # request either.
+        return StageRun(result, (_stopped_message(failure),), ("ica",))
     verified = _run_ica_verification(
         result,
         adapters=adapters,
@@ -76,6 +81,31 @@ def _run_ica(
         inputs=_systemic_inputs(inputs),
     )
     return StageRun(verified, calls=("ica",))
+
+
+def _fill_failure(slot_fill: Any) -> Any | None:
+    """Return the failure that stopped the ICA fill, if one did.
+
+    After it the run requests no model call: every later model-backed stage
+    is skipped, while accounting, the manifest, and the report are written.
+    """
+    return getattr(slot_fill, "fill_failure", None)
+
+
+def _stopped_message(failure: Any) -> str:
+    """Word the stage diagnostic of a stage the stopped ICA fill skipped."""
+    return (
+        f"{failure.code}: the ICA fill stopped at {failure.call_id}; the run "
+        "requests no further model call"
+    )
+
+
+def _skipped_scenarios(failure: Any) -> StageRun:
+    """Stand in for Stage 5 after the ICA fill stopped: no candidate requested."""
+    from asago_scenario_generator.stpa.scenario_prod.run import SP3RunResult
+
+    message = _stopped_message(failure)
+    return StageRun(SP3RunResult(stage_errors=[message]), (message,))
 
 
 def _slot_hazard_offers(slot_fill: Any) -> Any | None:

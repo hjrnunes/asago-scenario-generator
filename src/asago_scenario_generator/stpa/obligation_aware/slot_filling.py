@@ -53,6 +53,7 @@ from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SlotIcaDraft,
     SlotProviderEntry,
     SlotAnalysisAdapter,
+    SlotFillFailure,
     SlotLoss,
     SynthesisSlotFillResult,
     SynthesisSlotRequest,
@@ -80,7 +81,18 @@ SLOT_RESPONSE_DIGEST_DOMAIN = (
     "asago-scenario-generator:stpa-obligation-slot-response:v1"
 )
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
-_SCHEMA_REJECTION_WORDS = ("schema", "response_format")
+# Error text by which a provider says it rejects the response schema itself:
+# an invalid schema (OpenAI: "Invalid schema for response_format ..."; vLLM:
+# "Invalid JSON schema"), schema features it does not support (vLLM: "The
+# provided JSON schema contains features not supported by xgrammar"), a schema
+# it cannot compile, or ``response_format`` named as the rejected parameter.
+_SCHEMA_REJECTION = re.compile(
+    r"invalid (?:json )?schema"
+    r"|schema contains features not supported"
+    r"|(?:failed|unable) to (?:compile|convert|parse) (?:the )?(?:json )?schema"
+    r"|[\'\"]param[\'\"]: ?[\'\"]response_format[\'\"]",
+    re.IGNORECASE,
+)
 _WRONG_DURATION_NA_JUSTIFICATION = (
     "The authoritative action temporality is not continuous or bounded_duration."
 )
@@ -1224,19 +1236,21 @@ def is_request_schema_rejection(error: BaseException | None) -> bool:
     """Tell whether the provider rejected a request for its response schema.
 
     The classification is deliberately simple: an HTTP 400 whose error text
-    names the schema or ``response_format`` (vLLM: "The provided JSON schema
-    contains features not supported by xgrammar"; OpenAI: "Invalid schema for
-    response_format ...").  Every slot request of one fill carries a schema
-    built the same way, so the provider rejects each of them alike.  Any other
-    400 (such as an exceeded context length), a 5xx, or a local failure is a
+    says the provider rejects the response schema itself
+    (``_SCHEMA_REJECTION``).  Every slot request of one fill carries a schema
+    built the same way, so the provider rejects each of them alike.  A 400
+    that merely mentions the schema (such as a context length counted over
+    messages and schema), any other 400, a 5xx, or a local failure is a
     per-slot failure.  The provider adapter raises its call failure as the
-    cause, and a replayed failure keeps its recorded status, so the error and
-    its causes are read.
+    cause, a 400 may wrap the provider's own rejection, and a replayed failure
+    keeps its recorded status and text, so every error of the cause chain is
+    read.
     """
     while error is not None:
-        if getattr(error, "status_code", None) == 400:
-            text = str(error).lower()
-            return any(word in text for word in _SCHEMA_REJECTION_WORDS)
+        if getattr(error, "status_code", None) == 400 and _SCHEMA_REJECTION.search(
+            str(error)
+        ):
+            return True
         error = error.__cause__
     return False
 
@@ -1501,6 +1515,11 @@ class SlotFillRunResult:
     def lost_slots(self) -> tuple[SlotLoss, ...]:
         """Expose the provider-owned slots that ended unresolved."""
         return self.result.lost_slots
+
+    @property
+    def fill_failure(self) -> SlotFillFailure | None:
+        """Expose the failure that stopped the fill, if one did."""
+        return self.result.fill_failure
 
     @property
     def ica_merges(self) -> tuple[IcaMerge, ...]:
@@ -2228,6 +2247,7 @@ def fill_synthesis_slots(
     target_parts: dict[str, int] = {}
     rejection: BaseException | None = None
     rejected_ref = ""
+    unsent = 0
 
     for request in requests:
         call_ref = _request_call_ref(request, target_totals, target_parts)
@@ -2243,6 +2263,7 @@ def fill_synthesis_slots(
                 call_ref=call_ref,
                 rejected_ref=rejected_ref,
             )
+            unsent += 1
             continue
         rejection = _process_slot_request(
             method,
@@ -2266,6 +2287,15 @@ def fill_synthesis_slots(
         lost_slots=tuple(state.lost.values()),
         ica_merges=tuple(state.ica_merges),
         mechanism_considerations=tuple(state.mechanism_pairs),
+        fill_failure=(
+            None
+            if rejection is None
+            else SlotFillFailure(
+                code=REQUEST_SCHEMA_REJECTED,
+                call_id=rejected_ref,
+                unsent_requests=unsent,
+            )
+        ),
     )
     return SlotFillRunResult(result=final)
 
