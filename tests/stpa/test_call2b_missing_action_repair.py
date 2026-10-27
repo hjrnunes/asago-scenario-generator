@@ -69,14 +69,19 @@ def _reply(*owners: int) -> dict[str, Any]:
 
 
 def _bad_effect_reply(*owners: int) -> dict[str, Any]:
-    """A reply whose responsibility-targeting action has the wrong effect kind."""
+    """A reply whose responsibility-targeting action invokes an operation.
+
+    The operation keeps the parser from setting the message effect, so the
+    wrong effect kind is still rejected.
+    """
     reply = _reply(*owners)
     reply["control_actions"].append(
         {
             **_action(1),
             "ca_id": "CA-1-2",
             "target": {"type": "responsibility", "id": "RESP-2"},
-            "effect_kind": "state_change",
+            "effect_kind": "tool_call",
+            "operation": "open_case",
         }
     )
     return reply

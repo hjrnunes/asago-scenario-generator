@@ -99,6 +99,7 @@ from asago_scenario_generator.stpa.system_model._constants import (
     PROMPTS_DIR as SYSTEM_MODEL_PROMPTS_DIR,
 )
 from asago_scenario_generator.stpa.system_model.control_structure import (
+    DuplicateControlledProcess,
     UnknownReference,
 )
 from asago_scenario_generator.stpa.target_realization.provider import (
@@ -225,6 +226,7 @@ UNKNOWN_REFERENCES = {
     ],
     "process_model_owners": ONE_RESPONSIBILITY["responsibilities"],
     "undeclared_controlled_processes": [],
+    "duplicate_controlled_processes": [],
 }
 
 # A reply that left out `controlled_processes` and still targets CP-1 and CP-3.
@@ -237,6 +239,30 @@ UNDECLARED_CONTROLLED_PROCESSES = {
     "controlled_processes": [],
     "process_model_owners": [],
     "undeclared_controlled_processes": ["CP-1", "CP-3"],
+    "duplicate_controlled_processes": [],
+}
+
+# A reply that declares CP-2 twice, with two descriptions, and targets it.
+DUPLICATE_CONTROLLED_PROCESSES = {
+    "unknown_references": [],
+    "responsibilities": ONE_RESPONSIBILITY["responsibilities"],
+    "controlled_processes": [
+        ControlledProcess(cp_id="CP-1", description="Request processor"),
+        ControlledProcess(cp_id="CP-2", description="Policy store"),
+        ControlledProcess(cp_id="CP-2", description="Store of policies"),
+    ],
+    "process_model_owners": [],
+    "undeclared_controlled_processes": [],
+    "duplicate_controlled_processes": [
+        DuplicateControlledProcess(
+            "CP-2",
+            (
+                ("controlled_processes[1]", "Policy store"),
+                ("controlled_processes[2]", "Store of policies"),
+            ),
+            ("control_actions[0].target", "feedback[0].source"),
+        )
+    ],
 }
 
 MISSING_CONTROL_ACTIONS = {
@@ -722,6 +748,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "empty-structure": _system_model(**EMPTY_STRUCTURE),
     "unknown-references": _system_model(**UNKNOWN_REFERENCES),
     "undeclared-controlled-processes": _system_model(**UNDECLARED_CONTROLLED_PROCESSES),
+    "duplicate-controlled-processes": _system_model(**DUPLICATE_CONTROLLED_PROCESSES),
     "missing-control-actions": _system_model(**MISSING_CONTROL_ACTIONS),
     "no-declared-processes": _system_model(
         **{**MISSING_CONTROL_ACTIONS, "controlled_processes": []}

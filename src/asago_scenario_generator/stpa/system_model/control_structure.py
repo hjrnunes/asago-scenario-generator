@@ -48,6 +48,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     StageError,
     call_with_policy,
     correction_prompt,
+    _transformation,
     decode_content,
     log_llm_call_failure,
     strip_json_fence,
@@ -1045,10 +1046,61 @@ def _decode_control_element_payload(value: Any) -> Any:
     return raw_model_data(value)
 
 
+RESPONSIBILITY_MESSAGE_EFFECT_KIND = "responsibility_target_effect_kind"
+
+
+def _with_responsibility_message_effects(payload: Any) -> tuple[Any, list[str]]:
+    """Give each action aimed at a responsibility its only valid effect.
+
+    An action that targets a responsibility is a message between
+    controllers, so ``agent_message`` is the one effect it can have.  An
+    action that names another valid effect and no ``operation`` gets
+    ``agent_message``; the result lists each change as
+    ``control_actions[i] <ca_id>: <old effect>``.  An action that names an
+    operation keeps its effect and is rejected as before: an operation is an
+    invocation, so the target may be what is wrong.  Other shapes and
+    invalid values are left for the wire models.  The payload is copied only
+    when something changes.
+    """
+    if not isinstance(payload, dict) or not isinstance(
+        payload.get("control_actions"), list
+    ):
+        return payload, []
+    actions = list(payload["control_actions"])
+    changes: list[str] = []
+    for index, action in enumerate(actions):
+        if not isinstance(action, dict) or action.get("operation") is not None:
+            continue
+        target = action.get("target")
+        if isinstance(target, dict):
+            aims_at_responsibility = target.get("type") == ReferenceType.responsibility
+        else:
+            aims_at_responsibility = isinstance(target, str) and bool(
+                re.fullmatch(r"RESP-\d+", target)
+            )
+        effect_kind = action.get("effect_kind")
+        if (
+            not aims_at_responsibility
+            or not isinstance(effect_kind, str)
+            or effect_kind == ControlActionEffectKind.agent_message
+            or effect_kind not in {kind.value for kind in ControlActionEffectKind}
+        ):
+            continue
+        actions[index] = {
+            **action,
+            "effect_kind": ControlActionEffectKind.agent_message.value,
+        }
+        changes.append(f"control_actions[{index}] {action.get('ca_id')}: {effect_kind}")
+    if not changes:
+        return payload, []
+    return {**payload, "control_actions": actions}, changes
+
+
 def parse_control_element_set_response(
     value: Any,
     *,
     responsibilities: Sequence[Responsibility] | None = None,
+    cleanup_transformations: list[dict[str, Any]] | None = None,
 ) -> ControlElementSet:
     """Parse a Call 2b response through its closed wire models.
 
@@ -1058,14 +1110,33 @@ def parse_control_element_set_response(
     canonicalized later by ``id_normalization`` when their owner is explicit.
     A shape error raises the wire models' ``ValidationError``; a reference
     to an element the supplied responsibilities lack raises ``ValueError``.
+    An action aimed at a responsibility gets ``effect_kind='agent_message'``
+    when the response names another effect and no operation; the change is
+    appended to *cleanup_transformations*, so the call record keeps it apart
+    from model output.
     """
     owner_numbers = (
         _responsibility_owner_numbers(responsibilities)
         if responsibilities is not None
         else None
     )
+    decoded = _decode_control_element_payload(value)
+    normalized, effect_changes = _with_responsibility_message_effects(decoded)
+    if effect_changes and cleanup_transformations is not None:
+        cleanup_transformations.append(
+            _transformation(
+                RESPONSIBILITY_MESSAGE_EFFECT_KIND,
+                decoded,
+                normalized,
+                detail=(
+                    "set effect_kind to agent_message for actions that target "
+                    "a responsibility and name no operation; was: "
+                    + "; ".join(effect_changes)
+                ),
+            )
+        )
     wire = _Call2bResponse.model_validate(
-        _decode_control_element_payload(value),
+        normalized,
         context={_OWNER_CONTEXT_KEY: owner_numbers},
     )
     actions = [action.to_domain() for action in wire.control_actions]
@@ -1179,17 +1250,56 @@ class UnknownReference:
         )
 
 
+@dataclass(frozen=True)
+class DuplicateControlledProcess:
+    """One ``cp_id`` a Call 2b response declares more than once.
+
+    ``declarations`` pairs each declaration's location with its description;
+    ``references`` holds the locations of the targets and sources naming it.
+    """
+
+    cp_id: str
+    declarations: tuple[tuple[str, str], ...]
+    references: tuple[str, ...] = ()
+
+    @property
+    def message(self) -> str:
+        locations = [location for location, _description in self.declarations]
+        count = "twice" if len(locations) == 2 else f"{len(locations)} times"
+        listed = ", ".join(locations[:-1]) + " and " + locations[-1]
+        return (
+            f"controlled process {self.cp_id!r} is declared {count}, at {listed}; "
+            "each cp_id must be declared once"
+        )
+
+
 class UnknownReferenceError(ValueError):
-    """A Call 2b response names targets, sources or process model parts it lacks."""
+    """A Call 2b response names targets, sources or process model parts it lacks.
+
+    ``duplicates`` holds the controlled processes the response declares more
+    than once; a reference to one of them resolves to no single process.
+    """
 
     def __init__(
         self,
         references: Sequence[UnknownReference],
         controlled_processes: Sequence[ControlledProcess] = (),
+        duplicates: Sequence[DuplicateControlledProcess] = (),
     ) -> None:
         self.references = tuple(references)
         self.controlled_processes = tuple(controlled_processes)
-        super().__init__("; ".join(item.message for item in self.references))
+        self.duplicates = tuple(duplicates)
+        super().__init__(
+            "; ".join(item.message for item in (*self.duplicates, *self.references))
+        )
+
+
+class DuplicateDeclarationError(UnknownReferenceError):
+    """A Call 2b response declares one ``cp_id`` more than once.
+
+    It takes the reference correction like an unknown reference, and its
+    class name tells the model which defect the exact error describes.
+    """
 
 
 def _check_control_elements_against_responsibilities(
@@ -1216,7 +1326,10 @@ def _check_control_elements_against_responsibilities(
         responsibility_ids={resp.resp_id for resp in responsibilities},
         controlled_process_ids={process.cp_id for process in controlled_processes},
     )
-    if not unknown:
+    duplicates = _duplicate_controlled_processes(
+        controlled_processes, actions, feedback_channels
+    )
+    if not unknown and not duplicates:
         for index, channel in enumerate(feedback_channels):
             if channel.updates not in known_pm_ids:
                 raise ValueError(
@@ -1224,8 +1337,47 @@ def _check_control_elements_against_responsibilities(
                     f"{channel.updates!r}"
                 )
     unknown += _foreign_process_model_refs(actions, responsibilities)
+    if duplicates:
+        raise DuplicateDeclarationError(unknown, controlled_processes, duplicates)
     if unknown:
         raise UnknownReferenceError(unknown, controlled_processes)
+
+
+def _duplicate_controlled_processes(
+    controlled_processes: Sequence[ControlledProcess],
+    actions: Sequence[ControlAction],
+    feedback_channels: Sequence[FeedbackChannel],
+) -> list[DuplicateControlledProcess]:
+    """Return each ``cp_id`` declared more than once, in first-declaration order.
+
+    Canonical numbering gives each declaration its own ID but cannot tell
+    which one a reference to the shared source ID means, so assembly would
+    fail on it.  Control action and feedback IDs need no such check: nothing
+    in the response refers to them, and numbering by position separates them.
+    """
+    declarations: dict[str, list[tuple[str, str]]] = {}
+    for index, process in enumerate(controlled_processes):
+        declarations.setdefault(process.cp_id, []).append(
+            (f"controlled_processes[{index}]", process.description)
+        )
+    references: dict[str, list[str]] = {}
+    for collection_name, elements, ref_field in (
+        ("control_actions", actions, "target"),
+        ("feedback", feedback_channels, "source"),
+    ):
+        for index, element in enumerate(elements):
+            ref = getattr(element, ref_field)
+            if ref.type is ReferenceType.controlled_process:
+                references.setdefault(ref.id, []).append(
+                    f"{collection_name}[{index}].{ref_field}"
+                )
+    return [
+        DuplicateControlledProcess(
+            cp_id, tuple(declared), tuple(references.get(cp_id, ()))
+        )
+        for cp_id, declared in declarations.items()
+        if len(declared) > 1
+    ]
 
 
 def _unknown_element_refs(
@@ -2254,9 +2406,13 @@ def _call_2b_control_elements(
         StageError: If the LLM call fails or the response fails validation.
     """
 
-    def check(content: Any) -> ControlElementSet:
+    def check(
+        content: Any, cleanup: list[dict[str, Any]] | None = None
+    ) -> ControlElementSet:
         elements = parse_control_element_set_response(
-            content, responsibilities=responsibility_set.responsibilities
+            content,
+            responsibilities=responsibility_set.responsibilities,
+            cleanup_transformations=cleanup,
         )
         validate_feedback_authority_assessments(
             elements.feedback_channels,
@@ -2265,8 +2421,8 @@ def _call_2b_control_elements(
         )
         return elements
 
-    def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
-        return check(result.content)
+    def parse(result: LLMResult, cleanup: list[dict[str, Any]]) -> ControlElementSet:
+        return check(result.content, cleanup)
 
     def drop_unsupported_authority(
         outcome: CallOutcome[ControlElementSet],
@@ -2338,7 +2494,7 @@ def _repair_call_2b_missing_actions(
     system_prompt: str,
     user_prompt: str,
     responsibilities: Sequence[Responsibility],
-    check: Callable[[Any], ControlElementSet],
+    check: Callable[[Any, list[dict[str, Any]]], ControlElementSet],
     drop_unsupported_authority: Callable[
         [CallOutcome[ControlElementSet], Callable[[LLMResult], Any]],
         ControlElementSet | None,
@@ -2372,8 +2528,8 @@ def _repair_call_2b_missing_actions(
             responsibilities=responsibilities,
         )
 
-    def parse(result: LLMResult, _cleanup: list[dict[str, Any]]) -> ControlElementSet:
-        return check(merged(result))
+    def parse(result: LLMResult, cleanup: list[dict[str, Any]]) -> ControlElementSet:
+        return check(merged(result), cleanup)
 
     feedback = "\n\n" + loader.render_prompt(
         "stage2_call2b_missing_actions_correction.j2",
@@ -2435,8 +2591,10 @@ def _merge_missing_actions(
     through the full Call 2b parser.
     """
     reply = _decode_control_element_payload(reply_content)
+    # The merged response is parsed again, which applies and records the
+    # effect normalization; here it only keeps the reply from failing first.
     wire = _Call2bMissingActions.model_validate(
-        reply,
+        _with_responsibility_message_effects(reply)[0],
         context={_OWNER_CONTEXT_KEY: _responsibility_owner_numbers(responsibilities)},
     )
     prior = _decode_control_element_payload(prior_content)
@@ -2477,8 +2635,9 @@ def _correct_call_2b_references(
     """Send the one reference correction for a Call 2b response, or decline.
 
     It runs only when the generic correction is spent and the last response
-    still names unknown targets, sources or process model parts.  The request
-    names each unknown reference, offers the valid IDs with their
+    still names unknown targets, sources or process model parts, or declares
+    a controlled process ID more than once.  The request names each unknown
+    reference and each repeated declaration, offers the valid IDs with their
     descriptions, and continues the step's attempt numbering.  Every other
     failure is declined so the caller stops as before.  A corrected reply
     that fails only the authority basis checks goes to
@@ -2583,6 +2742,7 @@ def _call_2b_reference_feedback(
     return loader.render_prompt(
         "stage2_call2b_reference_correction.j2",
         unknown_references=failure.references,
+        duplicate_controlled_processes=failure.duplicates,
         responsibilities=responsibilities,
         controlled_processes=failure.controlled_processes,
         process_model_owners=[
