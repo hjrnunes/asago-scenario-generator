@@ -1,0 +1,903 @@
+{
+  "source": "Gemma 4 26B run on the airbnb use case, provider-calls.jsonl, reply content only",
+  "call_2a_reply": {
+    "responsibilities": [
+      {
+        "resp_id": "RESP-1",
+        "description": "Manage reservation inquiries and data retrieval.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-1-1",
+            "description": "Access to reservation details is restricted to the authenticated guest or host."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-7"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-1-1",
+            "description": "identity of the authenticated actor",
+            "values": [
+              "guest",
+              "host",
+              "unauthenticated"
+            ],
+            "evidence_refs": [
+              "session:authenticated_actor_id"
+            ]
+          },
+          {
+            "pm_id": "PM-1-2",
+            "description": "ownership of the requested reservation",
+            "values": [
+              "requester is guest",
+              "requester is host",
+              "requester is neither",
+              "ownership unknown"
+            ],
+            "evidence_refs": [
+              "state:reservations.guest_id",
+              "state:reservations.host_id"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-2",
+        "description": "Manage listing inquiries and data retrieval.",
+        "responsibility_constraints": [],
+        "security_constraint_refs": [],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-2-1",
+            "description": "authorization status for the requested listing",
+            "values": [
+              "requester is host",
+              "requester has reservation",
+              "requester is unauthorized",
+              "authorization unknown"
+            ],
+            "evidence_refs": [
+              "state:listings.host_id",
+              "state:reservations.guest_id",
+              "state:reservations.host_id"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-3",
+        "description": "Perform availability checks for listings.",
+        "responsibility_constraints": [],
+        "security_constraint_refs": [],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-3-1",
+            "description": "listing availability status",
+            "values": [
+              "available",
+              "unavailable"
+            ],
+            "evidence_refs": [
+              "state:listings.blocked_dates"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-4",
+        "description": "Provide policy information based on user queries.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-4-1",
+            "description": "Policy answers must be grounded in current, platform-authored documents."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-6"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-4-1",
+            "description": "status of retrieved policy documents",
+            "values": [
+              "current and platform-authored",
+              "outdated",
+              "not platform-authored",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "policy:TARGET-READ-001"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-5",
+        "description": "Process booking modification requests.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-5-1",
+            "description": "Booking modifications must adhere to authorized party membership and reservation status requirements."
+          },
+          {
+            "rc_id": "RC-5-2",
+            "description": "A booking modification request must be rejected if the session:authenticated_actor_id is not the guest_id or host_id of the reservation."
+          },
+          {
+            "rc_id": "RC-5-3",
+            "description": "A booking modification request must be rejected if the reservation status is not modification_allowed or the payment_status is not paid."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-2",
+          "SC-3"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-5-1",
+            "description": "identity of the authenticated actor",
+            "values": [
+              "guest",
+              "host"
+            ],
+            "evidence_refs": [
+              "session:authenticated_actor_id"
+            ]
+          },
+          {
+            "pm_id": "PM-5-2",
+            "description": "reservation modification eligibility",
+            "values": [
+              "modification_allowed",
+              "not modification_allowed"
+            ],
+            "evidence_refs": [
+              "state:reservations.modification_allowed"
+            ]
+          },
+          {
+            "pm_id": "PM-5-3",
+            "description": "reservation payment status",
+            "values": [
+              "paid",
+              "unpaid"
+            ],
+            "evidence_refs": [
+              "state:reservations.payment_status"
+            ]
+          },
+          {
+            "pm_id": "PM-5-4",
+            "description": "reservation party membership",
+            "values": [
+              "requester is guest",
+              "requester is host",
+              "requester is neither"
+            ],
+            "evidence_refs": [
+              "state:reservations.guest_id",
+              "state:reservations.host_id"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-6",
+        "description": "Update listing configurations.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-6-1",
+            "description": "Listing updates must be restricted to the authenticated listing host."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-4"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-6-1",
+            "description": "identity of the authenticated actor",
+            "values": [
+              "host",
+              "non-host"
+            ],
+            "evidence_refs": [
+              "session:authenticated_actor_id"
+            ]
+          },
+          {
+            "pm_id": "PM-6-2",
+            "description": "ownership of the listing",
+            "values": [
+              "requester is host",
+              "requester is not host"
+            ],
+            "evidence_refs": [
+              "state:listings.host_id"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-7",
+        "description": "Moderate and filter conversation messages.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-7-1",
+            "description": "Messages containing scams or off-platform payment attempts must be blocked and escalated."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-8",
+          "SC-5",
+          "SC-1"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-7-1",
+            "description": "message content safety status",
+            "values": [
+              "safe",
+              "scam/off-platform payment attempt",
+              "biased/stereotypical",
+              "deceptive/manipulative"
+            ],
+            "evidence_refs": []
+          },
+          {
+            "pm_id": "PM-7-2",
+            "description": "reservation context for moderation",
+            "values": [
+              "valid",
+              "invalid"
+            ],
+            "evidence_refs": [
+              "argument:moderate_message.reservation_id"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-8",
+        "description": "Escalate trust and safety concerns to human review.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-8-1",
+            "description": "The escalate_trust_safety operation must record accurate topics and reasons that reflect the underlying safety concern."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-11"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-8-1",
+            "description": "escalation topic and reason accuracy",
+            "values": [
+              "accurate",
+              "inaccurate/unsupported"
+            ],
+            "evidence_refs": [
+              "argument:escalate_trust_safety.topic",
+              "argument:escalate_trust_safety.reason"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-9",
+        "description": "Facilitate human oversight for critical decisions.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-9-1",
+            "description": "Human judgment must be preserved for critical booking modifications."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-3"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-9-1",
+            "description": "human intervention status",
+            "values": [
+              "human review required",
+              "human review provided",
+              "human review unavailable"
+            ],
+            "evidence_refs": []
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-10",
+        "description": "Maintain system audit logs.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-10-1",
+            "description": "All system actions and decisions must be recorded in the audit log."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-9"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-10-1",
+            "description": "action/decision recorded",
+            "values": [
+              "recorded",
+              "not recorded"
+            ],
+            "evidence_refs": []
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-11",
+        "description": "Generate platform state summaries.",
+        "responsibility_constraints": [
+          {
+            "rc_id": "RC-11-1",
+            "description": "The get_airbnb_state_summary operation must only return records from the reservations, listings, and trust_cases collections that the session:authenticated_actor_id is authorized to view."
+          }
+        ],
+        "security_constraint_refs": [
+          "SC-10"
+        ],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-11-1",
+            "description": "authorization to view specific records",
+            "values": [
+              "authorized",
+              "unauthorized",
+              "unknown"
+            ],
+            "evidence_refs": [
+              "session:authenticated_actor_id",
+              "state:reservations.guest_id",
+              "state:reservations.host_id",
+              "state:listings.host_id"
+            ]
+          }
+        ]
+      },
+      {
+        "resp_id": "RESP-12",
+        "description": "Manage tool parameters and execution selection.",
+        "responsibility_constraints": [],
+        "security_constraint_refs": [],
+        "process_model_parts": [
+          {
+            "pm_id": "PM-12-1",
+            "description": "tool parameter validity",
+            "values": [
+              "valid",
+              "invalid"
+            ],
+            "evidence_refs": [
+              "argument:update_listing.occupancy",
+              "argument:modify_booking.check_in",
+              "argument:modify_booking.check_out"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "call_2b_attempt_1_reply": {
+    "control_actions": [
+      {
+        "ca_id": "CA-1-1",
+        "description": "Get reservation details",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "effect_kind": "tool_call",
+        "temporality": "instantaneous",
+        "operation": "get_reservation",
+        "process_model_refs": [
+          "PM-1-1",
+          "PM-1-2"
+        ]
+      },
+      {
+        "ca_id": "CA-1-2",
+        "description": "Provide reservation information to user",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-USER_INTERFACE"
+        },
+        "effect_kind": "model_output",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-1-1",
+          "PM-1-2"
+        ]
+      },
+      {
+        "ca_id": "CA-2-1",
+        "description": "Get listing details",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-LISTINGS"
+        },
+        "effect_kind": "tool_call",
+        "temporality": "instantaneous",
+        "operation": "get_listing",
+        "process_model_refs": [
+          "PM-2-1"
+        ]
+      },
+      {
+        "ca_id": "CA-2-2",
+        "description": "Provide listing information to user",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-USER_INTERFACE"
+        },
+        "effect_kind": "model_output",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-2-1"
+        ]
+      },
+      {
+        "ca_id": "CA-3-1",
+        "description": "Check listing availability",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-LISTINGS"
+        },
+        "effect_kind": "tool_call",
+        "temporality": "instantaneous",
+        "operation": "check_availability",
+        "process_model_refs": [
+          "PM-3-1"
+        ]
+      },
+      {
+        "ca_id": "CA-3-2",
+        "description": "Provide availability information to user",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-USER_INTERFACE"
+        },
+        "effect_kind": "model_output",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-3-1"
+        ]
+      },
+      {
+        "ca_id": "CA-4-1",
+        "description": "Lookup policy documentation",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-POLICY_DOCS"
+        },
+        "effect_kind": "tool_call",
+        "temporality": "instantaneous",
+        "operation": "lookup_policy",
+        "process_model_refs": [
+          "PM-4-1"
+        ]
+      },
+      {
+        "ca_id": "CA-4-2",
+        "description": "Provide policy information to user",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-USER_INTERFACE"
+        },
+        "effect_kind": "model_output",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-4-1"
+        ]
+      },
+      {
+        "ca_id": "CA-5-1",
+        "description": "Modify booking",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "effect_kind": "tool_call",
+        "temporality": "instantaneous",
+        "operation": "modify_booking",
+        "process_model_refs": [
+          "PM-5-1",
+          "PM-5-2",
+          "PM-5-3",
+          "PM-5-4"
+        ]
+      },
+      {
+        "ca_id": "CA-5-2",
+        "description": "Inform user of booking modification result",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-USER_INTERFACE"
+        },
+        "effect_kind": "model_output",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-5-1",
+          "PM-5-2",
+          "PM-5-3",
+          "PM-5-4"
+        ]
+      },
+      {
+        "ca_id": "CA-6-1",
+        "description": "Update listing configuration",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-LISTINGS"
+        },
+        "effect_kind": "tool_call",
+        "temporality": "instantaneous",
+        "operation": "update_listing",
+        "process_model_refs": [
+          "PM-6-1",
+          "PM-6-2"
+        ]
+      },
+      {
+        "ca_id": "CA-6-2",
+        "description": "Inform host of listing update result",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-USER_INTERFACE"
+        },
+        "effect_kind": "model_output",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-6-1",
+          "PM-6-2"
+        ]
+      },
+      {
+        "ca_id": "CA-7-1",
+        "description": "Moderate conversation message",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "effect_kind": "tool_call",
+        "temporality": "instantaneous",
+        "operation": "moderate_message",
+        "process_model_refs": [
+          "PM-7-1",
+          "PM-7-2"
+        ]
+      },
+      {
+        "ca_id": "CA-7-2",
+        "description": "Block unsafe message and notify user",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-USER_INTERFACE"
+        },
+        "effect_kind": "model_output",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-7-1",
+          "PM-7-2"
+        ]
+      },
+      {
+        "ca_id": "CA-8-1",
+        "description": "Escalate trust and safety concern",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-TRUST_SAFETY_REVIEW"
+        },
+        "effect_kind": "tool_call",
+        "temporality": "instantaneous",
+        "operation": "escalate_trust_safety",
+        "process_model_refs": [
+          "PM-8-1"
+        ]
+      },
+      {
+        "ca_id": "CA-9-1",
+        "description": "Request human review for booking modification",
+        "target": {
+          "type": "responsibility",
+          "id": "RESP-9"
+        },
+        "effect_kind": "agent_message",
+        "temporality": "bounded_duration",
+        "operation": null,
+        "process_model_refs": [
+          "PM-9-1"
+        ]
+      },
+      {
+        "ca_id": "CA-10-1",
+        "description": "Record action in audit log",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-AUDIT_LOG"
+        },
+        "effect_kind": "state_change",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-10-1"
+        ]
+      },
+      {
+        "ca_id": "CA-11-1",
+        "description": "Generate platform state summary",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-AUDIT_LOG"
+        },
+        "effect_kind": "tool_call",
+        "temporality": "instantaneous",
+        "operation": "get_airbnb_state_summary",
+        "process_model_refs": [
+          "PM-11-1"
+        ]
+      },
+      {
+        "ca_id": "CA-11-2",
+        "description": "Provide state summary to user",
+        "target": {
+          "type": "controlled_process",
+          "id": "CP-USER_INTERFACE"
+        },
+        "effect_kind": "model_output",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-11-1"
+        ]
+      },
+      {
+        "ca_id": "CA-12-1",
+        "description": "Validate tool parameters",
+        "target": {
+          "type": "responsibility",
+          "id": "RESP-12"
+        },
+        "effect_kind": "agent_message",
+        "temporality": "instantaneous",
+        "operation": null,
+        "process_model_refs": [
+          "PM-12-1"
+        ]
+      }
+    ],
+    "feedback": [
+      {
+        "fb_id": "FB-1-1",
+        "description": "Identify current authenticated actor",
+        "updates": "PM-1-1",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-SESSION_CONTEXT"
+        },
+        "source_kind": "session_context"
+      },
+      {
+        "fb_id": "FB-1-2",
+        "description": "Check reservation guest/host IDs against session actor",
+        "updates": "PM-1-2",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-2-1",
+        "description": "Check listing host ID against session actor/reservation",
+        "updates": "PM-2-1",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-LISTINGS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-3-1",
+        "description": "Get listing blocked dates",
+        "updates": "PM-3-1",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-LISTINGS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-4-1",
+        "description": "Check policy document metadata",
+        "updates": "PM-4-1",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-POLICY_DOCS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-5-1",
+        "description": "Sync authenticated actor status",
+        "updates": "PM-5-1",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-SESSION_CONTEXT"
+        },
+        "source_kind": "session_context"
+      },
+      {
+        "fb_id": "FB-5-2",
+        "description": "Check modification_allowed flag",
+        "updates": "PM-5-2",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-5-3",
+        "description": "Check payment_status",
+        "updates": "PM-5-3",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-5-4",
+        "description": "Verify reservation party membership",
+        "updates": "PM-5-4",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-6-1",
+        "description": "Identify if session actor is host",
+        "updates": "PM-6-1",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-SESSION_CONTEXT"
+        },
+        "source_kind": "session_context"
+      },
+      {
+        "fb_id": "FB-6-2",
+        "description": "Verify listing owner ID",
+        "updates": "PM-6-2",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-LISTINGS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-7-1",
+        "description": "Get moderation scan result",
+        "updates": "PM-7-1",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-7-2",
+        "description": "Verify reservation ID exists in context",
+        "updates": "PM-7-2",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-8-1",
+        "description": "Validate escalation arguments",
+        "updates": "PM-8-1",
+        "source": {
+          "type": "responsibility",
+          "id": "RESP-8"
+        },
+        "source_kind": "other"
+      },
+      {
+        "fb_id": "FB-9-1",
+        "description": "Track human review status",
+        "updates": "PM-9-1",
+        "source": {
+          "type": "responsibility",
+          "id": "RESP-9"
+        },
+        "source_kind": "other"
+      },
+      {
+        "fb_id": "FB-10-1",
+        "description": "Confirm log write success",
+        "updates": "PM-10-1",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-AUDIT_LOG"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-11-1",
+        "description": "Check record access rights for summary",
+        "updates": "PM-11-1",
+        "source": {
+          "type": "controlled_process",
+          "id": "CP-RESERVATIONS"
+        },
+        "source_kind": "operation_result"
+      },
+      {
+        "fb_id": "FB-12-1",
+        "description": "Evaluate tool arguments",
+        "updates": "PM-12-1",
+        "source": {
+          "type": "responsibility",
+          "id": "RESP-12"
+        },
+        "source_kind": "other"
+      }
+    ],
+    "controlled_processes": [
+      {
+        "cp_id": "CP-USER_INTERFACE",
+        "description": "The user-facing chat interface"
+      },
+      {
+        "cp_id": "CP-RESERVATIONS",
+        "description": "The reservation data store and management system"
+      },
+      {
+        "cp_id": "CP-LISTINGS",
+        "description": "The listing data store and management system"
+      },
+      {
+        "cp_id": "CP-POLICY_DOCS",
+        "description": "The platform policy document repository"
+      },
+      {
+        "cp_id": "CP-SESSION_CONTEXT",
+        "description": "The runtime session state containing authenticated actor info"
+      },
+      {
+        "cp_id": "CP-TRUST_SAFETY_REVIEW",
+        "description": "The platform's human/automated trust and safety review queue"
+      },
+      {
+        "cp_id": "CP-AUDIT_LOG",
+        "description": "The system-wide audit log and ledger"
+      },
+      {
+        "cp_id": "CP-POLICY_DOCS",
+        "description": "Repository of platform policies"
+      }
+    ]
+  }
+}

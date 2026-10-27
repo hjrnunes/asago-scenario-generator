@@ -1,5 +1,27 @@
+{%- if unknown_references -%}
 The prior response names references that this structure does not hold.
 Correct only these references, and keep every other record as written.
+{%- endif %}
+{%- if duplicate_controlled_processes %}
+{%- if unknown_references %}{{ "\n\n" }}{% endif -%}
+The prior response declares the same `cp_id` more than once in
+`controlled_processes`, so a target or source that names it does not identify
+one controlled process. Declare each `cp_id` once, and keep every other record
+as written. When the declarations describe the same controlled process, keep
+one of them. When they describe different controlled processes, give each one
+its own `cp_id` and point every target or source at the process it means.
+
+Controlled processes declared more than once:
+{%- for duplicate in duplicate_controlled_processes %}
+- {{ duplicate.cp_id }}
+{%- for location, description in duplicate.declarations %}
+  - {{ location }}: {{ description }}
+{%- endfor %}
+{%- if duplicate.references %}
+  - named by: {{ duplicate.references | join(", ") }}
+{%- endif %}
+{%- endfor %}
+{%- endif %}
 {%- if undeclared_controlled_processes %}
 
 The prior response left out `controlled_processes` (or sent it empty), so it
@@ -15,10 +37,13 @@ Controlled processes referenced but not declared:
 {%- endfor %}
 {%- endif %}
 
+{%- if unknown_references %}
+
 Unknown references in the prior response:
 {%- for ref in unknown_references %}
 - {{ ref.location }}: {{ ref.value }}{% if ref.owner %} (not a process model part of {{ ref.owner }}){% endif %}
 {%- endfor %}
+{%- endif %}
 
 Valid action targets and feedback sources:
 {%- for resp in responsibilities %}

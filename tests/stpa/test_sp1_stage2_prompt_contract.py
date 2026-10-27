@@ -486,9 +486,14 @@ def test_call2b_parser_rejects_a_malformed_target(
     )
 
 
-def test_call2b_parser_rejects_an_effect_that_contradicts_its_target() -> None:
+def test_call2b_parser_rejects_an_operation_effect_that_contradicts_its_target() -> (
+    None
+):
+    # Without an operation the parser sets agent_message; an operation says
+    # the action is an invocation, so the contradiction is left to the model.
     action = _valid_payload()["control_actions"][1]
     action["effect_kind"] = "tool_call"
+    action["operation"] = "open_case"
 
     assert _has_error(
         _action_errors(action),
