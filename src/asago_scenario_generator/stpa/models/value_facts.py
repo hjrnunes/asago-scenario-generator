@@ -3,8 +3,10 @@
 A target declares what kind of record an operation argument or a state value
 holds (an order id, a customer id, a patient id, free text) and whether it
 holds a date or a date-time. The declarations travel on the execution target
-profile as ``value_facts``. Nothing here is inferred from a name, a value, or
-a description: a value without a declaration has no fact.
+profile as ``value_facts``. A tool's input schema declares a format too: a
+``string`` argument with ``format: date`` or ``format: date-time``
+(:func:`with_argument_formats`). Nothing here is inferred from a name, a
+value, or a description: a value without a declaration has no fact.
 
 - A record kind is a lower_snake label. Two different record kinds are
   disjoint: declaring them states that a value of one is never a value of the
@@ -21,7 +23,7 @@ disagree.
 
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from enum import Enum
 
 from pydantic import ConfigDict, Field, StrictStr, model_validator
@@ -139,6 +141,42 @@ def _match(
     return found.pop() if len(found) == 1 else None
 
 
+def with_argument_formats(
+    facts: TargetValueFacts | None,
+    formats: Mapping[tuple[str, str], ValueFormat],
+) -> TargetValueFacts | None:
+    """Add the format an input schema declares for each argument to ``facts``.
+
+    ``formats`` maps an ``(operation_id, argument)`` pair to the format its
+    input schema declares. An argument ``facts`` does not declare gains a
+    format fact. An argument ``facts`` declares keeps one fact when that
+    declaration states the same format or none, the latter gaining the
+    format; it has no fact when the two formats differ. Without formats,
+    ``facts`` returns unchanged.
+    """
+
+    if not formats:
+        return facts
+    base = facts if facts is not None else TargetValueFacts()
+    arguments = {(item.operation_id, item.argument): item for item in base.arguments}
+    for (operation_id, argument), value_format in formats.items():
+        declared = arguments.get((operation_id, argument))
+        if declared is None or declared.format is None:
+            arguments[(operation_id, argument)] = ArgumentValueFact(
+                operation_id=operation_id,
+                argument=argument,
+                record_kind=declared.record_kind if declared else None,
+                format=value_format,
+            )
+        elif declared.format is not value_format:
+            del arguments[(operation_id, argument)]
+    return TargetValueFacts(
+        arguments=tuple(arguments.values()),
+        state_fields=base.state_fields,
+        state_keys=base.state_keys,
+    )
+
+
 def _matches(pattern: Sequence[str], segments: Sequence[str]) -> bool:
     return len(pattern) == len(segments) and all(
         part in (WILDCARD, segment)
@@ -158,4 +196,5 @@ __all__ = [
     "StateValueFact",
     "TargetValueFacts",
     "ValueFormat",
+    "with_argument_formats",
 ]

@@ -34,6 +34,10 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     mcp_inventory_evidence_refs,
     mcp_resource_id,
 )
+from asago_scenario_generator.stpa.models.value_facts import (
+    ValueFormat,
+    with_argument_formats,
+)
 
 from .contracts import (
     McpInventoryAdapter,
@@ -60,6 +64,9 @@ from .prompts import (
     build_verifier_prompt,
     prompt_hash,
 )
+
+
+_SCHEMA_FORMATS = frozenset(item.value for item in ValueFormat)
 
 
 @dataclass(frozen=True)
@@ -209,8 +216,38 @@ def _build_profile(
         resources=tuple(resources),
         interpretations=tuple(interpretations),
         diagnostics=tuple(diagnostics),
-        value_facts=inputs.value_facts,
+        value_facts=with_argument_formats(
+            inputs.value_facts, _schema_formats(resources)
+        ),
     )
+
+
+def _schema_formats(
+    resources: Sequence[TargetProfileResource],
+) -> dict[tuple[str, str], ValueFormat]:
+    """Return the date formats tool input schemas declare for string arguments.
+
+    Only an argument whose schema has ``type: string`` and ``format`` exactly
+    ``date`` or ``date-time`` declares one; any other format stays wording.
+    """
+    formats: dict[tuple[str, str], ValueFormat] = {}
+    for resource in resources:
+        properties = resource.input_schema.get("properties", {})
+        for operation in resource.operations:
+            for argument, schema in properties.items():
+                text_format = _string_format(schema)
+                if text_format is not None:
+                    formats[(operation.operation_id, argument)] = text_format
+    return formats
+
+
+def _string_format(schema: object) -> ValueFormat | None:
+    if not isinstance(schema, Mapping) or schema.get("type") != "string":
+        return None
+    text_format = schema.get("format")
+    if not isinstance(text_format, str) or text_format not in _SCHEMA_FORMATS:
+        return None
+    return ValueFormat(text_format)
 
 
 def _discovery_result(

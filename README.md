@@ -386,8 +386,12 @@ Both commands take `--value-facts PATH`: a YAML or JSON file of the record
 kinds (`order_id`, `free_text`, ...) and date formats (`date`, `date-time`)
 the target declares for its operation arguments (`arguments`), state values
 (`state_fields`, dotted paths under `TARGET-STATE` where `*` is any one key),
-and state mapping keys (`state_keys`). The profile carries it unchanged as
-`value_facts`; a profile without it keeps its bytes and digest. An argument
+and state mapping keys (`state_keys`). The profile carries it as
+`value_facts`. A tool input schema declares a format too: a `string` argument
+with `format: date` or `format: date-time` gains that format fact. Where the
+file declares the same argument, a declaration with the same format or none
+keeps one fact, and one with a different format leaves the argument with no
+fact. A profile with neither keeps its bytes and digest. An argument
 fact must name an argument of a profiled operation. Stage 5's tool-call
 condition check reads only these declarations, never a name or a value, to
 refuse a comparison across two declared record kinds or an ordering on
