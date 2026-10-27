@@ -12,8 +12,11 @@ condition, so such a draft keeps its command-attempt claim: a failed
 condition never makes an observable call analytical. When that failure call
 is a missing call, the failure is that the operation is never called, and
 code derives the tool-call condition ``not_called(<operation>)`` from it,
-recorded as a normalization. An incorrect call says only that the call is
-wrong, not what makes it wrong, so code derives nothing for it.
+recorded as a normalization, unless the condition check would refuse that
+``not_called`` as detecting the safe behavior (``not_called_inversion``): an
+INCORRECT action that provides the same operation. An incorrect call says
+only that the call is wrong, not what makes it wrong, so code derives
+nothing for it.
 """
 
 from __future__ import annotations
@@ -24,6 +27,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.observation_contract import (
     FailureCall,
     ObservationContract,
@@ -33,6 +37,7 @@ from asago_scenario_generator.stpa.observation_contract import (
     failure_call_criterion,
 )
 from ..tool_call_binding import ToolCallBinding, bind_missing_call
+from .condition_claims import ConditionClaim, not_called_inversion
 from .records import Stage5Normalization
 from .validate import _replace_safe_outcome
 
@@ -126,6 +131,8 @@ def route_without_condition(
     contract: ObservationContract,
     failure_code: str,
     *,
+    uca_type: UCAType,
+    unsafe_operation: str | None,
     recorded_operations: tuple[str, ...] = (),
 ) -> RoutedDraft | None:
     """Move a condition-less command-attempt draft to a claim it can run at.
@@ -137,7 +144,9 @@ def route_without_condition(
     and code never writes one. Otherwise a draft whose failure call names one
     of ``recorded_operations`` takes the ``failure_call`` route, which keeps
     the draft unchanged (a missing call also gets its derived condition), and
-    every other draft goes to ``analytical_only``.
+    every other draft goes to ``analytical_only``. ``uca_type`` and
+    ``unsafe_operation`` (the operation the control action maps to, if any)
+    are the scenario fields the condition check judges a ``not_called`` by.
     """
 
     outcome = draft.unsafe_outcome
@@ -148,7 +157,8 @@ def route_without_condition(
     if _declares_supported_reply(outcome, contract):
         route: ConditionRoute = "reply"
     elif failure_call_criterion(failure_call, contract, recorded_operations):
-        return _failure_call_route(draft, failure_call)
+        claim = ConditionClaim(uca_type, unsafe_operation, safe_outcome, failure_call)
+        return _failure_call_route(draft, claim)
     else:
         route = "analytical_only"
     reason = _route_reason(route, failure_code)
@@ -169,14 +179,20 @@ def route_without_condition(
     return RoutedDraft(routed, route, tuple(normalizations))
 
 
-def _failure_call_route(draft: BaseModel, failure_call: FailureCall) -> RoutedDraft:
+def _failure_call_route(draft: BaseModel, claim: ConditionClaim) -> RoutedDraft:
     """Keep the draft; derive ``not_called`` when its failure call is a missing call.
 
     The caller has checked that the target records the operation and that
-    the contract captures tool calls at ``command_attempt``.
+    the contract captures tool calls at ``command_attempt``. Code derives no
+    ``not_called`` the condition check refuses for ``claim``: the draft then
+    publishes without a condition, as an incorrect call does.
     """
 
-    if failure_call.kind != _MISSING_CALL:
+    failure_call: FailureCall = claim.failure_call
+    if (
+        failure_call.kind != _MISSING_CALL
+        or not_called_inversion(failure_call.operation_name, claim) is not None
+    ):
         return RoutedDraft(copy.deepcopy(draft), "failure_call", ())
     binding = bind_missing_call(failure_call.operation_name)
     record = Stage5Normalization(

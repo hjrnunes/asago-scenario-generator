@@ -10,6 +10,9 @@ import yaml
 from asago_scenario_generator.stpa.scenario_prod.stage5.validate import (
     _validate_normal_provider_payload,
 )
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+    generate_bdi_for_context,
+)
 from asago_scenario_generator.stpa.scenario_prod.stage5.condition_routing import (
     route_without_condition,
 )
@@ -23,6 +26,7 @@ from asago_scenario_generator.models.target_realization import (
     TargetOperationObservation,
     TargetOperationReference,
 )
+from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.observation_contract import (
     ObservationContract,
     default_observation_contract,
@@ -39,7 +43,10 @@ from tests.helpers.discriminating_condition import (
     _ownership_condition,
     _payload_with,
 )
-from tests.helpers.normal_authoring_wire import _wrong_timing_context
+from tests.helpers.normal_authoring_wire import (
+    _wrong_timing_assembly,
+    _wrong_timing_context,
+)
 
 CHECK_FAILED = "discriminating_condition_check_failed"
 REPLY_CRITERION = {
@@ -677,6 +684,13 @@ def test_a_failed_condition_of_an_incorrect_call_publishes_without_a_condition(
     assert _normalizations(tmp_path) == [_removal("failure_call")]
 
 
+# The scenario fields the condition check judges a not_called by.
+WRONG_TIMING_REFUND = {
+    "uca_type": UCAType.wrong_timing,
+    "unsafe_operation": "refund_payment",
+}
+
+
 def _routing_draft(failure_call: dict):
     payload = _failed_condition_payload(failure_call)
     response_format = _scenario_semantics_payload_type(
@@ -694,6 +708,7 @@ def test_the_routing_derives_not_called_for_a_recorded_missing_call() -> None:
         _routing_draft(MISSING_REFUND),
         default_observation_contract(),
         CHECK_FAILED,
+        **WRONG_TIMING_REFUND,
         recorded_operations=("refund_payment",),
     )
 
@@ -710,6 +725,7 @@ def test_the_routing_derives_nothing_for_an_incorrect_call() -> None:
         _routing_draft(INCORRECT_REFUND),
         default_observation_contract(),
         CHECK_FAILED,
+        **WRONG_TIMING_REFUND,
         recorded_operations=("refund_payment",),
     )
 
@@ -749,6 +765,7 @@ def test_the_routing_derives_nothing_for_an_ineligible_missing_call(
         _routing_draft(MISSING_REFUND),
         observation_contract,
         CHECK_FAILED,
+        **WRONG_TIMING_REFUND,
         recorded_operations=recorded,
     )
 
@@ -756,3 +773,143 @@ def test_the_routing_derives_nothing_for_an_ineligible_missing_call(
     assert routed.route == "analytical_only"
     assert routed.binding is None
     assert all(item.field != "tool_call_condition" for item in routed.normalizations)
+
+
+# Under an INCORRECT action the action's own operation is called, so the
+# condition check refuses not_called on it; code derives none either.
+@pytest.mark.parametrize(
+    ("uca_type", "unsafe_operation", "operation", "derived"),
+    (
+        pytest.param(
+            UCAType.incorrect, "refund_payment", "refund_payment", False, id="own"
+        ),
+        pytest.param(
+            UCAType.incorrect, "refund_payment", "open_ticket", True, id="prerequisite"
+        ),
+        pytest.param(
+            UCAType.not_provided,
+            "refund_payment",
+            "refund_payment",
+            True,
+            id="not_provided_own",
+        ),
+        pytest.param(
+            UCAType.incorrect, None, "refund_payment", True, id="action_unmapped"
+        ),
+    ),
+)
+def test_the_routing_derives_only_a_not_called_the_condition_check_accepts(
+    uca_type, unsafe_operation, operation, derived
+) -> None:
+    missing = {"kind": "missing_call", "operation_name": operation}
+
+    routed = route_without_condition(
+        _routing_draft(missing),
+        default_observation_contract(),
+        CHECK_FAILED,
+        uca_type=uca_type,
+        unsafe_operation=unsafe_operation,
+        recorded_operations=("refund_payment", "open_ticket"),
+    )
+
+    assert routed is not None
+    assert routed.route == "failure_call"
+    assert (routed.binding is not None) is derived
+    assert bool(routed.normalizations) is derived
+
+
+def _profile_generate_for(client: MockLLMClient, tmp_path, uca_type: UCAType):
+    """``_profile_generate`` for a context of ``uca_type``."""
+    profile = realistic_profile()
+    context = _wrong_timing_context(uca_type=uca_type)
+    return generate_bdi_for_context(
+        client,
+        context,
+        tmp_path,
+        target_operation=_focal_operation(),
+        execution_target_profile=profile,
+        target_observations=realistic_observations(profile),
+        observation_contract=default_observation_contract(),
+        assembly=_wrong_timing_assembly(context),
+    )
+
+
+def _derived(operation: str) -> dict:
+    return {
+        "comparisons": [{"kind": "not_called", "operation": operation, "where": []}]
+    }
+
+
+def test_an_incorrect_actions_own_missing_call_publishes_without_a_condition(
+    tmp_path,
+) -> None:
+    """The guarded case publishes as a command attempt with no condition.
+
+    The model's not_called on the action's own operation is refused as
+    inverted on every attempt; code derives no not_called the check refuses,
+    so the scenario publishes as an executable command attempt whose
+    tool-call condition is not_executable (no_condition), which the consumer
+    rejects as tool_call_condition_missing.
+    """
+    missing = {"kind": "missing_call", "operation_name": FOCAL}
+    payload = _profile_payload(missing, _not_called(FOCAL))
+    client = _client(payload, payload, payload)
+
+    result, error = _profile_generate_for(client, tmp_path, UCAType.incorrect)
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 3
+    assert "discriminating_condition_polarity_inverted" in client.calls[1].user_prompt
+    assert result.observation_assessment.disposition == "executable"
+    safe = result.safe_observable_outcome
+    assert (safe.observable, safe.claim_level, safe.operation_name) == (
+        True,
+        "command_attempt",
+        FOCAL,
+    )
+    assert result.discriminating_condition is None
+    assert result.tool_call_condition is None
+    status = result.tool_call_condition_status
+    assert (status.status, status.reason) == ("not_executable", "no_condition")
+    assert result.condition_omitted_reason == (
+        "The discriminating condition failed validation after two corrections "
+        "(discriminating_condition_polarity_inverted); the failure call names an "
+        "operation the target records, so the command_attempt claim stays "
+        "observable and the scenario is published without a condition."
+    )
+    assert [item["field"] for item in _normalizations(tmp_path)] == [
+        "observation_criteria[1]",
+        "safe_observable_outcome.observable",
+        "safe_observable_outcome.claim_level",
+        "safe_observable_outcome.evidence",
+        "safe_observable_outcome.operation_name",
+        "discriminating_condition",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("uca_type", "operation"),
+    (
+        pytest.param(UCAType.incorrect, "open_ticket", id="incorrect_prerequisite"),
+        pytest.param(UCAType.not_provided, FOCAL, id="not_provided_own"),
+    ),
+)
+def test_a_missing_call_the_check_accepts_still_gets_the_derived_condition(
+    tmp_path, uca_type, operation
+) -> None:
+    missing = {"kind": "missing_call", "operation_name": operation}
+    payload = _profile_payload(missing, None)
+    client = _client(payload, payload, payload)
+
+    result, error = _profile_generate_for(client, tmp_path, uca_type)
+
+    assert error is None
+    assert result is not None
+    assert client.call_count == 2
+    assert result.tool_call_condition_status.status == "bound"
+    assert result.tool_call_condition.model_dump(mode="json") == _derived(operation)
+    assert _normalizations(tmp_path)[-1] == {
+        **DERIVED_RECORD,
+        "normalized": _derived(operation),
+    }

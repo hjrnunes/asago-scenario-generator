@@ -15,6 +15,9 @@ condition with structured fields of its own scenario:
   control action, whether or not it maps to an operation, and whatever the
   safe outcome claims, so a ``not_called`` on it is refused as well: the
   failure call alone proves that the unsafe behavior is that call.
+- The condition routing applies the same ``not_called`` rule
+  (:func:`not_called_inversion`) before it derives ``not_called`` from a
+  missing call, so code never publishes a predicate this check refuses.
 - A condition with no call-level part binds as ``state_only``: it names no
   call, so a command-attempt claim has no tool-call condition to run. This
   check runs only under a ``command_attempt`` safe outcome.
@@ -71,46 +74,62 @@ def condition_claim_findings(
     failure call is judged without a ``command_attempt`` safe outcome.
     """
 
-    if (
-        safe_outcome is None
-        or not safe_outcome.observable
-        or safe_outcome.claim_level != "command_attempt"
-    ):
-        return tuple(_inverted_not_called(condition, uca_type, None, failure_call))
+    claim = ConditionClaim(uca_type, unsafe_operation, safe_outcome, failure_call)
+    inverted = tuple(_inverted_not_called(condition, claim))
+    if not _claims_command_attempt(safe_outcome):
+        return inverted
+    return (*inverted, *_no_call(condition, fact_values, safe_outcome.operation_name))
+
+
+def _claims_command_attempt(safe_outcome: SafeObservableOutcome | None) -> bool:
     return (
-        *_inverted_not_called(condition, uca_type, unsafe_operation, failure_call),
-        *_no_call(condition, fact_values, safe_outcome.operation_name),
+        safe_outcome is not None
+        and safe_outcome.observable
+        and safe_outcome.claim_level == "command_attempt"
     )
 
 
-def _inverted_not_called(
-    condition: DiscriminatingCondition,
-    uca_type: UCAType,
-    unsafe_operation: str | None,
-    failure_call: FailureCall | None,
-) -> Iterator[ConditionFinding]:
-    """Flag a not_called on an operation whose call is the unsafe behavior.
+def not_called_inversion(operation: str, claim: ConditionClaim) -> str | None:
+    """Return why ``not_called`` on ``operation`` detects the safe behavior, if it does.
 
-    That operation is the one an INCORRECT action calls, or the one the
-    failure criterion states an incorrect call of.
+    That operation is the one an INCORRECT action calls (judged only under a
+    ``command_attempt`` safe outcome), or the one the failure criterion
+    states an incorrect call of. Returns ``None`` when ``not_called`` on it
+    agrees with the scenario.
     """
 
-    called = failure_call is not None and failure_call.kind == "incorrect_call"
+    unsafe_operation = (
+        claim.unsafe_operation if _claims_command_attempt(claim.safe_outcome) else None
+    )
+    failure_call = claim.failure_call
+    if claim.uca_type == UCAType.incorrect and operation == unsafe_operation:
+        return (
+            f"the unsafe control action provides {operation} incorrectly "
+            f"(category {UCAType.incorrect.value})"
+        )
+    if (
+        failure_call is not None
+        and failure_call.kind == "incorrect_call"
+        and operation == failure_call.operation_name
+    ):
+        return (
+            f"the failure criterion states an incorrect call of {operation} "
+            "(failure_call kind incorrect_call)"
+        )
+    return None
+
+
+def _inverted_not_called(
+    condition: DiscriminatingCondition, claim: ConditionClaim
+) -> Iterator[ConditionFinding]:
+    """Flag a not_called on an operation whose call is the unsafe behavior."""
+
     for index, comparison in enumerate(condition.comparisons):
         if not isinstance(comparison, NotCalledComparison):
             continue
         operation = comparison.operation
-        if uca_type == UCAType.incorrect and operation == unsafe_operation:
-            reason = (
-                f"the unsafe control action provides {operation} incorrectly "
-                f"(category {UCAType.incorrect.value})"
-            )
-        elif called and operation == failure_call.operation_name:
-            reason = (
-                f"the failure criterion states an incorrect call of {operation} "
-                "(failure_call kind incorrect_call)"
-            )
-        else:
+        reason = not_called_inversion(operation, claim)
+        if reason is None:
             continue
         yield ConditionFinding(
             IssueCode.discriminating_condition_polarity_inverted,

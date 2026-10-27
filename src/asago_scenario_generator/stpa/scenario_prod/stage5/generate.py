@@ -293,6 +293,12 @@ def _generate_semantics(
             draft,
             contract,
             failure_code,
+            uca_type=scenario_context.ica.uca_type,
+            unsafe_operation=(
+                target_operation.reference.operation_id
+                if target_operation is not None
+                else None
+            ),
             recorded_operations=_stage5_observed_operation_names(
                 execution_target_profile, target_operation=target_operation
             ),
