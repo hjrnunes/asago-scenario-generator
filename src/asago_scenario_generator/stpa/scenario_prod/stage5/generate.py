@@ -61,7 +61,7 @@ from .sources import (
     _causal_source_choices,
 )
 from .condition_retry import earns_second_correction, request_second_correction
-from .condition_routing import route_without_condition
+from .condition_routing import condition_removal, route_without_condition
 from .records import (
     _write_stage5_normalization_record,
 )
@@ -274,12 +274,17 @@ def _generate_semantics(
         return check.draft
 
     def validate_without_condition(
-        value: BaseModel, contract: ObservationContract, failure_code: str
+        value: BaseModel,
+        contract: ObservationContract,
+        failure_code: str,
+        original_condition: object = None,
     ) -> BaseModel:
         """Validate a draft without its condition and route it off a command attempt.
 
         A routed draft is validated again as a whole; when that fails the
         unrouted draft publishes, so the routing never loses a scenario.
+        Whichever draft publishes records the removal of
+        ``original_condition``, the condition the reply returned.
         """
         draft = validate(value, condition_required=False)
         first = checks[-1]
@@ -291,20 +296,24 @@ def _generate_semantics(
                 execution_target_profile, target_operation=target_operation
             ),
         )
-        if routed is None:
-            return draft
-        try:
-            final = validate(routed.draft, condition_required=False)
-        except (TypeError, ValueError):
-            return draft
+        final, route, routing = draft, None, ()
+        if routed is not None:
+            try:
+                final = validate(routed.draft, condition_required=False)
+            except (TypeError, ValueError):
+                pass
+            else:
+                route = routed.route
+                routing = (*routed.normalizations, *checks[-1].normalizations)
+        # checks[-1] is the check of ``final``: a failed validation appends none.
         checks[-1] = replace(
             checks[-1],
             normalizations=(
                 *first.normalizations,
-                *routed.normalizations,
-                *checks[-1].normalizations,
+                *condition_removal(original_condition, route, failure_code),
+                *routing,
             ),
-            route=routed.route,
+            route=route,
         )
         return final
 
@@ -324,8 +333,8 @@ def _generate_semantics(
         recovered = _draft_without_condition(
             final_llm_result,
             response_format,
-            lambda value: validate_without_condition(
-                value, observation_contract, failure_code
+            lambda value, original: validate_without_condition(
+                value, observation_contract, failure_code, original
             ),
         )
         if recovered is None:
@@ -674,14 +683,15 @@ def _condition_omitted_reason(
 def _draft_without_condition(
     llm_result: object,
     response_format: type[BaseModel],
-    validate: Callable[[BaseModel], BaseModel],
+    validate: Callable[[BaseModel, object], BaseModel],
 ) -> BaseModel | None:
     """Re-parse the final response with its condition removed, if that passes.
 
     Returns ``None`` when the response is unavailable or still fails without
     the condition, so only condition-attributable failures are recovered.
     ``llm_result`` is the reply as received, so a flat reply is restored here
-    the way the stage parse restores it.
+    the way the stage parse restores it. ``validate`` receives the parsed
+    draft and the condition the reply returned, so it can record the removal.
     """
 
     content = getattr(llm_result, "content", None)
@@ -700,10 +710,14 @@ def _draft_without_condition(
     outcome = payload.get("unsafe_outcome") if isinstance(payload, dict) else None
     if not isinstance(outcome, dict):
         return None
+    original = outcome.get("discriminating_condition")
     outcome["discriminating_condition"] = None
     try:
         return validate(
-            _parse_context_bdi_result(SimpleNamespace(content=payload), response_format)
+            _parse_context_bdi_result(
+                SimpleNamespace(content=payload), response_format
+            ),
+            original,
         )
     except (TypeError, ValueError):
         return None

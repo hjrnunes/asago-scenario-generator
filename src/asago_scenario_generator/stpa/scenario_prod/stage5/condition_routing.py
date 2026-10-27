@@ -81,6 +81,34 @@ def _route_reason(route: ConditionRoute, failure_code: str) -> str:
     return f"condition_dropped_{route}:{failure_code}"
 
 
+def condition_removal(
+    original: object, route: ConditionRoute | None, failure_code: str
+) -> tuple[Stage5Normalization, ...]:
+    """Return the record of a failed condition code removed before routing.
+
+    ``original`` is the condition as the reply returned it; a reply that
+    returned none has nothing to record. The reason names the route the
+    draft took (``condition_dropped:<code>`` when it took none) and the
+    failure code, like the route's own records.
+    """
+
+    if original is None:
+        return ()
+    reason = (
+        f"condition_dropped:{failure_code}"
+        if route is None
+        else _route_reason(route, failure_code)
+    )
+    return (
+        Stage5Normalization(
+            field="discriminating_condition",
+            original=original,
+            normalized=None,
+            reason=reason,
+        ),
+    )
+
+
 def route_without_condition(
     draft: BaseModel,
     contract: ObservationContract,
