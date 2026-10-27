@@ -639,13 +639,20 @@ the contract captures, so it is never analytical-only: when the provider's
 own criteria are all unsupported, code adds the failure call's
 `command_attempt` criterion and makes the safe outcome observable on that
 call, and a scenario whose condition could not be kept keeps that claim.
-When its failure call is a `missing_call`, the failure is that the operation
-is never called, so code derives the bound tool-call condition
+A reply that declares a `reply` criterion the contract supports takes the
+`reply` route first: its claim moves to `reply` and nothing below applies.
+Otherwise the scenario takes the `failure_call` route. There, when its
+failure call is a `missing_call`, the failure is that the operation is never
+called, so code derives the bound tool-call condition
 `{"comparisons": [{"kind": "not_called", "operation": <name>, "where": []}]}`
 and records it in the Stage 5 normalization record (field
-`tool_call_condition`, reason `missing_call_of_recorded_operation`). An
-`incorrect_call` states only that the call is wrong, not what makes it wrong,
-so code derives nothing: the scenario is published without a condition
+`tool_call_condition`, reason `missing_call_of_recorded_operation`), unless
+the condition check would refuse that `not_called` as detecting the safe
+behavior: under an INCORRECT unsafe control action whose operation is the
+missing call's, the call is the unsafe behavior, so code derives nothing.
+An `incorrect_call` states only that the call is wrong, not what makes it
+wrong, so code derives nothing either. A scenario on the `failure_call`
+route without a derived condition is published without one
 (`tool_call_condition_status` `not_executable`, reason `no_condition`), and
 the consumer rejects that command attempt as `tool_call_condition_missing`.
 Runtime-readiness
