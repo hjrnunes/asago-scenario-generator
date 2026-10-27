@@ -29,7 +29,7 @@ LOCKS = {
         "schema_version": "execution-target-profile-v1",
         "digest_domain": "execution-target-profile-v1",
     },
-    "tool-call-condition": {"version": "tool-call-condition-v1"},
+    "tool-call-condition": {"version": "tool-call-condition-v2"},
     "policy-coverage": {"schema_version": "policy-coverage-v2"},
     "attack-flow": {"schema_version": "attack-flow-2.0.0"},
     "model-profile": {"version": "model-profile-v1"},

@@ -1,10 +1,12 @@
 """Tests for the producer-owned ``tool-call-condition`` contract.
 
-The contract's vectors hold the results of Garak's ``validate_condition`` and
-``evaluate_condition``; Garak's own tests run them against the code. These
-tests check what the producer can check offline: the lock, the schema against
-the validate vectors, the shape of the vectors, and that every condition the
-binder produces satisfies the schema.
+The v1 vectors hold the results of Garak's ``validate_condition`` and
+``evaluate_condition``; Garak's own tests run them against the code. The v2
+validate vectors come from Garak too, and the v2 evaluate vectors from the
+generator's reference evaluator. These tests check what the producer can check
+offline: the lock, each schema against the validate vectors, the shape of the
+vectors, the reference evaluator against both versions, and that every
+condition the binder produces satisfies both schemas.
 """
 
 from __future__ import annotations
@@ -34,6 +36,7 @@ from asago_scenario_generator.stpa.scenario_prod.tool_call_binding import (
 DATA = Path(__file__).resolve().parents[2] / "data/contracts"
 CONTRACT_ROOT = DATA / "tool-call-condition"
 KIT = CONTRACT_ROOT / "tool-call-condition-v1"
+KIT_V2 = CONTRACT_ROOT / "tool-call-condition-v2"
 HANDOFF_VALID = DATA / "scenario-handoff/handoff-v5/valid"
 
 VALUE_OPS = ("eq", "ne", "gt", "ge", "lt", "le", "in", "not_in")
@@ -52,10 +55,38 @@ SCHEMA = _load(KIT / "schema.json")
 VALIDATOR = Draft202012Validator(SCHEMA)
 VALIDATE = _load(KIT / "vectors/validate.json")["vectors"]
 EVALUATE = _load(KIT / "vectors/evaluate.json")["vectors"]
+SCHEMA_V2 = _load(KIT_V2 / "schema.json")
+VALIDATOR_V2 = Draft202012Validator(SCHEMA_V2)
+CALL_VALIDATOR_V2 = Draft202012Validator(SCHEMA_V2["$defs"]["call"])
+VALIDATE_V2 = _load(KIT_V2 / "vectors/validate.json")["vectors"]
+EVALUATE_V2 = _load(KIT_V2 / "vectors/evaluate.json")["vectors"]
+
+# The v1 vectors whose v2 result differs, each by one of the three changes.
+CHANGED_IN_V2 = {
+    "completeness.order-clean.complete-false",
+    "order.same-argument-bool-int",
+    "order.same-argument-null-both-missing-on-prior",
+}
+
+# Existing handoffs reference v1: these digests must never change.
+V1_DIGESTS = {
+    "tool-call-condition-v1/README.md": (
+        "4115e3ad395497227a5523c5a641060451c0a8ca1131516ca76b770279cefdac"
+    ),
+    "tool-call-condition-v1/schema.json": (
+        "68fcc125d7ed0df81a0c5496f7f95718c8b3957bc492490c6ee43a27dff30493"
+    ),
+    "tool-call-condition-v1/vectors/evaluate.json": (
+        "8c9674bf6dd53364859bb9a67c7564844d65b17b706ececf43d07848e9cbb710"
+    ),
+    "tool-call-condition-v1/vectors/validate.json": (
+        "d91e7964a0333460c34b1a22cde0a1132d707b8eb9aa0a9983deb06ceddc4d63"
+    ),
+}
 
 
-def _schema_errors(condition: Any) -> list[str]:
-    return [error.message for error in VALIDATOR.iter_errors(condition)]
+def _schema_errors(condition: Any, validator: Any = VALIDATOR) -> list[str]:
+    return [error.message for error in validator.iter_errors(condition)]
 
 
 def test_schema_is_a_valid_draft_2020_12_schema() -> None:
@@ -138,6 +169,98 @@ def test_evaluate_vectors_cover_every_outcome_with_and_without_completeness() ->
         if item["kind"] == "value"
     }
     assert ops == set(VALUE_OPS)
+
+
+def test_v1_kit_files_keep_their_digests() -> None:
+    lock = _load(CONTRACT_ROOT / "CONTRACT.lock")
+    v1 = {path: digest for path, digest in lock["files"].items() if "-v1/" in path}
+    assert v1 == V1_DIGESTS
+
+
+def test_v2_schema_is_a_valid_draft_2020_12_schema() -> None:
+    Draft202012Validator.check_schema(SCHEMA_V2)
+
+
+def test_v2_schema_accepts_the_same_conditions_as_v1() -> None:
+    def condition_part(schema: dict[str, Any]) -> dict[str, Any]:
+        defs = {name: rule for name, rule in schema["$defs"].items() if name != "call"}
+        rest = {k: v for k, v in schema.items() if k not in ("title", "description")}
+        return {**rest, "$defs": defs}
+
+    assert condition_part(SCHEMA_V2) == condition_part(SCHEMA)
+
+
+def test_v2_validate_vectors_are_the_v1_validate_vectors() -> None:
+    assert VALIDATE_V2 == VALIDATE
+    v2 = _load(KIT_V2 / "vectors/validate.json")
+    assert v2["version"] == "tool-call-condition-v2"
+    assert (
+        v2["implementation"] == _load(KIT / "vectors/validate.json")["implementation"]
+    )
+
+
+def test_v2_evaluate_vectors_start_with_every_v1_input() -> None:
+    inputs = ("id", "condition", "calls", "complete")
+    assert [{key: vector[key] for key in inputs} for vector in EVALUATE] == [
+        {key: vector[key] for key in inputs} for vector in EVALUATE_V2[: len(EVALUATE)]
+    ]
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        {"name": "a", "arguments": {}},
+        {"name": None, "arguments": None},
+        {"name": "a", "arguments": {}, "blocked": True},
+        {"name": "a", "arguments": {}, "blocked": False},
+        {"name": "a", "arguments": {}, "result": {"ok": True}},
+    ],
+)
+def test_v2_call_schema_accepts_a_captured_call(call: dict[str, Any]) -> None:
+    assert _schema_errors(call, CALL_VALIDATOR_V2) == []
+
+
+@pytest.mark.parametrize(
+    "call",
+    [
+        {"name": "a", "arguments": {}, "blocked": "true"},
+        {"name": "a", "arguments": {}, "blocked": None},
+        {"name": "a"},
+        {"arguments": {}},
+        {"name": 1, "arguments": {}},
+    ],
+)
+def test_v2_call_schema_rejects_a_malformed_call(call: dict[str, Any]) -> None:
+    assert _schema_errors(call, CALL_VALIDATOR_V2) != []
+
+
+def test_v2_evaluate_vectors_are_well_formed() -> None:
+    malformed = []
+    for vector in EVALUATE_V2:
+        calls = vector["calls"]
+        matched = vector["matched_calls"]
+        good = (
+            OUTCOME_REASONS.get(vector["outcome"]) == vector["reason"]
+            and isinstance(vector["complete"], bool)
+            and not _schema_errors(vector["condition"], VALIDATOR_V2)
+            and all(not _schema_errors(call, CALL_VALIDATOR_V2) for call in calls)
+            and all(set(call) <= {"name", "arguments", "blocked"} for call in calls)
+            and all(
+                isinstance(index, int) and 0 <= index < len(calls) for index in matched
+            )
+            and len(set(matched)) == len(matched)
+        )
+        if not good:
+            malformed.append(vector["id"])
+    assert malformed == []
+    ids = [vector["id"] for vector in EVALUATE_V2]
+    assert len(ids) == len(set(ids))
+    blocked = {
+        vector["id"]
+        for vector in EVALUATE_V2
+        if any("blocked" in call for call in vector["calls"])
+    }
+    assert blocked == {id_ for id_ in ids if id_.startswith("blocked.")}
 
 
 FACTS = target_observation_fact_values(
@@ -268,6 +391,7 @@ def test_bound_condition_satisfies_the_schema(case: str) -> None:
     assert bound.condition is not None
     condition = bound.condition.model_dump(mode="json", exclude_none=True)
     assert _schema_errors(condition) == []
+    assert _schema_errors(condition, VALIDATOR_V2) == []
 
 
 @pytest.mark.parametrize(
@@ -279,6 +403,7 @@ def test_handoff_fixture_condition_satisfies_the_schema(fixture: Path) -> None:
         assert "tool_call_condition" not in payload
         return
     assert _schema_errors(payload["tool_call_condition"]) == []
+    assert _schema_errors(payload["tool_call_condition"], VALIDATOR_V2) == []
 
 
 # The vector generator needs Garak to compute results. These tests cover what
@@ -305,8 +430,9 @@ GENERATOR = _load_generator()
 
 def _computed_from_committed() -> dict[str, Any]:
     return {
-        "validate": _load(KIT / "vectors/validate.json")["vectors"],
-        "evaluate": _load(KIT / "vectors/evaluate.json")["vectors"],
+        "validate": VALIDATE,
+        "evaluate": EVALUATE,
+        "evaluate_v2": EVALUATE_V2,
         "crashes": [],
     }
 
@@ -340,11 +466,72 @@ def test_generator_inputs_are_the_committed_vector_inputs() -> None:
     ]
 
 
-@pytest.mark.parametrize("name, function", sorted(GENERATOR.VECTOR_FUNCTIONS.items()))
-def test_generator_formats_the_committed_vector_bytes(name: str, function: str) -> None:
-    text = (KIT / "vectors" / name).read_text(encoding="utf-8")
-    vectors = _load(KIT / "vectors" / name)["vectors"]
-    assert GENERATOR.dump(function, vectors) == text
+def test_generator_v2_inputs_are_the_committed_v2_vector_inputs() -> None:
+    evaluate = [
+        {"id": vector_id, "condition": condition, "calls": calls, "complete": complete}
+        for vector_id, condition, calls, complete in GENERATOR.evaluate_inputs_v2()
+    ]
+    assert evaluate == [
+        {key: vector[key] for key in ("id", "condition", "calls", "complete")}
+        for vector in EVALUATE_V2
+    ]
+
+
+@pytest.mark.parametrize("path", sorted(GENERATOR.VECTOR_FILES))
+def test_generator_formats_the_committed_vector_bytes(path: str) -> None:
+    version, _, implementation = GENERATOR.VECTOR_FILES[path]
+    text = (CONTRACT_ROOT / path).read_text(encoding="utf-8")
+    vectors = _load(CONTRACT_ROOT / path)["vectors"]
+    assert GENERATOR.dump(version, implementation, vectors) == text
+
+
+@pytest.mark.parametrize("vector", EVALUATE_V2, ids=lambda vector: vector["id"])
+def test_reference_evaluator_reproduces_every_v2_vector(vector: dict) -> None:
+    result = GENERATOR.evaluate_condition_v2(
+        vector["condition"], vector["calls"], vector["complete"]
+    )
+    assert result == (vector["outcome"], vector["reason"], vector["matched_calls"])
+
+
+def test_reference_evaluator_differs_from_v1_only_where_v2_changes_it() -> None:
+    differs = {
+        vector["id"]
+        for vector in EVALUATE
+        if GENERATOR.evaluate_condition_v2(
+            vector["condition"], vector["calls"], vector["complete"]
+        )
+        != (vector["outcome"], vector["reason"], vector["matched_calls"])
+    }
+    assert differs == CHANGED_IN_V2
+
+
+def test_v2_changes_reach_the_stated_outcomes() -> None:
+    v1 = {vector["id"]: vector["outcome"] for vector in EVALUATE}
+    v2 = {vector["id"]: vector["outcome"] for vector in EVALUATE_V2}
+    assert {id_: (v1[id_], v2[id_]) for id_ in CHANGED_IN_V2} == {
+        "completeness.order-clean.complete-false": ("detected", "inconclusive"),
+        "order.same-argument-bool-int": ("not_detected", "detected"),
+        "order.same-argument-null-both-missing-on-prior": ("not_detected", "detected"),
+    }
+    assert v2["completeness.order-violated.complete-false"] == "inconclusive"
+    assert v2["order.same-argument-prior-int-main-bool"] == "detected"
+    assert v2["order.same-argument-null-both"] == "not_detected"
+    assert {id_: v2[id_] for id_ in v2 if id_.startswith("blocked.")} == {
+        "blocked.prior": "detected",
+        "blocked.prior-incomplete": "inconclusive",
+        "blocked.prior-explicit-false": "not_detected",
+        "blocked.prior-same-argument": "detected",
+        "blocked.prior-same-argument-undecodable": "detected",
+        "blocked.prior-then-prior-ran": "not_detected",
+        "blocked.prior-ran-then-prior-blocked": "not_detected",
+        "blocked.prior-same-record-ran-other-record": "detected",
+        "blocked.prior-other-record-ran-same-record": "not_detected",
+        "blocked.main-call-order": "detected",
+        "blocked.main-call-order-prior-before": "not_detected",
+        "blocked.main-call-value": "detected",
+        "blocked.not-called": "not_detected",
+        "blocked.not-called-where": "not_detected",
+    }
 
 
 def test_generator_lock_is_the_committed_lock() -> None:
@@ -392,6 +579,17 @@ def test_generator_write_mode_restores_vectors_and_lock(contract_copy: Path) -> 
                 path.read_bytes()
                 == (CONTRACT_ROOT / path.relative_to(contract_copy)).read_bytes()
             )
+
+
+def test_generator_write_mode_creates_and_pins_a_missing_vector_file(
+    contract_copy: Path,
+) -> None:
+    (contract_copy / "tool-call-condition-v2/vectors/evaluate.json").unlink()
+    assert GENERATOR.main(["--garak-checkout", "x", "--garak-python", "y"]) == 0
+    for name in ("tool-call-condition-v2/vectors/evaluate.json", "CONTRACT.lock"):
+        assert (contract_copy / name).read_bytes() == (
+            CONTRACT_ROOT / name
+        ).read_bytes()
 
 
 def test_generator_reports_a_missing_file_as_stale(tmp_path: Path) -> None:
@@ -486,6 +684,7 @@ def test_generator_worker_prints_one_json_line(
     result = json.loads(capsys.readouterr().out)
     assert len(result["validate"]) == len(VALIDATE)
     assert len(result["evaluate"]) == len(EVALUATE)
+    assert result["evaluate_v2"] == EVALUATE_V2
     assert result["crashes"] == []
 
 
