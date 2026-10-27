@@ -67,6 +67,7 @@ from .prompts import (
 
 
 _SCHEMA_FORMATS = frozenset(item.value for item in ValueFormat)
+_STRING_TYPES = ("string", ["string"])
 
 
 @dataclass(frozen=True)
@@ -227,8 +228,9 @@ def _schema_formats(
 ) -> dict[tuple[str, str], ValueFormat]:
     """Return the date formats tool input schemas declare for string arguments.
 
-    Only an argument whose schema has ``type: string`` and ``format`` exactly
-    ``date`` or ``date-time`` declares one; any other format stays wording.
+    Only an argument whose schema has ``type: string`` (or the one-item list
+    ``["string"]``) and ``format`` exactly ``date`` or ``date-time`` declares
+    one; any other format or type stays wording.
     """
     formats: dict[tuple[str, str], ValueFormat] = {}
     for resource in resources:
@@ -242,7 +244,7 @@ def _schema_formats(
 
 
 def _string_format(schema: object) -> ValueFormat | None:
-    if not isinstance(schema, Mapping) or schema.get("type") != "string":
+    if not isinstance(schema, Mapping) or schema.get("type") not in _STRING_TYPES:
         return None
     text_format = schema.get("format")
     if not isinstance(text_format, str) or text_format not in _SCHEMA_FORMATS:

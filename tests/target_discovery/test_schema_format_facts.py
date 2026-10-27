@@ -112,8 +112,8 @@ def test_other_formats_and_non_string_types_declare_no_fact(formats: dict) -> No
     assert _profile(_payload(**formats)).value_facts is None
 
 
-@pytest.mark.parametrize("schema_type", [["string"], ["string", "null"], None])
-def test_only_type_string_declares_a_format_fact(schema_type: object) -> None:
+def _typed_payload(schema_type: object) -> dict:
+    """Return the tools list with ``lookup_order.order_id`` a date of that type."""
     payload = _payload(lookup_order=("order_id", "date"))
     lookup = next(tool for tool in payload["tools"] if tool["name"] == "lookup_order")
     schema = lookup["inputSchema"]["properties"]["order_id"]
@@ -121,8 +121,44 @@ def test_only_type_string_declares_a_format_fact(schema_type: object) -> None:
         del schema["type"]
     else:
         schema["type"] = schema_type
+    return payload
 
-    assert _profile(payload).value_facts is None
+
+def test_a_one_item_string_type_list_declares_a_format_fact() -> None:
+    profile = _profile(_typed_payload(["string"]))
+
+    assert profile.value_facts is not None
+    assert profile.value_facts.argument("lookup_order", "order_id") == DeclaredValue(
+        format=ValueFormat.date
+    )
+
+
+def test_a_one_item_string_type_list_with_another_declared_format_leaves_no_fact() -> (
+    None
+):
+    declared = {
+        "arguments": [
+            {
+                "operation_id": "lookup_order",
+                "argument": "order_id",
+                "format": "date-time",
+            },
+            *DECLARED["arguments"],
+        ]
+    }
+
+    profile = _profile(_typed_payload(["string"]), declared)
+
+    assert profile.value_facts == TargetValueFacts.model_validate(DECLARED)
+
+
+@pytest.mark.parametrize(
+    "schema_type",
+    [["string", "null"], ["string", "number"], ["null"], [], "number", None],
+    ids=["nullable", "mixed", "null-list", "empty-list", "number", "untyped"],
+)
+def test_other_types_declare_no_format_fact(schema_type: object) -> None:
+    assert _profile(_typed_payload(schema_type)).value_facts is None
 
 
 def test_a_declaration_with_the_same_format_stays_one_fact() -> None:
