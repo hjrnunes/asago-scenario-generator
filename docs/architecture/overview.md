@@ -86,6 +86,17 @@ for `scenario-handoff`. A change to condition semantics is a new contract
 version with new vectors, made here first; no repository redefines the
 semantics in its own prose or tests.
 
+The contract directory holds two versions side by side, pinned by one lock.
+`tool-call-condition-v1` is what Garak's detector implements, and its files
+never change. `tool-call-condition-v2` changes three evaluation rules: an
+`order` that finds no prior call is inconclusive on an incomplete capture,
+`same_argument` uses the strict equality of value comparisons, and a captured
+call marked `blocked` never satisfies `requires_prior`. Both versions share one
+condition schema, so every condition the producer binds is valid under both.
+A `scenario-handoff-v5` handoff therefore names no condition version: the
+evaluator states the version it implements by the kit it mirrors and the
+vectors it reproduces. The producer never emits `blocked`; the capture sets it.
+
 The consumer `generate` command owns concrete user text or user-only history,
 target-context binding, required-argument delivery, setup, detector and
 fidelity decisions, freezing, and compilation. The runtime owns delivery of
