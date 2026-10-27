@@ -149,14 +149,35 @@ def _failed_condition_handoff(
     *,
     failure_call: dict | None = None,
     named: tuple[str, ...] = (),
-    claim_level: str = "command_attempt",
+    criteria: tuple[dict, ...] = (),
 ) -> dict:
     handoff = _handoff(
         scenario_id, disposition="executable", failure_call=failure_call, named=named
     )
     handoff["condition_omitted_reason"] = FAILED_NOTE
-    handoff["safe_observable_outcome"] = {"claim_level": claim_level}
+    handoff["safe_observable_outcome"] = {"claim_level": "command_attempt"}
+    handoff["observation"]["criteria"].extend(criteria)
     return handoff
+
+
+# Observable criteria of a mixed reply: a command attempt and a reply.
+ATTEMPT_CRITERION = {
+    "criterion_id": "attempt",
+    "outcome": "get_referral is not called before the draft is committed.",
+    "observable": True,
+    "claim_level": "command_attempt",
+    "evidence": "tool_call",
+    "operation_name": "get_referral",
+    "reason": "The runtime captures tool calls.",
+}
+REPLY_CRITERION = {
+    "criterion_id": "said",
+    "outcome": "The assistant says the draft was committed.",
+    "observable": True,
+    "claim_level": "reply",
+    "evidence": "assistant_message",
+    "reason": "The runtime captures assistant messages.",
+}
 
 
 def test_a_failed_condition_of_a_recorded_missing_call_gets_the_derived_condition() -> (
@@ -189,7 +210,9 @@ def test_no_condition_is_derived_off_the_failure_call_route() -> None:
 
     rows = [
         _assess(_failed_condition_handoff(failure_call=outside)),
-        _assess(_failed_condition_handoff(failure_call=missing, claim_level="reply")),
+        _assess(
+            _failed_condition_handoff(failure_call=missing, criteria=(REPLY_CRITERION,))
+        ),
         _assess(bound),
         _assess(_handoff(disposition="executable", failure_call=missing)),
     ]
@@ -238,3 +261,42 @@ def test_the_condition_classes_are_counted_per_directory() -> None:
         "condition_proxy": 1,
     }
     assert "| miniocciai | out | 1 | 1 | 2 | 1 |" in script.render([summary])
+
+
+def test_a_supported_reply_criterion_beside_a_command_attempt_takes_the_reply_route() -> (
+    None
+):
+    """Stage 5 routes on any supported reply criterion, not on the safe outcome."""
+    missing = {"kind": "missing_call", "operation_name": "get_referral"}
+    mixed = (ATTEMPT_CRITERION, REPLY_CRITERION)
+
+    with_call = _assess(_failed_condition_handoff(failure_call=missing, criteria=mixed))
+    without_call = _assess(
+        _failed_condition_handoff(named=("get_referral",), criteria=mixed)
+    )
+    attempt_only = _assess(
+        _failed_condition_handoff(failure_call=missing, criteria=(ATTEMPT_CRITERION,))
+    )
+
+    assert (with_call["condition"], with_call["condition_proxy"]) == (
+        "unchanged",
+        False,
+    )
+    assert (without_call["condition"], without_call["condition_proxy"]) == (
+        "unchanged",
+        False,
+    )
+    assert attempt_only["condition"] == "derived_not_called"
+
+
+def test_a_reply_criterion_the_contract_does_not_support_leaves_the_derivation() -> (
+    None
+):
+    missing = {"kind": "missing_call", "operation_name": "get_referral"}
+    unsupported = {**REPLY_CRITERION, "evidence": "snapshot"}
+
+    row = _assess(
+        _failed_condition_handoff(failure_call=missing, criteria=(unsupported,))
+    )
+
+    assert row["condition"] == "derived_not_called"

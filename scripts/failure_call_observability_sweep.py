@@ -29,8 +29,9 @@ bound condition in the saved handoff either way.
 
 Every handoff also gets a ``condition`` class: what Stage 5 now publishes as
 its tool-call condition. A handoff whose discriminating condition failed
-validation, that has no bound condition and no reply-level claim (the reply
-route wins), and whose failure call the rule makes observable is
+validation, that has no bound condition and no reply criterion the contract
+supports (Stage 5 routes such a draft to ``reply`` first), and whose failure
+call the rule makes observable is
 ``derived_not_called`` for a ``missing_call`` (code derives
 ``not_called(<operation>)``) and ``incorrect_call_no_condition`` for an
 ``incorrect_call`` (code derives nothing). Every other handoff is
@@ -62,6 +63,7 @@ from asago_scenario_generator.stpa.observation_contract import (
     default_observation_contract,
     failure_call_criterion,
     load_observation_contract,
+    supports_reply_criterion,
 )
 
 ANALYTICAL = "analytical_only"
@@ -150,6 +152,18 @@ def _condition_failed(
     )
 
 
+def _failure_call_route(
+    handoff: Mapping[str, Any],
+    criteria: list[ObservationCriterion],
+    contract: ObservationContract,
+) -> bool:
+    """Return whether a failed condition leaves Stage 5 off the reply route."""
+
+    return _condition_failed(handoff, criteria) and not supports_reply_criterion(
+        criteria, contract
+    )
+
+
 def condition_class(
     handoff: Mapping[str, Any],
     criteria: list[ObservationCriterion],
@@ -159,10 +173,8 @@ def condition_class(
 ) -> str:
     """Return the tool-call condition Stage 5 now publishes for the handoff."""
 
-    safe = handoff.get("safe_observable_outcome") or {}
     if (
-        not _condition_failed(handoff, criteria)
-        or safe.get("claim_level") == "reply"
+        not _failure_call_route(handoff, criteria, contract)
         or failure_call_criterion(failure_call, contract, operations) is None
     ):
         return UNCHANGED
@@ -197,8 +209,7 @@ def assess_handoff(
     condition_proxy = (
         condition == UNCHANGED
         and failure_call is None
-        and _condition_failed(handoff, criteria)
-        and (handoff.get("safe_observable_outcome") or {}).get("claim_level") != "reply"
+        and _failure_call_route(handoff, criteria, contract)
         and bool(proxies)
         and failure_call_criterion(proxy_call, contract, operations) is not None
     )

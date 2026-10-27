@@ -397,6 +397,22 @@ _FAILURE_CALL_OUTCOMES: dict[str, str] = {
 }
 
 
+def supports_reply_criterion(
+    criteria: list[ObservationCriterion], contract: ObservationContract
+) -> bool:
+    """Return whether a criterion at ``reply`` level is one the contract supports.
+
+    Stage 5 routes a draft whose condition failed to ``reply`` on this, ahead
+    of its failure call.
+    """
+
+    supported = set(assess_observation_criteria(criteria, contract).supported_criteria)
+    return any(
+        item.criterion_id in supported and item.claim_level == "reply"
+        for item in criteria
+    )
+
+
 def failure_call_criterion(
     failure_call: FailureCall | None,
     contract: ObservationContract,
@@ -550,4 +566,5 @@ __all__ = [
     "load_observation_contract",
     "observation_contract_digest",
     "observation_contract_from_payload",
+    "supports_reply_criterion",
 ]

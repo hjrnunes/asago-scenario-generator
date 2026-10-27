@@ -33,8 +33,8 @@ from asago_scenario_generator.stpa.observation_contract import (
     ObservationContract,
     ObservationCriterion,
     SafeObservableOutcome,
-    assess_observation_criteria,
     failure_call_criterion,
+    supports_reply_criterion,
 )
 from ..tool_call_binding import ToolCallBinding, bind_missing_call
 from .condition_claims import ConditionClaim, not_called_inversion
@@ -221,11 +221,7 @@ def _declares_supported_reply(
         ObservationCriterion.model_validate(item.model_dump(mode="json"))
         for item in outcome.observation_criteria
     ]
-    supported = set(assess_observation_criteria(criteria, contract).supported_criteria)
-    return any(
-        item.criterion_id in supported and item.claim_level == "reply"
-        for item in criteria
-    )
+    return supports_reply_criterion(criteria, contract)
 
 
 def _stops_observing(criterion: BaseModel, route: ConditionRoute) -> bool:
