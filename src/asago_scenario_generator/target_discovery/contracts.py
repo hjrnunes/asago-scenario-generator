@@ -45,7 +45,8 @@ class McpTargetDiscoveryInputs(ClosedCanonicalModel):
     model_profile: StrictStr | None = Field(default=None, min_length=1)
     model_name: StrictStr | None = Field(default=None, min_length=1)
     # The record kinds and formats the target declares for its argument and
-    # state values, carried unchanged onto the profile.
+    # state values, carried onto the profile together with the date formats
+    # its tool input schemas declare.
     value_facts: TargetValueFacts | None = None
 
 

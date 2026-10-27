@@ -82,7 +82,8 @@ ValueFactsOption = Annotated[
         help=(
             "YAML or JSON file of the record kinds and date formats the target "
             "declares for its argument and state values; the profile carries "
-            "it as value_facts."
+            "it as value_facts, with the date formats the tool input schemas "
+            "declare."
         ),
     ),
 ]
