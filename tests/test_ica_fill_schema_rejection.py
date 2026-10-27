@@ -38,6 +38,8 @@ from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.prompt_preflight import PromptBudget
 from asago_scenario_generator.stpa.infra.provider_record import (
     ReplayedProviderError,
+    _error_record,
+    _rebuild_error,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     IcaDeviationDraft,
@@ -81,6 +83,7 @@ _SLOT_ID = re.compile(r"^\s*id: (RESP-1:\S+)$", re.MULTILINE)
 _SCHEMA_MESSAGE = (
     "The provided JSON schema contains features not supported by xgrammar."
 )
+_COMPILATION_MESSAGE = "JSON schema compilation failed: unsupported keyword oneOf"
 # A 400 that mentions the schema without rejecting it.
 _SCHEMA_CONTEXT_MESSAGE = (
     "Context length exceeded: messages and schema total 9000 tokens, limit 8192"
@@ -100,6 +103,14 @@ def _bad_request(
     response = httpx.Response(status, request=request, json=body)
     error_type = openai.BadRequestError if status == 400 else openai.InternalServerError
     return error_type(f"Error code: {status} - {body}", response=response, body=body)
+
+
+def _replayed(error: BaseException) -> BaseException:
+    """Record *error* as a provider call does, then rebuild it as a replay does.
+
+    The rebuilt error keeps the recorded status and text, but not the body.
+    """
+    return _rebuild_error(_error_record(error))
 
 
 class _FailingClient(ScriptedClient):
@@ -243,9 +254,36 @@ class TestOtherPerSlotFailures:
             ),
             True,
         ),
+        (
+            _bad_request(
+                "Cannot compile the JSON schema for response_format: "
+                "unsupported keyword oneOf"
+            ),
+            True,
+        ),
+        (
+            _bad_request(
+                "Unable to compile the response schema: unsupported keyword oneOf"
+            ),
+            True,
+        ),
+        (_bad_request(_COMPILATION_MESSAGE), True),
+        (_bad_request("response_format schema is invalid"), True),
+        (_bad_request("schema contains unsupported keyword oneOf"), True),
+        (_bad_request("The output schema could not be parsed"), True),
+        (_bad_request("Response schema is not supported by the backend"), True),
+        (_bad_request("Output schema is not valid JSON Schema"), True),
+        (_bad_request("Bad request", extra={"code": "invalid_json_schema"}), True),
+        (_bad_request("Bad request", extra={"code": "invalid_schema"}), True),
+        (_replayed(_bad_request(_COMPILATION_MESSAGE)), True),
+        (_replayed(_bad_request("Bad", extra={"param": "response_format"})), True),
         (_bad_request(_CONTEXT_MESSAGE), False),
         (_bad_request(_SCHEMA_CONTEXT_MESSAGE), False),
+        (_bad_request("The JSON schema is invalid for 8192 context tokens"), False),
+        (_bad_request("Invalid value for 'top_k': must be positive"), False),
         (_bad_request("Unsupported parameter", extra={"param": "top_k"}), False),
+        (_replayed(_bad_request("Unsupported", extra={"param": "top_k"})), False),
+        (_replayed(_bad_request(_SCHEMA_CONTEXT_MESSAGE)), False),
         (_bad_request(_SCHEMA_MESSAGE, status=500), False),
         (ReplayedProviderError("BadRequestError", _SCHEMA_MESSAGE, 400), True),
         (ReplayedProviderError("BadRequestError", _CONTEXT_MESSAGE, 400), False),
@@ -505,3 +543,32 @@ def test_no_later_model_backed_stage_sends_a_request(tmp_path, monkeypatch) -> N
     }
     assert (tmp_path / "obligation-accounting.yaml").exists()
     assert result.report_path is not None and result.report_path.exists()
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        _bad_request(_COMPILATION_MESSAGE),
+        _replayed(_bad_request(_COMPILATION_MESSAGE)),
+    ],
+    ids=["sdk-error", "replayed-error"],
+)
+def test_a_compilation_rejection_stops_the_fill_and_fails_the_run(
+    tmp_path, error
+) -> None:
+    fake = _SchemaRejectedRun(calls=[], client=_FailingClient(error, every=True))
+
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    assert len(fake.client.calls) == 1
+    slot_rows = [row for row in read_calls_jsonl(tmp_path) if "icas" in row["stage"]]
+    assert len(slot_rows) == 1
+    assert slot_rows[0]["success"] is False
+    assert _COMPILATION_MESSAGE in slot_rows[0]["error"]
+    failure = result.manifest["provider_evidence"]["ica"]["fill_failure"]
+    assert failure["code"] == REQUEST_SCHEMA_REJECTED
+    assert failure["unsent_requests"] > 0
+    assert result.run_status == "failed"
+    assert result.manifest["run_status_reason"].startswith(
+        f"{REQUEST_SCHEMA_REJECTED}: "
+    )

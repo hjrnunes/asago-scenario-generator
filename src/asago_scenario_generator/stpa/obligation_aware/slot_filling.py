@@ -81,18 +81,23 @@ SLOT_RESPONSE_DIGEST_DOMAIN = (
     "asago-scenario-generator:stpa-obligation-slot-response:v1"
 )
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
-# Error text by which a provider says it rejects the response schema itself:
-# an invalid schema (OpenAI: "Invalid schema for response_format ..."; vLLM:
-# "Invalid JSON schema"), schema features it does not support (vLLM: "The
-# provided JSON schema contains features not supported by xgrammar"), a schema
-# it cannot compile, or ``response_format`` named as the rejected parameter.
-_SCHEMA_REJECTION = re.compile(
-    r"invalid (?:json )?schema"
-    r"|schema contains features not supported"
-    r"|(?:failed|unable) to (?:compile|convert|parse) (?:the )?(?:json )?schema"
-    r"|[\'\"]param[\'\"]: ?[\'\"]response_format[\'\"]",
+# The parts of a provider's rejection of the response schema; see
+# ``is_request_schema_rejection``.
+_CLAUSE_BREAK = re.compile(r"[.;:\n]")
+_SCHEMA_NOUN = re.compile(r"\bschema\b|\bresponse_format\b", re.IGNORECASE)
+_REJECTION_WORD = re.compile(
+    r"\b(?:compil\w*|invalid|unsupported|not supported|not valid"
+    r"|(?:cannot|can't|could not|unable to|failed to) (?:be )?(?:parse|convert)\w*)\b",
     re.IGNORECASE,
 )
+_SIZE_WORD = re.compile(r"\b(?:context|tokens?)\b", re.IGNORECASE)
+_SCHEMA_FIELDS = {
+    "param": frozenset({"response_format"}),
+    "code": frozenset({"invalid_json_schema", "invalid_schema"}),
+}
+# A field of the error body as the SDK error's text shows it, which is all a
+# replayed error keeps of the body.
+_BODY_FIELD = re.compile(r"[\'\"](param|code)[\'\"]: ?[\'\"]([\w.]+)[\'\"]")
 _WRONG_DURATION_NA_JUSTIFICATION = (
     "The authoritative action temporality is not continuous or bounded_duration."
 )
@@ -1235,24 +1240,44 @@ def _prompt_budget_exceeded(error: BaseException | None) -> bool:
 def is_request_schema_rejection(error: BaseException | None) -> bool:
     """Tell whether the provider rejected a request for its response schema.
 
-    The classification is deliberately simple: an HTTP 400 whose error text
-    says the provider rejects the response schema itself
-    (``_SCHEMA_REJECTION``).  Every slot request of one fill carries a schema
-    built the same way, so the provider rejects each of them alike.  A 400
-    that merely mentions the schema (such as a context length counted over
-    messages and schema), any other 400, a 5xx, or a local failure is a
-    per-slot failure.  The provider adapter raises its call failure as the
-    cause, a 400 may wrap the provider's own rejection, and a replayed failure
-    keeps its recorded status and text, so every error of the cause chain is
-    read.
+    The classification is deliberately simple.  An HTTP 400 is a rejection of
+    the response schema when its error body names it in a structured field
+    (``param`` ``response_format``, or ``code`` ``invalid_json_schema`` or
+    ``invalid_schema``), or when one clause of its text (split at ``.``,
+    ``;``, ``:``, and line breaks) holds a schema noun (``schema``,
+    ``response_format``) and a rejection word (compile or compilation,
+    invalid, unsupported, not supported, not valid, or cannot, could not,
+    unable to, or failed to parse or convert, also passive) and speaks of no
+    context or tokens.  Word order does not matter.  Every slot request of one
+    fill carries a schema built the same way, so the provider rejects each of
+    them alike.  A 400 that merely mentions the schema (such as a context length
+    counted over messages and schema), a 400 naming another parameter, a 5xx,
+    or a local failure is a per-slot failure.  The provider adapter raises its
+    call failure as the cause, a 400 may wrap the provider's own rejection,
+    and a replayed failure keeps its recorded status and text but not its
+    body, so every error of the cause chain is read, and a body field also
+    from the text.
     """
     while error is not None:
-        if getattr(error, "status_code", None) == 400 and _SCHEMA_REJECTION.search(
-            str(error)
-        ):
+        if getattr(error, "status_code", None) == 400 and _rejects_schema(error):
             return True
         error = error.__cause__
     return False
+
+
+def _rejects_schema(error: BaseException) -> bool:
+    """Apply the rule of ``is_request_schema_rejection`` to one HTTP 400."""
+    text = str(error)
+    fields = [(name, getattr(error, name, None)) for name in _SCHEMA_FIELDS]
+    fields.extend(match.groups() for match in _BODY_FIELD.finditer(text))
+    if any(value in _SCHEMA_FIELDS[name] for name, value in fields):
+        return True
+    return any(
+        _SCHEMA_NOUN.search(clause)
+        and _REJECTION_WORD.search(clause)
+        and not _SIZE_WORD.search(clause)
+        for clause in _CLAUSE_BREAK.split(text)
+    )
 
 
 def _unresolved_diagnostic_code(error: BaseException | None) -> str:
