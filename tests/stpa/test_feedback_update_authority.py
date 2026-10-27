@@ -1140,6 +1140,39 @@ def test_the_call_2b_correction_names_every_failing_channel(tmp_path: Path) -> N
     assert warnings == []
 
 
+def test_the_call_2b_correction_lists_a_long_failure_list_whole(
+    tmp_path: Path,
+) -> None:
+    def reply(basis: str) -> dict[str, Any]:
+        content = _call_2b_reply(_assessed(basis))
+        content["feedback"] = [
+            {
+                **_assessed(basis),
+                "fb_id": f"FB-1-{n}",
+                "description": f"The requester's statement number {n}",
+            }
+            for n in range(1, 41)
+        ]
+        return content
+
+    client = _client(reply(_UNCITED_BASIS), reply(_BASIS))
+
+    _call_2b(client, tmp_path)
+
+    _, correction = _sent(client)
+    request = _message(correction, "user")
+    listed = "\n".join(
+        f"- feedback channel FB-1-{n} settled authority basis must cite the "
+        "supplied use case or an exact target-evidence ref"
+        for n in range(1, 41)
+    )
+    assert len(listed) > 4000
+    assert (
+        "ValueError: 40 feedback channel authority bases fail the checks:\n"
+        f"{listed}\n\n{_authority_note()}\n\n"
+    ) in request
+
+
 def test_call_2b_drops_what_the_one_correction_leaves_failing(
     tmp_path: Path,
 ) -> None:

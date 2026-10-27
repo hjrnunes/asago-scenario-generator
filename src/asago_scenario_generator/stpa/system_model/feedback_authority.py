@@ -137,8 +137,11 @@ class FeedbackAuthorityError(ExactFeedbackError):
 
     ``defects`` holds ``(fb_id, reason)`` for each failing channel.  The
     message lists every reason on a line of its own, so the one correction
-    request names each failing channel.
+    request names each failing channel.  It is not shortened, however long
+    the list.
     """
+
+    max_chars = None
 
     def __init__(self, defects: Sequence[tuple[str, str]]) -> None:
         self.defects = tuple(defects)
