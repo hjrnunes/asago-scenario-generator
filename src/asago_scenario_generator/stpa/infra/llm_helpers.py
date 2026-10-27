@@ -850,7 +850,11 @@ class ExactFeedbackError(ValueError):
 
     The correction prompt keeps its line breaks and uses a larger bound
     than for other errors, so every listed failure reaches the model.
+    ``max_chars`` is that bound; a subclass whose list must reach the model
+    whole at any length sets it to ``None``.
     """
+
+    max_chars: int | None = _EXACT_FEEDBACK_MAX_CHARS
 
 
 def correction_prompt(
@@ -909,7 +913,9 @@ def compact_validation_error(error: Exception) -> str:
         )
     if isinstance(error, ExactFeedbackError):
         message = "\n".join(" ".join(line.split()) for line in str(error).splitlines())
-        return f"ValueError: {_truncated(message, _EXACT_FEEDBACK_MAX_CHARS)}"
+        if error.max_chars is not None:
+            message = _truncated(message, error.max_chars)
+        return f"ValueError: {message}"
     message = " ".join(str(error).split())
     return f"{type(error).__name__}: {_truncated(message, 800)}"
 

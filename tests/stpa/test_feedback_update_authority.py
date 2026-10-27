@@ -74,7 +74,9 @@ from asago_scenario_generator.stpa.system_model.critic import (
     run_revision,
 )
 from asago_scenario_generator.stpa.system_model.feedback_authority import (
+    FeedbackAuthorityError,
     feedback_authority_defect,
+    validate_all_feedback_authority_assessments,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     EvidenceField,
@@ -932,7 +934,8 @@ def test_call_2b_drops_a_basis_the_correction_does_not_fix(
 
     first, correction = _sent(client)
     assert (
-        f"Exact validation error from the prior response:\nValueError: {reason}"
+        "Exact validation error from the prior response:\nValueError: "
+        f"1 feedback channel authority basis fails the checks:\n- {reason}"
     ) in _message(correction, "user")
     [channel] = elements.feedback_channels
     assert channel.authority_for_update is None
@@ -1020,6 +1023,199 @@ def test_call_2b_still_stops_on_other_failures(
 
     assert len(_sent(client)) == 2
     assert warnings == []
+    assert _AUTHORITY_NOTE_OPENING not in _message(_sent(client)[1], "user")
+
+
+# ---------------------------------------------------------------------------
+# The one correction names every failing channel
+# ---------------------------------------------------------------------------
+
+_RESTATED_BASIS = "user input is unverified"
+_UNCITED_BASIS = "The finance reviewer decides refund approvals."
+_RESTATED_REASON = (
+    "feedback channel FB-1-1 authority basis only restates source kind "
+    "'user_message'; state why that source may or may not establish this "
+    "value and cite supplied evidence"
+)
+_UNCITED_REASON = (
+    "feedback channel FB-1-3 settled authority basis must cite the supplied "
+    "use case or an exact target-evidence ref"
+)
+_AUTHORITY_NOTE_OPENING = "Correct the `authority_for_update` of every feedback"
+
+
+def _three_channel_reply(first_basis: str, third_basis: str) -> dict[str, Any]:
+    """A reply whose FB-1-2 basis passes, around FB-1-1 and FB-1-3."""
+    reply = _call_2b_reply(_assessed(first_basis))
+    reply["feedback"] += [
+        {
+            **_assessed(_BASIS),
+            "fb_id": "FB-1-2",
+            "description": "The finance reviewer's recorded approval",
+        },
+        {
+            **_assessed(third_basis),
+            "fb_id": "FB-1-3",
+            "description": "The requester's statement of the refund amount",
+        },
+    ]
+    return reply
+
+
+def _authority_note() -> str:
+    return (
+        TemplateLoader(PROMPTS_DIR)
+        .render_prompt("stage2_call2b_authority_correction.j2")
+        .rstrip()
+    )
+
+
+def test_the_authority_checks_name_every_failing_channel_in_order() -> None:
+    channels = [
+        _channel(
+            source_kind=FeedbackSourceKind.user_message,
+            authority_for_update=FeedbackUpdateAuthority(
+                status=FeedbackAuthorityStatus.non_authoritative,
+                basis=_RESTATED_BASIS,
+            ),
+        ),
+        _channel(authority_for_update=_NON_AUTHORITATIVE).model_copy(
+            update={"fb_id": "FB-1-2"}
+        ),
+        _channel(
+            authority_for_update=FeedbackUpdateAuthority(
+                status=FeedbackAuthorityStatus.non_authoritative,
+                basis=_UNCITED_BASIS,
+            ),
+        ).model_copy(update={"fb_id": "FB-1-3"}),
+    ]
+
+    with pytest.raises(FeedbackAuthorityError) as raised:
+        validate_all_feedback_authority_assessments(
+            channels, target_evidence=None, require_domain_scope=True
+        )
+
+    assert raised.value.defects == (
+        ("FB-1-1", _RESTATED_REASON),
+        ("FB-1-3", _UNCITED_REASON),
+    )
+    assert str(raised.value) == (
+        "2 feedback channel authority bases fail the checks:\n"
+        f"- {_RESTATED_REASON}\n"
+        f"- {_UNCITED_REASON}"
+    )
+
+
+def authority_correction_request(run_dir: Path) -> str:
+    """Return the Call 2b correction request after two failing bases."""
+    reply = _three_channel_reply(_RESTATED_BASIS, _UNCITED_BASIS)
+    client = _client(reply, _three_channel_reply(_BASIS, _BASIS))
+    _call_2b(client, run_dir)
+    _, correction = _sent(client)
+    return _message(correction, "user")
+
+
+def test_the_call_2b_correction_names_every_failing_channel(tmp_path: Path) -> None:
+    reply = _three_channel_reply(_RESTATED_BASIS, _UNCITED_BASIS)
+    client = _client(reply, _three_channel_reply(_BASIS, _BASIS))
+    warnings: list[str] = []
+
+    elements = _call_2b(client, tmp_path, warnings=warnings)
+
+    first, correction = _sent(client)
+    request = _message(correction, "user")
+    assert request.startswith(_message(first, "user"))
+    assert request.endswith(
+        "\n\nExact validation error from the prior response:\n"
+        "ValueError: 2 feedback channel authority bases fail the checks:\n"
+        f"- {_RESTATED_REASON}\n"
+        f"- {_UNCITED_REASON}\n\n"
+        f"{_authority_note()}\n\n"
+        "Return one JSON object matching the response schema already supplied."
+    )
+    assert _message(correction, "system") == _message(first, "system")
+    assert [c.authority_for_update for c in elements.feedback_channels] == [
+        _NON_AUTHORITATIVE
+    ] * 3
+    assert warnings == []
+
+
+def test_the_call_2b_correction_lists_a_long_failure_list_whole(
+    tmp_path: Path,
+) -> None:
+    def reply(basis: str) -> dict[str, Any]:
+        content = _call_2b_reply(_assessed(basis))
+        content["feedback"] = [
+            {
+                **_assessed(basis),
+                "fb_id": f"FB-1-{n}",
+                "description": f"The requester's statement number {n}",
+            }
+            for n in range(1, 41)
+        ]
+        return content
+
+    client = _client(reply(_UNCITED_BASIS), reply(_BASIS))
+
+    _call_2b(client, tmp_path)
+
+    _, correction = _sent(client)
+    request = _message(correction, "user")
+    listed = "\n".join(
+        f"- feedback channel FB-1-{n} settled authority basis must cite the "
+        "supplied use case or an exact target-evidence ref"
+        for n in range(1, 41)
+    )
+    assert len(listed) > 4000
+    assert (
+        "ValueError: 40 feedback channel authority bases fail the checks:\n"
+        f"{listed}\n\n{_authority_note()}\n\n"
+    ) in request
+
+
+def test_call_2b_drops_what_the_one_correction_leaves_failing(
+    tmp_path: Path,
+) -> None:
+    reply = _three_channel_reply(_RESTATED_BASIS, _UNCITED_BASIS)
+    client = _client(reply, _three_channel_reply(_BASIS, _UNCITED_BASIS))
+    warnings: list[str] = []
+
+    elements = _call_2b(client, tmp_path, warnings=warnings)
+
+    assert len(_sent(client)) == 2
+    fixed, supported, unfixed = elements.feedback_channels
+    assert fixed.authority_for_update == _NON_AUTHORITATIVE
+    assert supported.authority_for_update == _NON_AUTHORITATIVE
+    assert unfixed.authority_for_update is None
+    assert warnings == [
+        "stage_2/call_2b_control_elements: dropped the authority_for_update of "
+        f"feedback channel FB-1-3; its authority is unknown: {_UNCITED_REASON}"
+    ]
+
+
+def test_call_2b_drops_every_basis_the_correction_does_not_fix(
+    tmp_path: Path,
+) -> None:
+    reply = _three_channel_reply(_RESTATED_BASIS, _UNCITED_BASIS)
+    client = _client(reply, reply)
+    warnings: list[str] = []
+
+    elements = _call_2b(client, tmp_path, warnings=warnings)
+
+    assert len(_sent(client)) == 2
+    assert [c.authority_for_update for c in elements.feedback_channels] == [
+        None,
+        _NON_AUTHORITATIVE,
+        None,
+    ]
+    assert warnings == [
+        "stage_2/call_2b_control_elements: dropped the authority_for_update of "
+        f"feedback channel {fb_id}; its authority is unknown: {reason}"
+        for fb_id, reason in (
+            ("FB-1-1", _RESTATED_REASON),
+            ("FB-1-3", _UNCITED_REASON),
+        )
+    ]
 
 
 def _stage_2_client() -> MockLLMClient:

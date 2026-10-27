@@ -83,8 +83,9 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
 )
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.feedback_authority import (
+    FeedbackAuthorityError,
     feedback_authority_defect,
-    validate_feedback_authority_assessments,
+    validate_all_feedback_authority_assessments,
 )
 from asago_scenario_generator.stpa.system_model.publication import (
     publish_control_structure,
@@ -2396,11 +2397,13 @@ def _call_2b_control_elements(
 ) -> ControlElementSet:
     """Run Call 2b: derive control actions, feedback channels, and controlled processes.
 
-    Authority is optional.  When the last reply fails only the authority basis
-    checks, every failing ``authority_for_update`` is dropped, so that
-    channel's authority is unknown, and *warnings* gets one line per channel.
-    The last reply is the reply itself, or for the missing control action
-    repair, the response it repairs with the repair's actions merged in.
+    Authority is optional.  A reply whose authority bases fail the checks
+    earns the one generic correction, which names every failing channel with
+    its reason.  When the last reply fails only the authority basis checks,
+    every failing ``authority_for_update`` is dropped, so that channel's
+    authority is unknown, and *warnings* gets one line per channel.  The last
+    reply is the reply itself, or for the missing control action repair, the
+    response it repairs with the repair's actions merged in.
 
     Raises:
         StageError: If the LLM call fails or the response fails validation.
@@ -2414,12 +2417,17 @@ def _call_2b_control_elements(
             responsibilities=responsibility_set.responsibilities,
             cleanup_transformations=cleanup,
         )
-        validate_feedback_authority_assessments(
+        validate_all_feedback_authority_assessments(
             elements.feedback_channels,
             target_evidence=target_evidence,
             require_domain_scope=True,
         )
         return elements
+
+    def authority_note(error: Exception) -> str:
+        if not isinstance(error, FeedbackAuthorityError):
+            return ""
+        return loader.render_prompt("stage2_call2b_authority_correction.j2").rstrip()
 
     def parse(result: LLMResult, cleanup: list[dict[str, Any]]) -> ControlElementSet:
         return check(result.content, cleanup)
@@ -2484,6 +2492,7 @@ def _call_2b_control_elements(
         # carriers and missing meaning before canonical IDs are repaired.
         response_parser=parse,
         recover=recover,
+        error_note=authority_note,
     )
 
 
@@ -2700,7 +2709,9 @@ def _without_unsupported_authority(
     No request is sent.  Each dropped assessment leaves its channel's
     authority unknown and adds a warning naming the channel and the reason.
     """
-    if outcome.result is None or not isinstance(outcome.failure, ValueError):
+    if outcome.result is None or not isinstance(
+        outcome.failure, FeedbackAuthorityError
+    ):
         return None
     try:
         elements = parse_control_element_set_response(
@@ -2719,9 +2730,7 @@ def _without_unsupported_authority(
             continue
         channels.append(channel.model_copy(update={"authority_for_update": None}))
         reasons.append((channel.fb_id, reason))
-    # The step stopped on the first failing basis; any other failure is not
-    # this one, and dropping assessments would not answer it.
-    if not reasons or str(outcome.failure) != reasons[0][1]:
+    if not reasons:
         return None
     warnings.extend(
         "stage_2/call_2b_control_elements: dropped the authority_for_update "
