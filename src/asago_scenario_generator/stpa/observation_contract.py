@@ -383,6 +383,71 @@ def assess_observation_criteria(
     )
 
 
+FAILURE_CALL_CRITERION_ID = "failure_call"
+_FAILURE_CALL_CLAIM = "command_attempt"
+_FAILURE_CALL_OUTCOMES: dict[str, str] = {
+    "incorrect_call": (
+        "{operation} is called where the failure criterion states the call is "
+        "incorrect."
+    ),
+    "missing_call": (
+        "{operation} is not called where the failure criterion states the call "
+        "is required."
+    ),
+}
+
+
+def failure_call_criterion(
+    failure_call: FailureCall | None,
+    contract: ObservationContract,
+    recorded_operations: tuple[str, ...] | frozenset[str],
+    *,
+    taken_ids: tuple[str, ...] | frozenset[str] = (),
+) -> ObservationCriterion | None:
+    """Return the command-attempt criterion a failure call states, if observable.
+
+    The failure call names one exact operation and whether the failure is a
+    call of it or its absence. When the target records that operation and
+    the contract captures tool calls at ``command_attempt``, the failure is a
+    captured call (or a call missing from the complete capture), whatever the
+    provider criteria judged. Returns ``None`` without a failure call, for an
+    operation outside ``recorded_operations``, or under a contract that does
+    not observe command attempts. The id avoids every one in ``taken_ids``.
+    """
+
+    if failure_call is None:
+        return None
+    operation = failure_call.operation_name
+    if (
+        operation not in recorded_operations
+        or _FAILURE_CALL_CLAIM not in contract.supported_claim_levels
+        or not contract.supports_evidence(_CLAIM_EVIDENCE[_FAILURE_CALL_CLAIM])
+    ):
+        return None
+    return ObservationCriterion(
+        criterion_id=_free_criterion_id(taken_ids),
+        outcome=_FAILURE_CALL_OUTCOMES[failure_call.kind].format(operation=operation),
+        observable=True,
+        claim_level=_FAILURE_CALL_CLAIM,
+        evidence=_CLAIM_EVIDENCE[_FAILURE_CALL_CLAIM],
+        operation_name=operation,
+        reason=(
+            f"The failure call ({failure_call.kind}) names {operation}, an "
+            "operation the target records, and the contract captures tool "
+            f"calls at claim level {_FAILURE_CALL_CLAIM}."
+        ),
+    )
+
+
+def _free_criterion_id(taken_ids: tuple[str, ...] | frozenset[str]) -> str:
+    candidate = FAILURE_CALL_CRITERION_ID
+    suffix = 1
+    while candidate in taken_ids:
+        suffix += 1
+        candidate = f"{FAILURE_CALL_CRITERION_ID}_{suffix}"
+    return candidate
+
+
 def _unsupported_reason(
     criterion: ObservationCriterion, contract: ObservationContract
 ) -> str | None:
@@ -466,6 +531,7 @@ def default_observation_contract() -> ObservationContract:
 
 __all__ = [
     "ClaimLevel",
+    "FAILURE_CALL_CRITERION_ID",
     "FailureCall",
     "FailureCallKind",
     "OBSERVATION_CONTRACT_DIGEST_DOMAIN",
@@ -480,6 +546,7 @@ __all__ = [
     "ObservationEvidence",
     "assess_observation_criteria",
     "default_observation_contract",
+    "failure_call_criterion",
     "load_observation_contract",
     "observation_contract_digest",
     "observation_contract_from_payload",

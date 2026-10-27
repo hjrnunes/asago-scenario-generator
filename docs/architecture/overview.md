@@ -634,6 +634,13 @@ The producer does not classify binding completeness, and the published scenario
 carries no execution route or contract. A scenario is either executable (its
 observable outcome is supported by the observation contract) or
 analytical-only (it is not, or its discriminating condition could not be kept).
+A failure call that names an operation the target records is a command attempt
+the contract captures, so it is never analytical-only: when the provider's
+own criteria are all unsupported, code adds the failure call's
+`command_attempt` criterion and makes the safe outcome observable on that
+call, and a scenario whose condition could not be kept keeps that claim and
+is published without a condition (`tool_call_condition_status`
+`not_executable`, reason `no_condition`).
 Runtime-readiness
 concerns (chat surfaces, clocks, observers, locators, credentials, and endpoint
 details) belong to the consumer. A caller-requested environment basis

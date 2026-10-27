@@ -1,8 +1,10 @@
 """The second correction of a Stage 5 condition that still fails.
 
 A ``command_attempt`` scenario without a condition cannot run, so code
-publishes it as ``analytical_only``. One more correction, sent only for the
-chains below, gives the model a last chance to write a condition that passes.
+publishes it as ``analytical_only``, or, when its failure call names an
+operation the target records, as a command attempt without a condition. One
+more correction, sent only for the chains below, gives the model a last chance
+to write a condition that passes.
 It adds no wording of its own: it is the request a second validation retry of
 the Stage 5 call would send.
 """
@@ -26,6 +28,8 @@ from .issues import CONDITION_FAILURE_CODES, IssueCode, ValidationIssue
 
 # Attempts one and two are the call and its one correction.
 SECOND_CORRECTION_ATTEMPT = 3
+# The routes whose published draft has no claim the consumer can run.
+_UNRUNNABLE_ROUTES = frozenset({"analytical_only", "failure_call"})
 
 
 def earns_second_correction(
@@ -40,13 +44,14 @@ def earns_second_correction(
     exactly one correction. A reply that returned no condition took the exit
     the first correction offers, and a third request does not rescue it. The
     route is the one code gives the draft without its condition: only a
-    chain routed to ``analytical_only`` has a scenario to gain.
+    chain routed to ``analytical_only`` or ``failure_call`` publishes a claim
+    that nothing can run, so only it has a scenario to gain.
     """
     raised = {issue.code for issue in issues}
     return (
         failure is not None
         and attempt_number == SECOND_CORRECTION_ATTEMPT - 1
-        and route == "analytical_only"
+        and route in _UNRUNNABLE_ROUTES
         and IssueCode.discriminating_condition_missing not in raised
         and any(code in raised for code in CONDITION_FAILURE_CODES)
     )

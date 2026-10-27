@@ -26,6 +26,7 @@ from asago_scenario_generator.stpa.observation_contract import (
     ObservationCriterion,
     SafeObservableOutcome,
     assess_observation_criteria,
+    failure_call_criterion,
 )
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
@@ -50,6 +51,7 @@ from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
 from .wire import (
     _CausalSourceChoice,
+    _ObservationCriterionDraft,
     _ContextAdversarialDraft,
     _ContextAttackerBDIDraft,
     _ContextFunctionalAdversaryDraft,
@@ -145,6 +147,15 @@ def _validate_normal_provider_payload(
         for item in outcome.observation_criteria
     )
     if observation_contract is not None:
+        criteria = _with_failure_call_criterion(
+            outcome,
+            criteria,
+            observation_contract,
+            _stage5_observed_operation_names(
+                execution_target_profile, target_operation=target_operation
+            ),
+            normalizations,
+        )
         assessment = _assess_normal_observation(
             outcome,
             criteria,
@@ -380,6 +391,65 @@ def _normal_adversary_and_outcome(
     if observation_contract is not None and not outcome.observation_criteria:
         raise ValueError("observation_criteria is required in normal Stage 5 output")
     return adversary, outcome
+
+
+FAILURE_CALL_NORMALIZATION = "failure_call_of_recorded_operation"
+
+
+def _with_failure_call_criterion(
+    outcome: _ContextSemanticOutcomeDraft,
+    criteria: tuple[ObservationCriterion, ...],
+    observation_contract: ObservationContract,
+    recorded_operations: tuple[str, ...],
+    normalizations: list[Stage5Normalization],
+) -> tuple[ObservationCriterion, ...]:
+    """Add the failure call's criterion to a draft its own criteria leave analytical.
+
+    The failure call is the model's semantic choice; whether the contract
+    observes a call of a recorded operation is an exact lookup, so code adds
+    the command-attempt criterion :func:`failure_call_criterion` states and
+    makes an unobservable safe outcome observable on that call. A draft whose
+    own criteria are already executable is left unchanged. Returns the
+    criteria to assess.
+    """
+
+    if assess_observation_criteria(criteria, observation_contract).disposition != (
+        "analytical_only"
+    ):
+        return criteria
+    added = failure_call_criterion(
+        getattr(outcome, "failure_call", None),
+        observation_contract,
+        recorded_operations,
+        taken_ids=tuple(item.criterion_id for item in criteria),
+    )
+    if added is None:
+        return criteria
+    outcome.observation_criteria.append(
+        _ObservationCriterionDraft.model_validate(added.model_dump(mode="json"))
+    )
+    normalizations.append(
+        Stage5Normalization(
+            field=f"observation_criteria[{len(criteria)}]",
+            original=None,
+            normalized=added.model_dump(mode="json", exclude_none=True),
+            reason=FAILURE_CALL_NORMALIZATION,
+        )
+    )
+    safe_outcome = getattr(outcome, "safe_observable_outcome", None)
+    if safe_outcome is not None and not safe_outcome.observable:
+        outcome.safe_observable_outcome = _replace_safe_outcome(
+            safe_outcome,
+            {
+                "observable": True,
+                "claim_level": added.claim_level,
+                "evidence": added.evidence,
+                "operation_name": added.operation_name,
+            },
+            reason=FAILURE_CALL_NORMALIZATION,
+            normalizations=normalizations,
+        )
+    return (*criteria, added)
 
 
 def _assess_normal_observation(
