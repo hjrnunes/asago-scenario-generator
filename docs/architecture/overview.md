@@ -405,18 +405,21 @@ contract check before dispatch`. A manifest records the count as
 `prompt_contract_failures` only when it is above zero, so a run that keeps
 candidates despite such failures keeps its status and still shows the count,
 and a run without them keeps its manifest shape. A second exception covers a
-provider that rejects the ICA slot-fill request schema itself: an HTTP 400
-anywhere in the failure's cause chain whose error body names the response
-format in a structured field (`param` `response_format`, or `code`
-`invalid_json_schema` or `invalid_schema`; a replayed error keeps these only in
-its recorded text, where they are read too), or whose text has one clause
-(split at `.`, `;`, `:`, and line breaks) holding both a schema noun (`schema`,
-`response_format`) and a rejection word (compile or compilation, invalid,
-unsupported, not supported, not valid, or cannot, could not, unable to, or
-failed to parse or convert), in either order, without speaking of context or
-tokens. A 400 that merely mentions the schema, such as a context length
-counted over messages and schema, or one naming another parameter, does not
-count. The fill then sends no further slot request, since the provider rejects
+provider that rejects the ICA slot-fill request schema itself. Each HTTP 400
+anywhere in the failure's cause chain is judged by three steps, the first that
+applies deciding. First, structured body fields: `param` naming the response
+format (`response_format`, or a part of it such as `response_format.type`) or
+`code` `invalid_json_schema` or `invalid_schema` is a rejection, and `param`
+naming any other parameter is not; a replayed error keeps no body, so these
+fields are also read from its recorded text. Second, a size veto: text that
+speaks of a context length or window, tokens, or a maximum length anywhere is
+not a rejection. Third, text: a schema noun (`schema`, `json_schema`,
+`response_format` and its dotted parts) within three words of a rejection word
+(compile or compilation, invalid, unsupported, not supported, not valid, or
+cannot, could not, unable to, or failed to parse or convert), in either order,
+is a rejection. A 400 that merely mentions the schema, such as a context
+length counted over messages and schema, or one naming another parameter, does
+not count. The fill then sends no further slot request, since the provider rejects
 every slot request alike. The rejected request keeps the diagnostic code
 `request_schema_rejected`, stays in the call records, and counts as a request;
 each request left unsent gets the same code, and each slot left unfilled

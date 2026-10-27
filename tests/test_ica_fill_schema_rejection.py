@@ -88,6 +88,18 @@ _COMPILATION_MESSAGE = "JSON schema compilation failed: unsupported keyword oneO
 _SCHEMA_CONTEXT_MESSAGE = (
     "Context length exceeded: messages and schema total 9000 tokens, limit 8192"
 )
+# A context-length 400 whose clause after the colon reads like a rejection.
+_CONTEXT_SCHEMA_MESSAGE = (
+    "Context length exceeded: invalid combined size of messages and schema"
+)
+# A 400 about another parameter that mentions the request schema.
+_TOP_K_SCHEMA_MESSAGE = "Invalid value for top_k under the request schema"
+_TOP_K = {"param": "top_k"}
+_GRAMMAR_MESSAGE = "Failed to convert json_schema to grammar"
+_FORMAT_TYPE_MESSAGE = (
+    "Invalid value: 'json_schema'. Supported values are: 'json_object' and 'text'."
+)
+_FORMAT_TYPE = {"param": "response_format.type"}
 _CONTEXT_MESSAGE = (
     "This model's maximum context length is 8192 tokens. However, you "
     "requested 9000 tokens."
@@ -285,6 +297,32 @@ class TestOtherPerSlotFailures:
         (_replayed(_bad_request("Unsupported", extra={"param": "top_k"})), False),
         (_replayed(_bad_request(_SCHEMA_CONTEXT_MESSAGE)), False),
         (_bad_request(_SCHEMA_MESSAGE, status=500), False),
+        (_bad_request(_CONTEXT_SCHEMA_MESSAGE), False),
+        (_replayed(_bad_request(_CONTEXT_SCHEMA_MESSAGE)), False),
+        (_bad_request(_TOP_K_SCHEMA_MESSAGE, extra=_TOP_K), False),
+        (_replayed(_bad_request(_TOP_K_SCHEMA_MESSAGE, extra=_TOP_K)), False),
+        (_bad_request(_TOP_K_SCHEMA_MESSAGE), False),
+        (_replayed(_bad_request(_TOP_K_SCHEMA_MESSAGE)), False),
+        (_bad_request("Bad request", extra={"param": "response_format_x"}), False),
+        (
+            _bad_request(
+                _SCHEMA_MESSAGE, extra={"param": "top_k", "code": "invalid_value"}
+            ),
+            False,
+        ),
+        (_bad_request(_GRAMMAR_MESSAGE), True),
+        (_replayed(_bad_request(_GRAMMAR_MESSAGE)), True),
+        (_bad_request(_FORMAT_TYPE_MESSAGE, extra=_FORMAT_TYPE), True),
+        (_replayed(_bad_request(_FORMAT_TYPE_MESSAGE, extra=_FORMAT_TYPE)), True),
+        (_bad_request(_FORMAT_TYPE_MESSAGE), True),
+        (_replayed(_bad_request(_FORMAT_TYPE_MESSAGE)), True),
+        (_bad_request("Bad request", extra={"param": "response_format[0]"}), True),
+        (
+            _bad_request(
+                "Bad request", extra={"param": "response_format.json_schema.schema"}
+            ),
+            True,
+        ),
         (ReplayedProviderError("BadRequestError", _SCHEMA_MESSAGE, 400), True),
         (ReplayedProviderError("BadRequestError", _CONTEXT_MESSAGE, 400), False),
         (ValueError(_SCHEMA_MESSAGE), False),
@@ -572,3 +610,45 @@ def test_a_compilation_rejection_stops_the_fill_and_fails_the_run(
     assert result.manifest["run_status_reason"].startswith(
         f"{REQUEST_SCHEMA_REJECTED}: "
     )
+
+
+_SHAPES = {"sdk": lambda error: error, "replayed": _replayed}
+
+
+@pytest.mark.parametrize("shape", sorted(_SHAPES))
+@pytest.mark.parametrize(
+    ("message", "extra"),
+    [(_CONTEXT_SCHEMA_MESSAGE, None), (_TOP_K_SCHEMA_MESSAGE, _TOP_K)],
+    ids=["context-length-with-colon", "top-k-param"],
+)
+def test_a_400_that_is_not_a_schema_rejection_keeps_the_run_filling(
+    tmp_path, message, extra, shape
+) -> None:
+    error = _SHAPES[shape](_bad_request(message, extra=extra))
+    fake = _SchemaRejectedRun(calls=[], client=_FailingClient(error))
+
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    assert len(fake.client.calls) > 1
+    assert "fill_failure" not in result.manifest["provider_evidence"]["ica"]
+    assert result.run_status != "failed"
+
+
+@pytest.mark.parametrize("shape", sorted(_SHAPES))
+@pytest.mark.parametrize(
+    ("message", "extra"),
+    [(_GRAMMAR_MESSAGE, None), (_FORMAT_TYPE_MESSAGE, _FORMAT_TYPE)],
+    ids=["json-schema-to-grammar", "response-format-type-param"],
+)
+def test_a_schema_rejection_stops_the_run_after_one_request(
+    tmp_path, message, extra, shape
+) -> None:
+    error = _SHAPES[shape](_bad_request(message, extra=extra))
+    fake = _SchemaRejectedRun(calls=[], client=_FailingClient(error, every=True))
+
+    result = run_synthesis(_inputs(tmp_path), SynthesisAdapters.from_object(fake))
+
+    assert len(fake.client.calls) == 1
+    failure = result.manifest["provider_evidence"]["ica"]["fill_failure"]
+    assert failure["code"] == REQUEST_SCHEMA_REJECTED
+    assert result.run_status == "failed"

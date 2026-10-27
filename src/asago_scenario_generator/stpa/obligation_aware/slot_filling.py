@@ -83,21 +83,25 @@ SLOT_RESPONSE_DIGEST_DOMAIN = (
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
 # The parts of a provider's rejection of the response schema; see
 # ``is_request_schema_rejection``.
-_CLAUSE_BREAK = re.compile(r"[.;:\n]")
-_SCHEMA_NOUN = re.compile(r"\bschema\b|\bresponse_format\b", re.IGNORECASE)
-_REJECTION_WORD = re.compile(
-    r"\b(?:compil\w*|invalid|unsupported|not supported|not valid"
-    r"|(?:cannot|can't|could not|unable to|failed to) (?:be )?(?:parse|convert)\w*)\b",
-    re.IGNORECASE,
-)
-_SIZE_WORD = re.compile(r"\b(?:context|tokens?)\b", re.IGNORECASE)
-_SCHEMA_FIELDS = {
-    "param": frozenset({"response_format"}),
-    "code": frozenset({"invalid_json_schema", "invalid_schema"}),
-}
+_SCHEMA_PARAM = re.compile(r"response_format(?:$|[.\[])")
+_SCHEMA_CODES = frozenset({"invalid_json_schema", "invalid_schema"})
 # A field of the error body as the SDK error's text shows it, which is all a
 # replayed error keeps of the body.
-_BODY_FIELD = re.compile(r"[\'\"](param|code)[\'\"]: ?[\'\"]([\w.]+)[\'\"]")
+_BODY_FIELD = re.compile(r"[\'\"](param|code)[\'\"]: ?[\'\"]([^\'\"]+)[\'\"]")
+_SIZE_VETO = re.compile(
+    r"\bcontext (?:length|window)\b|\btokens?\b|\bmaximum length\b", re.IGNORECASE
+)
+_SCHEMA_NOUN = r"\b(?:schema|json_schema|response_format)\b"
+_REJECTION_WORD = (
+    r"\b(?:compil\w*|invalid|unsupported|not supported|not valid"
+    r"|(?:cannot|can't|could not|unable to|failed to) (?:be )?(?:parse|convert)\w*)\b"
+)
+# At most three words between the schema noun and the rejection word.
+_NEAR = r"\W+(?:\w+\W+){0,3}?"
+_SCHEMA_REJECTION_TEXT = re.compile(
+    f"{_REJECTION_WORD}{_NEAR}{_SCHEMA_NOUN}|{_SCHEMA_NOUN}{_NEAR}{_REJECTION_WORD}",
+    re.IGNORECASE,
+)
 _WRONG_DURATION_NA_JUSTIFICATION = (
     "The authoritative action temporality is not continuous or bounded_duration."
 )
@@ -1240,23 +1244,29 @@ def _prompt_budget_exceeded(error: BaseException | None) -> bool:
 def is_request_schema_rejection(error: BaseException | None) -> bool:
     """Tell whether the provider rejected a request for its response schema.
 
-    The classification is deliberately simple.  An HTTP 400 is a rejection of
-    the response schema when its error body names it in a structured field
-    (``param`` ``response_format``, or ``code`` ``invalid_json_schema`` or
-    ``invalid_schema``), or when one clause of its text (split at ``.``,
-    ``;``, ``:``, and line breaks) holds a schema noun (``schema``,
-    ``response_format``) and a rejection word (compile or compilation,
-    invalid, unsupported, not supported, not valid, or cannot, could not,
-    unable to, or failed to parse or convert, also passive) and speaks of no
-    context or tokens.  Word order does not matter.  Every slot request of one
-    fill carries a schema built the same way, so the provider rejects each of
-    them alike.  A 400 that merely mentions the schema (such as a context length
-    counted over messages and schema), a 400 naming another parameter, a 5xx,
-    or a local failure is a per-slot failure.  The provider adapter raises its
-    call failure as the cause, a 400 may wrap the provider's own rejection,
-    and a replayed failure keeps its recorded status and text but not its
-    body, so every error of the cause chain is read, and a body field also
-    from the text.
+    Every slot request of one fill carries a schema built the same way, so a
+    provider that rejects one rejects each of them alike.  Only an HTTP 400
+    can be such a rejection; each 400 in the error's cause chain is judged by
+    these steps, the first that applies deciding:
+
+    1. Structured body fields.  ``param`` naming the response format
+       (``response_format``, or a part of it such as ``response_format.type``)
+       or ``code`` ``invalid_json_schema`` or ``invalid_schema`` is a
+       rejection; ``param`` naming any other parameter is not.  The fields
+       come from the SDK error or, for a replayed error that keeps no body,
+       from the body as its recorded text shows it.
+    2. Size veto.  Text that speaks of a context length or window, tokens, or
+       a maximum length is not a rejection, wherever in the text it does.
+    3. Text.  A schema noun (``schema``, ``json_schema``, ``response_format``
+       and its dotted parts) within three words of a rejection word (compile
+       or compilation, invalid, unsupported, not supported, not valid, or
+       cannot, could not, unable to, or failed to parse or convert, also
+       passive), in either order, is a rejection.
+
+    Any other 400, a 5xx, or a local failure is a per-slot failure.  The
+    provider adapter raises its call failure as the cause, and a 400 may wrap
+    the provider's own rejection, so a 400 judged not a rejection does not end
+    the walk.
     """
     while error is not None:
         if getattr(error, "status_code", None) == 400 and _rejects_schema(error):
@@ -1266,18 +1276,21 @@ def is_request_schema_rejection(error: BaseException | None) -> bool:
 
 
 def _rejects_schema(error: BaseException) -> bool:
-    """Apply the rule of ``is_request_schema_rejection`` to one HTTP 400."""
+    """Apply the steps of ``is_request_schema_rejection`` to one HTTP 400."""
     text = str(error)
-    fields = [(name, getattr(error, name, None)) for name in _SCHEMA_FIELDS]
-    fields.extend(match.groups() for match in _BODY_FIELD.finditer(text))
-    if any(value in _SCHEMA_FIELDS[name] for name, value in fields):
-        return True
-    return any(
-        _SCHEMA_NOUN.search(clause)
-        and _REJECTION_WORD.search(clause)
-        and not _SIZE_WORD.search(clause)
-        for clause in _CLAUSE_BREAK.split(text)
+    recorded = dict(_BODY_FIELD.findall(text))
+    param, code = (
+        getattr(error, name, None) or recorded.get(name) for name in ("param", "code")
     )
+    if isinstance(param, str) and _SCHEMA_PARAM.match(param):
+        return True
+    if code in _SCHEMA_CODES:
+        return True
+    if param:
+        return False
+    if _SIZE_VETO.search(text):
+        return False
+    return _SCHEMA_REJECTION_TEXT.search(text) is not None
 
 
 def _unresolved_diagnostic_code(error: BaseException | None) -> str:
