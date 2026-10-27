@@ -369,7 +369,7 @@ def assess_handoff(
         return None
     raw_safe = handoff.get("safe_observable_outcome")
     raw_failure_call = handoff.get("semantic_failure_call")
-    uca_type = _handoff_uca_type(handoff)
+    uca_type = handoff_uca_type(handoff)
     condition = DiscriminatingCondition.model_validate(raw_condition)
     bound = ToolCallCondition.model_validate(raw_bound)
     if uca_type is None:
@@ -387,7 +387,7 @@ def assess_handoff(
     return assess_condition(condition, universe, claim=claim, bound=bound)
 
 
-def _handoff_uca_type(handoff: Mapping[str, Any]) -> UCAType | None:
+def handoff_uca_type(handoff: Mapping[str, Any]) -> UCAType | None:
     """Return the category the slot ID ``<controller>:<action>:<type>`` ends in."""
 
     slot = (handoff.get("lineage") or {}).get("ica_slot_id") or ""
@@ -1968,6 +1968,7 @@ __all__ = [
     "RuleFinding",
     "assess_condition",
     "assess_handoff",
+    "handoff_uca_type",
     "tool_call_condition_findings",
     "undecidable_diagnostics",
 ]
