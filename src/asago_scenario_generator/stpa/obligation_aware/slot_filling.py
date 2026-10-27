@@ -13,6 +13,7 @@ from asago_scenario_generator.models.mechanism_suggestion import (
     MechanismSuggestion,
 )
 from asago_scenario_generator.models.obligation_consideration import (
+    REQUEST_SCHEMA_REJECTED,
     SLOT_PROMPT_BUDGET_EXCEEDED,
     SLOT_PROVIDER_CONTRACT_FAILED,
     ConsiderationCallEvidence,
@@ -79,6 +80,7 @@ SLOT_RESPONSE_DIGEST_DOMAIN = (
     "asago-scenario-generator:stpa-obligation-slot-response:v1"
 )
 _SYNTHESIS_SLOT_MAX_COMPLETION_TOKENS = 8192
+_SCHEMA_REJECTION_WORDS = ("schema", "response_format")
 _WRONG_DURATION_NA_JUSTIFICATION = (
     "The authoritative action temporality is not continuous or bounded_duration."
 )
@@ -1218,13 +1220,45 @@ def _prompt_budget_exceeded(error: BaseException | None) -> bool:
     )
 
 
+def is_request_schema_rejection(error: BaseException | None) -> bool:
+    """Tell whether the provider rejected a request for its response schema.
+
+    The classification is deliberately simple: an HTTP 400 whose error text
+    names the schema or ``response_format`` (vLLM: "The provided JSON schema
+    contains features not supported by xgrammar"; OpenAI: "Invalid schema for
+    response_format ...").  Every slot request of one fill carries a schema
+    built the same way, so the provider rejects each of them alike.  Any other
+    400 (such as an exceeded context length), a 5xx, or a local failure is a
+    per-slot failure.  The provider adapter raises its call failure as the
+    cause, and a replayed failure keeps its recorded status, so the error and
+    its causes are read.
+    """
+    while error is not None:
+        if getattr(error, "status_code", None) == 400:
+            text = str(error).lower()
+            return any(word in text for word in _SCHEMA_REJECTION_WORDS)
+        error = error.__cause__
+    return False
+
+
 def _unresolved_diagnostic_code(error: BaseException | None) -> str:
     """Map a request failure to its stable local diagnostic code."""
     if _prompt_budget_exceeded(error):
         return "prompt_budget_exceeded"
     if isinstance(error, PromptContractError):
         return "prompt_contract_invalid"
+    if is_request_schema_rejection(error):
+        return REQUEST_SCHEMA_REJECTED
     return "slot_response_unresolved"
+
+
+def _lost_slot_error_class(error: BaseException | None) -> str:
+    """Name a lost slot by its exception class, or by the fill's stop."""
+    if error is None:
+        return "unknown"
+    if is_request_schema_rejection(error):
+        return REQUEST_SCHEMA_REJECTED
+    return type(error).__name__
 
 
 def _unresolved_pair_code(error: BaseException | None) -> str:
@@ -1322,7 +1356,7 @@ def _record_request_unresolved(
         all_filled=all_filled,
         successful_slots=successful_slots,
         lost=lost,
-        error_class="unknown" if error is None else type(error).__name__,
+        error_class=_lost_slot_error_class(error),
         call_ref=call_ref,
     )
     evidence.append(
@@ -2095,8 +2129,12 @@ def _process_slot_request(
     control_structure: ControlStructure,
     state: _SlotFillState,
     call_ref: str,
-) -> None:
-    """Process one bounded target request and retain all local failures."""
+) -> BaseException | None:
+    """Process one bounded target request and retain all local failures.
+
+    Return the provider's rejection of the request schema, which stops the
+    fill; every other failure stays local to this request.
+    """
     expected = _expected_slot_map(request)
     with count_requests() as sent:
         response, response_error = _coerce_request_response(method, request)
@@ -2109,7 +2147,9 @@ def _process_slot_request(
         state=state,
         call_ref=call_ref,
     ):
-        return
+        if is_request_schema_rejection(response_error):
+            return response_error
+        return None
     response = cast(SynthesisSlotResponse, response)
     _process_valid_response(
         response,
@@ -2119,6 +2159,29 @@ def _process_slot_request(
         control_structure=control_structure,
         state=state,
         call_ref=call_ref,
+    )
+    return None
+
+
+def _record_unsent_request(
+    request: SynthesisSlotRequest,
+    rejection: BaseException,
+    *,
+    state: _SlotFillState,
+    call_ref: str,
+    rejected_ref: str,
+) -> None:
+    """Leave a request the fill stopped before sending unresolved."""
+    state.requests_sent = 0
+    _record_request_failure(
+        request,
+        _expected_slot_map(request),
+        None,
+        f"Slot request not sent: the provider rejected the request schema of "
+        f"{rejected_ref}, and it rejects every slot request alike.",
+        state=state,
+        call_ref=call_ref,
+        error=rejection,
     )
 
 
@@ -2163,12 +2226,25 @@ def fill_synthesis_slots(
     )
     target_totals = _request_totals(requests)
     target_parts: dict[str, int] = {}
+    rejection: BaseException | None = None
+    rejected_ref = ""
 
     for request in requests:
         call_ref = _request_call_ref(request, target_totals, target_parts)
         if not _has_provider_slot(request):
             continue
-        _process_slot_request(
+        if rejection is not None:
+            # The provider rejects the request schema of every slot request
+            # alike, so the fill sends no further request.
+            _record_unsent_request(
+                request,
+                rejection,
+                state=state,
+                call_ref=call_ref,
+                rejected_ref=rejected_ref,
+            )
+            continue
+        rejection = _process_slot_request(
             method,
             request,
             loss_analysis=loss_analysis,
@@ -2176,6 +2252,7 @@ def fill_synthesis_slots(
             state=state,
             call_ref=call_ref,
         )
+        rejected_ref = call_ref
 
     ordered_slots = tuple(state.all_filled[key] for key in sorted(state.all_filled))
     enumeration = ICAEnumeration(slots=list(ordered_slots))
@@ -2194,6 +2271,7 @@ def fill_synthesis_slots(
 
 
 __all__ = [
+    "REQUEST_SCHEMA_REJECTED",
     "SlotFillRunResult",
     "build_synthesis_slot_requests",
     "compile_ica_slot_draft",
@@ -2201,5 +2279,6 @@ __all__ = [
     "fill_synthesis_slots",
     "final_slot_universe",
     "ica_merge_entries",
+    "is_request_schema_rejection",
     "merge_equal_findings",
 ]

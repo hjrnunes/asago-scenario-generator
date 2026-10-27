@@ -404,9 +404,18 @@ with the reason `prompt_contract_failures: <n> calls failed the prompt
 contract check before dispatch`. A manifest records the count as
 `prompt_contract_failures` only when it is above zero, so a run that keeps
 candidates despite such failures keeps its status and still shows the count,
-and a run without them keeps its manifest shape. The product `generate`
+and a run without them keeps its manifest shape. A second exception covers a
+provider that rejects the ICA slot-fill request schema (HTTP 400 whose error
+names the schema or `response_format`): the fill sends no further slot
+request, since the provider rejects every slot request alike, and leaves each
+remaining slot unfilled with the diagnostic code and lost-slot `error_class`
+`request_schema_rejected`. The rejected request stays in the call records and
+counts as a request. The status is then `failed` with the reason
+`request_schema_rejected: the provider rejected the ICA fill request schema;
+<n> slots were left unfilled`, whatever the candidates did. Any other per-slot
+failure leaves the fill going on to the next slot. The product `generate`
 persists and reports its diagnostic/accounting sidecars before returning
-non-zero for either `failed` status.
+non-zero for any `failed` status.
 
 Baseline assembly, heuristic and post-revision findings
 are retained with their source category in synthesis `stage_warnings` and the
