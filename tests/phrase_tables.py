@@ -124,6 +124,7 @@ from tests.stpa.test_stage5_condition_contradictions import (
     correction_request,
 )
 from tests.helpers.stpa_builders import make_capability_profile
+from tests.helpers.discriminating_condition import _placeholder_payload
 from tests.helpers.normal_authoring_wire import (
     _record_observations,
     _target_operation,
@@ -660,7 +661,12 @@ def _authority_beliefs() -> Callable[[str], str]:
     return render
 
 
-def _stage5_correction(condition: Callable[[], dict]) -> Callable[[str], str]:
+def _descriptive_literal_condition() -> dict:
+    """A condition whose literal is a descriptive phrase, not a supplied value."""
+    return _placeholder_payload()["unsafe_outcome"]["discriminating_condition"]
+
+
+def _stage5_correction(condition: Callable[[], dict | None]) -> Callable[[str], str]:
     """Render the Stage 5 correction request that follows a refused condition."""
 
     def render(request: str) -> str:
@@ -780,6 +786,10 @@ CASES: dict[str, Callable[[str], str]] = {
         _record_kind_mismatch_condition
     ),
     "ordering-not-numeric-correction": _stage5_correction(_ordering_text_condition),
+    "missing-condition-correction": _stage5_correction(lambda: None),
+    "literal-unsupported-correction": _stage5_correction(
+        _descriptive_literal_condition
+    ),
     **{case: _obligation_aware(case) for case in OBLIGATION_AWARE_BUILDS},
 }
 

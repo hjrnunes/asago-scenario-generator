@@ -43,8 +43,8 @@ def earns_second_correction(
     """Return whether a chain that failed its one correction earns another.
 
     The chain must have ended on a validation failure of the condition, after
-    exactly one correction. A reply that returned no condition took the exit
-    the first correction offers, and a third request does not rescue it. The
+    exactly one correction. A reply that still returned no condition after
+    the first correction asked for one is not rescued by a third request. The
     route is the one code gives the draft without its condition: only a
     chain routed to ``analytical_only`` or ``failure_call`` publishes a claim
     with no condition of the model's own (at most the unscoped ``not_called``

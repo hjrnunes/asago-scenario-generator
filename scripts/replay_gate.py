@@ -57,6 +57,15 @@ a re-record before the gate passes on a run that sends it:
   prompt and its examples explain the route's ``attack_pattern_id`` echo, and
   the response schema requires that echo.  Every later request of such a run
   depends on the routing replies and diverges with them.
+- Stage 5 condition corrections (stage ``stage_5``, the correction requests
+  at attempts 2 and 3 after a ``discriminating_condition_missing``,
+  ``discriminating_condition_literal_unsupported`` or
+  ``discriminating_condition_ordering_not_numeric`` failure): the repair
+  guidance of those codes in the correction's user message no longer offers
+  to set the condition to null and demote the claims to reply level or
+  analytical-only; it ends with "Keep observation_criteria and
+  safe_observable_outcome unchanged."  The scenario's later requests diverge
+  with the correction reply.
 
 A change that deletes a prompt template also drops that template's entry from
 the prompt-hash tables a run records.  A recorded entry whose ``.j2`` key the
