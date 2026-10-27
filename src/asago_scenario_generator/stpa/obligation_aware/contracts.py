@@ -24,6 +24,7 @@ from asago_scenario_generator.models.mechanism_suggestion import (
     MechanismSuggestion,
 )
 from asago_scenario_generator.models.obligation_consideration import (
+    REQUEST_SCHEMA_REJECTED,
     BoundedStructuralRevision,
     ConsiderationCallEvidence,
     ConsiderationDiagnostic,
@@ -927,6 +928,19 @@ class SlotLoss(_Model):
     call_id: str = Field(min_length=1)
 
 
+class SlotFillFailure(_Model):
+    """The failure that stopped a slot fill before it sent every request.
+
+    ``call_id`` names the request the provider rejected; ``unsent_requests``
+    counts the slot requests the fill then left unsent.  The run requests no
+    model call after it.
+    """
+
+    code: Literal[REQUEST_SCHEMA_REJECTED]
+    call_id: str = Field(min_length=1)
+    unsent_requests: int = Field(ge=0)
+
+
 class SynthesisSlotFillResult(_Model):
     """Final deterministic slot universe and separate obligation evidence."""
 
@@ -946,6 +960,11 @@ class SynthesisSlotFillResult(_Model):
     # obligation pairs; absent from the serialized form when empty.
     mechanism_considerations: tuple[MechanismIcaConsideration, ...] = Field(
         default=(), exclude_if=lambda value: not value
+    )
+    # The failure that stopped the fill; absent from the serialized form when
+    # the fill sent every request.
+    fill_failure: SlotFillFailure | None = Field(
+        default=None, exclude_if=lambda value: value is None
     )
 
     @model_validator(mode="after")
@@ -1100,6 +1119,7 @@ __all__ = [
     "StructuralRevisionResponse",
     "StructuralRoutingRequest",
     "StructuralRoutingResponse",
+    "SlotFillFailure",
     "SlotLoss",
     "SynthesisSlotFillResult",
     "SynthesisSlotRequest",

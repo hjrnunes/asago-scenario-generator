@@ -157,6 +157,11 @@ SLOT_PROVIDER_CONTRACT_FAILED = "slot_provider_contract_failed"
 # Diagnostic code ICA slot filling writes on each routed pair of a target
 # request its prompt budget rejected before dispatch.
 SLOT_PROMPT_BUDGET_EXCEEDED = "slot_prompt_budget_exceeded"
+# Failure name ICA slot filling writes when the provider rejects a request's
+# response schema: the fill sends no further slot request, each request it left
+# unfilled carries this diagnostic code, and each slot it left unfilled carries
+# it as its loss ``error_class``. The synthesis run then fails with it.
+REQUEST_SCHEMA_REJECTED = "request_schema_rejected"
 
 
 class ConsiderationDiagnostic(_ConsiderationModel):

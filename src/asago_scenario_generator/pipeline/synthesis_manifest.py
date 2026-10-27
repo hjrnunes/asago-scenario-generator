@@ -85,7 +85,9 @@ def _build_manifest(
     scenario_counts = _manifest_scenario_counts(scenario_result, len(scenarios))
     contract_failures = _prompt_contract_failure_count(call_records)
     run_status, run_status_reason = _scenario_generation_status(
-        scenario_counts, prompt_contract_failures=contract_failures
+        scenario_counts,
+        prompt_contract_failures=contract_failures,
+        fill_failure=getattr(ica_enumeration, "fill_failure", None),
     )
     payload: dict[str, Any] = {
         "schema_version": _MANIFEST_SCHEMA,
@@ -488,6 +490,9 @@ def _manifest_provider_evidence(
         lost_slots = getattr(stages[stage_name], "lost_slots", ())
         if lost_slots:
             result[stage_name]["lost_slots"] = [_dump(item) for item in lost_slots]
+        fill_failure = getattr(stages[stage_name], "fill_failure", None)
+        if fill_failure is not None:
+            result[stage_name]["fill_failure"] = _dump(fill_failure)
         verification = getattr(stages[stage_name], "ica_hazard_verification", None)
         if verification is not None:
             result[stage_name]["ica_hazard_verification"] = _dump(verification)
@@ -564,13 +569,24 @@ def _scenario_generation_status(
     counts: Mapping[str, int | None],
     *,
     prompt_contract_failures: int = 0,
+    fill_failure: Any | None = None,
 ) -> tuple[SynthesisRunStatus, str]:
     """Derive a truthful product status from candidate lifecycle counts.
 
     Zero requested candidates is a valid analysis unless the prompt contract
     check stopped calls before dispatch: those calls never asked for the
-    candidates, so the run failed rather than found none.
+    candidates, so the run failed rather than found none.  A failure that
+    stopped the ICA fill, such as the provider rejecting its request schema,
+    stopped the run's model calls, so the run failed whatever its candidates
+    did.
     """
+    if fill_failure is not None:
+        return (
+            SynthesisRunStatus.FAILED,
+            f"{fill_failure.code}: the provider rejected the ICA fill request "
+            f"schema at {fill_failure.call_id}; {fill_failure.unsent_requests} "
+            "slot requests were not sent and no later model call was made",
+        )
     requested = counts.get("requested")
     attempted = counts.get("attempted")
     generated = counts.get("generated")

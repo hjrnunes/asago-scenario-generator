@@ -420,9 +420,39 @@ with the reason `prompt_contract_failures: <n> calls failed the prompt
 contract check before dispatch`. A manifest records the count as
 `prompt_contract_failures` only when it is above zero, so a run that keeps
 candidates despite such failures keeps its status and still shows the count,
-and a run without them keeps its manifest shape. The product `generate`
+and a run without them keeps its manifest shape. A second exception covers a
+provider that rejects the ICA slot-fill request schema itself. Each HTTP 400
+anywhere in the failure's cause chain is judged by three steps, the first that
+applies deciding. First, structured body fields: `param` naming the response
+format (`response_format`, or a part of it such as `response_format.type`) or
+`code` `invalid_json_schema` or `invalid_schema` is a rejection, and `param`
+naming any other parameter is not; a replayed error keeps no body, so these
+fields are also read from its recorded text. Second, a size veto: text that
+speaks of a context length or window, tokens, or a maximum length anywhere is
+not a rejection. Third, text: a schema noun (`schema`, `json_schema`,
+`response_format` and its dotted parts) within three words of a rejection word
+(compile or compilation, invalid, unsupported, not supported, not valid, or
+cannot, could not, unable to, or failed to parse or convert), in either order,
+is a rejection. A 400 that merely mentions the schema, such as a context
+length counted over messages and schema, or one naming another parameter, does
+not count. The fill then sends no further slot request, since the provider rejects
+every slot request alike. The rejected request keeps the diagnostic code
+`request_schema_rejected`, stays in the call records, and counts as a request;
+each request left unsent gets the same code, and each slot left unfilled
+carries it as its lost-slot `error_class`. The fill result records the stop as
+`fill_failure` (code, rejected call ID, unsent request count), which the
+manifest publishes under `provider_evidence.ica.fill_failure`. The stop is
+terminal for model use: the ICA hazard verification, target realization, and
+scenario generation stages are skipped, and no candidate is requested, while
+accounting, scenario realization, the manifest, and the report are still
+written. The status is then `failed` with the reason `request_schema_rejected:
+the provider rejected the ICA fill request schema at <call ID>; <n> slot
+requests were not sent and no later model call was made`, derived from
+`fill_failure` alone, so a rejection of a split request's later part whose
+slot kept an earlier part's fill fails the run too. Any other per-slot failure
+leaves the fill going on to the next slot. The product `generate`
 persists and reports its diagnostic/accounting sidecars before returning
-non-zero for either `failed` status.
+non-zero for any `failed` status.
 
 Baseline assembly, heuristic and post-revision findings
 are retained with their source category in synthesis `stage_warnings` and the

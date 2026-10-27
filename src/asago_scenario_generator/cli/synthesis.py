@@ -357,12 +357,19 @@ def _report_generate_result(result: Any, plan_filename: str) -> None:
 
 
 def _failed_generation_message(result: Any) -> str:
-    """Word a failed run: candidates attempted, or none requested at all."""
+    """Word a failed run: fill stopped, candidates attempted, or none requested."""
+    from asago_scenario_generator.models.obligation_consideration import (
+        REQUEST_SCHEMA_REJECTED,
+    )
     from asago_scenario_generator.pipeline.synthesis_manifest import (
         PROMPT_CONTRACT_REASON,
     )
 
     reason = str(getattr(result, "run_status_reason", "") or "")
+    if reason.startswith(REQUEST_SCHEMA_REJECTED):
+        return (
+            f"Error: ICA fill stopped ({reason}); diagnostic artifacts were preserved."
+        )
     if reason.startswith(PROMPT_CONTRACT_REASON):
         return (
             f"Error: scenario generation requested no candidates ({reason}); "
