@@ -105,33 +105,6 @@ class _AuthorityChannel(Protocol):
     authority_for_update: FeedbackUpdateAuthority | None
 
 
-def validate_feedback_authority_assessments(
-    channels: Iterable[_AuthorityChannel],
-    *,
-    target_evidence: TargetEvidence | None,
-    require_domain_scope: bool,
-) -> None:
-    """Validate authority bases against evidence offered in the request.
-
-    Semantic authority remains the model's judgment. This check enforces only
-    what code can know exactly: citations exist in the request, and a basis is
-    more than an evidence handle or a spelling-out of ``source_kind``.
-
-    Raises:
-        ValueError: For the first channel whose basis fails.  The class stays
-            ``ValueError`` because correction prompts name it.
-    """
-    offered_refs = _offered_refs(target_evidence)
-    for channel in channels:
-        reason = _basis_defect(
-            channel,
-            offered_refs=offered_refs,
-            require_domain_scope=require_domain_scope,
-        )
-        if reason is not None:
-            raise ValueError(reason)
-
-
 class FeedbackAuthorityError(ExactFeedbackError):
     """Every channel whose authority basis fails the checks, in reply order.
 
@@ -162,13 +135,17 @@ def validate_all_feedback_authority_assessments(
     target_evidence: TargetEvidence | None,
     require_domain_scope: bool,
 ) -> None:
-    """Check bases as :func:`validate_feedback_authority_assessments` does.
+    """Validate authority bases against evidence offered in the request.
 
-    Unlike that function, it does not stop at the first failing channel.
+    Semantic authority remains the model's judgment. This check enforces only
+    what code can know exactly: citations exist in the request, and a basis is
+    more than an evidence handle or a spelling-out of ``source_kind``.  It
+    checks every channel rather than stopping at the first failure.
 
     Raises:
         FeedbackAuthorityError: Naming each channel whose basis fails, in the
-            order of *channels*.
+            order of *channels*.  It is a ``ValueError`` because correction
+            prompts name that class.
     """
     offered_refs = _offered_refs(target_evidence)
     defects = [
@@ -195,8 +172,8 @@ def feedback_authority_defect(
 ) -> str | None:
     """Return why *channel*'s authority basis fails the checks, or ``None``.
 
-    The reason is the message :func:`validate_feedback_authority_assessments`
-    raises for that channel.
+    The reason is the one :class:`FeedbackAuthorityError` lists for that
+    channel.
     """
     return _basis_defect(
         channel,
@@ -295,5 +272,4 @@ __all__ = [
     "FeedbackAuthorityError",
     "feedback_authority_defect",
     "validate_all_feedback_authority_assessments",
-    "validate_feedback_authority_assessments",
 ]
