@@ -15,6 +15,7 @@ from __future__ import annotations
 import copy
 import logging
 import re
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Literal
 
@@ -313,18 +314,32 @@ def _validate_revision_wire(
     )
 
 
+@dataclass(frozen=True)
+class _SalvagedRevision:
+    """A revision reply without its unsupported authority bases.
+
+    ``dropped_authority`` holds the ``(resp_id, fb_id)`` of each restated
+    channel whose assessment was dropped, as the reply wrote them.
+    """
+
+    delta: RevisionDelta
+    warnings: list[str]
+    dropped_authority: frozenset[tuple[str, str]]
+
+
 def _revision_without_unsupported_authority(
     outcome: CallOutcome[RevisionDelta],
     *,
     target_evidence: TargetEvidence | None,
-) -> tuple[RevisionDelta, list[str]] | None:
+) -> _SalvagedRevision | None:
     """Return the last revision reply without its unsupported authority bases.
 
     It applies only when the reply fails nothing but the authority basis
     checks; any other failure returns ``None`` so the revision is discarded as
-    before.  No request is sent.  A dropped assessment is an omitted one, so
-    the merge treats the channel as any channel that states no assessment.
-    Each drop adds a warning naming the channel and the reason.
+    before.  No request is sent.  A dropped assessment leaves the channel's
+    authority unknown: unlike an omitted one, the merge does not keep the
+    channel's earlier assessment for it.  Each drop adds a warning naming the
+    channel and the reason.
     """
     if outcome.result is None or not isinstance(outcome.failure, ValueError):
         return None
@@ -334,6 +349,7 @@ def _revision_without_unsupported_authority(
     except Exception:
         return None
     reasons: list[tuple[str, str]] = []
+    dropped: set[tuple[str, str]] = set()
     for key in ("new_responsibilities", "modified_responsibilities"):
         for resp_index, responsibility in enumerate(getattr(wire, key)):
             for fb_index, channel in enumerate(responsibility.feedback_channels):
@@ -346,6 +362,8 @@ def _revision_without_unsupported_authority(
                     "authority_for_update"
                 ]
                 reasons.append((channel.fb_id, reason))
+                if key == "modified_responsibilities":
+                    dropped.add((responsibility.resp_id, channel.fb_id))
     # The validator stopped on the first failing basis; any other failure is
     # not this one, and dropping assessments would not answer it.
     if not reasons or str(outcome.failure) != reasons[0][1]:
@@ -355,11 +373,15 @@ def _revision_without_unsupported_authority(
         delta = _revision_delta_from_wire(value)
     except Exception:
         return None
-    return delta, [
-        f"Revision dropped the authority_for_update of feedback channel {fb_id}: "
-        f"{reason}"
-        for fb_id, reason in reasons
-    ]
+    return _SalvagedRevision(
+        delta=delta,
+        warnings=[
+            f"Revision dropped the authority_for_update of feedback channel "
+            f"{fb_id}: {reason}"
+            for fb_id, reason in reasons
+        ],
+        dropped_authority=frozenset(dropped),
+    )
 
 
 def _revision_delta_from_wire(value: Any) -> RevisionDelta:
@@ -589,6 +611,7 @@ def _finish_revision(
     *,
     critic_findings: CriticFindings,
     loss_analysis: LossAnalysis | None,
+    dropped_authority: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[ControlStructure, list[str]]:
     """Merge a validated delta and retain post-revision diagnostics."""
     revision_warnings = [
@@ -612,7 +635,7 @@ def _finish_revision(
     # Merge the delta into the existing ControlStructure
     try:
         revised_cs, merge_warnings = _merge_revision_delta(
-            control_structure, revision_delta
+            control_structure, revision_delta, dropped_authority=dropped_authority
         )
     except Exception as exc:
         warning = f"{_REVISION_MERGE_DEGRADED}{type(exc).__name__}: {exc}"
@@ -711,13 +734,16 @@ def run_revision(
     )
     revision_delta, error_msg = outcome.value, outcome.error
     authority_warnings: list[str] = []
+    dropped_authority: frozenset[tuple[str, str]] = frozenset()
     if error_msg is not None:
         salvaged = _revision_without_unsupported_authority(
             outcome, target_evidence=target_evidence
         )
         if salvaged is None:
             return control_structure, _revision_failure_warnings(error_msg)
-        revision_delta, authority_warnings = salvaged
+        revision_delta = salvaged.delta
+        authority_warnings = salvaged.warnings
+        dropped_authority = salvaged.dropped_authority
     if revision_delta is None:
         return control_structure, [f"{_REVISION_FAILED}unexpected None response"]
     revised, revision_warnings = _finish_revision(
@@ -725,6 +751,7 @@ def run_revision(
         revision_delta,
         critic_findings=critic_findings,
         loss_analysis=loss_analysis,
+        dropped_authority=dropped_authority,
     )
     return revised, [*authority_warnings, *revision_warnings]
 
@@ -827,6 +854,7 @@ def _add_new_items(
 def _replace_modified_resps(
     resps: list[Responsibility],
     modified: list[Responsibility],
+    dropped_authority: frozenset[tuple[str, str]] = frozenset(),
 ) -> list[Responsibility]:
     """Replace responsibilities whose resp_id appears in *modified*.
 
@@ -834,6 +862,8 @@ def _replace_modified_resps(
     ``resp_id`` is the pre-normalization stitch key, so every modified
     responsibility must name an existing responsibility exactly.  A
     non-canonical or otherwise unknown key cannot be matched safely.
+    *dropped_authority* names the ``(resp_id, fb_id)`` of each restated
+    channel whose assessment was dropped.
     """
     existing_ids = {resp.resp_id for resp in resps}
     modified_map = {r.resp_id: r for r in modified}
@@ -844,11 +874,23 @@ def _replace_modified_resps(
             "Modified responsibility resp_id must match an existing "
             f"canonical responsibility ID; unknown ID(s): {unknown}."
         )
-    return [_revised_responsibility(r, modified_map.get(r.resp_id, r)) for r in resps]
+    return [
+        _revised_responsibility(
+            r,
+            modified_map.get(r.resp_id, r),
+            dropped_authority=frozenset(
+                fb_id for resp_id, fb_id in dropped_authority if resp_id == r.resp_id
+            ),
+        )
+        for r in resps
+    ]
 
 
 def _revised_responsibility(
-    original: Responsibility, replacement: Responsibility
+    original: Responsibility,
+    replacement: Responsibility,
+    *,
+    dropped_authority: frozenset[str] = frozenset(),
 ) -> Responsibility:
     """A completeness revision cannot revoke already established ownership links."""
     revised = copy.deepcopy(replacement)
@@ -856,11 +898,16 @@ def _revised_responsibility(
         set(original.security_constraint_refs)
         | set(replacement.security_constraint_refs)
     )
-    _carry_forward_context(original, revised)
+    _carry_forward_context(original, revised, dropped_authority=dropped_authority)
     return revised
 
 
-def _carry_forward_context(original: Responsibility, revised: Responsibility) -> None:
+def _carry_forward_context(
+    original: Responsibility,
+    revised: Responsibility,
+    *,
+    dropped_authority: frozenset[str] = frozenset(),
+) -> None:
     """Keep context fields a restated element omits.
 
     A revision restates a whole responsibility; the model may drop the
@@ -868,7 +915,9 @@ def _carry_forward_context(original: Responsibility, revised: Responsibility) ->
     temporality, operation and PM refs, FB source, source kind and authority)
     of an element it did not mean to change.  An authority assessment is about
     the variable a channel updates, so it is kept only while the channel still
-    updates that variable.
+    updates that variable.  A channel in *dropped_authority* stated an
+    assessment that was dropped as unsupported; it did not omit one, so its
+    authority stays unknown.
     """
     _carry_forward_process_model_context(original, revised)
     _carry_forward_action_context(original, revised)
@@ -881,7 +930,11 @@ def _carry_forward_context(original: Responsibility, revised: Responsibility) ->
             fb.source = old.source
         if fb.source_kind is None:
             fb.source_kind = old.source_kind
-        if fb.authority_for_update is None and fb.updates == old.updates:
+        if (
+            fb.authority_for_update is None
+            and fb.updates == old.updates
+            and fb.fb_id not in dropped_authority
+        ):
             fb.authority_for_update = old.authority_for_update
 
 
@@ -977,6 +1030,7 @@ def _renumber_colliding_cm_ids(
 def _stitch_revision_delta(
     cs: ControlStructure,
     delta: RevisionDelta,
+    dropped_authority: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[ControlStructure, list[str]]:
     """Stitch a revision delta onto the current structure by source ID.
 
@@ -986,7 +1040,9 @@ def _stitch_revision_delta(
     from the stitched list positions.
 
     - Replaces ``modified_responsibilities`` by source ``resp_id`` while
-      retaining their established governing security-constraint links.
+      retaining their established governing security-constraint links;
+      *dropped_authority* names the restated channels whose assessment was
+      dropped, which keep no earlier assessment.
     - Appends new responsibilities, processes, and links whose source
       IDs are not already present.
     - Records ``cm_id`` collisions among newly added links so the
@@ -1003,7 +1059,7 @@ def _stitch_revision_delta(
     existing_cl_ids = {cl.link_id for cl in cs.coordination_links}
 
     merged_resps = _replace_modified_resps(
-        cs.responsibilities, delta.modified_responsibilities
+        cs.responsibilities, delta.modified_responsibilities, dropped_authority
     )
     merged_resps = _add_new_items(
         merged_resps,
@@ -1042,6 +1098,8 @@ def _stitch_revision_delta(
 def _merge_revision_delta(
     cs: ControlStructure,
     delta: RevisionDelta,
+    *,
+    dropped_authority: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[ControlStructure, list[str]]:
     """Merge a RevisionDelta into an existing ControlStructure.
 
@@ -1054,7 +1112,7 @@ def _merge_revision_delta(
     """
     delta, label_warnings = _restore_descriptions_with_pasted_labels(cs, delta)
     delta, kind_warnings = _move_source_kinds_out_of_source_refs(delta)
-    stitched, stitch_warnings = _stitch_revision_delta(cs, delta)
+    stitched, stitch_warnings = _stitch_revision_delta(cs, delta, dropped_authority)
     return (
         validate_normalized_control_structure(stitched),
         label_warnings + kind_warnings + stitch_warnings,

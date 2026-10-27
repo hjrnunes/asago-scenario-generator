@@ -11,6 +11,8 @@ critic and revision requests show it beside the channel, and a revision that
 omits it keeps the earlier assessment while the channel updates the same
 variable.  A basis that still fails the deterministic checks after the
 existing correction is dropped with a warning instead of stopping the step.
+A revision whose stated assessment is dropped leaves that channel's authority
+unknown; one that only omits it keeps the earlier assessment.
 A cited ref's kind (``state:``, ``session:`` ...) is read case-insensitively,
 its name exactly.  Requests go through the real client with a mocked
 transport, or the SP1 mock client; no request leaves the process.
@@ -1287,3 +1289,83 @@ def test_call_2b_keeps_a_basis_whose_ref_opens_the_sentence(tmp_path: Path) -> N
         FeedbackUpdateAuthority(status="authoritative", basis=_CAPITALISED_KIND_BASIS)
     )
     assert warnings == []
+
+
+# ---------------------------------------------------------------------------
+# A dropped revision assessment is unknown, an omitted one unchanged
+# ---------------------------------------------------------------------------
+
+
+def _unsupported(channel: dict[str, Any]) -> dict[str, Any]:
+    return {
+        **channel,
+        "source_kind": "user_message",
+        "authority_for_update": {
+            "status": "non_authoritative",
+            "basis": "user input is unverified",
+        },
+    }
+
+
+def _revise(tmp_path: Path, structure: ControlStructure, reply: dict[str, Any]):
+    client = _client(reply, reply)
+    revised, warnings = run_revision(
+        llm_client=client,
+        control_structure=structure,
+        critic_findings=_FINDINGS,
+        use_case_text="A refund assistant issues refunds the finance reviewer approved.",
+        run_dir=tmp_path,
+    )
+    return revised, warnings, _sent(client)
+
+
+def test_a_dropped_revision_assessment_does_not_keep_the_earlier_one(
+    tmp_path: Path,
+) -> None:
+    original = _structure(_channel(authority_for_update=_NON_AUTHORITATIVE))
+
+    revised, warnings, sent = _revise(
+        tmp_path, original, _restated(_unsupported(_RESTATED_CHANNEL))
+    )
+
+    assert len(sent) == 2
+    [channel] = revised.responsibilities[0].feedback_channels
+    assert channel.authority_for_update is None
+    assert channel.update_authority == UNKNOWN_UPDATE_AUTHORITY
+    assert warnings[0].startswith(
+        "Revision dropped the authority_for_update of feedback channel FB-1-1: "
+    )
+
+
+def test_only_the_dropped_channel_loses_its_earlier_assessment(
+    tmp_path: Path,
+) -> None:
+    amount_basis = "The use case says the refund ledger records the refund amount."
+    amount = FeedbackUpdateAuthority(status="authoritative", basis=amount_basis)
+    original = _structure(_channel(authority_for_update=_NON_AUTHORITATIVE))
+    original.responsibilities[0].feedback_channels.append(
+        FeedbackChannel(
+            fb_id="FB-1-2",
+            description="The ledger's refund amount",
+            updates="PM-1-2",
+            source=_PROCESS,
+            authority_for_update=amount,
+        )
+    )
+    reply = _restated(_unsupported(_RESTATED_CHANNEL))
+    reply["modified_responsibilities"][0]["feedback_channels"].append(
+        {
+            "fb_id": "FB-1-2",
+            "description": "The ledger's refund amount",
+            "updates": "PM-1-2",
+            "source": {"type": "controlled_process", "id": "CP-1"},
+        }
+    )
+
+    revised, _, _ = _revise(tmp_path, original, reply)
+
+    dropped, omitted = revised.responsibilities[0].feedback_channels
+    assert dropped.fb_id == "FB-1-1"
+    assert dropped.authority_for_update is None
+    assert omitted.fb_id == "FB-1-2"
+    assert omitted.authority_for_update == amount
