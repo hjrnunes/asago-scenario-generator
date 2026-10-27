@@ -26,6 +26,18 @@ A handoff whose condition failed was demoted by the old routing; the new
 routing keeps its command-attempt claim, which the rule applied to the
 demoted criteria reproduces. A scenario the rule makes executable carries no
 bound condition in the saved handoff either way.
+
+Every handoff also gets a ``condition`` class: what Stage 5 now publishes as
+its tool-call condition. A handoff whose discriminating condition failed
+validation, that has no bound condition and no reply-level claim (the reply
+route wins), and whose failure call the rule makes observable is
+``derived_not_called`` for a ``missing_call`` (code derives
+``not_called(<operation>)``) and ``incorrect_call_no_condition`` for an
+``incorrect_call`` (code derives nothing). Every other handoff is
+``unchanged``. ``condition_proxy`` marks an unchanged handoff with a failed
+condition and no failure call whose failure criterion names a recorded
+operation: its failure call would decide between the two, so it bounds them
+from above.
 """
 
 from __future__ import annotations
@@ -53,6 +65,11 @@ from asago_scenario_generator.stpa.observation_contract import (
 )
 
 ANALYTICAL = "analytical_only"
+DERIVED = "derived_not_called"
+INCORRECT = "incorrect_call_no_condition"
+UNCHANGED = "unchanged"
+# How a publication note begins when the condition failed after its corrections.
+_CONDITION_FAILED = "The discriminating condition failed validation after"
 PROXY_AUTHORITY = "criterion_observed_operation"
 # The demotion note the old routing wrote on a criterion whose condition failed.
 _CONDITION_DEMOTION = "Not observable: the discriminating condition failed"
@@ -120,6 +137,38 @@ def _population(criteria: list[ObservationCriterion]) -> str:
     return "provider_unobservable"
 
 
+def _condition_failed(
+    handoff: Mapping[str, Any], criteria: list[ObservationCriterion]
+) -> bool:
+    """Return whether the handoff lost a condition that failed validation."""
+
+    if handoff.get("tool_call_condition"):
+        return False
+    note = handoff.get("condition_omitted_reason") or ""
+    return note.startswith(_CONDITION_FAILED) or (
+        _population(criteria) == "condition_failed"
+    )
+
+
+def condition_class(
+    handoff: Mapping[str, Any],
+    criteria: list[ObservationCriterion],
+    failure_call: FailureCall | None,
+    contract: ObservationContract,
+    operations: tuple[str, ...],
+) -> str:
+    """Return the tool-call condition Stage 5 now publishes for the handoff."""
+
+    safe = handoff.get("safe_observable_outcome") or {}
+    if (
+        not _condition_failed(handoff, criteria)
+        or safe.get("claim_level") == "reply"
+        or failure_call_criterion(failure_call, contract, operations) is None
+    ):
+        return UNCHANGED
+    return DERIVED if failure_call.kind == "missing_call" else INCORRECT
+
+
 def assess_handoff(
     handoff: Mapping[str, Any],
     contract: ObservationContract,
@@ -144,6 +193,15 @@ def assess_handoff(
         )
     )
     status = handoff.get("tool_call_condition_status") or {}
+    condition = condition_class(handoff, criteria, failure_call, contract, operations)
+    condition_proxy = (
+        condition == UNCHANGED
+        and failure_call is None
+        and _condition_failed(handoff, criteria)
+        and (handoff.get("safe_observable_outcome") or {}).get("claim_level") != "reply"
+        and bool(proxies)
+        and failure_call_criterion(proxy_call, contract, operations) is not None
+    )
     row = {
         "scenario_id": handoff.get("scenario_id"),
         "before": before,
@@ -154,6 +212,8 @@ def assess_handoff(
         "after_proxy": before,
         "condition_status": status.get("status"),
         "criterion": handoff.get("semantic_failure_criterion"),
+        "condition": condition,
+        "condition_proxy": condition_proxy,
     }
     if before != ANALYTICAL:
         return row
@@ -185,6 +245,9 @@ def summarize(
 
     analytical = [row for row in rows if row["before"] == ANALYTICAL]
 
+    def by_condition(name: str) -> list[str]:
+        return [row["scenario_id"] for row in rows if row["condition"] == name]
+
     def ids(key: str) -> list[str]:
         return [row["scenario_id"] for row in analytical if row[key] != ANALYTICAL]
 
@@ -200,6 +263,12 @@ def summarize(
         ),
         "executable_after": ids("after"),
         "executable_after_proxy": ids("after_proxy"),
+        DERIVED: by_condition(DERIVED),
+        INCORRECT: by_condition(INCORRECT),
+        UNCHANGED: len(by_condition(UNCHANGED)),
+        "condition_proxy": [
+            row["scenario_id"] for row in rows if row["condition_proxy"]
+        ],
         "rows": analytical,
     }
 
@@ -244,7 +313,12 @@ def report(
                 "analytical_before",
                 "analytical_after",
                 "analytical_after_proxy",
+                UNCHANGED,
             )
+        }
+        | {
+            key: sum(len(item[key]) for item in summaries)
+            for key in (DERIVED, INCORRECT, "condition_proxy")
         },
         "examples": examples(summaries, wanted),
     }
@@ -283,6 +357,24 @@ def render(summaries: list[dict[str, Any]], wanted: Sequence[str] = ()) -> str:
                 f" [{', '.join(row['proxy_operations']) or 'no named operation'}]"
             )
         lines.append("")
+    lines += [
+        "## Tool-call condition after a failed condition",
+        "",
+        "| target | directory | derived not_called | incorrect call, no condition "
+        "| unchanged | of which undecided without a failure call |",
+        "| --- | --- | ---: | ---: | ---: | ---: |",
+    ]
+    for item in result["directories"]:
+        lines.append(
+            f"| {item['target_id']} | {item['directory']} | {len(item[DERIVED])} | "
+            f"{len(item[INCORRECT])} | {item[UNCHANGED]} | "
+            f"{len(item['condition_proxy'])} |"
+        )
+    lines += [
+        f"| total | | {total[DERIVED]} | {total[INCORRECT]} | {total[UNCHANGED]} | "
+        f"{total['condition_proxy']} |",
+        "",
+    ]
     if result["examples"]:
         lines += ["## Named examples", ""]
         for row in result["examples"]:
