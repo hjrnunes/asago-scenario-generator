@@ -60,8 +60,9 @@ from asago_scenario_generator.stpa.models.control_structure import (
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.system_model._constants import PROMPTS_DIR
 from asago_scenario_generator.stpa.system_model.feedback_authority import (
+    FeedbackAuthorityError,
     feedback_authority_defect,
-    validate_feedback_authority_assessments,
+    validate_all_feedback_authority_assessments,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     TargetEvidence,
@@ -298,9 +299,13 @@ def _validate_revision_wire(
     *,
     target_evidence: TargetEvidence | None = None,
 ) -> None:
-    """Reject a revision response whose carrier breaks the wire models."""
+    """Reject a revision response whose carrier breaks the wire models.
+
+    The authority checks name every failing channel, so the one correction
+    request can ask for all of them.
+    """
     wire = _RevisionDeltaProviderSet.model_validate(value)
-    validate_feedback_authority_assessments(
+    validate_all_feedback_authority_assessments(
         (
             channel
             for responsibility in (
@@ -341,7 +346,9 @@ def _revision_without_unsupported_authority(
     channel's earlier assessment for it.  Each drop adds a warning naming the
     channel and the reason.
     """
-    if outcome.result is None or not isinstance(outcome.failure, ValueError):
+    if outcome.result is None or not isinstance(
+        outcome.failure, FeedbackAuthorityError
+    ):
         return None
     try:
         value = copy.deepcopy(decode_content(outcome.result))
@@ -364,9 +371,7 @@ def _revision_without_unsupported_authority(
                 reasons.append((channel.fb_id, reason))
                 if key == "modified_responsibilities":
                     dropped.add((responsibility.resp_id, channel.fb_id))
-    # The validator stopped on the first failing basis; any other failure is
-    # not this one, and dropping assessments would not answer it.
-    if not reasons or str(outcome.failure) != reasons[0][1]:
+    if not reasons:
         return None
     try:
         _validate_revision_wire(value, target_evidence=target_evidence)
@@ -680,6 +685,10 @@ def run_revision(
     structural heuristics are re-run. If structural errors remain, they
     are returned as warnings (the pipeline proceeds).
 
+    A reply whose authority bases fail the checks earns the one correction,
+    which names every failing channel with its reason.  Bases that still fail
+    after it are dropped, so those channels' authority is unknown.
+
     Args:
         llm_client: LLM client for making the completion call.
         control_structure: The current control structure to revise.
@@ -712,6 +721,11 @@ def run_revision(
         target_evidence=target_evidence,
     )
 
+    def authority_note(error: Exception) -> str:
+        if not isinstance(error, FeedbackAuthorityError):
+            return ""
+        return loader.render_prompt("revision_authority_correction.j2").rstrip()
+
     outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=system_prompt,
@@ -724,6 +738,7 @@ def run_revision(
             validation_retries=1,
             feedback=_REVISION_VALIDATION_FEEDBACK,
             include_schema=False,
+            error_note=authority_note,
         ),
         temperature=temperature,
         max_completion_tokens=REVISION_MAX_COMPLETION_TOKENS,

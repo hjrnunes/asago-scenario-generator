@@ -1385,6 +1385,182 @@ def test_revision_still_discards_a_reply_with_another_failure(tmp_path: Path) ->
 
     assert revised == original
     assert warnings[0].startswith("Revision failed: ")
+    assert _REVISION_NOTE_OPENING not in _message(_sent(client)[1], "user")
+
+
+# ---------------------------------------------------------------------------
+# The one revision correction names every failing channel
+# ---------------------------------------------------------------------------
+
+_REVISION_NOTE_OPENING = "Correct the `authority_for_update` of every feedback"
+
+
+def _revision_channel(fb_id: str, basis: str, description: str) -> dict[str, Any]:
+    return {
+        **_RESTATED_CHANNEL,
+        "fb_id": fb_id,
+        "description": description,
+        "source_kind": "user_message",
+        "authority_for_update": {"status": "non_authoritative", "basis": basis},
+    }
+
+
+def _three_channel_revision(first_basis: str, third_basis: str) -> dict[str, Any]:
+    """A restating reply whose FB-1-2 basis passes, around FB-1-1 and FB-1-3."""
+    reply = _restated(
+        _revision_channel("FB-1-1", first_basis, _RESTATED_CHANNEL["description"])
+    )
+    reply["modified_responsibilities"][0]["feedback_channels"] += [
+        _revision_channel("FB-1-2", _BASIS, "The finance reviewer's recorded approval"),
+        _revision_channel(
+            "FB-1-3", third_basis, "The requester's statement of the refund amount"
+        ),
+    ]
+    return reply
+
+
+def _revision_note() -> str:
+    return (
+        TemplateLoader(PROMPTS_DIR)
+        .render_prompt("revision_authority_correction.j2")
+        .rstrip()
+    )
+
+
+def _run_revision(
+    client: LLMClient, tmp_path: Path
+) -> tuple[ControlStructure, list[str]]:
+    return run_revision(
+        llm_client=client,
+        control_structure=_structure(_channel()),
+        critic_findings=_FINDINGS,
+        use_case_text="A refund assistant issues refunds the finance reviewer approved.",
+        run_dir=tmp_path,
+    )
+
+
+def _authority_by_channel(structure: ControlStructure) -> dict[str, Any]:
+    return {
+        channel.fb_id: channel.authority_for_update
+        for channel in structure.responsibilities[0].feedback_channels
+    }
+
+
+def revision_authority_correction_request(run_dir: Path) -> str:
+    """Return the revision correction request after two failing bases."""
+    client = _client(
+        _three_channel_revision(_RESTATED_BASIS, _UNCITED_BASIS),
+        _three_channel_revision(_BASIS, _BASIS),
+    )
+    _run_revision(client, run_dir)
+    _, correction = _sent(client)
+    return _message(correction, "user")
+
+
+def test_the_revision_correction_names_every_failing_channel(tmp_path: Path) -> None:
+    client = _client(
+        _three_channel_revision(_RESTATED_BASIS, _UNCITED_BASIS),
+        _three_channel_revision(_BASIS, _BASIS),
+    )
+
+    revised, warnings = _run_revision(client, tmp_path)
+
+    first, correction = _sent(client)
+    request = _message(correction, "user")
+    assert request.startswith(_message(first, "user"))
+    assert request.endswith(
+        "\n\nExact validation error from the prior response:\n"
+        "ValueError: 2 feedback channel authority bases fail the checks:\n"
+        f"- {_RESTATED_REASON}\n"
+        f"- {_UNCITED_REASON}\n\n"
+        f"{_revision_note()}\n\n"
+        "Return one JSON object matching the response schema already supplied."
+    )
+    assert _message(correction, "system") == _message(first, "system")
+    assert _authority_by_channel(revised) == {
+        "FB-1-1": _NON_AUTHORITATIVE,
+        "FB-1-2": _NON_AUTHORITATIVE,
+        "FB-1-3": _NON_AUTHORITATIVE,
+    }
+    assert not any("authority_for_update" in warning for warning in warnings)
+
+
+def test_the_revision_correction_lists_a_long_failure_list_whole(
+    tmp_path: Path,
+) -> None:
+    def reply(basis: str) -> dict[str, Any]:
+        content = _restated(_RESTATED_CHANNEL)
+        content["modified_responsibilities"][0]["feedback_channels"] = [
+            _revision_channel(
+                f"FB-1-{n}", basis, f"The requester's statement number {n}"
+            )
+            for n in range(1, 41)
+        ]
+        return content
+
+    client = _client(reply(_UNCITED_BASIS), reply(_BASIS))
+
+    _run_revision(client, tmp_path)
+
+    _, correction = _sent(client)
+    listed = "\n".join(
+        f"- feedback channel FB-1-{n} settled authority basis must cite the "
+        "supplied use case or an exact target-evidence ref"
+        for n in range(1, 41)
+    )
+    assert len(listed) > 4000
+    assert (
+        "ValueError: 40 feedback channel authority bases fail the checks:\n"
+        f"{listed}\n\n{_revision_note()}\n\n"
+    ) in _message(correction, "user")
+
+
+def test_revision_drops_what_the_one_correction_leaves_failing(
+    tmp_path: Path,
+) -> None:
+    client = _client(
+        _three_channel_revision(_RESTATED_BASIS, _UNCITED_BASIS),
+        _three_channel_revision(_BASIS, _UNCITED_BASIS),
+    )
+
+    revised, warnings = _run_revision(client, tmp_path)
+
+    assert len(_sent(client)) == 2
+    assert _authority_by_channel(revised) == {
+        "FB-1-1": _NON_AUTHORITATIVE,
+        "FB-1-2": _NON_AUTHORITATIVE,
+        "FB-1-3": None,
+    }
+    assert [w for w in warnings if "authority_for_update" in w] == [
+        "Revision dropped the authority_for_update of feedback channel FB-1-3: "
+        f"{_UNCITED_REASON}"
+    ]
+    assert not any(warning.startswith("Revision failed") for warning in warnings)
+
+
+def test_revision_drops_every_basis_the_correction_does_not_fix(
+    tmp_path: Path,
+) -> None:
+    reply = _three_channel_revision(_RESTATED_BASIS, _UNCITED_BASIS)
+    client = _client(reply, reply)
+
+    revised, warnings = _run_revision(client, tmp_path)
+
+    assert len(_sent(client)) == 2
+    assert _authority_by_channel(revised) == {
+        "FB-1-1": None,
+        "FB-1-2": _NON_AUTHORITATIVE,
+        "FB-1-3": None,
+    }
+    assert warnings[:2] == [
+        f"Revision dropped the authority_for_update of feedback channel {fb_id}: "
+        f"{reason}"
+        for fb_id, reason in (
+            ("FB-1-1", _RESTATED_REASON),
+            ("FB-1-3", _UNCITED_REASON),
+        )
+    ]
+    assert not any(warning.startswith("Revision failed") for warning in warnings)
 
 
 # ---------------------------------------------------------------------------

@@ -160,6 +160,7 @@ PROMPT_DIRS = (
 REQUESTS = (
     "stage5_condition_correction",
     "stage2_call2b_authority_correction_request",
+    "revision_authority_correction_request",
 )
 
 _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
@@ -719,6 +720,18 @@ def _call_2b_authority_correction(request: str) -> str:
         return authority_correction_request(Path(run_dir))
 
 
+def _revision_authority_correction(request: str) -> str:
+    """Render the revision correction request that follows two failing bases."""
+    assert request == "revision_authority_correction_request"
+    # Imported here: that test module reads CASES from this one.
+    from tests.stpa.test_feedback_update_authority import (
+        revision_authority_correction_request,
+    )
+
+    with tempfile.TemporaryDirectory() as run_dir:
+        return revision_authority_correction_request(Path(run_dir))
+
+
 # The critic request for a structure whose feedback channel is assessed.
 FEEDBACK_AUTHORITY_CRITIC = {
     "use_case_text": "Test use case",
@@ -833,6 +846,7 @@ CASES: dict[str, Callable[[str], str]] = {
         _descriptive_literal_condition
     ),
     "two-failing-authority-bases": _call_2b_authority_correction,
+    "two-failing-revision-authority-bases": _revision_authority_correction,
     **{case: _obligation_aware(case) for case in OBLIGATION_AWARE_BUILDS},
 }
 
