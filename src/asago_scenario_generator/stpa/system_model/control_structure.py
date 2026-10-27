@@ -120,11 +120,17 @@ _INTERMEDIATE_VALIDATION_RETRY_FEEDBACK = (
 
 @dataclass(frozen=True)
 class ControlStructureDerivationResult:
-    """Named Stage 2 result carrying the reviewed upstream loss graph."""
+    """Named Stage 2 result carrying the reviewed upstream loss graph.
+
+    ``warnings`` is the derivation record.  ``authority_warnings`` are those
+    of its warnings that name a dropped authority assessment; they stay in
+    the record and out of model prompts.
+    """
 
     loss_analysis: LossAnalysis
     control_structure: ControlStructure
     warnings: list[str] = field(default_factory=list)
+    authority_warnings: list[str] = field(default_factory=list)
 
 
 def _assembly_source_id_maps(
@@ -2058,6 +2064,7 @@ def _derive_control_structure(
         loss_analysis=reviewed_loss_analysis,
         control_structure=control_structure,
         warnings=[*call_2b_warnings, *repair_warnings],
+        authority_warnings=list(call_2b_warnings),
     )
 
 

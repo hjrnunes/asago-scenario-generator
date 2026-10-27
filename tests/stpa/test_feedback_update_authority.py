@@ -12,7 +12,8 @@ omits it keeps the earlier assessment while the channel updates the same
 variable.  A basis that still fails the deterministic checks after the
 existing correction is dropped with a warning instead of stopping the step.
 A revision whose stated assessment is dropped leaves that channel's authority
-unknown; one that only omits it keeps the earlier assessment.
+unknown; one that only omits it keeps the earlier assessment.  A dropped
+assessment's warning stays in the derivation record and out of model prompts.
 A cited ref's kind (``state:``, ``session:`` ...) is read case-insensitively,
 its name exactly.  Requests go through the real client with a mocked
 transport, or the SP1 mock client; no request leaves the process.
@@ -55,8 +56,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
+from asago_scenario_generator.stpa.system_model import run as stage_2_run
 from asago_scenario_generator.stpa.system_model.control_structure import (
     ControlElementSet,
+    ControlStructureDerivationResult,
     CoordinationAnalysis,
     RequirementSet,
     ResponsibilitySet,
@@ -1019,9 +1022,8 @@ def test_call_2b_still_stops_on_other_failures(
     assert warnings == []
 
 
-def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
-    tmp_path: Path,
-) -> None:
+def _stage_2_client() -> MockLLMClient:
+    """A Stage 2 run whose Call 2b basis fails the checks in both replies."""
     client = MockLLMClient()
     client.set_response_for(
         RequirementSet,
@@ -1057,7 +1059,12 @@ def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
     client.set_response_for(
         CoordinationAnalysis, valid_empty_coordination_analysis_dict()
     )
-    loss_analysis = LossAnalysis(
+    client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
+    return client
+
+
+def _refund_loss_analysis() -> LossAnalysis:
+    return LossAnalysis(
         risk_card_losses=[],
         use_case_losses=[
             Loss(
@@ -1082,6 +1089,20 @@ def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
         ],
     )
 
+
+_DROPPED_SOURCE_KIND_REASON = (
+    "feedback channel FB-1-1 authority basis only restates source kind "
+    "'user_message'; state why that source may or may not establish this "
+    "value and cite supplied evidence"
+)
+
+
+def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
+    tmp_path: Path,
+) -> None:
+    client = _stage_2_client()
+    loss_analysis = _refund_loss_analysis()
+
     result = derive_control_structure(
         llm_client=client,
         use_case_text="A refund assistant issues refunds the finance reviewer approved.",
@@ -1098,11 +1119,7 @@ def test_stage_2_completes_with_the_dropped_assessment_as_a_warning(
     assert len(call_2b_requests) == 2
     [channel] = result.control_structure.responsibilities[0].feedback_channels
     assert channel.authority_for_update is None
-    assert result.warnings[0] == _dropped_warning(
-        "feedback channel FB-1-1 authority basis only restates source kind "
-        "'user_message'; state why that source may or may not establish this "
-        "value and cite supplied evidence"
-    )
+    assert result.warnings[0] == _dropped_warning(_DROPPED_SOURCE_KIND_REASON)
 
 
 @pytest.mark.parametrize(("basis", "reason", "target_evidence"), _UNSUPPORTED_BASES)
@@ -1369,3 +1386,77 @@ def test_only_the_dropped_channel_loses_its_earlier_assessment(
     assert dropped.authority_for_update is None
     assert omitted.fb_id == "FB-1-2"
     assert omitted.authority_for_update == amount
+
+
+# ---------------------------------------------------------------------------
+# A dropped assessment's warning stays out of the critic request
+# ---------------------------------------------------------------------------
+
+
+def _critic_request(client: MockLLMClient) -> str:
+    [critic] = [
+        call
+        for call in client.calls
+        if call.response_format is not None
+        and issubclass(call.response_format, CriticFindings)
+    ]
+    return critic.user_prompt
+
+
+def _run_stage_2(client: MockLLMClient, tmp_path: Path, stage_warnings: list[str]):
+    return stage_2_run._run_stage_2_block(
+        client,
+        "A refund assistant issues refunds the finance reviewer approved.",
+        _refund_loss_analysis(),
+        make_capability_profile(),
+        tmp_path,
+        TemplateLoader(PROMPTS_DIR),
+        0.4,
+        [],
+        stage_warnings,
+    )
+
+
+def test_the_critic_request_omits_the_dropped_assessment_warning(
+    tmp_path: Path,
+) -> None:
+    client = _stage_2_client()
+    stage_warnings: list[str] = []
+
+    result = _run_stage_2(client, tmp_path, stage_warnings)
+
+    assert result.control_structure is not None
+    critic_request = _critic_request(client)
+    assert "FB-1-1" in critic_request
+    assert "dropped the authority_for_update" not in critic_request
+    assert _DROPPED_SOURCE_KIND_REASON not in critic_request
+    assert "Coordination Analysis Warnings" not in critic_request
+    assert _dropped_warning(_DROPPED_SOURCE_KIND_REASON) in stage_warnings
+
+
+def test_other_derivation_warnings_still_reach_the_critic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    dropped = _dropped_warning(_DROPPED_SOURCE_KIND_REASON)
+    stub = "stage_2/orphan_pm_repair: added stub feedback channel FB-1-2"
+    structure = _structure(_channel())
+
+    def derived(**_: Any) -> ControlStructureDerivationResult:
+        return ControlStructureDerivationResult(
+            loss_analysis=_refund_loss_analysis(),
+            control_structure=structure,
+            warnings=[dropped, stub],
+            authority_warnings=[dropped],
+        )
+
+    monkeypatch.setattr(stage_2_run, "derive_control_structure", derived)
+    client = MockLLMClient()
+    client.set_response_for(CriticFindings, valid_critic_findings_dict_no_gaps())
+    stage_warnings: list[str] = []
+
+    _run_stage_2(client, tmp_path, stage_warnings)
+
+    critic_request = _critic_request(client)
+    assert f"- {stub}" in critic_request
+    assert dropped not in critic_request
+    assert stage_warnings[:2] == [dropped, stub]
