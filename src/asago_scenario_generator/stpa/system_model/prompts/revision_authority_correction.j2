@@ -5,7 +5,9 @@ adds or restates. For each listed channel, write a `basis` that cites
 states the authority scope in domain words. When the supplied evidence does not
 settle that channel's authority, omit its `authority_for_update` instead: a
 restated channel that still updates the PM shown with it then keeps the
-assessment shown, and any other channel's authority is `unknown`. A basis that
-still fails the checks is dropped, and that channel's authority becomes
-`unknown` rather than the assessment shown. Otherwise answer the critic
-findings as the task asks.
+assessment shown, and any other channel's authority is `unknown`. If the
+revision is otherwise valid, an assessment whose basis still fails the checks
+is dropped, leaving that channel's authority `unknown` rather than the
+assessment shown; any other validation failure that remains discards the whole
+revision and keeps the earlier structure. Otherwise answer the critic findings
+as the task asks.
