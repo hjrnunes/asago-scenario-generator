@@ -12,13 +12,23 @@ cases:
         authority scope in domain words.
       - >-
         When the supplied evidence does not settle that channel's authority,
-        omit its `authority_for_update` instead; an omitted assessment means
-        `unknown`.
+        omit its `authority_for_update` instead: a restated channel that still
+        updates the PM shown with it then keeps the assessment shown, and any
+        other channel's authority is `unknown`.
+      - >-
+        If the revision is otherwise valid, an assessment whose basis still
+        fails the checks is dropped, leaving that channel's authority `unknown`
+        rather than the assessment shown; any other validation failure that
+        remains discards the whole revision and keeps the earlier structure.
       - Otherwise answer the critic findings as the task asks.
     forbidden:
       - Keep every other record as written.
+      - an omitted assessment means `unknown`
+      - A basis that still fails the checks is dropped
     ordered:
       - - Correct the `authority_for_update` of every feedback channel
         - write a `basis` that cites
         - omit its `authority_for_update` instead
+        - If the revision is otherwise valid
+        - any other validation failure that remains discards the whole revision
         - Otherwise answer the critic findings as the task asks.

@@ -56,9 +56,17 @@ cases:
       - >-
         Assess it for a new channel, and for a restated channel shown without
         one, where the supplied evidence bears on it; omit it otherwise.
-      - "An omitted assessment means `unknown`."
+      - >-
+        Omitting it leaves a new channel, or a restated channel shown without
+        one, `unknown`; a restated channel that still updates the PM shown with
+        it keeps the assessment shown.
       - "An assessment covers only the PM shown with it"
-      - "when a restated channel updates a different PM, assess it again or omit it"
+      - >-
+        when a restated channel updates a different PM, the assessment shown is
+        not kept, so assess it again or omit it to leave it `unknown`.
+      - >-
+        An assessment dropped because its basis fails these requirements leaves
+        the channel `unknown`, not with the assessment shown.
       - "Do not derive authority from `source_kind`"
       - >-
         an untrusted user message may be authoritative for that user's own
@@ -74,3 +82,4 @@ cases:
         greenhouse temperature.
     forbidden:
       - STPA-Sec
+      - An omitted assessment means `unknown`.
