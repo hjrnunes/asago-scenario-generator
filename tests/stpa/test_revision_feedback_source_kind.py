@@ -265,7 +265,7 @@ def test_a_discarded_revision_is_a_stage_warning_and_a_manifest_record(tmp_path)
     assert result.revised is False
     [warning] = [w for w in result.stage_warnings if w.startswith(_DISCARDED)]
     reason = warning.removeprefix(_DISCARDED)
-    assert reason.startswith("Revision delta merge degraded: ValidationError:")
+    assert reason.startswith("Revision failed: ValidationError:")
     assert "feedback_channels.0.source.type" in reason
     assert "input_value='sensor'" in reason
     assert reason in result.post_revision_warnings

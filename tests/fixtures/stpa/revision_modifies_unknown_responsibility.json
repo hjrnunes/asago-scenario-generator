@@ -1,0 +1,43 @@
+{
+  "modified_responsibilities": [
+    {
+      "resp_id": "RESP-2",
+      "description": "Validates the integrity and specialty-alignment of education materials",
+      "responsibility_constraints": [
+        {
+          "rc_id": "RC-2-1",
+          "description": "Ensure all retrieved educational content matches the patient's specialty and is approved."
+        }
+      ],
+      "security_constraint_refs": [],
+      "process_model_parts": [
+        {
+          "pm_id": "PM-2-1",
+          "description": "Integrity and alignment status of education content",
+          "values": [
+            "valid",
+            "invalid"
+          ],
+          "evidence_refs": []
+        }
+      ],
+      "control_actions": [],
+      "feedback_channels": [
+        {
+          "fb_id": "FB-2-1",
+          "description": "Report alignment/integrity status",
+          "updates": "PM-2-1",
+          "source": {
+            "type": "controlled_process",
+            "id": "CP-3"
+          },
+          "source_kind": "operation_result",
+          "authority_for_update": {
+            "status": "authoritative",
+            "basis": "Use case: the assistant must verify content is approved and specialty-matched."
+          }
+        }
+      ]
+    }
+  ]
+}

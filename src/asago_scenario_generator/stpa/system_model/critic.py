@@ -301,13 +301,22 @@ def _validate_revision_wire(
     value: Any,
     *,
     target_evidence: TargetEvidence | None = None,
+    control_structure: ControlStructure | None = None,
 ) -> None:
     """Reject a revision response whose carrier breaks the wire models.
 
-    The authority checks name every failing channel, so the one correction
+    With *control_structure*, a delta that changes something must also merge
+    into it, so a delta the merge would refuse earns the correction instead
+    of being discarded after it.  The merge runs before the authority checks:
+    a failing basis can still be dropped, an unmergeable delta cannot.  The
+    authority checks name every failing channel, so the one correction
     request can ask for all of them.
     """
     wire = _RevisionDeltaProviderSet.model_validate(value)
+    if control_structure is not None:
+        delta = _revision_delta_from_wire(value)
+        if _delta_has_changes(delta):
+            _merge_revision_delta(control_structure, delta)
     validate_all_feedback_authority_assessments(
         (
             channel
@@ -767,7 +776,9 @@ def run_revision(
         temperature=temperature,
         max_completion_tokens=REVISION_MAX_COMPLETION_TOKENS,
         raw_result_validator=lambda value: _validate_revision_wire(
-            value, target_evidence=target_evidence
+            value,
+            target_evidence=target_evidence,
+            control_structure=control_structure,
         ),
         response_parser=_parse_revision_result,
     )

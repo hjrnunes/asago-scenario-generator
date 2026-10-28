@@ -1,0 +1,219 @@
+responsibilities:
+- resp_id: RESP-1
+  description: Manages the conversational interaction with the authenticated patient,
+    including answering questions and providing educational guidance.
+  responsibility_constraints:
+  - rc_id: RC-1-1
+    description: Provide only approved education content matching the patient's specialty
+      and avoid unapproved templates.
+  security_constraint_refs:
+  - SC-1
+  - SC-4
+  process_model_parts:
+  - pm_id: PM-1-1
+    description: The specialty of the authenticated patient.
+    values:
+    - ophthalmology
+    - gynaecology
+    - unknown
+    evidence_refs:
+    - state:patients.specialty
+  - pm_id: PM-1-2
+    description: The content of the user's query.
+  - pm_id: PM-1-3
+    description: Presence of red-flag clinical terms in the query or generated response.
+    values:
+    - present
+    - absent
+  - pm_id: PM-1-4
+    description: Nature of the query regarding diagnosis or prescription.
+    values:
+    - diagnostic/prescriptive intent
+    - general inquiry
+  - pm_id: PM-1-5
+    description: Status of education material approval and specialty match.
+    values:
+    - approved and specialty-matched
+    - unapproved or specialty-mismatched
+    evidence_refs:
+    - state:education.approved
+    - state:education.specialty
+  - pm_id: PM-1-6
+    description: Content bias or stereotype risk in generated response.
+    values:
+    - low risk
+    - high risk
+  control_actions:
+  - ca_id: CA-1-1
+    description: Provide conversational response to patient
+    target:
+      type: controlled_process
+      id: CP-1
+    effect_kind: model_output
+    temporality: instantaneous
+    process_model_refs:
+    - PM-1-1
+    - PM-1-2
+    - PM-1-3
+    - PM-1-4
+    - PM-1-5
+    - PM-1-6
+  - ca_id: CA-1-2
+    description: Retrieve patient referral
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: get_referral
+    process_model_refs:
+    - PM-1-1
+  - ca_id: CA-1-3
+    description: Retrieve patient education material
+    target:
+      type: controlled_process
+      id: CP-3
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: get_education
+    process_model_refs:
+    - PM-1-1
+    - PM-1-5
+  - ca_id: CA-1-4
+    description: Ask clinical question from approved script
+    target:
+      type: controlled_process
+      id: CP-3
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: ask_clinical_question
+    process_model_refs:
+    - PM-1-1
+    - PM-1-3
+    - PM-1-4
+    - PM-1-5
+  - ca_id: CA-1-5
+    description: Submit patient questionnaire
+    target:
+      type: controlled_process
+      id: CP-4
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: submit_questionnaire
+  - ca_id: CA-1-6
+    description: Summarize conversation for EHR draft
+    target:
+      type: controlled_process
+      id: CP-5
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: summarize_for_ehr
+  - ca_id: CA-1-7
+    description: Generate education video
+    target:
+      type: controlled_process
+      id: CP-3
+    effect_kind: tool_call
+    temporality: bounded_duration
+    operation: generate_education_video
+    process_model_refs:
+    - PM-1-1
+    - PM-1-5
+  - ca_id: CA-1-8
+    description: Escalate urgent or red-flag matter to clinician
+    target:
+      type: controlled_process
+      id: CP-6
+    effect_kind: agent_message
+    temporality: instantaneous
+    operation: escalate_to_clinician
+    process_model_refs:
+    - PM-1-3
+  - ca_id: CA-1-9
+    description: Commit reviewed draft to EHR
+    target:
+      type: controlled_process
+      id: CP-5
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: commit_to_ehr
+  feedback_channels:
+  - fb_id: FB-1-1
+    description: Update patient specialty from referral data
+    updates: PM-1-1
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: the get_referral operation returns the authenticated patient''s
+        specialty.'
+  - fb_id: FB-1-2
+    description: Extract query text from user message
+    updates: PM-1-2
+    source:
+      type: controlled_process
+      id: CP-1
+    source_kind: user_message
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: the user''s input is the content of the query.'
+  - fb_id: FB-1-3
+    description: Detect red-flag terms in query or response
+    updates: PM-1-3
+    source:
+      type: responsibility
+      id: RESP-1
+    source_kind: other
+    authority_for_update:
+      status: conditional
+      basis: 'Use case: red-flag terms trigger escalation.'
+  - fb_id: FB-1-4
+    description: Analyze query for diagnostic/prescriptive intent
+    updates: PM-1-4
+    source:
+      type: controlled_process
+      id: CP-1
+    source_kind: user_message
+  - fb_id: FB-1-5
+    description: Verify education material approval and specialty match
+    updates: PM-1-5
+    source:
+      type: controlled_process
+      id: CP-3
+    source_kind: operation_result
+  - fb_id: FB-1-6
+    description: Assess model output for bias/stereotype risk
+    updates: PM-1-6
+    source:
+      type: responsibility
+      id: RESP-1
+    source_kind: other
+    authority_for_update:
+      status: unknown
+controlled_processes:
+- cp_id: CP-1
+  description: Patient-facing conversational interface
+- cp_id: CP-2
+  description: Patient referral data service
+- cp_id: CP-3
+  description: Approved education material repository
+- cp_id: CP-4
+  description: Questionnaire data storage
+- cp_id: CP-5
+  description: Electronic Health Record (EHR) system
+- cp_id: CP-6
+  description: Human clinical escalation system
+coordination_links:
+- link_id: CL-1
+  source: RESP-1
+  target: RESP-1
+  shared_pm: PM-1-1
+  coordination_mechanism:
+    cm_id: CM-1
+    description: Internal consistency check for patient identity across tool calls.
+    payload: patient_id
+  description: RESP-1 must ensure that all tool calls (referral, education, questionnaire,
+    EHR) are synchronized with the single authenticated patient identity bound to
+    the session to prevent cross-patient data leakage.

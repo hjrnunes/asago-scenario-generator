@@ -333,10 +333,12 @@ class TestRevision:
             run_dir=tmp_path,
         )
 
+        # Validation merges the delta, so the reply and its correction are
+        # rejected and the revision is discarded.
         assert revised == original
         assert len(revised.responsibilities) == 2
-        assert len(warnings) == 1
-        assert "Revision delta merge degraded" in warnings[0]
+        assert len(client.calls) == 2
+        assert warnings[0].startswith("Revision failed: ValidationError")
         assert "invalid effect_kind" in warnings[0]
 
     def test_revision_valid_effect_kind_merges_at_public_seam(self, tmp_path):

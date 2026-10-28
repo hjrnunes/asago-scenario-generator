@@ -833,7 +833,15 @@ feedback. A reply that does not decode as JSON also earns the call's one
 correction request in the Stage 1b capability profile, the Stage 1a graph
 revision, Stage 2 Calls 1–3 when the repeat is undecodable too, the
 completeness critic, and the critic revision; the correction names the decode
-error and asks for the complete object again. Each attempt is logged
+error and asks for the complete object again. The critic revision's
+correction shows the rejected delta before the exact error. Validation merges
+a revision delta into the structure it revises, so a delta the merge would
+refuse, such as one restating an unknown responsibility, earns that
+correction instead of being discarded after it. A delta that adds and
+restates nothing is not merged; the Stage 2 manifest records
+`critic_revision.status` as `applied` (the structure changed), `unchanged`
+(the reply was accepted and changed nothing), or `discarded` with its
+`reason`. Each attempt is logged
 separately in `calls.jsonl` and counts as one request in the stage's call
 count; these retries do not change the manifest/result schemas, and
 exhaustion remains fatal with three exceptions: an exhausted critic returns

@@ -355,7 +355,7 @@ def test_stage_2_refuses_an_untyped_action_without_a_revision(tmp_path) -> None:
     assert (tmp_path / "control-structure-refused.yaml").exists()
 
 
-def test_stage_2_refuses_an_untyped_action_after_a_degraded_merge(
+def test_stage_2_refuses_an_untyped_action_after_a_discarded_revision(
     tmp_path,
 ) -> None:
     client = _untyped_stage2_client()
@@ -374,8 +374,9 @@ def test_stage_2_refuses_an_untyped_action_after_a_degraded_merge(
             "taxonomy_probe_results": {},
         },
     )
-    # The merged structure names an unknown process, so the merge degrades and
-    # the pre-revision structure, with its untyped action, stays in force.
+    # The merged structure names an unknown process, so the reply and its
+    # correction are rejected and the pre-revision structure, with its untyped
+    # action, stays in force.
     client.set_response_for(
         RevisionDelta,
         {
@@ -402,7 +403,8 @@ def test_stage_2_refuses_an_untyped_action_after_a_degraded_merge(
 
     result, stage_errors = _stage_2(client, tmp_path)
 
-    assert len(client.calls) == 6
+    # Calls 1, 2a, 2b and 3, the critic, the revision and its correction.
+    assert len(client.calls) == 7
     assert result.control_structure is None  # type: ignore[attr-defined]
     assert stage_errors == [_UNTYPED_ERROR]
     assert not (tmp_path / "control-structure.yaml").exists()

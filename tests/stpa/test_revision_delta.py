@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     _next_free_cm_id,
     _next_num_from,
     _renumber_colliding_cm_ids,
+    discarded_revision_reason,
     run_revision,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
@@ -243,9 +244,13 @@ class TestRevisionDeltaModifiedMatchKey:
             run_dir=tmp_path,
         )
 
+        # The merge refuses the key, so validation rejects the reply; the
+        # correction repeats it and the revision is discarded.
         assert revised == original
-        assert any("degrad" in warning.lower() for warning in warnings)
-        assert any("renamed-controller" in warning for warning in warnings)
+        assert len(client.calls) == 2
+        reason = discarded_revision_reason(warnings)
+        assert reason is not None and reason.startswith("Revision failed: ")
+        assert "renamed-controller" in reason
 
 
 class TestRevisionDelta05MergeNewCps:
@@ -880,7 +885,11 @@ class TestCmDedupRenumbering:
 
 
 class TestCmDedupNestedPmIdCollision:
-    """A merge that fails validation degrades to the pre-revision structure."""
+    """A delta whose merge fails validation keeps the pre-revision structure.
+
+    Validation merges the delta, so the reply is rejected and corrected; a
+    correction that repeats it discards the revision.
+    """
 
     def test_nested_pm_id_collision_falls_back_and_warns(self, tmp_path):
         cs, warnings = _run_rev(tmp_path, _make_degradation_delta())
@@ -890,7 +899,8 @@ class TestCmDedupNestedPmIdCollision:
         assert {cl.link_id for cl in cs.coordination_links} == {"CL-1", "CL-2"}
         wtext = " ".join(warnings)
         assert any("degrad" in w.lower() for w in warnings)
-        assert "revision delta merge" in wtext.lower()
+        reason = discarded_revision_reason(warnings)
+        assert reason is not None and reason.startswith("Revision failed: ")
         assert "ValidationError" in wtext or "ValueError" in wtext
 
 

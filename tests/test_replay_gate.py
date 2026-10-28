@@ -2187,7 +2187,7 @@ def test_a_discarded_revision_rebinds_an_operation_named_with_the_prefix(
     assert kept is not None and f"'operation:{_LOOKUP}', not" in kept
 
 
-@pytest.mark.parametrize("reply", [None, "merge_degraded"])
+@pytest.mark.parametrize("reply", [None, "unmergeable"])
 def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
     tmp_path: Path, reply: str | None
 ) -> None:
@@ -2207,7 +2207,8 @@ def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
     if reply is None:
         client.set_exception_for(RevisionDelta, RuntimeError("provider down"))
     else:
-        # A modified responsibility the structure lacks cannot be merged.
+        # A modified responsibility the structure lacks cannot be merged, so
+        # validation rejects the reply and its correction.
         client.set_response_for(
             RevisionDelta,
             {
@@ -2247,9 +2248,7 @@ def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
     _write_post_revision_warnings(tmp_path, warnings)
 
     assert record is not None and record["status"] == "discarded"
-    assert record["reason"].startswith(
-        "Revision failed: " if reply is None else "Revision delta merge degraded: "
-    )
+    assert record["reason"].startswith("Revision failed: ")
     assert revised is True
     assert (tmp_path / "control-structure-evidence-bound.yaml").is_file()
     assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
