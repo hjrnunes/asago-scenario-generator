@@ -422,8 +422,9 @@ ASSESSED_AUTHORITY = frozenset(
 )
 """The statuses that settle a kept channel's lack of authority.
 
-A kept channel with any other status is kept only because its authority is
-``unknown``: recorded so, or absent.
+A kept channel with any other status is ``unknown`` (recorded so, or
+absent), or, under signature retrieval, ``authoritative`` for a mechanism
+that admits it (:func:`admitted_authority`).
 """
 
 

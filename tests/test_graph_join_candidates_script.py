@@ -305,3 +305,43 @@ def test_signature_retrieval_adds_library_mechanisms_only_when_asked(
     ]
     assert filtered.candidates == signature.candidates
     assert filtered.unfiltered == signature.candidates
+
+
+def test_authoritative_stale_feedback_is_counted_as_authoritative(
+    tmp_path: Path,
+) -> None:
+    data = _structure("operation_result")
+    data["responsibilities"][0]["feedback_channels"][0]["authority_for_update"] = {
+        "status": "authoritative",
+        "basis": "The backend sets it.",
+    }
+    path = tmp_path / "authoritative.yaml"
+    path.write_text(yaml.safe_dump(data))
+    script = _script()
+
+    (unit,) = script.load_units(
+        [("u", path)], authority_filter=True, signature_retrieval=True
+    )
+    row = script._unit_counts(unit, [unit])
+
+    assert [item.mechanism for item in unit.candidates] == ["stale_feedback"]
+    assert row["kept_assessed"] == 0
+    assert row["kept_unknown"] == 0
+    assert row["kept_unknown_missing"] == 0
+    assert row["kept_authoritative"] == 1
+    assert row["kept_by_authority"] == {"authoritative": 1}
+    summary = script._summary([row], {}, "")
+    assert "| Unknown (missing) | Authoritative (admitted) |" in summary
+    assert "| u | 2 | 1 | 0 | 0 (0) | 1 |" in summary
+
+
+def test_without_signature_retrieval_no_authoritative_bucket(tmp_path: Path) -> None:
+    path = tmp_path / "authority.yaml"
+    path.write_text(yaml.safe_dump(_authority_structure()))
+    script = _script()
+
+    (unit,) = script.load_units([("u", path)], authority_filter=True)
+    row = script._unit_counts(unit, [unit])
+
+    assert "kept_authoritative" not in row
+    assert "Authoritative (admitted)" not in script._summary([row], {}, "")

@@ -48,7 +48,9 @@ candidates. Without the flag every output is as before.
 ``--signature-retrieval`` runs both joins with signature retrieval on: every
 channel is matched against each mechanism library entry's signature, so the
 candidates, counts and sample cover every library mechanism. Without it every
-output is as before.
+output is as before. With ``--authority-filter`` too, every unit also counts
+``kept_authoritative``: kept candidates on an ``authoritative`` channel, which
+only a mechanism whose signature admits that status keeps.
 """
 
 from __future__ import annotations
@@ -102,6 +104,8 @@ class Unit:
     """The filtered join, when the script runs with ``--authority-filter``."""
     unfiltered: tuple[MechanismCandidate, ...] = ()
     """The unfiltered candidates, kept beside a filtered join for comparison."""
+    signature_retrieval: bool = False
+    """Whether the joins ran with signature retrieval."""
 
 
 def _read_tsv(path: Path) -> list[tuple[str, Path]]:
@@ -154,7 +158,7 @@ def _load(
     authority_filter: bool = False,
     signature_retrieval: bool = False,
 ) -> Unit:
-    unit = Unit(index, label, path)
+    unit = Unit(index, label, path, signature_retrieval=signature_retrieval)
     try:
         raw = path.read_bytes()
     except OSError as exc:
@@ -251,11 +255,21 @@ def _filter_counts(unit: Unit, channels: list[FeedbackChannel]) -> dict[str, Any
         if item.reason is DropReason.authoritative
     }
     unfiltered = set(unit.unfiltered)
-    return {
+    counts: dict[str, Any] = {
         "unfiltered_candidates": len(unit.unfiltered),
         "kept_assessed": sum(item.authority_assessed for item in kept),
-        "kept_unknown": sum(not item.authority_assessed for item in kept),
+        "kept_unknown": sum(
+            item.authority is FeedbackAuthorityStatus.unknown for item in kept
+        ),
         "kept_unknown_missing": sum(not item.authority_recorded for item in kept),
+    }
+    if unit.signature_retrieval:
+        # Only a mechanism that admits ``authoritative`` keeps such a channel.
+        counts["kept_authoritative"] = sum(
+            item.authority is FeedbackAuthorityStatus.authoritative for item in kept
+        )
+    return {
+        **counts,
         "kept_by_authority": dict(Counter(item.authority.value for item in kept)),
         "kept_by_reach": dict(Counter(item.reach.value for item in kept)),
         "kept_not_unfiltered": sum(item.candidate not in unfiltered for item in kept),
@@ -487,6 +501,7 @@ def _filter_summary(rows: list[dict[str, Any]]) -> list[str]:
     if not filtered:
         return []
     statuses = " / ".join(_AUTHORITY_VALUES)
+    admitted = any("kept_authoritative" in row for row in filtered)
     lines = [
         "",
         "Authority filter: kept candidates whose authority is assessed"
@@ -494,19 +509,29 @@ def _filter_summary(rows: list[dict[str, Any]]) -> list[str]:
         " missing); dropped candidates by reason. Channels counts every"
         f" channel by authority ({statuses}); untrusted counts the channels"
         " whose source_kind is untrusted; joined counts the channels that"
-        " start a kept or an authoritative-dropped candidate.",
+        " start a kept or an authoritative-dropped candidate."
+        + (
+            " Authoritative (admitted) counts kept candidates on an"
+            " authoritative channel, kept because their mechanism admits it."
+            if admitted
+            else ""
+        ),
         "",
-        "| Unit | Unfiltered | Kept | Assessed | Unknown (missing) | Not unfiltered "
+        "| Unit | Unfiltered | Kept | Assessed | Unknown (missing) "
+        f"{'| Authoritative (admitted) ' if admitted else ''}| Not unfiltered "
         "| Dropped authoritative | Dropped own controller "
         f"| Channels {statuses} | Untrusted {statuses} | Joined {statuses} |",
-        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"
+        + (" --- |" if admitted else ""),
     ]
     for row in filtered:
         reasons = row["dropped_by_reason"]
+        authoritative = f"| {row.get('kept_authoritative', 0)} " if admitted else ""
         lines.append(
             f"| {row['label']} | {row['unfiltered_candidates']} "
             f"| {row['candidates']} | {row['kept_assessed']} "
             f"| {row['kept_unknown']} ({row['kept_unknown_missing']}) "
+            f"{authoritative}"
             f"| {row['kept_not_unfiltered']} | {reasons['authoritative']} "
             f"| {reasons['own_controller']} "
             f"| {_slashed(row['channel_authority'])} "
