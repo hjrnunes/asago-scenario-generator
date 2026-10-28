@@ -1644,8 +1644,11 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
     assert set(provider.stage_provider_ids) == {id(provider)}
     assert result.consideration.schema_version == "stpa-obligation-consideration-v1"
     assert result.accounting.schema_version == "stpa-obligation-accounting-v1"
-    assert result.accounting.rows[0].disposition == "addressed"
-    assert result.accounting.rows[0].stop_reason == "addressed"
+    # The finding is exact, but no scenario was written for it.
+    assert result.accounting.rows[0].disposition == "generation_failed"
+    assert result.accounting.rows[0].stop_reason == "scenario_generation_failure"
+    assert result.accounting.summary.addressed == 0
+    assert result.accounting.summary.generation_failed == 1
     assert len(provider.verification_calls) == 2
     assert provider.verification_calls[0][0] == provider.verification_calls[1][0]
     assert provider.verification_calls[0][1] is None

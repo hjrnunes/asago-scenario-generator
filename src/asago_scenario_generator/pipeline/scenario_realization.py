@@ -11,8 +11,10 @@ from asago_scenario_generator.models.artifact_pin import (
 )
 from asago_scenario_generator.models.canonical import compute_framed_digest
 from asago_scenario_generator.models.obligation_accounting import (
+    SCENARIO_GENERATION_FAILURE,
     ObligationAccounting,
     ObligationAccountingRow,
+    derive_obligation_accounting_summary,
 )
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
@@ -69,11 +71,88 @@ def build_scenario_realization_assessment(
         for pair in eligible_pairs
         for ica_id in pair.ica_ids
     )
+    _reject_realized_generation_failures(accounting, records)
     return ScenarioRealizationAssessment(
         source_pins=_source_pins(accounting, enumeration, scenarios),
         records=records,
         summary=derive_scenario_realization_summary(records),
     )
+
+
+def account_generation_failures(
+    accounting: ObligationAccounting,
+    *,
+    scenario_specs: Iterable[ScenarioSpec],
+    functional_test_specs: Iterable[ScenarioSpec] = (),
+) -> ObligationAccounting:
+    """Mark each addressed row that no written scenario carries.
+
+    An addressed row is credited from its structural findings.  Once the
+    run's scenarios are known, a row none of whose findings any adversarial
+    or functional-test scenario carries becomes ``generation_failed`` with
+    stop reason ``scenario_generation_failure``; it keeps its identities.
+    Every other row is unchanged, and the summary is derived again.
+    """
+    scenarios = (
+        *_validated_scenarios(tuple(scenario_specs)),
+        *_validated_scenarios(
+            tuple(functional_test_specs), label="functional_test_specs"
+        ),
+    )
+    rows = tuple(
+        _generation_failed(row)
+        if row.disposition == "addressed"
+        and not any(
+            _scenario_realizes(scenario, row.obligation_id, ica_id)
+            for scenario in scenarios
+            for ica_id in row.ica_ids
+        )
+        else row
+        for row in accounting.rows
+    )
+    if rows == accounting.rows:
+        return accounting
+    return ObligationAccounting(
+        source_pins=accounting.source_pins,
+        rows=rows,
+        summary=derive_obligation_accounting_summary(rows),
+        slot_hazard_offers=accounting.slot_hazard_offers,
+    )
+
+
+def _generation_failed(row: ObligationAccountingRow) -> ObligationAccountingRow:
+    return ObligationAccountingRow.model_validate(
+        {
+            **row.model_dump(),
+            "disposition": "generation_failed",
+            "stop_reason": SCENARIO_GENERATION_FAILURE,
+        }
+    )
+
+
+def _reject_realized_generation_failures(
+    accounting: ObligationAccounting,
+    records: tuple[ScenarioRealizationRecord, ...],
+) -> None:
+    """A row accounting marked generation_failed has no realized finding."""
+    failed = {
+        row.obligation_id
+        for row in accounting.rows
+        if row.disposition == "generation_failed"
+    }
+    realized = sorted(
+        {
+            record.obligation_id
+            for record in records
+            if record.obligation_id in failed
+            and record.status in {"realized", "functional_test"}
+        }
+    )
+    if realized:
+        raise ValueError(
+            "generation_failed accounting rows have scenarios that realize "
+            "their findings: " + ", ".join(realized)
+        )
 
 
 def _validated_accounting(value: ObligationAccounting) -> ObligationAccounting:
@@ -198,8 +277,12 @@ def _addressed_row_for_finding(
 
 
 def _credited(row: ObligationAccountingRow) -> bool:
-    """Tell whether a row counts its findings: addressed, or governance-credited."""
-    return row.disposition == "addressed" or (
+    """Tell whether a row counts its findings.
+
+    An addressed row does, a row whose scenarios all failed keeps its findings
+    so realization records each failure, and so does a governance-credited row.
+    """
+    return row.disposition in {"addressed", "generation_failed"} or (
         row.disposition == "governance_only" and bool(row.ica_ids)
     )
 
@@ -356,4 +439,4 @@ def _source_pins(
     )
 
 
-__all__ = ["build_scenario_realization_assessment"]
+__all__ = ["account_generation_failures", "build_scenario_realization_assessment"]

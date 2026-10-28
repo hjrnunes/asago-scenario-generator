@@ -245,7 +245,8 @@ Accounting gives an uncredited row one stop reason, checked in a fixed order:
 
 1. `risk_out_of_scope`: the Stage 1a boundary decision put the risk's class
    outside the system (`outside_boundary` or `not_applicable`). It outranks
-   every reason below; addressed and governance-only rows keep their own.
+   every reason below; addressed, generation-failed, and governance-only rows
+   keep their own.
 2. `risk_pattern_mismatch`: routing judged `risk_alignment: mismatch`, so the
    pattern's mechanism would not realize the risk, whatever the mechanism
    judgement.
@@ -389,7 +390,12 @@ as `final_control_structure` and slot filling read; Stage 2's
 Accounting joins
 exact obligation/slot, ICA,
 `EXEC:*`, hazard, and constraint evidence but makes no correspondence
-or coverage claim. Scenario realization separately records whether that exact
+or coverage claim. Once the run's scenarios are written, an `addressed` row
+that no adversarial or functional-test scenario carries becomes
+`generation_failed` with stop reason `scenario_generation_failure`; it keeps
+its identities, and the accounting summary counts it once, under
+`generation_failed` (left out when zero), so the disposition counts sum to
+`total`. Scenario realization separately records whether that exact
 ICA/obligation concern survived into an admitted scenario. Reporting keeps
 structural findings separate from scenario realization and labels provisional
 accounting separately from completed scenario generation. Accounting and

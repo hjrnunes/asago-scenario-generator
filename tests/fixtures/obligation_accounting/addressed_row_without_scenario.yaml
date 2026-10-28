@@ -1,0 +1,20 @@
+constraint_ids:
+- SC-2
+diagnostics: []
+disposition: addressed
+evidence:
+- RESP-9 generates conversational replies (CA-9-1) to the user via CP-2.
+- provider-structured-consideration
+exec_candidate_ids:
+- EXEC:RESP-9:CA-9-1:INCORRECT
+hazard_ids:
+- H-1
+ica_ids:
+- RESP-9:CA-9-1:INCORRECT:2
+obligation_id: ob:v1:194c4a190b5842c4523add9e7d0c3028a52d52f4322f36a3a0f598c0345ed770
+route_refs:
+- route:v1:009570d30c3f6a59cc8d4f958e338ce39533088ff6624fe271d1ed302a62e0b8
+scope: outside_boundary
+slot_ids:
+- RESP-9:CA-9-1:INCORRECT
+stop_reason: addressed

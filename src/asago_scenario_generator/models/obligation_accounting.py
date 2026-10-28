@@ -1,9 +1,10 @@
 """Closed provisional accounting contracts for obligation-aware STPA.
 
-Accounting is intentionally separate from scenario realization.  An
-``addressed`` row proves only that STPA emitted an
-exact structural finding for the obligation; it never asserts taxonomy
-coverage.
+Accounting is separate from scenario realization.  An ``addressed`` row
+proves that STPA emitted an exact structural finding for the obligation and,
+once the run's scenarios are known, that a scenario carries at least one of
+its findings; it never asserts taxonomy coverage.  A row whose findings no
+scenario carries is ``generation_failed`` instead.
 """
 
 from __future__ import annotations
@@ -45,16 +46,21 @@ OBLIGATION_ACCOUNTING_SOURCE_PIN_SPECS: tuple[tuple[str, str], ...] = (
 
 GOVERNANCE_ROUTED_NO_FINDING = "governance_routed_no_finding"
 RISK_OUT_OF_SCOPE = "risk_out_of_scope"
+SCENARIO_GENERATION_FAILURE = "scenario_generation_failure"
 
 # The Stage 1a scope decision for the class of an obligation's risk.
 RiskScope = Literal["actionable", "outside_boundary", "not_applicable"]
 OUT_OF_SCOPE: frozenset[str] = frozenset({"outside_boundary", "not_applicable"})
 # Dispositions that keep their own stop reason whatever the scope: a credited
-# row, and a governance-only row, whose outcome no pattern analysis decided.
-SCOPE_EXEMPT_DISPOSITIONS: frozenset[str] = frozenset({"addressed", "governance_only"})
+# row, a credited row whose scenarios all failed, and a governance-only row,
+# whose outcome no pattern analysis decided.
+SCOPE_EXEMPT_DISPOSITIONS: frozenset[str] = frozenset(
+    {"addressed", "generation_failed", "governance_only"}
+)
 
 AccountingDisposition = Literal[
     "addressed",
+    "generation_failed",
     "proposed_not_applicable",
     "unresolved",
     "upstream_gap",
@@ -235,6 +241,15 @@ def _validate_addressed_row(row: ObligationAccountingRow) -> None:
         _require_nonempty(getattr(row, field_name), message)
 
 
+def _validate_generation_failed_row(row: ObligationAccountingRow) -> None:
+    """Keep an addressed row's identities and name the failure as its stop."""
+    _validate_addressed_row(row)
+    if row.stop_reason != SCENARIO_GENERATION_FAILURE:
+        raise ValueError(
+            f"generation_failed accounting rows stop at {SCENARIO_GENERATION_FAILURE}"
+        )
+
+
 def _validate_not_applicable_row(row: ObligationAccountingRow) -> None:
     """Require routed slots and route references without retained findings."""
     _require_nonempty(
@@ -292,6 +307,7 @@ def _validate_governance_row(row: ObligationAccountingRow) -> None:
 
 _DISPOSITION_VALIDATORS = {
     "addressed": _validate_addressed_row,
+    "generation_failed": _validate_generation_failed_row,
     "proposed_not_applicable": _validate_not_applicable_row,
     "capability_excluded": _validate_row_without_findings,
     "governance_only": _validate_governance_row,
@@ -299,7 +315,7 @@ _DISPOSITION_VALIDATORS = {
 
 
 class ObligationAccountingSummary(_AccountingModel):
-    """Exact counts for all six provisional accounting dispositions."""
+    """Exact counts for every accounting disposition; they sum to ``total``."""
 
     total: int = Field(ge=0, strict=True)
     addressed: int = Field(ge=0, strict=True)
@@ -308,6 +324,11 @@ class ObligationAccountingSummary(_AccountingModel):
     upstream_gap: int = Field(ge=0, strict=True)
     capability_excluded: int = Field(ge=0, strict=True)
     governance_only: int = Field(ge=0, strict=True)
+    # Addressed rows whose findings no scenario carries. Left out when zero so
+    # earlier artifacts keep their bytes.
+    generation_failed: int = Field(
+        default=0, ge=0, strict=True, exclude_if=lambda value: value == 0
+    )
     # Governance-only rows credited with an STPA finding; a subset of
     # governance_only. Left out when zero so earlier artifacts keep their bytes.
     governance_credited: int = Field(
@@ -334,6 +355,7 @@ def derive_obligation_accounting_summary(
         upstream_gap=counts["upstream_gap"],
         capability_excluded=counts["capability_excluded"],
         governance_only=counts["governance_only"],
+        generation_failed=counts["generation_failed"],
         governance_credited=sum(
             row.disposition == "governance_only" and bool(row.ica_ids) for row in values
         ),
@@ -411,6 +433,7 @@ __all__ = [
     "OUT_OF_SCOPE",
     "RISK_OUT_OF_SCOPE",
     "RiskScope",
+    "SCENARIO_GENERATION_FAILURE",
     "SCOPE_EXEMPT_DISPOSITIONS",
     "derive_obligation_accounting_summary",
     "validate_obligation_accounting_source_pins",

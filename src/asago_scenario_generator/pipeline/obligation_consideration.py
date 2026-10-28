@@ -34,6 +34,10 @@ from asago_scenario_generator.models.obligation_consideration import (
 )
 from asago_scenario_generator.models.obligation_plan import TaxonomyObligationPlan
 from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferReport
+from asago_scenario_generator.pipeline.scenario_realization import (
+    account_generation_failures,
+)
+from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.obligation_aware.briefs import (
     build_neutral_briefs,
     create_obligation_batches as _chunk_briefs,
@@ -892,6 +896,9 @@ def _accounting_summary(rows: tuple[ObligationAccountingRow, ...]) -> dict[str, 
             row.disposition == "capability_excluded" for row in rows
         ),
         "governance_only": sum(row.disposition == "governance_only" for row in rows),
+        "generation_failed": sum(
+            row.disposition == "generation_failed" for row in rows
+        ),
         "governance_credited": sum(
             row.disposition == "governance_only" and bool(row.ica_ids) for row in rows
         ),
@@ -926,6 +933,8 @@ def build_obligation_accounting(
     governance_routes: Iterable[ObligationRoute] = (),
     hazard_offers: SlotHazardOfferReport | None = None,
     risk_scopes: Mapping[str, str] | None = None,
+    scenario_specs: Iterable[ScenarioSpec] | None = None,
+    functional_test_specs: Iterable[ScenarioSpec] = (),
 ) -> ObligationAccounting:
     """Derive one provisional row per Phase 1 obligation.
 
@@ -935,7 +944,10 @@ def build_obligation_accounting(
     slot is credited without leaving the governance-only disposition.
     ``hazard_offers`` is the run's slot hazard offer report; accounting
     carries its summary. ``risk_scopes`` maps a risk ID to its Stage 1a scope
-    decision; each row records the scope of its risk.
+    decision; each row records the scope of its risk. ``scenario_specs`` and
+    ``functional_test_specs`` are the run's written scenarios; when given, an
+    addressed row that none of them carries becomes ``generation_failed``.
+    Without them the rows stay provisional.
     """
     plan = _require_plan(plan)
     if not isinstance(consideration, ObligationConsideration):
@@ -959,11 +971,18 @@ def build_obligation_accounting(
     )
     rows = _scoped_rows(plan, _accounting_rows(plan, routes, pairs), risk_scopes or {})
     pins = _validated_accounting_pins(source_pins, plan)
-    return ObligationAccounting(
+    accounting = ObligationAccounting(
         source_pins=pins,
         rows=rows,
         summary=_accounting_summary(rows),
         slot_hazard_offers=hazard_offers.summary if hazard_offers else None,
+    )
+    if scenario_specs is None:
+        return accounting
+    return account_generation_failures(
+        accounting,
+        scenario_specs=scenario_specs,
+        functional_test_specs=functional_test_specs,
     )
 
 

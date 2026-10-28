@@ -10,6 +10,7 @@ A row is counted and labelled under its one reason only.
 from __future__ import annotations
 
 from types import SimpleNamespace
+from typing import Any
 
 import pytest
 
@@ -106,11 +107,13 @@ def _account(
     *,
     scope: str | None = None,
     route_diagnostics: tuple[str, ...] = (),
+    **scenarios: Any,
 ) -> ObligationAccounting:
     """Account the fixture plan's pattern row through one assessed route.
 
     A targeted route carries a finding on its slot, so without a semantic stop
-    it would be addressed.
+    it would be addressed.  ``scenarios`` are the run's scenario keyword
+    arguments, when the accounting follows scenario writing.
     """
     plan = _plan_with_non_stpa_rows()
     pattern = AttackPattern.model_validate(get_test_raw_pattern())
@@ -135,6 +138,7 @@ def _account(
         ica_considerations=pairs,
         source_pins=_accounting_pins(plan),
         risk_scopes=None if scope is None else {_PATTERN_RISK: scope},
+        **scenarios,
     )
 
 

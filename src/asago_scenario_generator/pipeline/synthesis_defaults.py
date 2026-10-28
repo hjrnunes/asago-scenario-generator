@@ -641,9 +641,14 @@ def _default_account(
     governance_routes: tuple[Any, ...] = (),
     hazard_offers: Any | None = None,
     risk_scopes: Any | None = None,
+    scenario_result: Any | None = None,
     **_: Any,
 ) -> Any:
-    """Use the typed provisional accounting seam; never infer addressed rows."""
+    """Use the typed accounting seam; never infer addressed rows.
+
+    The scenario result's adversarial and functional-test scenarios decide
+    which addressed rows no scenario carries.
+    """
     from asago_scenario_generator.pipeline.obligation_consideration import (
         build_obligation_accounting,
     )
@@ -658,6 +663,12 @@ def _default_account(
         governance_routes=governance_routes,
         hazard_offers=hazard_offers,
         risk_scopes=risk_scopes,
+        scenario_specs=(
+            None if scenario_result is None else tuple(scenario_result.scenario_specs)
+        ),
+        functional_test_specs=tuple(
+            getattr(scenario_result, "functional_test_specs", ())
+        ),
     )
 
 
