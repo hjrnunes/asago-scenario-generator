@@ -24,6 +24,7 @@ from asago_scenario_generator.models.mechanism_suggestion import (
     MechanismSuggestion,
 )
 from asago_scenario_generator.models.obligation_consideration import (
+    REQUEST_REJECTION_REPEATED,
     REQUEST_SCHEMA_REJECTED,
     BoundedStructuralRevision,
     ConsiderationCallEvidence,
@@ -931,12 +932,14 @@ class SlotLoss(_Model):
 class SlotFillFailure(_Model):
     """The failure that stopped a slot fill before it sent every request.
 
-    ``call_id`` names the request the provider rejected; ``unsent_requests``
-    counts the slot requests the fill then left unsent.  The run requests no
-    model call after it.
+    ``code`` names why: the provider rejected the request schema, or it gave
+    two consecutive requests the same HTTP 400 reply.  ``call_id`` names the
+    request whose rejection stopped the fill; ``unsent_requests`` counts the
+    slot requests the fill then left unsent.  The run requests no model call
+    after it.
     """
 
-    code: Literal[REQUEST_SCHEMA_REJECTED]
+    code: Literal[REQUEST_SCHEMA_REJECTED, REQUEST_REJECTION_REPEATED]
     call_id: str = Field(min_length=1)
     unsent_requests: int = Field(ge=0)
 

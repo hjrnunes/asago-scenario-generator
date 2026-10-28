@@ -12,6 +12,9 @@ from datetime import UTC, datetime
 from typing import Any, Iterable, Mapping
 
 from asago_scenario_generator.models.canonical import compute_framed_digest
+from asago_scenario_generator.models.obligation_consideration import (
+    REQUEST_REJECTION_REPEATED,
+)
 from asago_scenario_generator.pipeline.synthesis_types import (
     SynthesisInputs,
     SynthesisRunStatus,
@@ -576,16 +579,21 @@ def _scenario_generation_status(
     Zero requested candidates is a valid analysis unless the prompt contract
     check stopped calls before dispatch: those calls never asked for the
     candidates, so the run failed rather than found none.  A failure that
-    stopped the ICA fill, such as the provider rejecting its request schema,
-    stopped the run's model calls, so the run failed whatever its candidates
-    did.
+    stopped the ICA fill, such as the provider rejecting its request schema
+    or giving two consecutive requests the same HTTP 400 reply, stopped the
+    run's model calls, so the run failed whatever its candidates did.
     """
     if fill_failure is not None:
+        cause = (
+            "gave two consecutive ICA fill requests the same HTTP 400 reply, the second"
+            if fill_failure.code == REQUEST_REJECTION_REPEATED
+            else "rejected the ICA fill request schema"
+        )
         return (
             SynthesisRunStatus.FAILED,
-            f"{fill_failure.code}: the provider rejected the ICA fill request "
-            f"schema at {fill_failure.call_id}; {fill_failure.unsent_requests} "
-            "slot requests were not sent and no later model call was made",
+            f"{fill_failure.code}: the provider {cause} at {fill_failure.call_id}; "
+            f"{fill_failure.unsent_requests} slot requests were not sent and no "
+            "later model call was made",
         )
     requested = counts.get("requested")
     attempted = counts.get("attempted")

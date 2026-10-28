@@ -449,8 +449,21 @@ written. The status is then `failed` with the reason `request_schema_rejected:
 the provider rejected the ICA fill request schema at <call ID>; <n> slot
 requests were not sent and no later model call was made`, derived from
 `fill_failure` alone, so a rejection of a split request's later part whose
-slot kept an earlier part's fill fails the run too. Any other per-slot failure
-leaves the fill going on to the next slot. The product `generate`
+slot kept an earlier part's fill fails the run too. A backstop catches a
+rejection the classifier misses: when two consecutive slot requests each fail
+with an HTTP 400 that is not a schema rejection and their 400s have the same
+text as the call records keep it (the first 400 in each cause chain, with
+connection material redacted and at most 800 characters, so a live reply and
+its replay compare alike), the fill stops after the second the same way, named
+`request_rejection_repeated`. A 400 the size veto marks as a context-length
+reply does not take part, and any other outcome between two such 400s, a
+success, a 5xx, a different 400, or a local failure, starts the count again.
+The first of the two keeps its per-slot handling; the second is sent,
+recorded, and counted, and it, each request left unsent, and each slot either
+leaves unfilled carry the name. The reason then reads
+`request_rejection_repeated: the provider gave two consecutive ICA fill requests
+the same HTTP 400 reply, the second at <call ID>; ...`. Any other per-slot
+failure leaves the fill going on to the next slot. The product `generate`
 persists and reports its diagnostic/accounting sidecars before returning
 non-zero for any `failed` status.
 
