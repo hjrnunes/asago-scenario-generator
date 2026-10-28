@@ -709,7 +709,10 @@ def _reads_disagree(
     """Return whether a supplied read of a key fails to confirm its owners.
 
     A read of a key is an observation whose ``arguments.<argument>`` fact is
-    a key of the collection. The records it returns for that key are the
+    a key of the collection. An ``arguments.<argument>`` fact that is
+    ambiguous (the read's content also carries an ``arguments`` object that
+    disagrees with the call) or not a string leaves the read's key unknown,
+    which counts as disagreement. The records it returns for that key are the
     objects in its content, at any depth, that hold the key as a value. The
     read agrees only when at least one such record exists and every one of
     them holds each owner field with the state's value; a missing record or
@@ -717,10 +720,13 @@ def _reads_disagree(
     """
 
     marker = f".arguments.{argument}"
-    for path, key in fact_values.items():
+    for path in fact_values:
         if not path.endswith(marker) or path.startswith(_STATE_PREFIX):
             continue
-        record = scope.collection.get(key) if isinstance(key, str) else None
+        found, key = resolve_fact(fact_values, path)
+        if not found or not isinstance(key, str):
+            return True
+        record = scope.collection.get(key)
         if record is None:
             continue
         returned = [
@@ -762,6 +768,19 @@ def _objects(value: object) -> Iterator[Mapping[str, object]]:
             yield from _objects(child)
 
 
+def _scalars(value: object) -> Iterator[object]:
+    """Yield every scalar in a JSON value, at any depth."""
+
+    if isinstance(value, Mapping):
+        for child in value.values():
+            yield from _scalars(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _scalars(child)
+    else:
+        yield value
+
+
 def _record_collections(
     fact_values: Mapping[str, object],
 ) -> dict[str, Mapping[str, Mapping[str, Any]]]:
@@ -794,9 +813,11 @@ def _subject_domain(
     and of no other. The subject's own collection is the one collection that
     has the session subject as a record key, provided that record holds the
     session subject under ``argument`` (the collection is keyed by the
-    argument's ids) and names it in no other field (a record that names the
-    subject elsewhere, such as an owner field, is a record the subject owns
-    whose key happens to equal the subject's id). Any other case leaves open
+    argument's ids), names it in no other field, and no other record of
+    that collection names it in any field. A record that names the subject
+    elsewhere, such as an owner field, shows the subject owns records of
+    that collection whose keys only happen to share its id. Records of other
+    collections that name the subject do not matter here. Any other case leaves open
     whether the argument takes subject ids or record keys.
     """
 
@@ -810,6 +831,12 @@ def _subject_domain(
     record = collections[own[0]][session]
     if record.get(argument) != session or any(
         value == session for name, value in record.items() if name != argument
+    ):
+        return False
+    if any(
+        session in _scalars(other)
+        for key, other in collections[own[0]].items()
+        if key != session
     ):
         return False
     return all(

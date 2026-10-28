@@ -776,9 +776,11 @@ record's collection. Anything else keeps every `eq`. Within that scope:
   and of no other collection. The subject's own collection is the single
   collection that has the session subject as a record key, and only when
   that record holds the session subject under the argument's name and
-  names it in no other field; a record that names the subject in another
-  field, such as an owner field, is a record the subject owns whose key
-  equals the subject's id. Otherwise a value that is both a subject id and
+  names it in no other field, and no other record of that collection names
+  the subject in any field. A record that names the subject in another
+  field, such as an owner field, shows the subject owns records of that
+  collection whose keys only share its id; records of other collections
+  that name the subject do not count against it. Otherwise a value that is both a subject id and
   a record key (numbers and UUIDs can be both) leaves the argument's domain
   open, so it is treated as below.
 - When the condition compares owner fields of the selected record `ne` with
@@ -786,7 +788,9 @@ record's collection. Anything else keeps every `eq`. Within that scope:
   ones. A selection of the record key, or of an owner field for an argument
   of another name, binds `not_in` the entitled keys when the supplied state
   settles the set: the reads of the operation passed only keys of the
-  collection for that argument; in every read of such a key, at least one
+  collection for that argument; every read's argument fact for it resolves
+  to one string (a read whose content repeats an `arguments` object that
+  disagrees with the call leaves it ambiguous, which declines); in every read of such a key, at least one
   object in its content holds that key, and every object that holds it
   holds each owner field with the state's value (no such object, or a
   missing owner field, counts as disagreement);

@@ -1401,3 +1401,78 @@ def test_an_owned_record_keyed_like_the_subject_is_not_its_own_collection() -> N
         value(arg("lookup_order", "order_id"), "ne", literal("1001")),
         eq("lookup_order", "order_id", "2002"),
     ]
+
+
+def test_a_collection_where_the_subject_owns_records_is_not_its_own() -> None:
+    # Every order holds its own id, and the record keyed like the customer
+    # belongs to someone else; order 2001 names the customer as its owner,
+    # so customer ids and order keys collide.
+    state = {
+        "authenticated_customer_id": "1001",
+        "orders": {
+            "1001": {"order_id": "1001", "customer_id": "1002"},
+            "2001": {"order_id": "2001", "customer_id": "1001"},
+            "2002": {"order_id": "2002", "customer_id": "1002"},
+        },
+    }
+    observations = snapshot(
+        state,
+        (
+            "lookup_order",
+            {"order_id": "1001"},
+            {"order_id": "1001", "customer_id": "1002"},
+        ),
+    )
+    raw = condition(
+        [ORDER_KEY_NE_SUBJECT],
+        "TARGET-STATE.orders.2002",
+        ("lookup_order", "order_id", "TARGET-STATE.orders.2002"),
+    )
+
+    bound_condition = checked_binding(raw, observations)
+
+    assert bound_condition["comparisons"] == [
+        value(arg("lookup_order", "order_id"), "ne", literal("1001")),
+        eq("lookup_order", "order_id", "2002"),
+    ]
+    owned = [{"name": "lookup_order", "arguments": {"order_id": "2001"}}]
+    assert evaluate_condition_v2(bound_condition, owned, True)[0] == "not_detected"
+
+
+def test_another_record_naming_the_subject_disqualifies_its_collection() -> None:
+    fact_values = clinic(
+        patients={
+            "PAT-101": {"patient_id": "PAT-101", "guardian": {"id": "PAT-104"}},
+            "PAT-104": {"patient_id": "PAT-104"},
+        }
+    )
+    reads = {"get_referral": {"patient_id": frozenset({"PAT-104"})}}
+
+    assert (
+        bound(REFERRAL_NE_SUBJECT, fact_values, "get_referral", reads) == REFERRAL_PIN
+    )
+
+
+def test_a_read_whose_argument_fact_is_ambiguous_keeps_the_pin() -> None:
+    # The read's content carries its own "arguments" object, so the call's
+    # order_id fact is ambiguous; the record it returns names another owner.
+    state = {
+        "authenticated_customer_id": "CUST001",
+        "orders": {
+            "ORD-101": {"customer_id": "CUST001"},
+            "ORD-201": {"customer_id": "CUST002"},
+        },
+    }
+    observations = snapshot(
+        state,
+        (
+            "lookup_order",
+            {"order_id": "ORD-101"},
+            {
+                "arguments": {"order_id": "ORD-999"},
+                "order": {"order_id": "ORD-101", "customer_id": "CUST009"},
+            },
+        ),
+    )
+
+    assert checked_binding(ORDER_PIN, observations)["comparisons"] == ORDER_201_PIN
