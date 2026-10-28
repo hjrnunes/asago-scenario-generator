@@ -1,0 +1,346 @@
+responsibilities:
+- resp_id: RESP-1
+  description: Provides information about reservations to the user.
+  responsibility_constraints:
+  - rc_id: RC-1-1
+    description: Disclose reservation details only if the authenticated actor is the guest
+      or host of that reservation.
+  security_constraint_refs:
+  - SC-5
+  process_model_parts:
+  - pm_id: PM-1-1
+    description: Identity of the authenticated actor in the session
+    values:
+    - authenticated actor is guest
+    - authenticated actor is host
+    - authenticated actor is neither
+    evidence_refs:
+    - session:authenticated_actor_id
+  - pm_id: PM-1-2
+    description: Ownership and membership of the target reservation
+    values:
+    - actor is guest
+    - actor is host
+    - actor is neither
+    evidence_refs:
+    - state:reservations.guest_id
+    - state:reservations.host_id
+  control_actions:
+  - ca_id: CA-1-1
+    description: Provide reservation details to the user
+    target:
+      type: controlled_process
+      id: CP-1
+    effect_kind: model_output
+    temporality: discrete
+    process_model_refs:
+    - PM-1-1
+    - PM-1-2
+  - ca_id: CA-1-2
+    description: Invoke get_reservation tool
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: get_reservation
+    process_model_refs:
+    - PM-1-1
+    - PM-1-2
+  feedback_channels:
+  - fb_id: FB-1-1
+    description: Session actor identity
+    updates: PM-1-1
+    source:
+      type: controlled_process
+      id: CP-7
+    source_kind: session_context
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: the authenticated actor id is bound to the session via session:authenticated_actor_id'
+  - fb_id: FB-1-2
+    description: Reservation party membership
+    updates: PM-1-2
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+- resp_id: RESP-2
+  description: Provides information about listings to the user.
+  responsibility_constraints:
+  - rc_id: RC-2-1
+    description: Disclose listing details only if the authenticated actor is the host or has
+      an associated reservation.
+  security_constraint_refs:
+  - SC-5
+  process_model_parts:
+  - pm_id: PM-2-1
+    description: Identity of the authenticated actor in the session
+    values:
+    - authenticated actor is host
+    - authenticated actor is not host
+    evidence_refs:
+    - session:authenticated_actor_id
+    - state:listings.host_id
+  - pm_id: PM-2-2
+    description: Association of actor with the listing via reservation
+    values:
+    - actor has reservation
+    - actor does not have reservation
+    evidence_refs:
+    - state:reservations.listing_id
+    - state:reservations.guest_id
+    - state:reservations.host_id
+  control_actions:
+  - ca_id: CA-2-1
+    description: Provide listing details to the user
+    target:
+      type: controlled_process
+      id: CP-1
+    effect_kind: model_output
+    temporality: discrete
+    process_model_refs:
+    - PM-2-1
+    - PM-2-2
+  - ca_id: CA-2-2
+    description: Invoke get_listing tool
+    target:
+      type: controlled_process
+      id: CP-3
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: get_listing
+    process_model_refs:
+    - PM-2-1
+    - PM-2-2
+  feedback_channels:
+  - fb_id: FB-2-1
+    description: Session actor identity
+    updates: PM-2-1
+    source:
+      type: controlled_process
+      id: CP-7
+    source_kind: session_context
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: authenticated actor identity established via session:authenticated_actor_id'
+  - fb_id: FB-2-2
+    description: Actor association with listing
+    updates: PM-2-2
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+- resp_id: RESP-3
+  description: Retrieves and communicates platform policy information.
+  responsibility_constraints:
+  - rc_id: RC-3-1
+    description: Provide only policy information directly supported by retrieved snippets.
+  security_constraint_refs:
+  - SC-4
+  - SC-9
+  process_model_parts:
+  - pm_id: PM-3-1
+    description: Content of retrieved policy snippets
+    values:
+    - supported by snippets
+    - not supported by snippets
+    - unknown
+    evidence_refs:
+    - policy:TARGET-READ-001
+  control_actions:
+  - ca_id: CA-3-1
+    description: Communicate policy information to the user
+    target:
+      type: controlled_process
+      id: CP-1
+    effect_kind: model_output
+    temporality: discrete
+    process_model_refs:
+    - PM-3-1
+  - ca_id: CA-3-2
+    description: Invoke lookup_policy tool
+    target:
+      type: controlled_process
+      id: CP-4
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: lookup_policy
+    process_model_refs:
+    - PM-3-1
+  feedback_channels:
+  - fb_id: FB-3-1
+    description: Retrieved policy text
+    updates: PM-3-1
+    source:
+      type: controlled_process
+      id: CP-4
+    source_kind: retrieved_content
+    authority_for_update:
+      status: conditional
+      basis: 'Use case: only current, platform-authored documents are valid policy'
+- resp_id: RESP-4
+  description: Manages booking modifications.
+  responsibility_constraints:
+  - rc_id: RC-4-1
+    description: Request modification only if the reservation allows it, is paid, and has
+      a valid date range.
+  security_constraint_refs:
+  - SC-3
+  - SC-6
+  process_model_parts:
+  - pm_id: PM-4-1
+    description: Reservation modification eligibility
+    values:
+    - allowed
+    - not allowed
+    evidence_refs:
+    - state:reservations.modification_allowed
+  - pm_id: PM-4-2
+    description: Reservation payment status
+    values:
+    - paid
+    - unpaid
+    evidence_refs:
+    - state:reservations.payment_status
+  - pm_id: PM-4-3
+    description: Target reservation party membership
+    values:
+    - actor is guest
+    - actor is host
+    - actor is neither
+    evidence_refs:
+    - state:reservations.guest_id
+    - state:reservations.host_id
+  control_actions:
+  - ca_id: CA-4-1
+    description: Request booking modification
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: modify_booking
+    process_model_refs:
+    - PM-4-1
+    - PM-4-2
+    - PM-4-3
+  feedback_channels:
+  - fb_id: FB-4-1
+    description: Modification eligibility status
+    updates: PM-4-1
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: modification status controlled by state:reservations.modification_allowed'
+  - fb_id: FB-4-2
+    description: Payment status
+    updates: PM-4-2
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: workflow requires state:reservations.payment_status to be paid'
+  - fb_id: FB-4-3
+    description: Reservation party membership
+    updates: PM-4-3
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: reservation membership determined by state:reservations.guest_id and
+        host_id'
+- resp_id: RESP-5
+  description: Manages listing updates.
+  responsibility_constraints:
+  - rc_id: RC-5-1
+    description: Perform listing updates only if the authenticated actor is the listing host.
+  security_constraint_refs:
+  - SC-8
+  - SC-6
+  process_model_parts:
+  - pm_id: PM-5-1
+    description: Identity of the authenticated actor
+    values:
+    - is host
+    - is not host
+    evidence_refs:
+    - session:authenticated_actor_id
+    - state:listings.host_id
+  control_actions:
+  - ca_id: CA-5-1
+    description: Update listing configuration
+    target:
+      type: controlled_process
+      id: CP-3
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: update_listing
+    process_model_refs:
+    - PM-5-1
+  feedback_channels:
+  - fb_id: FB-5-1
+    description: Session actor identity
+    updates: PM-5-1
+    source:
+      type: controlled_process
+      id: CP-7
+    source_kind: session_context
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: host identity established via session:authenticated_actor_id'
+controlled_processes:
+- cp_id: CP-1
+  description: User Interface / Conversation Channel
+- cp_id: CP-2
+  description: Reservation Management System
+- cp_id: CP-3
+  description: Listing Management System
+- cp_id: CP-4
+  description: Policy Knowledge Base
+- cp_id: CP-5
+  description: Message Moderation Service
+- cp_id: CP-6
+  description: Trust and Safety Case Ledger
+- cp_id: CP-7
+  description: Platform State Ledger (Audit Log/Summary)
+coordination_links:
+- link_id: CL-1
+  source: RESP-1
+  target: RESP-2
+  shared_pm: PM-1-1
+  coordination_mechanism:
+    cm_id: CM-1
+    description: Synchronize the authenticated actor identity to ensure consistent authorization
+      across reservation and listing queries.
+    payload: session:authenticated_actor_id
+  description: Ensures that both reservation and listing access checks use the same session-bound
+    actor identity to prevent authorization bypass.
+- link_id: CL-2
+  source: RESP-4
+  target: RESP-1
+  shared_pm: PM-1-2
+  coordination_mechanism:
+    cm_id: CM-2
+    description: Share reservation membership state to validate modification requests against
+      reservation ownership.
+    payload: state:reservations.guest_id/host_id
+  description: Coordination between modification management and reservation info retrieval
+    to ensure the actor has permission to modify the specific reservation being viewed.
+- link_id: CL-4
+  source: RESP-5
+  target: RESP-2
+  shared_pm: PM-2-2
+  coordination_mechanism:
+    cm_id: CM-4
+    description: Verify host identity and listing association.
+    payload: state:listings.host_id
+  description: Ensures listing updates are only performed by the authenticated host associated
+    with that specific listing.

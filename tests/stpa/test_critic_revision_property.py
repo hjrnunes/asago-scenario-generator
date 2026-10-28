@@ -380,28 +380,16 @@ def st_cs_with_links(draw) -> ControlStructure:
     )
 
 
-def _canonical_link_ids(n_links: int) -> list[str]:
-    """Return the published link IDs implied by final list positions."""
-    return [f"CL-{index}" for index in range(1, n_links + 1)]
-
-
-def _canonical_cm_ids(n_links: int) -> list[str]:
-    """Return the published mechanism IDs implied by final list positions."""
-    return [f"CM-{index}" for index in range(1, n_links + 1)]
-
-
 class TestMergeConservation:
     """When the delta has no modifications, existing elements survive in order."""
 
     @given(cs=st_cs_with_links())
     @settings(_FIXTURE_SAFE, max_examples=50)
     def test_empty_delta_keeps_every_element_in_order(self, tmp_path, cs):
-        """Empty-delta revision keeps every element and publishes position IDs.
+        """An empty-delta revision keeps the structure it was given.
 
-        Source ``link_id`` values are stitch keys only.  After the
-        merged lists are known, published IDs are ``CL-1..N`` /
-        ``CM-1..N`` from final position.  Non-ID content is conserved
-        in list order.
+        A delta that adds and restates nothing is not merged, so no element,
+        ID, or content changes; the source IDs are not renumbered either.
         """
         client = MockLLMClient()
         client.set_response_for(
@@ -414,27 +402,8 @@ class TestMergeConservation:
                 "dismissed_gaps": [],
             },
         )
-        original_descriptions = [cl.description for cl in cs.coordination_links]
-        original_payloads = [
-            cl.coordination_mechanism.payload for cl in cs.coordination_links
-        ]
         revised, _ = _revise(client, cs, tmp_path)
-        assert [r.resp_id for r in revised.responsibilities] == [
-            r.resp_id for r in cs.responsibilities
-        ]
-        n_links = len(cs.coordination_links)
-        assert [cl.link_id for cl in revised.coordination_links] == _canonical_link_ids(
-            n_links
-        )
-        assert [
-            cl.coordination_mechanism.cm_id for cl in revised.coordination_links
-        ] == _canonical_cm_ids(n_links)
-        assert [
-            cl.description for cl in revised.coordination_links
-        ] == original_descriptions
-        assert [
-            cl.coordination_mechanism.payload for cl in revised.coordination_links
-        ] == original_payloads
+        assert revised is cs
 
 
 ALL_DISMISSED_FRAGMENT = "dismissed all findings"

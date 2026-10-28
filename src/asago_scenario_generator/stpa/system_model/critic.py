@@ -645,6 +645,13 @@ def _finish_revision(
             "baseline control structure was retained and those gaps remain "
             "unresolved."
         )
+    # A delta that adds and restates nothing is not merged: merging
+    # re-normalizes the structure, and that copy would read as revised.
+    if not _delta_has_changes(revision_delta):
+        post_revision = check_structural_heuristics(control_structure, loss_analysis)
+        revision_warnings.extend(post_revision.errors)
+        revision_warnings.extend(post_revision.warnings)
+        return control_structure, revision_warnings
 
     # Merge the delta into the existing ControlStructure
     try:
