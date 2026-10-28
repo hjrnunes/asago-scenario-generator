@@ -1,12 +1,11 @@
 """Tests for the producer-owned ``tool-call-condition`` contract.
 
-The v1 vectors hold the results of Garak's ``validate_condition`` and
-``evaluate_condition``; Garak's own tests run them against the code. The v2
-validate vectors come from Garak too, and the v2 evaluate vectors from the
-generator's reference evaluator. These tests check what the producer can check
+The vectors of each version hold the results of Garak's ``validate_condition``
+and ``evaluate_condition`` at the revision the vector files name; Garak's own
+tests run them against the code. These tests check what the producer can check
 offline: the lock, each schema against the validate vectors, the shape of the
-vectors, the reference evaluator against both versions, and that every
-condition the binder produces satisfies both schemas.
+vectors, the generator's reference evaluator against both versions, and that
+every condition the binder produces satisfies both schemas.
 """
 
 from __future__ import annotations
@@ -194,9 +193,24 @@ def test_v2_validate_vectors_are_the_v1_validate_vectors() -> None:
     assert VALIDATE_V2 == VALIDATE
     v2 = _load(KIT_V2 / "vectors/validate.json")
     assert v2["version"] == "tool-call-condition-v2"
-    assert (
-        v2["implementation"] == _load(KIT / "vectors/validate.json")["implementation"]
-    )
+    v1_implementation = _load(KIT / "vectors/validate.json")["implementation"]
+    assert v2["implementation"] == {
+        **v1_implementation,
+        "revision": GENERATOR.REVISION,
+    }
+    assert v1_implementation["revision"] == GENERATOR.V1_REVISION
+
+
+def test_each_version_names_the_garak_revision_that_computed_it() -> None:
+    for kit, revision in ((KIT, GENERATOR.V1_REVISION), (KIT_V2, GENERATOR.REVISION)):
+        for name in ("validate", "evaluate"):
+            implementation = _load(kit / f"vectors/{name}.json")["implementation"]
+            assert implementation == {
+                "repository": "garak",
+                "revision": revision,
+                "module": "garak/detectors/toolcall.py",
+                "function": f"{name}_condition",
+            }
 
 
 def test_v2_evaluate_vectors_start_with_every_v1_input() -> None:
@@ -429,12 +443,7 @@ GENERATOR = _load_generator()
 
 
 def _computed_from_committed() -> dict[str, Any]:
-    return {
-        "validate": VALIDATE,
-        "evaluate": EVALUATE,
-        "evaluate_v2": EVALUATE_V2,
-        "crashes": [],
-    }
+    return {"validate": VALIDATE_V2, "evaluate": EVALUATE_V2, "crashes": []}
 
 
 @pytest.fixture
@@ -477,9 +486,16 @@ def test_generator_v2_inputs_are_the_committed_v2_vector_inputs() -> None:
     ]
 
 
-@pytest.mark.parametrize("path", sorted(GENERATOR.VECTOR_FILES))
+def test_generator_names_the_vectors_that_v2_changes() -> None:
+    assert GENERATOR.CHANGED_IN_V2 == CHANGED_IN_V2
+
+
+@pytest.mark.parametrize(
+    "path", sorted({**GENERATOR.VECTOR_FILES, **GENERATOR.V1_FILES})
+)
 def test_generator_formats_the_committed_vector_bytes(path: str) -> None:
-    version, _, implementation = GENERATOR.VECTOR_FILES[path]
+    files = {**GENERATOR.VECTOR_FILES, **GENERATOR.V1_FILES}
+    version, _, implementation = files[path]
     text = (CONTRACT_ROOT / path).read_text(encoding="utf-8")
     vectors = _load(CONTRACT_ROOT / path)["vectors"]
     assert GENERATOR.dump(version, implementation, vectors) == text
@@ -561,6 +577,115 @@ def test_generator_check_fails_on_an_edited_expected_value(
     assert path.read_text(encoding="utf-8") == edited, "check mode writes nothing"
 
 
+def test_generator_check_fails_on_an_edited_v2_expected_value(
+    contract_copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    path = contract_copy / "tool-call-condition-v2/vectors/evaluate.json"
+    path.write_text(
+        path.read_text(encoding="utf-8").replace(
+            '"outcome": "detected"', '"outcome": "x"', 1
+        ),
+        encoding="utf-8",
+    )
+    argv = ["--garak-checkout", "x", "--garak-python", "y", "--check"]
+    assert GENERATOR.main(argv) == 1
+    out = capsys.readouterr().out
+    assert "DIFFERS tool-call-condition-v2/vectors/evaluate.json" in out
+    assert "1 of 5 files differ" in out
+
+
+def _garak_results(**changes: tuple[str, str, list[int]]) -> dict[str, Any]:
+    """The committed v2 results, with the named vectors given other results."""
+
+    evaluate = []
+    for vector in EVALUATE_V2:
+        result = changes.get(vector["id"])
+        if result is not None:
+            outcome, reason, matched = result
+            vector = {
+                **vector,
+                "outcome": outcome,
+                "reason": reason,
+                "matched_calls": matched,
+            }
+        evaluate.append(vector)
+    return {**_computed_from_committed(), "evaluate": evaluate}
+
+
+def _v1_result(vector_id: str) -> tuple[str, str, list[int]]:
+    vector = next(vector for vector in EVALUATE if vector["id"] == vector_id)
+    return vector["outcome"], vector["reason"], vector["matched_calls"]
+
+
+def test_generator_check_reproduces_v1_except_the_v2_changes() -> None:
+    assert GENERATOR.v1_differences(CONTRACT_ROOT, _computed_from_committed()) == []
+
+
+def test_generator_check_fails_when_garak_differs_on_an_unchanged_v1_vector(
+    contract_copy: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    vector_id = EVALUATE[0]["id"]
+    assert vector_id not in CHANGED_IN_V2
+    computed = _garak_results(**{vector_id: ("x", "y", [])})
+    assert GENERATOR.v1_differences(contract_copy, computed) == [
+        contract_copy / "tool-call-condition-v1/vectors/evaluate.json"
+    ]
+    # past the reference cross-check, which would stop the run first
+    monkeypatch.setattr(GENERATOR, "reference_disagreements", lambda evaluate: [])
+    monkeypatch.setattr(GENERATOR, "run_garak", lambda python, checkout: computed)
+    argv = ["--garak-checkout", "x", "--garak-python", "y", "--check"]
+    assert GENERATOR.main(argv) == 1
+    assert (
+        "DIFFERS tool-call-condition-v1/vectors/evaluate.json"
+        in capsys.readouterr().out
+    )
+
+
+def test_generator_check_fails_when_garak_gives_a_changed_vector_its_v1_result(
+    contract_copy: Path,
+) -> None:
+    vector_id = "order.same-argument-bool-int"
+    computed = _garak_results(**{vector_id: _v1_result(vector_id)})
+    assert GENERATOR.v1_differences(contract_copy, computed) == [
+        contract_copy / "tool-call-condition-v1/vectors/evaluate.json"
+    ]
+
+
+def test_generator_check_fails_when_garak_differs_on_a_v1_validate_vector(
+    contract_copy: Path,
+) -> None:
+    validate = [{**VALIDATE[0], "valid": False, "error": "x"}, *VALIDATE[1:]]
+    computed = {**_computed_from_committed(), "validate": validate}
+    assert GENERATOR.v1_differences(contract_copy, computed) == [
+        contract_copy / "tool-call-condition-v1/vectors/validate.json"
+    ]
+
+
+def test_generator_write_mode_never_writes_a_v1_file(
+    contract_copy: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    v1 = contract_copy / "tool-call-condition-v1/vectors/validate.json"
+    v1.write_text("{}\n", encoding="utf-8")
+    v2 = contract_copy / "tool-call-condition-v2/vectors/validate.json"
+    v2.write_text("{}\n", encoding="utf-8")
+    assert GENERATOR.main(["--garak-checkout", "x", "--garak-python", "y"]) == 1
+    assert "(v1 files are never written)" in capsys.readouterr().out
+    assert v1.read_text(encoding="utf-8") == "{}\n"
+    assert v2.read_text(encoding="utf-8") == "{}\n", "nothing is written"
+
+
+def test_generator_stops_when_the_reference_evaluator_disagrees(
+    contract_copy: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    vector_id = "blocked.prior"
+    computed = _garak_results(**{vector_id: ("not_detected", "r", [])})
+    monkeypatch.setattr(GENERATOR, "run_garak", lambda python, checkout: computed)
+    with pytest.raises(SystemExit, match=f"disagrees with Garak on: {vector_id}$"):
+        GENERATOR.main(["--garak-checkout", "x", "--garak-python", "y", "--check"])
+
+
 def test_generator_check_fails_on_a_stale_lock(contract_copy: Path) -> None:
     readme = contract_copy / "tool-call-condition-v1/README.md"
     readme.write_text(readme.read_text(encoding="utf-8") + "\nedit\n", encoding="utf-8")
@@ -569,7 +694,7 @@ def test_generator_check_fails_on_a_stale_lock(contract_copy: Path) -> None:
 
 
 def test_generator_write_mode_restores_vectors_and_lock(contract_copy: Path) -> None:
-    vectors = contract_copy / "tool-call-condition-v1/vectors/validate.json"
+    vectors = contract_copy / "tool-call-condition-v2/vectors/validate.json"
     vectors.write_text("{}\n", encoding="utf-8")
     (contract_copy / "CONTRACT.lock").write_text("{}\n", encoding="utf-8")
     assert GENERATOR.main(["--garak-checkout", "x", "--garak-python", "y"]) == 0
@@ -682,9 +807,12 @@ def test_generator_worker_prints_one_json_line(
     monkeypatch.setitem(sys.modules, "garak.detectors", detectors)
     GENERATOR.main(["--worker"])
     result = json.loads(capsys.readouterr().out)
-    assert len(result["validate"]) == len(VALIDATE)
-    assert len(result["evaluate"]) == len(EVALUATE)
-    assert result["evaluate_v2"] == EVALUATE_V2
+    assert set(result) == {"validate", "evaluate", "crashes"}
+    assert len(result["validate"]) == len(VALIDATE_V2)
+    assert [vector["id"] for vector in result["evaluate"]] == [
+        vector["id"] for vector in EVALUATE_V2
+    ]
+    assert {vector["outcome"] for vector in result["evaluate"]} == {"detected"}
     assert result["crashes"] == []
 
 

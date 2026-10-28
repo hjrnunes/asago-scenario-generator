@@ -5,17 +5,25 @@
         --garak-checkout <Garak checkout> --garak-python <Garak interpreter> [--check]
 
 The script holds the vector inputs (conditions, calls, completeness) and the v2
-reference evaluator, and needs only the standard library. A child process started with the Garak interpreter runs
-``validate_condition`` and ``evaluate_condition`` on the inputs; every v1
-expected value, and every v2 validate value, comes from that run. The checkout
-must be at ``REVISION``. Garak at that revision evaluates v1, so the v2
-evaluate values come from ``evaluate_condition_v2`` below, the reference
-evaluator for ``tool-call-condition-v2``.
+reference evaluator, and needs only the standard library. A child process
+started with the Garak interpreter runs ``validate_condition`` and
+``evaluate_condition`` on the inputs. The checkout must be at ``REVISION``,
+where Garak evaluates ``tool-call-condition-v2``; every expected value in the
+v2 vector files comes from that run, and the files record that revision.
 
-Without ``--check`` the script writes the ``vectors/`` of each version and
-``CONTRACT.lock``. With ``--check`` it regenerates the same content in memory,
-writes nothing, and exits 1 when a committed file differs. Downstream
-repositories mirror the files byte for byte.
+The v1 vector files were computed by Garak at ``V1_REVISION``, which evaluated
+v1, and record that revision. Existing handoffs pin their bytes, so the script
+never writes them; one checkout cannot reproduce them either, because Garak at
+``REVISION`` no longer evaluates v1. Instead the script checks them against
+the same run: Garak at ``REVISION`` must reproduce every v1 validate vector, and
+every v1 evaluate vector except those in ``CHANGED_IN_V2``, whose results
+differ by design. The script also runs ``evaluate_condition_v2`` below on the
+v2 inputs and stops when it disagrees with Garak on any vector.
+
+Without ``--check`` the script writes the v2 ``vectors/`` and ``CONTRACT.lock``.
+With ``--check`` it regenerates the same content in memory, writes nothing,
+and exits 1 when a committed file differs or a v1 file disagrees with Garak.
+Downstream repositories mirror the files byte for byte.
 """
 
 from __future__ import annotations
@@ -27,12 +35,12 @@ import json
 import os
 import subprocess
 import sys
-import types
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
-REVISION = "877932916b7b3e1148171a49b97eeb75a44c9b39"
+REVISION = "4f4917d666feea947731ec1588739d8427bc15d9"
+V1_REVISION = "877932916b7b3e1148171a49b97eeb75a44c9b39"
 CONTRACT = "tool-call-condition"
 V1 = "tool-call-condition-v1"
 V2 = "tool-call-condition-v2"
@@ -41,29 +49,19 @@ AUTHORITY = "asago-scenario-generator"
 ROOT = Path(__file__).resolve().parents[1] / "data/contracts" / CONTRACT
 
 
-def garak_function(function: str) -> dict[str, str]:
+def garak_function(function: str, revision: str = REVISION) -> dict[str, str]:
     return {
         "repository": "garak",
-        "revision": REVISION,
+        "revision": revision,
         "module": "garak/detectors/toolcall.py",
         "function": function,
     }
 
 
 # Each vector file: its version, the key of its vectors in the computed
-# results, and the implementation that computed them. Validation is the same
-# in both versions; Garak evaluates v1, and the reference evaluator below v2.
+# results, and the implementation that computed them. Garak at REVISION
+# computes the v2 files, which the script writes.
 VECTOR_FILES = {
-    f"{V1}/vectors/validate.json": (
-        V1,
-        "validate",
-        garak_function("validate_condition"),
-    ),
-    f"{V1}/vectors/evaluate.json": (
-        V1,
-        "evaluate",
-        garak_function("evaluate_condition"),
-    ),
     f"{V2}/vectors/validate.json": (
         V2,
         "validate",
@@ -71,14 +69,32 @@ VECTOR_FILES = {
     ),
     f"{V2}/vectors/evaluate.json": (
         V2,
-        "evaluate_v2",
-        {
-            "repository": AUTHORITY,
-            "module": "scripts/gen_tool_call_condition_vectors.py",
-            "function": "evaluate_condition_v2",
-        },
+        "evaluate",
+        garak_function("evaluate_condition"),
     ),
 }
+# The v1 files, computed by Garak at V1_REVISION; the script only checks them.
+V1_FILES = {
+    f"{V1}/vectors/validate.json": (
+        V1,
+        "validate",
+        garak_function("validate_condition", V1_REVISION),
+    ),
+    f"{V1}/vectors/evaluate.json": (
+        V1,
+        "evaluate",
+        garak_function("evaluate_condition", V1_REVISION),
+    ),
+}
+# The v1 evaluate vectors whose v2 result differs, each by one of the three
+# changes that tool-call-condition-v2/README.md names.
+CHANGED_IN_V2 = frozenset(
+    {
+        "completeness.order-clean.complete-false",
+        "order.same-argument-bool-int",
+        "order.same-argument-null-both-missing-on-prior",
+    }
+)
 # Garak's VALUE_OPS; the worker asserts that the checkout agrees.
 VALUE_OPS = ("eq", "ne", "gt", "ge", "lt", "le", "in", "not_in")
 
@@ -1234,7 +1250,9 @@ def evaluate_inputs_v2() -> list[tuple[str, object, list, bool]]:
 # --- reference evaluator for tool-call-condition-v2 -------------------------
 #
 # The rules are those of tool-call-condition-v2/README.md; the comments name
-# the three places where v2 differs from v1.
+# the three places where v2 differs from v1. Garak computes the v2 vectors; this
+# second implementation must agree with it on every one, and lets the
+# producer's tests check the v2 vectors without a Garak checkout.
 
 DETECTED = ("detected", "the condition holds on the captured calls")
 NOT_DETECTED = ("not_detected", "the captured calls do not satisfy the condition")
@@ -1484,14 +1502,9 @@ def worker() -> None:
     assert toolcall.VALUE_OPS == VALUE_OPS, (
         "Garak's VALUE_OPS differ from this script's"
     )
-    reference = types.SimpleNamespace(
-        validate_condition=toolcall.validate_condition,
-        evaluate_condition=evaluate_condition_v2,
-    )
     result = {
         "validate": compute_validate(toolcall, validate_inputs()),
-        "evaluate": compute_evaluate(toolcall, evaluate_inputs()),
-        "evaluate_v2": compute_evaluate(reference, evaluate_inputs_v2()),
+        "evaluate": compute_evaluate(toolcall, evaluate_inputs_v2()),
         "crashes": probe_crashes(toolcall),
     }
     print(json.dumps(result))
@@ -1532,6 +1545,19 @@ def run_garak(garak_python: Path, checkout: Path) -> dict[str, Any]:
         sys.stderr.write(done.stderr)
         raise SystemExit(done.returncode)
     return json.loads(done.stdout.strip().splitlines()[-1])
+
+
+def reference_disagreements(evaluate: list[dict]) -> list[str]:
+    """The ids of the vectors whose result ``evaluate_condition_v2`` differs."""
+
+    return [
+        vector["id"]
+        for vector in evaluate
+        if evaluate_condition_v2(
+            vector["condition"], vector["calls"], vector["complete"]
+        )
+        != (vector["outcome"], vector["reason"], vector["matched_calls"])
+    ]
 
 
 # --- files ------------------------------------------------------------------
@@ -1602,6 +1628,47 @@ def stale_files(planned: dict[Path, str]) -> list[Path]:
     ]
 
 
+def v1_differences(root: Path, computed: dict[str, Any]) -> list[Path]:
+    """The v1 vector files that disagree with the results of Garak at ``REVISION``.
+
+    A v1 file agrees when it keeps the format and implementation the script
+    gives it, its validate vectors are the computed ones, and its evaluate
+    vectors have the v1 inputs and the computed results except on exactly the
+    vectors in ``CHANGED_IN_V2``.
+    """
+
+    results = ("outcome", "reason", "matched_calls")
+    inputs = [
+        {"id": vector_id, "condition": condition, "calls": calls, "complete": complete}
+        for vector_id, condition, calls, complete in evaluate_inputs()
+    ]
+    v2 = {vector["id"]: vector for vector in computed["evaluate"]}
+    differ = []
+    for path, (version, key, implementation) in V1_FILES.items():
+        file = root / path
+        try:
+            text = file.read_text(encoding="utf-8")
+            vectors = json.loads(text)["vectors"]
+            agrees = text == dump(version, implementation, vectors)
+        except (OSError, ValueError, LookupError, TypeError, AssertionError):
+            differ.append(file)
+            continue
+        if key == "validate":
+            agrees = agrees and vectors == computed["validate"]
+        else:
+            changed = {
+                vector["id"] for vector in vectors if vector != v2.get(vector["id"])
+            }
+            given = [
+                {key: value for key, value in vector.items() if key not in results}
+                for vector in vectors
+            ]
+            agrees = agrees and given == inputs and changed == CHANGED_IN_V2
+        if not agrees:
+            differ.append(file)
+    return differ
+
+
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument(
@@ -1628,18 +1695,28 @@ def main(argv: list[str] | None = None) -> int:
     computed = run_garak(args.garak_python, args.garak_checkout)
     for line in computed["crashes"]:
         print("CRASH (excluded from the vectors):", line, file=sys.stderr)
+    disagreements = reference_disagreements(computed["evaluate"])
+    if disagreements:
+        raise SystemExit(
+            "evaluate_condition_v2 disagrees with Garak on: " + ", ".join(disagreements)
+        )
     planned = planned_files(ROOT, computed)
     stale = stale_files(planned)
+    v1 = v1_differences(ROOT, computed)
+    for path in v1:
+        print("DIFFERS", path.relative_to(ROOT), "(v1 files are never written)")
     if args.check:
         for path in stale:
             print("DIFFERS", path.relative_to(ROOT))
-        print(f"{len(stale)} of {len(planned)} files differ")
-        return 1 if stale else 0
+        differ = len(v1) + len(stale)
+        print(f"{differ} of {len(V1_FILES) + len(planned)} files differ")
+        return 1 if differ else 0
+    if v1:
+        return 1
     for path in stale:
         path.write_text(planned[path], encoding="utf-8")
     print(f"validate vectors: {len(computed['validate'])}")
     print(f"evaluate vectors: {len(computed['evaluate'])}")
-    print(f"v2 evaluate vectors: {len(computed['evaluate_v2'])}")
     print(f"{len(stale)} of {len(planned)} files written")
     return 0
 
