@@ -284,3 +284,24 @@ def test_authority_filter_counts_kept_and_dropped(tmp_path: Path) -> None:
     assert record["authority_recorded"] is False
     assert record["reach_basis"] == "source_kind"
     assert "authority_status" not in script._judging_record(plain, plain.candidates[0])
+
+
+def test_signature_retrieval_adds_library_mechanisms_only_when_asked(
+    tmp_path: Path,
+) -> None:
+    path = _write(tmp_path / "operation.yaml", "operation_result")
+    script = _script()
+
+    (plain,) = script.load_units([("u", path)])
+    (signature,) = script.load_units([("u", path)], signature_retrieval=True)
+    (filtered,) = script.load_units(
+        [("u", path)], authority_filter=True, signature_retrieval=True
+    )
+
+    assert plain.candidates == ()
+    assert [item.mechanism for item in signature.candidates] == [
+        "stale_feedback",
+        "forged_completion",
+    ]
+    assert filtered.candidates == signature.candidates
+    assert filtered.unfiltered == signature.candidates

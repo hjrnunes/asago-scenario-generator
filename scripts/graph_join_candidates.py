@@ -3,7 +3,8 @@
 
     uv run --frozen python scripts/graph_join_candidates.py \\
         --units-tsv UNITS.tsv [--unit LABEL PATH ...] --out-dir DIR \\
-        [--sample-size 30] [--seed 20261024] [--suffix=-v2] [--authority-filter]
+        [--sample-size 30] [--seed 20261024] [--suffix=-v2] [--authority-filter] \\
+        [--signature-retrieval]
 
 Each unit is a label and a saved ``control-structure.yaml``. The TSV holds one
 ``label<TAB>path`` per line. Labels must be non-blank and unique; the script
@@ -43,6 +44,11 @@ lacks, and its channels by authority value (``missing`` when absent): all of
 them, those whose ``source_kind`` is untrusted, and those that start a kept or
 an authoritative-dropped candidate. ``join-dropped.jsonl`` lists the dropped
 candidates. Without the flag every output is as before.
+
+``--signature-retrieval`` runs both joins with signature retrieval on: every
+channel is matched against each mechanism library entry's signature, so the
+candidates, counts and sample cover every library mechanism. Without it every
+output is as before.
 """
 
 from __future__ import annotations
@@ -123,14 +129,17 @@ def _check_labels(specs: list[tuple[str, Path]]) -> None:
 
 
 def load_units(
-    specs: list[tuple[str, Path]], *, authority_filter: bool = False
+    specs: list[tuple[str, Path]],
+    *,
+    authority_filter: bool = False,
+    signature_retrieval: bool = False,
 ) -> list[Unit]:
     """Load every unit, marking each byte-identical copy of an earlier one."""
     _check_labels(specs)
     first_by_digest: dict[str, int] = {}
     units = []
     for index, (label, path) in enumerate(specs):
-        unit = _load(index, label, path, authority_filter)
+        unit = _load(index, label, path, authority_filter, signature_retrieval)
         if unit.digest is not None:
             first = first_by_digest.setdefault(unit.digest, index)
             unit.duplicate_of = None if first == index else first
@@ -138,7 +147,13 @@ def load_units(
     return units
 
 
-def _load(index: int, label: str, path: Path, authority_filter: bool = False) -> Unit:
+def _load(
+    index: int,
+    label: str,
+    path: Path,
+    authority_filter: bool = False,
+    signature_retrieval: bool = False,
+) -> Unit:
     unit = Unit(index, label, path)
     try:
         raw = path.read_bytes()
@@ -152,9 +167,11 @@ def _load(index: int, label: str, path: Path, authority_filter: bool = False) ->
         unit.error = f"{type(exc).__name__}: {exc}"
         return unit
     unit.structure = structure
-    unit.candidates = mechanism_candidates(structure)
+    unit.candidates = mechanism_candidates(
+        structure, signature_retrieval=signature_retrieval
+    )
     if authority_filter:
-        unit.join = mechanism_join(structure)
+        unit.join = mechanism_join(structure, signature_retrieval=signature_retrieval)
         unit.unfiltered = unit.candidates
         unit.candidates = tuple(item.candidate for item in unit.join.kept)
     unit.owners = _owners(structure)
@@ -514,6 +531,11 @@ def main() -> None:
         action="store_true",
         help="run the join that drops authoritative and controller-sourced channels",
     )
+    parser.add_argument(
+        "--signature-retrieval",
+        action="store_true",
+        help="match every channel against each mechanism library signature",
+    )
     args = parser.parse_args()
 
     specs = [item for tsv in args.units_tsv for item in _read_tsv(tsv)]
@@ -521,7 +543,11 @@ def main() -> None:
     if not specs:
         parser.error("give --units-tsv or --unit")
 
-    units = load_units(specs, authority_filter=args.authority_filter)
+    units = load_units(
+        specs,
+        authority_filter=args.authority_filter,
+        signature_retrieval=args.signature_retrieval,
+    )
     rows = [_unit_counts(unit, units) for unit in units]
     loaded = [row for row in rows if row["loaded"]]
     aggregates = {
