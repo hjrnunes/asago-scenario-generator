@@ -2,7 +2,7 @@
 
 Every test uses a fake client. Code checks each reply; a reply that breaks a
 rule earns one correction naming every broken rule, and a reply that still
-breaks one keeps the deterministic narrative and records why.
+breaks one records why and publishes the plain fallback paragraph.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
     NarrationReply,
     build_glossary,
     build_facts,
+    fallback_narrative,
     narrate_scenario,
     narration_failures,
     plain,
@@ -222,7 +223,7 @@ def test_a_broken_reply_earns_one_correction_that_names_every_broken_rule(
     assert len(narration.rejected) == 1
 
 
-def test_a_reply_broken_twice_keeps_the_deterministic_narrative_and_says_why(
+def test_a_reply_broken_twice_falls_back_and_says_why(
     tmp_path: Path,
 ) -> None:
     spec = everyday()
@@ -316,7 +317,7 @@ def _inputs(client: MockLLMClient, run_dir: Path) -> SimpleNamespace:
     )
 
 
-def test_narrate_writes_the_sidecar_and_returns_accepted_paragraphs_only(
+def test_narrate_writes_the_sidecar_and_returns_paragraphs_or_fallbacks(
     tmp_path: Path,
 ) -> None:
     accepted = adversarial()
@@ -327,7 +328,8 @@ def test_narrate_writes_the_sidecar_and_returns_accepted_paragraphs_only(
 
     published = _narrate(_inputs(client, tmp_path), [accepted, failed])
 
-    assert list(published) == ["SCN-001"]
+    assert list(published) == ["SCN-001", "SCN-002"]
+    assert published["SCN-002"] == fallback_narrative(failed)
     assert "because it incorrectly believes" in published["SCN-001"]
     assert not published["SCN-001"].startswith("Test hypothesis")
     sidecar = json.loads((tmp_path / NARRATIVES_FILENAME).read_text(encoding="utf-8"))

@@ -28,6 +28,10 @@ from asago_scenario_generator.stpa.models.execution_classification import (
     McpInventoryObservation,
 )
 from asago_scenario_generator.models.canonical import canonical_json_bytes
+from asago_scenario_generator.stpa.scenario_prod.narration import (
+    fallback_narrative,
+    lower_first,
+)
 from asago_scenario_generator.stpa.scenario_prod.run import (
     SP3CandidateStatus,
     run_sp3,
@@ -114,9 +118,14 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
     assert result.stage_errors == []
     assert (tmp_path / "scenarios" / "SCN-001.yaml").is_file()
     envelope = result.scenario_envelopes[0]
-    assert "hypothesis" in envelope.narrative.lower()
+    # No narrate reply was scripted, so the scenario publishes the plain
+    # fallback paragraph.
+    assert envelope.narrative == fallback_narrative(envelope.scenario_spec)
     criterion = envelope.scenario_spec.unsafe_outcome_semantic_proposition
-    assert f"Failure: {criterion}" in envelope.narrative
+    assert criterion is not None
+    assert f"The unsafe outcome is that {lower_first(criterion.rstrip('.'))}." in (
+        envelope.narrative
+    )
 
 
 def test_run_sp3_writes_no_copy_of_its_inputs(tmp_path):

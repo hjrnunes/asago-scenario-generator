@@ -9,7 +9,10 @@ the scenario spec, and adds no fact of its own.
 
 Code checks every reply and never repairs it. A reply that breaks a rule
 earns one correction naming every broken rule. A reply that still breaks
-one, and any failed call, keeps the deterministic narrative and records why.
+one, and any failed call, records why and publishes a plain paragraph code
+writes from the same facts: the situation, the agent's beliefs, the weak
+points, the failure and the worst case, with no identifier or source label.
+The analysts' code-built account stays in ``narratives.json``.
 
 Code renders the rest of the write-up: the attack steps from the closed
 attack shape, as an ATLAS case-study procedure with ATLAS technique IDs, and
@@ -128,6 +131,24 @@ _IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|\b[A-Z]{2,}-?\
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _LONG_QUOTE = re.compile(r"[\"\u201c][^\"\u201c\u201d]{40,}[\"\u201d]")
 _APPLIES_WHEN = re.compile(r"\bapplies when\s*:", re.IGNORECASE)
+_SOURCE_KEY = re.compile(r"\b[A-Z]+-\d+(?:-\d+)*(?::[A-Za-z0-9_-]+)+")
+_BRACKETED_IDS = re.compile(
+    r"\s*[(\[]\s*(?:(?:PM|FB|CA)-\d+-\d+|(?:RESP|CL|CM|CP|H|L|SC|SEM)-\d+)"
+    r"(?:\s*[,;]\s*(?:(?:PM|FB|CA)-\d+-\d+|(?:RESP|CL|CM|CP|H|L|SC|SEM)-\d+))*\s*[)\]]"
+)
+_SOURCE_LABEL = re.compile(r"\s*\((?:source|authority)\s*:[^()]*\)", re.IGNORECASE)
+# What a published fallback paragraph must not contain: structural, fact,
+# scenario and source identifiers, and the analysts' labels and vocabulary.
+_FALLBACK_BANNED = (
+    _STRUCTURAL_ID,
+    _FACT_ID,
+    _SOURCE_KEY,
+    re.compile(r"\bSCN-\d+\b"),
+    re.compile(r"\b(?:UCA|ICA)-?\d+\b"),
+    re.compile(r"\b(?:source|sources|authority)\s*:", re.IGNORECASE),
+    re.compile(r"\b(?:detectors?|hypothes[ie]s)\b", re.IGNORECASE),
+)
+FALLBACK_LAST_RESORT = "The agent may take an unsafe action in this situation."
 NOT_SELECTED = "not selected as a causal factor"
 _OWNERSHIP_WORDS = {
     "turn_array": 'the word "turn" or "turns" directly followed by a colon',
@@ -733,6 +754,117 @@ def _end(text: str) -> str:
 def rule_text(description: str) -> str:
     """State the rule in full; its applicability stays in the governing rules."""
     return plain(_APPLIES_WHEN.split(description, maxsplit=1)[0]).strip(" .")
+
+
+def fallback_narrative(spec: ScenarioSpec) -> str:
+    """Write the plain paragraph a scenario publishes when its narration fails.
+
+    The paragraph tells the narration's facts in fixed sentences: the
+    situation, why the agent acts (its flawed beliefs and the weak points),
+    the failure, and the worst case. A structural identifier becomes its
+    description, and a source key or bracketed reference is dropped. A
+    sentence that still breaks :func:`fallback_failures` or the handoff's
+    ownership rules is left out, so the paragraph never carries one.
+    """
+    meanings = _descriptions(spec)
+    context = spec.scenario_context
+    sentences: list[str] = []
+    if context is not None:
+        situation = re.sub(
+            r"^when\s+", "", _clause(context.ica.hazardous_context, meanings)
+        )
+        if situation:
+            sentences.append(f"The scenario arises when {situation}.")
+    sentences.extend(_reason_sentences(spec, meanings))
+    failure = _clause(selected_criterion(spec), meanings)
+    if failure:
+        sentences.append(f"The unsafe outcome is that {failure}.")
+    losses = [] if context is None else context.losses
+    harms = [_clause(item.description, meanings) for item in losses]
+    harms = [item for item in harms if item]
+    if harms:
+        sentences.append(f"At worst, this leads to {', and to '.join(harms)}.")
+    kept = [
+        sentence
+        for sentence in sentences
+        if not fallback_failures(sentence)
+        and not handoff_ownership_violations({"narrative": sentence})
+    ]
+    return " ".join(kept) or FALLBACK_LAST_RESORT
+
+
+def _reason_sentences(spec: ScenarioSpec, meanings: Mapping[str, str]) -> list[str]:
+    """Say why the agent acts: its flawed beliefs, then the weak points."""
+    factors = spec.causal_factors
+    beliefs = [
+        _clause(factor.flawed_belief, meanings)
+        for factor in factors
+        if factor.flawed_belief
+    ]
+    beliefs = [item for item in beliefs if item]
+    reason = ""
+    if beliefs:
+        reason = "it wrongly believes that " + ", and that ".join(beliefs)
+    else:
+        held = {belief.pm_id: belief for belief in spec.defender_bdi.beliefs}
+        topics = [
+            _clause(held[factor.source_id].content, meanings)
+            for factor in factors
+            if factor.source_id in held
+        ]
+        topics = [item for item in dict.fromkeys(topics) if item]
+        if topics:
+            reason = f"its belief about {' and '.join(topics)} is wrong"
+    weak = [_clause(factor.description, meanings) for factor in factors]
+    weak = [item for item in dict.fromkeys(weak) if item]
+    weak_text = ""
+    if weak:
+        noun = "weak point is" if len(weak) == 1 else "weak points are"
+        weak_text = f"the {noun} that " + ", and that ".join(weak)
+    if reason and weak_text:
+        return [f"The agent acts unsafely because {reason}; {weak_text}."]
+    if reason:
+        return [f"The agent acts unsafely because {reason}."]
+    if weak_text:
+        return [_sentence(weak_text)]
+    return []
+
+
+def _clause(text: str | None, meanings: Mapping[str, str]) -> str:
+    """Return a fact as a lower-case clause without identifiers or end stop.
+
+    A part of the fact, split at a full stop or semicolon, that still names
+    an identifier or an analyst word is left out.
+    """
+    parts = re.split(r"(?<=[.;])\s+", _without_identifiers(text or "", meanings))
+    kept = " ".join(part for part in parts if part and not fallback_failures(part))
+    return lower_first(kept.rstrip(" .;"))
+
+
+def _without_identifiers(text: str, meanings: Mapping[str, str]) -> str:
+    """Drop source keys, labels and bracketed references; describe identifiers."""
+
+    def described(match: re.Match[str]) -> str:
+        meaning = plain(meanings.get(match.group(0), ""))
+        meaning = _BRACKETED_IDS.sub("", _SOURCE_KEY.sub("", meaning))
+        return lower_first(_STRUCTURAL_ID.sub("", meaning).strip().rstrip("."))
+
+    text = _SOURCE_LABEL.sub("", plain(text))
+    text = _BRACKETED_IDS.sub("", _SOURCE_KEY.sub("", text))
+    text = _STRUCTURAL_ID.sub(described, text)
+    text = re.sub(r"[(\[]\s*[)\]]", "", text)
+    # A dropped identifier can leave its conjunction or comma behind.
+    text = re.sub(r"(?:\s*,|\s+(?:and|or))+\s*(?=[.;,)\]]|$)", "", text)
+    text = re.sub(r"\s+([,.;:)\]])", r"\1", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def fallback_failures(text: str) -> list[str]:
+    """Return each identifier, source label or analyst word a fallback carries."""
+    found: list[str] = []
+    for pattern in _FALLBACK_BANNED:
+        found.extend(match.group(0) for match in pattern.finditer(text))
+    return list(dict.fromkeys(found))
 
 
 def narratives_payload(

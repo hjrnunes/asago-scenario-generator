@@ -102,6 +102,7 @@ from .and_or_tree import (
     render_and_or_tree,
 )
 from .narration import (
+    fallback_narrative,
     narrate_scenarios,
     narratives_payload,
     write_narratives,
@@ -496,7 +497,9 @@ def _narrate(inputs: _SP3Inputs, specs: list[ScenarioSpec]) -> dict[str, str]:
 
     The result holds the accepted paragraph of each scenario whose reply code
     accepted, without the framing, title, steps or misuse-case fields of the
-    write-up; a scenario that fell back keeps its deterministic narrative.
+    write-up. A scenario that fell back gets the plain paragraph code writes
+    from its facts; its deterministic narrative, written for analysts, stays
+    in ``narratives.json`` only.
     """
     narrated = narrate_scenarios(
         specs,
@@ -512,10 +515,14 @@ def _narrate(inputs: _SP3Inputs, specs: list[ScenarioSpec]) -> dict[str, str]:
         inputs.run_dir,
         narratives_payload(specs, narrated, deterministic=deterministic),
     )
+    specs_by_id = {spec.scenario_id: spec for spec in specs}
     return {
-        scenario_id: narration.paragraph
+        scenario_id: (
+            narration.paragraph
+            if narration.accepted
+            else fallback_narrative(specs_by_id[scenario_id])
+        )
         for scenario_id, (_, narration) in narrated.items()
-        if narration.accepted
     }
 
 
