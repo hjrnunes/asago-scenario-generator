@@ -347,6 +347,20 @@ function. For example, showing an authenticated library member their own loan
 record is different from showing it to an unauthorized person. Do not invent
 the recipient, access restriction or disclosure to make a loss claim work.
 
+The unsafe control action's `statement` and `hazardous_context` give the
+reason the action is unsafe. The `semantic_proposition` tests that same
+reason{% if has_condition_references %}, and so does the
+`discriminating_condition` when you return one{% endif %}. Keep
+each permission, identity, ownership, recipient or verification qualifier the
+reason states, such as an unauthorized actor, a record that belongs to another
+principal, an unverified identity, or a request the session does not
+authorize. Do not replace the stated reason with one the statement does not
+give, such as an eligibility status, an amount limit or a record state, even
+when the supplied facts make that other condition easier to ground; a
+different reason is a different unsafe control action. When the statement
+gives alternative reasons, test one of them. Select causal factors that
+explain the stated reason.
+
 Temporal conditions use the explained local handles in the user prompt. Use
 `reference_handle` and, for `absence`, `until_step_handle`; use `null` when a
 factor has no separately supported temporal condition. Deterministic code

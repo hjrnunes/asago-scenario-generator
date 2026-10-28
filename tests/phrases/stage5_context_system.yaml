@@ -43,8 +43,25 @@ cases:
       - eligibility_reference
       - review_reference
       - A mechanism needs exact supplied capability/access evidence
+      - >-
+        The unsafe control action's `statement` and `hazardous_context` give
+        the reason the action is unsafe. The `semantic_proposition` tests that
+        same reason
+      - >-
+        Keep each permission, identity, ownership, recipient or verification
+        qualifier the reason states, such as an unauthorized actor, a record
+        that belongs to another principal, an unverified identity, or a
+        request the session does not authorize.
+      - >-
+        Do not replace the stated reason with one the statement does not give,
+        such as an eligibility status, an amount limit or a record state, even
+        when the supplied facts make that other condition easier to ground; a
+        different reason is a different unsafe control action.
+      - When the statement gives alternative reasons, test one of them.
+      - Select causal factors that explain the stated reason.
     once:
       - A negative or empty feedback result can be valid
+      - give the reason the action is unsafe
     forbidden:
       - A taxonomy consideration with `mechanism_name`
       - omit `gain`
@@ -93,6 +110,9 @@ cases:
   realistic-request:
     required:
       - "## Discriminating condition"
+      - >-
+        The `semantic_proposition` tests that same reason, and so does the
+        `discriminating_condition` when you return one.
       - >-
         Set `record_refs` only to top-level supplied `observation_ref` values
         such as `TARGET-STATE`, never to a record path such as
