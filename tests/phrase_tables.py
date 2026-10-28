@@ -161,6 +161,7 @@ REQUESTS = (
     "stage5_condition_correction",
     "stage2_call2b_authority_correction_request",
     "revision_authority_correction_request",
+    "revision_merge_and_authority_correction_request",
 )
 
 _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
@@ -732,6 +733,18 @@ def _revision_authority_correction(request: str) -> str:
         return revision_authority_correction_request(Path(run_dir))
 
 
+def _revision_merge_and_authority_correction(request: str) -> str:
+    """Render the revision correction that follows a merge and an authority error."""
+    assert request == "revision_merge_and_authority_correction_request"
+    # Imported here, as above.
+    from tests.stpa.test_revision_correction_names_every_error import (
+        merge_and_authority_correction_request,
+    )
+
+    with tempfile.TemporaryDirectory() as run_dir:
+        return merge_and_authority_correction_request(Path(run_dir))
+
+
 # The critic request for a structure whose feedback channel is assessed.
 FEEDBACK_AUTHORITY_CRITIC = {
     "use_case_text": "Test use case",
@@ -848,6 +861,9 @@ CASES: dict[str, Callable[[str], str]] = {
     ),
     "two-failing-authority-bases": _call_2b_authority_correction,
     "two-failing-revision-authority-bases": _revision_authority_correction,
+    "unmergeable-revision-with-failing-authority-basis": (
+        _revision_merge_and_authority_correction
+    ),
     **{case: _obligation_aware(case) for case in OBLIGATION_AWARE_BUILDS},
 }
 

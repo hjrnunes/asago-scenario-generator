@@ -1,0 +1,21 @@
+request: revision_merge_and_authority_correction_request
+cases:
+  unmergeable-revision-with-failing-authority-basis:
+    once:
+      - "Prior structured response to correct in place:"
+      - "Exact validation error from the prior response:"
+      - "ValueError: The revision delta cannot be merged into the reviewed structure:"
+      - "ValueError: Modified responsibility resp_id must match an existing canonical responsibility ID; unknown ID(s): RESP-2."
+      - "1 feedback channel authority basis fails the checks:"
+      - "- feedback channel FB-2-1 settled authority basis must cite the supplied use case or an exact target-evidence ref"
+      - Correct the `authority_for_update` of every feedback channel listed above
+      - Return one JSON object matching the response schema already supplied.
+    ordered:
+      - - "Prior structured response to correct in place:"
+        - "Exact validation error from the prior response:"
+        - "ValueError: The revision delta cannot be merged into the reviewed structure:"
+        - "ValueError: Modified responsibility resp_id must match an existing canonical responsibility ID; unknown ID(s): RESP-2."
+        - "1 feedback channel authority basis fails the checks:"
+        - "- feedback channel FB-2-1 settled authority basis must cite the supplied use case or an exact target-evidence ref"
+        - Correct the `authority_for_update` of every feedback channel listed above
+        - Return one JSON object matching the response schema already supplied.

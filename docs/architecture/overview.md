@@ -843,7 +843,10 @@ error and asks for the complete object again. The critic revision's
 correction shows the rejected delta before the exact error. Validation merges
 a revision delta into the structure it revises, so a delta the merge would
 refuse, such as one restating an unknown responsibility, earns that
-correction instead of being discarded after it. A revision is `applied`
+correction instead of being discarded after it. The authority checks run
+whether or not the merge fails, so a delta with both kinds of error earns one
+correction that names the merge error and every failing authority basis. A
+revision is `applied`
 exactly when the structure the step publishes after the reply differs from
 the structure it publishes with no revision. Both come from one
 post-revision function, applied once to the reviewed structure and once to

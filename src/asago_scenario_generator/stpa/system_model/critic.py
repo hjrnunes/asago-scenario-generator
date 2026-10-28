@@ -41,7 +41,9 @@ from asago_scenario_generator.stpa.infra.llm import (
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CallOutcome,
     CorrectionPolicy,
+    ExactFeedbackError,
     call_with_policy,
+    compact_validation_error,
     decode_content,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
@@ -298,6 +300,28 @@ class _RevisionDeltaProviderSet(RevisionDelta):
     dismissed_gaps: list[_Text] = []
 
 
+class RevisionMergeAndAuthorityError(ExactFeedbackError):
+    """A revision delta the merge refuses whose authority bases also fail.
+
+    The message names the merge error first and then every failing channel,
+    so the one correction request asks for all of them.  It is not
+    shortened: the merge error is already bounded, and the channel list must
+    reach the model whole, as in :class:`FeedbackAuthorityError`.
+    """
+
+    max_chars = None
+
+    def __init__(
+        self, merge_error: ValueError, authority_error: FeedbackAuthorityError
+    ) -> None:
+        self.merge_error = merge_error
+        self.authority_error = authority_error
+        super().__init__(
+            "The revision delta cannot be merged into the reviewed structure:\n"
+            f"{compact_validation_error(merge_error)}\n{authority_error}"
+        )
+
+
 def _validate_revision_wire(
     value: Any,
     *,
@@ -308,28 +332,41 @@ def _validate_revision_wire(
 
     With *control_structure*, a delta that changes something must also merge
     into it, so a delta the merge would refuse earns the correction instead
-    of being discarded after it.  The merge runs before the authority checks:
-    a failing basis can still be dropped, an unmergeable delta cannot.  The
-    authority checks name every failing channel, so the one correction
-    request can ask for all of them.
+    of being discarded after it.  The authority checks run whether or not the
+    merge fails and name every failing channel, so the one correction request
+    asks for every error: a merge error with failing bases is raised as
+    :class:`RevisionMergeAndAuthorityError`.  Only failing bases alone raise
+    :class:`FeedbackAuthorityError`, whose bases can still be dropped; an
+    unmergeable delta cannot.
     """
     wire = _RevisionDeltaProviderSet.model_validate(value)
+    merge_error: ValueError | None = None
     if control_structure is not None:
         delta = _revision_delta_from_wire(value)
         if _delta_has_changes(delta):
-            _merge_revision_delta(control_structure, delta)
-    validate_all_feedback_authority_assessments(
-        (
-            channel
-            for responsibility in (
-                *wire.new_responsibilities,
-                *wire.modified_responsibilities,
-            )
-            for channel in responsibility.feedback_channels
-        ),
-        target_evidence=target_evidence,
-        require_domain_scope=True,
-    )
+            try:
+                _merge_revision_delta(control_structure, delta)
+            except ValueError as error:
+                merge_error = error
+    try:
+        validate_all_feedback_authority_assessments(
+            (
+                channel
+                for responsibility in (
+                    *wire.new_responsibilities,
+                    *wire.modified_responsibilities,
+                )
+                for channel in responsibility.feedback_channels
+            ),
+            target_evidence=target_evidence,
+            require_domain_scope=True,
+        )
+    except FeedbackAuthorityError as error:
+        if merge_error is None:
+            raise
+        raise RevisionMergeAndAuthorityError(merge_error, error) from merge_error
+    if merge_error is not None:
+        raise merge_error
 
 
 @dataclass(frozen=True)
@@ -835,7 +872,9 @@ def revise_control_structure(
     )
 
     def authority_note(error: Exception) -> str:
-        if not isinstance(error, FeedbackAuthorityError):
+        if not isinstance(
+            error, (FeedbackAuthorityError, RevisionMergeAndAuthorityError)
+        ):
             return ""
         return loader.render_prompt("revision_authority_correction.j2").rstrip()
 
