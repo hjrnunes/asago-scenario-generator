@@ -770,10 +770,17 @@ record's collection. Anything else keeps every `eq`. Within that scope:
 
 - An argument the condition compares `ne` with the session subject loses
   its selection only when the supplied reads of the operation passed the
-  session subject for it and passed no key of any state collection. A value
-  that is both an id of the subject's kind and a record key (numbers and
-  UUIDs can be both) leaves the argument's domain open, so it is treated as
-  below.
+  session subject for it and every value they passed is a subject id. A
+  passed value that is no record key is one. A passed value that is a
+  record key is one only when it is a key of the subject's own collection
+  and of no other collection. The subject's own collection is the single
+  collection that has the session subject as a record key, and only when
+  that record holds the session subject under the argument's name and
+  names it in no other field; a record that names the subject in another
+  field, such as an owner field, is a record the subject owns whose key
+  equals the subject's id. Otherwise a value that is both a subject id and
+  a record key (numbers and UUIDs can be both) leaves the argument's domain
+  open, so it is treated as below.
 - When the condition compares owner fields of the selected record `ne` with
   the session subject, the records those comparisons fail are the entitled
   ones. A selection of the record key, or of an owner field for an argument

@@ -523,9 +523,8 @@ def _ownership_bindings(
 
     - An argument the condition compares ``ne`` with the session subject is
       covered by that comparison when the supplied reads of ``operation``
-      passed the session subject for it and passed no key of any state
-      collection: a value that is also a record key leaves open whether the
-      argument takes subject ids or record keys. Its selection then adds
+      passed the session subject for it and every value they passed is a
+      subject id (see :func:`_subject_domain`). Its selection then adds
       nothing. Otherwise the selection is handled as below or keeps its
       ``eq``.
     - Owner fields of the selected record compared ``ne`` with the session
@@ -564,16 +563,19 @@ def _ownership_bindings(
         return {}
     reads = read_arguments[operation]
     covered = _arguments_ne_session(comparisons, operation, session)
-    keys = _state_keys(fact_values)
+    collections = _record_collections(fact_values)
     replaced: dict[int, _Replacement] = {}
     for position, item in enumerate(items):
         argument, path = item["argument"], item["path"]
         passed = reads.get(argument, frozenset())
         field_name = path.removeprefix(f"{record_path}.")
-        if argument in covered and session[1] in passed and not passed & keys:
+        subject_ids = session[1] in passed and _subject_domain(
+            passed, argument, collections, session[1]
+        )
+        if argument in covered and subject_ids:
             replaced[position] = None
         elif field_name in scope.owners and argument == field_name:
-            if session[1] in passed and not passed & keys:
+            if subject_ids:
                 replaced[position] = _not_in(operation, argument, [session[1]])
         elif path == record_path or field_name in scope.owners:
             entitled = _entitled_keys(scope, argument, passed, fact_values, session)
@@ -760,10 +762,12 @@ def _objects(value: object) -> Iterator[Mapping[str, object]]:
             yield from _objects(child)
 
 
-def _state_keys(fact_values: Mapping[str, object]) -> frozenset[str]:
-    """Return the keys of every record collection in the state."""
+def _record_collections(
+    fact_values: Mapping[str, object],
+) -> dict[str, Mapping[str, Mapping[str, Any]]]:
+    """Return every record collection of the state, by name."""
 
-    keys: set[str] = set()
+    collections: dict[str, Mapping[str, Mapping[str, Any]]] = {}
     for path, records in fact_values.items():
         name = path.removeprefix(_STATE_PREFIX)
         if (
@@ -773,8 +777,46 @@ def _state_keys(fact_values: Mapping[str, object]) -> frozenset[str]:
             and records
             and all(isinstance(record, Mapping) for record in records.values())
         ):
-            keys.update(str(key) for key in records)
-    return frozenset(keys)
+            collections[name] = records
+    return collections
+
+
+def _subject_domain(
+    passed: frozenset[str],
+    argument: str,
+    collections: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    session: str,
+) -> bool:
+    """Return whether every value the reads passed for ``argument`` is a subject id.
+
+    A passed value that is no record key is one. A passed value that is a
+    record key is one only when it is a key of the subject's own collection
+    and of no other. The subject's own collection is the one collection that
+    has the session subject as a record key, provided that record holds the
+    session subject under ``argument`` (the collection is keyed by the
+    argument's ids) and names it in no other field (a record that names the
+    subject elsewhere, such as an owner field, is a record the subject owns
+    whose key happens to equal the subject's id). Any other case leaves open
+    whether the argument takes subject ids or record keys.
+    """
+
+    if not any(
+        value in records for value in passed for records in collections.values()
+    ):
+        return True
+    own = [name for name, records in collections.items() if session in records]
+    if len(own) != 1:
+        return False
+    record = collections[own[0]][session]
+    if record.get(argument) != session or any(
+        value == session for name, value in record.items() if name != argument
+    ):
+        return False
+    return all(
+        {name for name, records in collections.items() if value in records} == {own[0]}
+        for value in passed
+        if any(value in records for records in collections.values())
+    )
 
 
 def _arguments_ne_session(

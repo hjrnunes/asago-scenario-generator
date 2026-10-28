@@ -1293,3 +1293,111 @@ def test_a_read_agrees_only_through_its_keyed_record(
         [not_in("lookup_order", "order_id", ["ORD-101"])] if widened else ORDER_201_PIN
     )
     assert bound(ORDER_PIN, fact_values, "lookup_order", reads) == expected
+
+
+# The subject's own collection settles the argument's domain.
+
+
+REFERRAL_NE_SUBJECT = condition(
+    [
+        value(
+            arg("get_referral", "patient_id"),
+            "ne",
+            fact("TARGET-STATE.authenticated_patient_id"),
+        )
+    ],
+    "TARGET-STATE.referrals.REF-101",
+    ("get_referral", "patient_id", "TARGET-STATE.referrals.REF-101.patient_id"),
+)
+REFERRAL_NE = value(arg("get_referral", "patient_id"), "ne", literal("PAT-104"))
+REFERRAL_PIN = [REFERRAL_NE, eq("get_referral", "patient_id", "PAT-101")]
+
+
+def clinic(**extra: Any) -> dict[str, object]:
+    state: dict[str, Any] = {
+        "authenticated_patient_id": "PAT-104",
+        "patients": {
+            "PAT-101": {"patient_id": "PAT-101"},
+            "PAT-104": {"patient_id": "PAT-104"},
+            "PAT-201": {"patient_id": "PAT-201"},
+        },
+        "referrals": {
+            "REF-101": {"patient_id": "PAT-101"},
+            "REF-104": {"patient_id": "PAT-104"},
+        },
+    }
+    return facts(state | extra)
+
+
+@pytest.mark.parametrize(
+    ("fact_values", "passed", "expected"),
+    [
+        # Patient ids are keys of the subject's own collection only.
+        (clinic(), {"PAT-104"}, [REFERRAL_NE]),
+        (clinic(), {"PAT-104", "PAT-201"}, [REFERRAL_NE]),
+        # The subject's id is also a key of another collection.
+        (
+            clinic(charts={"PAT-104": {"status": "open"}}),
+            {"PAT-104"},
+            REFERRAL_PIN,
+        ),
+        # Another passed value is also a key of another collection.
+        (
+            clinic(charts={"PAT-201": {"status": "open"}}),
+            {"PAT-104", "PAT-201"},
+            REFERRAL_PIN,
+        ),
+        # The subject's record does not hold its key under the argument's name.
+        (
+            clinic(patients={"PAT-104": {"id": "PAT-104"}}),
+            {"PAT-104"},
+            REFERRAL_PIN,
+        ),
+    ],
+    ids=[
+        "subject-collection",
+        "subject-collection-two-values",
+        "subject-id-keys-another-collection",
+        "value-keys-another-collection",
+        "not-keyed-by-the-argument",
+    ],
+)
+def test_the_subjects_own_collection_settles_the_argument_domain(
+    fact_values: dict[str, object],
+    passed: set[str],
+    expected: list[dict[str, Any]],
+) -> None:
+    reads = {"get_referral": {"patient_id": frozenset(passed)}}
+
+    assert bound(REFERRAL_NE_SUBJECT, fact_values, "get_referral", reads) == expected
+
+
+def test_an_owned_record_keyed_like_the_subject_is_not_its_own_collection() -> None:
+    # Order 1001 holds its own id under order_id, but it names the customer
+    # as its owner: the customer id only happens to equal an order key.
+    state = {
+        "authenticated_customer_id": "1001",
+        "orders": {
+            "1001": {"order_id": "1001", "customer_id": "1001"},
+            "2001": {"order_id": "2001", "customer_id": "1001"},
+            "2002": {"order_id": "2002", "customer_id": "1002"},
+        },
+    }
+    observations = snapshot(
+        state,
+        (
+            "lookup_order",
+            {"order_id": "1001"},
+            {"order_id": "1001", "customer_id": "1001"},
+        ),
+    )
+    raw = condition(
+        [ORDER_KEY_NE_SUBJECT],
+        "TARGET-STATE.orders.2002",
+        ("lookup_order", "order_id", "TARGET-STATE.orders.2002"),
+    )
+
+    assert checked_binding(raw, observations)["comparisons"] == [
+        value(arg("lookup_order", "order_id"), "ne", literal("1001")),
+        eq("lookup_order", "order_id", "2002"),
+    ]
