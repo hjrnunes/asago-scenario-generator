@@ -844,16 +844,21 @@ correction shows the rejected delta before the exact error. Validation merges
 a revision delta into the structure it revises, so a delta the merge would
 refuse, such as one restating an unknown responsibility, earns that
 correction instead of being discarded after it. A delta has an effect only
-when its merged result differs from the reviewed structure put through the
-same merge without a delta, so re-normalization (such as sorting constraint
-citations) is never a revision; a delta without effect, including one that
-adds and restates nothing, leaves the reviewed structure in force. The Stage 2
+when its result and the reviewed structure still differ after each goes
+through everything the revision step does after the merge: merge
+normalization, the empty-responsibility strip and evidence binding. So
+re-normalization (such as sorting constraint citations), that cleanup, and a
+change binding removes again (an unobserved operation or evidence ref) are
+never a revision; a delta without effect, including one that adds and
+restates nothing, leaves the reviewed structure in force. The Stage 2
 manifest records `critic_revision.status` as `applied` (the reply changed the
 structure), `unchanged` (the reply was accepted and changed nothing), or
 `discarded` with its `reason`, and the run manifest's `revised` agrees with it.
 The revision step strips a responsibility that was already empty whatever the
 reply; that cleanup is not a revision and is reported only by its
-`Stripped empty responsibility ...` post-revision warning. Each attempt is logged
+`Stripped empty responsibility ...` post-revision warning. The replay gate
+rejects an `applied` record whose structure differs from the step's input
+only by that strip and the rebinding it allows. Each attempt is logged
 separately in `calls.jsonl` and counts as one request in the stage's call
 count; these retries do not change the manifest/result schemas, and
 exhaustion remains fatal with three exceptions: an exhausted critic returns

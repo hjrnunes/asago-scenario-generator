@@ -66,6 +66,7 @@ from asago_scenario_generator.stpa.system_model.feedback_authority import (
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     TargetEvidence,
+    check_evidence_bindings,
 )
 from asago_scenario_generator.stpa.system_model.undecodable_reply import (
     decode_aware_feedback,
@@ -635,14 +636,15 @@ def _finish_revision(
     critic_findings: CriticFindings,
     loss_analysis: LossAnalysis | None,
     dropped_authority: frozenset[tuple[str, str]] = frozenset(),
+    target_evidence: TargetEvidence | None = None,
 ) -> tuple[ControlStructure, list[str]]:
     """Merge a validated delta and retain post-revision diagnostics.
 
-    The merge re-normalizes the whole structure and strips empty
-    responsibilities, so a delta has an effect only when its result differs
-    from the reviewed structure put through that same merge without a delta.
-    A delta without an effect returns *control_structure* itself: callers
-    tell an applied revision by identity.
+    A delta has an effect only when its result and the reviewed structure
+    differ once each is put through everything the revision step does after
+    the merge: see :func:`_revision_step_form`.  A delta without an effect
+    returns *control_structure* itself: callers tell an applied revision by
+    identity.
     """
     revision_warnings = [
         f"Revision dismissed finding: {justification}"
@@ -651,6 +653,7 @@ def _finish_revision(
     revised_cs: ControlStructure | None = None
     merge_warnings: list[str] = []
     strip_warnings: list[str] = []
+    binding_warnings: list[str] = []
     if _delta_has_changes(revision_delta):
         try:
             merged, merge_warnings = _merge_revision_delta(
@@ -661,13 +664,26 @@ def _finish_revision(
             return control_structure, [warning]
         # Strip empty responsibilities as a safety net
         revised_cs, strip_warnings = strip_empty_responsibilities(merged)
-        if revised_cs == _merged_baseline(control_structure):
+        reply_form = _revision_step_form(revised_cs, target_evidence)
+        baseline_form = _revision_step_form(control_structure, target_evidence)
+        if (
+            reply_form is not None
+            and baseline_form is not None
+            and reply_form[0] == baseline_form[0]
+        ):
+            # Say what binding removed from the reply, not what it reports
+            # for the reviewed structure as well.
+            binding_warnings = [
+                warning for warning in reply_form[1] if warning not in baseline_form[1]
+            ]
             revised_cs = None
 
     # Warnings are accumulated in chronological order: dismissal → merge →
-    # strip → heuristics, so consumers see the earliest root-cause first.
+    # strip → binding → heuristics, so consumers see the earliest root-cause
+    # first.
     revision_warnings.extend(merge_warnings)
     revision_warnings.extend(strip_warnings)
+    revision_warnings.extend(binding_warnings)
     if revised_cs is None:
         revision_warnings.extend(_no_change_warnings(critic_findings, revision_delta))
         revised_cs = control_structure
@@ -680,16 +696,23 @@ def _finish_revision(
     return revised_cs, revision_warnings
 
 
-def _merged_baseline(control_structure: ControlStructure) -> ControlStructure | None:
-    """The reviewed structure as a merge without a delta leaves it.
+def _revision_step_form(
+    control_structure: ControlStructure, target_evidence: TargetEvidence | None
+) -> tuple[ControlStructure, list[str]] | None:
+    """Return *control_structure* as the revision step would publish it.
 
-    ``None`` when that merge fails, so no delta compares equal to it.
+    That is the structure after merge normalization, the empty-responsibility
+    strip and evidence binding, with binding's warnings.  Comparing the
+    reply's result and the reviewed structure in this form makes
+    normalization, cleanup and binding alone no revision.  ``None`` when the
+    normalization fails, so nothing compares equal to it.
     """
     try:
         merged, _ = _merge_revision_delta(control_structure, RevisionDelta())
     except Exception:
         return None
-    return strip_empty_responsibilities(merged)[0]
+    stripped, _ = strip_empty_responsibilities(merged)
+    return check_evidence_bindings(stripped, target_evidence)
 
 
 def _no_change_warnings(
@@ -824,6 +847,7 @@ def run_revision(
         critic_findings=critic_findings,
         loss_analysis=loss_analysis,
         dropped_authority=dropped_authority,
+        target_evidence=target_evidence,
     )
     return revised, [*authority_warnings, *revision_warnings]
 

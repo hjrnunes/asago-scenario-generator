@@ -1762,7 +1762,6 @@ def _critic_differences(
     ("record", "attempts", "versions"),
     [
         ({"status": "applied"}, (True,), "changed"),
-        ({"status": "applied"}, (True,), "stripped"),
         ({"status": "applied"}, (False, True), "changed"),
         ({"status": "unchanged"}, (True,), "unchanged"),
         ({"status": "unchanged"}, (True,), "stripped"),
@@ -1922,6 +1921,7 @@ def test_an_added_critic_revision_needs_the_synthesis_stage_warnings(trees) -> N
 
 _HOLDS_EMPTY = "holds an empty responsibility, which the revision step always strips"
 _BEYOND_STRIPPING = "beyond stripping its empty responsibilities"
+_ONLY_STRIPPING = "applied changed the control structure only by stripping"
 
 
 @pytest.mark.parametrize(
@@ -1929,6 +1929,8 @@ _BEYOND_STRIPPING = "beyond stripping its empty responsibilities"
     [
         ({"status": "applied"}, (), "changed", "made no revision request"),
         ({"status": "applied"}, (True,), "unchanged", "as applied left"),
+        ({"status": "applied"}, (True,), "stripped", _ONLY_STRIPPING),
+        ({"status": "applied"}, (True,), "prefixed_rebound", _ONLY_STRIPPING),
         ({"status": "unchanged"}, (True,), "changed", "as unchanged changed"),
         ({"status": "unchanged"}, (True,), "kept_empty", _HOLDS_EMPTY),
         ({"status": "unchanged"}, (True,), "stripped_and_edited", _BEYOND_STRIPPING),

@@ -802,10 +802,12 @@ def _maybe_apply_revision(
         temperature=temperature,
         target_evidence=target_evidence,
     )
+    # ``run_revision`` has already compared the reply's result with the
+    # baseline after the strip and evidence binding below, so a change that
+    # processing removes is no revision; only an effective one is a new object.
     revised = control_structure is not baseline_control_structure
     # Strip empty responsibilities whatever the reply.  This cleanup is not a
-    # revision: its own warning reports it, and ``revised`` stays as the
-    # reply left it.
+    # revision: its own warning reports it.
     control_structure, strip_warnings = strip_empty_responsibilities(control_structure)
     post_revision_warnings.extend(strip_warnings)
     if control_structure != baseline_control_structure:
