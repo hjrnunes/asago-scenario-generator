@@ -24,6 +24,10 @@ from pydantic import (
     field_validator,
 )
 
+from asago_scenario_generator.models.mechanism_suggestion_accounting import (
+    MECHANISM_SUGGESTION_ACCOUNTING_FILENAME,
+    MechanismSuggestionAccounting,
+)
 from asago_scenario_generator.models.obligation_accounting import ObligationAccounting
 from asago_scenario_generator.models.slot_hazard_offer import SlotHazardOfferReport
 from asago_scenario_generator.models.target_realization import TargetRealizationResult
@@ -213,6 +217,7 @@ class RunData:
     structure: ControlStructure | None
     offers: SlotHazardOfferReport | None
     accounting: ObligationAccounting | None
+    mechanisms: MechanismSuggestionAccounting | None
     plan: tuple[PlanObligation, ...] | None
     realization: TargetRealizationResult | None
     testability: dict[str, TestabilityRow] | None
@@ -374,6 +379,12 @@ def load_run(output_dir: Path | str) -> RunData:
         ),
         accounting=_read_yaml(
             output, "obligation-accounting.yaml", ObligationAccounting, unreadable
+        ),
+        mechanisms=_read_yaml(
+            output,
+            MECHANISM_SUGGESTION_ACCOUNTING_FILENAME,
+            MechanismSuggestionAccounting,
+            unreadable,
         ),
         plan=None if plan is None else tuple(plan.obligations),
         realization=_read_yaml(

@@ -18,6 +18,7 @@ from asago_scenario_generator.report.effort_section import effort_section
 from asago_scenario_generator.report.failure_section import failure_section
 from asago_scenario_generator.report.handoff_section import handoff_section
 from asago_scenario_generator.report.hazard_view import hazard_section
+from asago_scenario_generator.report.mechanism_section import mechanism_section
 from asago_scenario_generator.report.obligation_section import obligation_section
 from asago_scenario_generator.report.overview_section import (
     Counts,
@@ -98,6 +99,7 @@ def _sections(run: RunData, gaps: dict[str, Any] | None) -> list[Markup]:
         slot_section(run),
         testability_section(run),
         obligation_section(run),
+        mechanism_section(run),
         failure_section(run),
         warning_section(run),
         *views,

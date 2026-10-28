@@ -1,0 +1,2222 @@
+rows:
+- mechanism_id: user_claim
+  slot_id: CL-1:CM-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-1:CM-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-1:CM-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-1:CM-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-1:CM-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-1:CM-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-1:CM-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-1:CM-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-1:CM-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-1:CM-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-1:CM-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-1:CM-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-1:CM-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-1:CM-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-1:CM-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-1:CM-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-1:CM-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-1:CM-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-1:CM-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-1:CM-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-1:CM-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-1:CM-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-1:CM-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-1:CM-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-2:CM-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-2:CM-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-2:CM-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-2:CM-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-2:CM-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-2:CM-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-2:CM-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-2:CM-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-2:CM-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-2:CM-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-2:CM-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-2:CM-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-2:CM-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-2:CM-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-2:CM-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-2:CM-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-2:CM-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-2:CM-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-2:CM-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-2:CM-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-2:CM-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-2:CM-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-2:CM-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-2:CM-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CL-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The control action (RESP-3) is constrained to use retrieved/generated
+      material to stay within approved scripts, which is a check against the content
+      rather than the mechanism of a user claim standing in for an established value
+      like identity or entitlement.
+    relationship: adjacent_control
+  slot_id: CL-3:CM-3:INCORRECT
+  stop_reason: verifier_rejected
+- mechanism_id: retrieved_instructions
+  slot_id: CL-3:CM-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-3:CM-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  path_verdicts:
+  - path:
+      end_id: CL-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes a coordination link between controllers, but the
+      description of the link (CL-3) is a constraint to ensure content adherence,
+      not a mechanism where one controller's adversary-influenced belief is treated
+      as permission by another.
+    relationship: adjacent_control
+  slot_id: CL-3:CM-3:INCORRECT
+  stop_reason: verifier_rejected
+- mechanism_id: stale_feedback
+  slot_id: CL-3:CM-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-3:CM-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CL-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The control action (RESP-3) is constrained to use retrieved/generated
+      material to stay within approved scripts, which is a check against the content
+      rather than the mechanism of a user claim standing in for an established value
+      like identity or entitlement.
+    relationship: adjacent_control
+  slot_id: CL-3:CM-3:NOT_PROVIDED
+  stop_reason: verifier_rejected
+- mechanism_id: retrieved_instructions
+  slot_id: CL-3:CM-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-3:CM-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  path_verdicts:
+  - path:
+      end_id: CL-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes a coordination link between controllers, but the
+      description of the link (CL-3) is a constraint to ensure content adherence,
+      not a mechanism where one controller's adversary-influenced belief is treated
+      as permission by another.
+    relationship: adjacent_control
+  slot_id: CL-3:CM-3:NOT_PROVIDED
+  stop_reason: verifier_rejected
+- mechanism_id: stale_feedback
+  slot_id: CL-3:CM-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-3:CM-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-3:CM-3:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-3:CM-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-3:CM-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-3:CM-3:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: stale_feedback
+  slot_id: CL-3:CM-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-3:CM-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CL-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The control action (RESP-3) is constrained to use retrieved/generated
+      material to stay within approved scripts, which is a check against the content
+      rather than the mechanism of a user claim standing in for an established value
+      like identity or entitlement.
+    relationship: adjacent_control
+  slot_id: CL-3:CM-3:WRONG_TIMING
+  stop_reason: verifier_rejected
+- mechanism_id: retrieved_instructions
+  slot_id: CL-3:CM-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-3:CM-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  path_verdicts:
+  - path:
+      end_id: CL-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes a coordination link between controllers, but the
+      description of the link (CL-3) is a constraint to ensure content adherence,
+      not a mechanism where one controller's adversary-influenced belief is treated
+      as permission by another.
+    relationship: adjacent_control
+  slot_id: CL-3:CM-3:WRONG_TIMING
+  stop_reason: verifier_rejected
+- mechanism_id: stale_feedback
+  slot_id: CL-3:CM-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-3:CM-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-4:CM-4:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-4:CM-4:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-4:CM-4:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-4:CM-4:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-4:CM-4:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-4:CM-4:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-4:CM-4:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-4:CM-4:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-4:CM-4:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-4:CM-4:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-4:CM-4:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-4:CM-4:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-4:CM-4:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-4:CM-4:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-4:CM-4:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-4:CM-4:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-4:CM-4:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-4:CM-4:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-4:CM-4:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-4:CM-4:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-4:CM-4:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-4:CM-4:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-4:CM-4:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-4:CM-4:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-5:CM-5:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-5:CM-5:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-5:CM-5:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-5:CM-5:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-5:CM-5:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-5:CM-5:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-5:CM-5:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-5:CM-5:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-5:CM-5:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-5:CM-5:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-5:CM-5:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-5:CM-5:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-5:CM-5:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-5:CM-5:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-5:CM-5:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-5:CM-5:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-5:CM-5:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-5:CM-5:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-5:CM-5:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-5:CM-5:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-5:CM-5:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-5:CM-5:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: CL-5:CM-5:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-5:CM-5:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: The mechanism suggestion asks if user claims can stand in for established
+    values, but no finding in this slot specifically addresses the substitution of
+    an established value for a user-provided claim via the provided feedback channel.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CL-6
+      feedback_channel_id: FB-7-1
+      process_model_part_id: PM-7-1
+    rationale: The feedback (FB-7-1) shows the controller (RESP-7) taking a patient
+      ID directly from the user query (PM-7-1) to perform an escalation, which allows
+      a user claim to stand in for an established identity/value, potentially leading
+      to H-1 (accessing wrong patient data).
+    relationship: mechanism_specific
+  slot_id: CL-6:CM-6:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:9a7e27d4ffb738afc3865ea24d66c333c27fd8792ee80b44bea769094a52e80e
+- mechanism_id: retrieved_instructions
+  slot_id: CL-6:CM-6:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-6:CM-6:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  path_verdicts:
+  - path:
+      end_id: CL-6
+      feedback_channel_id: FB-7-1
+      process_model_part_id: PM-7-1
+    rationale: The coordination link (CL-6) is described as a trigger signal for escalation
+      based on red-flag terms, not as a mechanism where one controller's message is
+      treated as permission/authority by another.
+    relationship: adjacent_control
+  slot_id: CL-6:CM-6:INCORRECT
+  stop_reason: verifier_rejected
+- mechanism_id: stale_feedback
+  slot_id: CL-6:CM-6:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-6:CM-6:INCORRECT
+  stop_reason: not_proposed
+- detail: The mechanism suggestion concerns whether a user claim can stand in for
+    an established value, but the slot's requirement is for the presence of an escalation
+    signal itself.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CL-6
+      feedback_channel_id: FB-7-1
+      process_model_part_id: PM-7-1
+    rationale: The feedback (FB-7-1) shows the controller (RESP-7) taking a patient
+      ID directly from the user query (PM-7-1) to perform an escalation, which allows
+      a user claim to stand in for an established identity/value, potentially leading
+      to H-1 (accessing wrong patient data).
+    relationship: mechanism_specific
+  slot_id: CL-6:CM-6:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:ad8c6027fffc8b3bc18ab21d072c92b28546dc38547d3655d381e6f1215c9a37
+- mechanism_id: retrieved_instructions
+  slot_id: CL-6:CM-6:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-6:CM-6:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  path_verdicts:
+  - path:
+      end_id: CL-6
+      feedback_channel_id: FB-7-1
+      process_model_part_id: PM-7-1
+    rationale: The coordination link (CL-6) is described as a trigger signal for escalation
+      based on red-flag terms, not as a mechanism where one controller's message is
+      treated as permission/authority by another.
+    relationship: adjacent_control
+  slot_id: CL-6:CM-6:NOT_PROVIDED
+  stop_reason: verifier_rejected
+- mechanism_id: stale_feedback
+  slot_id: CL-6:CM-6:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-6:CM-6:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: CL-6:CM-6:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: CL-6:CM-6:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-6:CM-6:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: CL-6:CM-6:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: stale_feedback
+  slot_id: CL-6:CM-6:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-6:CM-6:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: The mechanism suggestion M1 asks if a user claim can stand in for an established
+    value, but the slot's hazards and constraints do not provide a specific timing
+    or ordering requirement related to user-provided identity claims for this coordination
+    link.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CL-6
+      feedback_channel_id: FB-7-1
+      process_model_part_id: PM-7-1
+    rationale: The feedback (FB-7-1) shows the controller (RESP-7) taking a patient
+      ID directly from the user query (PM-7-1) to perform an escalation, which allows
+      a user claim to stand in for an established identity/value, potentially leading
+      to H-1 (accessing wrong patient data).
+    relationship: mechanism_specific
+  slot_id: CL-6:CM-6:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:49384f7a2965ab0d5efc988ec03b4ae03346c5f8ae744525ad0a87e099c8d882
+- mechanism_id: retrieved_instructions
+  slot_id: CL-6:CM-6:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: CL-6:CM-6:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  path_verdicts:
+  - path:
+      end_id: CL-6
+      feedback_channel_id: FB-7-1
+      process_model_part_id: PM-7-1
+    rationale: The coordination link (CL-6) is described as a trigger signal for escalation
+      based on red-flag terms, not as a mechanism where one controller's message is
+      treated as permission/authority by another.
+    relationship: adjacent_control
+  slot_id: CL-6:CM-6:WRONG_TIMING
+  stop_reason: verifier_rejected
+- mechanism_id: stale_feedback
+  slot_id: CL-6:CM-6:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: CL-6:CM-6:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-10:CA-10-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-10:CA-10-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-10:CA-10-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-10:CA-10-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-10:CA-10-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-10:CA-10-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-10:CA-10-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-10:CA-10-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-10:CA-10-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-10:CA-10-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-10:CA-10-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-10:CA-10-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-10:CA-10-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-10:CA-10-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-10:CA-10-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-10:CA-10-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-10:CA-10-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-10:CA-10-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-10:CA-10-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-10:CA-10-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-10:CA-10-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-10:CA-10-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-10:CA-10-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-10:CA-10-1:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: the supplied evidence does not provide a way to connect the mechanism of
+    user claims standing in for established values to an incorrect retrieval of patient
+    referral information
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-1-1
+      feedback_channel_id: FB-1-2
+      process_model_part_id: PM-1-2
+    rationale: The controller (RESP-1) uses a patient ID taken from tool arguments
+      (FB-1-2) which are derived from the user query (PM-1-2), allowing a user claim
+      to stand in for an established value, which can lead to H-1 (accessing data
+      for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-1:CA-1-1:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:32f4ea83fcef378471aa568128846276d8fda158954ee81d56ece9e3ccaaf9c2
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-1:CA-1-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-1:CA-1-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-1:CA-1-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-1:CA-1-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-1:CA-1-1:INCORRECT
+  stop_reason: not_proposed
+- detail: The mechanism suggestion regarding user claims standing in for established
+    values does not provide evidence that the get_referral operation is missing in
+    a way that leads to the specified hazard.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-1-1
+      feedback_channel_id: FB-1-2
+      process_model_part_id: PM-1-2
+    rationale: The controller (RESP-1) uses a patient ID taken from tool arguments
+      (FB-1-2) which are derived from the user query (PM-1-2), allowing a user claim
+      to stand in for an established value, which can lead to H-1 (accessing data
+      for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:eb75cdb2366b2890654f6c74e99299661acaad732a421ae26ed33c03d40292ca
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-1:CA-1-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-1:CA-1-1:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-1:CA-1-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-1:CA-1-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-1:CA-1-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-1:CA-1-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-1:CA-1-1:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: The mechanism describes an incorrectness/authorization issue involving user
+    claims, which is not a timing-based deviation.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-1-1
+      feedback_channel_id: FB-1-2
+      process_model_part_id: PM-1-2
+    rationale: The controller (RESP-1) uses a patient ID taken from tool arguments
+      (FB-1-2) which are derived from the user query (PM-1-2), allowing a user claim
+      to stand in for an established value, which can lead to H-1 (accessing data
+      for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-1:CA-1-1:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:f89e5e90fc1d02df56a73f85d641ed464428b234fea0a5e340433460d8265b5e
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-1:CA-1-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-1:CA-1-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-1:CA-1-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-1:CA-1-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-1:CA-1-1:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: the mechanism suggestion describes a way to provide incorrect information,
+    but the routed obligation R1 cannot be expressed as a finding through the provided
+    hazards and constraints using this mechanism
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-1-2
+      feedback_channel_id: FB-1-2
+      process_model_part_id: PM-1-2
+    rationale: The controller (RESP-1) uses a patient ID from the user query (PM-1-2)
+      to provide referral details (CA-1-2), allowing a user claim to stand in for
+      an established value, which can lead to H-1 (accessing data for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-1:CA-1-2:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:382459ddf23bd5bf512c026e7bf9f72185f887a85ad2b2548abe27d8beba41a3
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-1:CA-1-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-1:CA-1-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-1:CA-1-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-1:CA-1-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-1:CA-1-2:INCORRECT
+  stop_reason: not_proposed
+- detail: the mechanism involving user claims standing in for established values is
+    not expressed by any finding in this slot.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-1-2
+      feedback_channel_id: FB-1-2
+      process_model_part_id: PM-1-2
+    rationale: The controller (RESP-1) uses a patient ID from the user query (PM-1-2)
+      to provide referral details (CA-1-2), allowing a user claim to stand in for
+      an established value, which can lead to H-1 (accessing data for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-1:CA-1-2:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:fbf121d36d66b6438e5a101e70e3fd0deb4d166ac7fd1d139031fd921f7182fb
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-1:CA-1-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-1:CA-1-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-1:CA-1-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-1:CA-1-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-1:CA-1-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-1:CA-1-2:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-1:CA-1-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-1:CA-1-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-1:CA-1-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-1:CA-1-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-1:CA-1-2:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: the mechanism regarding user claims standing in for established values is
+    not directly expressed by the findings in this slot
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-1-2
+      feedback_channel_id: FB-1-2
+      process_model_part_id: PM-1-2
+    rationale: The controller (RESP-1) uses a patient ID from the user query (PM-1-2)
+      to provide referral details (CA-1-2), allowing a user claim to stand in for
+      an established value, which can lead to H-1 (accessing data for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-1:CA-1-2:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:eb991cdd8bc5413b16ba1c71d7acf80cadbb43d96e3a2bd43eba643bdf93d852
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-1:CA-1-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-1:CA-1-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-1:CA-1-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-1:CA-1-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-1:CA-1-2:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: the provided mechanism suggestion M1 is not explicitly expressed by the
+    current findings in this slot.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-2-1
+      feedback_channel_id: FB-2-5
+      process_model_part_id: PM-2-5
+    rationale: The controller (RESP-2) uses a patient ID from the user query (FB-2-5)
+      to retrieve education material (CA-2-1), allowing a user claim to stand in for
+      an established value, which can lead to H-1 (accessing data for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-2:CA-2-1:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:3234f5e59b7a999a06f4cdfe741cfbbdf941cbab645155acd5251be5319dd327
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-1:INCORRECT
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-1:INCORRECT
+  stop_reason: not_proposed
+- detail: the mechanism M1 describes a way a value is incorrectly established via
+    user message, which is not an omission of the retrieval action itself
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-2-1
+      feedback_channel_id: FB-2-5
+      process_model_part_id: PM-2-5
+    rationale: The controller (RESP-2) uses a patient ID from the user query (FB-2-5)
+      to retrieve education material (CA-2-1), allowing a user claim to stand in for
+      an established value, which can lead to H-1 (accessing data for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-2:CA-2-1:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:495da7ee2d0eb9df93553c64050c8ee66edfa39a710aea1a72551ce134a4c8b3
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-1:NOT_PROVIDED
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-2:CA-2-1:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-1:WRONG_DURATION
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-1:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: The mechanism of a user claim standing in for a value relates to incorrect
+    identity or authorization, which is not expressed as a timing violation in this
+    slot.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-2-1
+      feedback_channel_id: FB-2-5
+      process_model_part_id: PM-2-5
+    rationale: The controller (RESP-2) uses a patient ID from the user query (FB-2-5)
+      to retrieve education material (CA-2-1), allowing a user claim to stand in for
+      an established value, which can lead to H-1 (accessing data for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-2:CA-2-1:WRONG_TIMING
+  stop_reason: slot_fill_not_applicable
+  suggestion_id: msug:v1:cfa0fe2d6313191ccb3cd336c3b13ab4f973319f75492260948b6220af15adf8
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-1:WRONG_TIMING
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-1:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: the mechanism suggestion M1 is about a user claim standing in for a value,
+    but there is no evidence in the slot that such a bypass is occurring or being
+    prevented.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-2-2
+      feedback_channel_id: FB-2-5
+      process_model_part_id: PM-2-5
+    rationale: The controller (RESP-2) uses a patient ID from the user query (FB-2-5)
+      to generate a video (CA-2-2), allowing a user claim to stand in for an established
+      value, which can lead to H-1 (accessing data for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-2:CA-2-2:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:9249e86a918d75dc73e8fc63cbdd58b38cff9228b9e98d4e1f663bf148ba3920
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-2:INCORRECT
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-2:INCORRECT
+  stop_reason: not_proposed
+- detail: the slot's findings do not express the M1 mechanism where a user claim stands
+    in for an established value
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-2-2
+      feedback_channel_id: FB-2-5
+      process_model_part_id: PM-2-5
+    rationale: The controller (RESP-2) uses a patient ID from the user query (FB-2-5)
+      to generate a video (CA-2-2), allowing a user claim to stand in for an established
+      value, which can lead to H-1 (accessing data for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-2:CA-2-2:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:67f1c8e9709c8a313b074c297422f89bcd65dcac33d2fd7e22a3849ad96ff35b
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-2:NOT_PROVIDED
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-2:CA-2-2:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-2:WRONG_DURATION
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-2:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: The slot contains no findings for the mechanism suggestion.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-2-2
+      feedback_channel_id: FB-2-5
+      process_model_part_id: PM-2-5
+    rationale: The controller (RESP-2) uses a patient ID from the user query (FB-2-5)
+      to generate a video (CA-2-2), allowing a user claim to stand in for an established
+      value, which can lead to H-1 (accessing data for the wrong patient).
+    relationship: mechanism_specific
+  slot_id: RESP-2:CA-2-2:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:174818760c16a146354458a63ab12abc9653794e397fccb14c37ce419bceb036
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-2:WRONG_TIMING
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-2:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: the mechanism suggestion involves whether a user claim stands in for an
+    established value, but no finding in this slot specifically addresses the substitution
+    of an established value with a user claim for the purpose of the control action.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-2-3
+      feedback_channel_id: FB-2-5
+      process_model_part_id: PM-2-5
+    rationale: The feedback (requested patient ID) and process model (requested patient
+      ID) indicate the controller relies on a value from the user message to identify
+      the patient, which matches the mechanism. The hazard H-1 and constraint SC-2
+      govern the consequence of accessing the wrong patient's data.
+    relationship: mechanism_specific
+  slot_id: RESP-2:CA-2-3:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:e949c2a079dc70836b6ee9471cdb92f20ba6de27f712c838d2f7940d330a46b7
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-3:INCORRECT
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-3:INCORRECT
+  stop_reason: not_proposed
+- detail: The mechanism M1 concerns the substitution of values via user messages,
+    which is a cause for incorrect or not_provided actions, but does not establish
+    a scenario where the absence of providing content is unsafe.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-2-3
+      feedback_channel_id: FB-2-5
+      process_model_part_id: PM-2-5
+    rationale: The feedback (requested patient ID) and process model (requested patient
+      ID) indicate the controller relies on a value from the user message to identify
+      the patient, which matches the mechanism. The hazard H-1 and constraint SC-2
+      govern the consequence of accessing the wrong patient's data.
+    relationship: mechanism_specific
+  slot_id: RESP-2:CA-2-3:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:be76ecd912638e150a32b0217e34d5e0b3af037af696cfabad95921207dd1d22
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-3:NOT_PROVIDED
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-2:CA-2-3:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-3:WRONG_DURATION
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-3:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: The mechanism 'User claim stands in for an established value' describes
+    a way to establish a process-model value, which relates to correctness/integrity,
+    but no finding in the WRONG_TIMING slot expresses this mechanism's effect as a
+    timing deviation.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-2-3
+      feedback_channel_id: FB-2-5
+      process_model_part_id: PM-2-5
+    rationale: The feedback (requested patient ID) and process model (requested patient
+      ID) indicate the controller relies on a value from the user message to identify
+      the patient, which matches the mechanism. The hazard H-1 and constraint SC-2
+      govern the consequence of accessing the wrong patient's data.
+    relationship: mechanism_specific
+  slot_id: RESP-2:CA-2-3:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:fb94380ef106518c59b5b6a096a2d4add12ac1b97fffa1545366378d7f2649b8
+- detail: authoritative
+  mechanism_id: retrieved_instructions
+  slot_id: RESP-2:CA-2-3:WRONG_TIMING
+  stop_reason: authority_filtered
+- mechanism_id: stale_history
+  slot_id: RESP-2:CA-2-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-2:CA-2-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-2:CA-2-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-2:CA-2-3:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: slot_provider_contract_failed
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-3-1
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes answering a clinical question from education material,
+      which does not involve a user claim standing in for an established value like
+      identity or approval; it is a standard query/response.
+    relationship: adjacent_control
+  - path:
+      end_id: CA-3-1
+      feedback_channel_id: FB-3-3
+      process_model_part_id: PM-3-3
+    rationale: The feedback and process model show the controller uses a 'requested
+      patient ID' from the user message to perform a clinical action. This matches
+      the mechanism of a user claim standing in for an established value (identity),
+      and the hazard H-1/SC-2 governs the consequence of incorrect patient data access.
+    relationship: mechanism_specific
+  slot_id: RESP-3:CA-3-1:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:72517df6986fdefd3c75bd21aff5ca980e75ac057a95467f1505b6c60babc825
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-3:CA-3-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-1:INCORRECT
+  stop_reason: not_proposed
+- detail: the mechanism concern regarding user claims standing in for established
+    values is not expressed in the findings
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-3-1
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes answering a clinical question from education material,
+      which does not involve a user claim standing in for an established value like
+      identity or approval; it is a standard query/response.
+    relationship: adjacent_control
+  - path:
+      end_id: CA-3-1
+      feedback_channel_id: FB-3-3
+      process_model_part_id: PM-3-3
+    rationale: The feedback and process model show the controller uses a 'requested
+      patient ID' from the user message to perform a clinical action. This matches
+      the mechanism of a user claim standing in for an established value (identity),
+      and the hazard H-1/SC-2 governs the consequence of incorrect patient data access.
+    relationship: mechanism_specific
+  slot_id: RESP-3:CA-3-1:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:bbaa85c2c7d4afa0d4e9f0ddd952f9ce25c96e0cf0c6bbba750f0c0e8aff344a
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-3:CA-3-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-3:CA-3-1:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-3:CA-3-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-1:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: The action is instantaneous and no preceding or succeeding control actions
+    are defined to support a WRONG_TIMING finding.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-3-1
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes answering a clinical question from education material,
+      which does not involve a user claim standing in for an established value like
+      identity or approval; it is a standard query/response.
+    relationship: adjacent_control
+  - path:
+      end_id: CA-3-1
+      feedback_channel_id: FB-3-3
+      process_model_part_id: PM-3-3
+    rationale: The feedback and process model show the controller uses a 'requested
+      patient ID' from the user message to perform a clinical action. This matches
+      the mechanism of a user claim standing in for an established value (identity),
+      and the hazard H-1/SC-2 governs the consequence of incorrect patient data access.
+    relationship: mechanism_specific
+  slot_id: RESP-3:CA-3-1:WRONG_TIMING
+  stop_reason: slot_fill_not_applicable
+  suggestion_id: msug:v1:6da34766bb44dbf6fbd477a251e9e9cb92934e1a3d5b638fdd03d6486c568738
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-3:CA-3-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-1:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: the mechanism 'User claim stands in for an established value' is a potential
+    cause for incorrect patient_id but is not directly expressed as an ICA in this
+    slot
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-3-2
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes delivering a clinical answer based on user query
+      content, which is a standard interaction and does not involve the user claiming
+      a value that should be established by an authoritative source (like identity
+      or approval).
+    relationship: adjacent_control
+  - path:
+      end_id: CA-3-2
+      feedback_channel_id: FB-3-3
+      process_model_part_id: PM-3-3
+    rationale: The feedback and process model show the controller uses a 'requested
+      patient ID' from the user message to deliver a clinical answer. This matches
+      the mechanism of a user claim standing in for an established value, and the
+      hazard H-1/SC-2 governs the consequence of incorrect patient data access.
+    relationship: mechanism_specific
+  slot_id: RESP-3:CA-3-2:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:8ce76a98c29f411fb2e3de4a028705323c191a1e4f419ae07de8755bf06e48df
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-3:CA-3-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-2:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-2:INCORRECT
+  stop_reason: not_proposed
+- ica_ids:
+  - RESP-3:CA-3-2:NOT_PROVIDED:1
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-3-2
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes delivering a clinical answer based on user query
+      content, which is a standard interaction and does not involve the user claiming
+      a value that should be established by an authoritative source (like identity
+      or approval).
+    relationship: adjacent_control
+  - path:
+      end_id: CA-3-2
+      feedback_channel_id: FB-3-3
+      process_model_part_id: PM-3-3
+    rationale: The feedback and process model show the controller uses a 'requested
+      patient ID' from the user message to deliver a clinical answer. This matches
+      the mechanism of a user claim standing in for an established value, and the
+      hazard H-1/SC-2 governs the consequence of incorrect patient data access.
+    relationship: mechanism_specific
+  slot_id: RESP-3:CA-3-2:NOT_PROVIDED
+  stop_reason: finding
+  suggestion_id: msug:v1:bf0c3bfd97a7fabcf4b050f44707b7db433b381ab623a3e937ca286f9431065a
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-3:CA-3-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-2:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-3:CA-3-2:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-3:CA-3-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-2:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-2:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: the mechanism describes a potential source of error but does not constitute
+    a timing violation for delivering the answer
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-3-2
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes delivering a clinical answer based on user query
+      content, which is a standard interaction and does not involve the user claiming
+      a value that should be established by an authoritative source (like identity
+      or approval).
+    relationship: adjacent_control
+  - path:
+      end_id: CA-3-2
+      feedback_channel_id: FB-3-3
+      process_model_part_id: PM-3-3
+    rationale: The feedback and process model show the controller uses a 'requested
+      patient ID' from the user message to deliver a clinical answer. This matches
+      the mechanism of a user claim standing in for an established value, and the
+      hazard H-1/SC-2 governs the consequence of incorrect patient data access.
+    relationship: mechanism_specific
+  slot_id: RESP-3:CA-3-2:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:0a4f9e3c142eae19930b74d3fde4de3b7222c14b09d3b7c718163687e0cde361
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-3:CA-3-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-2:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-3-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes escalating a query to a clinician, which is a standard
+      operational response to query content and does not involve a user claim standing
+      in for an established value like identity or approval.
+    relationship: adjacent_control
+  slot_id: RESP-3:CA-3-3:INCORRECT
+  stop_reason: verifier_rejected
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  path_verdicts:
+  - path:
+      end_id: CA-3-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes a single controller (the assistant) handling a query
+      and escalating; there is no evidence of a coordination link or message between
+      two controllers where one treats the other's message as unverified permission.
+    relationship: insufficient_evidence
+  slot_id: RESP-3:CA-3-3:INCORRECT
+  stop_reason: verifier_unresolved
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-3:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-3-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes escalating a query to a clinician, which is a standard
+      operational response to query content and does not involve a user claim standing
+      in for an established value like identity or approval.
+    relationship: adjacent_control
+  slot_id: RESP-3:CA-3-3:NOT_PROVIDED
+  stop_reason: verifier_rejected
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  path_verdicts:
+  - path:
+      end_id: CA-3-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes a single controller (the assistant) handling a query
+      and escalating; there is no evidence of a coordination link or message between
+      two controllers where one treats the other's message as unverified permission.
+    relationship: insufficient_evidence
+  slot_id: RESP-3:CA-3-3:NOT_PROVIDED
+  stop_reason: verifier_unresolved
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-3:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-3:CA-3-3:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-3:CA-3-3:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-3:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-3-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes escalating a query to a clinician, which is a standard
+      operational response to query content and does not involve a user claim standing
+      in for an established value like identity or approval.
+    relationship: adjacent_control
+  slot_id: RESP-3:CA-3-3:WRONG_TIMING
+  stop_reason: verifier_rejected
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-3:CA-3-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-3:CA-3-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  path_verdicts:
+  - path:
+      end_id: CA-3-3
+      feedback_channel_id: FB-3-1
+      process_model_part_id: PM-3-1
+    rationale: The path describes a single controller (the assistant) handling a query
+      and escalating; there is no evidence of a coordination link or message between
+      two controllers where one treats the other's message as unverified permission.
+    relationship: insufficient_evidence
+  slot_id: RESP-3:CA-3-3:WRONG_TIMING
+  stop_reason: verifier_unresolved
+- mechanism_id: stale_feedback
+  slot_id: RESP-3:CA-3-3:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-3:CA-3-3:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: the mechanism describes a potential way the controller could receive an
+    incorrect patient ID from an untrusted user message, but no specific finding in
+    this slot expresses this scenario via a governing constraint.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-4-1
+      feedback_channel_id: FB-4-2
+      process_model_part_id: PM-4-2
+    rationale: The feedback and process model show the controller uses a 'requested
+      patient ID' from the user message to submit a questionnaire. This matches the
+      mechanism of a user claim standing in for an established value, and the hazard
+      H-1/SC-2 governs the consequence of incorrect patient data access.
+    relationship: mechanism_specific
+  slot_id: RESP-4:CA-4-1:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:8003705d636ab544b8ce6d42629f8b32b431f23969deaaee2f47a5bee4704e0b
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-4:CA-4-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-4:CA-4-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-4:CA-4-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-4:CA-4-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-4:CA-4-1:INCORRECT
+  stop_reason: not_proposed
+- detail: the provided evidence does not contain an established value to compare against
+    a user claim
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-4-1
+      feedback_channel_id: FB-4-2
+      process_model_part_id: PM-4-2
+    rationale: The feedback and process model show the controller uses a 'requested
+      patient ID' from the user message to submit a questionnaire. This matches the
+      mechanism of a user claim standing in for an established value, and the hazard
+      H-1/SC-2 governs the consequence of incorrect patient data access.
+    relationship: mechanism_specific
+  slot_id: RESP-4:CA-4-1:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:a6d15127e288a847ba48c152016ace504346ad9782d6400c5145447ade928bf9
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-4:CA-4-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-4:CA-4-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-4:CA-4-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-4:CA-4-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-4:CA-4-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-4:CA-4-1:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-4:CA-4-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-4:CA-4-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-4:CA-4-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-4:CA-4-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-4:CA-4-1:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: The mechanism suggests a concern regarding user claims standing in for identity,
+    but no finding in this slot addresses the timing or ordering of the submit_questionnaire
+    operation relative to such claims or other system events.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-4-1
+      feedback_channel_id: FB-4-2
+      process_model_part_id: PM-4-2
+    rationale: The feedback and process model show the controller uses a 'requested
+      patient ID' from the user message to submit a questionnaire. This matches the
+      mechanism of a user claim standing in for an established value, and the hazard
+      H-1/SC-2 governs the consequence of incorrect patient data access.
+    relationship: mechanism_specific
+  slot_id: RESP-4:CA-4-1:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:ae4de23e8537aa430fc9c91545b2c5b0305fa966ad9e89295511a210c1d6a3c6
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-4:CA-4-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-4:CA-4-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-4:CA-4-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-4:CA-4-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-4:CA-4-1:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: the findings do not explicitly address the mechanism of a user claim standing
+    in for an established identity value
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-5-1
+      feedback_channel_id: FB-5-2
+      process_model_part_id: PM-5-2
+    rationale: The control action 'summarize_for_ehr' relies on a 'Requested patient
+      ID' from the process model, which is a value the user can claim in the message.
+      If this ID is taken from the user claim rather than an authenticated source,
+      it can lead to H-1 (accessing data for a patient ID that does not match the
+      session), which is a harm to a party other than the claimant (the patient whose
+      data is accessed).
+    relationship: mechanism_specific
+  slot_id: RESP-5:CA-5-1:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:ae5f7c4885246547c65255aefece5839a6666f5d50e25a3cf316ef02ce6b69e4
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-5:CA-5-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-5:CA-5-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-5:CA-5-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-5:CA-5-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-5:CA-5-1:INCORRECT
+  stop_reason: not_proposed
+- detail: The mechanism M1 concerns how a value is established in the process model,
+    but the slot is for NOT_PROVIDED (absence of action).
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-5-1
+      feedback_channel_id: FB-5-2
+      process_model_part_id: PM-5-2
+    rationale: The control action 'summarize_for_ehr' relies on a 'Requested patient
+      ID' from the process model, which is a value the user can claim in the message.
+      If this ID is taken from the user claim rather than an authenticated source,
+      it can lead to H-1 (accessing data for a patient ID that does not match the
+      session), which is a harm to a party other than the claimant (the patient whose
+      data is accessed).
+    relationship: mechanism_specific
+  slot_id: RESP-5:CA-5-1:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:e7c92d3a9f26c6513fa312a8ee386137500c0bd830f9ef5dfdc3f585fbc051f0
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-5:CA-5-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-5:CA-5-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-5:CA-5-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-5:CA-5-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-5:CA-5-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-5:CA-5-1:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-5:CA-5-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-5:CA-5-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-5:CA-5-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-5:CA-5-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-5:CA-5-1:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: the mechanism relates to how a value is established, which is an INCORRECT
+    or NOT_PROVIDED concern, not WRONG_TIMING
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-5-1
+      feedback_channel_id: FB-5-2
+      process_model_part_id: PM-5-2
+    rationale: The control action 'summarize_for_ehr' relies on a 'Requested patient
+      ID' from the process model, which is a value the user can claim in the message.
+      If this ID is taken from the user claim rather than an authenticated source,
+      it can lead to H-1 (accessing data for a patient ID that does not match the
+      session), which is a harm to a party other than the claimant (the patient whose
+      data is accessed).
+    relationship: mechanism_specific
+  slot_id: RESP-5:CA-5-1:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:feb28e1a2644d523ea0ee333af50eafaa871f446ec85f64a776fcdb2d45157cc
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-5:CA-5-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-5:CA-5-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-5:CA-5-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-5:CA-5-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-5:CA-5-1:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: The mechanism suggestion regarding user claims standing in for established
+    values is not expressed by the findings in this slot.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-6-1
+      feedback_channel_id: FB-6-3
+      process_model_part_id: PM-6-3
+    rationale: The control action 'commit_to_ehr' relies on a 'Requested patient ID'
+      from the process model. If the user provides this ID as a claim, it allows the
+      controller to act on a value it should establish from an entitled source. This
+      can lead to H-1 (accessing/returning data for the wrong patient), which is a
+      harm to a third party.
+    relationship: mechanism_specific
+  slot_id: RESP-6:CA-6-1:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:263a268cb56615274429ec5d66af21d4fccd2372259503c6bc2496781f74f469
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-6:CA-6-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-6:CA-6-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-6:CA-6-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-6:CA-6-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-6:CA-6-1:INCORRECT
+  stop_reason: not_proposed
+- detail: The mechanism M1 relates to user claims standing in for established values;
+    however, no finding in this NOT_PROVIDED slot expresses this mechanism through
+    the supplied hazard and governing constraint.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-6-1
+      feedback_channel_id: FB-6-3
+      process_model_part_id: PM-6-3
+    rationale: The control action 'commit_to_ehr' relies on a 'Requested patient ID'
+      from the process model. If the user provides this ID as a claim, it allows the
+      controller to act on a value it should establish from an entitled source. This
+      can lead to H-1 (accessing/returning data for the wrong patient), which is a
+      harm to a third party.
+    relationship: mechanism_specific
+  slot_id: RESP-6:CA-6-1:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:47e32e276390a99ec586440a1e1c82fa03fd44b28483bcb045ffe25a64a207ba
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-6:CA-6-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-6:CA-6-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-6:CA-6-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-6:CA-6-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-6:CA-6-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-6:CA-6-1:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-6:CA-6-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-6:CA-6-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-6:CA-6-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-6:CA-6-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-6:CA-6-1:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: the mechanism regarding a user claim standing in for an established value
+    is not expressed by a WRONG_TIMING deviation of the commit_to_ehr action
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-6-1
+      feedback_channel_id: FB-6-3
+      process_model_part_id: PM-6-3
+    rationale: The control action 'commit_to_ehr' relies on a 'Requested patient ID'
+      from the process model. If the user provides this ID as a claim, it allows the
+      controller to act on a value it should establish from an entitled source. This
+      can lead to H-1 (accessing/returning data for the wrong patient), which is a
+      harm to a third party.
+    relationship: mechanism_specific
+  slot_id: RESP-6:CA-6-1:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:5280fd73c0d4d2da4374b63baf38d08b261279d80cded32f598dc4e6950605b9
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-6:CA-6-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-6:CA-6-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-6:CA-6-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-6:CA-6-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-6:CA-6-1:WRONG_TIMING
+  stop_reason: not_proposed
+- detail: the mechanism suggests a user claim might stand in for an established value,
+    but no finding in this slot currently expresses this specific behavior via the
+    supplied hazard and constraint
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-7-1
+      feedback_channel_id: FB-7-1
+      process_model_part_id: PM-7-1
+    rationale: The control action 'escalate_to_clinician' relies on a 'Requested patient
+      ID' from the process model. If the user claims a specific patient ID, the system
+      may open an escalation case for the wrong patient, leading to H-1 (accessing/returning
+      data for a patient ID that does not match the session), which harms the third-party
+      patient.
+    relationship: mechanism_specific
+  slot_id: RESP-7:CA-7-1:INCORRECT
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:84faaa1a0a28aecb532510799d02bcd45983467cd02d0fea0271a15460212c67
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-7:CA-7-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-7:CA-7-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-7:CA-7-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-7:CA-7-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-7:CA-7-1:INCORRECT
+  stop_reason: not_proposed
+- detail: The mechanism suggests a user claim might substitute for an established
+    value, but the slot's hazards and constraints do not provide evidence of a specific
+    required identity verification for the 'escalate_to_clinician' action that would
+    make its absence an ICA for the NOT_PROVIDED type.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-7-1
+      feedback_channel_id: FB-7-1
+      process_model_part_id: PM-7-1
+    rationale: The control action 'escalate_to_clinician' relies on a 'Requested patient
+      ID' from the process model. If the user claims a specific patient ID, the system
+      may open an escalation case for the wrong patient, leading to H-1 (accessing/returning
+      data for a patient ID that does not match the session), which harms the third-party
+      patient.
+    relationship: mechanism_specific
+  slot_id: RESP-7:CA-7-1:NOT_PROVIDED
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:dd8abc38a41165b8f5b56e267c74780ddb351e9006273cfe9841db3daa961f5f
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-7:CA-7-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-7:CA-7-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-7:CA-7-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-7:CA-7-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-7:CA-7-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-7:CA-7-1:WRONG_DURATION
+  stop_reason: slot_not_analyzed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-7:CA-7-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-7:CA-7-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-7:CA-7-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-7:CA-7-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-7:CA-7-1:WRONG_DURATION
+  stop_reason: not_proposed
+- detail: the mechanism suggests a user claim might replace an established value,
+    but there is no evidence provided to confirm that an escalation action is performed
+    at a wrong time due to this specific substitution.
+  mechanism_id: user_claim
+  path_verdicts:
+  - path:
+      end_id: CA-7-1
+      feedback_channel_id: FB-7-1
+      process_model_part_id: PM-7-1
+    rationale: The control action 'escalate_to_clinician' relies on a 'Requested patient
+      ID' from the process model. If the user claims a specific patient ID, the system
+      may open an escalation case for the wrong patient, leading to H-1 (accessing/returning
+      data for a patient ID that does not match the session), which harms the third-party
+      patient.
+    relationship: mechanism_specific
+  slot_id: RESP-7:CA-7-1:WRONG_TIMING
+  stop_reason: slot_fill_unresolved
+  suggestion_id: msug:v1:c46ca089ac31ef3269f68d9faf2e958aecbd6cfe0a60dca3cff93258f42a141b
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-7:CA-7-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-7:CA-7-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-7:CA-7-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-7:CA-7-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-7:CA-7-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-8:CA-8-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-8:CA-8-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-8:CA-8-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-8:CA-8-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-8:CA-8-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-8:CA-8-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-8:CA-8-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-8:CA-8-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-8:CA-8-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-8:CA-8-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-8:CA-8-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-8:CA-8-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-8:CA-8-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-8:CA-8-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-8:CA-8-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-8:CA-8-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-8:CA-8-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-8:CA-8-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-8:CA-8-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-8:CA-8-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-8:CA-8-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-8:CA-8-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-8:CA-8-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-8:CA-8-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-9:CA-9-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-9:CA-9-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-9:CA-9-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-9:CA-9-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-9:CA-9-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-9:CA-9-1:INCORRECT
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-9:CA-9-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-9:CA-9-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-9:CA-9-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-9:CA-9-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-9:CA-9-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-9:CA-9-1:NOT_PROVIDED
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-9:CA-9-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-9:CA-9-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-9:CA-9-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-9:CA-9-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-9:CA-9-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-9:CA-9-1:WRONG_DURATION
+  stop_reason: not_proposed
+- mechanism_id: user_claim
+  slot_id: RESP-9:CA-9-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: retrieved_instructions
+  slot_id: RESP-9:CA-9-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_history
+  slot_id: RESP-9:CA-9-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: delegated_authority
+  slot_id: RESP-9:CA-9-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: stale_feedback
+  slot_id: RESP-9:CA-9-1:WRONG_TIMING
+  stop_reason: not_proposed
+- mechanism_id: forged_completion
+  slot_id: RESP-9:CA-9-1:WRONG_TIMING
+  stop_reason: not_proposed
+schema_version: stpa-mechanism-suggestion-accounting-v1
+summary:
+  rows: 504
+  stop_reasons:
+    authority_filtered: 12
+    finding: 1
+    ica_verifier_rejected: 0
+    not_proposed: 424
+    over_cap: 0
+    prompt_budget_exceeded: 0
+    slot_fill_not_applicable: 2
+    slot_fill_unresolved: 33
+    slot_not_analyzed: 17
+    verifier_rejected: 12
+    verifier_unresolved: 3

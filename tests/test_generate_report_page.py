@@ -29,7 +29,8 @@ SCHEMA = (
     / "stage-summary-v1.schema.json"
 )
 SECTIONS = (
-    "answer how risks slots testability obligations failed warnings hazards scenarios "
+    "answer how risks slots testability obligations mechanism-suggestions failed "
+    "warnings hazards scenarios "
     "target handoff effort"
 ).split()
 
