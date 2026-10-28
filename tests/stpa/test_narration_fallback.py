@@ -48,6 +48,7 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
     NARRATIVES_FILENAME,
     NarrationReply,
     PublishedNarrative,
+    _subject,
     build_facts,
     fallback_failures,
     fallback_narrative,
@@ -557,6 +558,36 @@ def test_a_lost_clause_is_reported_though_the_rest_of_its_fact_is_stated() -> No
             "The agent pays when the status != closed.",
             "the agent pays when the status is different from closed",
         ),
+        # A compound subject after a clause opener gets its copula, agreeing
+        # with its head; one that holds a verb stays adjectival.
+        (
+            "The agent pays if the refunded amount > 1000.",
+            "the agent pays if the refunded amount is greater than 1000",
+        ),
+        (
+            "The agent pays if the balance of the account < 10.",
+            "the agent pays if the balance of the account is less than 10",
+        ),
+        (
+            "The agent pays if the refund and the fee > 10.",
+            "the agent pays if the refund and the fee are greater than 10",
+        ),
+        (
+            "The agent ensures that the balance > 0.",
+            "the agent ensures that the balance is greater than 0",
+        ),
+        (
+            "The refund amount <= 10 for every refund.",
+            "the refund amount is at most 10 for every refund",
+        ),
+        (
+            "The agent pays that amount > 10.",
+            "the agent pays that amount greater than 10",
+        ),
+        (
+            "The agent pays when the agent sent refunds > 1000.",
+            "the agent pays when the agent sent refunds greater than 1000",
+        ),
         # An existing copula, with its negation, keeps the words it has.
         ("The amount is not > 1000.", "the amount is not greater than 1000"),
         ("The amount is never <= 0.", "the amount is never at most 0"),
@@ -579,6 +610,35 @@ def test_an_expression_the_ownership_rules_reject_reads_as_plain_words(
     assert f"The unsafe outcome is that {prose}." in fallback.text
     assert handoff_ownership_violations({"narrative": fallback.text}) == []
     assert fallback.omitted == ()
+
+
+@pytest.mark.parametrize(
+    ("phrase", "subject"),
+    [
+        ("amount", False),
+        ("the refund amount", False),
+        ("the refund amounts", True),
+        ("the daily transfer total", False),
+        ("the refunded amount", False),
+        ("the balance of the account", False),
+        ("the refund and the fee", True),
+        ("these totals", True),
+        ("the status", False),
+        ("the agent approves refunds", None),
+        ("the agent pays amounts", None),
+        ("the guest has bookings", None),
+        ("the agent sent refunds", None),
+        ("the agent never refunds", None),
+        ("the agent approved the refunds", None),
+        ("a refund for an amount", None),
+        ("the first second third fourth fifth", None),
+        ("", None),
+    ],
+)
+def test_a_compared_subject_holds_no_finite_verb(
+    phrase: str, subject: bool | None
+) -> None:
+    assert _subject(phrase.split()) is subject
 
 
 @pytest.mark.parametrize(
@@ -610,6 +670,30 @@ def test_an_expression_the_ownership_rules_reject_reads_as_plain_words(
         (
             "The agent pays amounts F3 > 1000.",
             "the agent pays amounts greater than 1000",
+        ),
+        (
+            "The agent approves a refund if the refund amount F3 > 1000.",
+            "the agent approves a refund if the refund amount is greater than 1000",
+        ),
+        (
+            "The agent pays when the account balance F3 < 10.",
+            "the agent pays when the account balance is less than 10",
+        ),
+        (
+            "The agent transfers money unless the daily transfer total >= 500.",
+            "the agent transfers money unless the daily transfer total is at least 500",
+        ),
+        (
+            "The agent issues refunds if the refund amounts > 1000.",
+            "the agent issues refunds if the refund amounts are greater than 1000",
+        ),
+        (
+            "The agent pays when the agent approves refunds > 1000.",
+            "the agent pays when the agent approves refunds greater than 1000",
+        ),
+        (
+            "The agent confirms the stay if the guest has bookings > 3.",
+            "the agent confirms the stay if the guest has bookings greater than 3",
         ),
     ],
 )

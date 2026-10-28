@@ -225,6 +225,23 @@ _DETERMINERS = frozenset(
     "some no all both".split()
 )
 _PLURAL_DETERMINERS = frozenset("these those all both".split())
+# The words a compared subject may hold between its nouns, each of which
+# may take a determiner of its own: "the refund and the fee", "the balance
+# of the account".
+_SUBJECT_LINKS = frozenset("and or of".split())
+# A compared subject holds no finite verb. These words always mark one: an
+# auxiliary or modal, a negation or frequency adverb that sits in a verb
+# phrase, or a common irregular past form.
+_VERB_WORDS = frozenset(
+    "is are was were be been being am has have had does do did can could will "
+    "would shall should must may might not never always often sent paid made "
+    "took gave got kept left held sold bought brought ran told found".split()
+)
+# Words ending in -s that name a thing, not an action, inside a subject.
+_NOUNS_IN_S = frozenset(
+    "series news goods funds savings earnings sales terms settings details "
+    "means metrics analytics logistics".split()
+)
 # The words that can follow a compared value which closes its own clause.
 _FOLLOWING_WORDS = frozenset(
     "for in on at with without by to from during after before when while if "
@@ -1046,47 +1063,86 @@ def _comparison_words(before: str, operator: str, after: str = "") -> str:
     """Read a comparison operator as words that fit the text around it.
 
     The adjective phrase fits a copula ("is not greater than") and a noun it
-    modifies ("an amount greater than"). A noun after "whose", "when" or
-    "if" opens a clause and needs "is". So does a noun at the clause's start
-    when the compared value ends the clause or a preposition follows it
-    ("The amount is at most 10 for every refund"); before a verb the phrase
-    modifies the noun ("The amounts greater than 1000 reach the ledger").
-    Only a one-word noun, after its determiner if it has one, counts as such
-    a subject, or two words after "whose": a longer run may hold a verb, as
-    in "the agent approves refunds", whose object the phrase then modifies.
-    Anything else keeps the adjective phrase alone, which stays grammatical.
+    modifies ("refunds greater than 1000"), so it is the reading unless the
+    compared words are positively a clause's subject. Then "is" or "are"
+    joins them: after a clause opener such as "if", "when", "unless" or
+    "whose" ("if the refund amount is greater than 1000"), or at the clause's
+    start when the compared value ends the clause or a preposition follows
+    it ("The amount is at most 10 for every refund"). :func:`_subject` says
+    whether the words before the operator are such a subject.
     """
     words = _COMPARISON_WORDS[operator]
     if _COPULA.search(before):
         return words
     tokens = re.findall(r"[\w'-]+|[;,.:!?(]", before)
-    index = len(tokens) - 1
-    noun = 0
+    start = len(tokens)
     while (
-        index >= 0
-        and noun < 3
-        and tokens[index][0].isalnum()
-        and tokens[index].lower() not in _DETERMINERS | _CLAUSE_OPENERS
+        start > 0
+        and tokens[start - 1][0].isalnum()
+        and tokens[start - 1].lower() not in _CLAUSE_OPENERS
     ):
-        index -= 1
-        noun += 1
-    if noun == 0:
+        start -= 1
+    phrase = [token.lower() for token in tokens[start:]]
+    boundary = tokens[start - 1].lower() if start > 0 else ""
+    if boundary == "that" and not (phrase and phrase[0] in _DETERMINERS):
+        # "that" before a bare noun is a determiner ("pays that amount").
         return words
-    head = tokens[-1].lower()
-    determiner = tokens[index].lower() if index >= 0 else ""
-    if determiner in _DETERMINERS:
-        index -= 1
-    if index >= 0 and _opens_nothing(tokens[index]):
+    subject = _subject(phrase)
+    if subject is None:
         return words
-    opener = tokens[index].lower() if index >= 0 else ""
-    if noun > (2 if opener == "whose" else 1):
+    if boundary not in _CLAUSE_OPENERS and not _ends_comparison(after):
         return words
-    if (index < 0 or not tokens[index][0].isalnum()) and not _ends_comparison(after):
-        return words
-    plural = determiner in _PLURAL_DETERMINERS or (
-        head.endswith("s") and not head.endswith(("ss", "us", "is"))
+    return f"{'are' if subject else 'is'} {words}"
+
+
+def _subject(phrase: Sequence[str]) -> bool | None:
+    """Whether ``phrase`` is a plural subject, a singular one, or no subject.
+
+    A subject is an optional determiner and up to four words naming a thing,
+    joined only by "and", "or" or "of", and holding no finite verb. A word
+    is a finite verb if it is in :data:`_VERB_WORDS`, or if it ends in -s or
+    -ed between two other words of the phrase, as "pays" does in "the agent
+    pays amounts": the head noun before the operator and the first word
+    after the determiner ("the refunded amount") are never taken for verbs.
+    """
+    if not phrase:
+        return None
+    determiner = phrase[0] if phrase[0] in _DETERMINERS else ""
+    nominal = list(phrase[1:] if determiner else phrase)
+    content = [word for word in nominal if word not in _SUBJECT_LINKS]
+    if not content or len(content) > 4:
+        return None
+    for index, word in enumerate(nominal):
+        if word in _VERB_WORDS:
+            return None
+        if word in _DETERMINERS and (
+            index == 0 or nominal[index - 1] not in _SUBJECT_LINKS
+        ):
+            return None
+        inner = (
+            0 < index < len(nominal) - 1 and nominal[index - 1] not in _SUBJECT_LINKS
+        )
+        if inner and _verb_form(word):
+            return None
+    head = nominal[-1]
+    if head in _SUBJECT_LINKS or head in _DETERMINERS:
+        return None
+    return (
+        determiner in _PLURAL_DETERMINERS
+        or "and" in nominal
+        or (_plural_form(head) and head not in {"news", "series"})
     )
-    return f"{'are' if plural else 'is'} {words}"
+
+
+def _verb_form(word: str) -> bool:
+    """Whether a word inside a subject reads as a finite verb form."""
+    if word.endswith("ed"):
+        return True
+    return _plural_form(word) and word not in _NOUNS_IN_S
+
+
+def _plural_form(word: str) -> bool:
+    return word.endswith("s") and not word.endswith(("ss", "us", "is"))
 
 
 def _ends_comparison(after: str) -> bool:
@@ -1099,11 +1155,6 @@ def _ends_comparison(after: str) -> bool:
         or not following[0].isalnum()
         or following.lower() in _FOLLOWING_WORDS
     )
-
-
-def _opens_nothing(token: str) -> bool:
-    """Whether a word before a noun phrase leaves it inside its clause."""
-    return token[0].isalnum() and token.lower() not in _CLAUSE_OPENERS
 
 
 def _without_references(text: str, meanings: Mapping[str, str]) -> str:
