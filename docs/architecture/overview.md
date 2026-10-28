@@ -81,8 +81,9 @@ operations, and the three outcomes with their reasons. The vectors of each
 version hold the results of Garak's `validate_condition` and
 `evaluate_condition` at the revision the vector files name; the producer's
 reference evaluator, `evaluate_condition_v2` in
-`scripts/gen_tool_call_condition_vectors.py`, must agree with every v2
-evaluate vector. An
+`stpa.tool_call_condition_eval` (which
+`scripts/gen_tool_call_condition_vectors.py` imports), must agree with every
+v2 evaluate vector. An
 evaluator, such as the Garak `toolcall` detector, executes the condition and
 must reproduce every vector of the version it implements; the consumer carries the condition unchanged in `tool_call_condition.json`;
 the consumer and the orchestrator mirror the contract byte for byte, as they do
@@ -652,6 +653,25 @@ reach is its number of sent scenarios with a condition. The block lists the
 constraints at reach 0 and reach 1, and the constraints lost to
 `analytical_only` (an analytical scenario and no sent scenario). It is a
 record only: no later step reads it and no request changes.
+
+Before publication, `stage5.cross_scenario` checks the adversarial scenarios
+of the run against each other. Two scenarios are siblings when they are on the
+same control action and their ICAs cite the same process-model context (the
+variable values of one context-table row; an ICA that cites none has no
+sibling). For every ordered pair of siblings (A, B), A's safe outcome is taken
+as the one call it names, its `operation_name`, on a complete capture; its
+`record_refs` name observations, not records, so the call's arguments stay
+unknown. B's bound `tool_call_condition` is evaluated on that call with the
+`tool-call-condition-v2` reference evaluator. When it is `detected`, what A
+states as safe is B's failure, and B is withdrawn: its candidate outcome is
+`publication_failed` with a `cross_scenario_safe_outcome_conflict`
+diagnostic, and its handoff is not written. A pair that conflicts both ways
+withdraws both. The run writes `cross-scenario-conflicts.yaml`
+(`cross-scenario-conflicts-v1`): the counts of eligible and evaluated pairs,
+each conflict with both scenario IDs, the action, the context, A's operation
+and `record_refs`, and B's condition, and the withdrawn IDs. The check reads
+only published fields and runs after the Gherkin step, so it adds no request
+and changes none.
 
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
 Its closed prompt view contains the authoritative action, original deviation,

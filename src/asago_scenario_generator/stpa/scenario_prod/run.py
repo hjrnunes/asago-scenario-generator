@@ -84,6 +84,12 @@ from .stage5.assemble import (
 )
 from .stage5.condition_claims import ConditionClaim
 from .stage5.condition_contradictions import undecidable_diagnostics
+from .stage5.cross_scenario import (
+    CrossScenarioCheck,
+    check_cross_scenario_conflicts,
+    publishable_specs,
+    write_cross_scenario_check,
+)
 from .stage5.generate import generate_bdi_for_context, is_bdi_length_retry_exhausted
 from .stage5.defender import populate_defender_bdi
 from .stage5.shape_step import (
@@ -243,6 +249,7 @@ def run_sp3(
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
     shape_config: ShapeStepConfig = ShapeStepConfig(),
     handoff_taxonomy: HandoffTaxonomyInputs | None = None,
+    ica_process_model_contexts: Mapping[str, Mapping[str, str]] | None = None,
 ) -> SP3RunResult:
     """Run the full SP3 pipeline: Stage 5 → Stage 6 → Stage 7.
 
@@ -311,6 +318,12 @@ def run_sp3(
         handoff_taxonomy: The run's ATLAS release and each loss's OWASP
             references. Every published handoff then carries the ``taxonomy``
             block for its lineage losses; ``None`` publishes none.
+        ica_process_model_contexts: Each ICA's process-model context, keyed
+            by ICA ID. Before publication, a scenario whose tool-call
+            condition holds on the safe call of a scenario on the same control
+            action and context is withdrawn (``stage5.cross_scenario``), and
+            the run writes ``cross-scenario-conflicts.yaml``. ``None`` gives
+            no ICA a context, so nothing is withdrawn.
 
     Returns:
         An :class:`SP3RunResult` with artifacts and diagnostics.
@@ -361,6 +374,7 @@ def run_sp3(
         condition_families=condition_families,
         shape_config=shape_config,
         handoff_taxonomy=handoff_taxonomy,
+        ica_process_model_contexts=ica_process_model_contexts,
     )
     scenario_specs, scenario_envelopes, functional_test_specs = _run_stages_5_and_6(
         inputs, stage_errors, candidate_builders
@@ -489,6 +503,7 @@ class _SP3Inputs:
     condition_families: Sequence[CandidateFamilyPlan] | None
     shape_config: ShapeStepConfig
     handoff_taxonomy: HandoffTaxonomyInputs | None = None
+    ica_process_model_contexts: Mapping[str, Mapping[str, str]] | None = None
 
 
 def _narrate(inputs: _SP3Inputs, specs: list[ScenarioSpec]) -> dict[str, str]:
@@ -526,8 +541,9 @@ def _run_stages_5_and_6(
 ) -> tuple[list[ScenarioSpec], list[Any], list[ScenarioSpec]]:
     """Generate Stage 5 specs, persist functional tests, and build envelopes.
 
-    Returns the non-functional scenario specs, their Stage 6 envelopes, and
-    the functional-test specs.
+    Returns the published non-functional scenario specs (those the
+    cross-scenario check does not withdraw), their Stage 6 envelopes, and the
+    functional-test specs.
     """
     run_dir = inputs.run_dir
     profile = inputs.execution_target_profile
@@ -627,8 +643,14 @@ def _run_stages_5_and_6(
         gherkins=gherkins,
         taxonomy=inputs.handoff_taxonomy,
     )
+    cross_check = check_cross_scenario_conflicts(
+        shaped_specs, inputs.ica_process_model_contexts
+    )
+    write_cross_scenario_check(run_dir, cross_check)
+    _withdraw_conflicting_candidates(cross_check, candidate_builders)
+    published_specs = publishable_specs(shaped_specs, cross_check)
     scenario_envelopes = _collect_stage6_artifacts(
-        shaped_specs,
+        published_specs,
         inputs.loss_analysis,
         inputs.scenarios_dir,
         stage_errors,
@@ -643,7 +665,21 @@ def _run_stages_5_and_6(
         gherkins=gherkins,
         taxonomy=inputs.handoff_taxonomy,
     )
-    return shaped_specs, scenario_envelopes, functional_test_specs
+    return published_specs, scenario_envelopes, functional_test_specs
+
+
+def _withdraw_conflicting_candidates(
+    check: CrossScenarioCheck,
+    candidate_builders: list[_CandidateOutcomeBuilder],
+) -> None:
+    """Close each withdrawn scenario as unpublished, with the conflict as reason."""
+    for scenario_id in check.withdrawn:
+        _mark_candidate_failure(
+            candidate_builders,
+            scenario_id,
+            SP3CandidateStatus.publication_failed,
+            tuple(check.diagnostics_for(scenario_id)),
+        )
 
 
 def _model_gherkins(
