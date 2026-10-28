@@ -750,6 +750,30 @@ wrong, so code derives nothing either. A scenario on the `failure_call`
 route without a derived condition is published without one
 (`tool_call_condition_status` `not_executable`, reason `no_condition`), and
 the consumer rejects that command attempt as `tool_call_condition_missing`.
+
+Binding normally turns each `record_selection` argument into an `eq` on the
+selected value. An ownership selection is bound differently, because its
+record is one example of a record outside the session subject's reach, not
+the extent of the failure. It applies only to the operation the scenario
+declares as its failure: the safe outcome is a `command_attempt` on it, the
+failure call (when the draft has one) is an `incorrect_call` of it, and a
+supplied target read called it. When the condition compares that
+operation's argument `ne` with the session subject, the comparison already
+covers every other value and the selection adds nothing. When it compares
+owner fields of the selected record `ne` with the session subject, code
+evaluates the condition's record comparisons on every record of the
+collection; the records they fail are the entitled ones, and the selected
+key binds `not_in` those keys. A selected owner field binds the same way
+when the supplied reads of the operation passed keys of the record's
+collection for that argument, and binds `not_in` the session subject when
+the argument has the field's name. The selection keeps its `eq` when a
+record comparison cites a fact outside the record, a record lacks a
+compared field, a record the condition would flag is named by a record that
+names the session subject (its entitlement is then unknown), or the
+comparison is against anything but the session subject. The bound status
+detail says when a selection was widened. Every result stays within
+`tool-call-condition-v2`; the condition still flags a call the target
+refuses, since v2 carries no call outcome.
 Runtime-readiness
 concerns (chat surfaces, clocks, observers, locators, credentials, and endpoint
 details) belong to the consumer. A caller-requested environment basis

@@ -14,6 +14,7 @@ from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticCondition,
 )
 from asago_scenario_generator.stpa.observation_contract import (
+    FailureCall,
     ObservationAssessment,
     ObservationContract,
     ObservationCriterion,
@@ -92,6 +93,31 @@ def _discriminating_condition_result(
     return checked.condition, checked.check, None
 
 
+def declared_failure_operation(
+    safe_outcome: BaseModel | None, failure_call: FailureCall | None
+) -> str | None:
+    """Return the operation whose call the scenario declares as its failure.
+
+    The safe outcome must be a command attempt on one operation, and a
+    failure call, when the draft has one, must be an incorrect call of that
+    same operation. A reply-level safe outcome, a missing call, or a failure
+    call of another operation declares none, so the binder keeps the
+    selection the model wrote.
+    """
+
+    if safe_outcome is None or getattr(safe_outcome, "claim_level", None) != (
+        "command_attempt"
+    ):
+        return None
+    operation = getattr(safe_outcome, "operation_name", None)
+    if failure_call is not None and (
+        failure_call.kind != "incorrect_call"
+        or failure_call.operation_name != operation
+    ):
+        return None
+    return operation
+
+
 def _materialize_adversary(draft: BaseModel) -> Adversary:
     """Derive the compiler-owned adversary fields.
 
@@ -160,6 +186,14 @@ def compile_scenario_spec(
             condition,
             condition_universe.fact_values if condition_universe is not None else {},
             condition_omitted_reason=omitted_reason,
+            failure_operation=declared_failure_operation(
+                outcome.safe_observable_outcome, getattr(outcome, "failure_call", None)
+            ),
+            read_arguments=(
+                condition_universe.read_arguments
+                if condition_universe is not None
+                else None
+            ),
         )
     return assemble_scenario_spec(
         assembly,
