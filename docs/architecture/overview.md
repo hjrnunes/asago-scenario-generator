@@ -873,8 +873,12 @@ the same tree. The structured handoff fields and the tree retain the selected
 causal evidence; every rendering describes a hypothesis, not an observed test
 result.
 The `stage6_narrative` and `stage6_gherkin` model steps then replace the
-narrative paragraph and the Gherkin with checked model replies; a scenario
-whose reply fails keeps the deterministic rendering.
+narrative paragraph and the Gherkin with checked model replies. A scenario
+whose Gherkin reply fails keeps the deterministic rendering; one whose
+narrative reply fails publishes a plain paragraph that code writes from the
+narration's facts, without identifiers or source labels, and its handoff
+carries a producer fact saying so. The deterministic rendering stays in
+`narratives.json` for analysts.
 Stage 5 prompt views teach condition field semantics without supplying invented
 request-specific values. Temporal outcomes reuse the factor-condition local
 handle resolver, and target-backed action-value predicates must name an observed

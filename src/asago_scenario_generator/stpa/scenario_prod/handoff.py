@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any, Literal, Self
@@ -1072,12 +1072,42 @@ def _operation_relevance(authority: str | None) -> str:
 #: generated; ``None`` when a caller does not report one.
 Stage1aSource = Literal["derived", "pinned"]
 
+
 #: Published constraint-authority stamps (finding A2).  The handoff schema
 #: leaves ``authority`` free-form, so these values need no contract-kit
 #: change.  Each stamp is derived from the actual source record, never
 #: asserted: a reviewed claim requires both the constraint record's reviewed
 #: direction authority and a run whose Stage 1a graph was pinned, so a
 #: derived/proposed constraint stays distinguishable from a reviewed one.
+def narrative_fallback_fact(omitted: Sequence[str] = ()) -> HandoffFact:
+    """Return the fact a handoff carries when code wrote its narrative.
+
+    Code writes the narrative when no model-written narrative passed the
+    producer's checks. ``omitted`` names the parts of the scenario's facts
+    the narrative does not fully state, wholly or in part, because no plain
+    clause states them.
+    """
+    statement = (
+        "Code wrote this scenario's narrative from the scenario's facts, "
+        "because no accepted model-written narrative was available."
+    )
+    if omitted:
+        parts = [f"the {part}" for part in omitted]
+        listed = (
+            parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + f" and {parts[-1]}"
+        )
+        statement += (
+            f" It does not fully state {listed}: code could not write all of "
+            "it in plain words."
+        )
+    return HandoffFact(
+        statement=statement,
+        source="producer narration step",
+        authority="producer_fallback",
+    )
+
+
+NARRATIVE_FALLBACK_FACT = narrative_fallback_fact()
 AUTHORITY_SUPPLIED_REVIEWED = "supplied_reviewed_constraint"
 AUTHORITY_SUPPLIED_PROPOSED = "supplied_proposed_constraint"
 AUTHORITY_DERIVED_PROPOSED = "derived_proposed_constraint"
@@ -1142,6 +1172,8 @@ def _sourced_facts(
             authority="producer_contract",
         )
     )
+    if envelope.narrative_fallback:
+        facts.append(narrative_fallback_fact(envelope.narrative_omitted))
     return facts
 
 
