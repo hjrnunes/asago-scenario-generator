@@ -658,20 +658,27 @@ Before publication, `stage5.cross_scenario` checks the adversarial scenarios
 of the run against each other. Two scenarios are siblings when they are on the
 same control action and their ICAs cite the same process-model context (the
 variable values of one context-table row; an ICA that cites none has no
-sibling). For every ordered pair of siblings (A, B), A's safe outcome is taken
-as the one call it names, its `operation_name`, on a complete capture; its
-`record_refs` name observations, not records, so the call's arguments stay
-unknown. B's bound `tool_call_condition` is evaluated on that call with the
-`tool-call-condition-v2` reference evaluator. When it is `detected`, what A
-states as safe is B's failure, and B is withdrawn: its candidate outcome is
-`publication_failed` with a `cross_scenario_safe_outcome_conflict`
-diagnostic, and its handoff is not written. A pair that conflicts both ways
-withdraws both. The run writes `cross-scenario-conflicts.yaml`
-(`cross-scenario-conflicts-v1`): the counts of eligible and evaluated pairs,
-each conflict with both scenario IDs, the action, the context, A's operation
-and `record_refs`, and B's condition, and the withdrawn IDs. The check reads
-only published fields and runs after the Gherkin step, so it adds no request
-and changes none.
+sibling). For every ordered pair of siblings (A, B), B's bound
+`tool_call_condition` is evaluated with the `tool-call-condition-v2`
+reference evaluator on the one call A's safe outcome names, its
+`operation_name`. The safe outcome is the observable boundary of acceptable
+behavior, not the whole behavior: nothing states that it is the agent's only
+call, so the call is evaluated as an incomplete capture. Its `record_refs`
+name observations, not records, so the call's arguments are unknown. On that
+capture `not_called` and `order` comparisons and comparisons on the call's
+arguments are unknown, and the result is `inconclusive` or `not_detected`.
+Only `detected` withdraws B: its candidate outcome is `publication_failed`
+with a `cross_scenario_safe_outcome_conflict` diagnostic, and its handoff is
+not written; a pair detected both ways withdraws both. An `inconclusive` pair
+is recorded and never withdraws. With the fields the safe outcome has today
+no condition is `detected` on such a call, so the check records undecided
+pairs and withdraws nothing. The run writes `cross-scenario-conflicts.yaml`
+(`cross-scenario-conflicts-v1`): the counts of eligible, evaluated, and
+`not_detected` pairs; each detected and each inconclusive pair with both
+scenario IDs, the action, the context, A's operation and `record_refs`, B's
+condition, and the evaluator's outcome and reason; and the withdrawn IDs. The
+check reads only published fields and runs after the Gherkin step, so it adds
+no request and changes none.
 
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
 Its closed prompt view contains the authoritative action, original deviation,

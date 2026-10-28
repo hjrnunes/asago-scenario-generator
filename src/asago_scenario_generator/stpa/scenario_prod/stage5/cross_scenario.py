@@ -3,28 +3,35 @@
 Two scenarios are siblings when they are on the same control action and
 their ICAs cite the same process-model context (the variable values of one
 row of the action's context table). For every ordered pair of siblings
-(A, B), A's safe outcome is evaluated as the one call it names: its
-``operation_name``, on a complete capture. When B's bound
-``tool_call_condition`` is ``detected`` on that call under the
-``tool-call-condition-v2`` reference evaluator, the pair asks the judge for
-opposite verdicts on the same behavior: what A states as safe is B's failure.
+(A, B), B's bound ``tool_call_condition`` is evaluated with the
+``tool-call-condition-v2`` reference evaluator on the call A's safe outcome
+names. When it is ``detected``, the pair asks the judge for opposite verdicts
+on the same behavior: what A states as safe is B's failure.
 
 This is the cross-scenario analogue of the within-scenario rule that a
 discriminating condition must separate a scenario's unsafe call from its safe
 one (:mod:`~asago_scenario_generator.stpa.scenario_prod.condition_check`).
 
-The safe outcome's ``record_refs`` name the observations the safe call reads
+The safe call is a partial capture. The safe outcome is "the
+scenario-specific observable boundary for acceptable behavior" and names one
+``operation_name`` (``prompts/stage5_context_system.j2``, "Scenario-specific
+safe observable outcome"; ``SafeObservableOutcome``); nothing states that it
+is the only call the agent makes, so the agent may make other calls before or
+after it. Its ``record_refs`` name the observations the safe call reads
 (``TARGET-STATE``), never a record path, which Stage 5 moves to
-``fact_refs``; they bind no argument value. The call's arguments are therefore
-unknown, and a comparison on them evaluates ``inconclusive``. Only a
-``detected`` outcome is a conflict, so an argument comparison never is; a
-``not_called`` or ``order`` comparison can be.
+``fact_refs``; they bind no argument value. On that one argument-less call,
+on an incomplete capture, ``not_called`` and ``order`` comparisons and
+comparisons on the call's arguments are unknown, so the result is
+``inconclusive`` or ``not_detected``. An ``inconclusive`` pair is recorded
+and never withdraws; only ``detected`` does. With the fields the safe outcome
+has today no condition is ``detected`` on such a call, so in practice the
+check records the undecided pairs and withdraws nothing.
 
-B is withdrawn from publication: B's condition is what the consumer runs, and
-it would fail an agent that does what A states as safe. A's condition is not
-in question for this pair. When both directions conflict, both are withdrawn.
-The withdrawn set is computed over every candidate at once, so it does not
-depend on publication order. ICAs that cite no context are never siblings.
+A withdrawn scenario is B: B's condition is what the consumer runs, and it
+would fail an agent that does what A states as safe. When both directions
+conflict, both are withdrawn. The withdrawn set is computed over every
+candidate at once, so it does not depend on publication order. ICAs that cite
+no context are never siblings.
 """
 
 from __future__ import annotations
@@ -46,6 +53,7 @@ from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 from asago_scenario_generator.stpa.tool_call_condition import ToolCallCondition
 from asago_scenario_generator.stpa.tool_call_condition_eval import (
     DETECTED,
+    INCONCLUSIVE,
     evaluate_condition_v2,
 )
 
@@ -58,17 +66,21 @@ class _ClosedModel(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class CrossScenarioConflict(_ClosedModel):
-    """One ordered pair: the safe call of ``safe_scenario_id`` fails ``scenario_id``."""
+class CrossScenarioPair(_ClosedModel):
+    """The condition of ``scenario_id`` on the safe call of ``safe_scenario_id``.
+
+    Only pairs the evaluator does not rule out (``not_detected``) are kept.
+    """
 
     scenario_id: StrictStr
-    reason: Literal["cross_scenario_safe_outcome_conflict"] = CROSS_SCENARIO_CONFLICT
     safe_scenario_id: StrictStr
     control_action_id: StrictStr
     process_model_context: dict[str, str] = Field(min_length=1)
     safe_operation_name: StrictStr
     safe_record_refs: list[StrictStr]
     tool_call_condition: ToolCallCondition
+    outcome: Literal["detected", "inconclusive"]
+    outcome_reason: StrictStr
 
     def diagnostic(self) -> str:
         """Render the candidate diagnostic of the withdrawn scenario."""
@@ -91,7 +103,11 @@ class CrossScenarioCheck(_ClosedModel):
     )
     eligible_pairs: int = Field(ge=0)
     evaluated_pairs: int = Field(ge=0)
-    conflicts: list[CrossScenarioConflict] = Field(default_factory=list)
+    not_detected_pairs: int = Field(ge=0)
+    # Detected pairs; each withdraws its ``scenario_id``.
+    conflicts: list[CrossScenarioPair] = Field(default_factory=list)
+    # Pairs the safe call cannot decide; recorded only.
+    inconclusive: list[CrossScenarioPair] = Field(default_factory=list)
     withdrawn: list[StrictStr] = Field(default_factory=list)
 
     def diagnostics_for(self, scenario_id: str) -> list[str]:
@@ -146,7 +162,11 @@ def check_cross_scenario_conflicts(
         groups.setdefault(key, []).append(spec)
     eligible = 0
     evaluated = 0
-    conflicts: list[CrossScenarioConflict] = []
+    not_detected = 0
+    decided: dict[str, list[CrossScenarioPair]] = {
+        DETECTED[0]: [],
+        INCONCLUSIVE[0]: [],
+    }
     for (action_id, context_items), members in sorted(groups.items()):
         for safe, failing in itertools.permutations(members, 2):
             eligible += 1
@@ -158,13 +178,15 @@ def check_cross_scenario_conflicts(
                 continue
             evaluated += 1
             call = {"name": outcome.operation_name, "arguments": {}}
-            result, _, _ = evaluate_condition_v2(
-                condition.model_dump(mode="json"), [call], True
+            # complete=False: the safe outcome does not exclude other calls.
+            result, result_reason, _ = evaluate_condition_v2(
+                condition.model_dump(mode="json"), [call], False
             )
-            if result != DETECTED[0]:
+            if result not in decided:
+                not_detected += 1
                 continue
-            conflicts.append(
-                CrossScenarioConflict(
+            decided[result].append(
+                CrossScenarioPair(
                     scenario_id=failing.scenario_id,
                     safe_scenario_id=safe.scenario_id,
                     control_action_id=action_id,
@@ -172,13 +194,19 @@ def check_cross_scenario_conflicts(
                     safe_operation_name=outcome.operation_name,
                     safe_record_refs=list(outcome.record_refs),
                     tool_call_condition=condition,
+                    outcome=result,
+                    outcome_reason=result_reason,
                 )
             )
-    conflicts.sort(key=lambda item: (item.scenario_id, item.safe_scenario_id))
+    for pairs in decided.values():
+        pairs.sort(key=lambda item: (item.scenario_id, item.safe_scenario_id))
+    conflicts = decided[DETECTED[0]]
     return CrossScenarioCheck(
         eligible_pairs=eligible,
         evaluated_pairs=evaluated,
+        not_detected_pairs=not_detected,
         conflicts=conflicts,
+        inconclusive=decided[INCONCLUSIVE[0]],
         withdrawn=sorted({item.scenario_id for item in conflicts}),
     )
 
@@ -208,7 +236,7 @@ __all__ = [
     "CROSS_SCENARIO_CONFLICTS_FILENAME",
     "CROSS_SCENARIO_CONFLICTS_SCHEMA_VERSION",
     "CrossScenarioCheck",
-    "CrossScenarioConflict",
+    "CrossScenarioPair",
     "check_cross_scenario_conflicts",
     "ica_process_model_contexts",
     "publishable_specs",

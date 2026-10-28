@@ -3,11 +3,16 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 from typing import Any
 
 import yaml
 
+from asago_scenario_generator.pipeline.synthesis_manifest import (
+    _manifest_candidate_outcomes,
+    _manifest_scenario_counts,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -30,16 +35,20 @@ from asago_scenario_generator.stpa.scenario_prod.stage5 import cross_scenario
 from asago_scenario_generator.stpa.scenario_prod.stage5.cross_scenario import (
     CROSS_SCENARIO_CONFLICT,
     CROSS_SCENARIO_CONFLICTS_FILENAME,
+    CrossScenarioCheck,
+    CrossScenarioPair,
     check_cross_scenario_conflicts,
     ica_process_model_contexts,
     publishable_specs,
     write_cross_scenario_check,
 )
-from asago_scenario_generator.stpa.tool_call_condition import ToolCallCondition
+from asago_scenario_generator.stpa.tool_call_condition import (
+    ToolCallCondition,
+    ToolCallConditionStatus,
+)
 from asago_scenario_generator.stpa.tool_call_condition_eval import (
     evaluate_condition_v2,
 )
-
 from tests.helpers.sp3_run import _make_ets, _setup_mock_client
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 
@@ -47,6 +56,13 @@ from .helpers import make_scenario_spec
 
 CONTEXT = {"PM-1-1": "unverified"}
 OTHER_CONTEXT = {"PM-1-1": "verified"}
+INCONCLUSIVE = "capture is incomplete or a relevant call is undecodable"
+ESCALATE_AFTER_POLICY = {
+    "kind": "order",
+    "operation": "escalate",
+    "requires_prior": "retrieve_policy",
+    "same_argument": None,
+}
 
 
 def _condition(*comparisons: dict[str, Any]) -> ToolCallCondition:
@@ -61,6 +77,17 @@ def _not_called(operation: str, **where: object) -> dict[str, Any]:
     }
 
 
+def _safe_call(operation: str) -> SafeObservableOutcome:
+    return SafeObservableOutcome(
+        observable=True,
+        statement="The agent makes the safe call.",
+        claim_level="command_attempt",
+        evidence="tool_call",
+        operation_name=operation,
+        record_refs=("TARGET-STATE",),
+    )
+
+
 def _spec(
     scenario_id: str,
     *,
@@ -69,16 +96,6 @@ def _spec(
     action: str = "CA-1-1",
 ) -> ScenarioSpec:
     """Return a spec whose ICA ID is ``ICA-<scenario number>``."""
-    safe = None
-    if safe_operation is not None:
-        safe = SafeObservableOutcome(
-            observable=True,
-            statement="The agent makes the safe call.",
-            claim_level="command_attempt",
-            evidence="tool_call",
-            operation_name=safe_operation,
-            record_refs=("TARGET-STATE",),
-        )
     return make_scenario_spec(scenario_id).model_copy(
         update={
             "threat_source": ThreatSource(
@@ -87,7 +104,9 @@ def _spec(
                 ica_id=f"ICA-{scenario_id[-3:]}",
             ),
             "target_control_action": action,
-            "safe_observable_outcome": safe,
+            "safe_observable_outcome": (
+                _safe_call(safe_operation) if safe_operation is not None else None
+            ),
             "tool_call_condition": condition,
         }
     )
@@ -97,10 +116,20 @@ def _contexts(*pairs: tuple[str, dict[str, str]]) -> dict[str, dict[str, str]]:
     return {f"ICA-{scenario_id[-3:]}": context for scenario_id, context in pairs}
 
 
-def _escalate_vs_answer() -> list[ScenarioSpec]:
+def _same_context(specs: list[ScenarioSpec]) -> dict[str, dict[str, str]]:
+    return _contexts(*((spec.scenario_id, CONTEXT) for spec in specs))
+
+
+def _pairs(items: list[CrossScenarioPair]) -> list[tuple[str, str]]:
+    return [(item.scenario_id, item.safe_scenario_id) for item in items]
+
+
+def test_a_sibling_not_called_on_a_partial_safe_call_is_recorded_not_withdrawn() -> (
+    None
+):
     # SCN-001 states escalating as safe; SCN-002 fails when the question is
-    # never asked, which escalating alone satisfies.
-    return [
+    # never asked. Escalating does not exclude asking, so nothing is decided.
+    specs = [
         _spec("SCN-001", safe_operation="escalate"),
         _spec(
             "SCN-002",
@@ -108,74 +137,51 @@ def _escalate_vs_answer() -> list[ScenarioSpec]:
             condition=_condition(_not_called("ask_question", patient_id="P-1")),
         ),
     ]
-
-
-def test_safe_call_that_satisfies_a_sibling_condition_withdraws_the_sibling() -> None:
-    specs = _escalate_vs_answer()
-    check = check_cross_scenario_conflicts(
-        specs, _contexts(("SCN-001", CONTEXT), ("SCN-002", CONTEXT))
-    )
+    check = check_cross_scenario_conflicts(specs, _same_context(specs))
 
     assert check.eligible_pairs == 2
     # SCN-001 has no condition, so only SCN-001 -> SCN-002 is evaluable.
     assert check.evaluated_pairs == 1
-    assert check.withdrawn == ["SCN-002"]
-    (conflict,) = check.conflicts
-    assert conflict.model_dump(mode="json") == {
+    assert check.conflicts == []
+    assert check.withdrawn == []
+    (pair,) = check.inconclusive
+    assert pair.model_dump(mode="json") == {
         "scenario_id": "SCN-002",
-        "reason": CROSS_SCENARIO_CONFLICT,
         "safe_scenario_id": "SCN-001",
         "control_action_id": "CA-1-1",
         "process_model_context": CONTEXT,
         "safe_operation_name": "escalate",
         "safe_record_refs": ["TARGET-STATE"],
         "tool_call_condition": specs[1].tool_call_condition.model_dump(mode="json"),
+        "outcome": "inconclusive",
+        "outcome_reason": INCONCLUSIVE,
     }
 
 
-def test_conflicts_in_both_directions_withdraw_both_scenarios() -> None:
-    specs = [
-        _spec(
-            "SCN-001",
-            safe_operation="escalate",
-            condition=_condition(_not_called("escalate")),
-        ),
-        _spec(
-            "SCN-002",
-            safe_operation="ask_question",
-            condition=_condition(_not_called("ask_question")),
-        ),
+def test_retrieve_then_escalate_is_not_withdrawn_by_an_order_condition() -> None:
+    # A's safe behavior is "retrieve the policy, then escalate", and its safe
+    # outcome names the escalation. B fails escalation without the policy.
+    # Both agree: the full safe trace does not satisfy B's condition.
+    condition = _condition(ESCALATE_AFTER_POLICY)
+    trace = [
+        {"name": "retrieve_policy", "arguments": {}},
+        {"name": "escalate", "arguments": {}},
     ]
-    check = check_cross_scenario_conflicts(
-        specs, _contexts(("SCN-001", CONTEXT), ("SCN-002", CONTEXT))
+    assert evaluate_condition_v2(condition.model_dump(mode="json"), trace, True)[0] == (
+        "not_detected"
     )
-
-    assert check.withdrawn == ["SCN-001", "SCN-002"]
-    assert [(c.scenario_id, c.safe_scenario_id) for c in check.conflicts] == [
-        ("SCN-001", "SCN-002"),
-        ("SCN-002", "SCN-001"),
-    ]
-
-
-def test_order_without_the_prior_call_is_a_conflict() -> None:
-    order = {
-        "kind": "order",
-        "operation": "escalate",
-        "requires_prior": "retrieve_policy",
-        "same_argument": None,
-    }
     specs = [
         _spec("SCN-001", safe_operation="escalate"),
-        _spec("SCN-002", safe_operation="escalate", condition=_condition(order)),
+        _spec("SCN-002", safe_operation="escalate", condition=condition),
     ]
-    check = check_cross_scenario_conflicts(
-        specs, _contexts(("SCN-001", CONTEXT), ("SCN-002", CONTEXT))
-    )
+    check = check_cross_scenario_conflicts(specs, _same_context(specs))
 
-    assert check.withdrawn == ["SCN-002"]
+    assert check.withdrawn == []
+    assert check.conflicts == []
+    assert _pairs(check.inconclusive) == [("SCN-002", "SCN-001")]
 
 
-def test_condition_the_safe_call_does_not_satisfy_is_no_conflict() -> None:
+def test_unknown_arguments_and_other_operations_stay_inconclusive() -> None:
     argument = {
         "kind": "value",
         "left": {"source": "argument", "operation": "refund", "argument": "id"},
@@ -184,24 +190,38 @@ def test_condition_the_safe_call_does_not_satisfy_is_no_conflict() -> None:
     }
     specs = [
         _spec("SCN-001", safe_operation="refund"),
-        # Calling refund does not satisfy "refund is never called".
-        _spec("SCN-002", condition=_condition(_not_called("refund"))),
-        # The safe call's arguments are unknown: inconclusive, not detected.
-        _spec("SCN-003", condition=_condition(argument)),
-        # No call of another operation exists on a complete capture.
+        # The safe call's arguments are unknown.
+        _spec("SCN-002", condition=_condition(argument)),
+        # A call of another operation may exist on an incomplete capture.
         _spec(
-            "SCN-004",
+            "SCN-003",
             condition=_condition(
                 {**argument, "left": {**argument["left"], "operation": "pay"}}
             ),
         ),
     ]
-    contexts = _contexts(*((spec.scenario_id, CONTEXT) for spec in specs))
-    check = check_cross_scenario_conflicts(specs, contexts)
+    check = check_cross_scenario_conflicts(specs, _same_context(specs))
 
-    assert check.evaluated_pairs == 3
-    assert check.conflicts == []
+    assert check.evaluated_pairs == 2
+    assert _pairs(check.inconclusive) == [
+        ("SCN-002", "SCN-001"),
+        ("SCN-003", "SCN-001"),
+    ]
     assert check.withdrawn == []
+
+
+def test_a_condition_the_safe_call_rules_out_is_counted_only() -> None:
+    specs = [
+        _spec("SCN-001", safe_operation="refund"),
+        # The safe call is a refund call, so "refund is never called" fails.
+        _spec("SCN-002", condition=_condition(_not_called("refund"))),
+    ]
+    check = check_cross_scenario_conflicts(specs, _same_context(specs))
+
+    assert check.evaluated_pairs == 1
+    assert check.not_detected_pairs == 1
+    assert check.inconclusive == []
+    assert check.conflicts == []
 
 
 def test_other_action_other_context_and_no_context_are_not_siblings() -> None:
@@ -221,35 +241,65 @@ def test_other_action_other_context_and_no_context_are_not_siblings() -> None:
     check = check_cross_scenario_conflicts(specs, contexts)
 
     assert check.eligible_pairs == 0
-    assert check.withdrawn == []
+    assert check.inconclusive == []
     assert check_cross_scenario_conflicts(specs, None).eligible_pairs == 0
 
 
 def test_check_does_not_depend_on_candidate_order() -> None:
     specs = [
-        *_escalate_vs_answer(),
+        _spec("SCN-001", safe_operation="escalate"),
+        _spec(
+            "SCN-002",
+            safe_operation="ask_question",
+            condition=_condition(_not_called("ask_question")),
+        ),
         _spec("SCN-003", condition=_condition(_not_called("verify"))),
     ]
-    contexts = _contexts(*((spec.scenario_id, CONTEXT) for spec in specs))
-    forward = check_cross_scenario_conflicts(specs, contexts)
-    backward = check_cross_scenario_conflicts(list(reversed(specs)), contexts)
+    forward = check_cross_scenario_conflicts(specs, _same_context(specs))
+    backward = check_cross_scenario_conflicts(
+        list(reversed(specs)), _same_context(specs)
+    )
 
     assert forward.model_dump(mode="json") == backward.model_dump(mode="json")
-    assert [(c.scenario_id, c.safe_scenario_id) for c in forward.conflicts] == [
+    assert _pairs(forward.inconclusive) == [
         ("SCN-002", "SCN-001"),
         ("SCN-003", "SCN-001"),
         ("SCN-003", "SCN-002"),
     ]
-    assert forward.withdrawn == ["SCN-002", "SCN-003"]
+
+
+def _detected(scenario_id: str, safe_scenario_id: str) -> CrossScenarioPair:
+    """A detected pair, as the evaluator would record it."""
+    return CrossScenarioPair(
+        scenario_id=scenario_id,
+        safe_scenario_id=safe_scenario_id,
+        control_action_id="CA-1-1",
+        process_model_context=CONTEXT,
+        safe_operation_name="escalate",
+        safe_record_refs=["TARGET-STATE"],
+        tool_call_condition=_condition(_not_called("ask_question")),
+        outcome="detected",
+        outcome_reason="the condition holds on the captured calls",
+    )
+
+
+def _withdrawing(scenario_id: str, safe_scenario_id: str) -> CrossScenarioCheck:
+    # No condition is detected on an argument-less call of a partial capture,
+    # so the consequence of a detected pair is pinned with a constructed one.
+    return CrossScenarioCheck(
+        eligible_pairs=2,
+        evaluated_pairs=2,
+        not_detected_pairs=1,
+        conflicts=[_detected(scenario_id, safe_scenario_id)],
+        withdrawn=[scenario_id],
+    )
 
 
 def test_withdrawn_candidate_is_unpublished_with_the_conflict_as_reason(
     tmp_path: Path,
 ) -> None:
-    specs = _escalate_vs_answer()
-    check = check_cross_scenario_conflicts(
-        specs, _contexts(("SCN-001", CONTEXT), ("SCN-002", CONTEXT))
-    )
+    specs = [_spec("SCN-001"), _spec("SCN-002")]
+    check = _withdrawing("SCN-002", "SCN-001")
     builders = [
         run_module._CandidateOutcomeBuilder("SCN-001", "RESP-1:CA-1-1:INCORRECT", "x"),
         run_module._CandidateOutcomeBuilder("SCN-002", "RESP-1:CA-1-1:INCORRECT", "y"),
@@ -268,9 +318,8 @@ def test_withdrawn_candidate_is_unpublished_with_the_conflict_as_reason(
     ]
     assert path.name == CROSS_SCENARIO_CONFLICTS_FILENAME
     record = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert record == check.model_dump(mode="json")
     assert record["schema_version"] == "cross-scenario-conflicts-v1"
-    assert record["withdrawn"] == ["SCN-002"]
-    assert record["conflicts"][0]["reason"] == CROSS_SCENARIO_CONFLICT
 
 
 def test_ica_contexts_come_from_the_ica_or_its_cited_row() -> None:
@@ -343,71 +392,167 @@ def test_the_check_and_the_vector_generator_share_one_evaluator() -> None:
     assert cross_scenario.evaluate_condition_v2 is evaluate_condition_v2
 
 
-def _withdraw_first(specs, contexts):
-    """Stand in for the check: withdraw SCN-001 for a sibling SCN-002."""
-    conflict = cross_scenario.CrossScenarioConflict(
-        scenario_id="SCN-001",
-        safe_scenario_id="SCN-002",
-        control_action_id="CA-1-1",
-        process_model_context=CONTEXT,
-        safe_operation_name="escalate",
-        safe_record_refs=["TARGET-STATE"],
-        tool_call_condition=_condition(_not_called("ask_question")),
-    )
-    return cross_scenario.CrossScenarioCheck(
-        eligible_pairs=2, evaluated_pairs=2, conflicts=[conflict], withdrawn=["SCN-001"]
-    )
+# --- through run_sp3 --------------------------------------------------------
+
+_ICA_IDS = [f"RESP-1:CA-1-1:NOT_PROVIDED:{index}" for index in (1, 2, 3)]
+_BOUND = ToolCallConditionStatus(status="bound", reason="bound", detail="bound")
+# SCN-001 states escalating as safe and SCN-002 asking; each fails when the
+# other's call is missing. SCN-003 is functional and states escalating as safe.
+_SAFE = {"SCN-001": "escalate", "SCN-002": "ask_question"}
+_CONDITIONS = {
+    "SCN-001": _condition(ESCALATE_AFTER_POLICY),
+    "SCN-002": _condition(_not_called("ask_question")),
+}
 
 
-def test_run_withdraws_before_publication_without_another_model_call(
+def _sibling_client() -> Any:
+    client = _setup_mock_client(num_threats=3)
+    # The first three queued replies are the Stage 5 replies, in threat order.
+    functional = client._response_queue[2]
+    functional["adversary"] = {
+        "kind": "none",
+        "gain": "The requested service completes as designed.",
+    }
+    functional["attacker_bdi"] = {"beliefs": [], "desires": [], "intentions": []}
+    return client
+
+
+def _with_safe_calls(apply_shape_step: Any) -> Any:
+    """Run the real shape step, then give each spec a safe call and a condition.
+
+    The mock Stage 5 replies are reply-level and bind no condition, so the
+    seam supplies what a target-bound run would publish.
+    """
+
+    def shaped(specs: list[ScenarioSpec], **kwargs: Any) -> list[ScenarioSpec]:
+        return [
+            spec.model_copy(
+                update={
+                    "safe_observable_outcome": _safe_call(_SAFE[spec.scenario_id]),
+                    "tool_call_condition_status": _BOUND,
+                    "tool_call_condition": _CONDITIONS[spec.scenario_id],
+                }
+            )
+            for spec in apply_shape_step(specs, **kwargs)
+        ]
+
+    return shaped
+
+
+def _run(run_dir: Path, contexts: dict[str, dict[str, str]] | None) -> Any:
+    client = _sibling_client()
+    result = run_module.run_sp3(
+        llm_client=client,
+        enriched_threat_set=_make_ets(num_threats=3),
+        control_structure=make_cs(),
+        loss_analysis=make_loss_analysis(),
+        run_dir=run_dir,
+        ica_process_model_contexts=contexts,
+    )
+    return client, result
+
+
+def _requests(client: Any) -> list[tuple[Any, ...]]:
+    # Some steps build their response model per request, so the model is
+    # compared by the schema it sends.
+    return [
+        (
+            call.system_prompt,
+            call.user_prompt,
+            json.dumps(call.response_format.model_json_schema(), sort_keys=True),
+            call.temperature,
+            call.max_completion_tokens,
+        )
+        for call in client.calls
+    ]
+
+
+def _record(run_dir: Path) -> dict[str, Any]:
+    path = run_dir / CROSS_SCENARIO_CONFLICTS_FILENAME
+    return yaml.safe_load(path.read_text(encoding="utf-8"))
+
+
+def test_run_records_sibling_pairs_and_keeps_functional_scenarios_out(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
-    def run(run_dir: Path) -> tuple[Any, Any]:
-        client = _setup_mock_client(num_threats=2)
-        result = run_module.run_sp3(
-            llm_client=client,
-            enriched_threat_set=_make_ets(num_threats=2),
-            control_structure=make_cs(),
-            loss_analysis=make_loss_analysis(),
-            run_dir=run_dir,
-        )
-        return client, result
+    monkeypatch.setattr(
+        run_module, "apply_shape_step", _with_safe_calls(run_module.apply_shape_step)
+    )
+    contexts = {ica_id: CONTEXT for ica_id in _ICA_IDS}
+    unchecked_client, unchecked = _run(tmp_path / "unchecked", None)
+    client, result = _run(tmp_path / "checked", contexts)
 
-    baseline_client, baseline = run(tmp_path / "baseline")
-    monkeypatch.setattr(run_module, "check_cross_scenario_conflicts", _withdraw_first)
-    client, result = run(tmp_path / "withdrawn")
+    assert _requests(client) == _requests(unchecked_client)
+    assert [spec.scenario_id for spec in result.functional_test_specs] == ["SCN-003"]
+    assert [spec.scenario_id for spec in result.scenario_specs] == [
+        "SCN-001",
+        "SCN-002",
+    ]
+    for scenario_id in ("SCN-001", "SCN-002", "SCN-003"):
+        assert (tmp_path / "checked" / "scenarios" / f"{scenario_id}.yaml").is_file()
+    record = _record(tmp_path / "checked")
+    # SCN-003 shares the context but is functional: no pair names it.
+    assert record["eligible_pairs"] == 2
+    assert record["evaluated_pairs"] == 2
+    assert record["not_detected_pairs"] == 0
+    assert record["conflicts"] == []
+    assert record["withdrawn"] == []
+    assert [
+        (pair["scenario_id"], pair["safe_scenario_id"], pair["outcome"])
+        for pair in record["inconclusive"]
+    ] == [
+        ("SCN-001", "SCN-002", "inconclusive"),
+        ("SCN-002", "SCN-001", "inconclusive"),
+    ]
+    assert _record(tmp_path / "unchecked")["eligible_pairs"] == 0
 
-    assert len(client.calls) == len(baseline_client.calls)
+
+def test_run_withdraws_a_detected_pair_before_publication(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    monkeypatch.setattr(
+        run_module, "apply_shape_step", _with_safe_calls(run_module.apply_shape_step)
+    )
+    baseline_client, baseline = _run(tmp_path / "baseline", None)
+    seen: list[list[str]] = []
+
+    def withdraw_first(specs: Any, contexts: Any) -> CrossScenarioCheck:
+        seen.append([spec.scenario_id for spec in specs])
+        return _withdrawing("SCN-001", "SCN-002")
+
+    monkeypatch.setattr(run_module, "check_cross_scenario_conflicts", withdraw_first)
+    client, result = _run(tmp_path / "withdrawn", None)
+
+    # The check sees the adversarial specs only, and adds or changes no request.
+    assert seen == [["SCN-001", "SCN-002"]]
+    assert _requests(client) == _requests(baseline_client)
     assert [spec.scenario_id for spec in baseline.scenario_specs] == [
         "SCN-001",
         "SCN-002",
     ]
     assert [spec.scenario_id for spec in result.scenario_specs] == ["SCN-002"]
-    assert [e.scenario_id for e in result.scenario_envelopes] == ["SCN-002"]
+    assert [envelope.scenario_id for envelope in result.scenario_envelopes] == [
+        "SCN-002"
+    ]
     scenarios = tmp_path / "withdrawn" / "scenarios"
     assert not (scenarios / "SCN-001.yaml").exists()
+    assert not (scenarios / "SCN-001.feature").exists()
     assert (scenarios / "SCN-002.yaml").is_file()
-    outcomes = {item.scenario_id: item for item in result.candidate_outcomes}
-    assert (
-        outcomes["SCN-001"].status is run_module.SP3CandidateStatus.publication_failed
-    )
-    assert outcomes["SCN-001"].diagnostics[-1].startswith(CROSS_SCENARIO_CONFLICT)
-    assert outcomes["SCN-002"].status is run_module.SP3CandidateStatus.published
-    record = yaml.safe_load(
-        (tmp_path / "withdrawn" / CROSS_SCENARIO_CONFLICTS_FILENAME).read_text(
-            encoding="utf-8"
-        )
-    )
-    assert record["withdrawn"] == ["SCN-001"]
-    # Without ICA contexts nothing is eligible, and the record says so.
-    assert yaml.safe_load(
-        (tmp_path / "baseline" / CROSS_SCENARIO_CONFLICTS_FILENAME).read_text(
-            encoding="utf-8"
-        )
-    ) == {
-        "schema_version": "cross-scenario-conflicts-v1",
-        "eligible_pairs": 0,
-        "evaluated_pairs": 0,
-        "conflicts": [],
-        "withdrawn": [],
+    outcomes = {
+        item["scenario_id"]: item for item in _manifest_candidate_outcomes(result)
     }
+    assert outcomes["SCN-001"]["status"] == "publication_failed"
+    assert outcomes["SCN-001"]["diagnostics"][-1] == (
+        _detected("SCN-001", "SCN-002").diagnostic()
+    )
+    assert outcomes["SCN-002"]["status"] == "published"
+    assert outcomes["SCN-003"]["status"] == "functional_test"
+    counts = _manifest_scenario_counts(result, len(result.scenario_envelopes))
+    assert (counts["generated"], counts["failed"], counts["functional_test"]) == (
+        1,
+        1,
+        1,
+    )
+    assert _record(tmp_path / "withdrawn") == _withdrawing(
+        "SCN-001", "SCN-002"
+    ).model_dump(mode="json")
