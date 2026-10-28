@@ -1,15 +1,17 @@
 """ICA fill stops when two consecutive slot requests get the same HTTP 400.
 
 The schema-rejection classifier reads a 400's fields and wording, so it can
-miss a provider's rejection of the request itself.  Such a provider then
-rejects every slot request alike, so two consecutive slot requests whose
-HTTP 400 replies have the same recorded text stop the fill after the second,
-named ``request_rejection_repeated``, and the run fails as for a classified
-schema rejection.  The second request is sent, recorded, and counted.
+miss a schema rejection.  As a backstop, two consecutive slot requests whose
+HTTP 400 replies have the same full error text (compared by its SHA-256,
+which the provider-call record keeps for a replay) stop the fill after the
+second, named ``request_rejection_repeated``, and the run fails as for a
+classified schema rejection.  The second request is sent, recorded, and
+counted.
 """
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable
@@ -27,9 +29,13 @@ from asago_scenario_generator.pipeline.synthesis import (
     run_synthesis,
 )
 from asago_scenario_generator.pipeline.synthesis_types import StageRun
+from asago_scenario_generator.stpa.infra.call_log import ERROR_DETAIL_LIMIT
 from asago_scenario_generator.stpa.infra.llm import LLMResult
 from asago_scenario_generator.stpa.infra.provider_record import (
+    REJECTION_FIELD,
     ReplayFill,
+    _error_record,
+    _rebuild_error,
     provider_call_session,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
@@ -66,8 +72,28 @@ _TOP_K_MESSAGE = "Unsupported parameter: top_k"
 _ICA_STAGE = "synthesis_obligation_aware_icas"
 
 
+# Text that runs past the call log's cut of an error's text.
+_LONG = "x" * ERROR_DETAIL_LIMIT
+# A context-length 400 whose size-limit wording lies past that cut.
+_LATE_CONTEXT = f"Bad request: {_LONG} This model's maximum context length is 8192."
+
+
 def _unflagged(message: str = _TOP_K_MESSAGE) -> Any:
     return _bad_request(message, extra=_TOP_K)
+
+
+def _late(n: int) -> Any:
+    """An unflagged 400 whose body differs from the others only past the cut."""
+    return _unflagged(f"{_TOP_K_MESSAGE} {_LONG} (request {n})")
+
+
+def _url(n: int) -> Any:
+    """An unflagged 400 whose body differs only in a URL the call log redacts."""
+    return _unflagged(f"{_TOP_K_MESSAGE}; see https://provider.invalid/requests/{n}")
+
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def _na_reply(kwargs: Any) -> LLMResult:
@@ -153,6 +179,22 @@ class TestTwoIdenticalUnflaggedRejections:
         assert set(by_call.values()) == {REQUEST_REJECTION_REPEATED}
         assert REQUEST_SCHEMA_REJECTED not in codes
 
+    @pytest.mark.parametrize("replayed", [False, True], ids=["live", "replayed"])
+    @pytest.mark.parametrize(
+        "message",
+        [f"{_TOP_K_MESSAGE} {_LONG}", f"{_TOP_K_MESSAGE}; see https://a.invalid/1"],
+        ids=["past-the-cut", "with-url"],
+    )
+    def test_identical_full_bodies_stop(self, tmp_path, message, replayed) -> None:
+        error = _unflagged(message)
+        client = _always(_replayed(error) if replayed else error)
+
+        filled = _fill(tmp_path, client)
+
+        assert len(client.calls) == 2
+        assert filled.fill_failure is not None
+        assert filled.fill_failure.code == REQUEST_REJECTION_REPEATED
+
 
 class TestPrecedence:
     def test_a_classified_rejection_stops_on_the_first_request(self, tmp_path) -> None:
@@ -190,7 +232,24 @@ class TestTheFillGoesOn:
                 lambda: _always(_replayed(_bad_request(_CONTEXT_MESSAGE))),
                 id="replayed-context",
             ),
+            pytest.param(
+                lambda: _always(_bad_request(_LATE_CONTEXT)), id="late-context"
+            ),
+            pytest.param(
+                lambda: _always(_replayed(_bad_request(_LATE_CONTEXT))),
+                id="replayed-late-context",
+            ),
             pytest.param(lambda: _SequenceClient(_numbered), id="bodies-differ"),
+            pytest.param(lambda: _SequenceClient(_late), id="differ-past-the-cut"),
+            pytest.param(
+                lambda: _SequenceClient(lambda n: _replayed(_late(n))),
+                id="replayed-differ-past-the-cut",
+            ),
+            pytest.param(lambda: _SequenceClient(_url), id="differ-in-url"),
+            pytest.param(
+                lambda: _SequenceClient(lambda n: _replayed(_url(n))),
+                id="replayed-differ-in-url",
+            ),
             pytest.param(
                 lambda: _script(_unflagged(), None, _unflagged()), id="success"
             ),
@@ -229,11 +288,11 @@ class TestRepeatableRejection:
         assert repeatable_rejection(live) is not None
         assert repeatable_rejection(live) == repeatable_rejection(_replayed(live))
 
-    def test_the_text_holds_the_reply_body(self) -> None:
-        text = repeatable_rejection(_unflagged())
+    def test_the_identity_digests_the_full_text_with_the_body(self) -> None:
+        error = _unflagged()
 
-        assert text is not None
-        assert "'param': 'top_k'" in text and _TOP_K_MESSAGE in text
+        assert repeatable_rejection(error) == _sha256(str(error))
+        assert "'param': 'top_k'" in str(error) and _TOP_K_MESSAGE in str(error)
 
     def test_the_cause_chain_is_read(self) -> None:
         error = _caused(ValueError("slot provider returned no payload"), _unflagged())
@@ -245,13 +304,82 @@ class TestRepeatableRejection:
         [
             _bad_request(_SCHEMA_MESSAGE),
             _bad_request(_CONTEXT_MESSAGE),
+            _bad_request(_LATE_CONTEXT),
+            _replayed(_bad_request(_LATE_CONTEXT)),
             _bad_request(_TOP_K_MESSAGE, status=500),
             ValueError(_TOP_K_MESSAGE),
             None,
         ],
-        ids=["schema-rejection", "context-length", "5xx", "local", "none"],
+        ids=[
+            "schema-rejection",
+            "context-length",
+            "late-context-length",
+            "replayed-late-context-length",
+            "5xx",
+            "local",
+            "none",
+        ],
     )
-    def test_other_failures_have_no_repeatable_text(self, error) -> None:
+    def test_other_failures_have_no_repeatable_identity(self, error) -> None:
+        assert repeatable_rejection(error) is None
+
+
+def _recorded_400(message: str, **fields: Any) -> dict[str, Any]:
+    """An HTTP 400 error record as an earlier or current recorder wrote it."""
+    return {
+        "type": "BadRequestError",
+        "message": message,
+        "status_code": 400,
+        **fields,
+    }
+
+
+class TestTheRecordedDigest:
+    def test_a_400_records_the_digest_of_its_full_text(self) -> None:
+        error = _url(1)
+
+        record = _error_record(error)
+
+        assert record[REJECTION_FIELD] == _sha256(str(error))
+        assert "https://" not in record["message"]
+        assert "[redacted-url]" in record["message"]
+
+    def test_a_size_limit_past_the_cut_records_no_digest(self) -> None:
+        record = _error_record(_bad_request(_LATE_CONTEXT))
+
+        assert record[REJECTION_FIELD] is None
+        assert "context length" not in record["message"]
+
+    def test_another_status_records_no_key(self) -> None:
+        record = _error_record(_bad_request(_TOP_K_MESSAGE, status=500))
+
+        assert REJECTION_FIELD not in record
+
+    @pytest.mark.parametrize(
+        "record",
+        [
+            _recorded_400("Bad request", rejection_sha256="ab" * 32),
+            _recorded_400("Bad request", rejection_sha256=None),
+            _recorded_400("Bad request"),
+        ],
+        ids=["digest", "null", "earlier-record"],
+    )
+    def test_a_replay_records_what_its_recording_holds(self, record) -> None:
+        assert _error_record(_rebuild_error(record)) == record
+
+    def test_an_earlier_record_falls_back_to_its_message(self) -> None:
+        error = _rebuild_error(_recorded_400(_TOP_K_MESSAGE))
+
+        assert repeatable_rejection(error) == _sha256(_TOP_K_MESSAGE)
+
+    @pytest.mark.parametrize(
+        "message",
+        [f"{_TOP_K_MESSAGE} [redacted-url]", ("x" * ERROR_DETAIL_LIMIT)],
+        ids=["redacted", "cut"],
+    )
+    def test_an_earlier_record_short_of_its_full_text_has_none(self, message) -> None:
+        error = _rebuild_error(_recorded_400(message))
+
         assert repeatable_rejection(error) is None
 
 
@@ -369,8 +497,14 @@ class TestRecordedAndReplayed:
 
         assert len(live_provider.requests) == 2
         assert replay_provider.requests == []
-        assert len(_records(tmp_path / "live" / "record")) == 2
-        assert len(_records(tmp_path / "replayed" / "record")) == 2
+        live_records = _records(tmp_path / "live" / "record")
+        replayed_records = _records(tmp_path / "replayed" / "record")
+        assert len(live_records) == len(replayed_records) == 2
+        digests = {record["error"][REJECTION_FIELD] for record in live_records}
+        assert digests == {_sha256(str(_unflagged()))}
+        assert [record["error"] for record in replayed_records] == [
+            record["error"] for record in live_records
+        ]
         for result in (live, replayed):
             assert result.run_status == "failed"
             assert result.manifest["run_status_reason"].startswith(_REASON)

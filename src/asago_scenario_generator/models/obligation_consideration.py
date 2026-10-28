@@ -163,8 +163,8 @@ SLOT_PROMPT_BUDGET_EXCEEDED = "slot_prompt_budget_exceeded"
 # it as its loss ``error_class``. The synthesis run then fails with it.
 REQUEST_SCHEMA_REJECTED = "request_schema_rejected"
 # Failure name ICA slot filling writes when two consecutive slot requests each
-# get the same HTTP 400 reply that names no schema rejection: the provider then
-# rejects the request itself, so the fill stops as for a schema rejection.
+# get the same HTTP 400 reply and the schema-rejection classifier flags
+# neither: the fill stops after the second as for a schema rejection.
 REQUEST_REJECTION_REPEATED = "request_rejection_repeated"
 
 

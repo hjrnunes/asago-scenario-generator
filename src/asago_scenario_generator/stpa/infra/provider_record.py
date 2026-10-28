@@ -20,7 +20,8 @@ Record format (one JSON object per line of ``provider-calls.jsonl``)::
       "request_sha256": "...",
       "outcome": "response" | "error",
       "response": {"id", "model", "finish_reason", "usage", "body"} | null,
-      "error": {"type", "message", "status_code"} | null,
+      "error": {"type", "message", "status_code",
+                "rejection_sha256"} | null,     # the digest on an HTTP 400 only
       "local_rejection": {"type", "message"} | null,
       "timestamp": "...", "duration_ms": 123,
       "retry_of": {"type", "status_code"},     # only on a transport retry
@@ -39,6 +40,13 @@ same identity and request digest; the retry's record carries ``retry_of``, the
 error class and status of the attempt it retries.  Other records have no
 ``retry_of`` key, so recordings made before the retry existed read unchanged.
 
+The error of an HTTP 400 carries ``rejection_sha256`` (see
+:func:`rejection_digest`): the SHA-256 of the error's full text before
+redaction and truncation, or ``null`` when that text names a size limit.  The
+text itself is recorded only as the redacted ``message``.  A replay records the
+value its recording holds, and an error recorded before the key existed
+replays without it.
+
 The request holds only per-call arguments.  The endpoint, credential, and
 connection headers belong to the SDK client, never to a request, and the
 recorder drops any parameter that names one.
@@ -48,6 +56,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import threading
 import time
 from collections import Counter, defaultdict, deque
@@ -56,11 +65,12 @@ from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Callable, Iterator, Mapping
+from typing import Any, Callable, Iterator, Mapping, cast
 
 from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.call_log import (
+    ERROR_DETAIL_LIMIT,
     CallLog,
     _safe_error,
     jsonl_lines,
@@ -73,6 +83,18 @@ from asago_scenario_generator.stpa.infra.transport_retry import (
 
 RECORD_FILENAME = "provider-calls.jsonl"
 RECORD_KIND = "provider-call-record-v1"
+# Error text that names a size limit: a context length or window, tokens, or a
+# maximum length.  Such an HTTP 400 answers the request's size, not its form.
+SIZE_LIMIT_TEXT = re.compile(
+    r"\bcontext (?:length|window)\b|\btokens?\b|\bmaximum length\b", re.IGNORECASE
+)
+# The error record key of an HTTP 400's rejection digest.
+REJECTION_FIELD = "rejection_sha256"
+# The attribute a replayed HTTP 400 keeps its recorded rejection digest in,
+# and its values for a live error and for a record without the key.
+_REPLAYED_REJECTION = "replayed_rejection_sha256"
+_LIVE = object()
+_NOT_RECORDED = object()
 
 _CONNECTION_PARAMETERS = frozenset(
     {
@@ -242,11 +264,48 @@ def _response_record(response: Any) -> dict[str, Any]:
 
 
 def _error_record(error: BaseException) -> dict[str, Any]:
-    return {
+    record = {
         "type": getattr(error, "recorded_type", type(error).__name__),
         "message": _safe_error(str(error)),
         "status_code": getattr(error, "status_code", None),
     }
+    if record["status_code"] == 400:
+        replayed = getattr(error, _REPLAYED_REJECTION, _LIVE)
+        if replayed is _LIVE:
+            record[REJECTION_FIELD] = _text_rejection_digest(str(error))
+        elif replayed is not _NOT_RECORDED:
+            record[REJECTION_FIELD] = replayed
+    return record
+
+
+def _text_rejection_digest(text: str) -> str | None:
+    """Digest an HTTP 400's full error text, or ``None`` if it names a size limit."""
+    if SIZE_LIMIT_TEXT.search(text):
+        return None
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def rejection_digest(error: BaseException) -> str | None:
+    """Identify an HTTP 400 by the SHA-256 of its full error text.
+
+    Two live 400s share a digest exactly when their full, unredacted texts are
+    equal; for an SDK error the text holds the reply body.  Text that names a
+    size limit (:data:`SIZE_LIMIT_TEXT`), decided on that full text, gives
+    ``None``.  A replayed 400 gives the value its record holds, so a replay
+    decides as the live run did.  One recorded before the record held the
+    value gives the digest of its recorded ``message``, unless that message
+    is not the full text: one redacted or cut at the recorded length gives
+    ``None``, as does one that names a size limit.
+    """
+    replayed = getattr(error, _REPLAYED_REJECTION, _LIVE)
+    if replayed is _LIVE:
+        return _text_rejection_digest(str(error))
+    if replayed is _NOT_RECORDED:
+        text = str(error)
+        if "[redacted" in text or len(text) >= ERROR_DETAIL_LIMIT:
+            return None
+        return _text_rejection_digest(text)
+    return cast(str | None, replayed)
 
 
 @dataclass
@@ -328,7 +387,9 @@ def _rebuild_error(error: Mapping[str, Any]) -> BaseException:
     except Exception:  # noqa: BLE001 - fall back to the generic replayed error
         rebuilt = None
     if rebuilt is None:
-        return ReplayedProviderError(name, message, status_code)
+        rebuilt = ReplayedProviderError(name, message, status_code)
+    if status_code == 400:
+        setattr(rebuilt, _REPLAYED_REJECTION, error.get(REJECTION_FIELD, _NOT_RECORDED))
     return rebuilt
 
 

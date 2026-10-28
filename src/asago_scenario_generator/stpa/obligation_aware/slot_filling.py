@@ -23,10 +23,13 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
     ObligationRoute,
 )
-from asago_scenario_generator.stpa.infra.call_log import _safe_error
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     count_requests,
     is_provider_contract_failure,
+)
+from asago_scenario_generator.stpa.infra.provider_record import (
+    SIZE_LIMIT_TEXT,
+    rejection_digest,
 )
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
@@ -90,9 +93,7 @@ _SCHEMA_CODES = frozenset({"invalid_json_schema", "invalid_schema"})
 # A field of the error body as the SDK error's text shows it, which is all a
 # replayed error keeps of the body.
 _BODY_FIELD = re.compile(r"[\'\"](param|code)[\'\"]: ?[\'\"]([^\'\"]+)[\'\"]")
-_SIZE_VETO = re.compile(
-    r"\bcontext (?:length|window)\b|\btokens?\b|\bmaximum length\b", re.IGNORECASE
-)
+_SIZE_VETO = SIZE_LIMIT_TEXT
 _SCHEMA_NOUN = r"\b(?:schema|json_schema|response_format)\b"
 _REJECTION_WORD = (
     r"\b(?:compil\w*|invalid|unsupported|not supported|not valid"
@@ -1296,25 +1297,25 @@ def _rejects_schema(error: BaseException) -> bool:
 
 
 def repeatable_rejection(error: BaseException | None) -> str | None:
-    """Return the text of an HTTP 400 that could repeat for every slot request.
+    """Identify the HTTP 400 a slot request failed with, for the backstop.
 
-    A provider that gives two consecutive slot requests the same HTTP 400
-    reply rejects the request itself, whatever the classifier of
-    ``is_request_schema_rejection`` makes of its wording, so the fill stops.
-    The text is that of the first 400 in the error's cause chain as the call
-    records keep it (connection material redacted, at most 800 characters),
-    so a live reply and its replay compare alike; for an SDK error it holds
-    the reply body.  A schema rejection, which stops the fill on its own, a
-    request its prompt budget rejected, and a 400 whose text the size veto
-    of ``is_request_schema_rejection`` marks as a context-length reply give
+    When two consecutive slot requests get the same HTTP 400 reply and the
+    classifier of ``is_request_schema_rejection`` flags neither, the fill
+    stops after the second.  The identity is ``rejection_digest`` of the
+    first 400 in the error's cause chain: the SHA-256 of its full error text,
+    which for an SDK error holds the reply body, so replies that differ
+    anywhere, redacted parts or text past the call log's cut included, do
+    not match.  A replay compares the digests its recording holds.  A schema
+    rejection, which stops the fill on its own, a request its prompt budget
+    rejected, and a 400 whose full text the size veto of
+    ``is_request_schema_rejection`` marks as a context-length reply give
     ``None``: they keep their own handling.
     """
     if _prompt_budget_exceeded(error) or is_request_schema_rejection(error):
         return None
     while error is not None:
         if getattr(error, "status_code", None) == 400:
-            text = _safe_error(str(error))
-            return None if _SIZE_VETO.search(text) else text
+            return rejection_digest(error)
         error = error.__cause__
     return None
 
@@ -1622,7 +1623,7 @@ class _SlotFillState:
     evidence: list[ConsiderationCallEvidence]
     diagnostics: list[ConsiderationDiagnostic]
     requests_sent: int = 0  # for the target request being processed
-    # The ``repeatable_rejection`` text of the last request sent, if any.
+    # The ``repeatable_rejection`` identity of the last request sent, if any.
     last_rejection: str | None = None
     lost: dict[str, SlotLoss] = field(default_factory=dict)
     ica_merges: list[IcaMerge] = field(default_factory=list)
@@ -2273,8 +2274,11 @@ def _stop_code(error: BaseException | None, state: _SlotFillState) -> str | None
     """Name the stop a request's failure makes, and track the repeated 400.
 
     A schema rejection stops the fill at once.  Otherwise a
-    ``repeatable_rejection`` text equal to the previous request's stops it;
-    any other outcome, a success included, leaves no rejection to repeat.
+    ``repeatable_rejection`` identity equal to the previous request's stops
+    it; any other outcome, a success included, leaves no rejection to repeat.
+    Consecutive means consecutive outcomes as the fill sees them, after the
+    client's one transport retry, so a 5xx retried into a 400 counts as that
+    400.
     """
     if is_request_schema_rejection(error):
         state.last_rejection = None
@@ -2286,7 +2290,10 @@ def _stop_code(error: BaseException | None, state: _SlotFillState) -> str | None
 
 
 _UNSENT_CAUSES = {
-    REQUEST_SCHEMA_REJECTED: "the provider rejected the request schema of {ref}",
+    REQUEST_SCHEMA_REJECTED: (
+        "the provider rejected the request schema of {ref}, and it rejects "
+        "every slot request alike"
+    ),
     REQUEST_REJECTION_REPEATED: (
         "the provider gave {ref} the same HTTP 400 reply as the slot request before it"
     ),
@@ -2307,7 +2314,7 @@ def _record_unsent_request(
         request,
         _expected_slot_map(request),
         None,
-        f"Slot request not sent: {cause}, and it rejects every slot request alike.",
+        f"Slot request not sent: {cause}.",
         state=state,
         call_ref=call_ref,
         error=stop.error,
@@ -2364,8 +2371,7 @@ def fill_synthesis_slots(
         if not _has_provider_slot(request):
             continue
         if stop is not None:
-            # The provider rejects every slot request alike, so the fill
-            # sends no further request.
+            # After a stop the fill sends no further request.
             _record_unsent_request(request, stop, state=state, call_ref=call_ref)
             unsent += 1
             continue

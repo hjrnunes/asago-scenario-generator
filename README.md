@@ -564,8 +564,12 @@ provider request, with the request exactly as sent (messages, response format,
 model, sampling controls), the raw response (body, `finish_reason`, usage,
 response id and model), the stage, step, slot, scenario, and attempt that
 issued it, a sequence number, and `request_sha256`, the SHA-256 of the
-canonical request JSON. A provider failure is recorded with its redacted error,
-and a response the client rejects locally carries the rejection. When the client
+canonical request JSON. A provider failure is recorded with its redacted error;
+an HTTP 400's error also carries `rejection_sha256`, the SHA-256 of its full
+error text before redaction and truncation (`null` when that text names a size
+limit such as a context length), which ICA slot filling compares, live and in
+replay, to stop after two consecutive identical 400 replies. A response the
+client rejects locally carries the rejection. When the client
 retries a request after a transport error, the failed attempt and the retry are
 two lines with the same request digest, and the retry's line carries
 `"retry_of": {"type": ..., "status_code": ...}`, the error class and HTTP
