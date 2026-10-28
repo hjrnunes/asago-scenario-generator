@@ -3,6 +3,7 @@ cases:
   two-failing-revision-authority-bases:
     once:
       - The prior response was not a valid RevisionDelta.
+      - "Prior structured response to correct in place:"
       - "Exact validation error from the prior response:"
       - "ValueError: 2 feedback channel authority bases fail the checks:"
       - Correct the `authority_for_update` of every feedback channel listed above
@@ -10,10 +11,10 @@ cases:
       - Return one JSON object matching the response schema already supplied.
     forbidden:
       - "1 feedback channel authority basis fails the checks:"
-      - "Prior structured response to correct in place:"
       - Keep every other record as written.
     ordered:
       - - The prior response was not a valid RevisionDelta.
+        - "Prior structured response to correct in place:"
         - "Exact validation error from the prior response:"
         - "ValueError: 2 feedback channel authority bases fail the checks:"
         - Correct the `authority_for_update` of every feedback channel listed above

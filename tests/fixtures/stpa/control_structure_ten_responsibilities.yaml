@@ -1,0 +1,646 @@
+responsibilities:
+- resp_id: RESP-1
+  description: Retrieves reservation information for the user.
+  responsibility_constraints:
+  - rc_id: RC-1-1
+    description: Access to reservation data is restricted to the host_id or guest_id
+      associated with that reservation.
+  security_constraint_refs:
+  - SC-1
+  process_model_parts:
+  - pm_id: PM-1-1
+    description: Authenticated actor ID
+    values:
+    - GST001
+    - other_id
+    evidence_refs:
+    - session:authenticated_actor_id
+  - pm_id: PM-1-2
+    description: Reservation ownership status
+    values:
+    - requester is guest
+    - requester is host
+    - requester is neither
+    evidence_refs:
+    - state:reservations.guest_id
+    - state:reservations.host_id
+    - session:authenticated_actor_id
+  control_actions:
+  - ca_id: CA-1-1
+    description: Return reservation details to user
+    target:
+      type: controlled_process
+      id: CP-1
+    effect_kind: model_output
+    temporality: instantaneous
+    process_model_refs:
+    - PM-1-1
+    - PM-1-2
+  - ca_id: CA-1-2
+    description: Invoke get_reservation tool
+    target:
+      type: controlled_process
+      id: CP-2
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: get_reservation
+    process_model_refs:
+    - PM-1-1
+    - PM-1-2
+  feedback_channels:
+  - fb_id: FB-1-1
+    description: Session identity
+    updates: PM-1-1
+    source:
+      type: controlled_process
+      id: CP-13
+    source_kind: session_context
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: session:authenticated_actor_id is bound to the session before
+        the first message.'
+  - fb_id: FB-1-2
+    description: Reservation record data
+    updates: PM-1-2
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: reservation visibility is determined by state:reservations.guest_id
+        and host_id.'
+- resp_id: RESP-2
+  description: Retrieves listing information for the user.
+  responsibility_constraints:
+  - rc_id: RC-2-1
+    description: Access to listing data is restricted to the host_id associated with
+      that listing or a guest with an active reservation for that listing.
+  security_constraint_refs:
+  - SC-1
+  process_model_parts:
+  - pm_id: PM-2-1
+    description: Authenticated actor ID
+    values:
+    - GST001
+    - other_id
+    evidence_refs:
+    - session:authenticated_actor_id
+  - pm_id: PM-2-2
+    description: Listing ownership/access status
+    values:
+    - requester is host
+    - requester has active reservation
+    - requester has no access
+    evidence_refs:
+    - state:listings.host_id
+    - state:reservations.listing_id
+    - state:reservations.guest_id
+    - session:authenticated_actor_id
+  control_actions:
+  - ca_id: CA-2-1
+    description: Return listing details to user
+    target:
+      type: controlled_process
+      id: CP-3
+    effect_kind: model_output
+    temporality: instantaneous
+    process_model_refs:
+    - PM-2-1
+    - PM-2-2
+  - ca_id: CA-2-2
+    description: Invoke get_listing tool
+    target:
+      type: controlled_process
+      id: CP-4
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: get_listing
+    process_model_refs:
+    - PM-2-1
+    - PM-2-2
+  feedback_channels:
+  - fb_id: FB-2-1
+    description: Session identity
+    updates: PM-2-1
+    source:
+      type: controlled_process
+      id: CP-13
+    source_kind: session_context
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: session:authenticated_actor_id is bound to the session before
+        the first message.'
+  - fb_id: FB-2-2
+    description: Listing record data
+    updates: PM-2-2
+    source:
+      type: controlled_process
+      id: CP-4
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: listing access is determined by state:listings.host_id and
+        reservation link.'
+- resp_id: RESP-3
+  description: Checks listing availability.
+  responsibility_constraints: []
+  security_constraint_refs: []
+  process_model_parts:
+  - pm_id: PM-3-1
+    description: Requested listing ID
+    evidence_refs:
+    - argument:check_availability.listing_id
+  - pm_id: PM-3-2
+    description: Requested date
+    evidence_refs:
+    - argument:check_availability.date
+  control_actions:
+  - ca_id: CA-3-1
+    description: Invoke check_availability tool
+    target:
+      type: controlled_process
+      id: CP-5
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: check_availability
+    process_model_refs:
+    - PM-3-1
+    - PM-3-2
+  feedback_channels:
+  - fb_id: FB-3-1
+    description: Listing ID requested
+    updates: PM-3-1
+    source:
+      type: responsibility
+      id: RESP-10
+    source_kind: user_message
+    authority_for_update:
+      status: conditional
+      basis: 'Use case: the user provides the listing ID in the query.'
+  - fb_id: FB-3-2
+    description: Date requested
+    updates: PM-3-2
+    source:
+      type: responsibility
+      id: RESP-10
+    source_kind: user_message
+    authority_for_update:
+      status: conditional
+      basis: 'Use case: the user provides the date in the query.'
+- resp_id: RESP-4
+  description: Retrieves and provides platform policy information.
+  responsibility_constraints:
+  - rc_id: RC-4-1
+    description: Policy-related answers must be grounded exclusively in current, platform-authored
+      policy documents.
+  security_constraint_refs:
+  - SC-7
+  process_model_parts:
+  - pm_id: PM-4-1
+    description: Policy document status
+    values:
+    - current and platform-authored
+    - outdated
+    - not authored by platform
+    evidence_refs:
+    - policy:TARGET-READ-001
+  control_actions:
+  - ca_id: CA-4-1
+    description: Return policy information to user
+    target:
+      type: controlled_process
+      id: CP-6
+    effect_kind: model_output
+    temporality: instantaneous
+    process_model_refs:
+    - PM-4-1
+  - ca_id: CA-4-2
+    description: Invoke lookup_policy tool
+    target:
+      type: controlled_process
+      id: CP-7
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: lookup_policy
+    process_model_refs:
+    - PM-4-1
+  feedback_channels:
+  - fb_id: FB-4-1
+    description: Policy document metadata
+    updates: PM-4-1
+    source:
+      type: controlled_process
+      id: CP-7
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: policy documents are retrieved via lookup_policy and their
+        status is determined by the platform.'
+- resp_id: RESP-5
+  description: Modifies an existing booking.
+  responsibility_constraints:
+  - rc_id: RC-5-1
+    description: A booking modification is permitted only if the authenticated_actor_id
+      is the host_id or guest_id of the reservation.
+  - rc_id: RC-5-2
+    description: A booking modification is permitted only if the reservation's modification_allowed
+      status is true, the payment_status is 'paid', and the requested check_in and
+      check_out dates form a valid range.
+  security_constraint_refs:
+  - SC-2
+  process_model_parts:
+  - pm_id: PM-5-1
+    description: Authenticated actor ID
+    values:
+    - GST001
+    - other_id
+    evidence_refs:
+    - session:authenticated_actor_id
+  - pm_id: PM-5-2
+    description: Reservation party membership
+    values:
+    - requester is guest
+    - requester is host
+    - requester is neither
+    evidence_refs:
+    - state:reservations.guest_id
+    - state:reservations.host_id
+    - session:authenticated_actor_id
+  - pm_id: PM-5-3
+    description: Reservation modification eligibility
+    values:
+    - modification allowed and paid
+    - modification not allowed
+    - not paid
+    evidence_refs:
+    - state:reservations.modification_allowed
+    - state:reservations.payment_status
+  - pm_id: PM-5-4
+    description: Date range validity
+    values:
+    - valid range
+    - invalid range
+    evidence_refs:
+    - argument:modify_booking.check_in
+    - argument:modify_booking.check_out
+  control_actions:
+  - ca_id: CA-5-1
+    description: Invoke modify_booking tool
+    target:
+      type: controlled_process
+      id: CP-8
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: modify_booking
+    process_model_refs:
+    - PM-5-1
+    - PM-5-2
+    - PM-5-3
+    - PM-5-4
+  - ca_id: CA-5-2
+    description: Return booking modification outcome to user
+    target:
+      type: controlled_process
+      id: CP-1
+    effect_kind: model_output
+    temporality: instantaneous
+    process_model_refs:
+    - PM-5-1
+    - PM-5-2
+    - PM-5-3
+    - PM-5-4
+  feedback_channels:
+  - fb_id: FB-5-1
+    description: Session identity
+    updates: PM-5-1
+    source:
+      type: controlled_process
+      id: CP-13
+    source_kind: session_context
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: session:authenticated_actor_id is bound to the session before
+        the first message.'
+  - fb_id: FB-5-2
+    description: Reservation membership
+    updates: PM-5-2
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: reservation membership is determined by comparing guest_id
+        and host_id to actor_id.'
+  - fb_id: FB-5-3
+    description: Reservation eligibility state
+    updates: PM-5-3
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: modification eligibility is based on state:reservations.modification_allowed
+        and payment_status.'
+  - fb_id: FB-5-4
+    description: Date range input
+    updates: PM-5-4
+    source:
+      type: responsibility
+      id: RESP-10
+    source_kind: user_message
+    authority_for_update:
+      status: conditional
+      basis: 'Use case: the user provides check_in and check_out dates in the modification
+        request.'
+- resp_id: RESP-6
+  description: Updates listing details on behalf of a host.
+  responsibility_constraints:
+  - rc_id: RC-6-1
+    description: Updates to a listing's occupancy or config_flags are permitted only
+      if the authenticated_actor_id matches the listing's host_id.
+  security_constraint_refs:
+  - SC-3
+  process_model_parts:
+  - pm_id: PM-6-1
+    description: Authenticated actor ID
+    values:
+    - HST001
+    - HST002
+    - other_id
+    evidence_refs:
+    - session:authenticated_actor_id
+  - pm_id: PM-6-2
+    description: Listing host ID
+    values:
+    - HST001
+    - HST002
+    - other_id
+    evidence_refs:
+    - state:listings.host_id
+  control_actions:
+  - ca_id: CA-6-1
+    description: Invoke update_listing tool
+    target:
+      type: controlled_process
+      id: CP-9
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: update_listing
+    process_model_refs:
+    - PM-6-1
+    - PM-6-2
+  feedback_channels:
+  - fb_id: FB-6-1
+    description: Session identity
+    updates: PM-6-1
+    source:
+      type: controlled_process
+      id: CP-13
+    source_kind: session_context
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: session:authenticated_actor_id is bound to the session before
+        the first message.'
+  - fb_id: FB-6-2
+    description: Listing host record
+    updates: PM-6-2
+    source:
+      type: controlled_process
+      id: CP-4
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: listing host is determined by state:listings.host_id.'
+- resp_id: RESP-7
+  description: Moderates conversation messages.
+  responsibility_constraints:
+  - rc_id: RC-7-1
+    description: Messages containing prohibited content, such as off-platform payment
+      attempts, must be blocked from the conversation channel.
+  security_constraint_refs:
+  - SC-4
+  process_model_parts:
+  - pm_id: PM-7-1
+    description: Message content safety
+    values:
+    - safe
+    - contains prohibited content (e.g., off-platform payment, scams)
+    evidence_refs:
+    - argument:moderate_message.body
+  control_actions:
+  - ca_id: CA-7-1
+    description: Invoke moderate_message tool
+    target:
+      type: controlled_process
+      id: CP-10
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: moderate_message
+    process_model_refs:
+    - PM-7-1
+  - ca_id: CA-7-2
+    description: Block message from conversation
+    target:
+      type: controlled_process
+      id: CP-11
+    effect_kind: agent_message
+    temporality: instantaneous
+    process_model_refs:
+    - PM-7-1
+  feedback_channels:
+  - fb_id: FB-7-1
+    description: Moderation result
+    updates: PM-7-1
+    source:
+      type: controlled_process
+      id: CP-10
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: moderation result determines if content is safe or prohibited.'
+- resp_id: RESP-8
+  description: Escalates trust and safety concerns to platform review.
+  responsibility_constraints:
+  - rc_id: RC-8-1
+    description: Trust-and-safety concerns identified during message processing must
+      be escalated to platform review.
+  security_constraint_refs:
+  - SC-6
+  process_model_parts:
+  - pm_id: PM-8-1
+    description: Topic of concern
+    values:
+    - scam
+    - harassment
+    - safety
+    - other
+    evidence_refs:
+    - argument:escalate_trust_safety.topic
+  control_actions:
+  - ca_id: CA-8-1
+    description: Invoke escalate_trust_safety tool
+    target:
+      type: controlled_process
+      id: CP-12
+    effect_kind: tool_call
+    temporality: instantaneous
+    operation: escalate_trust_safety
+    process_model_refs:
+    - PM-8-1
+  feedback_channels:
+  - fb_id: FB-8-1
+    description: Escalation topic
+    updates: PM-8-1
+    source:
+      type: responsibility
+      id: RESP-10
+    source_kind: user_message
+    authority_for_update:
+      status: conditional
+      basis: 'Use case: the topic is identified based on the content provided for
+        escalation.'
+- resp_id: RESP-9
+  description: Generates conversational responses.
+  responsibility_constraints:
+  - rc_id: RC-9-1
+    description: Outputs must not reflect stereotypes or treat demographic groups
+      disparately.
+  security_constraint_refs:
+  - SC-5
+  process_model_parts:
+  - pm_id: PM-9-1
+    description: Output content quality
+    values:
+    - non-discriminatory
+    - discriminatory/stereotypical
+  control_actions:
+  - ca_id: CA-9-1
+    description: Return conversational response to user
+    target:
+      type: controlled_process
+      id: CP-13
+    effect_kind: model_output
+    temporality: instantaneous
+    process_model_refs:
+    - PM-9-1
+  feedback_channels:
+  - fb_id: FB-9-1
+    description: Generated output quality
+    updates: PM-9-1
+    source:
+      type: responsibility
+      id: RESP-10
+    source_kind: other
+    authority_for_update:
+      status: unknown
+- resp_id: RESP-10
+  description: Manages tool parameter validation and action selection.
+  responsibility_constraints:
+  - rc_id: RC-10-1
+    description: System operations must be optimized to minimize resource consumption.
+  security_constraint_refs:
+  - SC-8
+  process_model_parts:
+  - pm_id: PM-10-1
+    description: Tool parameter validity
+    values:
+    - valid
+    - invalid
+  control_actions:
+  - ca_id: CA-10-1
+    description: Select optimal tool call
+    target:
+      type: responsibility
+      id: RESP-1
+    effect_kind: agent_message
+    temporality: instantaneous
+    process_model_refs:
+    - PM-10-1
+  feedback_channels:
+  - fb_id: FB-10-1
+    description: Tool execution result
+    updates: PM-10-1
+    source:
+      type: controlled_process
+      id: CP-2
+    source_kind: operation_result
+    authority_for_update:
+      status: authoritative
+      basis: 'Use case: tool execution determines if parameters were valid for the
+        operation.'
+controlled_processes:
+- cp_id: CP-1
+  description: User interface/Conversation channel
+- cp_id: CP-2
+  description: Reservation database/service
+- cp_id: CP-3
+  description: Listing database/service
+- cp_id: CP-4
+  description: Listing retrieval service
+- cp_id: CP-5
+  description: Availability service
+- cp_id: CP-6
+  description: Policy display
+- cp_id: CP-7
+  description: Policy document repository
+- cp_id: CP-8
+  description: Booking modification service
+- cp_id: CP-9
+  description: Listing management service
+- cp_id: CP-10
+  description: Content moderation service
+- cp_id: CP-11
+  description: Message blocking mechanism
+- cp_id: CP-12
+  description: Trust & Safety case management
+- cp_id: CP-13
+  description: Session context and identity provider
+coordination_links:
+- link_id: CL-1
+  source: RESP-1
+  target: RESP-5
+  shared_pm: PM-1-1
+  coordination_mechanism:
+    cm_id: CM-1
+    description: The system must ensure that the authenticated actor identity used
+      to gate reservation access (RESP-1) is the same identity evaluated for authorization
+      during booking modification (RESP-5).
+    payload: session:authenticated_actor_id
+  description: Coordination of authenticated actor identity to ensure consistent authorization
+    across retrieval and modification operations.
+- link_id: CL-2
+  source: RESP-5
+  target: RESP-10
+  shared_pm: PM-10-1
+  coordination_mechanism:
+    cm_id: CM-2
+    description: RESP-10 validates parameters for RESP-5; RESP-5 relies on the validation
+      state of the tool parameters.
+    payload: tool_parameter_status
+  description: RESP-10 provides parameter validation feedback that informs the execution
+    of modification actions in RESP-5.
+- link_id: CL-3
+  source: RESP-7
+  target: RESP-8
+  shared_pm: PM-7-1
+  coordination_mechanism:
+    cm_id: CM-3
+    description: If moderation identifies a trust-and-safety topic, it must trigger
+      the escalation process.
+    payload: escalation_trigger
+  description: Information flow from moderation results (RESP-7) to escalation responsibility
+    (RESP-8) to ensure safety concerns are addressed.
+- link_id: CL-4
+  source: RESP-9
+  target: RESP-10
+  shared_pm: PM-10-1
+  coordination_mechanism:
+    cm_id: CM-4
+    description: RESP-10 acts as a supervisor for the selection of tools used by the
+      conversational generator.
+    payload: action_selection_instruction
+  description: RESP-10 manages the selection of tool calls which are subsequently
+    utilized by the conversational response generation in RESP-9.

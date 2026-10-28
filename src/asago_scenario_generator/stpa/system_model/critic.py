@@ -702,8 +702,9 @@ def run_revision(
     are returned as warnings (the pipeline proceeds).
 
     A reply whose authority bases fail the checks earns the one correction,
-    which names every failing channel with its reason.  An undecodable reply
-    earns the same one correction.  Bases that still fail
+    which shows the rejected delta and names every failing channel with its
+    reason.  An undecodable reply earns the same one correction.  Bases that
+    still fail
     after it are dropped, so those channels' authority is unknown.
 
     Args:
@@ -759,6 +760,7 @@ def run_revision(
                 feedback=_REVISION_VALIDATION_FEEDBACK,
             ),
             include_schema=False,
+            include_response=True,
             error_note=authority_note,
             correct_undecodable=True,
         ),

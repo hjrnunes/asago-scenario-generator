@@ -649,6 +649,7 @@ class TestRevision:
         first, correction = _user_prompts(provider)
         assert correction == (
             f"{first}\n\n{_instruction('revision delta')}\n\n"
+            f"{_PRIOR_LABEL}\n```json\n{_UNDECODABLE.rstrip()}\n```\n\n"
             f"{_ERROR_LABEL}\n{_DECODE_ERROR}\n\n"
             "Return one JSON object matching the response schema already supplied."
         )
