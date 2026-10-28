@@ -455,10 +455,12 @@ def _unassessed_belief(tmp_path: Path) -> tuple[str, str]:
 # Each builder renders a request whose channels carry no assessment, every one
 # with at least one feedback channel.  The values are the SHA-256 of the system
 # and user prompt the code before the field produced for the same inputs.
+# The Stage 5 context system value also carries the later stated-reason
+# paragraph of ``stage5_context_system.j2``.
 _UNASSESSED_REQUESTS = {
     "stage5-context": (
         _unassessed_stage5,
-        "54c55283fad929e9adf816f0c8736e98f9eba0d5c9f9938b1bc012cfb71e8275",
+        "8e98a721daebe63577f518a82fab8da0d3f219e1e5fb8c370b15a8355bc6d9cf",
         "a3d88b0229ed6adda8a90fbff416d9e22b02e4767017d0ac4a48471937726b79",
     ),
     "stage5-belief": (
