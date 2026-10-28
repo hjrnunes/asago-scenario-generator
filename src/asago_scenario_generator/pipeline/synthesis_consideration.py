@@ -27,8 +27,12 @@ def _run_consideration(
     inputs: SynthesisInputs,
     snapshot: Any,
     adapters: SynthesisAdapters,
+    withheld_obligation_ids: frozenset[str] = frozenset(),
 ) -> StageRun:
-    """Run the initial complete structural consideration pass."""
+    """Run the initial complete structural consideration pass.
+
+    The briefs in ``withheld_obligation_ids`` are batched but never routed.
+    """
     result = adapters.consider(
         briefs=briefs,
         plan=plan,
@@ -39,6 +43,7 @@ def _run_consideration(
         obligation_adapter=adapters.obligation_adapter,
         output_dir=inputs.output_dir,
         max_workers=inputs.max_workers,
+        withheld_obligation_ids=withheld_obligation_ids,
     )
     return StageRun(result, calls=("consider",))
 
@@ -126,11 +131,13 @@ def _run_bounded_revision(
     inputs: SynthesisInputs,
     capability_snapshot: Any,
     resolved: SynthesisAdapters,
+    withheld_obligation_ids: frozenset[str] = frozenset(),
 ) -> StageRun:
     """Run at most one structural revision and its recheck for route gaps.
 
     The run's value is the revision result, the recheck result (or None),
-    the final loss analysis and control structure, and the final routes.
+    the final loss analysis and control structure, and the final routes. The
+    recheck withholds the same briefs the initial pass withheld.
     """
     final_loss = baseline_loss
     final_control = baseline_control
@@ -175,6 +182,7 @@ def _run_bounded_revision(
             capability_snapshot=capability_snapshot,
             obligation_adapter=resolved.obligation_adapter,
             output_dir=inputs.output_dir,
+            withheld_obligation_ids=withheld_obligation_ids,
         )
         calls += ("recheck",)
         recheck_result = rechecked

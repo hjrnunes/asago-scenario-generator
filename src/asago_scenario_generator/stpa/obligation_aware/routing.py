@@ -1112,8 +1112,16 @@ def route_obligations(
     controls: AnalysisControls | None = None,
     max_batch_size: int | None = None,
     purpose: Literal["initial", "recheck"] = "initial",
+    withheld_obligation_ids: Iterable[str] = (),
 ) -> RoutingRunResult:
-    """Route every applicable brief exactly once in canonical batches."""
+    """Route every applicable brief exactly once in canonical batches.
+
+    A brief named in ``withheld_obligation_ids`` is never sent: batches are
+    formed over every brief, then each batch drops its withheld briefs, and a
+    batch left empty sends no request.  The other batches keep their members
+    and their numbers, so withholding a brief changes no request that never
+    held it.  The result's briefs and routes cover the routed briefs only.
+    """
     if not isinstance(loss_analysis, LossAnalysis):
         raise TypeError("loss_analysis must be a LossAnalysis")
     if not isinstance(control_structure, ControlStructure):
@@ -1139,7 +1147,11 @@ def route_obligations(
     evidence: list[ConsiderationCallEvidence] = []
     diagnostics: list[str] = []
 
+    withheld = frozenset(withheld_obligation_ids)
     for batch_index, batch in enumerate(batches):
+        batch = tuple(item for item in batch if item.obligation_id not in withheld)
+        if not batch:
+            continue
         request, batch_routes, batch_evidence, diagnostic = _route_batch(
             adapter,
             batch,
@@ -1157,11 +1169,12 @@ def route_obligations(
         if diagnostic is not None:
             diagnostics.append(diagnostic)
 
+    routed = tuple(item for item in briefs_tuple if item.obligation_id not in withheld)
     ordered_routes = tuple(sorted(routes, key=lambda item: item.obligation_id))
-    if len(ordered_routes) != len(briefs_tuple):
+    if len(ordered_routes) != len(routed):
         raise AssertionError("routing pass did not retain one result per brief")
     return RoutingRunResult(
-        briefs=briefs_tuple,
+        briefs=routed,
         routes=ordered_routes,
         requests=tuple(requests),
         call_evidence=tuple(evidence),

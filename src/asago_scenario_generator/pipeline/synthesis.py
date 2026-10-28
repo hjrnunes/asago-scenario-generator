@@ -20,6 +20,9 @@ from pathlib import Path
 from typing import Any
 
 from asago_scenario_generator.pipeline.model_runtime import ModelRuntime
+from asago_scenario_generator.pipeline.obligation_consideration import (
+    out_of_scope_obligation_ids,
+)
 from asago_scenario_generator.pipeline.synthesis_baseline import (
     _baseline_diagnostics,
     _baseline_failure_message,
@@ -190,6 +193,15 @@ def _run_synthesis(
     if baseline_loss is None or baseline_control is None:
         raise ValueError(_baseline_failure_message(baseline))
     stage_warnings.extend(_baseline_diagnostics(baseline))
+    # The Stage 1a scope applies before routing: an applicable obligation of
+    # an out-of-scope risk is never routed, and accounting records it at
+    # ``risk_out_of_scope``.
+    risk_scopes = _boundary_decisions(getattr(baseline, "risk_actionability", None))
+    withheld = out_of_scope_obligation_ids(plan, risk_scopes)
+    routed_briefs = tuple(
+        brief for brief in briefs if brief.obligation_id not in withheld
+    )
+    routed_ids = _applicable_ids(plan) - withheld
 
     # Provider construction is deliberately after the provider-free Phase 1
     # planner and ordinary SP1 baseline.  The same object then reaches
@@ -207,13 +219,14 @@ def _run_synthesis(
             inputs,
             capability_snapshot,
             resolved,
+            withheld_obligation_ids=withheld,
         )
     )
     initial_routes = tuple(initial_consideration.routes)
     applicable_briefs = tuple(
         brief for brief in briefs if brief.obligation_id in _applicable_ids(plan)
     )
-    _ensure_route_universe(initial_routes, _applicable_ids(plan))
+    _ensure_route_universe(initial_routes, routed_ids)
     gaps = tuple(
         route for route in initial_routes if route.disposition == "upstream_gap"
     )
@@ -229,13 +242,14 @@ def _run_synthesis(
             inputs,
             capability_snapshot,
             resolved,
+            withheld_obligation_ids=withheld,
         )
     )
 
-    _ensure_route_universe(final_routes, _applicable_ids(plan))
+    _ensure_route_universe(final_routes, routed_ids)
     consideration = _close_consideration_artifact(
         plan=plan,
-        briefs=briefs,
+        briefs=routed_briefs,
         initial=initial_consideration,
         recheck=recheck_result,
         final_routes=final_routes,
@@ -279,7 +293,7 @@ def _run_synthesis(
     )
     stage_warnings.extend(governance.warnings)
     governance_routes = governance.routes
-    slot_briefs = (*briefs, *governance.briefs)
+    slot_briefs = (*routed_briefs, *governance.briefs)
     slot_routes = (*final_routes, *governance_routes)
 
     # Mechanism suggestions are proposed bottom up from the final structure
@@ -382,9 +396,7 @@ def _run_synthesis(
             slot_evidence=ica_enumeration,
             governance_routes=governance_routes,
             hazard_offers=hazard_offers,
-            risk_scopes=_boundary_decisions(
-                getattr(baseline, "risk_actionability", None)
-            ),
+            risk_scopes=risk_scopes,
         )
     )
     realization = log.take(

@@ -44,6 +44,12 @@ from asago_scenario_generator.stpa.scenario_prod.target_observations import (
 )
 
 
+def _routed(briefs, withheld_obligation_ids) -> tuple:
+    """Return the briefs a routing port routes: every brief it was not told to withhold."""
+    withheld = frozenset(withheld_obligation_ids)
+    return tuple(brief for brief in briefs if brief.obligation_id not in withheld)
+
+
 @dataclass
 class _FakeAdapters:
     calls: list[tuple[str, object]]
@@ -78,8 +84,16 @@ class _FakeAdapters:
             control_structure=self.control_structure,
         )
 
-    def consider(self, *, briefs, loss_analysis, control_structure, **_) -> object:
-        briefs = tuple(briefs)
+    def consider(
+        self,
+        *,
+        briefs,
+        loss_analysis,
+        control_structure,
+        withheld_obligation_ids=(),
+        **_,
+    ) -> object:
+        briefs = _routed(briefs, withheld_obligation_ids)
         self.calls.append(("consider", (briefs, loss_analysis, control_structure)))
         evidence = (
             (
@@ -114,8 +128,16 @@ class _FakeAdapters:
         )
         return self.revision
 
-    def recheck(self, *, briefs, loss_analysis, control_structure, **_) -> object:
-        briefs = tuple(briefs)
+    def recheck(
+        self,
+        *,
+        briefs,
+        loss_analysis,
+        control_structure,
+        withheld_obligation_ids=(),
+        **_,
+    ) -> object:
+        briefs = _routed(briefs, withheld_obligation_ids)
         self.calls.append(("recheck", (briefs, loss_analysis, control_structure)))
         return RoutingRunResult(
             briefs=briefs,

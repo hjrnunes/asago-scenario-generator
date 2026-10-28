@@ -266,6 +266,7 @@ def _default_consider(
     control_structure: Any,
     inputs: SynthesisInputs,
     obligation_adapter: Any,
+    withheld_obligation_ids: Any = (),
     **_: Any,
 ) -> Any:
     """Run one typed initial routing pass with the shared SP2 adapter."""
@@ -280,6 +281,7 @@ def _default_consider(
         control_structure=control_structure,
         controls=_provider_controls(obligation_adapter, inputs),
         purpose="initial",
+        withheld_obligation_ids=withheld_obligation_ids,
     )
 
 
@@ -331,6 +333,7 @@ def _default_recheck(
     control_structure: Any,
     inputs: SynthesisInputs,
     obligation_adapter: Any,
+    withheld_obligation_ids: Any = (),
     **_: Any,
 ) -> Any:
     """Run the sole complete post-revision routing pass through SP2."""
@@ -345,6 +348,7 @@ def _default_recheck(
         control_structure=control_structure,
         controls=_provider_controls(obligation_adapter, inputs),
         purpose="recheck",
+        withheld_obligation_ids=withheld_obligation_ids,
     )
 
 

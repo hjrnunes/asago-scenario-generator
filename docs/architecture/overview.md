@@ -246,7 +246,13 @@ Accounting gives an uncredited row one stop reason, checked in a fixed order:
 1. `risk_out_of_scope`: the Stage 1a boundary decision put the risk's class
    outside the system (`outside_boundary` or `not_applicable`). It outranks
    every reason below; addressed, generation-failed, and governance-only rows
-   keep their own.
+   keep their own. The decision applies before routing: an applicable
+   obligation of such a risk is withheld from the initial routing pass and
+   from the recheck, so it is never routed, never addressed, and stops here.
+   Batches are formed over every applicable obligation before the withheld
+   ones leave them, so a batch that held none keeps its request and its
+   number, and a batch left empty sends no request. Governance-only and
+   capability-excluded rows are not withheld.
 2. `risk_pattern_mismatch`: routing judged `risk_alignment: mismatch`, so the
    pattern's mechanism would not realize the risk, whatever the mechanism
    judgement.

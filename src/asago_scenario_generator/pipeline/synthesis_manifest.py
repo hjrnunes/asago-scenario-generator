@@ -770,10 +770,10 @@ def _obligation_scope_summary(
 ) -> dict[str, Any]:
     """Split the applicable obligations by the Stage 1a boundary decision.
 
-    The planner and the routing steps never read the decision, so this
-    summary only reports it. An obligation whose risk has no entry, or a run
-    without a decision, counts as in scope, the rule Stage 1a applies to an
-    unclassified card.
+    The planner never reads the decision; routing withholds the out-of-scope
+    obligations, which accounting stops at ``risk_out_of_scope``. An
+    obligation whose risk has no entry, or a run without a decision, counts
+    as in scope, the rule Stage 1a applies to an unclassified card.
     """
     decisions = _boundary_decisions(risk_actionability)
     risk_of = {

@@ -119,6 +119,24 @@ def _governance_brief(plan: TaxonomyObligationPlan, row: Any) -> NeutralObligati
     )
 
 
+def out_of_scope_obligation_ids(
+    plan: TaxonomyObligationPlan,
+    risk_scopes: Mapping[str, str],
+) -> frozenset[str]:
+    """Return the applicable obligations whose risk scope is out of scope.
+
+    These obligations are never sent to structural routing.  Governance-only
+    and capability-excluded rows are not applicable and are never named.
+    """
+    plan = _require_plan(plan)
+    return frozenset(
+        row.obligation_id
+        for row in plan.obligations
+        if row.scope_disposition == "applicable"
+        and risk_scopes.get(row.risk_ref.risk_id) in OUT_OF_SCOPE
+    )
+
+
 def batch_neutral_obligation_briefs(
     briefs: Iterable[NeutralObligationBrief],
     max_batch_size: int,
@@ -789,8 +807,13 @@ def _accounting_row_for(
     obligation: Any,
     routes: dict[str, ObligationRoute],
     pairs: tuple[ObligationIcaConsideration, ...],
+    scope: str | None = None,
 ) -> ObligationAccountingRow:
-    """Derive one row while retaining every Phase 1 scope disposition."""
+    """Derive one row while retaining every Phase 1 scope disposition.
+
+    An applicable obligation without a final route whose risk ``scope`` is out
+    of scope was withheld from routing; any other one lost its route.
+    """
     if obligation.scope_disposition == "capability_excluded":
         return ObligationAccountingRow(
             obligation_id=obligation.obligation_id,
@@ -804,6 +827,8 @@ def _accounting_row_for(
             _pair_results_for(pairs, obligation.obligation_id),
         )
     route = routes.get(obligation.obligation_id)
+    if route is None and scope in OUT_OF_SCOPE:
+        return _account_withheld(obligation, scope)
     if route is None:
         return ObligationAccountingRow(
             obligation_id=obligation.obligation_id,
@@ -825,6 +850,27 @@ def _accounting_row_for(
     )
 
 
+def _account_withheld(obligation: Any, scope: str) -> ObligationAccountingRow:
+    """Record an applicable obligation that routing withheld for its scope."""
+    return ObligationAccountingRow(
+        obligation_id=obligation.obligation_id,
+        disposition="unresolved",
+        stop_reason=RISK_OUT_OF_SCOPE,
+        scope=scope,
+        evidence=_phase1_evidence(obligation),
+        diagnostics=(
+            ConsiderationDiagnostic(
+                code=RISK_OUT_OF_SCOPE,
+                detail=(
+                    f"the risk's scope is {scope}, so the obligation was not "
+                    "sent to structural routing"
+                ),
+                obligation_ids=(obligation.obligation_id,),
+            ),
+        ),
+    )
+
+
 def _route_stop_reason(route: ObligationRoute) -> str:
     """Explain why a routed obligation stopped before ICA resolution."""
     codes = {item.code for item in route.diagnostics}
@@ -839,10 +885,13 @@ def _accounting_rows(
     plan: TaxonomyObligationPlan,
     routes: dict[str, ObligationRoute],
     pairs: tuple[ObligationIcaConsideration, ...],
+    risk_scopes: Mapping[str, str],
 ) -> tuple[ObligationAccountingRow, ...]:
     """Derive exactly one accounting row per Phase 1 obligation."""
     return tuple(
-        _accounting_row_for(obligation, routes, pairs)
+        _accounting_row_for(
+            obligation, routes, pairs, risk_scopes.get(obligation.risk_ref.risk_id)
+        )
         for obligation in plan.obligations
     )
 
@@ -944,7 +993,9 @@ def build_obligation_accounting(
     slot is credited without leaving the governance-only disposition.
     ``hazard_offers`` is the run's slot hazard offer report; accounting
     carries its summary. ``risk_scopes`` maps a risk ID to its Stage 1a scope
-    decision; each row records the scope of its risk. ``scenario_specs`` and
+    decision; each row records the scope of its risk, and an applicable row
+    of an out-of-scope risk without a final route was withheld from routing
+    and stops at ``risk_out_of_scope``. ``scenario_specs`` and
     ``functional_test_specs`` are the run's written scenarios; when given, an
     addressed row that none of them carries becomes ``generation_failed``.
     Without them the rows stay provisional.
@@ -969,7 +1020,8 @@ def build_obligation_accounting(
     routes = _validate_accounting_pairs(
         plan, consideration, pairs, tuple(governance_routes)
     )
-    rows = _scoped_rows(plan, _accounting_rows(plan, routes, pairs), risk_scopes or {})
+    scopes = risk_scopes or {}
+    rows = _scoped_rows(plan, _accounting_rows(plan, routes, pairs, scopes), scopes)
     pins = _validated_accounting_pins(source_pins, plan)
     accounting = ObligationAccounting(
         source_pins=pins,
@@ -992,5 +1044,6 @@ __all__ = [
     "build_governance_briefs",
     "build_neutral_briefs",
     "build_obligation_accounting",
+    "out_of_scope_obligation_ids",
     "validate_obligation_routes",
 ]
