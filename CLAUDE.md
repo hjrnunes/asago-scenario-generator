@@ -76,23 +76,29 @@ with unit tests under `tests/` and prompt text with rows in
   limit.
 - Follow the task's model, thinking, token, request, and target limits. Record
   actual controls and spend. Stop at the specified boundary without hidden
-  retries. The one retry the client makes after a transport error (HTTP 5xx or
-  a connection error that is not a timeout) is not hidden: it is recorded in
-  `provider-calls.jsonl` and counts as a request. Nothing else retries, with
-  four stated exceptions, each a recorded request that counts: the Stage 1a
-  risk-coverage review repeats a batch once when its reply decodes but carries
-  no row (`{"rows": []}`); the Stage 1a risk-actionability classifier repeats
-  once for the cards a reply leaves unclassified or classifies against its own
-  fields (an actionable decision that names no system action or affected
-  stakeholder), and a card still unclassified stays actionable with
-  `source: fallback`; obligation routing asks a whole batch again once
-  (`validation_retries`, default and maximum 1), sending the original prompt
-  plus a repair instruction and the validation error, when the reply fails
-  JSON decoding, its schema or batch identity, or a route's pattern binding,
-  assessment, or references (never for an over-budget prompt), and a route
-  still invalid stays `unresolved`; and Stage 5 repeats a scenario
-  request once, asking for a concise reply under a 2,048-token cap, when the
-  reply stopped at its completion cap.
+  retries. Every re-ask is its own request, recorded in
+  `provider-calls.jsonl`. All of them except the service-tier fallback also
+  count in the step's call count. The re-asks are bounded:
+  - The client retries a transport error (HTTP 5xx, or a connection error that
+    is not a timeout) once. With a profile `service_tier_fallback`, it re-sends
+    an HTTP 429 once on the fallback tier.
+  - Many model calls earn one correction when a reply fails its schema or
+    validators. The correction is the original prompt plus feedback and the
+    exact error. Stage 2 Calls 1–3 and the risk-actionability classifier also
+    repeat, once, a reply that does not decode.
+  - Some steps add bounded re-asks of their own:
+    - Stage 1a sends targeted repairs and a second density revision round.
+    - The risk review and the risk-actionability classifier each repeat a
+      batch or its pending cards.
+    - Stage 2 runs the Call 2b repair and the Call 3 density correction.
+    - Obligation and governance routing re-ask the whole batch.
+    - An unchanged ICA correction is asked again.
+    - Stage 5 sends its concise retry after a stop at the completion cap and
+      its condition correction.
+    - Target realization runs its correction and verifier retries.
+  - `docs/architecture/model-reasks.md` lists each re-ask with its trigger,
+    what it sends, its bound and its fallback. Keep it current when you
+    change one.
 - For execution, use the orchestrator's existing stage runner. Consumer
   authoring does not start services or perform setup.
 - Keep frozen inputs, packages, and historical evidence unchanged; write new
