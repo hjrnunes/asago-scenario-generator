@@ -79,15 +79,20 @@ with unit tests under `tests/` and prompt text with rows in
   retries. The one retry the client makes after a transport error (HTTP 5xx or
   a connection error that is not a timeout) is not hidden: it is recorded in
   `provider-calls.jsonl` and counts as a request. Nothing else retries, with
-  three stated exceptions, each a recorded request that counts: the Stage 1a
+  four stated exceptions, each a recorded request that counts: the Stage 1a
   risk-coverage review repeats a batch once when its reply decodes but carries
   no row (`{"rows": []}`); the Stage 1a risk-actionability classifier repeats
   once for the cards a reply leaves unclassified or classifies against its own
   fields (an actionable decision that names no system action or affected
   stakeholder), and a card still unclassified stays actionable with
-  `source: fallback`; and Stage 5 repeats a scenario request once, asking for a
-  concise reply under a 2,048-token cap, when the reply stopped at its
-  completion cap.
+  `source: fallback`; obligation routing asks a whole batch again once
+  (`validation_retries`, default and maximum 1), sending the original prompt
+  plus a repair instruction and the validation error, when the reply fails
+  JSON decoding, its schema or batch identity, or a route's pattern binding,
+  assessment, or references (never for an over-budget prompt), and a route
+  still invalid stays `unresolved`; and Stage 5 repeats a scenario
+  request once, asking for a concise reply under a 2,048-token cap, when the
+  reply stopped at its completion cap.
 - For execution, use the orchestrator's existing stage runner. Consumer
   authoring does not start services or perform setup.
 - Keep frozen inputs, packages, and historical evidence unchanged; write new
