@@ -759,29 +759,43 @@ whole failure can have one: the unsafe control action is `INCORRECT`, the
 safe outcome is a `command_attempt` on the operation, every observation
 criterion with a claim level is a `command_attempt` on the same operation,
 the failure call (when the draft has one) is an `incorrect_call` of it, and
-a supplied target read called it. The condition must concern that call
-alone: only `value` comparisons, argument operands of that operation only,
-and other operands that are fields of the selected record, the session
-subject, or literals, with every compared field present and not null on
-each record of the selected record's collection. Anything else keeps every
-`eq`. Within that scope:
+a supplied target read called it. Every selection must be on that
+operation, and the condition must concern that call alone: only `value`
+comparisons; an argument operand is one of that operation's and is compared
+with a literal or the session subject, never with a field of the selected
+record (that value would be frozen for every record); other operands are
+fields of the selected record, the session subject, or literals, with every
+compared field present and not null on each record of the selected
+record's collection. Anything else keeps every `eq`. Within that scope:
 
 - An argument the condition compares `ne` with the session subject loses
-  its selection when the supplied reads of the operation passed the session
-  subject for it, which shows the argument takes the subject's ids. Without
-  that evidence (record keys and subject ids can look alike, such as
-  numbers or UUIDs) it is treated as below.
+  its selection only when the supplied reads of the operation passed the
+  session subject for it and passed no key of any state collection. A value
+  that is both an id of the subject's kind and a record key (numbers and
+  UUIDs can be both) leaves the argument's domain open, so it is treated as
+  below.
 - When the condition compares owner fields of the selected record `ne` with
   the session subject, the records those comparisons fail are the entitled
   ones. A selection of the record key, or of an owner field for an argument
-  of another name, binds `not_in` the entitled keys only when the set is
-  settled: the reads of the operation passed only keys of the collection for
-  that argument, each read of a key agrees with the state on its owner
-  fields, the set is not empty, and no record it leaves out is named by a
-  record that names the session subject. An owner field selected for an
-  argument of its own name binds `not_in` the session subject when the
-  reads passed the subject for it.
+  of another name, binds `not_in` the entitled keys when the supplied state
+  settles the set: the reads of the operation passed only keys of the
+  collection for that argument; in every read of such a key, at least one
+  object in its content holds that key, and every object that holds it
+  holds each owner field with the state's value (no such object, or a
+  missing owner field, counts as disagreement);
+  the set is not empty; and no record it leaves out is named by a record
+  that names the session subject. An owner field selected for an argument
+  of its own name binds `not_in` the session subject under the same read
+  evidence as the first case.
 - Every other selection keeps its `eq`.
+
+These checks reject evidence that contradicts the supplied state; they do
+not prove the collection complete. A non-empty set of observed reads says
+nothing about records no read touched. The binder takes the supplied
+`TARGET-STATE` collection as the whole collection, because the target
+observations are the producer's supplied context for the target's records
+and Stage 5 cites records only from them; a capture that holds only part of
+a collection would make the entitled set too small.
 
 The bound status detail says when a selection was replaced. Every result
 stays within `tool-call-condition-v2`; the condition still flags a call the

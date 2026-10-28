@@ -34,7 +34,7 @@ Stage 5 check's stricter ones on mixed-type operands.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -509,34 +509,40 @@ def _ownership_bindings(
 ) -> dict[int, _Replacement]:
     """Return what replaces each ownership selection, by selection position.
 
-    Only a selection on ``operation`` can be replaced, and only when the
+    Only selections on ``operation`` can be replaced, and only when the
     supplied reads called ``operation``: its call then returns the record it
     names, so a call reaching a record outside the session subject's reach
-    discloses that record. The condition must concern that call alone: every
-    comparison is a ``value`` comparison, every argument operand is one of
-    ``operation``, and every other operand is a field of the selected record,
-    the session subject, or a literal, with each compared field present and
-    not null on every record of the selected record's collection. Otherwise
-    every selection keeps its ``eq``.
+    discloses that record. Every selection must be on ``operation``, and the
+    condition must concern that call alone: every comparison is a ``value``
+    comparison; an argument operand is one of ``operation`` and is compared
+    with a literal or the session subject; a comparison without an argument
+    compares fields of the selected record, the session subject, or
+    literals, with each compared field present and not null on every record
+    of the selected record's collection. Otherwise every selection keeps its
+    ``eq``.
 
     - An argument the condition compares ``ne`` with the session subject is
       covered by that comparison when the supplied reads of ``operation``
-      passed the session subject for it, which shows it takes the subject's
-      ids. Its selection then adds nothing. Without that evidence the
-      argument may take ids of another kind, such as record keys, and the
-      selection is handled as below or keeps its ``eq``.
+      passed the session subject for it and passed no key of any state
+      collection: a value that is also a record key leaves open whether the
+      argument takes subject ids or record keys. Its selection then adds
+      nothing. Otherwise the selection is handled as below or keeps its
+      ``eq``.
     - Owner fields of the selected record compared ``ne`` with the session
       subject make the selected record one the subject is not entitled to.
       The entitled records are those of its collection that fail the
       condition's record comparisons. A selection of the record's key, or of
       an owner field for an argument of another name, binds ``not_in`` the
-      entitled keys when the set is complete: the supplied reads of
-      ``operation`` passed only keys of the collection for that argument,
-      every read of a key agrees with the state on its owner fields, the
-      set is not empty, and no record left out of it is named by a record
-      that names the session subject. A selection of an owner field for an
-      argument of the same name binds ``not_in`` the session subject when
-      the reads passed the session subject for it.
+      entitled keys when the supplied state settles the set: the supplied
+      reads of ``operation`` passed only keys of the collection for that
+      argument, every read of such a key confirms the key's owner fields
+      (see :func:`_reads_disagree`), the set is not empty, and no record
+      left out of it is named by a record that names the session subject.
+      The supplied state collection is taken as the whole collection; these
+      checks reject evidence that contradicts it, they do not prove it.
+    - A selection of an owner field for an argument of the same name binds
+      ``not_in`` the session subject under the read evidence of the first
+      case.
     """
 
     session = _session_subject(fact_values)
@@ -548,6 +554,9 @@ def _ownership_bindings(
         or selection.get("status") != "observed"
     ):
         return {}
+    items = selection.get("argument_values") or ()
+    if any(item["operation"] != operation for item in items):
+        return {}
     comparisons = raw.get("comparisons") or []
     record_path = selection.get("record_path")
     scope = _record_scope(comparisons, operation, record_path, fact_values, session)
@@ -555,17 +564,16 @@ def _ownership_bindings(
         return {}
     reads = read_arguments[operation]
     covered = _arguments_ne_session(comparisons, operation, session)
+    keys = _state_keys(fact_values)
     replaced: dict[int, _Replacement] = {}
-    for position, item in enumerate(selection.get("argument_values") or ()):
-        if item["operation"] != operation:
-            continue
+    for position, item in enumerate(items):
         argument, path = item["argument"], item["path"]
         passed = reads.get(argument, frozenset())
         field_name = path.removeprefix(f"{record_path}.")
-        if argument in covered and session[1] in passed:
+        if argument in covered and session[1] in passed and not passed & keys:
             replaced[position] = None
         elif field_name in scope.owners and argument == field_name:
-            if session[1] in passed:
+            if session[1] in passed and not passed & keys:
                 replaced[position] = _not_in(operation, argument, [session[1]])
         elif path == record_path or field_name in scope.owners:
             entitled = _entitled_keys(scope, argument, passed, fact_values, session)
@@ -594,9 +602,11 @@ def _record_scope(
     """Return the record comparisons, or ``None`` when the condition is not one call's.
 
     ``None`` when a comparison is not a ``value`` comparison, names another
-    operation, cites a fact outside the selected record other than the
-    session subject, or compares a field that some record of the collection
-    lacks or holds as null.
+    operation, compares an argument with anything but a literal or the
+    session subject (a field of the selected record would bind that one
+    record's value for every record), cites a fact outside the selected
+    record other than the session subject, or compares a field that some
+    record of the collection lacks or holds as null.
     """
 
     collection = _collection(record_path, fact_values)
@@ -612,6 +622,12 @@ def _record_scope(
         if any(side.get("operation") != operation for side in named):
             return None
         if named:
+            if len(named) > 1 or not any(
+                side.get("source") == "literal" or _is_session_operand(side, session)
+                for side in sides
+                if side.get("source") != "argument"
+            ):
+                return None
             continue
         fields = [_record_field(side, record_path) for side in sides]
         for side, field_name in zip(sides, fields):
@@ -688,10 +704,14 @@ def _entitled_keys(
 def _reads_disagree(
     scope: _RecordScope, argument: str, fact_values: Mapping[str, object]
 ) -> bool:
-    """Return whether a supplied read of a key reports other owner values.
+    """Return whether a supplied read of a key fails to confirm its owners.
 
-    A read is the observation whose ``arguments.<argument>`` fact holds a
-    key of the collection; its top-level owner fields must equal the state's.
+    A read of a key is an observation whose ``arguments.<argument>`` fact is
+    a key of the collection. The records it returns for that key are the
+    objects in its content, at any depth, that hold the key as a value. The
+    read agrees only when at least one such record exists and every one of
+    them holds each owner field with the state's value; a missing record or
+    owner field is not agreement.
     """
 
     marker = f".arguments.{argument}"
@@ -701,12 +721,60 @@ def _reads_disagree(
         record = scope.collection.get(key) if isinstance(key, str) else None
         if record is None:
             continue
-        read = path.removesuffix(marker)
-        for owner in scope.owners:
-            found, value = resolve_fact(fact_values, f"{read}.{owner}")
-            if found and value != record.get(owner):
-                return True
+        returned = [
+            item
+            for item in _objects(_read_content(fact_values, path.removesuffix(marker)))
+            if key in item.values()
+        ]
+        if not returned or any(
+            owner not in item or item[owner] != record.get(owner)
+            for item in returned
+            for owner in scope.owners
+        ):
+            return True
     return False
+
+
+def _read_content(fact_values: Mapping[str, object], read: str) -> dict[str, object]:
+    """Rebuild the top-level content object of one read from its fact paths."""
+
+    prefix = f"{read}."
+    return {
+        path.removeprefix(prefix): value
+        for path, value in fact_values.items()
+        if path.startswith(prefix)
+        and "." not in path.removeprefix(prefix)
+        and path.removeprefix(prefix) != "arguments"
+    }
+
+
+def _objects(value: object) -> Iterator[Mapping[str, object]]:
+    """Yield every object in a JSON value, the value itself first."""
+
+    if isinstance(value, Mapping):
+        yield value
+        for child in value.values():
+            yield from _objects(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _objects(child)
+
+
+def _state_keys(fact_values: Mapping[str, object]) -> frozenset[str]:
+    """Return the keys of every record collection in the state."""
+
+    keys: set[str] = set()
+    for path, records in fact_values.items():
+        name = path.removeprefix(_STATE_PREFIX)
+        if (
+            name != path
+            and "." not in name
+            and isinstance(records, Mapping)
+            and records
+            and all(isinstance(record, Mapping) for record in records.values())
+        ):
+            keys.update(str(key) for key in records)
+    return frozenset(keys)
 
 
 def _arguments_ne_session(
