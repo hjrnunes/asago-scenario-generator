@@ -453,9 +453,9 @@ def _revision_structure_problem(status: str, root: Path) -> str | None:
     The step's input is the evidence-bound version and its output the revised
     one.  Whatever the reply, the step strips any responsibility with no
     process-model part, control action or feedback channel, so its output
-    holds none.  An applied revision changed the structure and an unchanged
-    one did not.  A discarded revision keeps its input, so its output is the
-    input with those responsibilities stripped: see
+    holds none.  An applied revision changed the structure.  An unchanged or
+    discarded revision keeps its input, so its output is the input with those
+    responsibilities stripped, which is no revision: see
     :func:`_discarded_structure_problem`.
     """
     versions = _revision_versions(root)
@@ -475,17 +475,18 @@ def _revision_structure_problem(status: str, root: Path) -> str | None:
         return (
             "a critic revision recorded as applied left the control structure unchanged"
         )
-    if status == "unchanged" and changed:
-        return "a critic revision recorded as unchanged changed the control structure"
-    if status == "discarded" and changed:
-        return _discarded_structure_problem(before, after)
+    if status in {"unchanged", "discarded"} and changed:
+        return _discarded_structure_problem(before, after, status=status)
     return None
 
 
 def _discarded_structure_problem(
-    before: ControlStructure, after: ControlStructure
+    before: ControlStructure, after: ControlStructure, *, status: str = "discarded"
 ) -> str | None:
-    """Check that a discarded revision's output is its input, stripped.
+    """Check that a kept revision's output is its input, stripped.
+
+    *status* is the record's: ``discarded``, or ``unchanged`` for a reply the
+    step accepted that changed nothing.
 
     The step strips the input's empty responsibilities and, only when that
     changed it, runs ``check_evidence_bindings`` again with the evidence that
@@ -495,16 +496,21 @@ def _discarded_structure_problem(
     it loses that prefix once more, or is dropped when the shorter name is
     not observed.
     """
+    label = f"{'an' if status == 'unchanged' else 'a'} {status} critic revision"
     stripped, removed = strip_empty_responsibilities(before)
     if not removed:
+        if status == "unchanged":
+            return (
+                "a critic revision recorded as unchanged changed the control structure"
+            )
         return (
             "a discarded critic revision changed the control structure, though "
             "the evidence-bound structure holds no empty responsibility to strip"
         )
     if _without_operations(stripped) != _without_operations(after):
         return (
-            "a discarded critic revision changed the control structure beyond "
-            "stripping its empty responsibilities"
+            f"{label} changed the control structure beyond stripping its empty "
+            "responsibilities"
         )
     for kept, bound in zip(stripped.responsibilities, after.responsibilities):
         for action, bound_action in zip(kept.control_actions, bound.control_actions):
@@ -519,7 +525,7 @@ def _discarded_structure_problem(
                     for name in sorted(allowed, key=lambda name: name is None)
                 )
                 return (
-                    "a discarded critic revision gave control action "
+                    f"{label} gave control action "
                     f"{bound_action.ca_id} the operation "
                     f"{bound_action.operation!r}, not {expected}"
                 )

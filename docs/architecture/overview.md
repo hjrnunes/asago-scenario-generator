@@ -843,11 +843,17 @@ error and asks for the complete object again. The critic revision's
 correction shows the rejected delta before the exact error. Validation merges
 a revision delta into the structure it revises, so a delta the merge would
 refuse, such as one restating an unknown responsibility, earns that
-correction instead of being discarded after it. A delta that adds and
-restates nothing is not merged; the Stage 2 manifest records
-`critic_revision.status` as `applied` (the structure changed), `unchanged`
-(the reply was accepted and changed nothing), or `discarded` with its
-`reason`. Each attempt is logged
+correction instead of being discarded after it. A delta has an effect only
+when its merged result differs from the reviewed structure put through the
+same merge without a delta, so re-normalization (such as sorting constraint
+citations) is never a revision; a delta without effect, including one that
+adds and restates nothing, leaves the reviewed structure in force. The Stage 2
+manifest records `critic_revision.status` as `applied` (the reply changed the
+structure), `unchanged` (the reply was accepted and changed nothing), or
+`discarded` with its `reason`, and the run manifest's `revised` agrees with it.
+The revision step strips a responsibility that was already empty whatever the
+reply; that cleanup is not a revision and is reported only by its
+`Stripped empty responsibility ...` post-revision warning. Each attempt is logged
 separately in `calls.jsonl` and counts as one request in the stage's call
 count; these retries do not change the manifest/result schemas, and
 exhaustion remains fatal with three exceptions: an exhausted critic returns

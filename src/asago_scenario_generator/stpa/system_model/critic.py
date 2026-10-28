@@ -636,48 +636,41 @@ def _finish_revision(
     loss_analysis: LossAnalysis | None,
     dropped_authority: frozenset[tuple[str, str]] = frozenset(),
 ) -> tuple[ControlStructure, list[str]]:
-    """Merge a validated delta and retain post-revision diagnostics."""
+    """Merge a validated delta and retain post-revision diagnostics.
+
+    The merge re-normalizes the whole structure and strips empty
+    responsibilities, so a delta has an effect only when its result differs
+    from the reviewed structure put through that same merge without a delta.
+    A delta without an effect returns *control_structure* itself: callers
+    tell an applied revision by identity.
+    """
     revision_warnings = [
         f"Revision dismissed finding: {justification}"
         for justification in revision_delta.dismissed_gaps
     ]
-    revision_warnings.extend(
-        _all_dismissed_no_change_warning(critic_findings, revision_delta)
-    )
-    if (
-        critic_findings.gaps
-        and not _delta_has_changes(revision_delta)
-        and len(revision_delta.dismissed_gaps) < len(critic_findings.gaps)
-    ):
-        revision_warnings.append(
-            "Revision made no structural changes for explicit critic gaps; the "
-            "baseline control structure was retained and those gaps remain "
-            "unresolved."
-        )
-    # A delta that adds and restates nothing is not merged: merging
-    # re-normalizes the structure, and that copy would read as revised.
-    if not _delta_has_changes(revision_delta):
-        post_revision = check_structural_heuristics(control_structure, loss_analysis)
-        revision_warnings.extend(post_revision.errors)
-        revision_warnings.extend(post_revision.warnings)
-        return control_structure, revision_warnings
-
-    # Merge the delta into the existing ControlStructure
-    try:
-        revised_cs, merge_warnings = _merge_revision_delta(
-            control_structure, revision_delta, dropped_authority=dropped_authority
-        )
-    except Exception as exc:
-        warning = f"{_REVISION_MERGE_DEGRADED}{type(exc).__name__}: {exc}"
-        return control_structure, [warning]
+    revised_cs: ControlStructure | None = None
+    merge_warnings: list[str] = []
+    strip_warnings: list[str] = []
+    if _delta_has_changes(revision_delta):
+        try:
+            merged, merge_warnings = _merge_revision_delta(
+                control_structure, revision_delta, dropped_authority=dropped_authority
+            )
+        except Exception as exc:
+            warning = f"{_REVISION_MERGE_DEGRADED}{type(exc).__name__}: {exc}"
+            return control_structure, [warning]
+        # Strip empty responsibilities as a safety net
+        revised_cs, strip_warnings = strip_empty_responsibilities(merged)
+        if revised_cs == _merged_baseline(control_structure):
+            revised_cs = None
 
     # Warnings are accumulated in chronological order: dismissal → merge →
     # strip → heuristics, so consumers see the earliest root-cause first.
     revision_warnings.extend(merge_warnings)
-
-    # Strip empty responsibilities as a safety net
-    revised_cs, strip_warnings = strip_empty_responsibilities(revised_cs)
     revision_warnings.extend(strip_warnings)
+    if revised_cs is None:
+        revision_warnings.extend(_no_change_warnings(critic_findings, revision_delta))
+        revised_cs = control_structure
 
     # Re-run structural heuristics after revision
     post_revision = check_structural_heuristics(revised_cs, loss_analysis)
@@ -685,6 +678,33 @@ def _finish_revision(
     revision_warnings.extend(post_revision.warnings)
 
     return revised_cs, revision_warnings
+
+
+def _merged_baseline(control_structure: ControlStructure) -> ControlStructure | None:
+    """The reviewed structure as a merge without a delta leaves it.
+
+    ``None`` when that merge fails, so no delta compares equal to it.
+    """
+    try:
+        merged, _ = _merge_revision_delta(control_structure, RevisionDelta())
+    except Exception:
+        return None
+    return strip_empty_responsibilities(merged)[0]
+
+
+def _no_change_warnings(
+    critic_findings: CriticFindings, revision_delta: RevisionDelta
+) -> list[str]:
+    """Explain a revision that left the reviewed structure in force."""
+    if not critic_findings.gaps:
+        return []
+    if len(revision_delta.dismissed_gaps) >= len(critic_findings.gaps):
+        return _all_dismissed_no_change_warning(critic_findings)
+    return [
+        "Revision made no structural changes for explicit critic gaps; the "
+        "baseline control structure was retained and those gaps remain "
+        "unresolved."
+    ]
 
 
 def run_revision(
@@ -729,6 +749,8 @@ def run_revision(
     Returns:
         A tuple of (revised ControlStructure, post-revision heuristic warnings).
         On LLM failure, returns (pre-revision ControlStructure, [warning]).
+        A reply without effect also returns the pre-revision object itself,
+        so an applied revision is any other returned object.
     """
     loader = template_loader or TemplateLoader(PROMPTS_DIR)
 
@@ -816,24 +838,12 @@ def _delta_has_changes(delta: RevisionDelta) -> bool:
     )
 
 
-def _all_dismissed_no_change_warning(
-    critic_findings: CriticFindings,
-    revision_delta: RevisionDelta,
-) -> list[str]:
-    """Build the warning for a revision that dismissed everything.
+def _all_dismissed_no_change_warning(critic_findings: CriticFindings) -> list[str]:
+    """Build the warning for a revision that dismissed every finding.
 
-    Returns a single-element list with the warning string when there was
-    at least one finding, the delta dismisses every finding, and the delta
-    adds or modifies nothing — the revision accomplished no structural
-    work. Returns an empty list otherwise.
+    The caller has established that the revision changed nothing.
     """
     finding_count = len(critic_findings.gaps)
-    if finding_count == 0:
-        return []
-    if len(revision_delta.dismissed_gaps) < finding_count:
-        return []
-    if _delta_has_changes(revision_delta):
-        return []
     return [
         f"Revision dismissed all findings ({finding_count}) and made no "
         "changes: the control structure is unchanged. Review each dismissal "

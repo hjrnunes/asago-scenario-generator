@@ -468,7 +468,11 @@ class TestAllDismissedWarning:
                 [ControlledProcess(cp_id="CP-2", description="New process")],
             ),
             ("new_coordination_links", [_make_cl(2, 2, 1, 2)]),
-            ("modified_responsibilities", [_make_resp(1)]),
+            # A restatement changes something only when it differs.
+            (
+                "modified_responsibilities",
+                [_make_resp(1).model_copy(update={"description": "Revised 1"})],
+            ),
         ],
     )
     def test_any_change_suppresses_warning(self, tmp_path, change_field, change_value):

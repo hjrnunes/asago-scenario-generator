@@ -787,9 +787,9 @@ def _maybe_apply_revision(
         return control_structure, [], False
 
     # Keep the baseline identity for the applied/not-applied decision.
-    # ``run_revision`` retains that object on provider, validation, or
-    # merge failure; an attempted call must not be reported as an applied
-    # revision in the result or manifest.
+    # ``run_revision`` returns that object on provider, validation, or merge
+    # failure and for a reply without effect; an attempted call must not be
+    # reported as an applied revision in the result or manifest.
     baseline_control_structure = control_structure
     control_structure, post_revision_warnings = run_revision(
         llm_client=llm_client,
@@ -802,7 +802,10 @@ def _maybe_apply_revision(
         temperature=temperature,
         target_evidence=target_evidence,
     )
-    # Strip empty responsibilities that revision may have introduced
+    revised = control_structure is not baseline_control_structure
+    # Strip empty responsibilities whatever the reply.  This cleanup is not a
+    # revision: its own warning reports it, and ``revised`` stays as the
+    # reply left it.
     control_structure, strip_warnings = strip_empty_responsibilities(control_structure)
     post_revision_warnings.extend(strip_warnings)
     if control_structure != baseline_control_structure:
@@ -810,7 +813,6 @@ def _maybe_apply_revision(
             control_structure, target_evidence
         )
         post_revision_warnings.extend(binding_warnings)
-    revised = control_structure != baseline_control_structure
     return control_structure, post_revision_warnings, revised
 
 

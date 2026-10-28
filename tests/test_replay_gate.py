@@ -1765,6 +1765,8 @@ def _critic_differences(
         ({"status": "applied"}, (True,), "stripped"),
         ({"status": "applied"}, (False, True), "changed"),
         ({"status": "unchanged"}, (True,), "unchanged"),
+        ({"status": "unchanged"}, (True,), "stripped"),
+        ({"status": "unchanged"}, (True,), "prefixed_rebound"),
         ({"status": "discarded", "reason": _FAILED}, (False,), "unchanged"),
         ({"status": "discarded", "reason": _FAILED}, (False,), "stripped"),
         ({"status": "discarded", "reason": _FAILED}, (False,), "prefixed_rebound"),
@@ -1929,6 +1931,7 @@ _BEYOND_STRIPPING = "beyond stripping its empty responsibilities"
         ({"status": "applied"}, (True,), "unchanged", "as applied left"),
         ({"status": "unchanged"}, (True,), "changed", "as unchanged changed"),
         ({"status": "unchanged"}, (True,), "kept_empty", _HOLDS_EMPTY),
+        ({"status": "unchanged"}, (True,), "stripped_and_edited", _BEYOND_STRIPPING),
         ({"status": "applied"}, (True,), "applied_kept_empty", _HOLDS_EMPTY),
         ({"status": "applied"}, (True,), "kept_one_empty", _HOLDS_EMPTY),
         (
@@ -2249,8 +2252,58 @@ def test_a_discarded_revision_that_strips_an_empty_responsibility_passes(
 
     assert record is not None and record["status"] == "discarded"
     assert record["reason"].startswith("Revision failed: ")
-    assert revised is True
+    # The step strips the empty responsibility; that is not a revision.
+    assert revised is False
+    assert revised_structure != baseline
     assert (tmp_path / "control-structure-evidence-bound.yaml").is_file()
+    assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
+
+
+def test_an_empty_revision_that_strips_an_empty_responsibility_is_unchanged(
+    tmp_path: Path,
+) -> None:
+    """Run the producer's revision step on a structure with an empty
+    responsibility and an accepted empty reply, then check its record."""
+    findings = CriticFindings(
+        gaps=[
+            CriticGap(
+                gap_type="missing_feedback",
+                description="No feedback reports the classified intent",
+                related_attack_path="A crafted message is read as a routine request",
+                suggested_remedy="Add intent classification feedback",
+            )
+        ]
+    )
+    client = MockLLMClient()
+    client.set_response_for(RevisionDelta, {})
+    baseline, _ = check_evidence_bindings(
+        _with_empty_responsibility(_reviewed_structure()), None
+    )
+
+    revised_structure, warnings, revised = _maybe_apply_revision(
+        baseline,
+        critic_findings=findings,
+        llm_client=client,
+        use_case_text="A support assistant answers account questions.",
+        run_dir=tmp_path,
+        loss_analysis=None,  # type: ignore[arg-type]
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0.4,
+    )
+    record = _critic_revision_record(findings, warnings, revised=revised)
+    _write_revision_versions(tmp_path, baseline, revised_structure)
+    (tmp_path / "run-manifest.yaml").write_text(
+        yaml.safe_dump({"post_revision_warnings": warnings})
+    )
+    (tmp_path / "synthesis-manifest.yaml").write_text(
+        yaml.safe_dump({"run_id": "r", "created_at": "t"})
+    )
+    _write_post_revision_warnings(tmp_path, warnings)
+
+    assert record == {"status": "unchanged"}
+    # The step still strips the empty responsibility.
+    assert revised_structure == strip_empty_responsibilities(baseline)[0]
+    assert any(w.startswith("Stripped empty responsibility RESP-99") for w in warnings)
     assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
 
 
