@@ -3,7 +3,10 @@
 :func:`mechanism_candidates` walks the typed control structure from untrusted
 feedback to the actions and coordination links it reaches.
 :func:`mechanism_join` runs the same walk under the authority filter and
-records why each channel's candidates were kept or dropped.
+records why each channel's candidates were kept or dropped.  Both take
+``signature_retrieval``, off by default, which matches every channel against
+each mechanism library entry's signature instead of the fixed source-kind
+labels; no pipeline stage turns it on.
 
 The index is rebuilt per call rather than cached: the STPA models are mutable,
 so a cache keyed on them could serve records that were changed in place.
@@ -19,7 +22,12 @@ from enum import Enum
 from types import MappingProxyType
 from typing import Any, TypeVar
 
-from asago_scenario_generator.stpa.mechanism_library import MechanismId
+from asago_scenario_generator.stpa.mechanism_library import (
+    ControllerCrossing,
+    MechanismId,
+    MechanismSignature,
+    bundled_mechanism_library,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlActionEffectKind,
@@ -243,8 +251,9 @@ permission for the other.
 class MechanismCandidate:
     """One mechanism worth considering on one typed path.
 
-    ``path`` is ``(FB, PM, CA)``: the untrusted feedback channel, the variable
-    it updates, and a control action that lists the variable in
+    ``path`` is ``(FB, PM, CA)``: the feedback channel (untrusted, unless
+    signature retrieval matched it), the variable it updates, and a control
+    action that lists the variable in
     ``process_model_refs``.  Or it is ``(FB, PM, CL)``: a coordination link
     whose ``source`` owns that variable as its ``shared_pm``.
     """
@@ -257,6 +266,7 @@ def mechanism_candidates(
     control_structure: ControlStructure,
     *,
     authority_filter: bool = False,
+    signature_retrieval: bool = False,
 ) -> tuple[MechanismCandidate, ...]:
     """Join untrusted feedback to the actions and links its variable reaches.
 
@@ -284,21 +294,81 @@ def mechanism_candidates(
     order: responsibilities, their channels, the actions of every
     responsibility, then the links; a repeated candidate is kept once.
 
+    With *signature_retrieval*, every channel starts a path, and each path
+    gets every library entry whose signature it fits, in library order
+    (:func:`signature_fits`).  The signature decides alone: the channel need
+    not be untrusted, and its authority is the filter's concern.  Each fixed
+    label is an entry that fits wherever the label applies, so the candidates
+    without the flag are a subsequence of those with it.
+
     With *authority_filter*, the candidates are those :func:`mechanism_join`
     keeps, in the same order; without it the join is unchanged.
     """
     if authority_filter:
-        return tuple(item.candidate for item in mechanism_join(control_structure).kept)
+        join = mechanism_join(
+            control_structure, signature_retrieval=signature_retrieval
+        )
+        return tuple(item.candidate for item in join.kept)
     actions = _children(control_structure.responsibilities, "control_actions")
     result: dict[MechanismCandidate, None] = {}
     for channel in _children(control_structure.responsibilities, "feedback_channels"):
-        if not channel.untrusted:
+        if not (signature_retrieval or channel.untrusted):
             continue
         for path, crosses in _channel_paths(control_structure, actions, channel):
-            _add_candidates(
-                result, path, SOURCE_MECHANISMS.get(channel.source_kind), crosses
-            )
+            for mechanism in _path_mechanisms(channel, crosses, signature_retrieval):
+                result.setdefault(MechanismCandidate(mechanism, path), None)
     return tuple(result)
+
+
+def signature_fits(
+    signature: MechanismSignature,
+    source_kind: FeedbackSourceKind | None,
+    crosses: bool,
+) -> bool:
+    """Whether a path from a *source_kind* channel fits *signature*'s structure.
+
+    The channel's kind must be one of ``source_kinds``, and the path's crossing
+    must meet ``crossing``: ``within_controller`` forbids a path that reaches
+    another controller, ``must_cross`` requires one.  Every join path reads its
+    variable, so ``process_model_refs`` (``read_by_path``) always holds.  The
+    signature's ``authority`` is left to the authority filter.
+    """
+    if source_kind not in signature.source_kinds:
+        return False
+    if signature.crossing is ControllerCrossing.within_controller:
+        return not crosses
+    if signature.crossing is ControllerCrossing.must_cross:
+        return crosses
+    return True
+
+
+def _path_mechanisms(
+    channel: FeedbackChannel, crosses: bool, signature_retrieval: bool
+) -> tuple[MechanismId, ...]:
+    """The mechanisms one path from *channel* gets, in library order."""
+    if signature_retrieval:
+        return tuple(
+            entry.id
+            for entry in bundled_mechanism_library().mechanisms
+            if signature_fits(entry.signature, channel.source_kind, crosses)
+        )
+    found = (
+        SOURCE_MECHANISMS.get(channel.source_kind),
+        CROSS_CONTROLLER_MECHANISM if crosses else None,
+    )
+    return tuple(mechanism for mechanism in found if mechanism is not None)
+
+
+def admitted_authority(mechanism: MechanismId) -> frozenset[FeedbackAuthorityStatus]:
+    """The channel authority statuses under which *mechanism* applies.
+
+    They are its library entry's signature ``authority``.  Most entries admit
+    every status but ``authoritative``: a channel entitled to set the value
+    cannot plant a false one.  ``stale_feedback`` also admits
+    ``authoritative``, because an entitled source's value can still be out of
+    date when the action runs.
+    """
+    return frozenset(bundled_mechanism_library().entry(mechanism).signature.authority)
 
 
 class ReachBasis(str, Enum):
@@ -335,7 +405,9 @@ class DropReason(str, Enum):
     """Why the authority filter drops a channel's candidates.
 
     - ``authoritative``: an adversary reaches the channel, but its
-      ``authority_for_update`` says it is entitled to set the variable;
+      ``authority_for_update`` says it is entitled to set the variable, and
+      the candidate's mechanism does not apply under that status
+      (:func:`admitted_authority`);
     - ``own_controller``: ``source_kind`` is ``retrieved_content`` or
       ``conversation_history``, but the channel's source is its own
       controller (:attr:`ReachBasis.own_controller`).
@@ -397,21 +469,26 @@ class MechanismJoin:
     dropped: tuple[DroppedCandidate, ...]
 
 
-def mechanism_join(control_structure: ControlStructure) -> MechanismJoin:
+def mechanism_join(
+    control_structure: ControlStructure, *, signature_retrieval: bool = False
+) -> MechanismJoin:
     """Join adversary-reachable feedback that lacks authority over its variable.
 
-    The paths and mechanisms are those of :func:`mechanism_candidates`; the
-    filter changes only which channels start a path:
+    The paths and mechanisms are those of :func:`mechanism_candidates`, with
+    the same *signature_retrieval*; the filter changes only which candidates
+    are kept:
 
     1. Reach.  A channel is adversary-reachable as :class:`ReachBasis`
        decides: its ``source`` against the responsibility that owns it, for
        the kinds in :data:`OWN_CONTROLLER_KINDS`, then its ``source_kind``.
        The filter never makes reachable a channel the unfiltered join skips.
-    2. Authority.  A reachable channel is kept unless its
-       ``update_authority`` status is ``authoritative``; ``non_authoritative``,
-       ``conditional`` and ``unknown`` (recorded or absent) keep it.
+    2. Authority.  A reachable channel's candidate is kept when its
+       ``update_authority`` status is one its mechanism admits
+       (:func:`admitted_authority`).  Without *signature_retrieval* every
+       mechanism admits ``non_authoritative``, ``conditional`` and ``unknown``
+       (recorded or absent) but not ``authoritative``.
 
-    A channel that fails both is dropped for the first.  A channel neither
+    A candidate that fails both is dropped for the first.  A channel neither
     join would follow is not reported.
     """
     actions = _children(control_structure.responsibilities, "control_actions")
@@ -419,20 +496,22 @@ def mechanism_join(control_structure: ControlStructure) -> MechanismJoin:
     dropped: dict[MechanismCandidate, DroppedCandidate] = {}
     for owner in control_structure.responsibilities:
         for channel in owner.feedback_channels:
-            if not channel.untrusted:
+            if not (signature_retrieval or channel.untrusted):
                 continue
             reach = _channel_reach(owner, channel)
-            mechanism = SOURCE_MECHANISMS.get(channel.source_kind)
             status = channel.update_authority.status
-            reason: DropReason | None = None
-            if reach is ReachBasis.own_controller:
-                reason = DropReason.own_controller
-            elif status is FeedbackAuthorityStatus.authoritative:
-                reason = DropReason.authoritative
             found: dict[MechanismCandidate, None] = {}
             for path, crosses in _channel_paths(control_structure, actions, channel):
-                _add_candidates(found, path, mechanism, crosses)
+                for mechanism in _path_mechanisms(
+                    channel, crosses, signature_retrieval
+                ):
+                    found.setdefault(MechanismCandidate(mechanism, path), None)
             for candidate in found:
+                reason: DropReason | None = None
+                if reach is ReachBasis.own_controller:
+                    reason = DropReason.own_controller
+                elif status not in admitted_authority(candidate.mechanism):
+                    reason = DropReason.authoritative
                 if reason is None:
                     kept.setdefault(
                         candidate,
@@ -495,20 +574,6 @@ def _issued_by_owner(
     return owner.resp_id == link.source
 
 
-def _add_candidates(
-    result: dict[MechanismCandidate, None],
-    path: tuple[str, str, str],
-    source_mechanism: MechanismId | None,
-    crosses: bool,
-) -> None:
-    for mechanism in (
-        source_mechanism,
-        CROSS_CONTROLLER_MECHANISM if crosses else None,
-    ):
-        if mechanism is not None:
-            result.setdefault(MechanismCandidate(mechanism, path), None)
-
-
 __all__ = [
     "ASSESSED_AUTHORITY",
     "CROSS_CONTROLLER_MECHANISM",
@@ -522,7 +587,9 @@ __all__ = [
     "ReachBasis",
     "SlotPath",
     "StpaIndex",
+    "admitted_authority",
     "build_stpa_index",
     "mechanism_candidates",
     "mechanism_join",
+    "signature_fits",
 ]
