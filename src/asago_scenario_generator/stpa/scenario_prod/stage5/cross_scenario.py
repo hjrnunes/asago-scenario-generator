@@ -20,8 +20,10 @@ is the only call the agent makes, so the agent may make other calls before or
 after it. Its ``record_refs`` name the observations the safe call reads
 (``TARGET-STATE``), never a record path, which Stage 5 moves to
 ``fact_refs``; they bind no argument value. On that one argument-less call,
-on an incomplete capture, ``not_called`` and ``order`` comparisons and
-comparisons on the call's arguments are unknown, so the result is
+on an incomplete capture, a ``not_called`` comparison is false when the known
+call rules it out (it calls that operation and the comparison has no
+``where`` item), otherwise unknown; ``order`` comparisons and comparisons on
+the call's arguments remain unknown. The result is therefore
 ``inconclusive`` or ``not_detected``. An ``inconclusive`` pair is recorded
 and never withdraws; only ``detected`` does. With the fields the safe outcome
 has today no condition is ``detected`` on such a call, so in practice the

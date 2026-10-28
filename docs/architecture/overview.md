@@ -665,8 +665,10 @@ reference evaluator on the one call A's safe outcome names, its
 behavior, not the whole behavior: nothing states that it is the agent's only
 call, so the call is evaluated as an incomplete capture. Its `record_refs`
 name observations, not records, so the call's arguments are unknown. On that
-capture `not_called` and `order` comparisons and comparisons on the call's
-arguments are unknown, and the result is `inconclusive` or `not_detected`.
+capture a `not_called` comparison is false when the known call rules it out
+(it calls that operation and the comparison has no `where` item), otherwise
+unknown; `order` comparisons and comparisons on the call's arguments remain
+unknown. The result is therefore `inconclusive` or `not_detected`.
 Only `detected` withdraws B: its candidate outcome is `publication_failed`
 with a `cross_scenario_safe_outcome_conflict` diagnostic, and its handoff is
 not written; a pair detected both ways withdraws both. An `inconclusive` pair
