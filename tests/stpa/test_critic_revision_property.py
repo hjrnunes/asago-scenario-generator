@@ -51,6 +51,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     CriticGap,
     RevisionDelta,
+    RevisionOutcome,
     _compute_next_ids,
     _merge_revision_delta,
     _stitch_revision_delta,
@@ -256,7 +257,9 @@ def _revision_attempted(findings: CriticFindings, run_dir) -> bool:
     """Return whether Stage 2 asks for a revision of these critic findings."""
     baseline = _make_base_cs()
     with patch.object(
-        run_module, "run_revision", return_value=(baseline, [])
+        run_module,
+        "revise_control_structure",
+        return_value=RevisionOutcome(baseline, [], applied=False),
     ) as revision:
         run_module._maybe_apply_revision(
             baseline,

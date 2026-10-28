@@ -50,9 +50,8 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     discarded_revision_reason,
     run_completeness_critic,
-    run_revision,
+    revise_control_structure,
     sanitize_critic_ids,
-    strip_empty_responsibilities,
 )
 from asago_scenario_generator.stpa.system_model.heuristics import (
     uncited_security_constraints,
@@ -786,12 +785,10 @@ def _maybe_apply_revision(
     if not critic_findings.gaps:
         return control_structure, [], False
 
-    # Keep the baseline identity for the applied/not-applied decision.
-    # ``run_revision`` returns that object on provider, validation, or merge
-    # failure and for a reply without effect; an attempted call must not be
-    # reported as an applied revision in the result or manifest.
-    baseline_control_structure = control_structure
-    control_structure, post_revision_warnings = run_revision(
+    # The revision step publishes the reply's output when it differs from the
+    # no-revision output and that output otherwise; both come from the same
+    # post-revision processing (strip, then conditional evidence binding).
+    outcome = revise_control_structure(
         llm_client=llm_client,
         control_structure=control_structure,
         critic_findings=critic_findings,
@@ -802,20 +799,7 @@ def _maybe_apply_revision(
         temperature=temperature,
         target_evidence=target_evidence,
     )
-    # ``run_revision`` has already compared the reply's result with the
-    # baseline after the strip and evidence binding below, so a change that
-    # processing removes is no revision; only an effective one is a new object.
-    revised = control_structure is not baseline_control_structure
-    # Strip empty responsibilities whatever the reply.  This cleanup is not a
-    # revision: its own warning reports it.
-    control_structure, strip_warnings = strip_empty_responsibilities(control_structure)
-    post_revision_warnings.extend(strip_warnings)
-    if control_structure != baseline_control_structure:
-        control_structure, binding_warnings = check_evidence_bindings(
-            control_structure, target_evidence
-        )
-        post_revision_warnings.extend(binding_warnings)
-    return control_structure, post_revision_warnings, revised
+    return outcome.structure, outcome.warnings, outcome.applied
 
 
 def _run_stage_2_block(

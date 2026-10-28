@@ -334,12 +334,12 @@ coordination_links:
     payload: state:reservations.guest_id/host_id
   description: Coordination between modification management and reservation info retrieval
     to ensure the actor has permission to modify the specific reservation being viewed.
-- link_id: CL-4
+- link_id: CL-3
   source: RESP-5
   target: RESP-2
   shared_pm: PM-2-2
   coordination_mechanism:
-    cm_id: CM-4
+    cm_id: CM-3
     description: Verify host identity and listing association.
     payload: state:listings.host_id
   description: Ensures listing updates are only performed by the authenticated host associated

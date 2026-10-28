@@ -23,7 +23,11 @@ from asago_scenario_generator.stpa.system_model import run as run_module
 from asago_scenario_generator.stpa.system_model.control_structure import (
     CoordinationAnalysis,
 )
-from asago_scenario_generator.stpa.system_model.critic import CriticFindings, CriticGap
+from asago_scenario_generator.stpa.system_model.critic import (
+    CriticFindings,
+    CriticGap,
+    RevisionOutcome,
+)
 from asago_scenario_generator.stpa.system_model.run import run_sp1
 from tests.helpers.stpa_builders import make_risk_cards
 from tests.stpa.sp1_helpers import (
@@ -205,7 +209,9 @@ class TestControlStructureVersions:
         base = "asago_scenario_generator.stpa.system_model.run."
 
         def revise(*, control_structure, **_kwargs):
-            return self._tagged("revised")(control_structure)
+            # The revision step binds its own output; run.py publishes it.
+            structure, warnings = self._tagged("revised")(control_structure)
+            return RevisionOutcome(structure, warnings, applied=True)
 
         patches = [
             patch(
@@ -229,7 +235,7 @@ class TestControlStructureVersions:
                     ]
                 ),
             ),
-            patch(base + "run_revision", side_effect=revise),
+            patch(base + "revise_control_structure", side_effect=revise),
         ]
         if writes is not None:
             patches.extend(_spy_canonical_writes(writes))
@@ -250,7 +256,7 @@ class TestControlStructureVersions:
         revised = self._description(tmp_path, "control-structure-revised.yaml")
         assert not reviewed.endswith(("bound", "revised", "placed"))
         assert bound == f"{reviewed} bound"
-        assert revised == f"{bound} revised bound"
+        assert revised == f"{bound} revised"
         # Placement is the last step: its version is the canonical file.
         _absent(tmp_path, "control-structure-placed.yaml")
 
@@ -261,7 +267,7 @@ class TestControlStructureVersions:
             self._description(tmp_path, "control-structure-revised.yaml") + " placed"
         )
         assert result.control_structure.responsibilities[0].description.endswith(
-            "revised bound placed"
+            "revised placed"
         )
 
     def test_an_absent_version_equals_the_next_version_on_disk(self, tmp_path):

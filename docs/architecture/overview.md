@@ -843,22 +843,25 @@ error and asks for the complete object again. The critic revision's
 correction shows the rejected delta before the exact error. Validation merges
 a revision delta into the structure it revises, so a delta the merge would
 refuse, such as one restating an unknown responsibility, earns that
-correction instead of being discarded after it. A delta has an effect only
-when its result and the reviewed structure still differ after each goes
-through everything the revision step does after the merge: merge
-normalization, the empty-responsibility strip and evidence binding. So
-re-normalization (such as sorting constraint citations), that cleanup, and a
-change binding removes again (an unobserved operation or evidence ref) are
-never a revision; a delta without effect, including one that adds and
-restates nothing, leaves the reviewed structure in force. The Stage 2
-manifest records `critic_revision.status` as `applied` (the reply changed the
-structure), `unchanged` (the reply was accepted and changed nothing), or
-`discarded` with its `reason`, and the run manifest's `revised` agrees with it.
-The revision step strips a responsibility that was already empty whatever the
-reply; that cleanup is not a revision and is reported only by its
-`Stripped empty responsibility ...` post-revision warning. The replay gate
-rejects an `applied` record whose structure differs from the step's input
-only by that strip and the rebinding it allows. Each attempt is logged
+correction instead of being discarded after it. A revision is `applied`
+exactly when the structure the step publishes after the reply differs from
+the structure it publishes with no revision. Both come from one
+post-revision function, applied once to the reviewed structure and once to
+the reply merged onto it: strip the empty responsibilities, then bind the
+evidence again only when that changed the reviewed structure, which is
+already bound. When the two outputs are equal, the no-revision output is
+published with the warnings that concern the reply. So that cleanup, and a
+change binding removes again (an unobserved operation or evidence ref), are
+never a revision. The merge leaves a responsibility the reply does not
+restate as it was, and a restated one keeps its constraint citations in
+order, so an exact restatement changes nothing. The Stage 2 manifest records
+`critic_revision.status` as `applied`, `unchanged` (the reply was accepted
+and changed nothing), or `discarded` with its `reason`, and the run
+manifest's `revised` agrees with it. The empty-responsibility cleanup is
+reported only by its `Stripped empty responsibility ...` post-revision
+warning. The replay gate holds no copy of the run's target evidence, so it
+does not reject an `applied` record whose structure differs from its input
+only in fields that strip and rebinding could also change. Each attempt is logged
 separately in `calls.jsonl` and counts as one request in the stage's call
 count; these retries do not change the manifest/result schemas, and
 exhaustion remains fatal with three exceptions: an exhausted critic returns

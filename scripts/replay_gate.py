@@ -453,10 +453,13 @@ def _revision_structure_problem(status: str, root: Path) -> str | None:
     The step's input is the evidence-bound version and its output the revised
     one.  Whatever the reply, the step strips any responsibility with no
     process-model part, control action or feedback channel, so its output
-    holds none.  An applied revision changed the structure beyond that strip
-    and the rebinding it allows.  An unchanged or discarded revision keeps its
-    input, so its output is the input with those responsibilities stripped,
-    which is no revision: see :func:`_discarded_structure_problem`.
+    holds none.  An applied revision changed the structure.  The gate holds
+    no copy of the run's target evidence, so it cannot tell a revision that
+    changed a bound field from the rebinding that follows the strip, and it
+    does not check that an applied revision did more than that.  An
+    unchanged or discarded revision keeps its input, so its output is the
+    input with those responsibilities stripped, which is no revision: see
+    :func:`_discarded_structure_problem`.
     """
     versions = _revision_versions(root)
     if versions is None:
@@ -474,14 +477,6 @@ def _revision_structure_problem(status: str, root: Path) -> str | None:
     if status == "applied" and not changed:
         return (
             "a critic revision recorded as applied left the control structure unchanged"
-        )
-    if (
-        status == "applied"
-        and _discarded_structure_problem(before, after, status=status) is None
-    ):
-        return (
-            "a critic revision recorded as applied changed the control structure "
-            "only by stripping its empty responsibilities, which is no revision"
         )
     if status in {"unchanged", "discarded"} and changed:
         return _discarded_structure_problem(before, after, status=status)

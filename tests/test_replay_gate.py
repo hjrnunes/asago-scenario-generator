@@ -56,7 +56,10 @@ from asago_scenario_generator.stpa.system_model.critic import (
     strip_empty_responsibilities,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
+    EvidenceArgument,
+    EvidenceField,
     EvidenceOperation,
+    EvidenceResource,
     TargetEvidence,
     check_evidence_bindings,
 )
@@ -1762,6 +1765,12 @@ def _critic_differences(
     ("record", "attempts", "versions"),
     [
         ({"status": "applied"}, (True,), "changed"),
+        # The gate holds no copy of the run's target evidence, so it cannot
+        # tell the permitted strip and rebinding from a revision that changed
+        # the same bound fields; it accepts these as applied.
+        ({"status": "applied"}, (True,), "stripped"),
+        ({"status": "applied"}, (True,), "prefixed_rebound"),
+        ({"status": "applied"}, (True,), "prefixed_dropped"),
         ({"status": "applied"}, (False, True), "changed"),
         ({"status": "unchanged"}, (True,), "unchanged"),
         ({"status": "unchanged"}, (True,), "stripped"),
@@ -1921,7 +1930,6 @@ def test_an_added_critic_revision_needs_the_synthesis_stage_warnings(trees) -> N
 
 _HOLDS_EMPTY = "holds an empty responsibility, which the revision step always strips"
 _BEYOND_STRIPPING = "beyond stripping its empty responsibilities"
-_ONLY_STRIPPING = "applied changed the control structure only by stripping"
 
 
 @pytest.mark.parametrize(
@@ -1929,8 +1937,6 @@ _ONLY_STRIPPING = "applied changed the control structure only by stripping"
     [
         ({"status": "applied"}, (), "changed", "made no revision request"),
         ({"status": "applied"}, (True,), "unchanged", "as applied left"),
-        ({"status": "applied"}, (True,), "stripped", _ONLY_STRIPPING),
-        ({"status": "applied"}, (True,), "prefixed_rebound", _ONLY_STRIPPING),
         ({"status": "unchanged"}, (True,), "changed", "as unchanged changed"),
         ({"status": "unchanged"}, (True,), "kept_empty", _HOLDS_EMPTY),
         ({"status": "unchanged"}, (True,), "stripped_and_edited", _BEYOND_STRIPPING),
@@ -2306,6 +2312,112 @@ def test_an_empty_revision_that_strips_an_empty_responsibility_is_unchanged(
     # The step still strips the empty responsibility.
     assert revised_structure == strip_empty_responsibilities(baseline)[0]
     assert any(w.startswith("Stripped empty responsibility RESP-99") for w in warnings)
+    assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
+
+
+def _evidence_observing_both_lookup_forms() -> TargetEvidence:
+    """Evidence for every reviewed binding, observing the lookup two ways.
+
+    It observes ``ask_clinical_question`` and also an operation literally
+    named ``operation:ask_clinical_question``.
+    """
+    names = [
+        action.operation
+        for resp in _reviewed_structure().responsibilities
+        for action in resp.control_actions
+        if action.operation is not None
+    ]
+    question = EvidenceArgument(name="question", type="str", required=True)
+    return TargetEvidence(
+        operations=(
+            *(
+                EvidenceOperation(
+                    name=name,
+                    description="Observed.",
+                    arguments=(question,) if name == _LOOKUP else (),
+                )
+                for name in names
+            ),
+            EvidenceOperation(
+                name=f"operation:{_LOOKUP}", description="Observed.", arguments=()
+            ),
+        ),
+        resources=(
+            EvidenceResource(
+                name="education",
+                record_count=1,
+                record_keys=("E-1",),
+                fields=tuple(
+                    EvidenceField(
+                        resource="education", name=name, types=("str",), values=()
+                    )
+                    for name in ("approved", "specialty")
+                ),
+            ),
+        ),
+    )
+
+
+def test_an_applied_revision_that_drops_a_prefixed_binding_passes(
+    tmp_path: Path,
+) -> None:
+    """A real revision that drops a binding is applied, and the gate keeps it.
+
+    The evidence observes both ``operation:ask_clinical_question`` and
+    ``ask_clinical_question``, and the baseline binds CA-1-2 to the prefixed
+    one.  The reply sets CA-1-2 to an unobserved operation, so the published
+    structure has none there: a genuine revision.  Without the evidence, the
+    gate cannot tell that from rebinding dropping the prefix, so it accepts
+    the applied record.
+    """
+    findings = CriticFindings(
+        gaps=[
+            CriticGap(
+                gap_type="missing_feedback",
+                description="No feedback reports the classified intent",
+                related_attack_path="A crafted message is read as a routine request",
+                suggested_remedy="Add intent classification feedback",
+            )
+        ]
+    )
+    evidence = _evidence_observing_both_lookup_forms()
+    baseline, _ = check_evidence_bindings(
+        _with_empty_responsibility(
+            _rebound(_reviewed_structure(), operation=f"operation:operation:{_LOOKUP}")
+        ),
+        evidence,
+    )
+    assert baseline.responsibilities[0].control_actions[1].operation == (
+        f"operation:{_LOOKUP}"
+    )
+    restated = baseline.responsibilities[0].model_dump(mode="json", exclude_none=True)
+    restated["control_actions"][1]["operation"] = "not_observed"
+    client = MockLLMClient()
+    client.set_response_for(RevisionDelta, {"modified_responsibilities": [restated]})
+
+    revised_structure, warnings, revised = _maybe_apply_revision(
+        baseline,
+        critic_findings=findings,
+        llm_client=client,
+        use_case_text="A support assistant answers account questions.",
+        run_dir=tmp_path,
+        loss_analysis=None,  # type: ignore[arg-type]
+        loader=TemplateLoader(PROMPTS_DIR),
+        temperature=0.4,
+        target_evidence=evidence,
+    )
+    record = _critic_revision_record(findings, warnings, revised=revised)
+    _write_revision_versions(tmp_path, baseline, revised_structure)
+    (tmp_path / "run-manifest.yaml").write_text(
+        yaml.safe_dump({"post_revision_warnings": warnings})
+    )
+    (tmp_path / "synthesis-manifest.yaml").write_text(
+        yaml.safe_dump({"run_id": "r", "created_at": "t"})
+    )
+    _write_post_revision_warnings(tmp_path, warnings)
+
+    assert record == {"status": "applied"}
+    assert revised_structure.responsibilities[0].control_actions[1].operation is None
     assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
 
 

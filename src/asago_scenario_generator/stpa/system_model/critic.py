@@ -629,6 +629,55 @@ def _revision_failure_warnings(error_msg: str) -> list[str]:
     return warnings
 
 
+@dataclass(frozen=True)
+class RevisionOutcome:
+    """What the revision step publishes, and whether the reply changed it.
+
+    ``applied`` is true exactly when ``structure`` is the reply's output and
+    that differs from the no-revision output; see :func:`revision_step_output`.
+    """
+
+    structure: ControlStructure
+    warnings: list[str]
+    applied: bool
+
+
+def revision_step_output(
+    structure: ControlStructure,
+    *,
+    baseline: ControlStructure,
+    target_evidence: TargetEvidence | None,
+) -> tuple[ControlStructure, list[str]]:
+    """Return what the revision step publishes for *structure*, with warnings.
+
+    The step strips every responsibility without a process-model part,
+    control action or feedback channel.  When that leaves a structure other
+    than *baseline*, which is already bound, it binds the evidence again.
+    The no-revision output is this applied to *baseline* itself; a reply's
+    output is this applied to the reply merged onto *baseline*.  Both go
+    through this one function, so the comparison and the published structure
+    cannot drift apart.
+    """
+    stripped, warnings = strip_empty_responsibilities(structure)
+    if stripped == baseline:
+        return stripped, warnings
+    bound, binding_warnings = check_evidence_bindings(stripped, target_evidence)
+    return bound, [*warnings, *binding_warnings]
+
+
+def _no_revision(
+    control_structure: ControlStructure,
+    warnings: list[str],
+    *,
+    target_evidence: TargetEvidence | None,
+) -> RevisionOutcome:
+    """Publish the no-revision output for a reply that is not applied."""
+    output, cleanup_warnings = revision_step_output(
+        control_structure, baseline=control_structure, target_evidence=target_evidence
+    )
+    return RevisionOutcome(output, [*warnings, *cleanup_warnings], applied=False)
+
+
 def _finish_revision(
     control_structure: ControlStructure,
     revision_delta: RevisionDelta,
@@ -637,23 +686,21 @@ def _finish_revision(
     loss_analysis: LossAnalysis | None,
     dropped_authority: frozenset[tuple[str, str]] = frozenset(),
     target_evidence: TargetEvidence | None = None,
-) -> tuple[ControlStructure, list[str]]:
-    """Merge a validated delta and retain post-revision diagnostics.
+) -> RevisionOutcome:
+    """Merge a validated delta and decide whether it is applied.
 
-    A delta has an effect only when its result and the reviewed structure
-    differ once each is put through everything the revision step does after
-    the merge: see :func:`_revision_step_form`.  A delta without an effect
-    returns *control_structure* itself: callers tell an applied revision by
-    identity.
+    The reply is applied exactly when its output differs from the
+    no-revision output, both from :func:`revision_step_output`.  Otherwise
+    the no-revision output is published, with the warnings that concern the
+    reply.
     """
     revision_warnings = [
         f"Revision dismissed finding: {justification}"
         for justification in revision_delta.dismissed_gaps
     ]
-    revised_cs: ControlStructure | None = None
-    merge_warnings: list[str] = []
-    strip_warnings: list[str] = []
-    binding_warnings: list[str] = []
+    unrevised, cleanup_warnings = revision_step_output(
+        control_structure, baseline=control_structure, target_evidence=target_evidence
+    )
     if _delta_has_changes(revision_delta):
         try:
             merged, merge_warnings = _merge_revision_delta(
@@ -661,58 +708,44 @@ def _finish_revision(
             )
         except Exception as exc:
             warning = f"{_REVISION_MERGE_DEGRADED}{type(exc).__name__}: {exc}"
-            return control_structure, [warning]
-        # Strip empty responsibilities as a safety net
-        revised_cs, strip_warnings = strip_empty_responsibilities(merged)
-        reply_form = _revision_step_form(revised_cs, target_evidence)
-        baseline_form = _revision_step_form(control_structure, target_evidence)
-        if (
-            reply_form is not None
-            and baseline_form is not None
-            and reply_form[0] == baseline_form[0]
-        ):
-            # Say what binding removed from the reply, not what it reports
-            # for the reviewed structure as well.
-            binding_warnings = [
-                warning for warning in reply_form[1] if warning not in baseline_form[1]
-            ]
-            revised_cs = None
-
-    # Warnings are accumulated in chronological order: dismissal → merge →
-    # strip → binding → heuristics, so consumers see the earliest root-cause
-    # first.
-    revision_warnings.extend(merge_warnings)
-    revision_warnings.extend(strip_warnings)
-    revision_warnings.extend(binding_warnings)
-    if revised_cs is None:
-        revision_warnings.extend(_no_change_warnings(critic_findings, revision_delta))
-        revised_cs = control_structure
-
-    # Re-run structural heuristics after revision
-    post_revision = check_structural_heuristics(revised_cs, loss_analysis)
-    revision_warnings.extend(post_revision.errors)
-    revision_warnings.extend(post_revision.warnings)
-
-    return revised_cs, revision_warnings
+            return RevisionOutcome(
+                unrevised, [warning, *cleanup_warnings], applied=False
+            )
+        output, output_warnings = revision_step_output(
+            merged, baseline=control_structure, target_evidence=target_evidence
+        )
+        # Warnings are accumulated in chronological order: dismissal → merge →
+        # strip → binding → heuristics, so consumers see the earliest
+        # root-cause first.
+        revision_warnings.extend(merge_warnings)
+        if output != unrevised:
+            revision_warnings.extend(output_warnings)
+            return _with_heuristics(
+                RevisionOutcome(output, revision_warnings, applied=True),
+                loss_analysis,
+            )
+        # Keep what the processing removed from the reply, not what it
+        # reports for the reviewed structure as well.
+        revision_warnings.extend(
+            warning for warning in output_warnings if warning not in cleanup_warnings
+        )
+    revision_warnings.extend(cleanup_warnings)
+    revision_warnings.extend(_no_change_warnings(critic_findings, revision_delta))
+    return _with_heuristics(
+        RevisionOutcome(unrevised, revision_warnings, applied=False), loss_analysis
+    )
 
 
-def _revision_step_form(
-    control_structure: ControlStructure, target_evidence: TargetEvidence | None
-) -> tuple[ControlStructure, list[str]] | None:
-    """Return *control_structure* as the revision step would publish it.
-
-    That is the structure after merge normalization, the empty-responsibility
-    strip and evidence binding, with binding's warnings.  Comparing the
-    reply's result and the reviewed structure in this form makes
-    normalization, cleanup and binding alone no revision.  ``None`` when the
-    normalization fails, so nothing compares equal to it.
-    """
-    try:
-        merged, _ = _merge_revision_delta(control_structure, RevisionDelta())
-    except Exception:
-        return None
-    stripped, _ = strip_empty_responsibilities(merged)
-    return check_evidence_bindings(stripped, target_evidence)
+def _with_heuristics(
+    outcome: RevisionOutcome, loss_analysis: LossAnalysis | None
+) -> RevisionOutcome:
+    """Re-run structural heuristics on the published structure."""
+    post_revision = check_structural_heuristics(outcome.structure, loss_analysis)
+    return RevisionOutcome(
+        outcome.structure,
+        [*outcome.warnings, *post_revision.errors, *post_revision.warnings],
+        outcome.applied,
+    )
 
 
 def _no_change_warnings(
@@ -730,7 +763,13 @@ def _no_change_warnings(
     ]
 
 
-def run_revision(
+def run_revision(**kwargs: Any) -> tuple[ControlStructure, list[str]]:
+    """Run :func:`revise_control_structure`; return its structure and warnings."""
+    outcome = revise_control_structure(**kwargs)
+    return outcome.structure, outcome.warnings
+
+
+def revise_control_structure(
     *,
     llm_client: LLMClient,
     control_structure: ControlStructure,
@@ -741,13 +780,15 @@ def run_revision(
     template_loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
     target_evidence: TargetEvidence | None = None,
-) -> tuple[ControlStructure, list[str]]:
+) -> RevisionOutcome:
     """Run a single revision attempt on the control structure.
 
     Requests a :class:`RevisionDelta` from the LLM (only new/modified
     elements) and merges it programmatically into the existing
-    ControlStructure. After the merge, ``strip_empty_responsibilities``
-    runs as a safety net, and structural heuristics are re-run.
+    ControlStructure.  The published structure is the reply's output when it
+    differs from the no-revision output, and the no-revision output
+    otherwise, both from :func:`revision_step_output`; structural heuristics
+    are re-run on it.
 
     This is NOT a loop — one revision attempt maximum. After revision,
     structural heuristics are re-run. If structural errors remain, they
@@ -768,12 +809,12 @@ def run_revision(
         loss_analysis: Optional loss analysis for heuristic hazard tracing.
         template_loader: Optional template loader (defaults to SP1 prompts dir).
         temperature: LLM temperature (default 0.4).
+        target_evidence: The evidence the structure is bound to.
 
     Returns:
-        A tuple of (revised ControlStructure, post-revision heuristic warnings).
-        On LLM failure, returns (pre-revision ControlStructure, [warning]).
-        A reply without effect also returns the pre-revision object itself,
-        so an applied revision is any other returned object.
+        The published structure, the post-revision warnings, and whether the
+        reply is applied.  A failed, discarded, or ineffective reply publishes
+        the no-revision output with ``applied`` false.
     """
     loader = template_loader or TemplateLoader(PROMPTS_DIR)
 
@@ -835,13 +876,21 @@ def run_revision(
             outcome, target_evidence=target_evidence
         )
         if salvaged is None:
-            return control_structure, _revision_failure_warnings(error_msg)
+            return _no_revision(
+                control_structure,
+                _revision_failure_warnings(error_msg),
+                target_evidence=target_evidence,
+            )
         revision_delta = salvaged.delta
         authority_warnings = salvaged.warnings
         dropped_authority = salvaged.dropped_authority
     if revision_delta is None:
-        return control_structure, [f"{_REVISION_FAILED}unexpected None response"]
-    revised, revision_warnings = _finish_revision(
+        return _no_revision(
+            control_structure,
+            [f"{_REVISION_FAILED}unexpected None response"],
+            target_evidence=target_evidence,
+        )
+    outcome = _finish_revision(
         control_structure,
         revision_delta,
         critic_findings=critic_findings,
@@ -849,7 +898,9 @@ def run_revision(
         dropped_authority=dropped_authority,
         target_evidence=target_evidence,
     )
-    return revised, [*authority_warnings, *revision_warnings]
+    return RevisionOutcome(
+        outcome.structure, [*authority_warnings, *outcome.warnings], outcome.applied
+    )
 
 
 def _delta_has_changes(delta: RevisionDelta) -> bool:
@@ -961,11 +1012,13 @@ def _replace_modified_resps(
     return [
         _revised_responsibility(
             r,
-            modified_map.get(r.resp_id, r),
+            modified_map[r.resp_id],
             dropped_authority=frozenset(
                 fb_id for resp_id, fb_id in dropped_authority if resp_id == r.resp_id
             ),
         )
+        if r.resp_id in modified_map
+        else copy.deepcopy(r)
         for r in resps
     ]
 
@@ -976,11 +1029,17 @@ def _revised_responsibility(
     *,
     dropped_authority: frozenset[str] = frozenset(),
 ) -> Responsibility:
-    """A completeness revision cannot revoke already established ownership links."""
+    """A completeness revision cannot revoke already established ownership links.
+
+    The established constraint citations keep their order; the restatement's
+    new ones follow, so a restatement that cites the same constraints leaves
+    them as they were.
+    """
     revised = copy.deepcopy(replacement)
-    revised.security_constraint_refs = sorted(
-        set(original.security_constraint_refs)
-        | set(replacement.security_constraint_refs)
+    revised.security_constraint_refs = list(
+        dict.fromkeys(
+            [*original.security_constraint_refs, *replacement.security_constraint_refs]
+        )
     )
     _carry_forward_context(original, revised, dropped_authority=dropped_authority)
     return revised

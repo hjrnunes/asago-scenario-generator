@@ -11,14 +11,16 @@ stands did the same, and so did a reply whose only change evidence binding
 removes again (an operation or an evidence ref the target was not observed
 to have).
 
-Whether a reply has an effect is decided by one comparison: the reply's
-result and the reviewed structure, each put through everything the revision
-step does after the merge (normalization, the empty-responsibility strip and
-evidence binding), must differ.  A reply
-without effect leaves the reviewed structure in force and the manifest
-records ``unchanged``.  The revision step still strips a responsibility that
-was already empty; that cleanup is reported by its own warning, not as a
-revision.
+A revision is ``applied`` exactly when what the step publishes after the
+reply differs from what it publishes with no revision.  Both are the output
+of the same post-revision processing (strip empty responsibilities, then
+bind evidence again only when that changed the reviewed structure), applied
+once to the reviewed structure and once to the reply merged onto it.  A
+reply without effect publishes the no-revision output and the manifest
+records ``unchanged``.  The step still strips a responsibility that was
+already empty; that cleanup is reported by its own warning, not as a
+revision.  The merge leaves a responsibility the reply does not restate as
+it was, and a restated one keeps its constraint citations in order.
 """
 
 from __future__ import annotations
@@ -50,6 +52,12 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
 from asago_scenario_generator.stpa.system_model.run import (
     _critic_revision_record,
     _maybe_apply_revision,
+)
+from asago_scenario_generator.stpa.system_model.critic import (
+    strip_empty_responsibilities,
+)
+from asago_scenario_generator.stpa.system_model.id_normalization import (
+    validate_normalized_control_structure,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     check_evidence_bindings,
@@ -159,18 +167,21 @@ def _field(resource: str, name: str) -> EvidenceField:
     return EvidenceField(resource=resource, name=name, types=("str",), values=())
 
 
-def _evidence() -> TargetEvidence:
+_OPERATIONS = (
+    "get_reservation",
+    "get_listing",
+    "lookup_policy",
+    "modify_booking",
+    "update_listing",
+)
+
+
+def _evidence(operations: tuple[str, ...] = _OPERATIONS) -> TargetEvidence:
     """Target evidence that observes every binding the fixture holds."""
     return TargetEvidence(
         operations=tuple(
             EvidenceOperation(name=name, description="Observed.", arguments=())
-            for name in (
-                "get_reservation",
-                "get_listing",
-                "lookup_policy",
-                "modify_booking",
-                "update_listing",
-            )
+            for name in operations
         ),
         session_fields=(
             EvidenceSessionField(name="authenticated_actor_id", value="guest-1"),
@@ -337,4 +348,95 @@ def test_a_change_evidence_binding_keeps_is_applied(tmp_path: Path) -> None:
     assert revised is True
     assert _critic_revision_record(_findings(), warnings, revised=revised) == {
         "status": "applied"
+    }
+
+
+def _restated(structure: ControlStructure, description: str) -> dict:
+    """The responsibility with *description*, restated exactly as it stands."""
+    resp = next(r for r in structure.responsibilities if r.description == description)
+    return {
+        "modified_responsibilities": [resp.model_dump(mode="json", exclude_none=True)]
+    }
+
+
+def _bound(structure: ControlStructure, evidence: TargetEvidence) -> ControlStructure:
+    return check_evidence_bindings(structure, evidence)[0]
+
+
+def _with_empty_at(index: int) -> ControlStructure:
+    """The fixture with an empty responsibility at *index*, numbered as published."""
+    reviewed = _reviewed()
+    resps = list(reviewed.responsibilities)
+    resps.insert(
+        index, Responsibility(resp_id="RESP-99", description="Confirms payment changes")
+    )
+    renumbered = validate_normalized_control_structure(
+        reviewed.model_copy(update={"responsibilities": resps})
+    )
+    return _bound(renumbered, _evidence())
+
+
+@pytest.mark.parametrize("index", (0, 2, 5), ids=("first", "middle", "last"))
+def test_an_identical_restatement_beside_an_empty_responsibility_is_unchanged(
+    tmp_path: Path, index: int
+) -> None:
+    baseline = _with_empty_at(index)
+    assert not baseline.responsibilities[index].control_actions
+    resp_3 = _reviewed().responsibilities[2].description
+
+    structure, warnings, revised = _apply(
+        baseline, _restated(baseline, resp_3), tmp_path, _evidence()
+    )
+
+    # The published structure is the no-revision one: the empty
+    # responsibility stripped, every other ID as the baseline numbers it.
+    assert structure == strip_empty_responsibilities(baseline)[0]
+    assert revised is False
+    assert _critic_revision_record(_findings(), warnings, revised=revised) == {
+        "status": "unchanged"
+    }
+
+
+# The target observes an operation whose own name begins with ``operation:``.
+_PREFIXED = "operation:lookup_policy"
+
+
+def _with_prefixed_operation() -> tuple[ControlStructure, TargetEvidence]:
+    """The fixture with CA-3-2 bound to the prefixed operation, and its evidence.
+
+    Binding strips one ``operation:`` from ``operation:operation:lookup_policy``
+    and finds the observed ``operation:lookup_policy``.
+    """
+    evidence = _evidence(
+        tuple(_PREFIXED if name == "lookup_policy" else name for name in _OPERATIONS)
+    )
+    reviewed = _reviewed()
+    resp_3 = reviewed.responsibilities[2]
+    actions = list(resp_3.control_actions)
+    actions[1] = actions[1].model_copy(update={"operation": f"operation:{_PREFIXED}"})
+    resps = list(reviewed.responsibilities)
+    resps[2] = resp_3.model_copy(update={"control_actions": actions})
+    baseline = _bound(reviewed.model_copy(update={"responsibilities": resps}), evidence)
+    assert baseline.responsibilities[2].control_actions[1].operation == _PREFIXED
+    return baseline, evidence
+
+
+@pytest.mark.parametrize(
+    "spelling",
+    (f"operation:{_PREFIXED}", _PREFIXED),
+    ids=("original-spelling", "bound-spelling"),
+)
+def test_a_restated_prefixed_operation_is_unchanged(
+    tmp_path: Path, spelling: str
+) -> None:
+    baseline, evidence = _with_prefixed_operation()
+    reply = _restated(baseline, baseline.responsibilities[2].description)
+    reply["modified_responsibilities"][0]["control_actions"][1]["operation"] = spelling
+
+    structure, warnings, revised = _apply(baseline, reply, tmp_path, evidence)
+
+    assert structure == baseline
+    assert revised is False
+    assert _critic_revision_record(_findings(), warnings, revised=revised) == {
+        "status": "unchanged"
     }
