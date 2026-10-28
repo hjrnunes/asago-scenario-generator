@@ -21,12 +21,20 @@ check, in one of three families (``FAMILIES`` holds the exact patterns):
   authorization, permission or consent; beyond the session scope.
 - ``verification``: an unverified or unauthenticated principal; identity,
   ownership or authorization not verified, confirmed or validated, or
-  unknown; acting without or before verifying them.
+  unknown; acting without, before or until verifying them, or verifying
+  them only after the action.
 - ``other_party``: another, other or a different customer, user or other
   party; not the owner, guest or host; neither the owner, guest nor host;
   not owned by, not accessible to, not a party to, other than the
   authenticated; does not match, belong or pertain to the authenticated,
   session, owner or authorized party.
+
+A positive form, such as "ownership is verified" outside a ``before``,
+``until``, ``prior to`` or ``without`` clause, is the opposite polarity and
+goes to its own ``verified`` family. It is reported but is not a restriction:
+it neither gives an ICA a qualifier nor keeps or paraphrases one, so an
+outcome that turns "ownership is unknown" into "ownership is verified" is not
+``kept``.
 
 The lists leave out wording that usually restricts content rather than a
 party: "not allowed" or "not permitted" (an eligibility flag), "third-party"
@@ -35,8 +43,9 @@ party: "not allowed" or "not permitted" (an eligibility flag), "third-party"
 Each handoff is classified:
 
 - ``no_qualifier``: the ICA states none.
-- ``kept``: every ICA family appears in the outcome text.
-- ``paraphrased``: the outcome states a qualifier of another family only,
+- ``kept``: every restrictive ICA family appears in the outcome text.
+- ``paraphrased``: the outcome states a restrictive qualifier of another
+  family only,
   for example an unauthorized recipient restated as a customer who is not a
   party to the record. Usually the same restriction; review by hand.
 - ``condition_only``: the outcome text states no qualifier, but a condition
@@ -84,11 +93,24 @@ FAMILIES: Mapping[str, tuple[str, ...]] = {
         rf"\bunverified (?:\w+ )?{_PARTY}\b",
         r"\bunauthenticated\b",
         r"\bnot (?:been )?authenticated\b",
-        rf"\b{_SUBJECT}\b[^.]{{0,40}}?\b(?:is|are|was|were|been) (?:not )?(?:yet )?"
-        r"(?:verified|confirmed|validated|unknown)\b",
+        rf"\b{_SUBJECT}\b[^.]{{0,40}}?\b(?:(?:is|are|was|were) (?:not|never)"
+        r"|(?:has|have|had) (?:not|never) been) (?:yet )?"
+        r"(?:verified|confirmed|validated)\b",
+        rf"\b{_SUBJECT}\b[^.]{{0,40}}?\b(?:is|are|was|were) unknown\b",
+        rf"\b(?:before|until|prior to)\b[^.]{{0,60}}?\b{_SUBJECT}\b[^.]{{0,40}}?"
+        r"\b(?:is|are|was|were|has been|have been) (?:verified|confirmed|validated)\b",
+        rf"\b{_SUBJECT}\b[^.]{{0,40}}?\b(?:is|are|was|were|has been|have been) "
+        r"(?:verified|confirmed|validated) (?:only )?after\b",
         rf"\b(?:without|before) (?:\w+ ){{0,2}}(?:verifying|confirming|validating"
         rf"|verification of)\b(?:\W+\w+){{0,4}}?\W+(?:{_SUBJECT}|authenticated)\b",
         rf"\bfails? to (?:verify|authenticate|confirm)\b(?:\W+\w+){{0,3}}?\W+{_SUBJECT}\b",
+    ),
+    # Opposite polarity: a positive verification. A verification that comes
+    # after the action is the negative form above; ``qualifier_hits`` also
+    # drops a match whose clause opens with ``_NOT_YET``.
+    "verified": (
+        rf"\b{_SUBJECT}\b[^.]{{0,40}}?\b(?:is|are|was|were|has been|have been) "
+        r"(?:verified|confirmed|validated)\b(?! (?:only )?after\b)",
     ),
     "other_party": (
         rf"\b(?:another|other|a different|different) {_PARTY}(?:s|'s|_id)?\b",
@@ -115,6 +137,10 @@ _COMPILED = {
     family: tuple(re.compile(pattern, re.IGNORECASE) for pattern in patterns)
     for family, patterns in FAMILIES.items()
 }
+RESTRICTIVE = frozenset({"authorization", "verification", "other_party"})
+_NOT_YET = re.compile(
+    r"\b(?:before|until|prior to|without)\b[^.]{0,60}$", re.IGNORECASE
+)
 _ACTOR_PATH = re.compile(r"authenticated|session|current_(?:user|actor)|actor_id")
 
 
@@ -123,7 +149,10 @@ def qualifier_hits(text: str) -> dict[str, list[str]]:
     hits: dict[str, list[str]] = {}
     for family, patterns in _COMPILED.items():
         found = [
-            match.group(0) for pattern in patterns for match in pattern.finditer(text)
+            match.group(0)
+            for pattern in patterns
+            for match in pattern.finditer(text)
+            if family != "verified" or not _NOT_YET.search(text[: match.start()])
         ]
         if found:
             hits[family] = found
@@ -171,12 +200,13 @@ def classify(handoff: Mapping[str, Any]) -> dict[str, Any] | None:
     )
     ica_hits = qualifier_hits(ica_text)
     outcome_hits = qualifier_hits(f"{proposition} {condition_statement}")
-    missing = sorted(set(ica_hits) - set(outcome_hits))
-    if not ica_hits:
+    restrictive = set(ica_hits) & RESTRICTIVE
+    missing = sorted(restrictive - set(outcome_hits))
+    if not restrictive:
         status = "no_qualifier"
     elif not missing:
         status = "kept"
-    elif outcome_hits:
+    elif set(outcome_hits) & RESTRICTIVE:
         status = "paraphrased"
     elif condition_names_actor_mismatch(condition):
         status = "condition_only"
@@ -218,10 +248,7 @@ def sweep(
     loader = getattr(yaml, "CSafeLoader", yaml.SafeLoader)
     for path in _handoff_paths(runs_dir, run_globs, exclude_globs):
         run = path.relative_to(runs_dir).parts[0]
-        text = path.read_text(encoding="utf-8")
-        # A handoff without a top-level uca block cannot be classified; skip
-        # the parse.
-        handoff = yaml.load(text, Loader=loader) if "\nuca:" in text else None
+        handoff = yaml.load(path.read_text(encoding="utf-8"), Loader=loader)
         row = classify(handoff) if isinstance(handoff, Mapping) else None
         if row is None:
             skipped += 1

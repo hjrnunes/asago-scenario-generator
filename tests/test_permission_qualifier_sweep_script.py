@@ -151,3 +151,74 @@ def test_sweep_reads_only_selected_runs_and_skips_handoffs_without_uca(
     rows = [json.loads(line) for line in (out / "rows.jsonl").read_text().splitlines()]
     assert [(row["run"], row["status"]) for row in rows] == [("cur-a", "dropped")]
     assert json.loads(capsys.readouterr().out) == summary
+
+
+def test_sweep_classifies_a_handoff_whose_first_key_is_uca(tmp_path: Path) -> None:
+    script = _script()
+    scenarios = tmp_path / "run-a/stages/generate/output/scenarios"
+    scenarios.mkdir(parents=True)
+    first = {"uca": DROPPED["uca"], **{k: v for k, v in DROPPED.items() if k != "uca"}}
+    text = yaml.safe_dump(first, sort_keys=False)
+    assert text.startswith("uca:")
+    (scenarios / "SCN-001.yaml").write_text(text)
+
+    rows, summary = script.sweep(tmp_path)
+
+    assert summary["skipped_without_uca"] == 0
+    assert summary["status"] == {"dropped": 1}
+    assert [row["status"] for row in rows] == ["dropped"]
+
+
+OWNERSHIP_UNKNOWN = (
+    "Select and execute backend operations to manage orders, payments, and "
+    "refunds. provides 'Process refund' with an unsafe value/effect because the "
+    "resource ownership is unknown."
+)
+
+
+def test_verification_polarity_keeps_only_a_matching_form() -> None:
+    script = _script()
+
+    assert script.qualifier_hits("the resource ownership is unknown") == {
+        "verification": ["ownership is unknown"]
+    }
+    assert script.qualifier_hits("the target record ownership is not verified") == {
+        "verification": ["ownership is not verified"]
+    }
+    assert script.qualifier_hits(
+        "the refund runs before the authorization status is confirmed"
+    ) == {"verification": ["before the authorization status is confirmed"]}
+    assert script.qualifier_hits(
+        "a reservation whose ownership has not been verified"
+    ) == {"verification": ["ownership has not been verified"]}
+    assert script.qualifier_hits(
+        "the patient identity is verified after a tool call has been initiated"
+    ) == {"verification": ["identity is verified after"]}
+    assert script.qualifier_hits("the order's ownership status is verified") == {
+        "verified": ["ownership status is verified"]
+    }
+
+    same = _handoff(
+        OWNERSHIP_UNKNOWN,
+        "a refund is processed for an order or plan where ownership cannot be verified",
+        "The assistant executes process_refund for an order whose ownership is "
+        "unknown.",
+    )
+    opposite = _handoff(
+        OWNERSHIP_UNKNOWN,
+        "a refund is processed for an order or plan where ownership cannot be verified",
+        "The assistant executes process_refund after the order's ownership is "
+        "verified.",
+    )
+    positive_only = _handoff(
+        "the content authorization status is verified and provided to the user",
+        "policy content is provided to the user",
+        "The assistant provides ungrounded policy information.",
+    )
+
+    assert script.classify(same)["status"] == "kept"
+    assert script.classify(opposite)["status"] == "dropped"
+    assert script.classify(opposite)["outcome_qualifiers"] == {
+        "verified": ["ownership is verified"]
+    }
+    assert script.classify(positive_only)["status"] == "no_qualifier"
