@@ -81,8 +81,9 @@ operations, and the three outcomes with their reasons. The vectors of each
 version hold the results of Garak's `validate_condition` and
 `evaluate_condition` at the revision the vector files name; the producer's
 reference evaluator, `evaluate_condition_v2` in
-`scripts/gen_tool_call_condition_vectors.py`, must agree with every v2
-evaluate vector. An
+`stpa.tool_call_condition_eval` (which
+`scripts/gen_tool_call_condition_vectors.py` imports), must agree with every
+v2 evaluate vector. An
 evaluator, such as the Garak `toolcall` detector, executes the condition and
 must reproduce every vector of the version it implements; the consumer carries the condition unchanged in `tool_call_condition.json`;
 the consumer and the orchestrator mirror the contract byte for byte, as they do
@@ -652,6 +653,34 @@ reach is its number of sent scenarios with a condition. The block lists the
 constraints at reach 0 and reach 1, and the constraints lost to
 `analytical_only` (an analytical scenario and no sent scenario). It is a
 record only: no later step reads it and no request changes.
+
+Before publication, `stage5.cross_scenario` checks the adversarial scenarios
+of the run against each other. Two scenarios are siblings when they are on the
+same control action and their ICAs cite the same process-model context (the
+variable values of one context-table row; an ICA that cites none has no
+sibling). For every ordered pair of siblings (A, B), B's bound
+`tool_call_condition` is evaluated with the `tool-call-condition-v2`
+reference evaluator on the one call A's safe outcome names, its
+`operation_name`. The safe outcome is the observable boundary of acceptable
+behavior, not the whole behavior: nothing states that it is the agent's only
+call, so the call is evaluated as an incomplete capture. Its `record_refs`
+name observations, not records, so the call's arguments are unknown. On that
+capture a `not_called` comparison is false when the known call rules it out
+(it calls that operation and the comparison has no `where` item), otherwise
+unknown; `order` comparisons and comparisons on the call's arguments remain
+unknown. The result is therefore `inconclusive` or `not_detected`.
+Only `detected` withdraws B: its candidate outcome is `publication_failed`
+with a `cross_scenario_safe_outcome_conflict` diagnostic, and its handoff is
+not written; a pair detected both ways withdraws both. An `inconclusive` pair
+is recorded and never withdraws. With the fields the safe outcome has today
+no condition is `detected` on such a call, so the check records undecided
+pairs and withdraws nothing. The run writes `cross-scenario-conflicts.yaml`
+(`cross-scenario-conflicts-v1`): the counts of eligible, evaluated, and
+`not_detected` pairs; each detected and each inconclusive pair with both
+scenario IDs, the action, the context, A's operation and `record_refs`, B's
+condition, and the evaluator's outcome and reason; and the withdrawn IDs. The
+check reads only published fields and runs after the Gherkin step, so it adds
+no request and changes none.
 
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
 Its closed prompt view contains the authoritative action, original deviation,

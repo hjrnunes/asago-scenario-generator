@@ -521,6 +521,9 @@ def _default_scenarios(
         plan_family_candidates,
     )
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+    from asago_scenario_generator.stpa.scenario_prod.stage5.cross_scenario import (
+        ica_process_model_contexts,
+    )
     from asago_scenario_generator.stpa.threat_enum.catalog_enrichment import (
         enrich_threats,
     )
@@ -569,6 +572,9 @@ def _default_scenarios(
         ),
         condition_families=condition_families,
         handoff_taxonomy=_handoff_taxonomy(inputs, loss_analysis),
+        ica_process_model_contexts=ica_process_model_contexts(
+            ordinary_icas, control_structure
+        ),
     )
 
 
