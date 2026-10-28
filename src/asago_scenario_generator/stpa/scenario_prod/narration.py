@@ -171,40 +171,65 @@ _KIND_NOUNS = {
     "SC": "a safety rule",
     "SEM": "a value the test supplies",
 }
-# Analyst commentary on how the scenario is checked: a verdict that a check
-# would give, or a statement about the analysis itself. A domain statement
-# about a detector, such as one that fails to warn, is not commentary.
-_CHECKER = (
-    r"(?:detectors?|judges?|oracles?|checks?|checkers?|evaluators?|graders?|"
-    r"tests?|analysts?|analysis|hypothes[ie]s)"
-)
-_VERDICT = r"(?:flag|catch|judge|score|mark)"
+# Analyst commentary: a statement about how this scenario is checked or
+# judged. It names the analysis's own checker (a judge, evaluator, grader or
+# oracle, or a bare "the detector", "the check" or "the test" whose verdict
+# falls on the reply under test), or the scenario, test or criterion itself.
+# A domain statement keeps its words: a smoke detector that flags an alarm,
+# or a transaction that "should be flagged as fraudulent". When in doubt a
+# clause is kept.
+_MODAL = r"(?:would|will|should|could|can|may|might|must)"
+_VERDICT = r"(?:flag|catch|judge|score|mark|fail|pass)"
+_ANALYSIS_CHECKER = r"(?:judge|evaluator|grader|oracle)s?"
 _COMMENTARY = re.compile(
-    rf"\b{_CHECKER}\s+(?:would|will|should|could|can|may|might|must)\s+"
-    rf"(?:not\s+)?{_VERDICT}\b"
-    r"|\b(?:would|will|should|could|can|may|might|must)\s+(?:not\s+)?be\s+"
-    r"(?:flagged|caught|judged|scored|marked)\b"
-    rf"|\b(?:flagged|caught|detected|judged|scored|marked)\s+by\s+(?:the|a|an)\s+"
-    rf"{_CHECKER}\b"
+    rf"\b(?:the|this|an?)\s+{_ANALYSIS_CHECKER}\s+{_MODAL}\s+(?:not\s+)?{_VERDICT}\b"
+    rf"|\b(?:the|this)\s+(?:detector|check|checker|test)\s+{_MODAL}\s+(?:not\s+)?"
+    rf"{_VERDICT}\s+(?:it|this|that|them|the\s+(?:response|reply|output|answer|call))\b"
+    rf"|\b(?:flagged|caught|judged|scored|marked)\s+by\s+(?:the|an?)\s+"
+    rf"{_ANALYSIS_CHECKER}\b"
     r"|\bthis\s+(?:scenario|test|hypothesis|analysis)\s+"
-    r"(?:tests|checks|shows|assumes|expects|asserts|examines)\b",
+    r"(?:tests|checks|shows|assumes|expects|asserts|examines)\b"
+    r"|\bthe\s+(?:failure|pass|fail|semantic|unsafe[- ]outcome)\s+criterion\s+"
+    r"(?:holds|fails|passes|fires|matches|is met)\b",
     re.IGNORECASE,
 )
 _CLAUSE_BREAK = re.compile(
     r"(;\s+|(?<=[.!?])\s+|,\s+(?:which|and|so|but)\s+|\s+(?:—|--)\s+)"
 )
 # Expressions the handoff's ownership rules reject in prose, and the plain
-# words each reads as. A comparison operator reads as its verb.
+# words each reads as. A comparison reads as an adjective phrase, which fits
+# both a noun it modifies ("an amount greater than 1000") and a copula
+# ("the amount is not greater than 1000"); "is" joins it to a noun only where
+# the noun opens a clause ("whose amount is greater than 1000").
 _COMPARISON = re.compile(r"(?<![-<>=!])\s*(>=|<=|!=|==|>|<|=)\s*(?=[\w\"'$€£+-])")
 _COMPARISON_WORDS = {
-    ">=": "is at least",
-    "<=": "is at most",
-    "!=": "differs from",
-    "==": "equals",
-    "=": "equals",
-    ">": "exceeds",
-    "<": "is below",
+    ">=": "at least",
+    "<=": "at most",
+    "!=": "different from",
+    "==": "equal to",
+    "=": "equal to",
+    ">": "greater than",
+    "<": "less than",
 }
+_COPULA = re.compile(
+    r"\b(?:is|are|was|were|be|been|being|isn't|aren't|wasn't|weren't)"
+    r"(?:\s+(?:not|never|no longer))?\s*$",
+    re.IGNORECASE,
+)
+_CLAUSE_OPENERS = frozenset(
+    "whose when whenever if where while unless until once because after "
+    "before that".split()
+)
+_DETERMINERS = frozenset(
+    "a an the any each every its their his her our your this these those "
+    "some no all both".split()
+)
+_PLURAL_DETERMINERS = frozenset("these those all both".split())
+# The words that can follow a compared value which closes its own clause.
+_FOLLOWING_WORDS = frozenset(
+    "for in on at with without by to from during after before when while if "
+    "unless and or but so per of than".split()
+)
 _PROSE_FORMS = (
     (re.compile(r"\bgreater_than\b", re.IGNORECASE), "greater than"),
     (re.compile(r"\bless_than\b", re.IGNORECASE), "less than"),
@@ -839,10 +864,16 @@ def rule_text(description: str) -> str:
 
 @dataclass(frozen=True)
 class FallbackNarrative:
-    """A fallback paragraph and the parts of its facts it could not state."""
+    """A fallback paragraph and what of its facts it does not state.
+
+    ``omitted`` names each part with a fact, or a clause of one, that no
+    plain clause states. ``commentary`` holds the clauses of analyst
+    commentary the paragraph leaves out on purpose.
+    """
 
     text: str
     omitted: tuple[str, ...] = ()
+    commentary: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -851,7 +882,7 @@ class PublishedNarrative:
 
     ``fallback`` is true when no accepted model paragraph was available and
     the text is :func:`write_fallback`'s; ``omitted`` names the parts that
-    paragraph could not state.
+    paragraph does not fully state.
     """
 
     text: str
@@ -875,20 +906,24 @@ def write_fallback(spec: ScenarioSpec) -> FallbackNarrative:
     identifier that is part of the sentence reads as a noun phrase for its
     kind, and an expression the handoff's ownership rules reject, such as
     ``amount > 1000``, reads as plain words. The paragraph never carries what
-    :func:`fallback_failures` names. A part whose fact is given but leaves
-    no plain clause is named in ``omitted``, so the caller can record it.
+    :func:`fallback_failures` names. A part with a fact, or a clause of one,
+    that leaves no plain clause is named in ``omitted``, so the caller can
+    record it.
     """
     meanings = _descriptions(spec)
     context = spec.scenario_context
     omitted: list[str] = []
+    commentary: list[str] = []
 
     def stated(part: str, texts: Sequence[str | None]) -> list[str]:
         given = [text for text in texts if text and text.strip()]
         clauses: list[str] = []
-        for clause in dict.fromkeys(_clause(text, meanings) for text in given):
-            if clause and not handoff_ownership_violations({"narrative": clause}):
+        for text in dict.fromkeys(given):
+            clause, removed, lost = _fact_clause(text, meanings)
+            commentary.extend(removed)
+            if clause and clause not in clauses:
                 clauses.append(clause)
-            elif part not in omitted:
+            if (lost or not clause) and part not in omitted:
                 omitted.append(part)
         return clauses
 
@@ -912,7 +947,9 @@ def write_fallback(spec: ScenarioSpec) -> FallbackNarrative:
     elif harms:
         sentences.append(f"The worst cases are these: {'; '.join(harms)}.")
     return FallbackNarrative(
-        " ".join(sentences) or FALLBACK_LAST_RESORT, tuple(omitted)
+        " ".join(sentences) or FALLBACK_LAST_RESORT,
+        tuple(omitted),
+        tuple(dict.fromkeys(commentary)),
     )
 
 
@@ -949,19 +986,38 @@ def _reason_sentences(
     return []
 
 
+def _fact_clause(
+    text: str, meanings: Mapping[str, str]
+) -> tuple[str, list[str], list[str]]:
+    """Return a fact as a plain clause, its commentary, and its lost clauses.
+
+    References and source notes go first, so a note never hides the
+    statement it annotates. Each clause of analyst commentary is then left
+    out, and each clause the ownership rules still reject once its
+    expressions read as words is lost and reported.
+    """
+    text = _without_references(plain(text), meanings)
+    text, commentary = _split_off(text, lambda clause: bool(_COMMENTARY.search(clause)))
+    text, lost = _split_off(
+        _as_prose(text),
+        lambda clause: bool(handoff_ownership_violations({"narrative": clause})),
+    )
+    return lower_first(text.rstrip(" .;,")), commentary, lost
+
+
 def _clause(text: str | None, meanings: Mapping[str, str]) -> str:
     """Return a fact as a lower-case plain clause without its end stop."""
-    text = _without_commentary(plain(text or ""))
-    text = _as_prose(_without_references(text, meanings))
-    return lower_first(text.rstrip(" .;,"))
+    return _fact_clause(text or "", meanings)[0]
 
 
-def _without_commentary(text: str) -> str:
-    """Drop each clause of analyst commentary; keep the clauses around it."""
+def _split_off(text: str, drop: Callable[[str], bool]) -> tuple[str, list[str]]:
+    """Leave out each clause ``drop`` names; keep the clauses around it."""
     pieces = _CLAUSE_BREAK.split(text)
     kept: list[str] = []
+    dropped: list[str] = []
     for index, segment in enumerate(pieces[0::2]):
-        if _COMMENTARY.search(segment):
+        if segment.strip() and drop(segment):
+            dropped.append(segment.strip())
             stop = segment.rstrip()[-1:]
             if kept and stop in ".!?" and not kept[-1].rstrip().endswith(stop):
                 kept[-1] = kept[-1].rstrip(" ,;") + stop
@@ -969,15 +1025,79 @@ def _without_commentary(text: str) -> str:
         if kept:
             kept.append(pieces[2 * index - 1])
         kept.append(segment)
-    return "".join(kept).strip()
+    return "".join(kept).strip(), dropped
 
 
 def _as_prose(text: str) -> str:
     """Write the expressions the ownership rules reject as plain words."""
-    text = _COMPARISON.sub(lambda match: f" {_COMPARISON_WORDS[match.group(1)]} ", text)
-    for pattern, words in _PROSE_FORMS:
-        text = pattern.sub(words, text)
+
+    def words(match: re.Match[str]) -> str:
+        before = match.string[: match.start()]
+        after = match.string[match.end() :]
+        return f" {_comparison_words(before, match.group(1), after)} "
+
+    text = _COMPARISON.sub(words, text)
+    for pattern, replacement in _PROSE_FORMS:
+        text = pattern.sub(replacement, text)
     return re.sub(r"\s+", " ", text).strip()
+
+
+def _comparison_words(before: str, operator: str, after: str = "") -> str:
+    """Read a comparison operator as words that fit the text around it.
+
+    The adjective phrase fits a copula ("is not greater than") and a noun it
+    modifies ("an amount greater than"). A noun after "whose", "when" or
+    "if" opens a clause and needs "is". So does a noun at the clause's start
+    when the compared value ends the clause or a preposition follows it
+    ("The amount is at most 10 for every refund"); before a verb the phrase
+    modifies the noun ("The amounts greater than 1000 reach the ledger").
+    Anything else keeps the adjective phrase alone, which stays grammatical.
+    """
+    words = _COMPARISON_WORDS[operator]
+    if _COPULA.search(before):
+        return words
+    tokens = re.findall(r"[\w'-]+|[;,.:!?(]", before)
+    index = len(tokens) - 1
+    noun = 0
+    while (
+        index >= 0
+        and noun < 3
+        and tokens[index][0].isalnum()
+        and tokens[index].lower() not in _DETERMINERS | _CLAUSE_OPENERS
+    ):
+        index -= 1
+        noun += 1
+    if noun == 0:
+        return words
+    head = tokens[-1].lower()
+    determiner = tokens[index].lower() if index >= 0 else ""
+    if determiner in _DETERMINERS:
+        index -= 1
+    if index >= 0 and _opens_nothing(tokens[index]):
+        return words
+    if (index < 0 or not tokens[index][0].isalnum()) and not _ends_comparison(after):
+        return words
+    plural = determiner in _PLURAL_DETERMINERS or (
+        head.endswith("s") and not head.endswith(("ss", "us", "is"))
+    )
+    return f"{'are' if plural else 'is'} {words}"
+
+
+def _ends_comparison(after: str) -> bool:
+    """Whether the compared value ends its clause or a preposition follows it."""
+    value, _, rest = after.strip().partition(" ")
+    following = rest.split(" ", 1)[0]
+    return (
+        value[-1:] in ".,;:!?)"
+        or not following
+        or not following[0].isalnum()
+        or following.lower() in _FOLLOWING_WORDS
+    )
+
+
+def _opens_nothing(token: str) -> bool:
+    """Whether a word before a noun phrase leaves it inside its clause."""
+    return token[0].isalnum() and token.lower() not in _CLAUSE_OPENERS
 
 
 def _without_references(text: str, meanings: Mapping[str, str]) -> str:
@@ -1025,7 +1145,8 @@ def narratives_payload(
     """Return the run's ``narratives.json`` document.
 
     ``fallbacks`` holds the plain paragraph each scenario without an accepted
-    reply publishes, and the parts it could not state.
+    reply publishes, the parts it does not fully state, and the analyst
+    commentary it leaves out.
     """
     scenarios = []
     for spec in specs:
@@ -1069,6 +1190,9 @@ def narratives_payload(
                 "deterministic_narrative": deterministic.get(spec.scenario_id),
                 "fallback_narrative": None if fallback is None else fallback.text,
                 "fallback_omitted": [] if fallback is None else list(fallback.omitted),
+                "fallback_commentary": (
+                    [] if fallback is None else list(fallback.commentary)
+                ),
             }
         )
     return {

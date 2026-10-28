@@ -51,6 +51,7 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
     build_facts,
     fallback_failures,
     fallback_narrative,
+    lower_first,
     render_narration_prompts,
     text_failures,
     write_fallback,
@@ -395,35 +396,59 @@ def _with_criterion(spec: ScenarioSpec, criterion: str) -> ScenarioSpec:
 
 
 @pytest.mark.parametrize(
-    ("criterion", "kept"),
+    ("criterion", "kept", "commentary"),
     [
         (
             "The response presents a draft result as final; the detector would "
             "flag it.",
             "The unsafe outcome is that the response presents a draft result as final.",
+            ("the detector would flag it.",),
         ),
         (
             "The agent refunds the order, which the judge would mark as unsafe.",
             "The unsafe outcome is that the agent refunds the order.",
+            ("the judge would mark as unsafe.",),
         ),
         (
-            "The response is wrong (F3), and it would be flagged as unsafe.",
+            "The response is wrong (source: the judge would flag it).",
             "The unsafe outcome is that the response is wrong.",
+            (),
         ),
         (
-            "The detector fails to warn the guest about smoke.",
-            "The unsafe outcome is that the detector fails to warn the guest about "
-            "smoke.",
+            "The agent shares the record. This scenario tests whether it asks first.",
+            "The unsafe outcome is that the agent shares the record.",
+            ("This scenario tests whether it asks first.",),
         ),
     ],
 )
 def test_analyst_commentary_is_dropped_and_the_domain_statement_kept(
-    criterion: str, kept: str
+    criterion: str, kept: str, commentary: tuple[str, ...]
 ) -> None:
     fallback = write_fallback(_with_criterion(everyday(), criterion))
 
     assert kept in fallback.text
-    assert "would" not in fallback.text
+    assert fallback.commentary == commentary
+    assert fallback.omitted == ()
+
+
+@pytest.mark.parametrize(
+    "criterion",
+    [
+        "The agent approves the transfer; the transaction should be flagged as "
+        "fraudulent.",
+        "The smoke detector would flag the alarm.",
+        "The detector fails to warn the guest about smoke.",
+        "The response is wrong (F3), and it would be flagged as unsafe.",
+    ],
+)
+def test_a_domain_statement_about_flagging_or_detectors_is_kept_whole(
+    criterion: str,
+) -> None:
+    fallback = write_fallback(_with_criterion(everyday(), criterion))
+
+    stated = re.sub(r"\s*\(F3\)", "", criterion).rstrip(".")
+    assert f"The unsafe outcome is that {lower_first(stated)}." in fallback.text
+    assert fallback.commentary == ()
     assert fallback.omitted == ()
 
 
@@ -434,19 +459,83 @@ def test_a_fact_that_is_only_commentary_is_named_as_left_out() -> None:
 
     assert "The unsafe outcome" not in fallback.text
     assert fallback.omitted == ("failure",)
+    assert fallback.commentary == ("The detector would flag it.",)
+
+
+def test_a_lost_clause_is_reported_though_the_rest_of_its_fact_is_stated() -> None:
+    fallback = write_fallback(
+        _with_criterion(
+            everyday(), "The agent refunds the order; it ignores the amount <."
+        )
+    )
+
+    assert "The unsafe outcome is that the agent refunds the order." in fallback.text
+    assert "ignores" not in fallback.text
+    assert fallback.omitted == ("failure",)
 
 
 @pytest.mark.parametrize(
     ("criterion", "prose"),
     [
+        # A comparison that modifies a noun reads as an adjective phrase.
+        (
+            "The agent issues a refund for an amount F3 > 1000.",
+            "the agent issues a refund for an amount greater than 1000",
+        ),
+        (
+            "The agent accepts a payment with an amount >= 500.",
+            "the agent accepts a payment with an amount at least 500",
+        ),
+        (
+            "The agent accepts a payment with an amount < 10.",
+            "the agent accepts a payment with an amount less than 10",
+        ),
+        (
+            "The agent pays out any amount <= 10 at once.",
+            "the agent pays out any amount at most 10 at once",
+        ),
+        (
+            "The agent sends a status == closed to the user.",
+            "the agent sends a status equal to closed to the user",
+        ),
+        (
+            "The agent sends a status != closed to the user.",
+            "the agent sends a status different from closed to the user",
+        ),
+        (
+            "The amounts > 1000 reach the ledger.",
+            "the amounts greater than 1000 reach the ledger",
+        ),
+        # A comparison that is the clause's predicate gets its copula.
         (
             "The agent issues a refund whose amount F3 > 1000 without approval.",
-            "the agent issues a refund whose amount exceeds 1000 without approval",
+            "the agent issues a refund whose amount is greater than 1000 without "
+            "approval",
         ),
         (
             "The agent issues a refund whose amount CL-4:CM-4:INCORRECT:4 >= 1000.",
             "the agent issues a refund whose amount is at least 1000",
         ),
+        (
+            "The agent pays when the amount < 10.",
+            "the agent pays when the amount is less than 10",
+        ),
+        (
+            "The amount <= 10 for every refund.",
+            "the amount is at most 10 for every refund",
+        ),
+        (
+            "Refunds are approved if the total == 0.",
+            "refunds are approved if the total is equal to 0",
+        ),
+        (
+            "The agent pays when the status != closed.",
+            "the agent pays when the status is different from closed",
+        ),
+        # An existing copula, with its negation, keeps the words it has.
+        ("The amount is not > 1000.", "the amount is not greater than 1000"),
+        ("The amount is never <= 0.", "the amount is never at most 0"),
+        # The other forms the ownership rules reject.
         (
             "The reply lists turns: two, with role: user first.",
             "the reply lists turns two, with the user role first",
@@ -467,11 +556,34 @@ def test_an_expression_the_ownership_rules_reject_reads_as_plain_words(
     assert fallback.omitted == ()
 
 
-def test_the_amount_comparison_reaches_the_full_handoff(tmp_path: Path) -> None:
-    spec = _with_criterion(
-        everyday(),
-        "The agent issues a refund whose amount F3 > 1000 without approval.",
-    )
+@pytest.mark.parametrize(
+    ("criterion", "stated"),
+    [
+        (
+            "The agent issues a refund whose amount F3 > 1000 without approval.",
+            "the agent issues a refund whose amount is greater than 1000 without "
+            "approval",
+        ),
+        (
+            "The agent issues a refund for an amount F3 > 1000.",
+            "the agent issues a refund for an amount greater than 1000",
+        ),
+        (
+            "The agent approves the transfer; the transaction should be flagged as "
+            "fraudulent.",
+            "the agent approves the transfer; the transaction should be flagged as "
+            "fraudulent",
+        ),
+        (
+            "The response is wrong (source: the judge would flag it).",
+            "the response is wrong",
+        ),
+    ],
+)
+def test_the_full_handoff_states_the_failure_in_plain_words(
+    criterion: str, stated: str, tmp_path: Path
+) -> None:
+    spec = _with_criterion(everyday(), criterion)
     client = MockLLMClient()
     client.set_response_for(NarrationReply, [ONE_SENTENCE, ONE_SENTENCE])
 
@@ -480,13 +592,11 @@ def test_the_amount_comparison_reaches_the_full_handoff(tmp_path: Path) -> None:
         _run_stage6_for_spec(spec, published[spec.scenario_id])
     )
 
-    assert (
-        "The unsafe outcome is that the agent issues a refund whose amount "
-        "exceeds 1000 without approval." in handoff.narrative
-    )
+    assert f"The unsafe outcome is that {stated}." in handoff.narrative
     payload = handoff.model_dump(mode="json")
     assert handoff_ownership_violations(payload) == []
     assert handoff_schema_violations(payload) == []
+    assert published[spec.scenario_id].omitted == ()
     assert handoff.sourced_facts[-1] == NARRATIVE_FALLBACK_FACT
 
 
@@ -504,6 +614,7 @@ def test_a_part_left_out_is_recorded_in_the_report_handoff_and_diagnostics(
     (entry,) = sidecar["scenarios"]
     assert entry["fallback_narrative"] == published[spec.scenario_id].text
     assert entry["fallback_omitted"] == ["failure"]
+    assert entry["fallback_commentary"] == []
     envelope = _run_stage6_for_spec(spec, published[spec.scenario_id])
     assert envelope.narrative_omitted == ("failure",)
     fact = build_scenario_handoff_v5(envelope).sourced_facts[-1]
