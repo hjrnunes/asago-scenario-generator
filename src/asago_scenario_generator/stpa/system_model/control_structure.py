@@ -97,6 +97,9 @@ from asago_scenario_generator.stpa.system_model.id_normalization import (
     normalize_control_structure_payload,
     validate_normalized_control_structure,
 )
+from asago_scenario_generator.stpa.system_model.undecodable_reply import (
+    decode_aware_feedback,
+)
 from asago_scenario_generator.stpa.system_model.semantic_review import (
     ActionEffectReview,
     ConstraintHazardReview,
@@ -2240,6 +2243,7 @@ def _run_stage2_llm_call(
     user_prompt_kwargs: dict[str, Any],
     response_format: type[_Stage2ModelT],
     step: str,
+    reply_name: str,
     raw_result_validator: Callable[[Any], None] | None = None,
     result_validator: Callable[[Any], None] | None = None,
     response_parser: (
@@ -2258,6 +2262,10 @@ def _run_stage2_llm_call(
     ``call_with_policy``, and raises ``StageError`` if the call or validation
     fails.  ``recover`` receives a failed outcome with the system and user
     prompts and may return a model from a follow-up request instead.
+
+    An undecodable reply is repeated once.  An undecodable reply that the
+    repeat does not cover earns the call's one correction, which names the
+    reply as *reply_name*; every other failure keeps the generic correction.
     """
     system_prompt = loader.render_prompt(system_template)
     user_prompt = (
@@ -2275,10 +2283,15 @@ def _run_stage2_llm_call(
         policy=CorrectionPolicy(
             json_retries=JSON_DECODE_RETRIES,
             validation_retries=1,
-            feedback=_INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
+            feedback=decode_aware_feedback(
+                loader,
+                reply_name=reply_name,
+                feedback=_INTERMEDIATE_VALIDATION_RETRY_FEEDBACK,
+            ),
             include_schema=False,
             include_response=True,
             error_note=error_note,
+            correct_undecodable=True,
         ),
         temperature=temperature,
         raw_result_validator=raw_result_validator,
@@ -2328,6 +2341,7 @@ def _call_1_requirements(
         },
         response_format=RequirementSet,
         step="call_1_requirements",
+        reply_name="requirement set",
     )
 
 
@@ -2373,6 +2387,7 @@ def _call_2a_responsibilities(
         },
         response_format=_ResponsibilityProviderSet,
         step="call_2a_responsibilities",
+        reply_name="responsibility set",
         raw_result_validator=_validate_responsibility_wire,
         response_parser=_parse_responsibility_result,
         error_note=_top_level_responsibility_note,
@@ -2488,6 +2503,7 @@ def _call_2b_control_elements(
         },
         response_format=_ControlElementProviderSet,
         step="call_2b_control_elements",
+        reply_name="control element set",
         # Call 2b is semantic output.  Its stage-local parser rejects unknown
         # carriers and missing meaning before canonical IDs are repaired.
         response_parser=parse,
@@ -2856,6 +2872,7 @@ def _call_3_coordination(
         },
         response_format=response_format,
         step=step,
+        reply_name="coordination review",
         user_prompt_suffix=correction_feedback,
         result_validator=lambda value: _validate_semantic_review_response(
             value,

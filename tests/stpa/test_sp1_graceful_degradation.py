@@ -229,16 +229,20 @@ class TestCriticGracefulDegradation:
         assert findings.taxonomy_probe_results == {}
 
     def test_gd_05_critic_failure_logs_with_success_false(self, tmp_path):
-        """SP1-GD-05: critic failure logs the failed call with success=false."""
+        """SP1-GD-05: critic failure logs each failed call with success=false.
+
+        An undecodable reply earns the one correction, so two attempts fail.
+        """
         client = MockLLMClient()
         client.set_invalid_response_for(CriticFindings)
         _run_critic(client, tmp_path)
         entries = read_calls_jsonl(tmp_path)
         critic_entries = [e for e in entries if e["step"] == "critic"]
-        assert len(critic_entries) == 1
-        assert critic_entries[0]["stage"] == "stage_2"
-        assert critic_entries[0]["success"] is False
-        assert "error" in critic_entries[0]
+        assert len(critic_entries) == 2
+        for entry in critic_entries:
+            assert entry["stage"] == "stage_2"
+            assert entry["success"] is False
+            assert "error" in entry
 
     def test_gd_06_critic_failure_does_not_trigger_revision(self, tmp_path):
         """SP1-GD-06: critic failure (empty findings) does not trigger revision."""

@@ -1,10 +1,11 @@
 """JSON-decode retry behavior at the model-call boundaries.
 
-Stage 2 keeps its bounded JSON-decode retry (one extra attempt).  Stage 1a
-has none: an undecodable body is a typed terminal outcome of the single
-first attempt, recorded as an unsupported response failure in the run-level
-repair record, and is never answered with a second dispatch or a repair
-call.
+Stage 2 keeps its bounded JSON-decode retry (one extra attempt); a second
+undecodable reply earns the call's one correction.  Stage 1a risk and gap
+derivation have none: an undecodable body is a typed terminal outcome of the
+single first attempt, recorded as an unsupported response failure in the
+run-level repair record, and is never answered with a second dispatch or a
+repair call.
 """
 
 from __future__ import annotations
@@ -65,11 +66,19 @@ def test_stage2_json_decode_retry_continues_and_logs_both_attempts(tmp_path):
 
 
 def test_stage2_json_decode_retry_is_bounded(tmp_path):
-    """Two malformed responses do not trigger an unbounded retry loop."""
+    """Three malformed responses do not trigger an unbounded retry loop.
+
+    The repeat and the one correction are spent; the fourth fixture is unused.
+    """
     client: MockLLMClient = setup_sp1_mock_client()
     client.set_response_for(
         ResponsibilitySet,
-        ["{malformed JSON", "{still malformed JSON", valid_responsibility_set_dict()],
+        [
+            "{malformed JSON",
+            "{still malformed JSON",
+            "{malformed JSON again",
+            valid_responsibility_set_dict(),
+        ],
     )
 
     result = run_sp1_default(client, tmp_path)
@@ -82,8 +91,8 @@ def test_stage2_json_decode_retry_is_bounded(tmp_path):
         for entry in read_calls_jsonl(tmp_path)
         if entry["step"] == "call_2a_responsibilities"
     ]
-    assert len(attempts) == 2
-    assert [entry["success"] for entry in attempts] == [False, False]
+    assert len(attempts) == 3
+    assert [entry["success"] for entry in attempts] == [False, False, False]
 
 
 def test_stage2_semantic_failure_gets_one_corrective_retry(tmp_path):

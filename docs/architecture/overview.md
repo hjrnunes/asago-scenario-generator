@@ -800,10 +800,17 @@ requirement/responsibility sets, and an exhausted fallback is fatal. The
 STPA retry contract is bounded: Stage 2 retries a JSON-decoding failure or a
 semantically empty requirement/responsibility result once, while Stage 1a
 retries semantic dangling hazard/loss references once with concise validation
-feedback. Each attempt is logged separately in
-`calls.jsonl` and counts as one request in the stage's call count; these
-retries do not change the manifest/result schemas, and exhaustion remains
-fatal.
+feedback. A reply that does not decode as JSON also earns the call's one
+correction request in the Stage 1b capability profile, the Stage 1a graph
+revision, Stage 2 Calls 1–3 when the repeat is undecodable too, the
+completeness critic, and the critic revision; the correction names the decode
+error and asks for the complete object again. Each attempt is logged
+separately in `calls.jsonl` and counts as one request in the stage's call
+count; these retries do not change the manifest/result schemas, and
+exhaustion remains fatal with three exceptions: an exhausted critic returns
+empty findings, an exhausted revision keeps the pre-revision control
+structure, and an exhausted Stage 1b draw is left out of the KC vote (the
+stage fails only when every draw fails).
 Stage 3 likewise retries a Pydantic-invalid slot response once with explicit
 slot-consistency feedback. Stage 5 retains one concise retry for an isolated
 completion-length failure; if that retry is also exhausted, the stage records a

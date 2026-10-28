@@ -43,6 +43,9 @@ from asago_scenario_generator.stpa.system_model.kc_decision import (
     target_kc_decision,
     vote_kc_subcodes,
 )
+from asago_scenario_generator.stpa.system_model.undecodable_reply import (
+    decode_aware_feedback,
+)
 
 STAGE = "stage_1b"
 STEP = "capability_profile"
@@ -161,6 +164,7 @@ def derive_capability_profile(
         system_prompt=system_prompt,
         user_prompt=user_prompt,
         run_dir=run_dir,
+        loader=loader,
         temperature=temperature,
         samples=samples,
     )
@@ -188,12 +192,23 @@ def _sample_drafts(
     system_prompt: str,
     user_prompt: str,
     run_dir: Path,
+    loader: TemplateLoader,
     temperature: float,
     samples: int,
 ) -> tuple[list[Stage1Profile], list[str]]:
-    """Send the Stage 1b request *samples* times; return the drafts and errors."""
+    """Send the Stage 1b request *samples* times; return the drafts and errors.
+
+    Each draw has one correction request, which an undecodable reply also
+    earns.
+    """
     drafts: list[Stage1Profile] = []
     errors: list[str] = []
+    policy = CorrectionPolicy(
+        validation_retries=1,
+        feedback=decode_aware_feedback(loader, reply_name="capability profile"),
+        include_response=True,
+        correct_undecodable=True,
+    )
     for index in range(1, samples + 1):
         outcome = call_with_policy(
             llm_client=llm_client,
@@ -203,7 +218,7 @@ def _sample_drafts(
             run_dir=run_dir,
             stage=STAGE,
             step=STEP if index == 1 else f"{STEP}_vote_{index}",
-            policy=CorrectionPolicy(validation_retries=1, include_response=True),
+            policy=policy,
             temperature=temperature,
         )
         if outcome.error is not None:

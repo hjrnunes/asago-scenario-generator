@@ -1,0 +1,19 @@
+template: undecodable_reply_correction.j2
+cases:
+  named-reply:
+    once:
+      - "Correction request: the prior control element set response did not decode as JSON"
+      - Reply again with the complete control element set as one JSON object
+    required:
+      - possibly because it ran to the token limit before the object was complete
+      - and end the reply at its closing brace
+      - add no blank lines or spaces after it
+    forbidden:
+      - failed validation
+      - semantically empty
+      - JSONDecodeError
+    ordered:
+      - - "Correction request: the prior control element set response did not decode as JSON"
+        - possibly because it ran to the token limit
+        - Reply again with the complete control element set as one JSON object
+        - add no blank lines or spaces after it

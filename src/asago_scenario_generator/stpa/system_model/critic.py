@@ -67,6 +67,9 @@ from asago_scenario_generator.stpa.system_model.feedback_authority import (
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     TargetEvidence,
 )
+from asago_scenario_generator.stpa.system_model.undecodable_reply import (
+    decode_aware_feedback,
+)
 from asago_scenario_generator.stpa.system_model.id_normalization import (
     validate_normalized_control_structure,
 )
@@ -424,7 +427,8 @@ def run_completeness_critic(
     """Run the completeness critic on the control structure.
 
     Makes a single LLM call with three probes. Logs the call and returns
-    the CriticFindings.
+    the CriticFindings.  A reply that fails validation or does not decode
+    earns one correction request.
 
     Args:
         llm_client: LLM client for making the completion call.
@@ -472,8 +476,13 @@ def run_completeness_critic(
         step=STEP_CRITIC,
         policy=CorrectionPolicy(
             validation_retries=1,
-            feedback=_CRITIC_VALIDATION_FEEDBACK,
+            feedback=decode_aware_feedback(
+                loader,
+                reply_name="critic findings",
+                feedback=_CRITIC_VALIDATION_FEEDBACK,
+            ),
             include_schema=False,
+            correct_undecodable=True,
         ),
         temperature=temperature,
         result_validator=_validate_critic_findings_consistency,
@@ -686,7 +695,8 @@ def run_revision(
     are returned as warnings (the pipeline proceeds).
 
     A reply whose authority bases fail the checks earns the one correction,
-    which names every failing channel with its reason.  Bases that still fail
+    which names every failing channel with its reason.  An undecodable reply
+    earns the same one correction.  Bases that still fail
     after it are dropped, so those channels' authority is unknown.
 
     Args:
@@ -736,9 +746,14 @@ def run_revision(
         step=STEP_REVISION,
         policy=CorrectionPolicy(
             validation_retries=1,
-            feedback=_REVISION_VALIDATION_FEEDBACK,
+            feedback=decode_aware_feedback(
+                loader,
+                reply_name="revision delta",
+                feedback=_REVISION_VALIDATION_FEEDBACK,
+            ),
             include_schema=False,
             error_note=authority_note,
+            correct_undecodable=True,
         ),
         temperature=temperature,
         max_completion_tokens=REVISION_MAX_COMPLETION_TOKENS,
