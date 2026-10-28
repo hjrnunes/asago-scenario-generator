@@ -866,8 +866,11 @@ still fails after its one correction, the narrative is a plain paragraph that
 code writes from the same facts (situation, beliefs, weak points, failure,
 worst case) with no identifiers or source labels, and `sourced_facts` carries
 a fact with `source: producer narration step` and `authority:
-producer_fallback` that says so. `narratives.json` records each scenario's
-source, rejections, and reason, and keeps the analysts' deterministic account. After narration, one
+producer_fallback` that says so and names any part the paragraph leaves out
+because no plain clause states it. `narratives.json` records each scenario's
+source, rejections, and reason, the fallback paragraph and its omitted parts,
+and keeps the analysts' deterministic account; an omitted part is also a
+candidate diagnostic. After narration, one
 `stage6_gherkin` request per published scenario asks the model for a declarative Gherkin reply
 (feature, scenario, and Given, When, Then, and unsafe steps that each cite the
 scenario's facts plus an appended safe-behavior fact). Code checks the reply,

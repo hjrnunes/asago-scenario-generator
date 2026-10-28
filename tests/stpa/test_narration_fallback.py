@@ -36,6 +36,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     NARRATIVE_FALLBACK_FACT,
     handoff_ownership_violations,
     handoff_schema_violations,
+    narrative_fallback_fact,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     build_scenario_handoff_v5,
@@ -52,12 +53,15 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
     fallback_narrative,
     render_narration_prompts,
     text_failures,
+    write_fallback,
 )
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_presentation,
 )
 from asago_scenario_generator.stpa.scenario_prod.run import (
+    _CandidateOutcomeBuilder,
     _narrate,
+    _record_fallback_omissions,
     _run_stage6_for_spec,
 )
 from tests.stpa.sp1_helpers import MockLLMClient
@@ -142,7 +146,8 @@ def booking_scn_010() -> ScenarioSpec:
             )
         ],
         criterion=(
-            "The agent cancels reservation for another guest, breaking RESP-7 and SC-9."
+            "The agent cancels a reservation for another guest, breaking RESP-7 "
+            "and SC-9."
         ),
         parts={"PM-7-1": "The reservation owner", "RESP-7": "Verify ownership"},
         losses={"L-2": "Loss of a guest's booked stay"},
@@ -255,6 +260,11 @@ def test_the_fallback_tells_the_facts_in_plain_words(case) -> None:
     source_text = "\n".join(fact.text for fact in build_facts(spec).facts)
     assert text_failures("the paragraph", text, source_text) == []
     assert text == fallback_narrative(spec)
+    # Every part the spec gives is stated.
+    assert write_fallback(spec).omitted == ()
+    for opening in ("The scenario arises when", "The unsafe outcome is that"):
+        assert opening in text
+    assert "weak point" in text and "The worst case" in text
 
 
 def test_the_booking_fallback_reads_identifiers_as_noun_phrases() -> None:
@@ -267,8 +277,8 @@ def test_the_booking_fallback_reads_identifiers_as_noun_phrases() -> None:
         "reservation belongs to the guest who asks; the weak point is that the "
         "agent's record of the reservation owner is set from the guest's own "
         "claim rather than from the reservation record. "
-        "The unsafe outcome is that the agent cancels reservation for another "
-        "guest, breaking a duty of the agent and a safety rule. "
+        "The unsafe outcome is that the agent cancels a reservation for "
+        "another guest, breaking a duty of the agent and a safety rule. "
         "The worst case is this: loss of a guest's booked stay."
     )
 
@@ -373,8 +383,152 @@ def test_a_scenario_with_no_fact_left_still_publishes_text() -> None:
         }
     )
 
-    assert fallback_narrative(spec) == FALLBACK_LAST_RESORT
+    fallback = write_fallback(spec)
+
+    assert fallback.text == FALLBACK_LAST_RESORT
+    assert fallback.omitted == ("failure",)
     assert fallback_failures(FALLBACK_LAST_RESORT) == []
+
+
+def _with_criterion(spec: ScenarioSpec, criterion: str) -> ScenarioSpec:
+    return spec.model_copy(update={"unsafe_outcome_semantic_proposition": criterion})
+
+
+@pytest.mark.parametrize(
+    ("criterion", "kept"),
+    [
+        (
+            "The response presents a draft result as final; the detector would "
+            "flag it.",
+            "The unsafe outcome is that the response presents a draft result as final.",
+        ),
+        (
+            "The agent refunds the order, which the judge would mark as unsafe.",
+            "The unsafe outcome is that the agent refunds the order.",
+        ),
+        (
+            "The response is wrong (F3), and it would be flagged as unsafe.",
+            "The unsafe outcome is that the response is wrong.",
+        ),
+        (
+            "The detector fails to warn the guest about smoke.",
+            "The unsafe outcome is that the detector fails to warn the guest about "
+            "smoke.",
+        ),
+    ],
+)
+def test_analyst_commentary_is_dropped_and_the_domain_statement_kept(
+    criterion: str, kept: str
+) -> None:
+    fallback = write_fallback(_with_criterion(everyday(), criterion))
+
+    assert kept in fallback.text
+    assert "would" not in fallback.text
+    assert fallback.omitted == ()
+
+
+def test_a_fact_that_is_only_commentary_is_named_as_left_out() -> None:
+    fallback = write_fallback(
+        _with_criterion(everyday(), "The detector would flag it.")
+    )
+
+    assert "The unsafe outcome" not in fallback.text
+    assert fallback.omitted == ("failure",)
+
+
+@pytest.mark.parametrize(
+    ("criterion", "prose"),
+    [
+        (
+            "The agent issues a refund whose amount F3 > 1000 without approval.",
+            "the agent issues a refund whose amount exceeds 1000 without approval",
+        ),
+        (
+            "The agent issues a refund whose amount CL-4:CM-4:INCORRECT:4 >= 1000.",
+            "the agent issues a refund whose amount is at least 1000",
+        ),
+        (
+            "The reply lists turns: two, with role: user first.",
+            "the reply lists turns two, with the user role first",
+        ),
+        (
+            "The agent uses less_than to send this message.",
+            "the agent uses less than to send the message",
+        ),
+    ],
+)
+def test_an_expression_the_ownership_rules_reject_reads_as_plain_words(
+    criterion: str, prose: str
+) -> None:
+    fallback = write_fallback(_with_criterion(everyday(), criterion))
+
+    assert f"The unsafe outcome is that {prose}." in fallback.text
+    assert handoff_ownership_violations({"narrative": fallback.text}) == []
+    assert fallback.omitted == ()
+
+
+def test_the_amount_comparison_reaches_the_full_handoff(tmp_path: Path) -> None:
+    spec = _with_criterion(
+        everyday(),
+        "The agent issues a refund whose amount F3 > 1000 without approval.",
+    )
+    client = MockLLMClient()
+    client.set_response_for(NarrationReply, [ONE_SENTENCE, ONE_SENTENCE])
+
+    published = _narrate(_inputs(client, tmp_path), [spec])
+    handoff = build_scenario_handoff_v5(
+        _run_stage6_for_spec(spec, published[spec.scenario_id])
+    )
+
+    assert (
+        "The unsafe outcome is that the agent issues a refund whose amount "
+        "exceeds 1000 without approval." in handoff.narrative
+    )
+    payload = handoff.model_dump(mode="json")
+    assert handoff_ownership_violations(payload) == []
+    assert handoff_schema_violations(payload) == []
+    assert handoff.sourced_facts[-1] == NARRATIVE_FALLBACK_FACT
+
+
+def test_a_part_left_out_is_recorded_in_the_report_handoff_and_diagnostics(
+    tmp_path: Path,
+) -> None:
+    spec = _with_criterion(everyday(), "(F1)")
+    client = MockLLMClient()
+    client.set_response_for(NarrationReply, [ONE_SENTENCE, ONE_SENTENCE])
+
+    published = _narrate(_inputs(client, tmp_path), [spec])
+
+    assert published[spec.scenario_id].omitted == ("failure",)
+    sidecar = json.loads((tmp_path / NARRATIVES_FILENAME).read_text(encoding="utf-8"))
+    (entry,) = sidecar["scenarios"]
+    assert entry["fallback_narrative"] == published[spec.scenario_id].text
+    assert entry["fallback_omitted"] == ["failure"]
+    envelope = _run_stage6_for_spec(spec, published[spec.scenario_id])
+    assert envelope.narrative_omitted == ("failure",)
+    fact = build_scenario_handoff_v5(envelope).sourced_facts[-1]
+    assert fact == narrative_fallback_fact(("failure",))
+    assert fact.statement.endswith(
+        " It leaves out the failure, which code could not state in plain words."
+    )
+    builder = _CandidateOutcomeBuilder(
+        scenario_id=spec.scenario_id, ica_slot_id="slot", ica_id=None
+    )
+    _record_fallback_omissions(published, [builder])
+    assert builder.diagnostics == [
+        "the fallback narrative leaves out the failure: no plain clause states it"
+    ]
+
+
+def test_the_marker_names_the_fallback_without_claiming_a_correction() -> None:
+    statement = NARRATIVE_FALLBACK_FACT.statement
+
+    assert "no accepted model-written narrative was available" in statement
+    assert "correction" not in statement
+    assert narrative_fallback_fact(("failure", "worst case")).statement.endswith(
+        "It leaves out the failure and the worst case, which code could not "
+        "state in plain words."
+    )
 
 
 def test_the_guard_names_identifiers_and_labels_but_not_domain_words() -> None:
@@ -413,6 +567,11 @@ def test_a_narration_rejected_twice_publishes_the_marked_fallback_in_the_handoff
     assert "the paragraph has 1 sentences; write 2 to 4" in client.calls[1].user_prompt
     plain = fallback_narrative(spec)
     assert published == {spec.scenario_id: PublishedNarrative(plain, fallback=True)}
+    sidecar_entry = json.loads(
+        (tmp_path / NARRATIVES_FILENAME).read_text(encoding="utf-8")
+    )["scenarios"][0]
+    assert sidecar_entry["fallback_narrative"] == plain
+    assert sidecar_entry["fallback_omitted"] == []
 
     envelope = _run_stage6_for_spec(spec, published[spec.scenario_id])
     assert envelope.narrative_fallback

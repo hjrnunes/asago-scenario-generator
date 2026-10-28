@@ -22,7 +22,7 @@ case threat, capture guarantee, and related business rules.
 
 from __future__ import annotations
 
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
 import json
 from pathlib import Path
@@ -150,7 +150,7 @@ _FALLBACK_BANNED = (
 _REFERENCE = "|".join(f"(?:{pattern.pattern})" for pattern in _FALLBACK_BANNED[:5])
 # A bracketed group that only annotates the statement before it: references
 # alone, or a labelled source note.
-_ANNOTATION = re.compile(
+_REFERENCE_NOTE = re.compile(
     rf"\s*[(\[]\s*(?:{_REFERENCE})(?:\s*(?:[,;/]|\band\b)\s*(?:{_REFERENCE}))*\s*[)\]]"
     r"|\s*[(\[]\s*(?i:structural sources?|sources?|authority|kind|evidence)\s*:"
     r"[^()\[\]]*[)\]]"
@@ -171,6 +171,64 @@ _KIND_NOUNS = {
     "SC": "a safety rule",
     "SEM": "a value the test supplies",
 }
+# Analyst commentary on how the scenario is checked: a verdict that a check
+# would give, or a statement about the analysis itself. A domain statement
+# about a detector, such as one that fails to warn, is not commentary.
+_CHECKER = (
+    r"(?:detectors?|judges?|oracles?|checks?|checkers?|evaluators?|graders?|"
+    r"tests?|analysts?|analysis|hypothes[ie]s)"
+)
+_VERDICT = r"(?:flag|catch|judge|score|mark)"
+_COMMENTARY = re.compile(
+    rf"\b{_CHECKER}\s+(?:would|will|should|could|can|may|might|must)\s+"
+    rf"(?:not\s+)?{_VERDICT}\b"
+    r"|\b(?:would|will|should|could|can|may|might|must)\s+(?:not\s+)?be\s+"
+    r"(?:flagged|caught|judged|scored|marked)\b"
+    rf"|\b(?:flagged|caught|detected|judged|scored|marked)\s+by\s+(?:the|a|an)\s+"
+    rf"{_CHECKER}\b"
+    r"|\bthis\s+(?:scenario|test|hypothesis|analysis)\s+"
+    r"(?:tests|checks|shows|assumes|expects|asserts|examines)\b",
+    re.IGNORECASE,
+)
+_CLAUSE_BREAK = re.compile(
+    r"(;\s+|(?<=[.!?])\s+|,\s+(?:which|and|so|but)\s+|\s+(?:—|--)\s+)"
+)
+# Expressions the handoff's ownership rules reject in prose, and the plain
+# words each reads as. A comparison operator reads as its verb.
+_COMPARISON = re.compile(r"(?<![-<>=!])\s*(>=|<=|!=|==|>|<|=)\s*(?=[\w\"'$€£+-])")
+_COMPARISON_WORDS = {
+    ">=": "is at least",
+    "<=": "is at most",
+    "!=": "differs from",
+    "==": "equals",
+    "=": "equals",
+    ">": "exceeds",
+    "<": "is below",
+}
+_PROSE_FORMS = (
+    (re.compile(r"\bgreater_than\b", re.IGNORECASE), "greater than"),
+    (re.compile(r"\bless_than\b", re.IGNORECASE), "less than"),
+    (re.compile(r"\bprepared_user_text\b", re.IGNORECASE), "prepared user text"),
+    (
+        re.compile(r"\b(roles?)\s*\"?\s*:\s*\"?(user|assistant|system)\b", re.I),
+        r"the \2 \1",
+    ),
+    (re.compile(r"\b(turns?)\s*\"?\s*:", re.IGNORECASE), r"\1"),
+    (re.compile(r"\b(send|deliver) this message\b", re.IGNORECASE), r"\1 the message"),
+    (
+        re.compile(r"\bexecute the following\b", re.IGNORECASE),
+        "carry out the following",
+    ),
+    (re.compile(r"\bsystem prompt is\b", re.IGNORECASE), "system prompt reads"),
+    (re.compile(r"\bjudge prompt\b", re.IGNORECASE), "judging instructions"),
+)
+# The parts of a fallback paragraph, as the producer report and the handoff
+# name the ones a paragraph leaves out.
+SITUATION_PART = "situation"
+BELIEFS_PART = "agent's beliefs"
+WEAK_POINTS_PART = "weak points"
+FAILURE_PART = "failure"
+WORST_CASE_PART = "worst case"
 FALLBACK_LAST_RESORT = "The agent may take an unsafe action in this situation."
 NOT_SELECTED = "not selected as a causal factor"
 _OWNERSHIP_WORDS = {
@@ -780,83 +838,104 @@ def rule_text(description: str) -> str:
 
 
 @dataclass(frozen=True)
+class FallbackNarrative:
+    """A fallback paragraph and the parts of its facts it could not state."""
+
+    text: str
+    omitted: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class PublishedNarrative:
     """The narrative a scenario's handoff publishes, and whether code wrote it.
 
-    ``fallback`` is true when the model's paragraph failed its checks and the
-    text is :func:`fallback_narrative`.
+    ``fallback`` is true when no accepted model paragraph was available and
+    the text is :func:`write_fallback`'s; ``omitted`` names the parts that
+    paragraph could not state.
     """
 
     text: str
     fallback: bool = False
+    omitted: tuple[str, ...] = ()
 
 
 def fallback_narrative(spec: ScenarioSpec) -> str:
+    """Return the text of :func:`write_fallback`."""
+    return write_fallback(spec).text
+
+
+def write_fallback(spec: ScenarioSpec) -> FallbackNarrative:
     """Write the plain paragraph a scenario publishes when its narration fails.
 
     Fixed sentences tell the narration's facts: the situation, why the agent
     acts (its flawed beliefs and the weak points), the failure, and the worst
-    case. Each fact keeps its words. A reference that only annotates it, such
-    as a bracketed identifier, a fact citation or a source note, is dropped;
-    a structural identifier that is part of the sentence reads as a noun
-    phrase for its kind. The paragraph never carries what
-    :func:`fallback_failures` names. A sentence that breaks the handoff's
-    ownership rules is left out, as the handoff could not publish it.
+    case. Each fact keeps its words, without what only annotates it: a
+    bracketed identifier, a fact citation, a source note, or a clause of
+    analyst commentary on how the scenario is checked. A structural
+    identifier that is part of the sentence reads as a noun phrase for its
+    kind, and an expression the handoff's ownership rules reject, such as
+    ``amount > 1000``, reads as plain words. The paragraph never carries what
+    :func:`fallback_failures` names. A part whose fact is given but leaves
+    no plain clause is named in ``omitted``, so the caller can record it.
     """
     meanings = _descriptions(spec)
     context = spec.scenario_context
+    omitted: list[str] = []
+
+    def stated(part: str, texts: Sequence[str | None]) -> list[str]:
+        given = [text for text in texts if text and text.strip()]
+        clauses: list[str] = []
+        for clause in dict.fromkeys(_clause(text, meanings) for text in given):
+            if clause and not handoff_ownership_violations({"narrative": clause}):
+                clauses.append(clause)
+            elif part not in omitted:
+                omitted.append(part)
+        return clauses
+
     sentences: list[str] = []
-    if context is not None:
-        situation = re.sub(
-            r"^when\s+", "", _clause(context.ica.hazardous_context, meanings)
-        )
-        if situation:
-            sentences.append(f"The scenario arises when {situation}.")
-    sentences.extend(_reason_sentences(spec, meanings))
-    failure = _clause(selected_criterion(spec), meanings)
+    situation = stated(
+        SITUATION_PART, [context.ica.hazardous_context] if context else []
+    )
+    if situation:
+        when = re.sub(r"^when\s+", "", situation[0])
+        sentences.append(f"The scenario arises when {when}.")
+    sentences.extend(_reason_sentences(spec, stated))
+    failure = stated(FAILURE_PART, [selected_criterion(spec)])
     if failure:
-        sentences.append(f"The unsafe outcome is that {failure}.")
-    losses = [] if context is None else context.losses
-    harms = [_clause(item.description, meanings) for item in losses]
-    harms = [item for item in dict.fromkeys(harms) if item]
+        sentences.append(f"The unsafe outcome is that {failure[0]}.")
+    harms = stated(
+        WORST_CASE_PART,
+        [item.description for item in context.losses] if context else [],
+    )
     if len(harms) == 1:
         sentences.append(f"The worst case is this: {harms[0]}.")
     elif harms:
         sentences.append(f"The worst cases are these: {'; '.join(harms)}.")
-    kept = [
-        sentence
-        for sentence in sentences
-        if not handoff_ownership_violations({"narrative": sentence})
-    ]
-    return " ".join(kept) or FALLBACK_LAST_RESORT
+    return FallbackNarrative(
+        " ".join(sentences) or FALLBACK_LAST_RESORT, tuple(omitted)
+    )
 
 
-def _reason_sentences(spec: ScenarioSpec, meanings: Mapping[str, str]) -> list[str]:
+def _reason_sentences(
+    spec: ScenarioSpec, stated: Callable[[str, Sequence[str | None]], list[str]]
+) -> list[str]:
     """Say why the agent acts: its flawed beliefs, then the weak points."""
     factors = spec.causal_factors
-    beliefs = [
-        _clause(factor.flawed_belief, meanings)
-        for factor in factors
-        if factor.flawed_belief
-    ]
-    beliefs = [item for item in dict.fromkeys(beliefs) if item]
     reason = ""
-    if beliefs:
-        reason = "it wrongly believes that " + ", and that ".join(beliefs)
+    if any(factor.flawed_belief for factor in factors):
+        beliefs = stated(BELIEFS_PART, [factor.flawed_belief for factor in factors])
+        if beliefs:
+            reason = "it wrongly believes that " + ", and that ".join(beliefs)
     else:
-        held = {belief.pm_id: belief for belief in spec.defender_bdi.beliefs}
-        topics = [
-            _clause(held[factor.source_id].content, meanings)
-            for factor in factors
-            if factor.source_id in held
-        ]
-        topics = [item for item in dict.fromkeys(topics) if item]
+        held = {belief.pm_id: belief.content for belief in spec.defender_bdi.beliefs}
+        topics = stated(
+            BELIEFS_PART, [held.get(factor.source_id) for factor in factors]
+        )
         if len(topics) == 1:
             reason = f"its belief about {topics[0]} is wrong"
         elif topics:
             reason = f"its beliefs about {' and '.join(topics)} are wrong"
-    weak = [_clause(factor.description, meanings) for factor in factors]
-    weak = [item for item in dict.fromkeys(weak) if item]
+    weak = stated(WEAK_POINTS_PART, [factor.description for factor in factors])
     weak_text = ""
     if weak:
         noun = "weak point is" if len(weak) == 1 else "weak points are"
@@ -871,8 +950,34 @@ def _reason_sentences(spec: ScenarioSpec, meanings: Mapping[str, str]) -> list[s
 
 
 def _clause(text: str | None, meanings: Mapping[str, str]) -> str:
-    """Return a fact as a lower-case clause without references or end stop."""
-    return lower_first(_without_references(text or "", meanings).rstrip(" .;,"))
+    """Return a fact as a lower-case plain clause without its end stop."""
+    text = _without_commentary(plain(text or ""))
+    text = _as_prose(_without_references(text, meanings))
+    return lower_first(text.rstrip(" .;,"))
+
+
+def _without_commentary(text: str) -> str:
+    """Drop each clause of analyst commentary; keep the clauses around it."""
+    pieces = _CLAUSE_BREAK.split(text)
+    kept: list[str] = []
+    for index, segment in enumerate(pieces[0::2]):
+        if _COMMENTARY.search(segment):
+            stop = segment.rstrip()[-1:]
+            if kept and stop in ".!?" and not kept[-1].rstrip().endswith(stop):
+                kept[-1] = kept[-1].rstrip(" ,;") + stop
+            continue
+        if kept:
+            kept.append(pieces[2 * index - 1])
+        kept.append(segment)
+    return "".join(kept).strip()
+
+
+def _as_prose(text: str) -> str:
+    """Write the expressions the ownership rules reject as plain words."""
+    text = _COMPARISON.sub(lambda match: f" {_COMPARISON_WORDS[match.group(1)]} ", text)
+    for pattern, words in _PROSE_FORMS:
+        text = pattern.sub(words, text)
+    return re.sub(r"\s+", " ", text).strip()
 
 
 def _without_references(text: str, meanings: Mapping[str, str]) -> str:
@@ -889,7 +994,7 @@ def _without_references(text: str, meanings: Mapping[str, str]) -> str:
                 return template.format(lower_first(meaning))
         return _KIND_NOUNS.get(kind, "")
 
-    text = _ANNOTATION.sub("", plain(text))
+    text = _REFERENCE_NOTE.sub("", text)
     text = _SOURCE_KEY.sub("", text)
     text = _STRUCTURAL_ID.sub(lambda match: noun(match, described=bool(meanings)), text)
     text = _SCENARIO_ID.sub("this scenario", text)
@@ -915,14 +1020,20 @@ def narratives_payload(
     narrated: Mapping[str, tuple[ScenarioFacts, Narration]],
     *,
     deterministic: Mapping[str, str],
+    fallbacks: Mapping[str, FallbackNarrative] | None = None,
 ) -> dict[str, Any]:
-    """Return the run's ``narratives.json`` document."""
+    """Return the run's ``narratives.json`` document.
+
+    ``fallbacks`` holds the plain paragraph each scenario without an accepted
+    reply publishes, and the parts it could not state.
+    """
     scenarios = []
     for spec in specs:
         entry = narrated.get(spec.scenario_id)
         if entry is None:
             continue
         facts, narration = entry
+        fallback = (fallbacks or {}).get(spec.scenario_id)
         scenarios.append(
             {
                 "scenario_id": spec.scenario_id,
@@ -956,6 +1067,8 @@ def narratives_payload(
                 ],
                 "writeup": render_writeup(spec, facts, narration),
                 "deterministic_narrative": deterministic.get(spec.scenario_id),
+                "fallback_narrative": None if fallback is None else fallback.text,
+                "fallback_omitted": [] if fallback is None else list(fallback.omitted),
             }
         )
     return {

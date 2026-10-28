@@ -103,9 +103,9 @@ from .and_or_tree import (
 )
 from .narration import (
     PublishedNarrative,
-    fallback_narrative,
     narrate_scenarios,
     narratives_payload,
+    write_fallback,
     write_narratives,
 )
 from .handoff import (
@@ -514,21 +514,44 @@ def _narrate(
     deterministic = {
         spec.scenario_id: render_scenario_presentation(spec)[0] for spec in specs
     }
+    fallbacks = {
+        spec.scenario_id: write_fallback(spec)
+        for spec in specs
+        if spec.scenario_id in narrated and not narrated[spec.scenario_id][1].accepted
+    }
     write_narratives(
         inputs.run_dir,
-        narratives_payload(specs, narrated, deterministic=deterministic),
+        narratives_payload(
+            specs, narrated, deterministic=deterministic, fallbacks=fallbacks
+        ),
     )
-    specs_by_id = {spec.scenario_id: spec for spec in specs}
     return {
         scenario_id: (
             PublishedNarrative(narration.paragraph)
             if narration.accepted
             else PublishedNarrative(
-                fallback_narrative(specs_by_id[scenario_id]), fallback=True
+                fallbacks[scenario_id].text,
+                fallback=True,
+                omitted=fallbacks[scenario_id].omitted,
             )
         )
         for scenario_id, (_, narration) in narrated.items()
     }
+
+
+def _record_fallback_omissions(
+    narratives: Mapping[str, PublishedNarrative],
+    candidate_builders: list[_CandidateOutcomeBuilder] | None,
+) -> None:
+    """Add a diagnostic to each candidate whose fallback leaves a part out."""
+    for scenario_id, published in narratives.items():
+        builder = _candidate_builder_for(candidate_builders, scenario_id)
+        if published.omitted and builder is not None:
+            builder.diagnostics.append(
+                "the fallback narrative leaves out the "
+                + ", the ".join(published.omitted)
+                + ": no plain clause states it"
+            )
 
 
 def _run_stages_5_and_6(
@@ -614,6 +637,7 @@ def _run_stages_5_and_6(
             run_dir, candidate_builders, inputs.condition_families, scenario_specs
         )
     narratives = _narrate(inputs, deduplicated_specs)
+    _record_fallback_omissions(narratives, candidate_builders)
     tree_siblings = build_sibling_index(deduplicated_specs)
     gherkins = _model_gherkins(
         inputs,
@@ -1556,9 +1580,11 @@ def _run_stage6_for_spec(
     """
     narrative, tree, gherkin = render_scenario_presentation(spec)
     narrative_fallback = False
+    narrative_omitted: tuple[str, ...] = ()
     if narrative_override is not None:
         narrative = narrative_override.text
         narrative_fallback = narrative_override.fallback
+        narrative_omitted = narrative_override.omitted
     if gherkin_override is not None:
         gherkin = gherkin_override
     if tree_siblings is None:
@@ -1572,6 +1598,7 @@ def _run_stage6_for_spec(
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
         narrative_fallback=narrative_fallback,
+        narrative_omitted=narrative_omitted,
     )
 
 
