@@ -866,8 +866,8 @@ still fails after its one correction, the narrative is a plain paragraph that
 code writes from the same facts (situation, beliefs, weak points, failure,
 worst case) with no identifiers or source labels, and `sourced_facts` carries
 a fact with `source: producer narration step` and `authority:
-producer_fallback` that says so and names any part the paragraph leaves out
-because no plain clause states it. `narratives.json` records each scenario's
+producer_fallback` that says so and names any part the paragraph does not
+fully state because no plain clause states all of it. `narratives.json` records each scenario's
 source, rejections, and reason, the fallback paragraph, its omitted parts and
 the analyst commentary it leaves out, and keeps the analysts' deterministic
 account; an omitted part is also a candidate diagnostic. After narration, one

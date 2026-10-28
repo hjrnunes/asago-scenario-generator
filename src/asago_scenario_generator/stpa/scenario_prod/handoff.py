@@ -1084,7 +1084,8 @@ def narrative_fallback_fact(omitted: Sequence[str] = ()) -> HandoffFact:
 
     Code writes the narrative when no model-written narrative passed the
     producer's checks. ``omitted`` names the parts of the scenario's facts
-    the narrative leaves out because no plain clause states them.
+    the narrative does not fully state, wholly or in part, because no plain
+    clause states them.
     """
     statement = (
         "Code wrote this scenario's narrative from the scenario's facts, "
@@ -1096,7 +1097,8 @@ def narrative_fallback_fact(omitted: Sequence[str] = ()) -> HandoffFact:
             parts[0] if len(parts) == 1 else ", ".join(parts[:-1]) + f" and {parts[-1]}"
         )
         statement += (
-            f" It leaves out {listed}, which code could not state in plain words."
+            f" It does not fully state {listed}: code could not write all of "
+            "it in plain words."
         )
     return HandoffFact(
         statement=statement,

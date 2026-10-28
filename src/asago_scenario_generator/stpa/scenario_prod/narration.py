@@ -1051,6 +1051,9 @@ def _comparison_words(before: str, operator: str, after: str = "") -> str:
     when the compared value ends the clause or a preposition follows it
     ("The amount is at most 10 for every refund"); before a verb the phrase
     modifies the noun ("The amounts greater than 1000 reach the ledger").
+    Only a one-word noun, after its determiner if it has one, counts as such
+    a subject, or two words after "whose": a longer run may hold a verb, as
+    in "the agent approves refunds", whose object the phrase then modifies.
     Anything else keeps the adjective phrase alone, which stays grammatical.
     """
     words = _COMPARISON_WORDS[operator]
@@ -1074,6 +1077,9 @@ def _comparison_words(before: str, operator: str, after: str = "") -> str:
     if determiner in _DETERMINERS:
         index -= 1
     if index >= 0 and _opens_nothing(tokens[index]):
+        return words
+    opener = tokens[index].lower() if index >= 0 else ""
+    if noun > (2 if opener == "whose" else 1):
         return words
     if (index < 0 or not tokens[index][0].isalnum()) and not _ends_comparison(after):
         return words

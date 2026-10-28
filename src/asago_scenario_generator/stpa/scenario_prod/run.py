@@ -548,9 +548,9 @@ def _record_fallback_omissions(
         builder = _candidate_builder_for(candidate_builders, scenario_id)
         if published.omitted and builder is not None:
             builder.diagnostics.append(
-                "the fallback narrative leaves out the "
+                "the fallback narrative does not fully state the "
                 + ", the ".join(published.omitted)
-                + ": no plain clause states it"
+                + ": no plain clause states all of it"
             )
 
 

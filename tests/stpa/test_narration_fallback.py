@@ -506,6 +506,27 @@ def test_a_lost_clause_is_reported_though_the_rest_of_its_fact_is_stated() -> No
             "The amounts > 1000 reach the ledger.",
             "the amounts greater than 1000 reach the ledger",
         ),
+        # The object of a verb keeps the adjective phrase: no second verb.
+        (
+            "The agent approves refunds > 1000 without authorization.",
+            "the agent approves refunds greater than 1000 without authorization",
+        ),
+        (
+            "The agent pays amounts F3 > 1000.",
+            "the agent pays amounts greater than 1000",
+        ),
+        (
+            "The agent transfers funds >= 500 to the account.",
+            "the agent transfers funds at least 500 to the account",
+        ),
+        (
+            "The agent cancels bookings < 3 days before arrival.",
+            "the agent cancels bookings less than 3 days before arrival",
+        ),
+        (
+            "The agent pays when the agent approves refunds > 1000.",
+            "the agent pays when the agent approves refunds greater than 1000",
+        ),
         # A comparison that is the clause's predicate gets its copula.
         (
             "The agent issues a refund whose amount F3 > 1000 without approval.",
@@ -527,6 +548,10 @@ def test_a_lost_clause_is_reported_though_the_rest_of_its_fact_is_stated() -> No
         (
             "Refunds are approved if the total == 0.",
             "refunds are approved if the total is equal to 0",
+        ),
+        (
+            "The agent refunds an order whose total amount > 1000.",
+            "the agent refunds an order whose total amount is greater than 1000",
         ),
         (
             "The agent pays when the status != closed.",
@@ -578,6 +603,14 @@ def test_an_expression_the_ownership_rules_reject_reads_as_plain_words(
             "The response is wrong (source: the judge would flag it).",
             "the response is wrong",
         ),
+        (
+            "The agent approves refunds > 1000 without authorization.",
+            "the agent approves refunds greater than 1000 without authorization",
+        ),
+        (
+            "The agent pays amounts F3 > 1000.",
+            "the agent pays amounts greater than 1000",
+        ),
     ],
 )
 def test_the_full_handoff_states_the_failure_in_plain_words(
@@ -620,14 +653,16 @@ def test_a_part_left_out_is_recorded_in_the_report_handoff_and_diagnostics(
     fact = build_scenario_handoff_v5(envelope).sourced_facts[-1]
     assert fact == narrative_fallback_fact(("failure",))
     assert fact.statement.endswith(
-        " It leaves out the failure, which code could not state in plain words."
+        " It does not fully state the failure: code could not write all of it "
+        "in plain words."
     )
     builder = _CandidateOutcomeBuilder(
         scenario_id=spec.scenario_id, ica_slot_id="slot", ica_id=None
     )
     _record_fallback_omissions(published, [builder])
     assert builder.diagnostics == [
-        "the fallback narrative leaves out the failure: no plain clause states it"
+        "the fallback narrative does not fully state the failure: no plain "
+        "clause states all of it"
     ]
 
 
@@ -637,8 +672,8 @@ def test_the_marker_names_the_fallback_without_claiming_a_correction() -> None:
     assert "no accepted model-written narrative was available" in statement
     assert "correction" not in statement
     assert narrative_fallback_fact(("failure", "worst case")).statement.endswith(
-        "It leaves out the failure and the worst case, which code could not "
-        "state in plain words."
+        "It does not fully state the failure and the worst case: code could not "
+        "write all of it in plain words."
     )
 
 
