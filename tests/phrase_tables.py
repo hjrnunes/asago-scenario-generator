@@ -755,6 +755,7 @@ FEEDBACK_AUTHORITY_CALL3 = {
 # A case renders one template; the table that names it supplies the template.
 CASES: dict[str, Callable[[str], str]] = {
     "no-variables": _system_model(),
+    "named-reply": _system_model(reply_name="control element set"),
     "no-target-variables": _target_realization(),
     "no-stated-rules": _system_model(stated_rules=False),
     "records-service": _system_model(**RECORDS_SERVICE),

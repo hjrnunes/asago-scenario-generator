@@ -558,6 +558,8 @@ SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "repair_ids": 0,
     "rule_span_repair": 0,
     "quote_normalization": 0,
+    # The undecodable-reply correction wording, shared by Stage 1b and Stage 2.
+    "undecodable_reply": 0,
     "heuristics": 1,
     # The one writer of the canonical control structure; it applies the
     # heuristics check and is shared by the derivation and the orchestrator.
