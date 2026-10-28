@@ -77,11 +77,12 @@ delivery configuration, or executable artifact compilation.
 The producer also owns what a bound `tool_call_condition` means. The
 `tool-call-condition` contract in `data/contracts/tool-call-condition/` states
 the condition's structure, how comparisons combine, how calls are assigned to
-operations, and the three outcomes with their reasons. The v1 vectors and the
-v2 validate vectors hold the results of Garak's `validate_condition` and
-`evaluate_condition` at the revision the vector files name; the v2 evaluate
-vectors hold the results of the producer's reference evaluator,
-`evaluate_condition_v2` in `scripts/gen_tool_call_condition_vectors.py`. An
+operations, and the three outcomes with their reasons. The vectors of each
+version hold the results of Garak's `validate_condition` and
+`evaluate_condition` at the revision the vector files name; the producer's
+reference evaluator, `evaluate_condition_v2` in
+`scripts/gen_tool_call_condition_vectors.py`, must agree with every v2
+evaluate vector. An
 evaluator, such as the Garak `toolcall` detector, executes the condition and
 must reproduce every vector of the version it implements; the consumer carries the condition unchanged in `tool_call_condition.json`;
 the consumer and the orchestrator mirror the contract byte for byte, as they do
@@ -90,8 +91,9 @@ version with new vectors, made here first; no repository redefines the
 semantics in its own prose or tests.
 
 The contract directory holds two versions side by side, pinned by one lock.
-`tool-call-condition-v1` is what Garak's detector implements, and its files
-never change. `tool-call-condition-v2` changes three evaluation rules: an
+`tool-call-condition-v1` is what Garak's detector implemented at the revision
+its vector files name, and its files never change; Garak's detector now
+implements `tool-call-condition-v2`. `tool-call-condition-v2` changes three evaluation rules: an
 `order` that finds no prior call is inconclusive on an incomplete capture,
 `same_argument` uses the strict equality of value comparisons, and a captured
 call marked `blocked` never satisfies `requires_prior`. Both versions share one
