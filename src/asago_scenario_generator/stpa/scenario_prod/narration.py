@@ -132,22 +132,45 @@ _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _LONG_QUOTE = re.compile(r"[\"\u201c][^\"\u201c\u201d]{40,}[\"\u201d]")
 _APPLIES_WHEN = re.compile(r"\bapplies when\s*:", re.IGNORECASE)
 _SOURCE_KEY = re.compile(r"\b[A-Z]+-\d+(?:-\d+)*(?::[A-Za-z0-9_-]+)+")
-_BRACKETED_IDS = re.compile(
-    r"\s*[(\[]\s*(?:(?:PM|FB|CA)-\d+-\d+|(?:RESP|CL|CM|CP|H|L|SC|SEM)-\d+)"
-    r"(?:\s*[,;]\s*(?:(?:PM|FB|CA)-\d+-\d+|(?:RESP|CL|CM|CP|H|L|SC|SEM)-\d+))*\s*[)\]]"
+_SCENARIO_ID = re.compile(r"\bSCN-\d+\b")
+_ICA_CODE = re.compile(r"\b(?:UCA|ICA)-?\d+\b")
+_SOURCE_LABEL = re.compile(
+    r"\b(?:structural sources?|sources?|authority)\s*:", re.IGNORECASE
 )
-_SOURCE_LABEL = re.compile(r"\s*\((?:source|authority)\s*:[^()]*\)", re.IGNORECASE)
-# What a published fallback paragraph must not contain: structural, fact,
-# scenario and source identifiers, and the analysts' labels and vocabulary.
+# What a fallback paragraph must not carry: structural, fact, scenario and
+# source identifiers, and the source labels of the analysts' account.
 _FALLBACK_BANNED = (
+    _SOURCE_KEY,
     _STRUCTURAL_ID,
     _FACT_ID,
-    _SOURCE_KEY,
-    re.compile(r"\bSCN-\d+\b"),
-    re.compile(r"\b(?:UCA|ICA)-?\d+\b"),
-    re.compile(r"\b(?:source|sources|authority)\s*:", re.IGNORECASE),
-    re.compile(r"\b(?:detectors?|hypothes[ie]s)\b", re.IGNORECASE),
+    _SCENARIO_ID,
+    _ICA_CODE,
+    _SOURCE_LABEL,
 )
+_REFERENCE = "|".join(f"(?:{pattern.pattern})" for pattern in _FALLBACK_BANNED[:5])
+# A bracketed group that only annotates the statement before it: references
+# alone, or a labelled source note.
+_ANNOTATION = re.compile(
+    rf"\s*[(\[]\s*(?:{_REFERENCE})(?:\s*(?:[,;/]|\band\b)\s*(?:{_REFERENCE}))*\s*[)\]]"
+    r"|\s*[(\[]\s*(?i:structural sources?|sources?|authority|kind|evidence)\s*:"
+    r"[^()\[\]]*[)\]]"
+)
+# The noun phrase each kind of structural identifier reads as in a sentence.
+# A process-model part or feedback with a description names it.
+_DESCRIBED_NOUNS = {"PM": "the agent's record of {}", "FB": "the feedback on {}"}
+_KIND_NOUNS = {
+    "PM": "the agent's own record",
+    "FB": "the feedback the agent receives",
+    "CA": "the agent's action",
+    "RESP": "a duty of the agent",
+    "CL": "one of the system's controllers",
+    "CM": "the coordination between controllers",
+    "CP": "the process the agent controls",
+    "H": "a hazard",
+    "L": "a loss",
+    "SC": "a safety rule",
+    "SEM": "a value the test supplies",
+}
 FALLBACK_LAST_RESORT = "The agent may take an unsafe action in this situation."
 NOT_SELECTED = "not selected as a causal factor"
 _OWNERSHIP_WORDS = {
@@ -756,15 +779,29 @@ def rule_text(description: str) -> str:
     return plain(_APPLIES_WHEN.split(description, maxsplit=1)[0]).strip(" .")
 
 
+@dataclass(frozen=True)
+class PublishedNarrative:
+    """The narrative a scenario's handoff publishes, and whether code wrote it.
+
+    ``fallback`` is true when the model's paragraph failed its checks and the
+    text is :func:`fallback_narrative`.
+    """
+
+    text: str
+    fallback: bool = False
+
+
 def fallback_narrative(spec: ScenarioSpec) -> str:
     """Write the plain paragraph a scenario publishes when its narration fails.
 
-    The paragraph tells the narration's facts in fixed sentences: the
-    situation, why the agent acts (its flawed beliefs and the weak points),
-    the failure, and the worst case. A structural identifier becomes its
-    description, and a source key or bracketed reference is dropped. A
-    sentence that still breaks :func:`fallback_failures` or the handoff's
-    ownership rules is left out, so the paragraph never carries one.
+    Fixed sentences tell the narration's facts: the situation, why the agent
+    acts (its flawed beliefs and the weak points), the failure, and the worst
+    case. Each fact keeps its words. A reference that only annotates it, such
+    as a bracketed identifier, a fact citation or a source note, is dropped;
+    a structural identifier that is part of the sentence reads as a noun
+    phrase for its kind. The paragraph never carries what
+    :func:`fallback_failures` names. A sentence that breaks the handoff's
+    ownership rules is left out, as the handoff could not publish it.
     """
     meanings = _descriptions(spec)
     context = spec.scenario_context
@@ -781,14 +818,15 @@ def fallback_narrative(spec: ScenarioSpec) -> str:
         sentences.append(f"The unsafe outcome is that {failure}.")
     losses = [] if context is None else context.losses
     harms = [_clause(item.description, meanings) for item in losses]
-    harms = [item for item in harms if item]
-    if harms:
-        sentences.append(f"At worst, this leads to {', and to '.join(harms)}.")
+    harms = [item for item in dict.fromkeys(harms) if item]
+    if len(harms) == 1:
+        sentences.append(f"The worst case is this: {harms[0]}.")
+    elif harms:
+        sentences.append(f"The worst cases are these: {'; '.join(harms)}.")
     kept = [
         sentence
         for sentence in sentences
-        if not fallback_failures(sentence)
-        and not handoff_ownership_violations({"narrative": sentence})
+        if not handoff_ownership_violations({"narrative": sentence})
     ]
     return " ".join(kept) or FALLBACK_LAST_RESORT
 
@@ -801,7 +839,7 @@ def _reason_sentences(spec: ScenarioSpec, meanings: Mapping[str, str]) -> list[s
         for factor in factors
         if factor.flawed_belief
     ]
-    beliefs = [item for item in beliefs if item]
+    beliefs = [item for item in dict.fromkeys(beliefs) if item]
     reason = ""
     if beliefs:
         reason = "it wrongly believes that " + ", and that ".join(beliefs)
@@ -813,8 +851,10 @@ def _reason_sentences(spec: ScenarioSpec, meanings: Mapping[str, str]) -> list[s
             if factor.source_id in held
         ]
         topics = [item for item in dict.fromkeys(topics) if item]
-        if topics:
-            reason = f"its belief about {' and '.join(topics)} is wrong"
+        if len(topics) == 1:
+            reason = f"its belief about {topics[0]} is wrong"
+        elif topics:
+            reason = f"its beliefs about {' and '.join(topics)} are wrong"
     weak = [_clause(factor.description, meanings) for factor in factors]
     weak = [item for item in dict.fromkeys(weak) if item]
     weak_text = ""
@@ -831,36 +871,39 @@ def _reason_sentences(spec: ScenarioSpec, meanings: Mapping[str, str]) -> list[s
 
 
 def _clause(text: str | None, meanings: Mapping[str, str]) -> str:
-    """Return a fact as a lower-case clause without identifiers or end stop.
-
-    A part of the fact, split at a full stop or semicolon, that still names
-    an identifier or an analyst word is left out.
-    """
-    parts = re.split(r"(?<=[.;])\s+", _without_identifiers(text or "", meanings))
-    kept = " ".join(part for part in parts if part and not fallback_failures(part))
-    return lower_first(kept.rstrip(" .;"))
+    """Return a fact as a lower-case clause without references or end stop."""
+    return lower_first(_without_references(text or "", meanings).rstrip(" .;,"))
 
 
-def _without_identifiers(text: str, meanings: Mapping[str, str]) -> str:
-    """Drop source keys, labels and bracketed references; describe identifiers."""
+def _without_references(text: str, meanings: Mapping[str, str]) -> str:
+    """Drop annotating references; read the others as noun phrases."""
 
-    def described(match: re.Match[str]) -> str:
-        meaning = plain(meanings.get(match.group(0), ""))
-        meaning = _BRACKETED_IDS.sub("", _SOURCE_KEY.sub("", meaning))
-        return lower_first(_STRUCTURAL_ID.sub("", meaning).strip().rstrip("."))
+    def noun(match: re.Match[str], *, described: bool = True) -> str:
+        identifier = match.group(0)
+        kind = identifier.split("-", 1)[0]
+        template = _DESCRIBED_NOUNS.get(kind)
+        meaning = plain(meanings.get(identifier, "")) if described else ""
+        if template and meaning:
+            meaning = _without_references(meaning, {}).rstrip(" .;,")
+            if meaning:
+                return template.format(lower_first(meaning))
+        return _KIND_NOUNS.get(kind, "")
 
-    text = _SOURCE_LABEL.sub("", plain(text))
-    text = _BRACKETED_IDS.sub("", _SOURCE_KEY.sub("", text))
-    text = _STRUCTURAL_ID.sub(described, text)
+    text = _ANNOTATION.sub("", plain(text))
+    text = _SOURCE_KEY.sub("", text)
+    text = _STRUCTURAL_ID.sub(lambda match: noun(match, described=bool(meanings)), text)
+    text = _SCENARIO_ID.sub("this scenario", text)
+    for pattern in (_FACT_ID, _ICA_CODE, _SOURCE_LABEL):
+        text = pattern.sub("", text)
     text = re.sub(r"[(\[]\s*[)\]]", "", text)
-    # A dropped identifier can leave its conjunction or comma behind.
-    text = re.sub(r"(?:\s*,|\s+(?:and|or))+\s*(?=[.;,)\]]|$)", "", text)
+    # A dropped reference can leave its conjunction or comma behind.
+    text = re.sub(r"(?:\s*,|\s+(?:and|or|per))+\s*(?=[.;,)\]]|$)", "", text)
     text = re.sub(r"\s+([,.;:)\]])", r"\1", text)
     return re.sub(r"\s+", " ", text).strip()
 
 
 def fallback_failures(text: str) -> list[str]:
-    """Return each identifier, source label or analyst word a fallback carries."""
+    """Return each identifier or source label a fallback paragraph carries."""
     found: list[str] = []
     for pattern in _FALLBACK_BANNED:
         found.extend(match.group(0) for match in pattern.finditer(text))

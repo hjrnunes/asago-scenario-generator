@@ -26,6 +26,7 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
     NARRATIVES_FILENAME,
     Fact,
     NarrationReply,
+    PublishedNarrative,
     build_glossary,
     build_facts,
     fallback_narrative,
@@ -329,9 +330,12 @@ def test_narrate_writes_the_sidecar_and_returns_paragraphs_or_fallbacks(
     published = _narrate(_inputs(client, tmp_path), [accepted, failed])
 
     assert list(published) == ["SCN-001", "SCN-002"]
-    assert published["SCN-002"] == fallback_narrative(failed)
-    assert "because it incorrectly believes" in published["SCN-001"]
-    assert not published["SCN-001"].startswith("Test hypothesis")
+    assert published["SCN-002"] == PublishedNarrative(
+        fallback_narrative(failed), fallback=True
+    )
+    assert not published["SCN-001"].fallback
+    assert "because it incorrectly believes" in published["SCN-001"].text
+    assert not published["SCN-001"].text.startswith("Test hypothesis")
     sidecar = json.loads((tmp_path / NARRATIVES_FILENAME).read_text(encoding="utf-8"))
     assert sidecar["mode"] == "handoff"
     entries = {entry["scenario_id"]: entry for entry in sidecar["scenarios"]}

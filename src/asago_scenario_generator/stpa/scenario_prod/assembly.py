@@ -23,6 +23,7 @@ def assemble_envelope(
     attack_tree: dict,
     gherkin_spec: GherkinSpec,
     gherkin_raw: str = "",
+    narrative_fallback: bool = False,
 ) -> ScenarioEnvelope:
     """Assemble a ScenarioEnvelope from its components.
 
@@ -33,6 +34,8 @@ def assemble_envelope(
         attack_tree: The Stage 6 summary attack tree dict.
         gherkin_spec: The Stage 6 summary structured Gherkin spec.
         gherkin_raw: The Stage 6 summary Gherkin feature text.
+        narrative_fallback: Whether code wrote the narrative because the
+            model's narrative failed its checks.
 
     Returns:
         A :class:`ScenarioEnvelope`.
@@ -41,6 +44,7 @@ def assemble_envelope(
         scenario_id=scenario_id,
         scenario_spec=scenario_spec,
         narrative=narrative,
+        narrative_fallback=narrative_fallback,
         attack_tree=attack_tree,
         gherkin_spec=gherkin_spec,
         gherkin_raw=gherkin_raw,

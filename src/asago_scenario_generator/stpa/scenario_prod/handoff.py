@@ -1078,6 +1078,17 @@ Stage1aSource = Literal["derived", "pinned"]
 #: asserted: a reviewed claim requires both the constraint record's reviewed
 #: direction authority and a run whose Stage 1a graph was pinned, so a
 #: derived/proposed constraint stays distinguishable from a reviewed one.
+#: The fact a handoff carries when code wrote its narrative: the model's
+#: narrative failed the producer's checks after its one correction.
+NARRATIVE_FALLBACK_FACT = HandoffFact(
+    statement=(
+        "Code wrote this scenario's narrative from the scenario's facts, "
+        "because the model-written narrative did not pass the producer's "
+        "checks after one correction."
+    ),
+    source="producer narration step",
+    authority="producer_fallback",
+)
 AUTHORITY_SUPPLIED_REVIEWED = "supplied_reviewed_constraint"
 AUTHORITY_SUPPLIED_PROPOSED = "supplied_proposed_constraint"
 AUTHORITY_DERIVED_PROPOSED = "derived_proposed_constraint"
@@ -1142,6 +1153,8 @@ def _sourced_facts(
             authority="producer_contract",
         )
     )
+    if envelope.narrative_fallback:
+        facts.append(NARRATIVE_FALLBACK_FACT)
     return facts
 
 

@@ -102,6 +102,7 @@ from .and_or_tree import (
     render_and_or_tree,
 )
 from .narration import (
+    PublishedNarrative,
     fallback_narrative,
     narrate_scenarios,
     narratives_payload,
@@ -492,14 +493,16 @@ class _SP3Inputs:
     handoff_taxonomy: HandoffTaxonomyInputs | None = None
 
 
-def _narrate(inputs: _SP3Inputs, specs: list[ScenarioSpec]) -> dict[str, str]:
+def _narrate(
+    inputs: _SP3Inputs, specs: list[ScenarioSpec]
+) -> dict[str, PublishedNarrative]:
     """Run the narrate step, write ``narratives.json``; return the narratives.
 
     The result holds the accepted paragraph of each scenario whose reply code
     accepted, without the framing, title, steps or misuse-case fields of the
     write-up. A scenario that fell back gets the plain paragraph code writes
-    from its facts; its deterministic narrative, written for analysts, stays
-    in ``narratives.json`` only.
+    from its facts, marked as a fallback; its deterministic narrative, written
+    for analysts, stays in ``narratives.json`` only.
     """
     narrated = narrate_scenarios(
         specs,
@@ -518,9 +521,11 @@ def _narrate(inputs: _SP3Inputs, specs: list[ScenarioSpec]) -> dict[str, str]:
     specs_by_id = {spec.scenario_id: spec for spec in specs}
     return {
         scenario_id: (
-            narration.paragraph
+            PublishedNarrative(narration.paragraph)
             if narration.accepted
-            else fallback_narrative(specs_by_id[scenario_id])
+            else PublishedNarrative(
+                fallback_narrative(specs_by_id[scenario_id]), fallback=True
+            )
         )
         for scenario_id, (_, narration) in narrated.items()
     }
@@ -657,7 +662,7 @@ def _model_gherkins(
     inputs: _SP3Inputs,
     specs: list[ScenarioSpec],
     *,
-    narratives: Mapping[str, str],
+    narratives: Mapping[str, PublishedNarrative],
     tree_siblings: SiblingIndex,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication],
     observed_operations: tuple[str, ...] | None,
@@ -1056,7 +1061,7 @@ def _persist_functional_test_candidates(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
-    narratives: Mapping[str, str] | None = None,
+    narratives: Mapping[str, PublishedNarrative] | None = None,
     tree_siblings: SiblingIndex | None = None,
     gherkins: Mapping[str, GherkinSpec] | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
@@ -1126,7 +1131,7 @@ def _render_stage6_candidate(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
-    narrative: str | None = None,
+    narrative: PublishedNarrative | None = None,
     tree_siblings: SiblingIndex | None = None,
     gherkin: GherkinSpec | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
@@ -1193,7 +1198,7 @@ def _collect_stage6_artifacts(
     observed_operations: tuple[str, ...] | None = None,
     stage_1a_source: Stage1aSource | None = None,
     deduplication_by_scenario: Mapping[str, ScenarioDeduplication] | None = None,
-    narratives: Mapping[str, str] | None = None,
+    narratives: Mapping[str, PublishedNarrative] | None = None,
     tree_siblings: SiblingIndex | None = None,
     gherkins: Mapping[str, GherkinSpec] | None = None,
     taxonomy: HandoffTaxonomyInputs | None = None,
@@ -1534,7 +1539,7 @@ def _validate_stage5_spec(
 
 def _run_stage6_for_spec(
     spec: ScenarioSpec,
-    narrative_override: str | None = None,
+    narrative_override: PublishedNarrative | None = None,
     tree_siblings: SiblingIndex | None = None,
     gherkin_override: GherkinSpec | None = None,
 ) -> ScenarioEnvelope:
@@ -1543,14 +1548,17 @@ def _run_stage6_for_spec(
     No execution projection is prepared: the scenario handoff does not carry
     one, so a scenario whose failure criterion has no downstream-compilable
     detector is still rendered and published, with the limitation reported
-    downstream. ``narrative_override`` replaces the rendered narrative only.
+    downstream. ``narrative_override`` replaces the rendered narrative only,
+    and the envelope records whether it is a code-written fallback.
     The tree is ``and-or-tree-v1``; ``tree_siblings`` names the run's
     scenarios by hazard, and without it the tree names this scenario alone.
     ``gherkin_override`` replaces the rendered Gherkin.
     """
     narrative, tree, gherkin = render_scenario_presentation(spec)
+    narrative_fallback = False
     if narrative_override is not None:
-        narrative = narrative_override
+        narrative = narrative_override.text
+        narrative_fallback = narrative_override.fallback
     if gherkin_override is not None:
         gherkin = gherkin_override
     if tree_siblings is None:
@@ -1563,6 +1571,7 @@ def _run_stage6_for_spec(
         attack_tree=tree,
         gherkin_spec=gherkin,
         gherkin_raw=gherkin.to_feature_text(),
+        narrative_fallback=narrative_fallback,
     )
 
 

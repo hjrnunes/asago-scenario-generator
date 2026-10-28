@@ -45,6 +45,7 @@ from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
 )
 from asago_scenario_generator.stpa.scenario_prod.narration import (
     NarrationReply,
+    PublishedNarrative,
 )
 from asago_scenario_generator.stpa.scenario_prod.presentation import (
     render_scenario_presentation,
@@ -669,7 +670,7 @@ def test_the_handoff_narrative_is_the_accepted_paragraph_alone(
     published = _narrate(_inputs(client, tmp_path), [spec])
 
     paragraph = " ".join(item["text"] for item in valid_reply(spec)["sentences"])
-    assert published == {"SCN-001": paragraph}
+    assert published == {"SCN-001": PublishedNarrative(paragraph)}
 
 
 # --- plumbing -----------------------------------------------------------------

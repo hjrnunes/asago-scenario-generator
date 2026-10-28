@@ -76,6 +76,8 @@ class ScenarioEnvelope(BaseModel):
     scenario_id: str
     scenario_spec: ScenarioSpec
     narrative: str  # Stage 6 Call A output
+    # True when code wrote the narrative because the model's failed its checks.
+    narrative_fallback: bool = False
     attack_tree: dict  # Stage 6 Call B output (YAML-serializable tree)
     gherkin_spec: GherkinSpec  # Stage 6 Call C output (structured)
     gherkin_raw: str = ""  # Raw LLM text for .feature file generation

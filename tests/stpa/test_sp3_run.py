@@ -121,6 +121,7 @@ def test_execution_publication_needs_no_presentation_model_calls(tmp_path) -> No
     # No narrate reply was scripted, so the scenario publishes the plain
     # fallback paragraph.
     assert envelope.narrative == fallback_narrative(envelope.scenario_spec)
+    assert envelope.narrative_fallback
     criterion = envelope.scenario_spec.unsafe_outcome_semantic_proposition
     assert criterion is not None
     assert f"The unsafe outcome is that {lower_first(criterion.rstrip('.'))}." in (
