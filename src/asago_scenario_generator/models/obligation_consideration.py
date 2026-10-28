@@ -162,6 +162,10 @@ SLOT_PROMPT_BUDGET_EXCEEDED = "slot_prompt_budget_exceeded"
 # unfilled carries this diagnostic code, and each slot it left unfilled carries
 # it as its loss ``error_class``. The synthesis run then fails with it.
 REQUEST_SCHEMA_REJECTED = "request_schema_rejected"
+# Failure name ICA slot filling writes when two consecutive slot requests each
+# get the same HTTP 400 reply and the schema-rejection classifier flags
+# neither: the fill stops after the second as for a schema rejection.
+REQUEST_REJECTION_REPEATED = "request_rejection_repeated"
 
 
 class ConsiderationDiagnostic(_ConsiderationModel):

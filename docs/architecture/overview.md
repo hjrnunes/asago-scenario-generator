@@ -451,8 +451,26 @@ written. The status is then `failed` with the reason `request_schema_rejected:
 the provider rejected the ICA fill request schema at <call ID>; <n> slot
 requests were not sent and no later model call was made`, derived from
 `fill_failure` alone, so a rejection of a split request's later part whose
-slot kept an earlier part's fill fails the run too. Any other per-slot failure
-leaves the fill going on to the next slot. The product `generate`
+slot kept an earlier part's fill fails the run too. As a backstop for a
+schema rejection the classifier misses, the fill also stops when two
+consecutive slot requests each get an HTTP 400 that it does not flag and the
+two replies are the same. Consecutive means consecutive outcomes as the fill
+sees them, after the client's one transport retry, so a 5xx retried into a
+400 counts as that 400. Replies are the same when the SHA-256 of their full,
+unredacted error text, which holds the reply body, is equal; the
+provider-call record keeps that digest as the error's `rejection_sha256`, so a
+replay compares the recorded digests, and an error recorded before the record
+held it is compared by its recorded message unless that message was redacted
+or cut. A 400 whose full text the size veto marks as a context-length reply
+records `null` and does not take part, and any other outcome between two such
+400s, a success, a 5xx, a different 400, or a local failure, starts the count
+again. The fill then stops after the second the same way, named
+`request_rejection_repeated`. The first of the two keeps its per-slot
+handling; the second is sent, recorded, and counted, and it, each request left
+unsent, and each slot either leaves unfilled carry the name. The reason then
+reads `request_rejection_repeated: the provider gave two consecutive ICA fill
+requests the same HTTP 400 reply, the second at <call ID>; ...`. Any other per-slot
+failure leaves the fill going on to the next slot. The product `generate`
 persists and reports its diagnostic/accounting sidecars before returning
 non-zero for any `failed` status.
 

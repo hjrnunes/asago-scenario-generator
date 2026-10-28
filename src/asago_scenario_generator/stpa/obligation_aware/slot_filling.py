@@ -13,6 +13,7 @@ from asago_scenario_generator.models.mechanism_suggestion import (
     MechanismSuggestion,
 )
 from asago_scenario_generator.models.obligation_consideration import (
+    REQUEST_REJECTION_REPEATED,
     REQUEST_SCHEMA_REJECTED,
     SLOT_PROMPT_BUDGET_EXCEEDED,
     SLOT_PROVIDER_CONTRACT_FAILED,
@@ -25,6 +26,10 @@ from asago_scenario_generator.models.obligation_consideration import (
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     count_requests,
     is_provider_contract_failure,
+)
+from asago_scenario_generator.stpa.infra.provider_record import (
+    SIZE_LIMIT_TEXT,
+    rejection_digest,
 )
 from asago_scenario_generator.stpa.infra.prompt_preflight import (
     PromptBudget,
@@ -88,9 +93,7 @@ _SCHEMA_CODES = frozenset({"invalid_json_schema", "invalid_schema"})
 # A field of the error body as the SDK error's text shows it, which is all a
 # replayed error keeps of the body.
 _BODY_FIELD = re.compile(r"[\'\"](param|code)[\'\"]: ?[\'\"]([^\'\"]+)[\'\"]")
-_SIZE_VETO = re.compile(
-    r"\bcontext (?:length|window)\b|\btokens?\b|\bmaximum length\b", re.IGNORECASE
-)
+_SIZE_VETO = SIZE_LIMIT_TEXT
 _SCHEMA_NOUN = r"\b(?:schema|json_schema|response_format)\b"
 _REJECTION_WORD = (
     r"\b(?:compil\w*|invalid|unsupported|not supported|not valid"
@@ -1293,6 +1296,30 @@ def _rejects_schema(error: BaseException) -> bool:
     return _SCHEMA_REJECTION_TEXT.search(text) is not None
 
 
+def repeatable_rejection(error: BaseException | None) -> str | None:
+    """Identify the HTTP 400 a slot request failed with, for the backstop.
+
+    When two consecutive slot requests get the same HTTP 400 reply and the
+    classifier of ``is_request_schema_rejection`` flags neither, the fill
+    stops after the second.  The identity is ``rejection_digest`` of the
+    first 400 in the error's cause chain: the SHA-256 of its full error text,
+    which for an SDK error holds the reply body, so replies that differ
+    anywhere, redacted parts or text past the call log's cut included, do
+    not match.  A replay compares the digests its recording holds.  A schema
+    rejection, which stops the fill on its own, a request its prompt budget
+    rejected, and a 400 whose full text the size veto of
+    ``is_request_schema_rejection`` marks as a context-length reply give
+    ``None``: they keep their own handling.
+    """
+    if _prompt_budget_exceeded(error) or is_request_schema_rejection(error):
+        return None
+    while error is not None:
+        if getattr(error, "status_code", None) == 400:
+            return rejection_digest(error)
+        error = error.__cause__
+    return None
+
+
 def _unresolved_diagnostic_code(error: BaseException | None) -> str:
     """Map a request failure to its stable local diagnostic code."""
     if _prompt_budget_exceeded(error):
@@ -1392,11 +1419,16 @@ def _record_request_unresolved(
     requests_sent: int,
     lost: dict[str, SlotLoss] | None = None,
     mechanism_pairs: list[MechanismIcaConsideration] | None = None,
+    stop_code: str | None = None,
 ) -> None:
-    """Retain one failed target request as unresolved local evidence."""
+    """Retain one failed target request as unresolved local evidence.
+
+    *stop_code* names the failure that stopped the fill at or before this
+    request; it replaces the code the error alone would give.
+    """
     diagnostics.append(
         ConsiderationDiagnostic(
-            code=_unresolved_diagnostic_code(error),
+            code=stop_code or _unresolved_diagnostic_code(error),
             detail=detail,
             refs=(request.target_id,),
         )
@@ -1408,7 +1440,7 @@ def _record_request_unresolved(
         all_filled=all_filled,
         successful_slots=successful_slots,
         lost=lost,
-        error_class=_lost_slot_error_class(error),
+        error_class=stop_code or _lost_slot_error_class(error),
         call_ref=call_ref,
     )
     evidence.append(
@@ -1591,6 +1623,8 @@ class _SlotFillState:
     evidence: list[ConsiderationCallEvidence]
     diagnostics: list[ConsiderationDiagnostic]
     requests_sent: int = 0  # for the target request being processed
+    # The ``repeatable_rejection`` identity of the last request sent, if any.
+    last_rejection: str | None = None
     lost: dict[str, SlotLoss] = field(default_factory=dict)
     ica_merges: list[IcaMerge] = field(default_factory=list)
     mechanism_pairs: list[MechanismIcaConsideration] = field(default_factory=list)
@@ -1898,6 +1932,7 @@ def _record_request_failure(
     state: _SlotFillState,
     call_ref: str,
     error: BaseException,
+    stop_code: str | None = None,
 ) -> None:
     """Record a request-local failure through the common unresolved seam."""
     _record_request_unresolved(
@@ -1915,6 +1950,7 @@ def _record_request_failure(
         requests_sent=state.requests_sent,
         lost=state.lost,
         mechanism_pairs=state.mechanism_pairs,
+        stop_code=stop_code,
     )
 
 
@@ -1988,6 +2024,7 @@ def _record_response_error(
     *,
     state: _SlotFillState,
     call_ref: str,
+    stop_code: str | None = None,
 ) -> bool:
     """Record a provider-call failure and report whether processing should stop."""
     if response_error is None:
@@ -2000,6 +2037,7 @@ def _record_response_error(
         state=state,
         call_ref=call_ref,
         error=response_error,
+        stop_code=stop_code,
     )
     return True
 
@@ -2186,16 +2224,18 @@ def _process_slot_request(
     control_structure: ControlStructure,
     state: _SlotFillState,
     call_ref: str,
-) -> BaseException | None:
+) -> _FillStop | None:
     """Process one bounded target request and retain all local failures.
 
-    Return the provider's rejection of the request schema, which stops the
-    fill; every other failure stays local to this request.
+    Return the stop when the provider rejected the request schema, or gave
+    this request the same HTTP 400 reply as the one before it; every other
+    failure stays local to this request.
     """
     expected = _expected_slot_map(request)
     with count_requests() as sent:
         response, response_error = _coerce_request_response(method, request)
     state.requests_sent = sent.requests
+    stop_code = _stop_code(response_error, state)
     if _record_response_error(
         request,
         expected,
@@ -2203,9 +2243,10 @@ def _process_slot_request(
         response_error,
         state=state,
         call_ref=call_ref,
+        stop_code=stop_code,
     ):
-        if is_request_schema_rejection(response_error):
-            return response_error
+        if stop_code is not None:
+            return _FillStop(stop_code, cast(Exception, response_error), call_ref)
         return None
     response = cast(SynthesisSlotResponse, response)
     _process_valid_response(
@@ -2220,25 +2261,64 @@ def _process_slot_request(
     return None
 
 
+@dataclass(frozen=True)
+class _FillStop:
+    """The rejection that stopped the fill, and the request it answered."""
+
+    code: str
+    error: BaseException
+    call_ref: str
+
+
+def _stop_code(error: BaseException | None, state: _SlotFillState) -> str | None:
+    """Name the stop a request's failure makes, and track the repeated 400.
+
+    A schema rejection stops the fill at once.  Otherwise a
+    ``repeatable_rejection`` identity equal to the previous request's stops
+    it; any other outcome, a success included, leaves no rejection to repeat.
+    Consecutive means consecutive outcomes as the fill sees them, after the
+    client's one transport retry, so a 5xx retried into a 400 counts as that
+    400.
+    """
+    if is_request_schema_rejection(error):
+        state.last_rejection = None
+        return REQUEST_SCHEMA_REJECTED
+    rejection = repeatable_rejection(error)
+    repeated = rejection is not None and rejection == state.last_rejection
+    state.last_rejection = rejection
+    return REQUEST_REJECTION_REPEATED if repeated else None
+
+
+_UNSENT_CAUSES = {
+    REQUEST_SCHEMA_REJECTED: (
+        "the provider rejected the request schema of {ref}, and it rejects "
+        "every slot request alike"
+    ),
+    REQUEST_REJECTION_REPEATED: (
+        "the provider gave {ref} the same HTTP 400 reply as the slot request before it"
+    ),
+}
+
+
 def _record_unsent_request(
     request: SynthesisSlotRequest,
-    rejection: BaseException,
+    stop: _FillStop,
     *,
     state: _SlotFillState,
     call_ref: str,
-    rejected_ref: str,
 ) -> None:
     """Leave a request the fill stopped before sending unresolved."""
     state.requests_sent = 0
+    cause = _UNSENT_CAUSES[stop.code].format(ref=stop.call_ref)
     _record_request_failure(
         request,
         _expected_slot_map(request),
         None,
-        f"Slot request not sent: the provider rejected the request schema of "
-        f"{rejected_ref}, and it rejects every slot request alike.",
+        f"Slot request not sent: {cause}.",
         state=state,
         call_ref=call_ref,
-        error=rejection,
+        error=stop.error,
+        stop_code=stop.code,
     )
 
 
@@ -2283,27 +2363,19 @@ def fill_synthesis_slots(
     )
     target_totals = _request_totals(requests)
     target_parts: dict[str, int] = {}
-    rejection: BaseException | None = None
-    rejected_ref = ""
+    stop: _FillStop | None = None
     unsent = 0
 
     for request in requests:
         call_ref = _request_call_ref(request, target_totals, target_parts)
         if not _has_provider_slot(request):
             continue
-        if rejection is not None:
-            # The provider rejects the request schema of every slot request
-            # alike, so the fill sends no further request.
-            _record_unsent_request(
-                request,
-                rejection,
-                state=state,
-                call_ref=call_ref,
-                rejected_ref=rejected_ref,
-            )
+        if stop is not None:
+            # After a stop the fill sends no further request.
+            _record_unsent_request(request, stop, state=state, call_ref=call_ref)
             unsent += 1
             continue
-        rejection = _process_slot_request(
+        stop = _process_slot_request(
             method,
             request,
             loss_analysis=loss_analysis,
@@ -2311,7 +2383,6 @@ def fill_synthesis_slots(
             state=state,
             call_ref=call_ref,
         )
-        rejected_ref = call_ref
 
     ordered_slots = tuple(state.all_filled[key] for key in sorted(state.all_filled))
     enumeration = ICAEnumeration(slots=list(ordered_slots))
@@ -2327,11 +2398,9 @@ def fill_synthesis_slots(
         mechanism_considerations=tuple(state.mechanism_pairs),
         fill_failure=(
             None
-            if rejection is None
+            if stop is None
             else SlotFillFailure(
-                code=REQUEST_SCHEMA_REJECTED,
-                call_id=rejected_ref,
-                unsent_requests=unsent,
+                code=stop.code, call_id=stop.call_ref, unsent_requests=unsent
             )
         ),
     )
@@ -2339,6 +2408,7 @@ def fill_synthesis_slots(
 
 
 __all__ = [
+    "REQUEST_REJECTION_REPEATED",
     "REQUEST_SCHEMA_REJECTED",
     "SlotFillRunResult",
     "build_synthesis_slot_requests",
@@ -2349,4 +2419,5 @@ __all__ = [
     "ica_merge_entries",
     "is_request_schema_rejection",
     "merge_equal_findings",
+    "repeatable_rejection",
 ]

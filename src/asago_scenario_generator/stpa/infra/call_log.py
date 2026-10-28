@@ -98,13 +98,17 @@ def _content_pin(
     return _sha256(f"{frame}\n{payload}")
 
 
+# The most characters of an error's text a log or record keeps.
+ERROR_DETAIL_LIMIT = 800
+
+
 def _safe_error(error: str) -> str:
     """Keep lifecycle context while excluding connection material."""
     detail = re.sub(r"https?://[^\s\"')]+", "[redacted-url]", str(error))
     detail = _SENSITIVE_ERROR.sub("[redacted-secret]", detail)
     detail = re.sub(r"(?i)\bbearer\s+\S+", "Bearer [redacted]", detail)
     detail = re.sub(r"(?i)\bsk-[A-Za-z0-9_-]+\b", "[redacted-key]", detail)
-    return detail[:800]
+    return detail[:ERROR_DETAIL_LIMIT]
 
 
 def _safe_controls(value: Mapping[str, Any]) -> dict[str, Any]:
