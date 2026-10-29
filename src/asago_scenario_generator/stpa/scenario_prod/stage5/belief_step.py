@@ -7,7 +7,10 @@ used, and the selected path's process-model variables under local handles.
 The reply states one flawed belief per listed belief-flaw factor and, where
 code does not fill the factor's variable, names the variable that holds the
 belief or the variable the controller lacks. A decision-rule factor, whose
-belief is correct, takes a null belief and no variable.
+belief is correct, takes a null belief and no variable. A spec whose every
+factor is a decision rule sends no request: its reply can only be null for
+every factor, so code builds that reply and applies it as it would the
+model's.
 
 Code checks the reply with the stated-belief rules and never repairs it. A
 reply that breaks a rule, or does not decode, earns one correction. A reply
@@ -317,6 +320,17 @@ def apply_beliefs(
     return spec.model_copy(update={"causal_factors": factors})
 
 
+def rule_only_reply(request: BeliefRequest) -> StatedBeliefReply:
+    """Return the reply whose every entry is a decision rule's null belief.
+
+    It is the only reply the request's schema allows when every listed factor
+    is a faulty decision rule.
+    """
+    return belief_reply_type(request).model_validate(
+        {choice.handle: {"flawed_belief": None} for choice in request.choices}
+    )
+
+
 class _BeliefRejectedError(ExactFeedbackError):
     """A parsed reply that broke a stated-belief rule."""
 
@@ -334,7 +348,7 @@ class BeliefOutcome:
 
     @property
     def accepted(self) -> bool:
-        return self.source == "model"
+        return self.source in {"model", "code"}
 
 
 def state_beliefs(
@@ -346,12 +360,20 @@ def state_beliefs(
     loader: TemplateLoader | None = None,
     temperature: float = DEFAULT_TEMPERATURE,
 ) -> BeliefOutcome:
-    """Send one spec's belief request, with at most one correction."""
+    """Send one spec's belief request, with at most one correction.
+
+    A spec whose every factor is a faulty decision rule sends none; code
+    applies the only reply its schema allows, a null belief per factor.
+    """
     outcome = BeliefOutcome(scenario_id=spec.scenario_id)
     try:
         request = belief_request(spec, control_structure)
     except ValueError as exc:
         outcome.reason = str(exc)
+        return outcome
+    if all(choice.handle in request.frame.beliefless for choice in request.choices):
+        outcome.source = "code"
+        outcome.spec = apply_beliefs(spec, rule_only_reply(request), request)
         return outcome
     system, user = render_belief_prompts(spec, request, loader)
 
@@ -434,7 +456,8 @@ def apply_belief_step(
     """Request each spec's stated beliefs in order and write ``beliefs.json``.
 
     Every spec costs one request, plus one correction when its reply breaks a
-    rule or does not decode. A spec whose request fails comes back unchanged.
+    rule or does not decode; a spec whose every factor is a faulty decision
+    rule costs none. A spec whose request fails comes back unchanged.
     """
     effective = DEFAULT_TEMPERATURE if temperature is None else temperature
     outcomes = [

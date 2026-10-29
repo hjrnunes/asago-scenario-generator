@@ -35,6 +35,9 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
+    _causal_factors as handoff_causal_factors,
+)
+from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     build_scenario_handoff_v5,
 )
 from asago_scenario_generator.stpa.scenario_prod.narration import (
@@ -49,11 +52,13 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from asago_scenario_generator.stpa.scenario_prod.stage5.belief_step import (
     BELIEFS_FILENAME,
+    StatedBeliefReply,
     apply_beliefs,
     belief_failures,
     belief_reply_type,
     belief_request,
     render_belief_prompts,
+    state_beliefs,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
@@ -334,6 +339,71 @@ def test_the_belief_request_marks_the_decision_rule_factor(tmp_path) -> None:
     assert "source_type: a controller decision rule" in user
 
 
+# --- a scenario whose every factor is a decision rule sends no request ---------
+
+
+def _belief_calls(client) -> list:
+    return [
+        call
+        for call in client.calls
+        if isinstance(call.response_format, type)
+        and issubclass(call.response_format, StatedBeliefReply)
+    ]
+
+
+def _state(spec, structure, run_dir: Path, client):
+    return state_beliefs(
+        spec, llm_client=client, run_dir=run_dir, control_structure=structure
+    )
+
+
+def test_a_rule_only_spec_sends_no_belief_request(tmp_path) -> None:
+    spec, structure = _spec(tmp_path / "stage5", RULE_HANDLE)
+    client = BeliefClient()
+
+    outcome = _state(spec, structure, tmp_path, client)
+
+    assert _belief_calls(client) == []
+    assert (outcome.source, outcome.requests, outcome.rejected, outcome.reason) == (
+        "code",
+        0,
+        [],
+        None,
+    )
+    (rule,) = outcome.spec.causal_factors
+    assert rule.kind is CausalFactorKind.inadequate_control_algorithm
+    assert (rule.source_id, rule.flawed_belief, rule.process_model_variable) == (
+        "RESP-1",
+        None,
+        None,
+    )
+    assert outcome.spec.model_dump(exclude={"causal_factors"}) == spec.model_dump(
+        exclude={"causal_factors"}
+    )
+
+
+def test_a_skipped_request_publishes_what_a_null_reply_publishes(tmp_path) -> None:
+    rule_only, structure = _spec(tmp_path / "rule", RULE_HANDLE)
+    mixed, _ = _spec(tmp_path / "mixed", "cause_1", RULE_HANDLE)
+    client = BeliefClient()
+
+    skipped = _state(rule_only, structure, tmp_path / "rule", client).spec
+    replied = _state(mixed, structure, tmp_path / "mixed", client)
+
+    # The mixed spec still sends its request, and the model's reply gives the
+    # decision rule its null belief.
+    assert len(_belief_calls(client)) == 1
+    assert (replied.source, replied.requests) == ("model", 1)
+    assert skipped.causal_factors[0] == replied.spec.causal_factors[1]
+    (published,) = handoff_causal_factors(skipped)
+    assert published == handoff_causal_factors(replied.spec)[1]
+    assert published.model_dump(mode="json") == {
+        "source_id": "RESP-1",
+        "process_model_belief": None,
+        "flaw": skipped.causal_factors[0].description,
+    }
+
+
 # --- publication, attack tree and narration -----------------------------------
 
 
@@ -559,7 +629,15 @@ def test_a_run_publishes_a_decision_rule_with_a_null_belief(tmp_path: Path) -> N
 
     assert result.stage_errors == []
     sidecar = json.loads((tmp_path / BELIEFS_FILENAME).read_text(encoding="utf-8"))
-    assert [entry["source"] for entry in sidecar["scenarios"]] == ["model"] * 2
+    # SCN-002 is everyday and its one factor is the decision rule: code states
+    # its null belief and no belief request is sent for it.
+    assert [
+        (entry["scenario_id"], entry["source"], entry["requests"])
+        for entry in sidecar["scenarios"]
+    ] == [("SCN-001", "model", 1), ("SCN-002", "code", 0)]
+    assert [
+        call.user_prompt.count(RULE_EVIDENCE) for call in _belief_calls(client)
+    ] == [1]
     published = {
         scenario_id: _published_handoff(tmp_path, scenario_id)
         for scenario_id in ("SCN-001", "SCN-002")
