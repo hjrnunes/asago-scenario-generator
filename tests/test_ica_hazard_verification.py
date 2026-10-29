@@ -406,6 +406,73 @@ def test_no_verifier_leaves_every_ica_unverified() -> None:
     assert "could be verified" in filtered.slots[0].unresolved_reason
 
 
+def _mixed_inputs() -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
+    """Two ICAs in one slot; the second cites a hazard the analysis lacks."""
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    slot = enumeration.slots[0]
+    valid, other = slot.icas
+    incomplete = other.model_copy(update={"related_hazards": ["H-missing"]})
+    return (
+        ICAEnumeration(slots=[slot.model_copy(update={"icas": [valid, incomplete]})]),
+        loss_analysis,
+        control_structure,
+    )
+
+
+@pytest.mark.parametrize(
+    "adapter",
+    [None, _FailingFirstReview()],
+    ids=["no-verifier", "failing-verifier"],
+)
+def test_a_mixed_batch_keeps_every_excluded_icas_reason(adapter) -> None:
+    enumeration, loss_analysis, control_structure = _mixed_inputs()
+    valid, incomplete = (ica.ica_id for ica in enumeration.slots[0].icas)
+
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    assert filtered.slots[0].icas == []
+    assert "could be verified" not in filtered.slots[0].unresolved_reason
+    [record] = batch.records
+    assert record.ica_id == valid and record.disposition == "provider_failure"
+    assert batch.incomplete_ica_ids == (incomplete,)
+    reasons = {(item.code, ref) for item in batch.diagnostics for ref in item.refs}
+    assert ("ica_hazard_verification_provider_failure", valid) in reasons
+    assert ("unsafe_outcome_lineage_incomplete", incomplete) in reasons
+    assert batch.unsupported_count == 1 and batch.provider_failure_count == 1
+
+
+def test_the_slot_hazard_flag_survives_a_missing_verifier() -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+    loss_analysis = loss_analysis.model_copy(
+        update={
+            "hazards": [
+                loss_analysis.hazards[0].model_copy(
+                    update={"description": "An unsafe release reaches `deploy_now`."}
+                )
+            ]
+        }
+    )
+
+    _, batch = verify_final_ica_batch(
+        None,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        operation_inventory=("deploy_now",),
+    )
+
+    assert any(
+        item.code == "ica_hazard_operation_outside_slot"
+        and item.refs == (enumeration.slots[0].icas[0].ica_id,)
+        for item in batch.diagnostics
+    )
+
+
 def test_a_rejected_then_failed_ica_keeps_the_rejection_reason() -> None:
     enumeration, loss_analysis, control_structure = _single_ica_inputs()
 

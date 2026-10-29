@@ -1508,7 +1508,8 @@ def verify_final_ica_batch(
             batch_id,
             requests,
             "no ICA hazard verification adapter was supplied",
-            diagnostics=flags,
+            diagnostics=(*diagnostics, *flags),
+            incomplete_ica_ids=incomplete_ica_ids,
         )
         return _exclude_unsupported_icas(enumeration, batch), batch
     records, unsupported, initial_diagnostics, call_evidence = (
@@ -1908,7 +1909,14 @@ def _failed_batch(
     error: str,
     *,
     diagnostics: Sequence[ConsiderationDiagnostic] = (),
+    incomplete_ica_ids: Sequence[str] = (),
 ) -> IcaHazardVerificationBatch:
+    """Record every request as failed, keeping the ICAs no request was built for.
+
+    *diagnostics* carries the projection failures and slot/hazard flags made
+    before the failure, and *incomplete_ica_ids* the ICAs without a request,
+    so each excluded ICA keeps its reason.
+    """
     diagnostics = (
         *(
             _verification_diagnostic(
@@ -1931,6 +1939,7 @@ def _failed_batch(
         ),
         diagnostics=diagnostics,
         call_evidence=(_call_evidence(batch_id, "initial", "technical_failure", 0),),
+        incomplete_ica_ids=tuple(incomplete_ica_ids),
     )
 
 
