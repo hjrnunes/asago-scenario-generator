@@ -345,6 +345,24 @@ def _raise_if_length_without_content(response: Any) -> None:
         raise LengthFinishReasonError(completion=response)
 
 
+def _drop_api_key(error: BaseException, api_key: str) -> None:
+    """Replace the client's API key in a provider error's text, in place.
+
+    A provider can echo the key it was sent with no label or key-like prefix,
+    so the key is found by its value, whatever that value is, before any
+    record or log turns the error into text.
+    """
+    if not api_key:
+        return
+    error.args = tuple(
+        arg.replace(api_key, "[redacted-key]") if isinstance(arg, str) else arg
+        for arg in error.args
+    )
+    message = getattr(error, "message", None)
+    if isinstance(message, str):
+        error.message = message.replace(api_key, "[redacted-key]")  # type: ignore[attr-defined]
+
+
 def _locally_parse_response_content(
     content: Any,
     response_format: type[BaseModel],
@@ -680,7 +698,11 @@ class LLMClient:
             endpoint = self._client
             for part in api.split("."):
                 endpoint = getattr(endpoint, part)
-            return endpoint(**request)
+            try:
+                return endpoint(**request)
+            except Exception as error:
+                _drop_api_key(error, self.api_key)
+                raise
 
         if self.session is None:
             return retry_once(send)

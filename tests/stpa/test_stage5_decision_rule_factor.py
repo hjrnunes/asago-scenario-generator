@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import yaml
@@ -43,13 +44,14 @@ from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
 from asago_scenario_generator.stpa.scenario_prod.narration import (
     AGENT_BELIEF,
     DECISION_RULE,
+    NARRATIVES_FILENAME,
     NarrationReply,
     build_facts,
     narration_failures,
     render_narration_prompts,
     write_fallback,
 )
-from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
+from asago_scenario_generator.stpa.scenario_prod.run import _narrate, run_sp3
 from asago_scenario_generator.stpa.scenario_prod.stage5.belief_step import (
     BELIEFS_FILENAME,
     StatedBeliefReply,
@@ -59,6 +61,9 @@ from asago_scenario_generator.stpa.scenario_prod.stage5.belief_step import (
     belief_request,
     render_belief_prompts,
     state_beliefs,
+)
+from asago_scenario_generator.stpa.scenario_prod.stage5.generate import (
+    generate_bdi_for_context,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
@@ -82,11 +87,18 @@ from tests.helpers.scenario_handoff_publication import (
 )
 from tests.helpers.shape_step_call import DIRECT_REPLY
 from tests.helpers.sp3_run import _make_ets
+from tests.helpers.stage5_assembly import stage5_assembly
 from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.helpers import make_minimal_control_structure
+from tests.stpa.sp1_helpers import MockLLMClient
 from tests.stpa.test_and_or_tree import nodes, tree_of
 from tests.stpa.test_narration import adversarial
-from tests.stpa.test_sp3_scenario_continuity import _coordination_context
+from tests.stpa.stage5_wire import normal_wire_queue
+from tests.stpa.test_sp3_scenario_continuity import (
+    _coordination_context,
+    _coordination_control_structure,
+    _coordination_threat,
+)
 from tests.stpa.test_scenario_handoff_v5 import SCHEMA, _envelope
 from tests.stpa.test_stage5_belief_step import BELIEF as STEP_BELIEF
 from tests.stpa.test_stage5_belief_step import BeliefClient
@@ -382,6 +394,126 @@ def test_a_rule_only_spec_sends_no_belief_request(tmp_path) -> None:
     )
 
 
+# The coordination path's decision-rule handle: its two process-model parts,
+# two feedback channels (two kinds each) and one control action come first.
+CL_RULE_HANDLE = "cause_9"
+
+
+def _coordination_rule_spec(run_dir: Path):
+    """Compile a coordination-path reply whose one factor is the link's rule."""
+    context = _coordination_context()
+    client = MockLLMClient()
+    client.set_response_queue(
+        normal_wire_queue(
+            [
+                {
+                    "stimulus": {
+                        "category": "conversation",
+                        "description": "A coordination turn carries the policy state.",
+                    },
+                    "adversary": {
+                        "kind": "malicious_customer",
+                        "gain": "Gets a payment authorized against policy.",
+                    },
+                    "attacker_bdi": {
+                        "beliefs": ["The link forwards any policy state it reads."],
+                        "desires": ["Induce the selected unsafe action."],
+                        "intentions": [
+                            {
+                                "description": "Rely on the link's forwarding rule.",
+                                "source_handles": [CL_RULE_HANDLE],
+                            }
+                        ],
+                    },
+                    "causal_factors": [
+                        {
+                            "source_handle": CL_RULE_HANDLE,
+                            "evidence": RULE_EVIDENCE,
+                            "temporal_condition": None,
+                            "evidence_status": "structural_failure",
+                            "selected_for_route": True,
+                        }
+                    ],
+                    "unsafe_outcome": {
+                        "condition": {
+                            "type": "action_value",
+                            "control_action_id": "CM-1",
+                            "property": "authorization_state",
+                            "operator": "equals",
+                            "expected": {
+                                "binding_ref": "SEM-test-coordination-state",
+                                "value_type": "string",
+                                "description": "The synchronized state is unsafe.",
+                                "minimum": None,
+                                "maximum": None,
+                            },
+                        },
+                        "semantic_proposition": (
+                            "The coordination message carries an unsafe state."
+                        ),
+                    },
+                    "execution_route": {
+                        "disposition": "executable_route",
+                        "action_kind": "agent_message",
+                        "reason": "The link's rule decides the coordination message.",
+                    },
+                }
+            ]
+        )
+    )
+    structure = _coordination_control_structure()
+    spec, error = generate_bdi_for_context(
+        client,
+        context,
+        run_dir,
+        assembly=stage5_assembly(context, _coordination_threat(), structure),
+    )
+    assert error is None and spec is not None, error
+    return spec, structure
+
+
+def test_a_coordination_link_rule_only_spec_sends_no_belief_request(
+    tmp_path,
+) -> None:
+    spec, structure = _coordination_rule_spec(tmp_path / "stage5")
+    (factor,) = spec.causal_factors
+    assert (factor.kind, factor.source_id) == (
+        CausalFactorKind.inadequate_control_algorithm,
+        "CL-1",
+    )
+    request = belief_request(spec, structure)
+    assert [choice.handle for choice in request.choices] == [CL_RULE_HANDLE]
+    assert request.frame.beliefless == (CL_RULE_HANDLE,)
+    client = BeliefClient()
+
+    outcome = _state(spec, structure, tmp_path, client)
+
+    assert _belief_calls(client) == []
+    assert (outcome.source, outcome.requests, outcome.rejected, outcome.reason) == (
+        "code",
+        0,
+        [],
+        None,
+    )
+    assert outcome.accepted
+    (rule,) = outcome.spec.causal_factors
+    assert rule.kind is CausalFactorKind.inadequate_control_algorithm
+    assert (rule.source_id, rule.flawed_belief, rule.process_model_variable) == (
+        "CL-1",
+        None,
+        None,
+    )
+    assert outcome.spec.model_dump(exclude={"causal_factors"}) == spec.model_dump(
+        exclude={"causal_factors"}
+    )
+    (published,) = handoff_causal_factors(outcome.spec)
+    assert published.model_dump(mode="json") == {
+        "source_id": "CL-1",
+        "process_model_belief": None,
+        "flaw": rule.description,
+    }
+
+
 def test_a_skipped_request_publishes_what_a_null_reply_publishes(tmp_path) -> None:
     rule_only, structure = _spec(tmp_path / "rule", RULE_HANDLE)
     mixed, _ = _spec(tmp_path / "mixed", "cause_1", RULE_HANDLE)
@@ -617,6 +749,71 @@ def test_a_mixed_narrate_request_asks_for_the_rule_as_a_rule() -> None:
     )
     assert not build_facts(_rule_spec()).mixed_rule
     assert not build_facts(adversarial()).mixed_rule
+
+
+MIXED_REASON = (
+    "It takes the unsafe action because it incorrectly believes that the order "
+    "on screen belongs to the caller, and because it applies a faulty rule that "
+    "releases any batch under the daily limit."
+)
+
+
+def test_a_mixed_narration_publishes_the_rule_as_a_rule(tmp_path: Path) -> None:
+    spec = _mixed_spec()
+    facts = build_facts(spec)
+    (belief_id,) = facts.ids_in((AGENT_BELIEF,))
+    (rule_id,) = facts.ids_in((DECISION_RULE,))
+    reply = {
+        "title": "A wrong belief and a faulty rule release the batch",
+        "sentences": [
+            {"text": "A caller asks about an order.", "facts": ["F1"]},
+            {
+                "text": MIXED_REASON,
+                "facts": [*facts.ids_in(("unsafe action",)), belief_id, rule_id],
+            },
+            {
+                "text": "A third party plants content in what the lookup returns.",
+                "facts": facts.ids_in(("attack step",))[:1],
+            },
+            {"text": "The harm follows.", "facts": facts.ids_in(("hazard",))},
+        ],
+    }
+    client = MockLLMClient()
+    client.set_response_for(NarrationReply, reply)
+
+    published = _narrate(
+        SimpleNamespace(
+            llm_client=client, run_dir=tmp_path, loader=None, temperature=None
+        ),
+        [spec],
+    )
+
+    # The one request sent is the mixed request: it lists the rule as a
+    # decision rule fact and asks for it to be described as a rule.
+    (call,) = client.calls
+    assert f"- {rule_id} (decision rule): {RULE_EVIDENCE}\n" in call.user_prompt
+    assert (
+        f"Each decision rule fact ({rule_id}) states a faulty rule the agent\n"
+        "applies, not a belief: describe it as a rule, not as a flawed or false "
+        "belief."
+    ) in call.user_prompt
+    assert "describe it as a faulty rule the agent applies" in call.system_prompt
+    # The reply that keeps the rule wording is accepted without a correction,
+    # and the published paragraph and write-up keep that wording.
+    narration = published[spec.scenario_id]
+    assert not narration.fallback
+    assert MIXED_REASON in narration.text
+    sidecar = json.loads((tmp_path / NARRATIVES_FILENAME).read_text(encoding="utf-8"))
+    (entry,) = sidecar["scenarios"]
+    assert (entry["source"], entry["requests"], entry["rejected"]) == ("model", 1, [])
+    assert entry["sentences"][1] == {
+        "text": MIXED_REASON,
+        "facts": [*facts.ids_in(("unsafe action",)), belief_id, rule_id],
+    }
+    assert MIXED_REASON in entry["writeup"]
+    assert {"fact_id": rule_id, "category": DECISION_RULE, "text": RULE_EVIDENCE} in (
+        entry["facts"]
+    )
 
 
 def test_the_fallback_names_the_decision_rule_and_no_belief() -> None:
