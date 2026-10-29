@@ -288,8 +288,12 @@ only request-local causal handles; the deterministic adapter binds each handle
 to its fixed factor kind and exact PM/FB/CA source. One more handle names the
 selected controller itself (its `RESP-` responsibility, or the `CL-` link of a
 coordination slot) for a faulty decision rule applied to a correct belief
-(`INADEQUATE_CONTROL_ALGORITHM`); such a factor states no flawed belief and
-publishes `process_model_belief: null`. Other coordination and controller IDs
+(`INADEQUATE_CONTROL_ALGORITHM`). Code describes that handle by the rule it
+applies: the control action the rule decides, and the unsafe-control-action
+type and hazardous context in which it selects the unsafe action. Such a
+factor states no flawed belief and publishes `process_model_belief: null`;
+when every factor of a scenario is a decision rule, the belief step sends no
+request and code applies the null belief. Other coordination and controller IDs
 remain explained context but cannot be published as causal-factor sources,
 and every attacker intention must cite a handle with a declared factor.
 The contextual provider supplies one causal statement per declared handle.

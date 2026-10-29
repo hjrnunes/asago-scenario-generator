@@ -23,7 +23,12 @@ cases:
         select_when: Select only when the controller's belief about the
         situation is correct and the rule it applies to that belief still
         selects the unsafe action; a wrong, missing, or stale belief belongs to
-        the process-model belief instead.
+        the process-model belief instead. Reading a correct value does not by
+        itself make the belief correct, because the controller may
+        misinterpret the value or not retain it, and its belief is then wrong.
+      - which decides whether and how it provides
+      - As a cause, this rule selects the unsafe action
+      - in the hazardous context where
     forbidden:
       - compatible_mechanisms
       - "`stimulus`"

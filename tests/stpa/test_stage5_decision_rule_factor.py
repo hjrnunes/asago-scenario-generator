@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
@@ -34,6 +35,9 @@ from asago_scenario_generator.stpa.scenario_prod.handoff import (
     verify_handoff_digest,
 )
 from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
+    _causal_factors as handoff_causal_factors,
+)
+from asago_scenario_generator.stpa.scenario_prod.handoff_v5 import (
     build_scenario_handoff_v5,
 )
 from asago_scenario_generator.stpa.scenario_prod.narration import (
@@ -48,11 +52,13 @@ from asago_scenario_generator.stpa.scenario_prod.narration import (
 from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
 from asago_scenario_generator.stpa.scenario_prod.stage5.belief_step import (
     BELIEFS_FILENAME,
+    StatedBeliefReply,
     apply_beliefs,
     belief_failures,
     belief_reply_type,
     belief_request,
     render_belief_prompts,
+    state_beliefs,
 )
 from asago_scenario_generator.stpa.scenario_prod.stage5.prompt_view import (
     build_context_bdi_prompts,
@@ -80,6 +86,7 @@ from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.helpers import make_minimal_control_structure
 from tests.stpa.test_and_or_tree import nodes, tree_of
 from tests.stpa.test_narration import adversarial
+from tests.stpa.test_sp3_scenario_continuity import _coordination_context
 from tests.stpa.test_scenario_handoff_v5 import SCHEMA, _envelope
 from tests.stpa.test_stage5_belief_step import BELIEF as STEP_BELIEF
 from tests.stpa.test_stage5_belief_step import BeliefClient
@@ -175,15 +182,75 @@ def test_stage5_offers_the_controller_last_so_other_handles_keep_their_numbers()
         ("cause_4", CausalFactorKind.actuator_anomaly, "CA-1-1"),
         (RULE_HANDLE, CausalFactorKind.inadequate_control_algorithm, "RESP-1"),
     ]
-    assert choices[-1].description == "Authorize bounded payment actions"
+    assert choices[-1].description == RESP_RULE
 
 
-def test_the_stage5_request_describes_the_decision_rule_source() -> None:
-    _, user = build_context_bdi_prompts(
-        _wrong_timing_context(), TemplateLoader(PROMPTS_DIR)
+# The rule a decision-rule handle names: the controller, the control action
+# its rule decides, and the unsafe-control-action type and hazardous context
+# in which the rule selects the unsafe action, all from the analysis data.
+RESP_RULE = (
+    'Decision rule of the controller "Authorize bounded payment actions", which '
+    'decides whether and how it provides "Authorize a bounded batch of payment '
+    'actions". As a cause, this rule selects the unsafe action (WRONG_TIMING, '
+    "meaning the action is provided too early, too late, or in an unsafe order) "
+    "in the hazardous context where a compromised workflow requests bulk "
+    "payment actions."
+)
+CL_RULE = (
+    'Decision rule of the coordination link "Payment authorization and policy '
+    'verification coordinate", which decides whether and how it provides '
+    '"Synchronize payment policy state". As a cause, this rule selects the '
+    "unsafe action (INCORRECT, meaning the action is provided, but its value, "
+    "content, destination, or effect is unsafe) in the hazardous context where "
+    "a manipulated policy state reaches payment authorization."
+)
+
+
+def _rule_entry(user: str) -> dict:
+    """Return the decision-rule entry of the request's causal-source list."""
+    section = user.split("## Allowed Causal-Factor Sources", 1)[1]
+    start = section.index("- source_handle:")
+    listed = yaml.safe_load(section[start : section.index("\n---", start)])
+    (entry,) = [
+        item for item in listed if item["source_type"] == "a controller decision rule"
+    ]
+    return entry
+
+
+@pytest.mark.parametrize(
+    ("context", "handle", "source_id", "rule"),
+    [
+        (_wrong_timing_context, RULE_HANDLE, "RESP-1", RESP_RULE),
+        (_coordination_context, "cause_9", "CL-1", CL_RULE),
+    ],
+)
+def test_the_stage5_request_describes_the_decision_rule_source(
+    context, handle, source_id, rule
+) -> None:
+    built = context()
+    (choice,) = [
+        item
+        for item in _causal_source_choices(built)
+        if item.kind is CausalFactorKind.inadequate_control_algorithm
+    ]
+    assert (choice.handle, choice.source_id, choice.description) == (
+        handle,
+        source_id,
+        rule,
     )
-    assert f"source_handle: {RULE_HANDLE}" in user
-    assert "source_type: a controller decision rule" in user
+    _, user = build_context_bdi_prompts(built, TemplateLoader(PROMPTS_DIR))
+
+    entry = _rule_entry(user)
+    assert entry["source_handle"] == handle
+    assert entry["description"] == rule
+    assert entry["select_when"] == (
+        "Select only when the controller's belief about the situation is correct "
+        "and the rule it applies to that belief still selects the unsafe action; "
+        "a wrong, missing, or stale belief belongs to the process-model belief "
+        "instead. Reading a correct value does not by itself make the belief "
+        "correct, because the controller may misinterpret the value or not "
+        "retain it, and its belief is then wrong."
+    )
 
 
 # --- belief-step validation ---------------------------------------------------
@@ -270,6 +337,71 @@ def test_the_belief_request_marks_the_decision_rule_factor(tmp_path) -> None:
         "belief" in user
     )
     assert "source_type: a controller decision rule" in user
+
+
+# --- a scenario whose every factor is a decision rule sends no request ---------
+
+
+def _belief_calls(client) -> list:
+    return [
+        call
+        for call in client.calls
+        if isinstance(call.response_format, type)
+        and issubclass(call.response_format, StatedBeliefReply)
+    ]
+
+
+def _state(spec, structure, run_dir: Path, client):
+    return state_beliefs(
+        spec, llm_client=client, run_dir=run_dir, control_structure=structure
+    )
+
+
+def test_a_rule_only_spec_sends_no_belief_request(tmp_path) -> None:
+    spec, structure = _spec(tmp_path / "stage5", RULE_HANDLE)
+    client = BeliefClient()
+
+    outcome = _state(spec, structure, tmp_path, client)
+
+    assert _belief_calls(client) == []
+    assert (outcome.source, outcome.requests, outcome.rejected, outcome.reason) == (
+        "code",
+        0,
+        [],
+        None,
+    )
+    (rule,) = outcome.spec.causal_factors
+    assert rule.kind is CausalFactorKind.inadequate_control_algorithm
+    assert (rule.source_id, rule.flawed_belief, rule.process_model_variable) == (
+        "RESP-1",
+        None,
+        None,
+    )
+    assert outcome.spec.model_dump(exclude={"causal_factors"}) == spec.model_dump(
+        exclude={"causal_factors"}
+    )
+
+
+def test_a_skipped_request_publishes_what_a_null_reply_publishes(tmp_path) -> None:
+    rule_only, structure = _spec(tmp_path / "rule", RULE_HANDLE)
+    mixed, _ = _spec(tmp_path / "mixed", "cause_1", RULE_HANDLE)
+    client = BeliefClient()
+
+    skipped = _state(rule_only, structure, tmp_path / "rule", client).spec
+    replied = _state(mixed, structure, tmp_path / "mixed", client)
+
+    # The mixed spec still sends its request, and the model's reply gives the
+    # decision rule its null belief.
+    assert len(_belief_calls(client)) == 1
+    assert (replied.source, replied.requests) == ("model", 1)
+    assert skipped.causal_factors[0] == replied.spec.causal_factors[1]
+    (published,) = handoff_causal_factors(skipped)
+    assert published == handoff_causal_factors(replied.spec)[1]
+    assert published.model_dump(mode="json") == {
+        "source_id": "RESP-1",
+        "process_model_belief": None,
+        "flaw": skipped.causal_factors[0].description,
+    }
 
 
 # --- publication, attack tree and narration -----------------------------------
@@ -457,7 +589,34 @@ def test_only_a_rule_only_narrate_request_asks_for_the_rule() -> None:
     )
     assert "No agent belief is false in this scenario." in rule_user
     assert "3. How that flawed belief arises:" in belief_system
-    assert "faulty" not in belief_system + belief_user
+    assert "No agent belief is false" not in belief_user
+    only_system, only_user = render_narration_prompts(build_facts(adversarial()))
+    assert "faulty" not in only_system + only_user
+
+
+def test_a_mixed_narrate_request_asks_for_the_rule_as_a_rule() -> None:
+    facts = build_facts(_mixed_spec())
+    system, user = render_narration_prompts(facts)
+    (belief_id,) = facts.ids_in((AGENT_BELIEF,))
+    (rule_id,) = facts.ids_in((DECISION_RULE,))
+
+    assert facts.mixed_rule and not facts.rule_only
+    assert (
+        "Build the claim from the weak point and the agent belief facts. Here the "
+        "facts also give a decision rule beside the agent belief. That rule is a "
+        "second cause, not a belief: describe it as a faulty rule the agent "
+        "applies, do not call it a flawed or false belief, and do not present it "
+        "as the source of the flawed belief.\n3. How that flawed belief arises:"
+    ) in system
+    assert user.endswith(
+        'The sentence that says why the agent acts ("because it incorrectly '
+        'believes\nthat ...") cites the agent belief fact whose belief it states: '
+        f"{belief_id}.\nEach decision rule fact ({rule_id}) states a faulty rule "
+        "the agent\napplies, not a belief: describe it as a rule, not as a flawed "
+        "or false belief.\n"
+    )
+    assert not build_facts(_rule_spec()).mixed_rule
+    assert not build_facts(adversarial()).mixed_rule
 
 
 def test_the_fallback_names_the_decision_rule_and_no_belief() -> None:
@@ -497,7 +656,15 @@ def test_a_run_publishes_a_decision_rule_with_a_null_belief(tmp_path: Path) -> N
 
     assert result.stage_errors == []
     sidecar = json.loads((tmp_path / BELIEFS_FILENAME).read_text(encoding="utf-8"))
-    assert [entry["source"] for entry in sidecar["scenarios"]] == ["model"] * 2
+    # SCN-002 is everyday and its one factor is the decision rule: code states
+    # its null belief and no belief request is sent for it.
+    assert [
+        (entry["scenario_id"], entry["source"], entry["requests"])
+        for entry in sidecar["scenarios"]
+    ] == [("SCN-001", "model", 1), ("SCN-002", "code", 0)]
+    assert [
+        call.user_prompt.count(RULE_EVIDENCE) for call in _belief_calls(client)
+    ] == [1]
     published = {
         scenario_id: _published_handoff(tmp_path, scenario_id)
         for scenario_id in ("SCN-001", "SCN-002")

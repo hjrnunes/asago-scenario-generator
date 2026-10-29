@@ -459,12 +459,13 @@ def _unassessed_belief(tmp_path: Path) -> tuple[str, str]:
 # The Stage 5 context system value also carries the later stated-reason
 # paragraph of ``stage5_context_system.j2``; both Stage 5 context values also
 # carry the later decision-rule source (the controller's handle and the
-# evidence sentence for it).
+# evidence sentence for it); the user value also carries that handle's later
+# rule description and the misreading sentence of its selection guidance.
 _UNASSESSED_REQUESTS = {
     "stage5-context": (
         _unassessed_stage5,
         "f8f8eae6f53835beb0c6d000a89d79a7b8b654e2f0dda7a9357b681cf1ca0c27",
-        "dadc2c76549cc0dcf49254b7ff486b8e9ce8ac10561b0915827e9fe356a3a7fb",
+        "6b49574d804a66ffd7bb4b1967494a97d3570d470e1997471d8285c66071cded",
     ),
     "stage5-belief": (
         _unassessed_belief,

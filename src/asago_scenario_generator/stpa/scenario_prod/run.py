@@ -257,7 +257,8 @@ def run_sp3(
 
     After Stage 5, one belief request per Stage 5 spec states each causal
     factor's flawed belief and process-model variable and writes
-    ``beliefs.json``. Stage 6 renders each scenario's ``and-or-tree-v1``
+    ``beliefs.json``; a spec whose every factor is a faulty decision rule
+    sends none. Stage 6 renders each scenario's ``and-or-tree-v1``
     attack tree, sends one narrate request per scenario (writing
     ``narratives.json``) and one Gherkin request per publishable scenario
     (writing ``gherkins.json``), and publishes ``scenario-handoff-v5``: the

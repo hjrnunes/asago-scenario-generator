@@ -807,7 +807,8 @@ After Stage 5, each scenario passes through these model steps in order:
 that is a belief flaw (a faulty decision rule applied to a correct belief, the
 `INADEQUATE_CONTROL_ALGORITHM` kind that cites the selected controller's
 `RESP-` or `CL-` identifier, states none and publishes
-`process_model_belief: null`),
+`process_model_belief: null`; a scenario whose every causal factor is such a
+rule sends no belief request, and code applies that null belief),
 `stage5_shape` proposes the attack shape of an adversarial scenario,
 `stage6_narrative` writes the lead paragraph, and `stage6_gherkin` writes the
 Gherkin. Code checks every reply. The belief, narrative, and Gherkin steps

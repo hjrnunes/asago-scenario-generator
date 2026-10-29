@@ -9,6 +9,7 @@ cases:
     forbidden:
       - cites the agent belief fact
       - No agent belief is false
+      - Each decision rule fact
   narrate-rule-only:
     required:
       - >-
@@ -17,8 +18,22 @@ cases:
         and cites the decision rule fact that states it:
     forbidden:
       - cites the agent belief fact
+      - Each decision rule fact
   narrate-stated:
     required:
       - >-
         The sentence that says why the agent acts ("because it incorrectly
         believes that ...") cites the agent belief fact whose belief it states:
+    forbidden:
+      - Each decision rule fact
+  narrate-mixed:
+    required:
+      - >-
+        The sentence that says why the agent acts ("because it incorrectly
+        believes that ...") cites the agent belief fact whose belief it states:
+      - Each decision rule fact (
+      - >-
+        states a faulty rule the agent applies, not a belief: describe it as a
+        rule, not as a flawed or false belief.
+    forbidden:
+      - No agent belief is false

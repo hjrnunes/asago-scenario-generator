@@ -6,7 +6,9 @@ the scenario's lead paragraph in the STPA Handbook's loss-scenario form
 "because" the agent wrongly believes something, how that flawed belief
 arises, and the harm. When every causal factor is a faulty decision rule, the
 agent's belief is correct, and the paragraph says the action happens because
-of that rule instead. The model cites numbered facts that code builds from
+of that rule instead. When a decision rule stands beside a belief flaw, the
+request asks for the rule to be described as a rule, not as a flawed belief
+or its source. The model cites numbered facts that code builds from
 the scenario spec, and adds no fact of its own.
 
 Code checks every reply and never repairs it. A reply that breaks a rule
@@ -419,6 +421,11 @@ class ScenarioFacts:
     def ids_in(self, categories: Sequence[str]) -> list[str]:
         return [fact.fact_id for fact in self.facts if fact.category in categories]
 
+    @property
+    def mixed_rule(self) -> bool:
+        """True when a decision rule fact stands beside a belief-flaw factor."""
+        return not self.rule_only and bool(self.ids_in((DECISION_RULE,)))
+
 
 def build_facts(spec: ScenarioSpec) -> ScenarioFacts:
     """Number the scenario's facts in causal order and name what to cover."""
@@ -692,6 +699,7 @@ def render_narration_prompts(
         max_words=WORDS_ASKED,
         max_title_words=MAX_TITLE_WORDS,
         rule_only=facts.rule_only,
+        mixed_rule=facts.mixed_rule,
     )
     user = loader.render_prompt(
         "stage6_narrate_user.j2",
@@ -706,6 +714,9 @@ def render_narration_prompts(
             ", ".join(facts.ids_in((AGENT_BELIEF,))) if facts.stated_beliefs else ""
         ),
         rule_ids=", ".join(facts.ids_in((DECISION_RULE,))) if facts.rule_only else "",
+        mixed_rule_ids=(
+            ", ".join(facts.ids_in((DECISION_RULE,))) if facts.mixed_rule else ""
+        ),
     )
     return system, user
 
