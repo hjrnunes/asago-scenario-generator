@@ -316,6 +316,33 @@ def _lead(run: RunData, rows: list[ObligationRow], by_stop: dict) -> Markup:
     )
 
 
+def _fan_out_note(run: RunData) -> Markup:
+    """Show the manifest's second denominator beside its applicable count.
+
+    A manifest written before the funnel carried the second denominator shows
+    nothing.
+    """
+    funnel = run.manifest.obligation_resolution_funnel or {}
+    block = funnel.get("applicable_without_llm_fan_out")
+    if not isinstance(block, dict):
+        return Markup("")
+    patterns = ", ".join(
+        f"{pattern} ({count})"
+        for pattern, count in block["fan_out_excluded_by_attack_pattern"].items()
+    )
+    return Markup(
+        f"<p>The manifest counts "
+        f"{_counted('applicable_and_considered', funnel['applicable_and_considered'])} "
+        f"applicable obligations. Without the "
+        f"{_counted('fan_out_excluded', block['fan_out_excluded'])} fan-out rows, "
+        f"{_counted('applicable_without_llm_fan_out', block['applicable'])} remain, "
+        f"{block['realized_obligations']} of them realized; "
+        f"{block['fan_out_realized']} fan-out rows were realized. "
+        f'<span class="nm">{esc(block["rule"])} Excluded rows per attack pattern: '
+        f"{esc(patterns or 'none')}.</span></p>"
+    )
+
+
 def _outside_note(rows: list[ObligationRow]) -> Markup:
     routed = _routed(rows)
     outside = [o for o in routed if o.outside]
@@ -353,6 +380,7 @@ def _body(run: RunData) -> Markup:
     return join(
         [
             _lead(run, rows, by_stop),
+            _fan_out_note(run),
             _outside_note(rows),
             _disagreements(run, by_stop),
             *(_row_disclosure(key, by_stop[key]) for key in ordered),

@@ -37,6 +37,7 @@ from asago_scenario_generator.pipeline.synthesis import (
     run_synthesis,
 )
 from asago_scenario_generator.pipeline.synthesis_manifest import (
+    FAN_OUT_RULE,
     _manifest_artifact_identity,
     _manifest_provider_evidence,
     _scenario_generation_status,
@@ -1661,6 +1662,15 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
         "reconciles": True,
         "realized_obligation_denominator": 0,
         "admitted_scenario_denominator": 0,
+        "applicable_without_llm_fan_out": {
+            "rule": FAN_OUT_RULE,
+            "fan_out_llm_codes": ["LLM01", "LLM07"],
+            "applicable": 1,
+            "fan_out_excluded": 0,
+            "fan_out_excluded_by_attack_pattern": {},
+            "realized_obligations": 0,
+            "fan_out_realized": 0,
+        },
     }
     assert result.manifest["context_tables"] == {
         "row_budget": 12,

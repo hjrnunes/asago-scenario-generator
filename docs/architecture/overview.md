@@ -413,7 +413,15 @@ realization expose one closed terminal stop reason
 per applicable obligation. The manifest/report replace the provisional
 `addressed` marker with the later realized, functional-test, generation-failed,
 or not-requested outcome where scenario evidence exists, and show both the full
-applicable denominator and survivor denominators. Provider call evidence separately
+applicable denominator and survivor denominators. Beside the full applicable
+count (`applicable_and_considered`), the funnel's
+`applicable_without_llm_fan_out` block gives a second denominator that leaves
+out the LLM01/LLM07 fan-out rows: applicable obligations with at least one
+mapping path whose every path from risk to attack pattern passes through LLM01
+or LLM07. A row also reached through another OWASP LLM code, or by catalog
+identity, stays in. The block states the rule and counts the excluded rows,
+per attack pattern and realized; the full count is unchanged and nothing is
+pruned from the plan. Provider call evidence separately
 records response receipt, typed parsing, semantic validation, compilation,
 publication, and terminal error codes; compatibility `success` is not the sole
 stage-quality signal. Scenario candidate outcomes are counted once by exact
