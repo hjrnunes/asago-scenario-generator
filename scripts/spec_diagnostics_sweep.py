@@ -104,6 +104,8 @@ def _read_text(path: Path) -> str:
         return path.read_text(encoding="utf-8")
     except OSError as exc:
         raise Skip(f"{path.name} cannot be read: {exc.strerror or exc}") from exc
+    except UnicodeError as exc:
+        raise Skip(f"{path.name} is not valid UTF-8: {exc}") from exc
 
 
 def _read(path: Path) -> Any:
@@ -164,6 +166,9 @@ def _retained_icas(output: Path, pinned: dict[str, Any]) -> ICAEnumeration | Non
         realization = TargetRealizationResult.from_yaml(
             _read_text(output / TARGET_REALIZATION)
         )
+    except yaml.YAMLError as exc:
+        first = str(exc).splitlines()[0]
+        raise Skip(f"{TARGET_REALIZATION} is not valid YAML: {first}") from exc
     except (ValueError, TypeError) as exc:
         first = str(exc).splitlines()[0]
         raise Skip(f"{TARGET_REALIZATION} fails its integrity check: {first}") from exc

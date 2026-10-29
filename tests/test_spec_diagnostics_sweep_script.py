@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 import sys
@@ -34,6 +35,13 @@ from asago_scenario_generator.stpa.spec_diagnostics import (
     SPEC_DIAGNOSTICS_FILENAME,
     SpecCheck,
     read_spec_diagnostics,
+)
+
+from tests.helpers.target_realization import (
+    _ExtensionInterpreter,
+    _profile,
+    _realize,
+    _UnmappedInterpreter,
 )
 
 _SCRIPT = Path(__file__).resolve().parents[1] / "scripts" / "spec_diagnostics_sweep.py"
@@ -184,11 +192,19 @@ def _pin(artifact_id: str, value: Any) -> dict[str, str]:
     return _manifest_artifact_identity(artifact_id, "", value)
 
 
-def _run(root: Path, *, target_realization: bool = True) -> Path:
+def _run(
+    root: Path,
+    *,
+    target_realization: bool = True,
+    loss: dict[str, Any] | None = None,
+    structure: dict[str, Any] | None = None,
+    realization: TargetRealizationResult | None = None,
+) -> Path:
     """A saved run whose final structure carries one enriched description."""
     output = root / "stages" / "generate" / "output"
-    structure = _structure()
-    _write(output / "loss-analysis.yaml", _LOSS)
+    loss = loss or _LOSS
+    structure = structure or _structure()
+    _write(output / "loss-analysis.yaml", loss)
     _write(output / "control-structure.yaml", structure)
     _write(
         output / "control-action-enrichment.yaml",
@@ -203,26 +219,85 @@ def _run(root: Path, *, target_realization: bool = True) -> Path:
             ]
         },
     )
-    final = _structure()
+    final = copy.deepcopy(structure)
     final["responsibilities"][0]["control_actions"][0]["description"] = (
         "Act (documented operation: op)"
     )
     pins = {
         "final_loss_analysis": _pin(
-            "stpa-loss-analysis-final", LossAnalysis.model_validate(_LOSS)
+            "stpa-loss-analysis-final", LossAnalysis.model_validate(loss)
         ),
         "final_control_structure": _pin(
             "stpa-control-structure-final", ControlStructure.model_validate(final)
         ),
     }
     if target_realization:
-        realization = _realization(["H-1"])
+        realization = realization or _realization(["H-1"])
         (output / "target-realization.yaml").write_text(
             realization.to_yaml(), encoding="utf-8"
         )
         pins["target_realization"] = _pin("target-realization", realization)
     _write(output / "synthesis-manifest.yaml", {"source_artifacts": pins})
     return output
+
+
+def _target_only_finder(request: Any) -> dict[str, Any]:
+    """A deterministic target-derived ICA finder: one verified H-2 finding."""
+    slot = next(
+        item
+        for item in request.target_derived_ica_slots
+        if item.uca_type == "INCORRECT"
+    )
+    return {
+        "findings": (
+            {
+                "slot_id": slot.slot_id,
+                "ica_id": f"{slot.slot_id}:1",
+                "ica_text": "The target operation is issued unchecked.",
+                "deviation": "The operation is issued unchecked.",
+                "hazardous_context": "The observed operation is available.",
+                "loss_scenario": "An unauthorized payment is scheduled.",
+                "related_hazards": ("H-2",),
+                "related_constraints": ("SC-2",),
+                "verification": {
+                    "status": "verified",
+                    "detail": "stub target-derived finding verification",
+                    "evidence_refs": ("verification:stub",),
+                },
+            },
+        )
+    }
+
+
+def _target_extended_inputs() -> tuple[dict, dict, TargetRealizationResult]:
+    """Loss, structure and a realization whose only H-2 ICA is target-derived.
+
+    The target lens adds an action for an uncovered observed operation, and
+    the stub finder gives its slot one verified ICA citing H-2, which no
+    baseline ICA cites.  SC-2 governs H-2 and RESP-1 cites it, as the
+    target-derived compiler requires.
+    """
+    loss = copy.deepcopy(_LOSS)
+    loss["security_constraints"].append(
+        {"constraint_id": "SC-2", "rule": "Rule two", "related_hazards": ["H-2"]}
+    )
+    structure = _structure()
+    structure["responsibilities"][0]["security_constraint_refs"] = ["SC-1", "SC-2"]
+    baseline = SystemicStpaBaseline.from_stpa(
+        loss_analysis=LossAnalysis.model_validate(loss),
+        control_structure=ControlStructure.model_validate(structure),
+        ica_enumeration=ICAEnumeration.model_validate(
+            {"slots": [_slot(_SLOT, [_ICA], ["H-1"])]}
+        ),
+    )
+    extended = _realize(
+        baseline,
+        _profile(),
+        lambda: _UnmappedInterpreter(),
+        extension=_ExtensionInterpreter(),
+    )
+    realization = realize_target_derived_icas(baseline, extended, _target_only_finder)
+    return loss, structure, realization
 
 
 def _counts(result: Any) -> dict[SpecCheck, int]:
@@ -253,6 +328,29 @@ def test_without_a_target_realization_the_ica_checks_do_not_run(tmp_path: Path):
     result = _script().diagnose_run(tmp_path / "run-a")
 
     assert {s.check for s in result.checks if s.status == "not_run"} == set(ICA_CHECKS)
+
+
+def test_a_target_derived_ica_does_not_cover_a_hazard(tmp_path: Path):
+    loss, structure, realization = _target_extended_inputs()
+    view = realization.effective_view
+    assert view is not None
+    target_only = [
+        ica
+        for slot in view.effective_ica_enumeration.slots
+        if slot.slot_id not in view.baseline_ica_slot_ids
+        for ica in slot.icas
+    ]
+    assert [ica.related_hazards for ica in target_only] == [("H-2",)]
+    _run(tmp_path / "run-a", loss=loss, structure=structure, realization=realization)
+
+    result = _script().diagnose_run(tmp_path / "run-a")
+
+    hazards = [
+        f.subject_ids
+        for f in result.findings
+        if f.check is SpecCheck.hazard_without_ica
+    ]
+    assert hazards == [("H-2",)]
 
 
 def _skip_reason(run_dir: Path) -> str:
@@ -363,6 +461,36 @@ def test_the_sweep_goes_on_after_unreadable_runs(tmp_path: Path):
         "skipped",
         "diagnosed",
     ]
+
+
+def _sweep_statuses(tmp_path: Path) -> list[str]:
+    _run(tmp_path / "runs" / "run-b")
+    counts = _script().sweep(
+        [tmp_path / "runs" / "run-a", tmp_path / "runs" / "run-b"], tmp_path / "out"
+    )
+    assert (counts["diagnosed"], counts["skipped"]) == (1, 1)
+    rows = (tmp_path / "out" / "spec-diagnostics-runs.jsonl").read_text()
+    return [json.loads(line)["status"] for line in rows.splitlines()]
+
+
+def test_the_sweep_goes_on_after_a_malformed_target_realization(tmp_path: Path):
+    output = _run(tmp_path / "runs" / "run-a")
+    (output / "target-realization.yaml").write_text("a: [unclosed\n", encoding="utf-8")
+
+    assert "target-realization.yaml is not valid YAML" in _skip_reason(
+        tmp_path / "runs" / "run-a"
+    )
+    assert _sweep_statuses(tmp_path) == ["skipped", "diagnosed"]
+
+
+def test_the_sweep_goes_on_after_invalid_utf8(tmp_path: Path):
+    output = _run(tmp_path / "runs" / "run-a")
+    (output / "control-structure.yaml").write_bytes(b"responsibilities: \xff\n")
+
+    assert "control-structure.yaml is not valid UTF-8" in _skip_reason(
+        tmp_path / "runs" / "run-a"
+    )
+    assert _sweep_statuses(tmp_path) == ["skipped", "diagnosed"]
 
 
 def test_the_sweep_writes_only_to_the_out_dir(tmp_path: Path):
