@@ -552,7 +552,11 @@ and channel only where a later decision depends on it, with the channel's
 source and trust taken from what the result carries. An answer or other text
 an operation returns in reply to a question, or the refusal or hand-off it
 returns instead, is retrieved content, and its variable claims no record
-state the text does not carry. Code adds no such
+state the text does not carry. A result that only acknowledges a request,
+including one that stores, submits or queues an item for another party's
+later action, reports that acceptance and the status it was stored with, not
+the outcome of that later action; a variable for the outcome needs feedback
+from where the outcome is recorded, or stays unknown. Code adds no such
 channel itself, since a declared output does not establish where its
 information originates or whether an adversary can author it.
 
@@ -881,7 +885,30 @@ restate as it was, and a restated one keeps its constraint citations in
 order, so an exact restatement changes nothing. The Stage 2 manifest records
 `critic_revision.status` as `applied`, `unchanged` (the reply was accepted
 and changed nothing), or `discarded` with its `reason`, and the run
-manifest's `revised` agrees with it. The empty-responsibility cleanup is
+manifest's `revised` agrees with it.
+
+The revision user prompt shows each critic gap with a code-assigned ID,
+`G-1` to `G-n` in finding order. The reply's `gap_dispositions` gives one
+entry per gap: `gap_id`, `disposition` (`addressed`, `dismissed`, or
+`recommendation`), `element_ids`, and a one-sentence `justification`. A
+dismissal or recommendation is only for a gap the reply leaves unchanged; an
+`addressed` gap must name elements the reply adds or modifies. Code checks
+each claim against the elements the published structure adds or changes
+relative to the no-revision output (a responsibility whose child changes is
+changed too), accepting either the ID the reply wrote or the ID the element
+is published under. A gap with no disposition, a disposition for an unknown
+gap ID, and an `addressed` claim that changed none of its IDs are
+unresolved. The check sends no request and never rejects or re-asks the
+reply. An `applied` or `unchanged` record adds `gap_dispositions` (the count
+of each disposition) and `unresolved_gaps` (each gap ID with its reason); a
+`discarded` record does not. Each unresolved gap is also a
+`Revision left critic gap G-n unresolved: ...` post-revision warning, each
+dismissal or recommendation keeps its `Revision dismissed finding G-n ...`
+warning, and a process-model variable the revision added that no control
+action reads is reported as a post-revision warning. A reply written before
+dispositions, with free-text `dismissed_gaps`, still loads: each entry keeps
+its `Revision dismissed finding: ...` warning and the record has no gap
+review. The request schema no longer offers `dismissed_gaps`. The empty-responsibility cleanup is
 reported only by its `Stripped empty responsibility ...` post-revision
 warning. The replay gate holds no copy of the run's target evidence, so it
 does not reject an `applied` record whose structure differs from its input
