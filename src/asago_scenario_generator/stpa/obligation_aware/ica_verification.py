@@ -45,6 +45,11 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
 )
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.calls import call_evidence
+from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
+    find_slot_hazard_mismatches,
+    flag_slot_hazard_mismatches,
+    slot_hazard_diagnostics,
+)
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
     StpaIndex,
     build_stpa_index,
@@ -1474,23 +1479,32 @@ def verify_final_ica_batch(
     the subset that received a non-supported verdict.  Provider/protocol
     failures remain typed records and do not erase ordinary STPA siblings.
     A correction failure cannot rehabilitate a previously rejected finding.
+    Each final ICA whose hazard depends on another action's operation is
+    flagged, on the ICA and in the batch diagnostics, and kept in its slot.
     """
     requests, incomplete_ica_ids, diagnostics = _build_verification_requests(
         enumeration, loss_analysis, control_structure
     )
     if not requests:
+        enumeration, flags = _flag_slot_hazards(
+            enumeration, loss_analysis, control_structure
+        )
         batch = IcaHazardVerificationBatch(
             batch_id=batch_id,
-            diagnostics=tuple(diagnostics),
+            diagnostics=(*diagnostics, *flags),
             incomplete_ica_ids=tuple(incomplete_ica_ids),
         )
         return _exclude_unsupported_icas(enumeration, batch), batch
     method = _verification_method(adapter)
     if method is None:
+        enumeration, flags = _flag_slot_hazards(
+            enumeration, loss_analysis, control_structure
+        )
         return enumeration, _failed_batch(
             batch_id,
             requests,
             "no ICA hazard verification adapter was supplied",
+            diagnostics=flags,
         )
     records, unsupported, initial_diagnostics, call_evidence = (
         _verify_initial_request_groups(method, requests, batch_id=batch_id)
@@ -1516,15 +1530,37 @@ def verify_final_ica_batch(
                 diagnostics=diagnostics,
             )
         )
+    corrected_enumeration, flags = _flag_slot_hazards(
+        _apply_corrected_requests(enumeration, records),
+        loss_analysis,
+        control_structure,
+    )
     batch = IcaHazardVerificationBatch(
         batch_id=batch_id,
         records=tuple(records.values()),
-        diagnostics=tuple(diagnostics),
+        diagnostics=(*diagnostics, *flags),
         call_evidence=tuple(call_evidence),
         incomplete_ica_ids=tuple(incomplete_ica_ids),
     )
-    corrected_enumeration = _apply_corrected_requests(enumeration, records)
     return _exclude_unsupported_icas(corrected_enumeration, batch), batch
+
+
+def _flag_slot_hazards(
+    enumeration: ICAEnumeration,
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+) -> tuple[ICAEnumeration, tuple[ConsiderationDiagnostic, ...]]:
+    """Flag every ICA whose hazard depends on another action's operation."""
+    # Without both artifacts no request was built, and there is nothing to check.
+    if loss_analysis is None or control_structure is None:
+        return enumeration, ()
+    mismatches = find_slot_hazard_mismatches(
+        enumeration, loss_analysis, control_structure
+    )
+    return (
+        flag_slot_hazard_mismatches(enumeration, mismatches),
+        slot_hazard_diagnostics(mismatches),
+    )
 
 
 def _verify_initial_request_groups(
@@ -1860,12 +1896,17 @@ def _failed_batch(
     batch_id: str,
     requests: Sequence[IcaHazardVerificationRequest],
     error: str,
+    *,
+    diagnostics: Sequence[ConsiderationDiagnostic] = (),
 ) -> IcaHazardVerificationBatch:
-    diagnostics = tuple(
-        _verification_diagnostic(
-            "ica_hazard_verification_provider_failure", request, error
-        )
-        for request in requests
+    diagnostics = (
+        *(
+            _verification_diagnostic(
+                "ica_hazard_verification_provider_failure", request, error
+            )
+            for request in requests
+        ),
+        *diagnostics,
     )
     return IcaHazardVerificationBatch(
         batch_id=batch_id,
