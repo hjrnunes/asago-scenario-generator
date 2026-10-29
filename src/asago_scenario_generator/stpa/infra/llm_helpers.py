@@ -416,6 +416,7 @@ class _SafeCallState:
     attempt_number: int = 1
     dispatched: bool = False
     transport_retries: int = 0
+    fallback_requests: int = 0
     retry_of: str | None = None
     logged_attempt_id: str | None = None
     provider_requests: list[dict[str, Any]] = field(default_factory=list)
@@ -507,7 +508,8 @@ def _call_client(
     completion_kwargs: dict[str, Any],
     state: _SafeCallState,
 ) -> LLMResult:
-    """Call a client, counting the transport retries the client makes.
+    """Call a client, counting the transport retries and the service-tier
+    fallback requests the client makes.
 
     The provider records the call sent are kept for its call-log entry.
     """
@@ -516,6 +518,7 @@ def _call_client(
             return llm_client.complete(**completion_kwargs)
         finally:
             state.transport_retries += retries.count
+            state.fallback_requests += retries.fallbacks
             state.provider_requests = provider_requests_of(llm_client)
 
 
@@ -1339,12 +1342,16 @@ def call_with_policy(
                 model,
                 state.result,
                 None,
-                _dispatched(calls + 1 + state.transport_retries),
+                _dispatched(
+                    calls + 1 + state.transport_retries + state.fallback_requests
+                ),
                 attempt_number=attempt_number,
                 attempt_id=state.logged_attempt_id,
             )
         except Exception as exc:
-            calls += state.dispatched + state.transport_retries
+            calls += (
+                state.dispatched + state.transport_retries + state.fallback_requests
+            )
             error_msg = _log_structured_failure(
                 llm_client=llm_client,
                 run_dir=run_dir,
