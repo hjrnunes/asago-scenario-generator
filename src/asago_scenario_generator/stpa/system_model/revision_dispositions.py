@@ -4,15 +4,16 @@ The revision reply gives one disposition per critic gap, keyed by the gap ID
 code assigns in finding order (``G-1`` to ``G-n``).  An ``addressed``
 disposition must name an element the published structure adds or changes;
 ``dismissed`` and ``recommendation`` leave the gap unchanged.  The check only
-records what it finds: a gap without a disposition, a disposition for an
-unknown gap, or an ``addressed`` claim that names no changed element is
-unresolved.  It sends no request and never rejects the revision.
+records what it finds: a gap without a disposition or with more than one, a
+disposition for an unknown gap, or an ``addressed`` claim that names no
+element changed for it is unresolved.  It sends no request and never rejects the revision.
 """
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Iterator, Mapping, Sequence
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
+from types import MappingProxyType
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -79,37 +80,71 @@ class GapReview:
         }
 
 
+@dataclass(frozen=True)
+class ElementChanges:
+    """The elements a revision adds or changes, by published ID.
+
+    ``members`` maps each responsibility and link to the published IDs of the
+    elements it holds (a responsibility's children, a link's mechanism), in
+    structure order.  ``member_changes`` maps each element that changed only
+    through those members to the changed ones; an element whose own fields
+    changed, that is new, or that lost a member is not in it.
+    """
+
+    ids: frozenset[str]
+    members: Mapping[str, tuple[str, ...]] = MappingProxyType({})
+    member_changes: Mapping[str, tuple[str, ...]] = MappingProxyType({})
+
+
 def review_gap_dispositions(
     dispositions: Sequence[GapDisposition],
     *,
     gap_count: int,
-    changed_ids: frozenset[str],
+    changes: ElementChanges,
     written: Mapping[str, frozenset[str]] | None = None,
 ) -> GapReview:
     """Check each disposition against the elements the revision changed.
 
-    *changed_ids* are the published IDs of the elements the revision adds or
-    changes.  *written* maps each ID the reply wrote to the published IDs of
-    the elements it wrote under that ID (see :class:`RevisionIdentity`).  A
+    *changes* holds the published IDs of the elements the revision adds or
+    changes, and of the elements each responsibility or link holds.
+    *written* maps each ID the reply wrote to the published IDs of the
+    elements it wrote under that ID (see :class:`RevisionIdentity`).  A
     claimed ID the reply wrote names those elements; any other claimed ID is
     read as a published ID.
+
+    A claim that names a responsibility or link together with elements it
+    holds is judged by those elements.  Named alone, it supports the claim
+    when it changed on its own, or through a changed member no other gap's
+    ``addressed`` claim names: a member another gap names is that gap's
+    change.  A gap given more than one disposition is unresolved, and none of
+    its dispositions is counted.
     """
     written = written or {}
     gap_ids = critic_gap_ids(gap_count)
-    counts = {kind: 0 for kind in DISPOSITION_KINDS}
     by_gap: dict[str, list[GapDisposition]] = {}
     unknown: list[str] = []
     for item in dispositions:
-        counts[item.disposition] += 1
         if item.gap_id in gap_ids:
             by_gap.setdefault(item.gap_id, []).append(item)
         elif item.gap_id not in unknown:
             unknown.append(item.gap_id)
+    counts = {kind: 0 for kind in DISPOSITION_KINDS}
+    for item in dispositions:
+        if len(by_gap.get(item.gap_id, ())) <= 1:
+            counts[item.disposition] += 1
 
-    def changed(element_id: str) -> bool:
-        if element_id in written:
-            return bool(written[element_id] & changed_ids)
-        return element_id in changed_ids
+    def published(element_id: str) -> frozenset[str]:
+        return written.get(element_id, frozenset({element_id}))
+
+    # The gaps whose ``addressed`` claim names each published ID.
+    naming: dict[str, list[str]] = {}
+    for item in dispositions:
+        if item.disposition == "addressed":
+            for element_id in item.element_ids:
+                for target in published(element_id):
+                    gaps = naming.setdefault(target, [])
+                    if item.gap_id not in gaps:
+                        gaps.append(item.gap_id)
 
     unresolved: list[UnresolvedGap] = []
     for gap_id in gap_ids:
@@ -117,21 +152,73 @@ def review_gap_dispositions(
         if not given:
             unresolved.append(UnresolvedGap(gap_id, "no disposition"))
             continue
-        for item in given:
-            if item.disposition != "addressed":
-                continue
-            if not item.element_ids:
-                reason = "claimed addressed but named no element"
-            elif not any(changed(element_id) for element_id in item.element_ids):
-                reason = "claimed addressed but did not change " + ", ".join(
-                    item.element_ids
+        if len(given) > 1:
+            unresolved.append(
+                UnresolvedGap(
+                    gap_id,
+                    f"gave {len(given)} dispositions: "
+                    + ", ".join(_described(item) for item in given),
                 )
-            else:
-                continue
+            )
+            continue
+        [item] = given
+        if item.disposition != "addressed":
+            continue
+        if not item.element_ids:
+            unresolved.append(
+                UnresolvedGap(gap_id, "claimed addressed but named no element")
+            )
+            continue
+        reason = _unsupported_claim(item, published, changes, naming)
+        if reason is not None:
             unresolved.append(UnresolvedGap(gap_id, reason))
-            break
     unresolved.extend(UnresolvedGap(gap_id, "unknown gap id") for gap_id in unknown)
     return GapReview(counts=counts, unresolved=tuple(unresolved))
+
+
+def _described(item: GapDisposition) -> str:
+    if not item.element_ids:
+        return item.disposition
+    return f"{item.disposition} ({', '.join(item.element_ids)})"
+
+
+def _unsupported_claim(
+    item: GapDisposition,
+    published: Callable[[str], frozenset[str]],
+    changes: ElementChanges,
+    naming: Mapping[str, Sequence[str]],
+) -> str | None:
+    """Say why an ``addressed`` claim changed nothing it names, or ``None``."""
+    named = {
+        target for element_id in item.element_ids for target in published(element_id)
+    }
+    unchanged: list[str] = []
+    elsewhere: list[str] = []
+    for element_id in item.element_ids:
+        targets = sorted(published(element_id) & changes.ids)
+        if not targets:
+            unchanged.append(element_id)
+            continue
+        for target in targets:
+            held = [m for m in changes.members.get(target, ()) if m in named]
+            if held:
+                elsewhere.append(f"{element_id} changed only outside {', '.join(held)}")
+                continue
+            if target not in changes.member_changes:
+                return None
+            members = changes.member_changes[target]
+            if any(set(naming.get(m, ())) <= {item.gap_id} for m in members):
+                return None
+            gaps = list(dict.fromkeys(gap for m in members for gap in naming[m]))
+            elsewhere.append(
+                f"{element_id} changed only in {', '.join(members)}, which "
+                f"{', '.join(gaps)} {'names' if len(gaps) == 1 else 'name'}"
+            )
+    parts = []
+    if unchanged:
+        parts.append("did not change " + ", ".join(unchanged))
+    parts.extend(elsewhere)
+    return "claimed addressed but " + "; ".join(parts)
 
 
 def set_aside_warnings(dispositions: Iterable[GapDisposition]) -> list[str]:
@@ -413,12 +500,12 @@ def _members(element: Any, nested: tuple[str, ...]) -> list[str]:
     return ids
 
 
-def changed_element_ids(
+def element_changes(
     before: ControlStructure,
     after: ControlStructure,
     identity: RevisionIdentity | None = None,
-) -> frozenset[str]:
-    """Return the published IDs of the elements *after* adds or changes.
+) -> ElementChanges:
+    """Return the elements *after* adds or changes, and how each parent changed.
 
     *before* holds reviewed IDs; *identity* says which element each ID of
     *after* is (by default, the element with the same ID).  Elements are
@@ -426,7 +513,8 @@ def changed_element_ids(
     names, so an ID that changed only by renumbering is not a change.  A
     responsibility is changed when its own fields change, when it gains or
     loses a child, or when a child changes; a link, when its own fields or its
-    mechanism change.  The order of the children does not count.
+    mechanism change.  The order of the children does not count.  A gained
+    child is itself a changed member.
     """
     identity = identity or RevisionIdentity.unchanged(after)
     tokens = {
@@ -439,6 +527,7 @@ def changed_element_ids(
             frozenset(_members(element, nested)),
         )
     changed: set[str] = set()
+    own: set[str] = set()
     for element_id, element, nested in _flat_elements(after):
         token = tokens.get(element_id)
         payload = _in_reviewed_terms(
@@ -447,14 +536,39 @@ def changed_element_ids(
         members = frozenset(
             tokens.get(member, member) for member in _members(element, nested)
         )
-        if token is None or old.get(token) != (payload, members):
+        earlier = old.get(token) if token is not None else None
+        if earlier is None or earlier[0] != payload or earlier[1] - members:
+            own.add(element_id)
             changed.add(element_id)
-    changed.update(
-        element_id
-        for element_id, element, nested in _flat_elements(after)
-        if nested and changed.intersection(_members(element, nested))
+        elif earlier[1] != members:
+            changed.add(element_id)
+    holdings: dict[str, tuple[str, ...]] = {}
+    member_changes: dict[str, tuple[str, ...]] = {}
+    for element_id, element, nested in _flat_elements(after):
+        if not nested:
+            continue
+        holdings[element_id] = tuple(_members(element, nested))
+        changed_members = tuple(m for m in holdings[element_id] if m in changed)
+        if not changed_members:
+            continue
+        changed.add(element_id)
+        if element_id not in own:
+            member_changes[element_id] = changed_members
+    return ElementChanges(
+        ids=frozenset(changed), members=holdings, member_changes=member_changes
     )
-    return frozenset(changed)
+
+
+def changed_element_ids(
+    before: ControlStructure,
+    after: ControlStructure,
+    identity: RevisionIdentity | None = None,
+) -> frozenset[str]:
+    """Return the published IDs of the elements *after* adds or changes.
+
+    See :func:`element_changes`.
+    """
+    return element_changes(before, after, identity).ids
 
 
 def unread_added_process_model_warnings(

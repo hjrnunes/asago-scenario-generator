@@ -4,8 +4,10 @@ Code numbers the critic gaps ``G-1`` to ``G-n`` in finding order and shows
 each ID next to its gap.  The reply says, per gap, whether it ``addressed``,
 ``dismissed`` or kept the gap as a ``recommendation``.  An ``addressed`` claim
 must name an element the published structure adds or changes; a gap with no
-disposition, a disposition for an unknown gap, and an ``addressed`` claim
-that changed nothing it names are unresolved.  The check sends no request and
+disposition or with several, a disposition for an unknown gap, and an
+``addressed`` claim that changed nothing it names are unresolved.  A
+responsibility named with its children is judged by them, and one named
+alone does not count a change another gap's claim names.  The check sends no request and
 never rejects the reply: it adds post-revision warnings and fields of the
 ``critic_revision`` record.  A process-model variable the revision added and
 no control action reads is reported as well.  A reply in the earlier format,
@@ -16,10 +18,13 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
+from unittest.mock import MagicMock
 
 import pytest
 
+from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -38,10 +43,12 @@ from asago_scenario_generator.stpa.system_model.critic import (
     revise_control_structure,
 )
 from asago_scenario_generator.stpa.system_model.revision_dispositions import (
+    ElementChanges,
     GapDisposition,
     RevisionIdentity,
     changed_element_ids,
     critic_gap_ids,
+    element_changes,
     element_ref_fields,
     reference_fields,
     review_gap_dispositions,
@@ -312,6 +319,67 @@ def test_a_disposition_for_an_unknown_gap_is_unresolved(tmp_path) -> None:
     )
 
 
+def test_a_gap_given_two_dispositions_is_unresolved_and_not_counted(
+    tmp_path,
+) -> None:
+    reply = _reply(
+        # Each of G-1's claims would pass on its own.
+        _disposition("G-1", "addressed", "PM-1-2"),
+        _disposition("G-1", "addressed", "FB-1-2"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        _disposition("G-3", "dismissed"),
+        _disposition("G-4", "recommendation"),
+    )
+
+    outcome, client = _revise(reply, tmp_path)
+
+    assert outcome.applied is True
+    assert len(client.calls) == 1
+    assert outcome.gap_review is not None
+    assert outcome.gap_review.record() == {
+        "gap_dispositions": {"addressed": 1, "dismissed": 1, "recommendation": 1},
+        "unresolved_gaps": [
+            {
+                "gap_id": "G-1",
+                "reason": "gave 2 dispositions: addressed (PM-1-2), addressed (FB-1-2)",
+            }
+        ],
+    }
+    assert (
+        "Revision left critic gap G-1 unresolved: gave 2 dispositions: "
+        "addressed (PM-1-2), addressed (FB-1-2)."
+    ) in outcome.warnings
+
+
+def test_a_gap_given_conflicting_dispositions_is_unresolved_and_not_counted() -> None:
+    review = review_gap_dispositions(
+        [
+            GapDisposition(
+                gap_id="G-1",
+                disposition="addressed",
+                element_ids=["FB-1-1"],
+                justification="Changes the report.",
+            ),
+            GapDisposition(
+                gap_id="G-1", disposition="dismissed", justification="Covered."
+            ),
+            GapDisposition(
+                gap_id="G-1", disposition="recommendation", justification="Later."
+            ),
+        ],
+        gap_count=1,
+        changes=ElementChanges(frozenset({"RESP-1", "FB-1-1"})),
+    )
+
+    assert review.counts == {"addressed": 0, "dismissed": 0, "recommendation": 0}
+    assert [(gap.gap_id, gap.reason) for gap in review.unresolved] == [
+        (
+            "G-1",
+            "gave 3 dispositions: addressed (FB-1-1), dismissed, recommendation",
+        )
+    ]
+
+
 def test_an_unchanged_revision_leaves_every_addressed_claim_unresolved(
     tmp_path,
 ) -> None:
@@ -333,6 +401,179 @@ def test_an_unchanged_revision_leaves_every_addressed_claim_unresolved(
         ("G-1", "claimed addressed but did not change RESP-1"),
         ("G-2", "claimed addressed but named no element"),
     ]
+
+
+def test_a_parent_changed_for_another_gap_does_not_resolve_a_claim(
+    tmp_path,
+) -> None:
+    # G-1 asks for something FB-1-1 already has, and the reply restates
+    # FB-1-1 unchanged.  For G-4 the reply cites a new constraint on RESP-1
+    # and adds PM-1-2 and FB-1-2 to it; G-4 names RESP-1 and those children.
+    reply = _reply(
+        _disposition("G-1", "addressed", "RESP-1", "FB-1-1"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        _disposition("G-3", "dismissed"),
+        _disposition("G-4", "addressed", "RESP-1", "PM-1-2", "FB-1-2"),
+    )
+    reply["modified_responsibilities"][0]["security_constraint_refs"] = ["SC-9"]
+
+    outcome, _ = _revise(reply, tmp_path)
+
+    assert outcome.applied is True
+    assert outcome.gap_review is not None
+    assert outcome.gap_review.counts["addressed"] == 3
+    assert [(gap.gap_id, gap.reason) for gap in outcome.gap_review.unresolved] == [
+        (
+            "G-1",
+            "claimed addressed but did not change FB-1-1; RESP-1 changed only "
+            "outside FB-1-1",
+        )
+    ]
+    assert (
+        "Revision left critic gap G-1 unresolved: claimed addressed but did not "
+        "change FB-1-1; RESP-1 changed only outside FB-1-1."
+    ) in outcome.warnings
+
+
+def test_a_parent_named_alone_is_unresolved_when_another_gap_names_its_changes(
+    tmp_path,
+) -> None:
+    reply = _reply(
+        _disposition("G-1", "addressed", "RESP-1"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        _disposition("G-3", "addressed", "PM-1-2"),
+        _disposition("G-4", "addressed", "FB-1-2"),
+        read_new_variable=False,
+    )
+
+    outcome, _ = _revise(reply, tmp_path)
+
+    assert outcome.gap_review is not None
+    assert [(gap.gap_id, gap.reason) for gap in outcome.gap_review.unresolved] == [
+        (
+            "G-1",
+            "claimed addressed but RESP-1 changed only in PM-1-2, FB-1-2, "
+            "which G-3, G-4 name",
+        )
+    ]
+
+
+def test_a_parent_named_alone_resolves_through_a_change_no_other_claim_names(
+    tmp_path,
+) -> None:
+    reply = _reply(
+        _disposition("G-1", "addressed", "RESP-1"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        # A set-aside gap's element IDs claim no change.
+        _disposition("G-3", "dismissed", "FB-1-2"),
+        _disposition("G-4", "addressed", "RESP-1", "PM-1-2"),
+        read_new_variable=False,
+    )
+
+    outcome, _ = _revise(reply, tmp_path)
+
+    # FB-1-2 changed RESP-1 and no other addressed claim names it.
+    assert outcome.gap_review is not None
+    assert outcome.gap_review.unresolved == ()
+
+
+def test_a_parent_named_alone_resolves_when_its_own_fields_changed(
+    tmp_path,
+) -> None:
+    reply = _reply(
+        _disposition("G-1", "addressed", "RESP-1"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        _disposition("G-3", "dismissed"),
+        _disposition("G-4", "addressed", "RESP-1", "PM-1-2", "FB-1-2"),
+        read_new_variable=False,
+    )
+    reply["modified_responsibilities"][0]["description"] = "Store and track drafts"
+
+    outcome, _ = _revise(reply, tmp_path)
+
+    assert outcome.gap_review is not None
+    assert outcome.gap_review.unresolved == ()
+
+
+def _claim(gap_id: str, *element_ids: str) -> GapDisposition:
+    return GapDisposition(
+        gap_id=gap_id,
+        disposition="addressed",
+        element_ids=list(element_ids),
+        justification=f"Addresses {gap_id}.",
+    )
+
+
+def test_the_helper_judges_a_parent_named_with_a_child_by_the_child() -> None:
+    changes = ElementChanges(
+        ids=frozenset({"RESP-1", "PM-1-3"}),
+        members={"RESP-1": ("PM-1-1", "PM-1-3", "FB-1-1")},
+    )
+
+    review = review_gap_dispositions(
+        [_claim("G-1", "RESP-1", "FB-1-1"), _claim("G-2", "RESP-1", "PM-1-3")],
+        gap_count=2,
+        changes=changes,
+    )
+
+    assert [(gap.gap_id, gap.reason) for gap in review.unresolved] == [
+        (
+            "G-1",
+            "claimed addressed but did not change FB-1-1; RESP-1 changed only "
+            "outside FB-1-1",
+        )
+    ]
+
+
+def test_the_helper_attributes_a_member_change_to_the_gap_that_names_it() -> None:
+    changes = ElementChanges(
+        ids=frozenset({"RESP-1", "PM-1-3"}),
+        members={"RESP-1": ("PM-1-1", "PM-1-3")},
+        member_changes={"RESP-1": ("PM-1-3",)},
+    )
+
+    review = review_gap_dispositions(
+        [_claim("G-1", "RESP-1"), _claim("G-2", "PM-1-3")],
+        gap_count=2,
+        changes=changes,
+    )
+
+    assert [(gap.gap_id, gap.reason) for gap in review.unresolved] == [
+        ("G-1", "claimed addressed but RESP-1 changed only in PM-1-3, which G-2 names")
+    ]
+
+
+def test_member_changes_name_the_parents_changed_only_through_members() -> None:
+    before = _reviewed()
+    after = before.model_copy(deep=True)
+    after.responsibilities[0].feedback_channels[0].description = "Reworded report"
+    after.responsibilities[1].description = "Track draft owners"
+    after.responsibilities[1].feedback_channels[0].description = "Reworded report"
+    after.responsibilities[2].process_model_parts.append(
+        ProcessModelPart(pm_id="PM-3-2", description="Escalation status")
+    )
+
+    changes = element_changes(before, after)
+
+    assert changes.ids == changed_element_ids(before, after)
+    assert changes.members["RESP-3"] == ("PM-3-1", "PM-3-2", "CA-3-1", "FB-3-1")
+    # RESP-2's own description changed, so it is not changed only through
+    # its members.
+    assert changes.member_changes == {
+        "RESP-1": ("FB-1-1",),
+        "RESP-3": ("PM-3-2",),
+    }
+
+
+def test_a_parent_that_lost_a_member_changed_on_its_own() -> None:
+    before = _reviewed()
+    after = before.model_copy(deep=True)
+    after.responsibilities[0].feedback_channels = []
+
+    changes = element_changes(before, after)
+
+    assert "RESP-1" in changes.ids
+    assert "RESP-1" not in changes.member_changes
 
 
 def test_a_claim_may_name_the_id_the_reply_wrote_for_a_renumbered_element(
@@ -764,6 +1005,92 @@ def test_saved_replies_in_the_earlier_format_are_present() -> None:
     assert any("dismissed_gaps" in json.loads(p.read_text()) for p in _SAVED_REPLIES)
 
 
+def _transport_client(*replies: dict[str, Any]) -> LLMClient:
+    """A client that parses each reply into the request's schema, as live."""
+    client = LLMClient(
+        base_url="http://test-endpoint.invalid", api_key="test-key", model="test-model"
+    )
+    client._client = MagicMock()
+    client._client.chat.completions.create.side_effect = [
+        SimpleNamespace(
+            usage=SimpleNamespace(prompt_tokens=3, completion_tokens=4),
+            choices=[
+                SimpleNamespace(
+                    message=SimpleNamespace(content=json.dumps(reply)),
+                    finish_reason="stop",
+                )
+            ],
+        )
+        for reply in replies
+    ]
+    return client
+
+
+def _fields_outside_schema(
+    value: Any, schema: dict[str, Any], defs: dict[str, Any], path: str = ""
+) -> list[str]:
+    """Return the path of each object field *value* holds that *schema* lacks."""
+    if "$ref" in schema:
+        schema = defs[schema["$ref"].rsplit("/", 1)[-1]]
+    for option in schema.get("anyOf", ()):
+        if (option.get("type") == "null") == (value is None):
+            return _fields_outside_schema(value, option, defs, path)
+    outside: list[str] = []
+    if isinstance(value, dict):
+        properties = schema.get("properties", {})
+        for key, item in value.items():
+            if key not in properties:
+                outside.append(f"{path}/{key}")
+            else:
+                outside.extend(
+                    _fields_outside_schema(item, properties[key], defs, f"{path}/{key}")
+                )
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            outside.extend(
+                _fields_outside_schema(
+                    item, schema.get("items", {}), defs, f"{path}/{index}"
+                )
+            )
+    return outside
+
+
+def test_the_correction_shows_the_prior_reply_in_the_current_format(
+    tmp_path,
+) -> None:
+    unmergeable = _reply(
+        _disposition("G-1", "addressed", "PM-1-2"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        _disposition("G-3", "dismissed"),
+        _disposition("G-4", "dismissed"),
+    )
+    unmergeable["modified_responsibilities"][0]["resp_id"] = "RESP-9"
+    corrected = _reply(*unmergeable["gap_dispositions"])
+    client = _transport_client(unmergeable, corrected)
+
+    outcome = revise_control_structure(
+        llm_client=client,
+        control_structure=_reviewed(),
+        critic_findings=_FINDINGS,
+        use_case_text="Drafts are stored for later review by a person.",
+        run_dir=tmp_path,
+    )
+
+    assert outcome.applied is True
+    first, correction = [
+        call.kwargs for call in client._client.chat.completions.create.call_args_list
+    ]
+    request = correction["messages"][-1]["content"]
+    shown = request.split("Prior structured response to correct in place:\n```json\n")[
+        1
+    ].split("\n```", 1)[0]
+    schema = first["response_format"]["json_schema"]["schema"]
+    prior = json.loads(shown)
+    assert prior["modified_responsibilities"][0]["resp_id"] == "RESP-9"
+    assert "dismissed_gaps" not in request
+    assert _fields_outside_schema(prior, schema, schema["$defs"]) == []
+
+
 def test_the_request_schema_offers_dispositions_and_not_free_text() -> None:
     schema = _RevisionDeltaProviderSet.model_json_schema()
 
@@ -819,7 +1146,7 @@ def test_an_addressed_claim_counts_once_any_named_id_changed() -> None:
             )
         ],
         gap_count=1,
-        changed_ids=frozenset({"RESP-1", "FB-1-1"}),
+        changes=ElementChanges(frozenset({"RESP-1", "FB-1-1"})),
     )
 
     assert review.unresolved == ()

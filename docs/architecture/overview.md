@@ -951,12 +951,18 @@ change of ID alone is not a change. Only those fields are rewritten: the
 `shared_pm`); values, descriptions and other data are compared as written,
 even when they look like an ID. A claimed ID the reply wrote names the element it
 wrote under that ID, including a new link's mechanism whose colliding ID the
-merge renumbered; any other claimed ID is read as a published ID. A gap with
-no disposition, a disposition for an unknown
-gap ID, and an `addressed` claim that changed none of its IDs are
+merge renumbered; any other claimed ID is read as a published ID. A claim
+that names a responsibility or link together with elements it holds is
+judged by those elements, not by the parent's change. A parent named alone
+counts when it changed on its own (its own fields, a new parent, or a lost
+child), or through a changed child that no other gap's `addressed` claim
+names: a child another gap names is that gap's change. A gap with
+no disposition, a gap with more than one disposition, a disposition for an
+unknown gap ID, and an `addressed` claim that changed none of its IDs are
 unresolved. The check sends no request and never rejects or re-asks the
 reply. An `applied` or `unchanged` record adds `gap_dispositions` (the count
-of each disposition) and `unresolved_gaps` (each gap ID with its reason); a
+of each disposition, leaving out every disposition of a gap given more than
+one) and `unresolved_gaps` (each gap ID with its reason); a
 `discarded` record does not. Each unresolved gap is also a
 `Revision left critic gap G-n unresolved: ...` post-revision warning, each
 dismissal or recommendation keeps its `Revision dismissed finding G-n ...`
@@ -965,7 +971,8 @@ by published ID) that no control action reads is reported as a
 post-revision warning. A reply written before
 dispositions, with free-text `dismissed_gaps`, still loads: each entry keeps
 its `Revision dismissed finding: ...` warning and the record has no gap
-review. The request schema no longer offers `dismissed_gaps`. The empty-responsibility cleanup is
+review. The request schema no longer offers `dismissed_gaps`, and the
+revision correction shows the prior reply without it. The empty-responsibility cleanup is
 reported only by its `Stripped empty responsibility ...` post-revision
 warning. The replay gate holds no copy of the run's target evidence, so it
 does not reject an `applied` record whose structure differs from its input

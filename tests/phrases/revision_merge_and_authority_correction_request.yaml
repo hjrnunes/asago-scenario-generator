@@ -10,6 +10,8 @@ cases:
       - "- feedback channel FB-2-1 settled authority basis must cite the supplied use case or an exact target-evidence ref"
       - Correct the `authority_for_update` of every feedback channel listed above
       - Return one JSON object matching the response schema already supplied.
+    forbidden:
+      - dismissed_gaps
     ordered:
       - - "Prior structured response to correct in place:"
         - "Exact validation error from the prior response:"

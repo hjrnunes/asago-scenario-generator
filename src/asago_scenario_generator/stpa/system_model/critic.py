@@ -30,6 +30,7 @@ from pydantic import (
 )
 from pydantic.json_schema import SkipJsonSchema
 
+from asago_scenario_generator.stpa._model_data import raw_model_data
 from asago_scenario_generator.models.capability_profile import (
     ZONE_DISPLAY_NAMES,
     CapabilityProfile,
@@ -70,11 +71,12 @@ from asago_scenario_generator.stpa.system_model.feedback_authority import (
 )
 from asago_scenario_generator.stpa.system_model.revision_dispositions import (
     DispositionKind,
+    ElementChanges,
     GapDisposition,
     GapReview,
     RevisionIdentity,
-    changed_element_ids,
     critic_gap_ids,
+    element_changes,
     review_gap_dispositions,
     set_aside_warnings,
     revision_identity,
@@ -324,6 +326,26 @@ class _RevisionDeltaProviderSet(RevisionDelta):
     modified_responsibilities: list[_RevisionResponsibility] = []
     gap_dispositions: list[_RevisionGapDisposition] = []
     dismissed_gaps: SkipJsonSchema[list[_Text]] = []
+
+
+# The reply fields the request schema leaves out.  Parsing fills them with
+# their defaults, so a correction would otherwise show them to the model.
+_UNREQUESTED_REVISION_FIELDS = frozenset(
+    _RevisionDeltaProviderSet.model_fields
+) - frozenset(_RevisionDeltaProviderSet.model_json_schema()["properties"])
+
+
+def _shown_revision_reply(content: Any) -> Any:
+    """Show a correction the prior reply with only the fields the schema asks for."""
+    if isinstance(content, BaseModel):
+        content = raw_model_data(content)
+    if not isinstance(content, dict):
+        return content
+    return {
+        key: value
+        for key, value in content.items()
+        if key not in _UNREQUESTED_REVISION_FIELDS
+    }
 
 
 class RevisionMergeAndAuthorityError(ExactFeedbackError):
@@ -794,7 +816,7 @@ def _finish_revision(
             review = _gap_review(
                 revision_delta,
                 critic_findings,
-                changed_ids=changed_element_ids(unrevised, output, identity),
+                changes=element_changes(unrevised, output, identity),
                 written=identity.written,
             )
             revision_warnings.extend(_gap_review_warnings(review))
@@ -814,7 +836,9 @@ def _finish_revision(
         )
     revision_warnings.extend(cleanup_warnings)
     revision_warnings.extend(_no_change_warnings(critic_findings, revision_delta))
-    review = _gap_review(revision_delta, critic_findings, changed_ids=frozenset())
+    review = _gap_review(
+        revision_delta, critic_findings, changes=ElementChanges(frozenset())
+    )
     revision_warnings.extend(_gap_review_warnings(review))
     return _with_heuristics(
         RevisionOutcome(unrevised, revision_warnings, applied=False, gap_review=review),
@@ -826,7 +850,7 @@ def _gap_review(
     revision_delta: RevisionDelta,
     critic_findings: CriticFindings,
     *,
-    changed_ids: frozenset[str],
+    changes: ElementChanges,
     written: Mapping[str, frozenset[str]] | None = None,
 ) -> GapReview | None:
     """Check the reply's gap dispositions; ``None`` for a free-text-only reply."""
@@ -835,7 +859,7 @@ def _gap_review(
     return review_gap_dispositions(
         revision_delta.gap_dispositions,
         gap_count=len(critic_findings.gaps),
-        changed_ids=changed_ids,
+        changes=changes,
         written=written,
     )
 
@@ -974,6 +998,7 @@ def revise_control_structure(
             include_schema=False,
             include_response=True,
             error_note=authority_note,
+            response_view=_shown_revision_reply,
             correct_undecodable=True,
         ),
         temperature=temperature,

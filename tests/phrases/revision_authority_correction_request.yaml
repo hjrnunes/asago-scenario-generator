@@ -12,6 +12,7 @@ cases:
     forbidden:
       - "1 feedback channel authority basis fails the checks:"
       - Keep every other record as written.
+      - dismissed_gaps
     ordered:
       - - The prior response was not a valid RevisionDelta.
         - "Prior structured response to correct in place:"
