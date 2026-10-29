@@ -7,7 +7,8 @@
 Offline: the script reads saved files, writes only to ``--out-dir``, and calls
 no model.  Each ``RUN_DIR`` is a producer output directory, or a directory
 holding exactly one (found by its ``loss-analysis.yaml``); its name labels the
-run, and labels must be unique.  ``--out-dir`` must lie outside every run.
+run, and labels must be unique.  Every path the script writes must lie
+outside every run; otherwise it writes nothing.
 
 A run is diagnosed on its final artifacts, each checked against the identity
 ``synthesis-manifest.yaml`` pins for it:
@@ -17,14 +18,15 @@ A run is diagnosed on its final artifacts, each checked against the identity
   structural revision applied, otherwise ``control-structure.yaml`` with the
   descriptions ``control-action-enrichment.yaml`` records;
 - the retained ICAs are the baseline slots of the effective view in
-  ``target-realization.yaml``.  That snapshot omits each ICA's
-  ``process_model_context``, which no check reads, so its ICAs cannot be
-  checked against the manifest; the script checks their IDs against the
-  view's baseline ICA IDs instead.  Without the file the ICA checks are
-  recorded as not run.
+  ``target-realization.yaml``, loaded with its integrity check
+  (``TargetRealizationResult.from_yaml``) and matched to the manifest's
+  ``target_realization`` identity.  The snapshot omits each ICA's
+  ``process_model_context``, which no check reads.  Without the file the ICA
+  checks are recorded as not run.
 
-A run that lacks a final artifact, or whose artifact fails its check or does
-not load under the current schema, is skipped with the reason.
+A run that lacks a final artifact, whose artifact cannot be read or parsed,
+fails its check, or does not load under the current schema, is skipped with
+the reason, and the sweep goes on to the next run.
 
 Outputs in ``--out-dir``:
 
@@ -47,6 +49,9 @@ from typing import Any
 import yaml
 from pydantic import ValidationError
 
+from asago_scenario_generator.models.target_realization import (
+    TargetRealizationResult,
+)
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _manifest_artifact_identity,
 )
@@ -54,6 +59,7 @@ from asago_scenario_generator.stpa.models.control_structure import ControlStruct
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.spec_diagnostics import (
+    SPEC_DIAGNOSTICS_FILENAME,
     SpecCheck,
     SpecDiagnostics,
     diagnose_final_artifacts,
@@ -93,8 +99,26 @@ def find_output_dir(run_dir: Path) -> Path:
     return found[0]
 
 
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise Skip(f"{path.name} cannot be read: {exc.strerror or exc}") from exc
+
+
 def _read(path: Path) -> Any:
-    return yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        return yaml.safe_load(_read_text(path))
+    except yaml.YAMLError as exc:
+        first = str(exc).splitlines()[0]
+        raise Skip(f"{path.name} is not valid YAML: {first}") from exc
+
+
+def _read_mapping(path: Path) -> dict[str, Any]:
+    data = _read(path)
+    if not isinstance(data, dict):
+        raise Skip(f"{path.name} is not a mapping")
+    return data
 
 
 def _load(model: type, data: Any, name: str) -> Any:
@@ -114,39 +138,53 @@ def _check_identity(value: Any, artifact_id: str, pinned: Any, name: str) -> Non
 
 def _final_structure(output: Path) -> tuple[Any, str]:
     if (output / FINAL_STRUCTURE).is_file():
-        return _read(output / FINAL_STRUCTURE), FINAL_STRUCTURE
-    raw = _read(output / STRUCTURE)
-    if (output / ENRICHMENT).is_file():
-        rows = _read(output / ENRICHMENT).get("rows") or []
+        return _read_mapping(output / FINAL_STRUCTURE), FINAL_STRUCTURE
+    raw = _read_mapping(output / STRUCTURE)
+    if not (output / ENRICHMENT).is_file():
+        return raw, STRUCTURE
+    try:
         enriched = {
             row["control_action_id"]: row["enriched_description"]
-            for row in rows
+            for row in _read_mapping(output / ENRICHMENT).get("rows") or []
             if row.get("enriched") is True
         }
         for responsibility in raw.get("responsibilities") or []:
             for action in responsibility.get("control_actions") or []:
                 if action.get("ca_id") in enriched:
                     action["description"] = enriched[action["ca_id"]]
-        return raw, f"{STRUCTURE} + {ENRICHMENT}"
-    return raw, STRUCTURE
+    except (AttributeError, KeyError, TypeError) as exc:
+        raise Skip(f"{ENRICHMENT} or {STRUCTURE} is malformed: {exc!r}") from exc
+    return raw, f"{STRUCTURE} + {ENRICHMENT}"
 
 
-def _retained_icas(output: Path) -> ICAEnumeration | None:
+def _retained_icas(output: Path, pinned: dict[str, Any]) -> ICAEnumeration | None:
     if not (output / TARGET_REALIZATION).is_file():
         return None
-    view = _read(output / TARGET_REALIZATION).get("effective_view") or {}
-    enumeration = view.get("effective_ica_enumeration")
-    if not isinstance(enumeration, dict):
-        raise Skip(f"{TARGET_REALIZATION} has no effective ICA enumeration")
-    baseline_slots = set(view.get("baseline_ica_slot_ids") or ())
+    try:
+        realization = TargetRealizationResult.from_yaml(
+            _read_text(output / TARGET_REALIZATION)
+        )
+    except (ValueError, TypeError) as exc:
+        first = str(exc).splitlines()[0]
+        raise Skip(f"{TARGET_REALIZATION} fails its integrity check: {first}") from exc
+    _check_identity(
+        realization,
+        "target-realization",
+        pinned.get("target_realization"),
+        TARGET_REALIZATION,
+    )
+    view = realization.effective_view
+    if view is None:
+        raise Skip(f"{TARGET_REALIZATION} has no effective view")
+    baseline_slots = set(view.baseline_ica_slot_ids)
     slots = [
-        slot
-        for slot in enumeration.get("slots") or []
-        if slot.get("slot_id") in baseline_slots
+        slot.model_dump(mode="json")
+        for slot in view.effective_ica_enumeration.slots
+        if slot.slot_id in baseline_slots
     ]
     icas = _load(ICAEnumeration, {"slots": slots}, TARGET_REALIZATION)
     ids = {ica.ica_id for slot in icas.slots for ica in slot.icas}
-    if ids != set(view.get("baseline_ica_ids") or ()):
+    if ids != set(view.baseline_ica_ids):
         raise Skip(f"{TARGET_REALIZATION} baseline ICAs do not match its ICA IDs")
     return icas
 
@@ -154,8 +192,11 @@ def _retained_icas(output: Path) -> ICAEnumeration | None:
 def _first_stage_error(output: Path) -> str:
     """Name the step and error type of the run's first recorded stage error."""
     path = output / RUN_MANIFEST
-    errors = (_read(path) or {}).get("stage_errors") if path.is_file() else None
-    if not errors:
+    try:
+        errors = _read_mapping(path).get("stage_errors") if path.is_file() else None
+    except Skip:
+        return ""
+    if not isinstance(errors, list) or not errors:
         return ""
     step, _, rest = str(errors[0]).partition(": ")
     kind = rest.partition(":")[0].strip()
@@ -174,7 +215,9 @@ def load_final_artifacts(output: Path) -> FinalArtifacts:
         raise Skip(reason + _first_stage_error(output))
     if not (output / LOSS).is_file():
         raise Skip(f"the synthesis manifest has no {LOSS} beside it")
-    pinned = (_read(output / MANIFEST) or {}).get("source_artifacts") or {}
+    pinned = _read_mapping(output / MANIFEST).get("source_artifacts") or {}
+    if not isinstance(pinned, dict):
+        raise Skip(f"{MANIFEST} has no source_artifacts mapping")
     loss = _load(LossAnalysis, _read(output / LOSS), LOSS)
     _check_identity(
         loss, "stpa-loss-analysis-final", pinned.get("final_loss_analysis"), LOSS
@@ -187,7 +230,7 @@ def load_final_artifacts(output: Path) -> FinalArtifacts:
         pinned.get("final_control_structure"),
         name,
     )
-    icas = _retained_icas(output)
+    icas = _retained_icas(output, pinned)
     return FinalArtifacts(
         loss_analysis=loss,
         control_structure=structure,
@@ -232,10 +275,7 @@ def sweep(run_dirs: list[Path], out_dir: Path) -> dict[str, Any]:
     labels = [run_dir.name for run_dir in run_dirs]
     if len(set(labels)) != len(labels):
         raise ValueError("run directory names must be unique")
-    resolved_out = out_dir.resolve()
-    for run_dir in run_dirs:
-        if resolved_out.is_relative_to(run_dir.resolve()):
-            raise ValueError(f"--out-dir lies inside run {run_dir.name}")
+    _refuse_writes_inside_runs(_destinations(out_dir, labels), run_dirs)
     out_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, SpecDiagnostics] = {}
     run_rows: list[dict[str, Any]] = []
@@ -268,12 +308,37 @@ def sweep(run_dirs: list[Path], out_dir: Path) -> dict[str, Any]:
         "skipped": len(run_rows) - len(results),
         "checks": _counts(results),
     }
-    _write_jsonl(out_dir / "spec-diagnostics-runs.jsonl", run_rows)
-    _write_jsonl(out_dir / "spec-diagnostics-findings.jsonl", finding_rows)
-    (out_dir / "spec-diagnostics-counts.json").write_text(
+    _write_jsonl(out_dir / RUNS_FILE, run_rows)
+    _write_jsonl(out_dir / FINDINGS_FILE, finding_rows)
+    (out_dir / COUNTS_FILE).write_text(
         json.dumps(counts, indent=2) + "\n", encoding="utf-8"
     )
     return counts
+
+
+RUNS_FILE = "spec-diagnostics-runs.jsonl"
+FINDINGS_FILE = "spec-diagnostics-findings.jsonl"
+COUNTS_FILE = "spec-diagnostics-counts.json"
+
+
+def _destinations(out_dir: Path, labels: list[str]) -> list[Path]:
+    """Every directory and file the sweep may create, before it writes."""
+    paths = [
+        out_dir,
+        *(out_dir / name for name in (RUNS_FILE, FINDINGS_FILE, COUNTS_FILE)),
+    ]
+    for label in labels:
+        paths += [out_dir / label, out_dir / label / SPEC_DIAGNOSTICS_FILENAME]
+    return paths
+
+
+def _refuse_writes_inside_runs(destinations: list[Path], run_dirs: list[Path]) -> None:
+    runs = [(run_dir.name, run_dir.resolve()) for run_dir in run_dirs]
+    for destination in destinations:
+        resolved = destination.resolve()
+        for name, run in runs:
+            if resolved.is_relative_to(run):
+                raise ValueError(f"{destination} lies inside run {name}")
 
 
 def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:

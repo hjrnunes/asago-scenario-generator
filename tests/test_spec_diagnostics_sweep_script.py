@@ -12,10 +12,22 @@ from typing import Any
 import pytest
 import yaml
 
+from asago_scenario_generator.models.target_realization import (
+    SystemicStpaBaseline,
+    TargetRealizationDisposition,
+    TargetRealizationResult,
+    TargetRealizationRow,
+    TargetRealizationSummary,
+    canonical_target_realization,
+)
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _manifest_artifact_identity,
 )
+from asago_scenario_generator.pipeline.target_realization import (
+    realize_target_derived_icas,
+)
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.spec_diagnostics import (
     ICA_CHECKS,
@@ -103,27 +115,64 @@ def _slot(slot_id: str, ica_ids: list[str], hazards: list[str]) -> dict[str, Any
     return {
         "slot_id": slot_id,
         "responsibility": "RESP-1",
-        "coordination_link": None,
         "control_action": "CA-1-1",
         "action_temporality": "discrete",
         "uca_type": "INCORRECT",
         "is_na": False,
-        "na_justification": None,
-        "unresolved_reason": None,
         "icas": [
             {
                 "ica_id": ica_id,
                 "ica_text": "Unsafe",
-                "deviation": None,
                 "hazardous_context": "Context",
                 "loss_scenario": "Scenario",
                 "related_hazards": hazards,
                 "related_constraints": ["SC-1"],
-                "quality_warnings": [],
             }
             for ica_id in ica_ids
         ],
     }
+
+
+def _realization(hazards: list[str]) -> TargetRealizationResult:
+    """A target realization built the way the pipeline builds one."""
+    baseline = SystemicStpaBaseline.from_stpa(
+        loss_analysis=LossAnalysis.model_validate(_LOSS),
+        control_structure=ControlStructure.model_validate(_structure()),
+        ica_enumeration=ICAEnumeration.model_validate(
+            {"slots": [_slot(_SLOT, [_ICA], hazards)]}
+        ),
+    )
+    rows = tuple(
+        TargetRealizationRow(
+            control_action_id=action_id,
+            controller_id="RESP-1",
+            disposition=TargetRealizationDisposition.unmapped,
+        )
+        for action_id in ("CA-1-1", "CA-1-2")
+    )
+    realization = canonical_target_realization(
+        TargetRealizationResult(
+            baseline_id=baseline.baseline_id,
+            baseline_digest=baseline.baseline_digest,
+            profile_id="profile-fixture",
+            profile_digest="d" * 64,
+            rows=rows,
+            operation_records=(),
+            summary=TargetRealizationSummary(
+                baseline_control_actions=2,
+                observed_operations=0,
+                supported=0,
+                ambiguous=0,
+                unmapped=0,
+                contradictory=0,
+            ),
+        )
+    )
+    return realize_target_derived_icas(baseline, realization, finder=None)
+
+
+_SLOT = "RESP-1:CA-1-1:INCORRECT"
+_ICA = "RESP-1:CA-1-1:INCORRECT:1"
 
 
 def _write(path: Path, data: Any) -> None:
@@ -158,41 +207,21 @@ def _run(root: Path, *, target_realization: bool = True) -> Path:
     final["responsibilities"][0]["control_actions"][0]["description"] = (
         "Act (documented operation: op)"
     )
-    _write(
-        output / "synthesis-manifest.yaml",
-        {
-            "source_artifacts": {
-                "final_loss_analysis": _pin(
-                    "stpa-loss-analysis-final", LossAnalysis.model_validate(_LOSS)
-                ),
-                "final_control_structure": _pin(
-                    "stpa-control-structure-final",
-                    ControlStructure.model_validate(final),
-                ),
-            }
-        },
-    )
+    pins = {
+        "final_loss_analysis": _pin(
+            "stpa-loss-analysis-final", LossAnalysis.model_validate(_LOSS)
+        ),
+        "final_control_structure": _pin(
+            "stpa-control-structure-final", ControlStructure.model_validate(final)
+        ),
+    }
     if target_realization:
-        _write(
-            output / "target-realization.yaml",
-            {
-                "effective_view": {
-                    "baseline_ica_slot_ids": ["RESP-1:CA-1-1:INCORRECT"],
-                    "baseline_ica_ids": ["RESP-1:CA-1-1:INCORRECT:1"],
-                    "effective_ica_enumeration": {
-                        "slots": [
-                            _slot(
-                                "RESP-1:CA-1-1:INCORRECT",
-                                ["RESP-1:CA-1-1:INCORRECT:1"],
-                                ["H-1"],
-                            ),
-                            # Target-derived: outside the retained ICAs.
-                            _slot("RESP-1:CA-9-1:INCORRECT", ["X:1"], ["H-2"]),
-                        ]
-                    },
-                }
-            },
+        realization = _realization(["H-1"])
+        (output / "target-realization.yaml").write_text(
+            realization.to_yaml(), encoding="utf-8"
         )
+        pins["target_realization"] = _pin("target-realization", realization)
+    _write(output / "synthesis-manifest.yaml", {"source_artifacts": pins})
     return output
 
 
@@ -279,13 +308,61 @@ def test_an_artifact_of_an_older_schema_is_skipped_not_adapted(tmp_path: Path):
     assert "does not load under the current schema" in _skip_reason(tmp_path / "run-a")
 
 
-def test_baseline_icas_that_disagree_with_the_view_are_skipped(tmp_path: Path):
+def test_changed_ica_citations_fail_the_integrity_check(tmp_path: Path):
+    """Citations edited in place, IDs untouched: the digest no longer holds."""
     output = _run(tmp_path / "run-a")
-    document = yaml.safe_load((output / "target-realization.yaml").read_text())
-    document["effective_view"]["baseline_ica_ids"].append("RESP-1:CA-1-1:INCORRECT:2")
-    _write(output / "target-realization.yaml", document)
+    path = output / "target-realization.yaml"
+    text = path.read_text(encoding="utf-8")
+    assert text.count("- H-1") == 1
+    path.write_text(text.replace("- H-1", "- H-2"), encoding="utf-8")
 
-    assert "baseline ICAs do not match" in _skip_reason(tmp_path / "run-a")
+    assert "fails its integrity check" in _skip_reason(tmp_path / "run-a")
+
+
+def test_a_valid_realization_the_manifest_does_not_pin_is_skipped(tmp_path: Path):
+    """Same ICA IDs, other citations, a self-consistent digest: not the run's."""
+    output = _run(tmp_path / "run-a")
+    other = _realization(["H-2"])
+    (output / "target-realization.yaml").write_text(other.to_yaml(), encoding="utf-8")
+
+    assert "does not match the manifest's target-realization identity" in (
+        _skip_reason(tmp_path / "run-a")
+    )
+
+
+def test_a_manifest_without_its_control_structure_is_skipped(tmp_path: Path):
+    output = _run(tmp_path / "run-a")
+    (output / "control-structure.yaml").unlink()
+
+    assert "control-structure.yaml cannot be read" in _skip_reason(tmp_path / "run-a")
+
+
+def test_malformed_yaml_is_skipped(tmp_path: Path):
+    output = _run(tmp_path / "run-a")
+    (output / "loss-analysis.yaml").write_text("hazards: [unclosed\n", encoding="utf-8")
+
+    assert "loss-analysis.yaml is not valid YAML" in _skip_reason(tmp_path / "run-a")
+
+
+def test_the_sweep_goes_on_after_unreadable_runs(tmp_path: Path):
+    broken = _run(tmp_path / "runs" / "run-a")
+    (broken / "control-structure.yaml").unlink()
+    bad_yaml = _run(tmp_path / "runs" / "run-b")
+    (bad_yaml / "synthesis-manifest.yaml").write_text(": : :\n", encoding="utf-8")
+    _run(tmp_path / "runs" / "run-c")
+
+    counts = _script().sweep(
+        [tmp_path / "runs" / name for name in ("run-a", "run-b", "run-c")],
+        tmp_path / "out",
+    )
+
+    assert (counts["diagnosed"], counts["skipped"]) == (1, 2)
+    rows = (tmp_path / "out" / "spec-diagnostics-runs.jsonl").read_text()
+    assert [json.loads(line)["status"] for line in rows.splitlines()] == [
+        "skipped",
+        "skipped",
+        "diagnosed",
+    ]
 
 
 def test_the_sweep_writes_only_to_the_out_dir(tmp_path: Path):
@@ -326,6 +403,24 @@ def test_the_sweep_refuses_an_out_dir_inside_a_run(tmp_path: Path):
         _script().sweep([tmp_path / "run-a"], tmp_path / "run-a" / "out")
 
 
-def test_the_sweep_requires_unique_run_names(tmp_path: Path):
+def test_the_sweep_refuses_an_out_dir_that_holds_a_run(tmp_path: Path):
+    """The run's own artifact would land at <out-dir>/<label>, inside the run."""
+    runs = tmp_path / "runs"
+    _run(runs / "run-a")
+    before = sorted(runs.rglob("*"))
+
+    with pytest.raises(ValueError, match="inside run run-a"):
+        _script().sweep([runs / "run-a"], runs)
+
+    assert sorted(runs.rglob("*")) == before
+
+
+def test_the_sweep_refuses_colliding_run_names_before_writing(tmp_path: Path):
+    _run(tmp_path / "a" / "run")
+    _run(tmp_path / "b" / "run")
+    out = tmp_path / "out"
+
     with pytest.raises(ValueError, match="unique"):
-        _script().sweep([tmp_path / "a" / "run", tmp_path / "b" / "run"], tmp_path)
+        _script().sweep([tmp_path / "a" / "run", tmp_path / "b" / "run"], out)
+
+    assert not out.exists()
