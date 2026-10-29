@@ -671,6 +671,30 @@ def _narrate_rule_only() -> Callable[[str], str]:
     return render
 
 
+def _narrate_mixed() -> Callable[[str], str]:
+    facts = ScenarioFacts(
+        scenario_id="SCN-001",
+        kind="adversarial",
+        facts=(
+            Fact("F1", "situation", "RESP-1 receives a refund request"),
+            Fact(
+                "F2",
+                "agent belief",
+                "The agent wrongly believes that the refund is for the caller.",
+            ),
+            Fact("F3", "decision rule", "The rule refunds any request under 50."),
+        ),
+        glossary=(("RESP-1", "Handle customer service inquiries."),),
+        coverage=(("the weak point", ("weak point", "agent belief", "decision rule")),),
+        stated_beliefs=True,
+    )
+
+    def render(template: str) -> str:
+        return dict(zip(_NARRATE_TEMPLATES, render_narration_prompts(facts)))[template]
+
+    return render
+
+
 def _narrate() -> Callable[[str], str]:
     facts = ScenarioFacts(
         scenario_id="SCN-001",
@@ -870,6 +894,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "narrate": _narrate(),
     "narrate-stated": _narrate_stated(),
     "narrate-rule-only": _narrate_rule_only(),
+    "narrate-mixed": _narrate_mixed(),
     "gherkin": _gherkin(),
     "separate-beliefs": _separate_beliefs(),
     "decision-rule-beliefs": _decision_rule_beliefs(),

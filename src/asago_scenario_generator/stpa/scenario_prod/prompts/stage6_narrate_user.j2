@@ -21,3 +21,6 @@ that ...") cites the agent belief fact whose belief it states: {{ belief_ids }}.
 the agent acts ("because ...") explains it by the faulty decision rule and cites
 the decision rule fact that states it: {{ rule_ids }}.
 {% endif -%}
+{% if mixed_rule_ids %}Each decision rule fact ({{ mixed_rule_ids }}) states a faulty rule the agent
+applies, not a belief: describe it as a rule, not as a flawed or false belief.
+{% endif -%}

@@ -589,7 +589,34 @@ def test_only_a_rule_only_narrate_request_asks_for_the_rule() -> None:
     )
     assert "No agent belief is false in this scenario." in rule_user
     assert "3. How that flawed belief arises:" in belief_system
-    assert "faulty" not in belief_system + belief_user
+    assert "No agent belief is false" not in belief_user
+    only_system, only_user = render_narration_prompts(build_facts(adversarial()))
+    assert "faulty" not in only_system + only_user
+
+
+def test_a_mixed_narrate_request_asks_for_the_rule_as_a_rule() -> None:
+    facts = build_facts(_mixed_spec())
+    system, user = render_narration_prompts(facts)
+    (belief_id,) = facts.ids_in((AGENT_BELIEF,))
+    (rule_id,) = facts.ids_in((DECISION_RULE,))
+
+    assert facts.mixed_rule and not facts.rule_only
+    assert (
+        "Build the claim from the weak point and the agent belief facts. Here the "
+        "facts also give a decision rule beside the agent belief. That rule is a "
+        "second cause, not a belief: describe it as a faulty rule the agent "
+        "applies, do not call it a flawed or false belief, and do not present it "
+        "as the source of the flawed belief.\n3. How that flawed belief arises:"
+    ) in system
+    assert user.endswith(
+        'The sentence that says why the agent acts ("because it incorrectly '
+        'believes\nthat ...") cites the agent belief fact whose belief it states: '
+        f"{belief_id}.\nEach decision rule fact ({rule_id}) states a faulty rule "
+        "the agent\napplies, not a belief: describe it as a rule, not as a flawed "
+        "or false belief.\n"
+    )
+    assert not build_facts(_rule_spec()).mixed_rule
+    assert not build_facts(adversarial()).mixed_rule
 
 
 def test_the_fallback_names_the_decision_rule_and_no_belief() -> None:

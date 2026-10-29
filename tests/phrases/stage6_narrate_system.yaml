@@ -24,6 +24,22 @@ cases:
       - message to send
       - faulty decision rule
       - faulty rule
+      - That rule is a second cause, not a belief
+  narrate-mixed:
+    required:
+      - '"because it incorrectly believes that" followed by the claim the agent wrongly takes to be true'
+      - >-
+        Here the facts also give a decision rule beside the agent belief. That
+        rule is a second cause, not a belief: describe it as a faulty rule the
+        agent applies, do not call it a flawed or false belief, and do not
+        present it as the source of the flawed belief.
+    ordered:
+      - - 2. The unsafe action and its cause
+        - Here the facts also give a decision rule beside the agent belief
+        - "3. How that flawed belief arises:"
+    forbidden:
+      - Here the facts give a decision rule and no agent belief
+      - How that faulty rule comes into play
   narrate-rule-only:
     required:
       - '"because it incorrectly believes that" followed by the claim the agent wrongly takes to be true'
@@ -40,3 +56,4 @@ cases:
         - 4. The harm the unsafe action leads to.
     forbidden:
       - How that flawed belief arises
+      - That rule is a second cause, not a belief
