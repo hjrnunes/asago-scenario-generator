@@ -24,6 +24,11 @@ A run is diagnosed on its final artifacts, each checked against the identity
   ``process_model_context``, which no check reads.  Without the file the ICA
   checks are recorded as not run.
 
+With ``--stage2-only`` a run is instead diagnosed on the
+``loss-analysis.yaml`` and ``control-structure.yaml`` Stage 2 published,
+unpinned and without the ICA checks: the measure for a run that stops after
+Stage 2.
+
 A run that lacks a final artifact, whose artifact cannot be read or parsed,
 fails its check, or does not load under the current schema, is skipped with
 the reason, and the sweep goes on to the next run.
@@ -35,6 +40,12 @@ Outputs in ``--out-dir``:
 - ``spec-diagnostics-findings.jsonl``: one row per (run, finding);
 - ``spec-diagnostics-counts.json``: per check, the runs it ran on, the runs
   with a finding, and the findings.
+
+A finding of the two feedback checks also lists, under ``actions``, the
+``effect_kind`` and bound ``operation`` of each control action it names, and
+the counts split those findings (``feedback_by_action``): ``bound_tool_call``
+when the finding names a ``tool_call`` bound to an observed operation (evidence
+binding drops any other name), ``other`` otherwise.
 """
 
 from __future__ import annotations
@@ -55,13 +66,17 @@ from asago_scenario_generator.models.target_realization import (
 from asago_scenario_generator.pipeline.synthesis_manifest import (
     _manifest_artifact_identity,
 )
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlActionEffectKind,
+    ControlStructure,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.spec_diagnostics import (
     SPEC_DIAGNOSTICS_FILENAME,
     SpecCheck,
     SpecDiagnostics,
+    SpecFinding,
     diagnose_final_artifacts,
     write_spec_diagnostics,
 )
@@ -244,14 +259,73 @@ def load_final_artifacts(output: Path) -> FinalArtifacts:
     )
 
 
+def load_stage2_artifacts(output: Path) -> FinalArtifacts:
+    """Load the loss analysis and control structure Stage 2 published.
+
+    For a run measured on Stage 2 alone, such as one stopped at its request
+    budget after Stage 2: no synthesis manifest pins these files, so their
+    identity is not checked, and the ICA checks do not run.
+    """
+    for name in (LOSS, STRUCTURE):
+        if not (output / name).is_file():
+            raise Skip(
+                f"no {name}: Stage 2 published none" + _first_stage_error(output)
+            )
+    return FinalArtifacts(
+        loss_analysis=_load(LossAnalysis, _read(output / LOSS), LOSS),
+        control_structure=_load(ControlStructure, _read(output / STRUCTURE), STRUCTURE),
+        ica_enumeration=None,
+        ica_unavailable_reason="a Stage 2 only diagnosis reads no ICA enumeration",
+    )
+
+
 def diagnose_run(run_dir: Path) -> SpecDiagnostics:
     """Diagnose one saved run, or raise :class:`Skip` with the reason."""
-    final = load_final_artifacts(find_output_dir(run_dir))
+    return _diagnose(load_final_artifacts(find_output_dir(run_dir)))
+
+
+def _diagnose(final: FinalArtifacts) -> SpecDiagnostics:
     return diagnose_final_artifacts(
         loss_analysis=final.loss_analysis,
         control_structure=final.control_structure,
         ica_enumeration=final.ica_enumeration,
         ica_unavailable_reason=final.ica_unavailable_reason,
+    )
+
+
+FEEDBACK_CHECKS = (
+    SpecCheck.controlled_process_without_feedback,
+    SpecCheck.controlled_process_unobserved,
+)
+
+
+def _named_actions(
+    finding: SpecFinding, structure: ControlStructure
+) -> list[dict[str, Any]]:
+    """The effect kind and bound operation of each action *finding* names."""
+    actions = {
+        action.ca_id: action
+        for resp in structure.responsibilities
+        for action in resp.control_actions
+    }
+    return [
+        {
+            "ca_id": ca_id,
+            "effect_kind": (
+                action.effect_kind.value if action.effect_kind is not None else None
+            ),
+            "operation": action.operation,
+        }
+        for ca_id in finding.subject_ids
+        if (action := actions.get(ca_id)) is not None
+    ]
+
+
+def _names_bound_tool_call(actions: list[dict[str, Any]]) -> bool:
+    return any(
+        item["effect_kind"] == ControlActionEffectKind.tool_call.value
+        and item["operation"] is not None
+        for item in actions
     )
 
 
@@ -275,8 +349,34 @@ def _counts(results: dict[str, SpecDiagnostics]) -> dict[str, Any]:
     return counts
 
 
-def sweep(run_dirs: list[Path], out_dir: Path) -> dict[str, Any]:
-    """Diagnose every run into *out_dir* and return the counts."""
+def _feedback_by_action(finding_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    split: dict[str, Any] = {}
+    for check in FEEDBACK_CHECKS:
+        groups: dict[str, list[str]] = {"bound_tool_call": [], "other": []}
+        for row in finding_rows:
+            if row["check"] == check.value:
+                group = (
+                    "bound_tool_call"
+                    if _names_bound_tool_call(row["actions"])
+                    else "other"
+                )
+                groups[group].append(row["run"])
+        split[check.value] = {
+            group: {"runs_with_findings": len(set(runs)), "findings": len(runs)}
+            for group, runs in groups.items()
+        }
+    return split
+
+
+def sweep(
+    run_dirs: list[Path], out_dir: Path, *, stage2_only: bool = False
+) -> dict[str, Any]:
+    """Diagnose every run into *out_dir* and return the counts.
+
+    With *stage2_only* each run is diagnosed on its published Stage 2
+    artifacts (:func:`load_stage2_artifacts`) instead of its final ones.
+    """
+    load = load_stage2_artifacts if stage2_only else load_final_artifacts
     labels = [run_dir.name for run_dir in run_dirs]
     if len(set(labels)) != len(labels):
         raise ValueError("run directory names must be unique")
@@ -287,7 +387,8 @@ def sweep(run_dirs: list[Path], out_dir: Path) -> dict[str, Any]:
     finding_rows: list[dict[str, Any]] = []
     for label, run_dir in zip(labels, run_dirs, strict=True):
         try:
-            result = diagnose_run(run_dir)
+            final = load(find_output_dir(run_dir))
+            result = _diagnose(final)
         except Skip as skip:
             run_rows.append({"run": label, "status": "skipped", "reason": str(skip)})
             continue
@@ -303,15 +404,17 @@ def sweep(run_dirs: list[Path], out_dir: Path) -> dict[str, Any]:
                 },
             }
         )
-        finding_rows.extend(
-            {"run": label, **finding.model_dump(mode="json")}
-            for finding in result.findings
-        )
+        for finding in result.findings:
+            row = {"run": label, **finding.model_dump(mode="json")}
+            if finding.check in FEEDBACK_CHECKS:
+                row["actions"] = _named_actions(finding, final.control_structure)
+            finding_rows.append(row)
     counts = {
         "runs": len(run_rows),
         "diagnosed": len(results),
         "skipped": len(run_rows) - len(results),
         "checks": _counts(results),
+        "feedback_by_action": _feedback_by_action(finding_rows),
     }
     _write_jsonl(out_dir / RUNS_FILE, run_rows)
     _write_jsonl(out_dir / FINDINGS_FILE, finding_rows)
@@ -358,9 +461,17 @@ def main(argv: list[str] | None = None) -> int:
         description="Compute the specification diagnostics of saved runs."
     )
     parser.add_argument("--out-dir", type=Path, required=True)
+    parser.add_argument(
+        "--stage2-only",
+        action="store_true",
+        help=(
+            "Diagnose the loss analysis and control structure Stage 2 "
+            "published, without a synthesis manifest; the ICA checks do not run."
+        ),
+    )
     parser.add_argument("run_dirs", type=Path, nargs="+")
     args = parser.parse_args(argv)
-    counts = sweep(args.run_dirs, args.out_dir)
+    counts = sweep(args.run_dirs, args.out_dir, stage2_only=args.stage2_only)
     json.dump(counts, sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
