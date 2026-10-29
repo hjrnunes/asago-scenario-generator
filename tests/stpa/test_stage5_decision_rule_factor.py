@@ -15,6 +15,7 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from jsonschema import Draft202012Validator
 from pydantic import ValidationError
 
@@ -80,6 +81,7 @@ from tests.helpers.stpa_builders import make_cs, make_loss_analysis
 from tests.stpa.helpers import make_minimal_control_structure
 from tests.stpa.test_and_or_tree import nodes, tree_of
 from tests.stpa.test_narration import adversarial
+from tests.stpa.test_sp3_scenario_continuity import _coordination_context
 from tests.stpa.test_scenario_handoff_v5 import SCHEMA, _envelope
 from tests.stpa.test_stage5_belief_step import BELIEF as STEP_BELIEF
 from tests.stpa.test_stage5_belief_step import BeliefClient
@@ -175,15 +177,75 @@ def test_stage5_offers_the_controller_last_so_other_handles_keep_their_numbers()
         ("cause_4", CausalFactorKind.actuator_anomaly, "CA-1-1"),
         (RULE_HANDLE, CausalFactorKind.inadequate_control_algorithm, "RESP-1"),
     ]
-    assert choices[-1].description == "Authorize bounded payment actions"
+    assert choices[-1].description == RESP_RULE
 
 
-def test_the_stage5_request_describes_the_decision_rule_source() -> None:
-    _, user = build_context_bdi_prompts(
-        _wrong_timing_context(), TemplateLoader(PROMPTS_DIR)
+# The rule a decision-rule handle names: the controller, the control action
+# its rule decides, and the unsafe-control-action type and hazardous context
+# in which the rule selects the unsafe action, all from the analysis data.
+RESP_RULE = (
+    'Decision rule of the controller "Authorize bounded payment actions", which '
+    'decides whether and how it provides "Authorize a bounded batch of payment '
+    'actions". As a cause, this rule selects the unsafe action (WRONG_TIMING, '
+    "meaning the action is provided too early, too late, or in an unsafe order) "
+    "in the hazardous context where a compromised workflow requests bulk "
+    "payment actions."
+)
+CL_RULE = (
+    'Decision rule of the coordination link "Payment authorization and policy '
+    'verification coordinate", which decides whether and how it provides '
+    '"Synchronize payment policy state". As a cause, this rule selects the '
+    "unsafe action (INCORRECT, meaning the action is provided, but its value, "
+    "content, destination, or effect is unsafe) in the hazardous context where "
+    "a manipulated policy state reaches payment authorization."
+)
+
+
+def _rule_entry(user: str) -> dict:
+    """Return the decision-rule entry of the request's causal-source list."""
+    section = user.split("## Allowed Causal-Factor Sources", 1)[1]
+    start = section.index("- source_handle:")
+    listed = yaml.safe_load(section[start : section.index("\n---", start)])
+    (entry,) = [
+        item for item in listed if item["source_type"] == "a controller decision rule"
+    ]
+    return entry
+
+
+@pytest.mark.parametrize(
+    ("context", "handle", "source_id", "rule"),
+    [
+        (_wrong_timing_context, RULE_HANDLE, "RESP-1", RESP_RULE),
+        (_coordination_context, "cause_9", "CL-1", CL_RULE),
+    ],
+)
+def test_the_stage5_request_describes_the_decision_rule_source(
+    context, handle, source_id, rule
+) -> None:
+    built = context()
+    (choice,) = [
+        item
+        for item in _causal_source_choices(built)
+        if item.kind is CausalFactorKind.inadequate_control_algorithm
+    ]
+    assert (choice.handle, choice.source_id, choice.description) == (
+        handle,
+        source_id,
+        rule,
     )
-    assert f"source_handle: {RULE_HANDLE}" in user
-    assert "source_type: a controller decision rule" in user
+    _, user = build_context_bdi_prompts(built, TemplateLoader(PROMPTS_DIR))
+
+    entry = _rule_entry(user)
+    assert entry["source_handle"] == handle
+    assert entry["description"] == rule
+    assert entry["select_when"] == (
+        "Select only when the controller's belief about the situation is correct "
+        "and the rule it applies to that belief still selects the unsafe action; "
+        "a wrong, missing, or stale belief belongs to the process-model belief "
+        "instead. Reading a correct value does not by itself make the belief "
+        "correct, because the controller may misinterpret the value or not "
+        "retain it, and its belief is then wrong."
+    )
 
 
 # --- belief-step validation ---------------------------------------------------

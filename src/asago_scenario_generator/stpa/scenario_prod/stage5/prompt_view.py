@@ -525,6 +525,8 @@ def _source_selection_guidance(kind: CausalFactorKind) -> str:
             "Select only when the controller's belief about the situation is "
             "correct and the rule it applies to that belief still selects the "
             "unsafe action; a wrong, missing, or stale belief belongs to the "
-            "process-model belief instead."
+            "process-model belief instead. Reading a correct value does not by "
+            "itself make the belief correct, because the controller may "
+            "misinterpret the value or not retain it, and its belief is then wrong."
         ),
     }[kind]

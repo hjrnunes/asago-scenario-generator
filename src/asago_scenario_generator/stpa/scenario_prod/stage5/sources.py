@@ -90,6 +90,39 @@ def _normalize_typed_value(value: object | None) -> str | None:
     return raw.strip().lower().replace("-", "_").replace(" ", "_") or None
 
 
+def _decision_rule_description(context: ScenarioGenerationContext) -> str:
+    """Name the rule that selects the unsafe action, from the analysis facts.
+
+    The controller's responsibility text alone ("Generates responses.") does
+    not say which rule could be at fault, so the description also names the
+    control action the rule decides and the unsafe-control-action type and
+    hazardous context in which it selects the unsafe action.
+    """
+    path = context.target_control_path
+    ica = context.ica
+    owner = "coordination link" if path.coordination_path is not None else "controller"
+    return (
+        f'Decision rule of the {owner} "{_clause(path.controller.description)}", '
+        "which decides whether and how it provides "
+        f'"{_clause(path.control_action.description)}". As a cause, this rule '
+        f"selects the unsafe action ({ica.uca_type.value}, meaning "
+        f"{_lower_first(_clause(ica.uca_type_definition))}) in the hazardous "
+        f"context where {_lower_first(_clause(ica.hazardous_context))}."
+    )
+
+
+def _clause(text: str) -> str:
+    """Return ``text`` on one line without its closing full stop."""
+    return " ".join(text.split()).rstrip(".")
+
+
+def _lower_first(text: str) -> str:
+    """Lower an initial capital that does not start an acronym or identifier."""
+    if len(text) > 1 and text[0].isupper() and not text[1].isupper():
+        return text[0].lower() + text[1:]
+    return text
+
+
 def _causal_source_choices(
     context: ScenarioGenerationContext,
 ) -> tuple[_CausalSourceChoice, ...]:
@@ -121,7 +154,7 @@ def _causal_source_choices(
             (
                 CausalFactorKind.inadequate_control_algorithm,
                 path.controller.element_id,
-                path.controller.description,
+                _decision_rule_description(context),
             )
         )
     unique = tuple(dict.fromkeys(candidates))
