@@ -22,7 +22,10 @@ from asago_scenario_generator.model_profiles import (
 from asago_scenario_generator.stpa.infra.provider_record import (
     ProviderCallSession,
 )
-from asago_scenario_generator.stpa.infra.transport_retry import retry_once
+from asago_scenario_generator.stpa.infra.transport_retry import (
+    note_service_tier_fallback,
+    retry_once,
+)
 from asago_scenario_generator.request_schema import (
     find_unions,
     find_xgrammar_rejected_keywords,
@@ -760,6 +763,7 @@ class LLMClient:
                 **extra_kwargs,
                 "service_tier": self.service_tier_fallback,
             }
+            note_service_tier_fallback()
             response, content = self._request_completion(
                 messages,
                 response_format,

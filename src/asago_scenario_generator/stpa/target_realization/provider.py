@@ -36,6 +36,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     CallOutcome,
     CorrectionPolicy,
     call_with_policy,
+    is_provider_failure,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.ica_enumeration import (
@@ -499,14 +500,17 @@ class TargetDerivedICALlmFinder:
         verifier request, as before.
         """
         draft, diagnostics = self._draft(request)
-        decisions = (
-            self._decisions(request, draft) if draft.findings or not diagnostics else {}
+        decisions, undecided_detail = (
+            self._decisions(request, draft)
+            if draft.findings or not diagnostics
+            else ({}, _OMITTED_AFTER_RETRY)
         )
         findings = _compile_derived_findings(
             draft,
             decisions,
             request.target_derived_ica_slots,
             request.target_operation_context,
+            undecided_detail=undecided_detail,
         )
         return TargetDerivedICAProviderResponse(
             findings=findings
@@ -600,27 +604,34 @@ class TargetDerivedICALlmFinder:
         self,
         request: TargetDerivedICARequest,
         draft: TargetDerivedICADraftResponse,
-    ) -> dict[str, TargetDerivedICAVerificationItem]:
+    ) -> tuple[dict[str, TargetDerivedICAVerificationItem], str]:
         """Collect one verifier decision per draft finding.
 
-        A failed call or an omitted finding is a technical gap, not a
+        A failed reply or an omitted finding is a technical gap, not a
         semantic rejection, so the omitted findings get one more verifier
-        call. Findings still undecided after it stay unverified.
+        call. A provider or transport failure gets none: the client already
+        made the one retry it earns. Findings still undecided stay unverified;
+        the returned detail says what happened to them: the first call failed
+        in the provider, the retry did, or the retry omitted them too.
         """
-        decisions = _verification_decisions(self._verify(request, draft))
+        response, provider_failed = self._verify(request, draft)
+        decisions = _verification_decisions(response)
         _require_known_decision_ids(decisions, draft.findings)
+        if provider_failed:
+            return decisions, _VERIFIER_PROVIDER_FAILURE
         omitted = tuple(item for item in draft.findings if item.ica_id not in decisions)
         if not omitted:
-            return decisions
-        retry = _verification_decisions(
-            self._verify(
-                request,
-                TargetDerivedICADraftResponse(findings=omitted),
-                step="verify_target_derived_icas_retry",
-            )
+            return decisions, _OMITTED_AFTER_RETRY
+        retry, retry_failed = self._verify(
+            request,
+            TargetDerivedICADraftResponse(findings=omitted),
+            step="verify_target_derived_icas_retry",
         )
+        retry = _verification_decisions(retry)
         _require_known_decision_ids(retry, omitted)
-        return {**decisions, **retry}
+        return {**decisions, **retry}, (
+            _RETRY_PROVIDER_FAILURE if retry_failed else _OMITTED_AFTER_RETRY
+        )
 
     def _verify(
         self,
@@ -628,7 +639,9 @@ class TargetDerivedICALlmFinder:
         draft: TargetDerivedICADraftResponse,
         *,
         step: str = "verify_target_derived_icas",
-    ) -> TargetDerivedICAVerificationResponse:
+    ) -> tuple[TargetDerivedICAVerificationResponse, bool]:
+        """Return the verifier's response, empty when the call failed, and
+        whether it failed in the provider or transport."""
         system_prompt, user_prompt = self._derived_verification_prompts(request, draft)
         outcome = call_with_policy(
             llm_client=self._client,
@@ -643,8 +656,11 @@ class TargetDerivedICALlmFinder:
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
         )
         if outcome.error is not None or outcome.value is None:
-            return TargetDerivedICAVerificationResponse()
-        return outcome.value
+            return (
+                TargetDerivedICAVerificationResponse(),
+                is_provider_failure(outcome.failure),
+            )
+        return outcome.value, False
 
     def _derived_verification_prompts(
         self,
@@ -1120,11 +1136,24 @@ def _verification_decisions(
     return decisions
 
 
+_OMITTED_AFTER_RETRY = "independent verifier omitted this finding, including on retry"
+_VERIFIER_PROVIDER_FAILURE = (
+    "independent verifier call ended in a provider or transport failure; "
+    "it is not retried"
+)
+_RETRY_PROVIDER_FAILURE = (
+    "independent verifier omitted this finding; its retry ended in a provider "
+    "or transport failure, and no further retry follows"
+)
+
+
 def _compile_derived_findings(
     draft: TargetDerivedICADraftResponse,
     decisions: Mapping[str, TargetDerivedICAVerificationItem],
     slots: Sequence[Any],
     operation_context: Sequence[Any] = (),
+    *,
+    undecided_detail: str = _OMITTED_AFTER_RETRY,
 ) -> tuple[TargetDerivedICAFinding, ...]:
     slot_categories = {item.slot_id: item.uca_type for item in slots}
     slot_actions = {item.slot_id: item.control_action for item in slots}
@@ -1135,6 +1164,7 @@ def _compile_derived_findings(
             decisions.get(item.ica_id),
             slot_categories.get(item.slot_id),
             has_operation_context=(slot_actions.get(item.slot_id) in context_actions),
+            undecided_detail=undecided_detail,
         )
         for item in draft.findings
     )
@@ -1146,11 +1176,13 @@ def _compile_derived_finding(
     slot_uca_type: str | None,
     *,
     has_operation_context: bool = True,
+    undecided_detail: str = _OMITTED_AFTER_RETRY,
 ) -> TargetDerivedICAFinding:
     verification = _finding_verification(
         decision,
         slot_uca_type,
         has_operation_context=has_operation_context,
+        undecided_detail=undecided_detail,
     )
     return TargetDerivedICAFinding(
         **item.model_dump(mode="python"),
@@ -1163,11 +1195,12 @@ def _finding_verification(
     slot_uca_type: str | None = None,
     *,
     has_operation_context: bool = True,
+    undecided_detail: str = _OMITTED_AFTER_RETRY,
 ) -> TargetRealizationVerification:
     if decision is None:
         return TargetRealizationVerification(
             status="unverified",
-            detail="independent verifier omitted this finding, including on retry",
+            detail=undecided_detail,
         )
 
     semantic_decision = _semantic_verification_decision(decision, slot_uca_type)

@@ -178,9 +178,7 @@ def test_saved_klarna_counterexamples_keep_their_action_and_independent_classifi
     )
     results = adapter.verify_ica_hazards(
         requests,
-        correction_feedback={requests[0].ica_id: "Prior rejected label"}
-        if corrected
-        else None,
+        correction=corrected,
     )
     assert client.calls == 1
     assert {result.ica_id: result.verdict for result in results} == {

@@ -8,7 +8,8 @@ parse or validate an answer are never retried.  The SDK client keeps
 
 Both attempts reach ``provider-calls.jsonl`` (see ``provider_record``), and
 every active :func:`count_transport_retries` scope counts the retry, so call
-tallies include it.
+tallies include it.  The same scopes count the client's service-tier fallback
+request (see ``llm``), which follows an HTTP 429 on the configured tier.
 """
 
 from __future__ import annotations
@@ -58,9 +59,14 @@ def retry_once(send: Callable[[], _T]) -> _T:
 
 @dataclass
 class TransportRetryCount:
-    """The transport retries made inside one :func:`count_transport_retries` scope."""
+    """The client's re-sends inside one :func:`count_transport_retries` scope.
+
+    ``count`` is the transport retries; ``fallbacks`` is the service-tier
+    fallback requests.
+    """
 
     count: int = 0
+    fallbacks: int = 0
 
 
 _COUNTS: ContextVar[tuple[TransportRetryCount, ...]] = ContextVar(
@@ -83,3 +89,9 @@ def note_transport_retry() -> None:
     """Add one retry to every active counting scope."""
     for scope in _COUNTS.get():
         scope.count += 1
+
+
+def note_service_tier_fallback() -> None:
+    """Add one service-tier fallback request to every active counting scope."""
+    for scope in _COUNTS.get():
+        scope.fallbacks += 1

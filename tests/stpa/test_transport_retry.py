@@ -135,6 +135,54 @@ def test_the_service_tier_fallback_keeps_its_own_rule() -> None:
     assert [r.get("service_tier") for r in provider.requests] == ["flex", "default"]
 
 
+def _tiered(*fallback_failures: BaseException) -> _Provider:
+    """Refuse the flex tier with a 429; fail the fallback tier as given, then answer."""
+    pending = list(fallback_failures)
+
+    def respond(**kwargs: Any) -> ChatCompletion:
+        if kwargs.get("service_tier") == "flex":
+            raise _status_error(429)
+        if pending:
+            raise pending.pop(0)
+        return _answer()
+
+    return _Provider(respond)
+
+
+def _tiered_client(provider: _Provider) -> Any:
+    return _client(provider, service_tier="flex", service_tier_fallback="default")
+
+
+def test_the_service_tier_fallback_counts_as_a_call(tmp_path: Path) -> None:
+    provider = _tiered()
+
+    outcome = _call(_tiered_client(provider), tmp_path)
+
+    assert outcome.error is None
+    assert len(provider.requests) == 2
+    assert outcome.calls == 2
+
+
+def test_the_fallback_and_its_transport_retry_both_count(tmp_path: Path) -> None:
+    provider = _tiered(_status_error(502))
+
+    outcome = _call(_tiered_client(provider), tmp_path)
+
+    assert outcome.error is None
+    assert len(provider.requests) == 3
+    assert outcome.calls == 3
+
+
+def test_a_failed_fallback_still_counts_as_a_call(tmp_path: Path) -> None:
+    provider = _tiered(_status_error(429))
+
+    outcome = _call(_tiered_client(provider), tmp_path)
+
+    assert outcome.error is not None
+    assert len(provider.requests) == 2
+    assert outcome.calls == 2
+
+
 def test_both_attempts_are_recorded_and_the_retry_names_the_failure(
     tmp_path: Path,
 ) -> None:

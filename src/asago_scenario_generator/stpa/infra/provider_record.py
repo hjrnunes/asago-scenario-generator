@@ -20,7 +20,7 @@ Record format (one JSON object per line of ``provider-calls.jsonl``)::
       "request_sha256": "...",
       "outcome": "response" | "error",
       "response": {"id", "model", "finish_reason", "usage", "body"} | null,
-      "error": {"type", "message", "status_code",
+      "error": {"type", "message", "status_code", "provider_failure",
                 "rejection_sha256"} | null,     # the digest on an HTTP 400 only
       "local_rejection": {"type", "message"} | null,
       "timestamp": "...", "duration_ms": 123,
@@ -46,6 +46,14 @@ redaction and truncation, or ``null`` when that text names a size limit.  The
 text itself is recorded only as the redacted ``message``.  A replay records the
 value its recording holds, and an error recorded before the key existed
 replays without it.
+
+The error's ``provider_failure`` records whether the live failure was a
+provider or transport failure (see :func:`is_provider_failure`), not an
+answer that could not be read.  A replay raises the rebuilt error with that
+category, so callers decide on a re-ask as the live run did.  An error
+recorded before the key existed is classified by its recorded type.  A
+malformed response body the SDK could not decode replays as a
+``json.JSONDecodeError``.
 
 The request holds only per-call arguments.  The endpoint, credential, and
 connection headers belong to the SDK client, never to a request, and the
@@ -90,6 +98,8 @@ SIZE_LIMIT_TEXT = re.compile(
 )
 # The error record key of an HTTP 400's rejection digest.
 REJECTION_FIELD = "rejection_sha256"
+# The error record key of whether the live error was a provider failure.
+PROVIDER_FAILURE_FIELD = "provider_failure"
 # The attribute a replayed HTTP 400 keeps its recorded rejection digest in,
 # and its values for a live error and for a record without the key.
 _REPLAYED_REJECTION = "replayed_rejection_sha256"
@@ -119,6 +129,56 @@ class ReplayedProviderError(RuntimeError):
         super().__init__(message)
         self.recorded_type = error_type
         self.status_code = status_code
+
+
+class ReplayedJSONDecodeError(json.JSONDecodeError):
+    """A recorded undecodable response body, raised again during replay."""
+
+    def __init__(self, message: str) -> None:
+        super().__init__(message, "", 0)
+        self.args = (message,)
+        self.recorded_type = "JSONDecodeError"
+
+
+# Set on a replayed error: the provider-failure category the live error had.
+_PROVIDER_FAILURE = "_asago_provider_failure"
+
+
+def _provider_failure_types() -> tuple[type[BaseException], ...]:
+    import openai
+
+    return (
+        openai.APIConnectionError,
+        openai.APIStatusError,
+        TimeoutError,
+        ConnectionError,
+    )
+
+
+def is_provider_failure(error: BaseException | None) -> bool:
+    """Tell whether *error* is a provider or transport failure, not a bad reply.
+
+    These are the errors raised when no usable reply arrived: a timeout, any
+    HTTP status error (a 4xx, or a 5xx the transport retry did not clear), or
+    a connection error, from the SDK or as a built-in exception.  A replayed
+    error carries the category its live error was recorded with.
+    """
+    if error is None:
+        return False
+    recorded = getattr(error, _PROVIDER_FAILURE, None)
+    if isinstance(recorded, bool):
+        return recorded
+    return isinstance(error, _provider_failure_types())
+
+
+def _named_provider_failure(name: str) -> bool:
+    """Classify a recorded error by its class name, for a record with no category."""
+    import openai
+
+    candidate = getattr(openai, name, None) or _BUILTIN_TRANSPORT_ERRORS.get(name)
+    return isinstance(candidate, type) and issubclass(
+        candidate, _provider_failure_types()
+    )
 
 
 class ReplayIncompleteError(RuntimeError):
@@ -388,6 +448,12 @@ def _rebuild_error(error: Mapping[str, Any]) -> BaseException:
         rebuilt = None
     if rebuilt is None:
         rebuilt = ReplayedProviderError(name, message, status_code)
+    category = error.get(PROVIDER_FAILURE_FIELD)
+    setattr(
+        rebuilt,
+        _PROVIDER_FAILURE,
+        category if isinstance(category, bool) else _named_provider_failure(name),
+    )
     if status_code == 400:
         setattr(rebuilt, _REPLAYED_REJECTION, error.get(REJECTION_FIELD, _NOT_RECORDED))
     return rebuilt
@@ -418,7 +484,9 @@ def _rebuild_openai_error(
 def _rebuild_builtin_error(
     name: str, message: str, status_code: Any
 ) -> BaseException | None:
-    """Rebuild a built-in transport error that round-trips its message exactly."""
+    """Rebuild a built-in error that round-trips its message exactly."""
+    if name == "JSONDecodeError" and status_code is None:
+        return ReplayedJSONDecodeError(message)
     candidate = _BUILTIN_TRANSPORT_ERRORS.get(name)
     if candidate is None or status_code is not None:
         return None
@@ -714,7 +782,10 @@ class ProviderCallSession:
         try:
             response = self._dispatch(attempt, send)
         except Exception as error:
-            attempt.error = _error_record(error)
+            attempt.error = {
+                **_error_record(error),
+                PROVIDER_FAILURE_FIELD: is_provider_failure(error),
+            }
             raise
         else:
             attempt.response = _response_record(response)

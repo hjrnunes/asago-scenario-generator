@@ -40,6 +40,7 @@ from asago_scenario_generator.stpa.infra.llm import LLMClient
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
+    is_provider_failure,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.infra.yaml_io import write_yaml
@@ -165,9 +166,10 @@ def classify_risk_actionability(
     """Classify every card's scope and persist the record.
 
     Cards are sent in batches of at most :data:`MAX_CARDS_PER_CALL`.  A batch
-    whose call fails or omits cards receives one retry for its missing cards;
-    cards still missing stay actionable (``source: fallback``).  The call
-    never raises: a failed call is recorded as a warning.
+    whose reply fails or omits cards receives one retry for its missing cards;
+    a provider or transport failure receives none.  Cards still missing stay
+    actionable (``source: fallback``).  The call never raises: a failed call
+    is recorded as a warning.
     """
     cards = list(risk_cards)
     if not cards:
@@ -214,15 +216,17 @@ def _classify_with_retry(
 ) -> int:
     """Classify *batch*, retrying its missing cards once.
 
-    Return the number of requests sent, JSON-decode retries included and
-    requests the prompt preflight blocked excluded.
+    A provider or transport failure ends the batch without the retry: the
+    client already made the one retry such a failure earns.  Return the
+    number of requests sent, JSON-decode retries included and requests the
+    prompt preflight blocked excluded.
     """
     call_count = 0
     for step in (STEP, STEP_RETRY):
         pending = [card for card in batch if card.risk_id not in decided]
         if not pending:
             break
-        decisions, error, sent = _classify_batch(
+        decisions, error, sent, provider_failed = _classify_batch(
             llm_client=llm_client,
             system_prompt=system_prompt,
             user_prompt=template_loader.render_prompt(
@@ -238,6 +242,8 @@ def _classify_with_retry(
         call_count += sent
         if error is not None:
             warnings.append(f"{step}: {error}")
+            if provider_failed:
+                break
             continue
         _accept_requested_decisions(
             decisions, pending, decided=decided, warnings=warnings, step=step
@@ -367,8 +373,9 @@ def _classify_batch(
     run_dir: Path,
     temperature: float,
     step: str,
-) -> tuple[list[RiskActionabilityDecision], str | None, int]:
-    """Return the decisions, the error, and the number of requests sent."""
+) -> tuple[list[RiskActionabilityDecision], str | None, int, bool]:
+    """Return the decisions, the error, the number of requests sent, and
+    whether the call ended in a provider or transport failure."""
     outcome = call_with_policy(
         llm_client=llm_client,
         system_prompt=system_prompt,
@@ -382,8 +389,13 @@ def _classify_batch(
         max_completion_tokens=MAX_COMPLETION_TOKENS,
     )
     if outcome.error is not None or outcome.value is None:
-        return [], outcome.error or "no response", outcome.calls
-    return list(outcome.value.decisions), None, outcome.calls
+        return (
+            [],
+            outcome.error or "no response",
+            outcome.calls,
+            is_provider_failure(outcome.failure),
+        )
+    return list(outcome.value.decisions), None, outcome.calls, False
 
 
 def _record(

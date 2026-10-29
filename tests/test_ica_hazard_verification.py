@@ -304,7 +304,7 @@ def test_verification_batches_are_isolated_by_responsibility() -> None:
         def __init__(self) -> None:
             self.calls: list[tuple[str, ...]] = []
 
-        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+        def verify_ica_hazards(self, requests, *, correction=False):
             ids = tuple(request.responsibility_id for request in requests)
             self.calls.append(ids)
             if ids == ("RESP-1", "RESP-1"):
@@ -338,14 +338,14 @@ class _CorrectionFake:
     def __init__(self) -> None:
         self.calls: list[bool] = []
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
-        self.calls.append(bool(correction_feedback))
+    def verify_ica_hazards(self, requests, *, correction=False):
+        self.calls.append(bool(correction))
         return [
             {
                 "ica_id": request.ica_id,
                 "verdict": (
                     "supported"
-                    if correction_feedback or request.ica_id.endswith(":2")
+                    if correction or request.ica_id.endswith(":2")
                     else "insufficient_evidence"
                 ),
                 "rationale": "The supplied STPA path is coherent.",
@@ -389,11 +389,9 @@ class _SendingCorrectionFake(_CorrectionFake):
         super().__init__()
         self.run_dir = run_dir
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
-        dispatch_requests(self.run_dir, 2 if correction_feedback else 1)
-        return super().verify_ica_hazards(
-            requests, correction_feedback=correction_feedback
-        )
+    def verify_ica_hazards(self, requests, *, correction=False):
+        dispatch_requests(self.run_dir, 2 if correction else 1)
+        return super().verify_ica_hazards(requests, correction=correction)
 
     def correct_ica_hazard(self, request, verdict):
         dispatch_requests(self.run_dir, 1)
@@ -461,7 +459,7 @@ class _ExhaustedFake:
     def __init__(self) -> None:
         self.calls = 0
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
+    def verify_ica_hazards(self, requests, *, correction=False):
         self.calls += 1
         return [
             {
@@ -531,7 +529,7 @@ def test_incomplete_lineage_excludes_only_unprojectable_ica() -> None:
     enumeration = enumeration.model_copy(update={"slots": [slot]})
 
     class SupportsValidSibling:
-        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+        def verify_ica_hazards(self, requests, *, correction=False):
             return [
                 {
                     "ica_id": request.ica_id,
@@ -561,9 +559,9 @@ class _TerminalCorrectionFake:
         self.disposition = disposition
         self.verification_calls = 0
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
+    def verify_ica_hazards(self, requests, *, correction=False):
         self.verification_calls += 1
-        assert correction_feedback is None
+        assert not correction
         return [
             {
                 "ica_id": request.ica_id,
@@ -625,9 +623,9 @@ class _SecondVerificationFailureFake:
         self.omit_verdict = omit_verdict
         self.verification_calls = 0
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
+    def verify_ica_hazards(self, requests, *, correction=False):
         self.verification_calls += 1
-        if correction_feedback:
+        if correction:
             if self.omit_verdict:
                 return []
             raise RuntimeError("second verifier unavailable")
@@ -721,12 +719,12 @@ class _ScriptedCorrectionFake:
         self.retry_flags: list[bool] = []
         self.verification_calls = 0
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
+    def verify_ica_hazards(self, requests, *, correction=False):
         self.verification_calls += 1
         return [
             {
                 "ica_id": request.ica_id,
-                "verdict": "supported" if correction_feedback else "contradictory",
+                "verdict": "supported" if correction else "contradictory",
                 "rationale": "The supplied STPA path is judged as scripted.",
             }
             for request in requests
@@ -1009,3 +1007,65 @@ def test_coordination_slot_with_unknown_source_is_rejected() -> None:
         build_ica_hazard_verification_request(
             slot.icas[0], slot, loss_analysis, control_structure
         )
+
+
+def test_reverification_sends_the_initial_prompt_under_the_correction_step(
+    tmp_path,
+) -> None:
+    """Re-verification flags its step only: no first-verdict text reaches it."""
+    from asago_scenario_generator.stpa.infra.llm import LLMResult
+    from asago_scenario_generator.stpa.obligation_aware.contracts import (
+        AnalysisControls,
+    )
+    from asago_scenario_generator.stpa.obligation_aware.provider import (
+        ObligationAwareLLMAdapter,
+    )
+    from tests.helpers.calls_log import read_calls_jsonl
+
+    class Client:
+        model = "reverification-test"
+
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def complete(self, **kwargs):
+            self.prompts.append(kwargs["user_prompt"])
+            return LLMResult(
+                content={
+                    "verdicts": [
+                        {
+                            "review_ref": "review-1",
+                            "action_state": "absent",
+                            "hazard_path": "supported",
+                            "rationale": "The hazard path is supported.",
+                        }
+                    ]
+                },
+                prompt_tokens=1,
+                completion_tokens=1,
+                duration_ms=1,
+                system_prompt=kwargs["system_prompt"],
+                user_prompt=kwargs["user_prompt"],
+            )
+
+    client = Client()
+    adapter = ObligationAwareLLMAdapter(
+        client,
+        run_dir=tmp_path,
+        controls=AnalysisControls(
+            model_profile="offline",
+            model_name=client.model,
+            temperature=0.0,
+            deadline_seconds=30.0,
+        ),
+    )
+    request = _request()
+
+    adapter.verify_ica_hazards((request,))
+    adapter.verify_ica_hazards((request,), correction=True)
+
+    assert client.prompts[0] == client.prompts[1]
+    assert [entry["step"] for entry in read_calls_jsonl(tmp_path)] == [
+        "initial",
+        "correction",
+    ]

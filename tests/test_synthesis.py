@@ -1585,25 +1585,23 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
                 filled_slots=tuple(filled),
             )
 
-        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+        def verify_ica_hazards(self, requests, *, correction=False):
             self.stage_provider_ids.append(id(self))
             requests = tuple(requests)
             self.verification_calls.append(
-                (tuple(request.ica_id for request in requests), correction_feedback)
+                (tuple(request.ica_id for request in requests), correction)
             )
             return tuple(
                 {
                     "ica_id": request.ica_id,
-                    "verdict": (
-                        "supported" if correction_feedback else "insufficient_evidence"
-                    ),
+                    "verdict": ("supported" if correction else "insufficient_evidence"),
                     "rationale": "The typed STPA path is coherent after one correction.",
                     **(
                         {
                             "absence_loss_ids": (request.losses[0].loss_id,),
                             "absence_consequence": "The unsafe request is accepted.",
                         }
-                        if correction_feedback
+                        if correction
                         else {}
                     ),
                 }
@@ -1651,8 +1649,8 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
     assert result.accounting.summary.generation_failed == 1
     assert len(provider.verification_calls) == 2
     assert provider.verification_calls[0][0] == provider.verification_calls[1][0]
-    assert provider.verification_calls[0][1] is None
-    assert provider.verification_calls[1][1]
+    assert provider.verification_calls[0][1] is False
+    assert provider.verification_calls[1][1] is True
     assert result.manifest["obligation_resolution_funnel"] == {
         "all_plan_rows": 1,
         "governance_only": 0,

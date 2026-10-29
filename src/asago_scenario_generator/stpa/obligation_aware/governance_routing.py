@@ -27,6 +27,7 @@ from asago_scenario_generator.models.obligation_consideration import (
     ObligationRoute,
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    ProviderCallError,
     RequestTally,
     count_requests,
 )
@@ -247,13 +248,17 @@ def _attempt(
     dict[str, GovernancePlacement],
     dict[str, str],
 ]:
-    """Make one call; a malformed answer fails every risk, a budget error escapes."""
+    """Make one call; a malformed answer fails every risk.
+
+    A budget error, or a provider or transport failure, escapes: neither
+    earns the re-ask.
+    """
     try:
         response = call_with_feedback(adapter.route_governance, request, feedback)
         if not isinstance(response, GovernanceRoutingResponse):
             raise TypeError("governance adapter returned an unsupported response")
         accepted, errors = _check_response(response, request, covers)
-    except PromptBudgetExceeded:
+    except (PromptBudgetExceeded, ProviderCallError):
         raise
     except (TypeError, ValueError) as exc:
         return None, {}, dict.fromkeys(_risk_ids(request), _clip(exc))
@@ -275,7 +280,7 @@ def _run_batch(
                 response, accepted, errors = _attempt(
                     adapter, request, covers, feedback
                 )
-        except PromptBudgetExceeded as exc:
+        except (PromptBudgetExceeded, ProviderCallError) as exc:
             pending = [
                 item for item in _risk_ids(request) if item not in outcome.accepted
             ]
