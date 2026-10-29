@@ -76,9 +76,9 @@ with unit tests under `tests/` and prompt text with rows in
   limit.
 - Follow the task's model, thinking, token, request, and target limits. Record
   actual controls and spend. Stop at the specified boundary without hidden
-  retries. Every re-ask is its own request, recorded in
-  `provider-calls.jsonl`. All of them except the service-tier fallback also
-  count in the step's call count. The re-asks are bounded:
+  retries. Every re-ask is recorded in `provider-calls.jsonl`. A step's call
+  count can leave out the client's re-asks (see the catalogue below), so take
+  spend from that file. The re-asks are bounded:
   - The client retries a transport error (HTTP 5xx, or a connection error that
     is not a timeout) once. With a profile `service_tier_fallback`, it re-sends
     an HTTP 429 once on the fallback tier.

@@ -1,23 +1,42 @@
 # Model re-asks
 
-Every request the producer sends after a reply was refused, or after the
-request itself failed, is listed here. Each one is a separate request
-through the model client. It is logged as its own attempt in `calls.jsonl`
-and written to `provider-calls.jsonl`, which `generate` always records. A
-replay-fill run counts it against `--max-live-requests`. Every re-ask except
-the service-tier fallback is also counted in the call count of its step, which
-comes from `CallOutcome.calls`. Nothing else re-sends a request. When you add,
-remove, or change a re-ask, update this page and the summary in `CLAUDE.md`.
+This page lists every request the producer sends after a reply was refused,
+or after the request itself failed. Nothing else re-sends a request. When
+you add, remove, or change a re-ask, update this page and the summary in
+`CLAUDE.md`.
+
+The page counts at two levels:
+
+- An **attempt** is one `call_with_policy` request and one `calls.jsonl`
+  entry. Every application-level re-ask below is a new attempt.
+- A **provider request** is one record in `provider-calls.jsonl`, which
+  `generate` always records. One attempt holds one provider request, plus
+  any the client re-sends inside it. The client's re-asks get no
+  `calls.jsonl` entry of their own. They share the attempt's entry, which
+  names each of its records under `provider_requests`.
+
+A replay-fill run counts provider requests sent live against
+`--max-live-requests`. Requests it serves from the record do not count.
+
+Step call counts come from `CallOutcome.calls`. That figure counts attempts
+plus transport retries, but not the service-tier fallback. A step that
+counts requests itself can count less. The risk-coverage review reports 1
+request per batch, or 2 after its empty-reply repeat, so transport retries
+never raise its `call_count`.
 
 Paths are relative to `src/asago_scenario_generator/stpa/`. "Max" means the
-most extra requests per unit, on top of the first one.
+most extra attempts per unit, on top of the first one. Each bound below
+leaves out the client's re-asks. Inside every attempt, the client can still
+add a transport retry and a service-tier fallback, and the fallback can take
+its own transport retry. With a fallback configured, one attempt can
+therefore reach 4 provider requests; without one, 2.
 
 ## Client
 
 | Re-ask | Where | Trigger | Sends | Max | If it fails too |
 | --- | --- | --- | --- | --- | --- |
-| Transport retry | `infra/transport_retry.py` `retry_once`; `infra/provider_record.py` `exchange_with_retry` | HTTP 5xx, or a connection error that is not a timeout. Timeouts, every 4xx (429 included) and invalid answers are not retried here. | The same request, after a 1 s pause. Its record names `retry_of`. | 1 per request | The error reaches the step. |
-| Service-tier fallback | `infra/llm.py` `_complete` | HTTP 429 when the profile sets `service_tier` and `service_tier_fallback` | The same request on the fallback tier. `service_tier_fallback_used` goes in the request controls. | 1 per request | The error reaches the step. This re-ask is in `provider-calls.jsonl` but not in `CallOutcome.calls`. |
+| Transport retry | `infra/transport_retry.py` `retry_once`; `infra/provider_record.py` `exchange_with_retry` | HTTP 5xx, or a connection error that is not a timeout. Timeouts, every 4xx (429 included) and invalid answers are not retried here. | The same request, after a 1 s pause. Its record names `retry_of`. A replay re-sends it only when the record holds the retry. | 1 per send | The error reaches the attempt. |
+| Service-tier fallback | `infra/llm.py` `_complete` | HTTP 429 when the profile sets `service_tier` and `service_tier_fallback` | The same request on the fallback tier, which can take its own transport retry. The attempt's request controls set `service_tier_fallback_used`. | 1 per attempt | The error reaches the attempt. The fallback has its own `provider-calls.jsonl` record but is not counted in `CallOutcome.calls`. |
 
 ## The shared correction policy
 
@@ -46,7 +65,7 @@ caller-level re-ask), using `CorrectionPolicy()` for it.
 | Second density revision round | `loss_analysis_gates.py` `_run_density_revision` (`GRAPH_REVISION_ROUNDS = 2`) | The graph from round 1 still fails a density check | A new revision call on that graph with the checks still failing. Checks round 1 introduced are labelled as such. | 1 round, and it has its own correction | `LossAnalysisGateError` |
 | Coverage-review repeat | `system_model/risk_coverage_review.py` `_run_one_review_call` | The reply decodes but carries no row, no invalid row and no failure | The same request | 1 per batch | Its cards are `rows_missing`, and the review is `partial` or `unavailable`. |
 | Actionability JSON repeat | `system_model/risk_actionability.py` `_classify_batch` (`json_retries=1`) | The reply does not decode | The same prompt | 1 per request | The request fails, which leaves its cards pending for the retry step. |
-| Actionability retry step | `risk_actionability.py` `_classify_with_retry` | After the first step, cards are still undecided. The cause can be a failed call, an omitted card, or a decision that contradicts its own action fields. | A freshly rendered prompt that lists only the pending cards | 1 step per batch. With the JSON repeat, a batch sends at most 4 requests. | Each undecided card stays actionable with `source: fallback`. |
+| Actionability retry step | `risk_actionability.py` `_classify_with_retry` | After the first step, cards are still undecided. The cause can be a failed call, an omitted card, or a decision that contradicts its own action fields. | A freshly rendered prompt that lists only the pending cards | 1 step per batch. With the JSON repeat, a batch makes at most 4 attempts. | Each undecided card stays actionable with `source: fallback`. |
 
 ## Stage 1b capability profile
 
@@ -92,16 +111,16 @@ re-ask.
 | Re-ask | Where | Trigger | Sends | Max | If it fails too |
 | --- | --- | --- | --- | --- | --- |
 | BDI correction | `scenario_prod/stage5/generate.py` `_call_bdi_with_bounded_length_retry` | A schema, parser or validator failure. A reply that does not decode gets no correction. | The original prompt, then the repair codes, the error and the prior reply | 1 | It goes to the concise retry or the condition correction below, or the scenario fails. |
-| Concise retry | `generate.py` `_call_bdi_with_bounded_length_retry` | The original reply or its correction stopped at the completion cap | The original prompt, plus an instruction to return only a concise reply, capped at 2,048 tokens. The retry can earn its own correction. | 1, plus its correction | The scenario fails. If the first stop at the cap returned no content, the remaining Stage 5 candidates are also skipped. |
+| Concise retry | `generate.py` `_call_bdi_with_bounded_length_retry` | The original reply or its correction stopped at the completion cap | The original prompt, plus an instruction to return only a concise reply. It requests a 2,048-token cap. When the profile sets `reasoning_effort`, the client raises that cap to the profile's `max_completion_tokens` if that is larger (`model_profiles.py` `reasoning_completion_cap`). The retry can earn its own correction. | 1, plus its correction | The scenario fails. If the first stop at the cap returned no content, the remaining Stage 5 candidates are also skipped. |
 | Condition correction | `generate.py` and `stage5/condition_retry.py` `earns_second_correction` | After the first correction, the discriminating condition still fails, and the draft without it would be `analytical_only` or `failure_call`. It never follows a concise retry. | The original prompt, then the feedback, the error and the second reply | 1 | A condition-less draft is published if code can recover one. Otherwise the scenario fails. |
 | Attack shape | `stage5/shape_step.py` | A schema or rule failure | The original prompt, then the feedback, the error and the prior reply | 1 | The rejected shape is used, or the default shape. |
 | Belief | `stage5/belief_step.py` | A schema or belief failure, or a reply that does not decode | The original prompt, then the feedback, the error and the prior reply | 1 | No beliefs are applied. |
 | Gherkin | `scenario_prod/model_gherkin.py` | A schema or check failure | The original prompt, then the feedback, the error and the prior reply | 1 | The fallback Gherkin is used. |
 | Narration | `scenario_prod/narration.py` | A schema or check failure | The original prompt, then the feedback, the error and the prior reply | 1 | The narration that does not come from the model is kept. |
 
-The BDI call for one scenario sends at most 4 requests. The worst case is a
-reply, a correction that stops at the cap, the concise retry, and the retry's
-correction.
+The BDI call for one scenario makes at most 4 attempts, not counting the
+client's re-asks. The worst case is a reply, a correction that stops at the
+cap, the concise retry, and the retry's correction.
 
 ## Target realization
 
