@@ -30,13 +30,18 @@ An ICA is routed only when all of these hold:
 4. It is about the user's intent, by one of two bases, the structural one
    first:
 
-   - ``reason_variable``: that variable's description names an intent and
-     no classifier output ("the classified intent produced by the
-     classifier" is the action's output, not the user's intent) and is
-     about request and intent alignment alone: a description that also
-     names an amount, value or numeric range, a limit or bound, a currency,
-     eligibility, a status or lifecycle, timing, ownership, the session,
-     the actor or identity keeps the ICA on Stage 5; its value,
+   - ``reason_variable``: that variable's whole description is one of
+     ``_ALIGNMENT_DESCRIPTION_FORMS``, which affirmatively state that the
+     request and the principal's intent align ("The alignment between the
+     requested operation and the customer's authorized context/intent.",
+     "Whether the requested operation matches the customer's authorized
+     intent."). A description about who is authorized, about a
+     classification, or about anything beyond the alignment keeps the ICA
+     on Stage 5. As an extra layer, a description that names a classifier
+     output or another ground (an amount, value or numeric range, a limit
+     or bound, a currency, eligibility, a status or lifecycle, timing,
+     ownership, the session, the actor or identity) never qualifies. Its
+     value,
      as a whole, is one of ``_INTENT_ONLY_VALUE_FORMS``, a sole failed or
      unknown intent ("does not match authorized intent", "not aligned with
      authorized intent", "intent unknown", "unauthorized transaction"), so
@@ -259,6 +264,26 @@ _INTENT_ONLY_VALUE_FORMS: tuple[re.Pattern[str], ...] = (
         r"(?:transaction|request|operation|action|payment|refund)"
     ),
 )
+# The descriptions a cited intent variable may have: as a whole, they state
+# that the request and the principal's intent align. "context/intent" is
+# accepted in that slash form only (``_SLASHED_CONTEXT_INTENT``), never
+# "context" alone.
+_ALIGNMENT_VERBS = (
+    r"(?:matches|aligns with|is aligned with|is consistent with"
+    r"|corresponds to|agrees with)"
+)
+_ALIGNMENT_DESCRIPTION_FORMS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(form)
+    for form in (
+        # "The alignment between the requested operation and the customer's
+        # authorized context/intent.", in either order
+        r"(?:the )?(?:alignment|match|consistency|agreement|correspondence) between "
+        rf"(?:{_REQUEST} and {_INTENT_PHRASE}|{_INTENT_PHRASE} and {_REQUEST})",
+        # "Whether the requested operation matches the customer's authorized intent."
+        rf"(?:whether )?{_REQUEST} {_ALIGNMENT_VERBS} {_INTENT_PHRASE}",
+    )
+)
+_SLASHED_CONTEXT_INTENT = re.compile(r"\bcontext\s*/\s*intent\b", re.IGNORECASE)
 _FLAG_TERMS = dict(reason_family._KIND_TERMS)["flag"]
 _STATE_TERMS = dict(reason_family._KIND_TERMS)["state"]
 
@@ -413,21 +438,31 @@ def _is_failed_user_intent(
 ) -> bool:
     """Return whether the reason states only a failed value of a user-intent variable.
 
-    The description names an intent, no classifier output and no other
-    ground (``_describes_another_ground``), the whole value is a sole failed
-    or unknown intent, and the reason adds only words naming the request.
+    The whole description states request-to-intent alignment
+    (``_states_alignment``), the whole value is a sole failed or unknown
+    intent, and the reason adds only words naming the request.
     """
-    description = reason_terms(variable.description or "")
-    described = frozenset(description)
-    if not described & _INTENT_NOUNS or described & _CLASSIFIER_TERMS:
-        return False
-    if _describes_another_ground(description):
+    if not _states_alignment(variable.description or ""):
         return False
     value = reason_terms(variable.value)
     if not _matches_any(value, _INTENT_ONLY_VALUE_FORMS):
         return False
     frame = _without_run(words, value)
     return frame is not None and frozenset(frame) <= _FRAME_TERMS
+
+
+def _states_alignment(description: str) -> bool:
+    """Return whether the whole description states request-to-intent alignment.
+
+    The description must be one of ``_ALIGNMENT_DESCRIPTION_FORMS``, with a
+    leading "The" or "Whether" and trailing punctuation allowed. As an extra
+    layer it must name no classifier output and no other ground
+    (``_describes_another_ground``).
+    """
+    words = reason_terms(_SLASHED_CONTEXT_INTENT.sub("intent", description))
+    if frozenset(words) & _CLASSIFIER_TERMS or _describes_another_ground(words):
+        return False
+    return _matches_any(words, _ALIGNMENT_DESCRIPTION_FORMS)
 
 
 def _describes_another_ground(description: Sequence[str]) -> bool:

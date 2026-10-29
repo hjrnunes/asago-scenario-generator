@@ -1115,14 +1115,26 @@ hold:
   alone (`reason_variable`). It must:
   - carry no target evidence (`state:`, `session:`, `argument:`,
     `operation:`);
-  - have a description that names an intent but no classifier output ("the
-    classified intent produced by the classifier" is the action's output,
-    not the user's intent) and is about request and intent alignment alone.
-    A description that also names an amount, value or numeric range, a
-    limit or bound, a currency, eligibility, a status or lifecycle, timing,
-    ownership, the session, the actor or identity keeps the ICA on Stage 5
-    ("whether the payment amount specified by the user's intent is between 0
-    and 100");
+  - have a description that, as a whole, affirmatively states that the
+    request and the principal's intent align. Two forms qualify:
+    - the alignment, match or consistency between the request and the
+      principal's (authorized) intent, in either order ("The alignment
+      between the requested operation and the customer's authorized
+      context/intent.");
+    - whether the request matches, aligns with or is consistent with that
+      intent ("Whether the requested operation matches the customer's
+      authorized intent.").
+
+    "context/intent" is accepted only in that slash form, never "context"
+    alone. Any other description keeps the ICA on Stage 5: one about who is
+    authorized ("Whether the user is authorized to perform the transaction
+    described by their intent."), about a classification ("the classified
+    intent produced by the classifier"), or about anything beyond the
+    alignment. As an extra layer, a description that names another ground
+    never qualifies: an amount, value or numeric range, a limit or bound, a
+    currency, eligibility, a status or lifecycle, timing, ownership, the
+    session, the actor or identity ("whether the payment amount specified by
+    the user's intent is between 0 and 100");
   - have a value that is, as a whole, a sole failed or unknown intent ("does
     not match authorized intent", "not aligned with authorized intent",
     "intent unknown", "unauthorized transaction"). A value that adds another
