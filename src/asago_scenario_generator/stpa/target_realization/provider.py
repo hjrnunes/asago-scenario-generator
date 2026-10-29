@@ -611,7 +611,8 @@ class TargetDerivedICALlmFinder:
         semantic rejection, so the omitted findings get one more verifier
         call. A provider or transport failure gets none: the client already
         made the one retry it earns. Findings still undecided stay unverified;
-        the returned detail says which of the two happened to them.
+        the returned detail says what happened to them: the first call failed
+        in the provider, the retry did, or the retry omitted them too.
         """
         response, provider_failed = self._verify(request, draft)
         decisions = _verification_decisions(response)
@@ -621,14 +622,16 @@ class TargetDerivedICALlmFinder:
         omitted = tuple(item for item in draft.findings if item.ica_id not in decisions)
         if not omitted:
             return decisions, _OMITTED_AFTER_RETRY
-        retry, _ = self._verify(
+        retry, retry_failed = self._verify(
             request,
             TargetDerivedICADraftResponse(findings=omitted),
             step="verify_target_derived_icas_retry",
         )
         retry = _verification_decisions(retry)
         _require_known_decision_ids(retry, omitted)
-        return {**decisions, **retry}, _OMITTED_AFTER_RETRY
+        return {**decisions, **retry}, (
+            _RETRY_PROVIDER_FAILURE if retry_failed else _OMITTED_AFTER_RETRY
+        )
 
     def _verify(
         self,
@@ -1137,6 +1140,10 @@ _OMITTED_AFTER_RETRY = "independent verifier omitted this finding, including on 
 _VERIFIER_PROVIDER_FAILURE = (
     "independent verifier call ended in a provider or transport failure; "
     "it is not retried"
+)
+_RETRY_PROVIDER_FAILURE = (
+    "independent verifier omitted this finding; its retry ended in a provider "
+    "or transport failure, and no further retry follows"
 )
 
 

@@ -524,3 +524,33 @@ def _drop_provider_failure_keys(path: Path) -> None:
         if record.get("error"):
             record["error"].pop(PROVIDER_FAILURE_FIELD)
     path.write_text("".join(json.dumps(record) + "\n" for record in records))
+
+
+@pytest.mark.parametrize(
+    "make_failure", [_timeout, lambda: _status_error(429)], ids=["timeout", "429"]
+)
+def test_a_provider_failure_on_the_omitted_findings_retry_is_reported(
+    tmp_path: Path, make_failure
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            _payment_draft(
+                "The first payment finding is not provided.",
+                "The second payment finding is not provided.",
+            ),
+            _supported(1),
+            make_failure(),
+        ]
+    )
+
+    response = _find(client, tmp_path)
+
+    assert client.call_count == 3
+    decided, retried = (item.verification for item in response.findings)
+    assert decided.status == "verified"
+    assert retried.status == "unverified"
+    assert "including on retry" not in retried.detail
+    assert "retry" in retried.detail
+    assert "provider or transport failure" in retried.detail
+    assert "no further retry" in retried.detail
