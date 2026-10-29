@@ -82,22 +82,25 @@ test would contradict the ICA's own context; the rules continue without
 ownership and the ICA gets what rules 3-5 give, or no hint.
 
 Reason against row: the ICA's reason wins over a guarding row only when the
-reason itself denies ownership in one of four explicit shapes: a negated
-ownership or role relation, with only determiners and adverbs between
-("does not currently belong to", "is not the host", "not a party"); an owner
-or role noun that is not the principal ("the widget owner is not the
-authenticated user"); a possession verb naming another owner ("belongs to
-another customer", "held by someone other than the session customer"); or a
-record, not an identity or a principal, that does not match or is not the
-session or a principal ("the widget does not match the session user", "the
-request does not match the authenticated customer identity"). Then the guard
-is off and the reason's ownership source deals ``ownership``. Anything else
-leaves the cited row in charge, the safe default: a negated authorization or
-consent beside an ownership word ("not authorized as owner", "without owner
-consent"), a failed authorization ("the actor is unauthorized"), an identity
-check ("the supplied identity does not match the session user"), or another
-principal's act ("edited by someone other than the session user", "another
-user's failed edit cancelled the widget").
+reason itself denies ownership in one of four affirmative shapes, each
+built from an auxiliary and "not" right before the relation (past allowed
+adverbs), a role noun that heads its phrase, and a target phrase headed by
+the principal: a negated relation ("does not currently belong to", "is not
+the host", "not a party", "has no relationship to"); a role noun that is not
+the principal ("the widget owner is not the authenticated user"); a
+possession verb naming another owner ("belongs to another customer", "held
+by someone other than the session customer"); or a record that does not
+match or is not the principal ("the order does not match the authenticated
+customer identity"), whose subject's head is a record noun, generic or named
+by the ICA's row and families, and never a credential. Then the guard is off
+and the reason's ownership source deals ``ownership``. Anything else leaves
+the cited row in charge, the safe default: a role noun modifying another
+noun ("without owner consent", "with no owner authorization"), a negated
+requirement ("does not need to match"), a principal's thing as the target
+("the authenticated customer's consent", "the user's identity"), a
+credential subject ("the password does not match"), a failed authorization
+("the actor is unauthorized"), or another principal's act ("edited by
+someone other than the session user").
 
 The term lists below are the only lexical matching; everything else is exact
 lookup.
@@ -228,10 +231,6 @@ POSSESSION_TERMS = frozenset(
     }
 )
 ROLE_TERMS = frozenset({"guest", "host", "owner", "member", "party"})
-# Ownership and role relations a reason can deny ("does not belong", "is not
-# the host", "not a party"); identity is left out, since a negated identity
-# is a failed check rather than a denied relation.
-DENIABLE_RELATION_TERMS = (OWNERSHIP_TERMS - {"identity", "identities"}) | ROLE_TERMS
 _COPULAS = frozenset({"is", "are"})
 # Words skipped between a failed authorization or comparison word and the
 # principal it is predicated of: linking words and principal modifiers.
@@ -559,7 +558,7 @@ def choose_reason_family(
     words = reason_terms(reason.reason)
     terms = frozenset(words)
     guard = _row_says_session_owns(reason.row, variable) and not (
-        _reason_denies_ownership(words)
+        _reason_denies_ownership(words, _context_record_nouns(reason.row, families))
     )
     guarded = False
 
@@ -761,43 +760,89 @@ def _relation_not_current(words: Sequence[str]) -> bool:
     return False
 
 
-def _reason_denies_ownership(words: Sequence[str]) -> bool:
+def _reason_denies_ownership(
+    words: Sequence[str], record_nouns: frozenset[str] = frozenset()
+) -> bool:
     """Return whether the reason itself denies the principal's ownership.
 
-    Only four explicit shapes deny; anything else leaves the cited row in
-    charge, the safe default:
+    Only four affirmative shapes deny; anything else leaves the cited row in
+    charge, the safe default. A negation counts only when an auxiliary and
+    "not" (past allowed adverbs) stand right before the relation verb or
+    noun, so "does not need to match" negates a requirement. A role noun
+    counts only as the head of its phrase, so "owner authorization" and
+    "host written approval" name no relation. A target is a principal
+    phrase headed by the principal (see ``_principal_target``).
 
-    1. a negated ownership or role relation, with only determiners and
-       adverbs between ("does not belong", "does not currently belong",
-       "is not the host", "not a party", "no relationship");
-    2. an owner or role noun said not to be the principal ("the widget
-       owner is not the authenticated user", "the owner is a different
-       customer");
-    3. a possession verb giving the record another owner ("belongs to
-       another customer", "held by someone other than the session
-       customer"); an action verb ("edited by") is no possession;
-    4. a record, not an identity or a principal, that does not match or is
-       not the session or a principal ("the widget does not match the
-       session user", "the record is other than the authenticated actor's").
+    1. A negated relation: "does not (currently) belong", "is not owned",
+       "is not (actually) the host", "has no relationship".
+    2. A role noun that is not the principal: "the widget owner is not the
+       authenticated user", "the owner is a different customer".
+    3. A possession verb naming another owner: "belongs to another
+       customer", "held by someone other than the session customer".
+    4. A record that does not match, or is not, a principal: "the order
+       does not match the authenticated customer identity". The subject's
+       head noun must be a record noun (``RECORD_NOUNS`` or
+       ``record_nouns``, the collections the ICA's row and families name),
+       never a credential or identity noun.
     """
     return any(
-        shape(words, index)
+        _negated_relation(words, index)
+        or _role_is_not_principal(words, index)
+        or _possessed_by_another(words, index)
+        or _record_does_not_match(words, index, record_nouns)
         for index in range(len(words))
-        for shape in (
-            _negated_relation,
-            _role_is_not_principal,
-            _possessed_by_another,
-            _record_does_not_match,
-        )
     )
 
 
-_DENIAL_NEGATIONS = frozenset({"not", "no", "never", "neither", "nor"})
-_OTHER_PRINCIPAL_TERMS = frozenset({"another", "other", "different"})
-_DETERMINERS = frozenset(
-    {"the", "a", "an", "any", "its", "their", "this", "that", "yet", "longer"}
+# Generic record nouns a record comparison may name as its subject.
+RECORD_NOUNS = frozenset(
+    {
+        "record",
+        "records",
+        "order",
+        "orders",
+        "request",
+        "requests",
+        "reservation",
+        "reservations",
+        "account",
+        "accounts",
+        "plan",
+        "plans",
+        "booking",
+        "bookings",
+        "listing",
+        "listings",
+    }
 )
-# Adverbs that may qualify a negated relation ("does not currently belong").
+# Credential and identity nouns, never a record.
+CREDENTIAL_NOUNS = frozenset(
+    {
+        "password",
+        "passwords",
+        "passcode",
+        "signature",
+        "signatures",
+        "token",
+        "tokens",
+        "credential",
+        "credentials",
+        "pin",
+        "pins",
+        "code",
+        "codes",
+        "key",
+        "keys",
+        "identity",
+        "identities",
+        "id",
+        "ids",
+        "identifier",
+        "identifiers",
+    }
+)
+_DETERMINERS = frozenset({"the", "a", "an", "any", "its", "their", "this", "that"})
+# Adverbs that may stand between "not" and the relation it negates.
 _RELATION_ADVERBS = frozenset(
     {
         "currently",
@@ -808,26 +853,88 @@ _RELATION_ADVERBS = frozenset(
         "ever",
         "even",
         "legitimately",
+        "yet",
     }
 )
-# Nouns an ownership or role word may modify; the phrase then names the
-# consent or check ("without owner consent", "owner verification").
-_QUALIFIED_NOUNS = CONSENT_TERMS | frozenset(
-    {"verification", "verifications", "check", "checks"}
+_AUXILIARIES = frozenset(
+    {
+        "do",
+        "does",
+        "did",
+        "is",
+        "are",
+        "was",
+        "were",
+        "can",
+        "could",
+        "will",
+        "would",
+        "should",
+        "may",
+        "might",
+        "must",
+        "has",
+        "have",
+        "had",
+    }
 )
-_ROLE_NOUNS = frozenset({"owner", "owners", "host", "guest", "member", "party"})
 _BE = frozenset({"is", "are", "was", "were"})
+_HAVE = frozenset({"has", "have", "had"})
+_NOT = frozenset({"not", "never"})
+_RELATION_VERBS = frozenset({"belong", "belongs", "belonged", "own", "owns", "owned"})
+_ROLE_NOUNS = frozenset(
+    {
+        "owner",
+        "owners",
+        "host",
+        "hosts",
+        "guest",
+        "guests",
+        "member",
+        "members",
+        "party",
+        "parties",
+    }
+)
+_DENIABLE_RELATION_NOUNS = frozenset(
+    {"relationship", "relation", "association", "ownership", "membership"}
+)
 _POSSESSION_VERBS = frozenset(
     {"belong", "belongs", "belonged", "belonging", "owned", "held"}
 )
-_SOMEONE = frozenset({"someone", "somebody"})
 _COMPARISON_VERBS = frozenset(
-    {"match", "matches", "matched", "matching", "correspond", "corresponds"}
+    {"match", "matches", "matched", "correspond", "corresponds"}
 )
-_IDENTITY_TERMS = frozenset(
-    {"identity", "identities", "id", "ids", "credential", "credentials"}
+_OTHER_PRINCIPAL_TERMS = frozenset({"another", "other", "different"})
+_SOMEONE = frozenset({"someone", "somebody"})
+_PRINCIPAL_MODIFIERS = frozenset(
+    {"authenticated", "current", "active", "existing", "logged", "signed"}
 )
-_CLAUSE_BREAKS = frozenset({"and", "but", "or", "because", "while", "so"})
+_IDENTIFIER_NOUNS = frozenset({"id", "identity", "identifier"})
+# Words that may follow the head of a phrase; any other word, a noun or an
+# adjective, makes the head word a modifier.
+_PHRASE_ENDS = frozenset(
+    {
+        "of",
+        "to",
+        "for",
+        "in",
+        "on",
+        "at",
+        "with",
+        "and",
+        "or",
+        "but",
+        "nor",
+        "because",
+        "so",
+        "while",
+        "since",
+        "as",
+        "when",
+        "if",
+    }
+)
 
 
 def _word(words: Sequence[str], index: int) -> str | None:
@@ -835,40 +942,60 @@ def _word(words: Sequence[str], index: int) -> str | None:
     return words[index] if 0 <= index < len(words) else None
 
 
-def _skip(words: Sequence[str], index: int, skipped: frozenset[str]) -> int:
-    """Return the first position from ``index`` whose word is not skipped."""
-    while _word(words, index) in skipped:
-        index += 1
-    return index
+def _ends_phrase(words: Sequence[str], index: int) -> bool:
+    """Return whether the phrase ends before ``index``."""
+    word = _word(words, index)
+    return word is None or word in _PHRASE_ENDS
+
+
+def _negated_by(
+    words: Sequence[str],
+    index: int,
+    auxiliaries: frozenset[str],
+    skipped: frozenset[str],
+) -> bool:
+    """Return whether an auxiliary and "not" govern the word at ``index``.
+
+    Only ``skipped`` words may stand between "not" and the word; any other
+    verb ("need to", "appear to") governs it instead.
+    """
+    at = index - 1
+    while _word(words, at) in skipped:
+        at -= 1
+    return _word(words, at) in _NOT and _word(words, at - 1) in auxiliaries
 
 
 def _negated_relation(words: Sequence[str], index: int) -> bool:
-    """Shape 1: a negation governs the ownership or role word at ``index``.
-
-    A possessive ("the owner's consent") or a modified noun ("owner
-    consent") names what the owner has or gives, not the relation.
-    """
-    if words[index] not in DENIABLE_RELATION_TERMS:
-        return False
-    following = _word(words, index + 1)
-    if following == "s" or following in _QUALIFIED_NOUNS:
-        return False
-    before = index - 1
-    while index - before <= _WINDOW and _word(words, before) in (
-        _DETERMINERS | _RELATION_ADVERBS
-    ):
-        before -= 1
-    return index - before <= _WINDOW and _word(words, before) in _DENIAL_NEGATIONS
+    """Shape 1: an auxiliary and a negation govern an ownership relation."""
+    word = words[index]
+    if word in _RELATION_VERBS:
+        return _negated_by(words, index, _AUXILIARIES, _RELATION_ADVERBS)
+    if word in _ROLE_NOUNS:
+        return _ends_phrase(words, index + 1) and _negated_by(
+            words, index, _BE, _RELATION_ADVERBS | _DETERMINERS
+        )
+    if word in _DENIABLE_RELATION_NOUNS:
+        at = index - 1
+        while _word(words, at) in _RELATION_ADVERBS:
+            at -= 1
+        return (
+            _ends_phrase(words, index + 1)
+            and _word(words, at) == "no"
+            and _word(words, at - 1) in _HAVE
+        )
+    return False
 
 
 def _role_is_not_principal(words: Sequence[str], index: int) -> bool:
-    """Shape 2: an owner or role noun, a form of be, a negation, a principal."""
+    """Shape 2: a role noun, a form of be, a negation or another, a principal."""
     if words[index] not in _ROLE_NOUNS or _word(words, index + 1) not in _BE:
         return False
-    at = _skip(words, index + 2, _RELATION_ADVERBS | _DETERMINERS)
-    if _word(words, at) not in _DENIAL_NEGATIONS | _OTHER_PRINCIPAL_TERMS:
-        return False
-    return _principal_after(words, at) is not None
+    at = index + 2
+    negated = _word(words, at) in _NOT
+    if negated:
+        at += 1
+    target, other = _principal_target(words, at)
+    return target and (negated or other)
 
 
 def _possessed_by_another(words: Sequence[str], index: int) -> bool:
@@ -878,55 +1005,105 @@ def _possessed_by_another(words: Sequence[str], index: int) -> bool:
         "by",
     }:
         return False
-    at = _skip(words, index + 2, _DETERMINERS | _SOMEONE)
-    if _word(words, at) not in _OTHER_PRINCIPAL_TERMS:
-        return False
-    if _word(words, at + 1) == "than":
+    at = index + 2
+    while _word(words, at) in _DETERMINERS | _SOMEONE:
         at += 1
-    return _principal_after(words, at) is not None
+    if _word(words, at) == "other" and _word(words, at + 1) == "than":
+        return _principal_target(words, at + 2)[0]
+    target, other = _principal_target(words, at)
+    return target and other
 
 
-def _record_does_not_match(words: Sequence[str], index: int) -> bool:
-    """Shape 4: a record that does not match, or is not, a principal.
-
-    The comparison is a negated "match" or "correspond" ("does not match
-    the session user"), or a form of be followed by "not" or "other than"
-    ("is other than the authenticated actor's"). Its subject, the clause
-    before it, names no identity and no principal, so "the supplied
-    identity does not match" and "the actor is not the session user"
-    compare no record.
-    """
+def _record_does_not_match(
+    words: Sequence[str], index: int, record_nouns: frozenset[str]
+) -> bool:
+    """Shape 4: a record subject, then "does not match" or "is not" a principal."""
     word = words[index]
     if word in _COMPARISON_VERBS:
-        negation = next(
-            (
-                at
-                for at in range(index - 1, max(-1, index - 1 - _WINDOW), -1)
-                if words[at] in _DENIAL_NEGATIONS
-            ),
-            None,
-        )
-        if negation is None:
+        if not _negated_by(words, index, _AUXILIARIES, _RELATION_ADVERBS):
             return False
-        subject_end, compared_from = negation, index
-    elif word in _BE:
-        following = _word(words, index + 1)
-        if following == "not":
-            compared_from = index + 1
-        elif following == "other" and _word(words, index + 2) == "than":
-            compared_from = index + 2
-        else:
-            return False
-        subject_end = index
+        # The auxiliary stands right before "not" and the adverbs.
+        subject_end = index - 1
+        while _word(words, subject_end) not in _AUXILIARIES:
+            subject_end -= 1
+        at = index + 1
+        if _word(words, at) in {"with", "to"}:
+            at += 1
+    elif word in _BE and _word(words, index + 1) in _NOT:
+        subject_end, at = index, index + 2
+    elif (
+        word in _BE
+        and _word(words, index + 1) == "other"
+        and _word(words, index + 2) == "than"
+    ):
+        subject_end, at = index, index + 3
     else:
         return False
-    if _principal_after(words, compared_from) is None:
+    head = _word(words, subject_end - 1)
+    if head is None or head in CREDENTIAL_NOUNS:
         return False
-    start = subject_end
-    while start > 0 and words[start - 1] not in _CLAUSE_BREAKS:
-        start -= 1
-    subject = set(words[start:subject_end])
-    return not subject & (_IDENTITY_TERMS | PRINCIPAL_TERMS)
+    if head not in RECORD_NOUNS | record_nouns:
+        return False
+    return _principal_target(words, at)[0]
+
+
+def _principal_target(words: Sequence[str], index: int) -> tuple[bool, bool]:
+    """Return whether a principal phrase starts at ``index``, and names another.
+
+    The phrase is determiners, "another", "other" or "different", and
+    principal modifiers, then principal words whose last is the head ("the
+    session user", "another customer"). The head may carry an identifier
+    noun ("the authenticated customer identity") or an elided possessive
+    ("the authenticated actor's"); after either the phrase must end. A
+    possessive followed by a noun ("the customer's consent", "the user's
+    identity") names the principal's thing, not the principal.
+    """
+    other = False
+    at = index
+    while (word := _word(words, at)) in (
+        _DETERMINERS | _OTHER_PRINCIPAL_TERMS | _PRINCIPAL_MODIFIERS
+    ):
+        other = other or word in _OTHER_PRINCIPAL_TERMS
+        at += 1
+    head = None
+    while (word := _word(words, at)) in PRINCIPAL_TERMS | _PRINCIPAL_MODIFIERS:
+        if word in PRINCIPAL_TERMS:
+            head = at
+        at += 1
+    if head is None or head != at - 1:
+        return False, other
+    if _word(words, at) in _IDENTIFIER_NOUNS or _word(words, at) == "s":
+        at += 1
+    return _ends_phrase(words, at), other
+
+
+def _context_record_nouns(
+    row: CitedContextRow | None, families: Iterable[ConditionFamily]
+) -> frozenset[str]:
+    """Return the record nouns the ICA's row and families name.
+
+    Each ``state:<collection>.<field>`` reference of the row and each
+    family field path names a collection; its last word and that word
+    without a final "s" are record nouns, unless they are credentials.
+    """
+    collections = [
+        ref[len(_STATE_PREFIX) :].partition(".")[0]
+        for variable in (row.variables if row is not None else ())
+        for ref in variable.evidence_refs
+        if ref.startswith(_STATE_PREFIX)
+    ]
+    collections.extend(
+        parts[1]
+        for family in families
+        for path in family.field_paths
+        if len(parts := path.split(".")) > 1
+    )
+    nouns: set[str] = set()
+    for collection in collections:
+        terms = reason_terms(collection)
+        if terms:
+            nouns.update({terms[-1], terms[-1].removesuffix("s")})
+    return frozenset(nouns - CREDENTIAL_NOUNS)
 
 
 def _limit_failure(words: Sequence[str]) -> bool:

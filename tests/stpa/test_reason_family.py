@@ -735,6 +735,9 @@ def test_the_reason_variable_itself_never_guards() -> None:
         # An adverb may qualify the negated relation.
         "The widget does not currently belong to the session customer",
         "the actor is not actually the owner of the widget",
+        # A record compared with the principal's identifier.
+        "the order does not match the authenticated customer identity",
+        "the request does not match the session:authenticated_customer_id",
         # The negation follows the owner it denies.
         "The widget owner is not the authenticated user",
         "the widget's owner is a different customer",
@@ -783,6 +786,26 @@ def test_a_reason_that_denies_ownership_wins_over_an_affirming_row(reason) -> No
         ),
         ("Another user's identity is unknown", None, "no_match"),
         ("another user's failed edit cancelled the widget", "state", "reason_terms"),
+        # A role noun that modifies another noun is no relation.
+        ("The edit proceeds with no owner authorization", None, "no_match"),
+        ("The edit proceeds with no host written approval", None, "no_match"),
+        # The negation governs a requirement, not the match.
+        ("The request does not need to match the session user", None, "no_match"),
+        # A principal's consent is no principal target.
+        (
+            "The owner's request does not match the authenticated customer's consent",
+            None,
+            "no_match",
+        ),
+        # A credential is no record.
+        ("The password does not match the authenticated user", None, "no_match"),
+        ("The signature does not match the authenticated user", None, "no_match"),
+        # A possessive principal followed by a noun is no principal target.
+        (
+            "the request does not match the authenticated customer's identity",
+            None,
+            "no_match",
+        ),
     ],
 )
 def test_a_reason_that_does_not_deny_ownership_leaves_the_row_in_charge(
@@ -800,6 +823,22 @@ def test_a_denial_wins_on_the_reason_variable_field_path_too() -> None:
     )
     assert choice.ownership_guarded is False
     assert choice.kind == "ownership"
+
+
+def test_a_record_comparison_needs_record_evidence() -> None:
+    """The subject must be a generic record word or one the context names."""
+    accounts = _var(
+        "PM-1-2",
+        "belongs to authenticated customer",
+        "session:x",
+        "state:accounts.owner_id",
+    )
+    unknown = _choose("the gadget does not match the session user", _row(accounts), ())
+    known = _choose("the account does not match the session user", _row(accounts), ())
+    named = _choose("the widget does not match the session user", _row(BELONGS), ())
+    assert unknown.ownership_guarded is True
+    assert known.ownership_guarded is False and known.kind == "ownership"
+    assert named.ownership_guarded is False and named.kind == "ownership"
 
 
 def test_a_consent_reason_is_no_denial() -> None:
