@@ -259,10 +259,16 @@ def _consideration_pins(
 
 
 def _phase1_evidence(row: Any) -> tuple[str, ...]:
-    """Copy Phase 1 evidence into provisional accounting text references."""
-    return tuple(f"phase1:{item.kind}:{item.detail}" for item in row.evidence) or (
-        "phase1:obligation-row",
-    )
+    """Copy Phase 1 evidence into provisional accounting text references.
+
+    A reference names a record by kind and detail, so records that share both
+    are one reference, kept once in first-seen order.  The planner leaves such
+    records: one projection issue for each unfilled slot, which does not name
+    the slot, and a qualification reason beside the record of its facts.  The
+    plan, pinned by the accounting, keeps every record.
+    """
+    references = (f"phase1:{item.kind}:{item.detail}" for item in row.evidence)
+    return tuple(dict.fromkeys(references)) or ("phase1:obligation-row",)
 
 
 def _pair_results_for(
