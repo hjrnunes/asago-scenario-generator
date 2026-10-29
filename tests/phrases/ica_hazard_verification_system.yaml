@@ -12,5 +12,10 @@ cases:
       - different_action
       - "`absence_loss_ids`"
       - "`absence_consequence`"
+      - "`performed_without_effect`: that action is issued as required"
+      - it does not take effect
+      - A correct action without effect is out of scope
+      - the alarm is sent to the right recipient but nobody acts on it
+      - one of the seven states above
     forbidden:
       - NOT_PROVIDED

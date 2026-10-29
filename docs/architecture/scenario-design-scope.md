@@ -467,6 +467,12 @@ Derived from Schneider's node selection criteria (Part 2: micro simulations):
   specific OWASP sub-scenario template.
 - **Filter scenarios by depth**: All relevant sub-scenarios are generated. Prioritization is for navigation, not
   exclusion.
+- **Generate scenarios where a correct control action fails to take effect**: A controller that issues the right
+  action, which is then not carried out or does not prevent the harm, is a failure downstream of the controller, not an
+  unsafe control action. The ICA hazard verifier reports such a finding's action state as `performed_without_effect`;
+  code rejects it as `contradictory` with the rejection reason `correct_action_without_effect`, gives it no correction
+  round, and the finding stops at `ica_hazard_correct_action_without_effect`. It is never accepted as
+  `performed_unsafe`.
 
 ---
 

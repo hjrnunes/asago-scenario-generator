@@ -715,6 +715,184 @@ def test_the_reason_variable_itself_never_guards() -> None:
     assert choice.kind == "ownership"
 
 
+# --- a reason that denies ownership wins over its row ------------------------
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the widget does not belong to the authenticated customer",
+        "the widget doesn't belong to the session customer",
+        "the actor is not the host of the widget",
+        "the requester is not a party to the widget",
+        "the actor is not a member of the widget's group",
+        "the actor has no relationship to the widget",
+        "the widget is not owned by the session customer",
+        "the widget belongs to another customer",
+        "the widget does not match the session user",
+        "the widget record is other than the authenticated actor's",
+        "the widget is held by someone other than the session customer",
+        # An adverb may qualify the negated relation.
+        "The widget does not currently belong to the session customer",
+        "the actor is not actually the owner of the widget",
+        # A record compared with the principal's identifier.
+        "the order does not match the authenticated customer identity",
+        "the request does not match the session:authenticated_customer_id",
+        # A bare nominal denial needs no auxiliary.
+        "Not a party to the widget",
+        "the requester, not a party to the widget, edits it",
+        # A possessive identifier names the principal, like the bare one.
+        "the request does not match the authenticated customer's identity",
+        "the order does not match the session customer's ID",
+        # The negation follows the owner it denies.
+        "The widget owner is not the authenticated user",
+        "the widget's owner is a different customer",
+        "the widget host isn't the session user",
+    ],
+)
+def test_a_reason_that_denies_ownership_wins_over_an_affirming_row(reason) -> None:
+    choice = _choose(reason, _row(BELONGS))
+    assert choice.ownership_guarded is False
+    assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
+
+
+@pytest.mark.parametrize(
+    ("reason", "kind", "rule"),
+    [
+        ("the actor is unauthorized", None, "no_match"),
+        ("the plan is not authorized by session", None, "no_match"),
+        ("the session customer identity is unknown", None, "no_match"),
+        ("the actor is a guest but the widget is not paid", "state", "reason_terms"),
+        (
+            "the widget is owned by the session customer but is pending",
+            "state",
+            "reason_terms",
+        ),
+        ("the guest's widget is still pending", "state", "reason_terms"),
+        ("the owner edits a widget that is not allowed", "flag", "reason_terms"),
+        (
+            "the actor is unauthorized and the price exceeds the limit",
+            "bound",
+            "reason_terms",
+        ),
+        # A negation of authorization or consent near an ownership word does
+        # not deny the ownership relation.
+        ("The actor is not authorized as owner", None, "no_match"),
+        ("the edit proceeds without the owner's consent", None, "no_match"),
+        # An identity check and another principal's act compare no record.
+        ("The supplied identity does not match the session user", None, "no_match"),
+        ("another user's edit cancelled the widget", "state", "reason_terms"),
+        # An owner noun that modifies consent names the consent.
+        ("The edit proceeds without owner consent", None, "no_match"),
+        # Another principal's act, or identity, compares no record.
+        (
+            "The widget is edited by someone other than the session user",
+            None,
+            "no_match",
+        ),
+        ("Another user's identity is unknown", None, "no_match"),
+        ("another user's failed edit cancelled the widget", "state", "reason_terms"),
+        # A role noun that modifies another noun is no relation.
+        ("The edit proceeds with no owner authorization", None, "no_match"),
+        ("The edit proceeds with no host written approval", None, "no_match"),
+        # The negation governs a requirement, not the match.
+        ("The request does not need to match the session user", None, "no_match"),
+        # A principal's consent is no principal target.
+        (
+            "The owner's request does not match the authenticated customer's consent",
+            None,
+            "no_match",
+        ),
+        # A credential is no record.
+        ("The password does not match the authenticated user", None, "no_match"),
+        ("The signature does not match the authenticated user", None, "no_match"),
+        # The subject's head stands before its prepositional modifier.
+        (
+            "The signature on the order does not match the authenticated user",
+            None,
+            "no_match",
+        ),
+        (
+            "the approval for the order does not match the authenticated user",
+            None,
+            "no_match",
+        ),
+        # A role noun in a bare nominal must still head its phrase.
+        ("Not a party approval was given for the widget", None, "no_match"),
+        # A relative clause or other embedding leaves the compared subject
+        # uncertain, so the row stays in charge.
+        (
+            "The actor edits an account for which the password does not match "
+            "the session user",
+            None,
+            "no_match",
+        ),
+        (
+            "The actor edits an order for which the signature does not match "
+            "the session user",
+            None,
+            "no_match",
+        ),
+        (
+            "the actor edits an order whose request does not match the session user",
+            None,
+            "no_match",
+        ),
+        (
+            "the actor edits a booking where the account does not match the "
+            "authenticated customer",
+            None,
+            "no_match",
+        ),
+        # Without commas a non-restrictive clause reads like a restrictive one.
+        (
+            "the request, which the host submitted, does not match the session user",
+            None,
+            "no_match",
+        ),
+    ],
+)
+def test_a_reason_that_does_not_deny_ownership_leaves_the_row_in_charge(
+    reason, kind, rule
+) -> None:
+    choice = _choose(reason, _row(BELONGS))
+    assert choice.ownership_guarded is True
+    assert (choice.kind, choice.rule) == (kind, rule)
+
+
+def test_a_denial_wins_on_the_reason_variable_field_path_too() -> None:
+    owner = _var("PM-1-1", "edited", "state:widgets.owner_id")
+    choice = _choose(
+        "the widget does not belong to the session customer", _row(owner, BELONGS)
+    )
+    assert choice.ownership_guarded is False
+    assert choice.kind == "ownership"
+
+
+def test_a_record_comparison_needs_record_evidence() -> None:
+    """The subject must be a generic record word or one the context names."""
+    accounts = _var(
+        "PM-1-2",
+        "belongs to authenticated customer",
+        "session:x",
+        "state:accounts.owner_id",
+    )
+    unknown = _choose("the gadget does not match the session user", _row(accounts), ())
+    known = _choose("the account does not match the session user", _row(accounts), ())
+    named = _choose("the widget does not match the session user", _row(BELONGS), ())
+    assert unknown.ownership_guarded is True
+    assert known.ownership_guarded is False and known.kind == "ownership"
+    assert named.ownership_guarded is False and named.kind == "ownership"
+
+
+def test_a_consent_reason_is_no_denial() -> None:
+    choice = _choose(
+        "the edit lacks another user's explicit confirmation", _row(BELONGS)
+    )
+    assert choice.ownership_guarded is False
+    assert choice.kind is None
+
+
 # --- dealing -----------------------------------------------------------------
 
 

@@ -122,10 +122,12 @@ default.
 | Unchanged ICA correction | `obligation_aware/ica_verification.py` `_prepare_one_correction` | A correction left the ICA request content unchanged | The correction prompt again, with a block saying the first answer changed nothing | 1 per ICA | The ICA is kept unsupported, with its first verdict. |
 
 Two follow-ups are planned and are not re-asks. An ICA the first verdict does
-not support gets one correction request. When that correction revises the
-ICA, it is verified once more, under the step `correction`; that call can
-make its own verification re-ask. The second verification is built as the
-first was, from the corrected ICA alone: the first verdict is not sent.
+not support gets one correction request, unless that verdict is final: a
+downgraded absence, or a correct action without effect, which is out of scope
+and stops at `ica_hazard_correct_action_without_effect`. When that correction
+revises the ICA, it is verified once more, under the step `correction`; that
+call can make its own verification re-ask. The second verification is built
+as the first was, from the corrected ICA alone: the first verdict is not sent.
 
 ## Stage 5 and scenario production
 

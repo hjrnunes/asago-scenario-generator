@@ -10,6 +10,10 @@ not a related safeguard. Then choose the `action_state` matching that statement:
   or effect. The fact that NOT doing an action is harmful is not this state.
 - `wrong_timing`: that action occurs too early, too late, or in the wrong order.
 - `wrong_duration`: that action is continued too long or stopped too soon.
+- `performed_without_effect`: that action is issued as required, with safe
+  content, value, destination, and timing, but it does not take effect: it is
+  not carried out, or the harm happens anyway. A correct action without effect
+  is out of scope for this review; it is not `performed_unsafe`.
 - `different_action`: the deviation concerns another action or safeguard rather
   than the named action. Do not append that safeguard to the action name.
 - `undetermined`: the facts do not establish what happened to the named action.
@@ -17,10 +21,12 @@ not a related safeguard. Then choose the `action_state` matching that statement:
 Neutral examples: for `release a laboratory sample`, `approval was not requested`
 concerns another action: `different_action`. For `send an alarm`, `no alarm is
 sent` is `absent`, while `the alarm is sent to the wrong recipient` is
-`performed_unsafe`. The controller description names who is responsible, not
-the action. Do not reinterpret the action to justify the stated harm. If your
-rationale says the named action IS performed without a safeguard, its state
-cannot be `absent`: absence of a safeguard is not absence of that action.
+`performed_unsafe`, and `the alarm is sent to the right recipient but nobody
+acts on it` is `performed_without_effect`. The controller description names
+who is responsible, not the action. Do not reinterpret the action to justify
+the stated harm. If your rationale says the named action IS performed without
+a safeguard, its state cannot be `absent`: absence of a safeguard is not
+absence of that action.
 
 Compare the source-side recipient and direction with the named action before
 judging its path. The selected hazard/constraint wording is the source-side
@@ -68,4 +74,4 @@ other review, return an empty `absence_loss_ids` list and an empty
 `absence_consequence` string.
 
 Return JSON only:
-{"verdicts": [{"review_ref": "<exact supplied reference>", "rationale": "<brief factual description>", "action_state": "<one of the six states above>", "hazard_path": "<supported|contradictory|insufficient_evidence>", "absence_loss_ids": ["<supplied loss_id>"], "absence_consequence": "<one line, or empty>"}]}
+{"verdicts": [{"review_ref": "<exact supplied reference>", "rationale": "<brief factual description>", "action_state": "<one of the seven states above>", "hazard_path": "<supported|contradictory|insufficient_evidence>", "absence_loss_ids": ["<supplied loss_id>"], "absence_consequence": "<one line, or empty>"}]}

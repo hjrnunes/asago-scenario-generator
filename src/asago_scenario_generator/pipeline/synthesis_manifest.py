@@ -798,6 +798,9 @@ def _obligation_resolution_funnel(
     routed = _count_rows_with_value(rows, "stop_reason", "governance_routed_no_finding")
     if routed:
         funnel["governance_routed_no_finding"] = routed
+    failed = sum(_governance_generation_failed(row) for row in rows)
+    if failed:
+        funnel["governance_generation_failed"] = failed
     funnel["applicable_without_llm_fan_out"] = _fan_out_denominator(
         plan=plan, rows=rows, realization=realization
     )
@@ -918,8 +921,20 @@ def _boundary_decisions(risk_actionability: Any) -> dict[str, str]:
 
 
 def _governance_credited(row: Any) -> bool:
-    """Tell whether a governance-only row carries an STPA finding."""
-    return row.disposition == "governance_only" and bool(getattr(row, "ica_ids", ()))
+    """Tell whether a governance-only row carries a finding a scenario may carry."""
+    return (
+        row.disposition == "governance_only"
+        and bool(getattr(row, "ica_ids", ()))
+        and not _governance_generation_failed(row)
+    )
+
+
+def _governance_generation_failed(row: Any) -> bool:
+    """Tell whether no scenario carries a credited governance row's findings."""
+    return (
+        row.disposition == "governance_only"
+        and row.stop_reason == "scenario_generation_failure"
+    )
 
 
 def _count_rows_with_value(

@@ -100,6 +100,7 @@ from asago_scenario_generator.stpa.obligation_aware.fill_reply import (
     split_pair,
 )
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
+    CORRECT_ACTION_WITHOUT_EFFECT,
     IcaHazardVerificationRequest,
     IcaHazardVerificationCorrection,
     IcaHazardVerificationVerdict,
@@ -592,6 +593,7 @@ class _IcaHazardProviderVerdict(_Model):
         "performed_unsafe",
         "wrong_timing",
         "wrong_duration",
+        "performed_without_effect",
         "different_action",
         "undetermined",
     ]
@@ -643,13 +645,23 @@ def _bound_ica_review(
     """Retain the observed state as actionable bounded-correction feedback.
 
     A supported hazardous absence that still lacks valid evidence is not
-    supported: it becomes the downgraded verdict, and the others stand.
+    supported: it becomes the downgraded verdict, and the others stand. A
+    correct action without effect is out of scope whatever the slot's
+    category: it is contradictory and names that reason.
     """
     verdict = item.verdict_for(request.uca_type)
     rationale = (
         f"Observed action state: {item.action_state}; proposed category: "
         f"{request.uca_type.value}. {item.rationale}"
     )
+    if item.action_state == "performed_without_effect":
+        return IcaHazardVerificationVerdict(
+            ica_id=request.ica_id,
+            request_digest=request.semantic_digest,
+            verdict="contradictory",
+            rationale=rationale[:2000],
+            rejection_reason=CORRECT_ACTION_WITHOUT_EFFECT,
+        )
     evidence: dict[str, Any] = {}
     if requires_absence_evidence(request, verdict):
         loss_ids = tuple(dict.fromkeys(item.absence_loss_ids))

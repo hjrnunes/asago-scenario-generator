@@ -18,6 +18,8 @@ from asago_scenario_generator.models.obligation_accounting import (
     SCOPE_EXEMPT_DISPOSITIONS,
     ObligationAccounting,
     ObligationAccountingRow,
+    is_governance_credited,
+    is_governance_generation_failed,
     validate_obligation_accounting_source_pins,
 )
 from asago_scenario_generator.models.obligation_consideration import (
@@ -367,6 +369,7 @@ _ICA_VERIFICATION_STOP_REASONS = (
     "ica_hazard_contradictory",
     "ica_hazard_insufficient_evidence",
     "ica_hazard_absence_evidence_missing",
+    "ica_hazard_correct_action_without_effect",
     "ica_hazard_verification_provider_failure",
     "ica_hazard_correction_exhausted",
     "unsafe_outcome_lineage_incomplete",
@@ -954,11 +957,12 @@ def _accounting_summary(rows: tuple[ObligationAccountingRow, ...]) -> dict[str, 
         "generation_failed": sum(
             row.disposition == "generation_failed" for row in rows
         ),
-        "governance_credited": sum(
-            row.disposition == "governance_only" and bool(row.ica_ids) for row in rows
-        ),
+        "governance_credited": sum(is_governance_credited(row) for row in rows),
         "governance_routed_no_finding": sum(
             row.stop_reason == GOVERNANCE_ROUTED_NO_FINDING for row in rows
+        ),
+        "governance_generation_failed": sum(
+            is_governance_generation_failed(row) for row in rows
         ),
     }
 

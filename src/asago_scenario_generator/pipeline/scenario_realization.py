@@ -15,6 +15,7 @@ from asago_scenario_generator.models.obligation_accounting import (
     ObligationAccounting,
     ObligationAccountingRow,
     derive_obligation_accounting_summary,
+    is_governance_credited,
 )
 from asago_scenario_generator.models.obligation_consideration import (
     ObligationIcaConsideration,
@@ -85,13 +86,15 @@ def account_generation_failures(
     scenario_specs: Iterable[ScenarioSpec],
     functional_test_specs: Iterable[ScenarioSpec] = (),
 ) -> ObligationAccounting:
-    """Mark each addressed row that no written scenario carries.
+    """Mark each credited row that no written scenario carries.
 
     An addressed row is credited from its structural findings.  Once the
     run's scenarios are known, a row none of whose findings any adversarial
     or functional-test scenario carries becomes ``generation_failed`` with
     stop reason ``scenario_generation_failure``; it keeps its identities.
-    Every other row is unchanged, and the summary is derived again.
+    A credited governance-only row in the same position keeps its
+    disposition and stops at ``scenario_generation_failure``.  Every other
+    row is unchanged, and the summary is derived again.
     """
     scenarios = (
         *_validated_scenarios(tuple(scenario_specs)),
@@ -101,7 +104,7 @@ def account_generation_failures(
     )
     rows = tuple(
         _generation_failed(row)
-        if row.disposition == "addressed"
+        if (row.disposition == "addressed" or is_governance_credited(row))
         and not any(
             _scenario_realizes(scenario, row.obligation_id, ica_id)
             for scenario in scenarios
@@ -121,10 +124,13 @@ def account_generation_failures(
 
 
 def _generation_failed(row: ObligationAccountingRow) -> ObligationAccountingRow:
+    disposition = (
+        row.disposition if row.disposition == "governance_only" else "generation_failed"
+    )
     return ObligationAccountingRow.model_validate(
         {
             **row.model_dump(),
-            "disposition": "generation_failed",
+            "disposition": disposition,
             "stop_reason": SCENARIO_GENERATION_FAILURE,
         }
     )

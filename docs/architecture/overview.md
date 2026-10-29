@@ -472,7 +472,14 @@ that no adversarial or functional-test scenario carries becomes
 `generation_failed` with stop reason `scenario_generation_failure`; it keeps
 its identities, and the accounting summary counts it once, under
 `generation_failed` (left out when zero), so the disposition counts sum to
-`total`. Scenario realization separately records whether that exact
+`total`. A governance-only row credited with findings that no scenario
+carries keeps its `governance_only` disposition and its identities and stops
+at `scenario_generation_failure`; the summary counts it under
+`governance_generation_failed` (left out when zero) instead of
+`governance_credited`. The three governance counts (`governance_credited`,
+`governance_routed_no_finding`, `governance_generation_failed`) are disjoint
+subsets of `governance_only`, and the summary refuses counts that break
+either rule. Scenario realization separately records whether that exact
 ICA/obligation concern survived into an admitted scenario. Reporting keeps
 structural findings separate from scenario realization and labels provisional
 accounting separately from completed scenario generation. Accounting and

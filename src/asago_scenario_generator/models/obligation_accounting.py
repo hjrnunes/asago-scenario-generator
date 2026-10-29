@@ -288,11 +288,17 @@ def _validate_governance_row(row: ObligationAccountingRow) -> None:
 
     A routed row names its route and slots and carries no finding. A credited
     row carries every identity an addressed row carries and no stop reason; a
-    partial set of identities is never a credit.
+    partial set of identities is never a credit. A credited row whose findings
+    no scenario carries keeps them and stops at ``scenario_generation_failure``.
     """
     if row.stop_reason == GOVERNANCE_ROUTED_NO_FINDING:
         _validate_routed_governance_row(row)
         return
+    if row.stop_reason == SCENARIO_GENERATION_FAILURE and not row.ica_ids:
+        raise ValueError(
+            f"governance-only rows stopping at {SCENARIO_GENERATION_FAILURE} "
+            "require their findings"
+        )
     if not any(getattr(row, field_name) for field_name in _FINDING_FIELDS):
         return
     try:
@@ -301,8 +307,11 @@ def _validate_governance_row(row: ObligationAccountingRow) -> None:
         raise ValueError(
             f"governance-only rows with findings must be complete: {error}"
         ) from error
-    if row.stop_reason is not None:
-        raise ValueError("governance-only rows with findings carry no stop reason")
+    if row.stop_reason not in (None, SCENARIO_GENERATION_FAILURE):
+        raise ValueError(
+            "governance-only rows with findings carry no stop reason other than "
+            f"{SCENARIO_GENERATION_FAILURE}"
+        )
 
 
 _DISPOSITION_VALIDATORS = {
@@ -315,7 +324,10 @@ _DISPOSITION_VALIDATORS = {
 
 
 class ObligationAccountingSummary(_AccountingModel):
-    """Exact counts for every accounting disposition; they sum to ``total``."""
+    """Exact counts for every accounting disposition; they sum to ``total``.
+
+    The governance counts are disjoint subsets of ``governance_only``.
+    """
 
     total: int = Field(ge=0, strict=True)
     addressed: int = Field(ge=0, strict=True)
@@ -329,7 +341,8 @@ class ObligationAccountingSummary(_AccountingModel):
     generation_failed: int = Field(
         default=0, ge=0, strict=True, exclude_if=lambda value: value == 0
     )
-    # Governance-only rows credited with an STPA finding; a subset of
+    # Governance-only rows credited with an STPA finding that a scenario
+    # carries, or provisionally before scenarios are known; a subset of
     # governance_only. Left out when zero so earlier artifacts keep their bytes.
     governance_credited: int = Field(
         default=0, ge=0, strict=True, exclude_if=lambda value: value == 0
@@ -338,6 +351,60 @@ class ObligationAccountingSummary(_AccountingModel):
     # governance_only, disjoint from governance_credited. Left out when zero.
     governance_routed_no_finding: int = Field(
         default=0, ge=0, strict=True, exclude_if=lambda value: value == 0
+    )
+    # Governance-only rows credited with findings no scenario carries; a subset
+    # of governance_only, disjoint from the two above. Left out when zero.
+    governance_generation_failed: int = Field(
+        default=0, ge=0, strict=True, exclude_if=lambda value: value == 0
+    )
+
+    @model_validator(mode="after")
+    def validate_totals(self) -> "ObligationAccountingSummary":
+        dispositions = sum(getattr(self, name) for name in _SUMMARY_DISPOSITION_FIELDS)
+        if dispositions != self.total:
+            raise ValueError("accounting disposition counts must sum to total")
+        governance = sum(getattr(self, name) for name in _SUMMARY_GOVERNANCE_FIELDS)
+        if governance > self.governance_only:
+            raise ValueError(
+                "governance counts must not exceed governance_only "
+                f"({governance} > {self.governance_only})"
+            )
+        return self
+
+
+_SUMMARY_DISPOSITION_FIELDS = (
+    "addressed",
+    "generation_failed",
+    "proposed_not_applicable",
+    "unresolved",
+    "upstream_gap",
+    "capability_excluded",
+    "governance_only",
+)
+_SUMMARY_GOVERNANCE_FIELDS = (
+    "governance_credited",
+    "governance_routed_no_finding",
+    "governance_generation_failed",
+)
+
+
+def is_governance_credited(row: ObligationAccountingRow) -> bool:
+    """Tell whether a governance-only row counts as credited.
+
+    It carries a finding and has not stopped because no scenario carries it.
+    """
+    return (
+        row.disposition == "governance_only"
+        and bool(row.ica_ids)
+        and row.stop_reason != SCENARIO_GENERATION_FAILURE
+    )
+
+
+def is_governance_generation_failed(row: ObligationAccountingRow) -> bool:
+    """Tell whether a credited governance-only row's scenarios all failed."""
+    return (
+        row.disposition == "governance_only"
+        and row.stop_reason == SCENARIO_GENERATION_FAILURE
     )
 
 
@@ -356,11 +423,12 @@ def derive_obligation_accounting_summary(
         capability_excluded=counts["capability_excluded"],
         governance_only=counts["governance_only"],
         generation_failed=counts["generation_failed"],
-        governance_credited=sum(
-            row.disposition == "governance_only" and bool(row.ica_ids) for row in values
-        ),
+        governance_credited=sum(is_governance_credited(row) for row in values),
         governance_routed_no_finding=sum(
             row.stop_reason == GOVERNANCE_ROUTED_NO_FINDING for row in values
+        ),
+        governance_generation_failed=sum(
+            is_governance_generation_failed(row) for row in values
         ),
     )
 
@@ -436,5 +504,7 @@ __all__ = [
     "SCENARIO_GENERATION_FAILURE",
     "SCOPE_EXEMPT_DISPOSITIONS",
     "derive_obligation_accounting_summary",
+    "is_governance_credited",
+    "is_governance_generation_failed",
     "validate_obligation_accounting_source_pins",
 ]
