@@ -81,6 +81,17 @@ one, so the guard errs towards dealing. When it does withhold, an ownership
 test would contradict the ICA's own context; the rules continue without
 ownership and the ICA gets what rules 3-5 give, or no hint.
 
+Reason against row: the ICA's reason wins over a guarding row only when the
+reason itself denies ownership. It negates an ownership or role relation
+("does not belong to", "is not the host", "not a party", "no relationship
+to"), names another owner ("belongs to another customer"), or says the
+record does not match the session or a principal ("does not match the
+session user", "another customer's account", "other than the authenticated
+actor's"). Then the guard is off and the reason's ownership source deals
+``ownership``. Any other ownership source, such as a failed authorization
+("the actor is unauthorized") or another principal's act ("another user
+could take over the account"), leaves the cited row in charge.
+
 The term lists below are the only lexical matching; everything else is exact
 lookup.
 """
@@ -210,6 +221,10 @@ POSSESSION_TERMS = frozenset(
     }
 )
 ROLE_TERMS = frozenset({"guest", "host", "owner", "member", "party"})
+# Ownership and role relations a reason can deny ("does not belong", "is not
+# the host", "not a party"); identity is left out, since a negated identity
+# is a failed check rather than a denied relation.
+DENIABLE_RELATION_TERMS = (OWNERSHIP_TERMS - {"identity", "identities"}) | ROLE_TERMS
 _COPULAS = frozenset({"is", "are"})
 # Words skipped between a failed authorization or comparison word and the
 # principal it is predicated of: linking words and principal modifiers.
@@ -536,7 +551,9 @@ def choose_reason_family(
     labels = _field_labels(variable)
     words = reason_terms(reason.reason)
     terms = frozenset(words)
-    guard = _row_says_session_owns(reason.row, variable)
+    guard = _row_says_session_owns(reason.row, variable) and not (
+        _reason_denies_ownership(words)
+    )
     guarded = False
 
     ownership_source = (
@@ -734,6 +751,79 @@ def _relation_not_current(words: Sequence[str]) -> bool:
             and following[1] in UNSETTLED_TERMS
         ):
             return True
+    return False
+
+
+def _reason_denies_ownership(words: Sequence[str]) -> bool:
+    """Return whether the reason itself denies the principal's ownership.
+
+    It negates an ownership or role relation within three words before it
+    ("does not belong", "is not the host", "not a party", "no relationship"),
+    gives the record another owner ("belongs to another customer"), or says
+    the record does not match the session or a principal (see
+    ``_record_mismatch``). A failed authorization ("the actor is
+    unauthorized") or another principal's act ("another user could take
+    over the account") denies no ownership.
+    """
+    for index, word in enumerate(words):
+        if word in DENIABLE_RELATION_TERMS and any(
+            w in NEGATION_TERMS for w in words[max(0, index - _WINDOW) : index]
+        ):
+            return True
+        if word in POSSESSION_TERMS and _other_principal_after(words, index):
+            return True
+    return _record_mismatch(words)
+
+
+def _other_principal_after(words: Sequence[str], index: int) -> bool:
+    """Return whether a negated principal follows ``index`` past links.
+
+    "belongs to another customer" and "owned by a different user" name an
+    owner who is not the principal.
+    """
+    window = words[index + 1 : index + 2 + _WINDOW]
+    for offset, word in enumerate(window):
+        if word in NEGATION_TERMS:
+            return any(w in PRINCIPAL_TERMS for w in window[offset + 1 :])
+        if word not in _LINKS:
+            return False
+    return False
+
+
+_OTHER_TERMS = frozenset({"other", "another", "different"})
+
+
+def _record_mismatch(words: Sequence[str]) -> bool:
+    """Return whether the reason says a record does not match a principal.
+
+    A negated comparison ("does not match the session user", "not present in
+    the authenticated customer's orders") or a stated mismatch
+    ("inconsistent with the session customer") counts. "other", "another"
+    and "different" count only for a compared record: a possessive
+    principal ("another customer's account") or "other than" a principal.
+    A principal's intent, eligibility or consent is no record.
+    """
+    for index, word in enumerate(words):
+        if word in COMPARISON_TERMS:
+            window = words[max(0, index - _WINDOW) : index]
+            if not any(w in NEGATION_TERMS for w in window):
+                continue
+        elif word not in FAILED_COMPARISON_TERMS:
+            continue
+        principal = _principal_after(words, index)
+        if principal is None:
+            continue
+        compared = list(words[principal + 1 : principal + 6])
+        possessive = compared[:1] == ["s"]
+        if word in _OTHER_TERMS and not (
+            possessive or words[index + 1 : index + 2] == ["than"]
+        ):
+            continue
+        if possessive and set(compared) & _ATTRIBUTE_TERMS:
+            continue
+        if _names_consent(compared[1:] if possessive else compared):
+            continue
+        return True
     return False
 
 

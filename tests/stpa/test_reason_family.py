@@ -715,6 +715,76 @@ def test_the_reason_variable_itself_never_guards() -> None:
     assert choice.kind == "ownership"
 
 
+# --- a reason that denies ownership wins over its row ------------------------
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the widget does not belong to the authenticated customer",
+        "the widget doesn't belong to the session customer",
+        "the actor is not the host of the widget",
+        "the requester is not a party to the widget",
+        "the actor is not a member of the widget's group",
+        "the actor has no relationship to the widget",
+        "the widget is not owned by the session customer",
+        "the widget belongs to another customer",
+        "the widget does not match the session user",
+        "the widget record is other than the authenticated actor's",
+    ],
+)
+def test_a_reason_that_denies_ownership_wins_over_an_affirming_row(reason) -> None:
+    choice = _choose(reason, _row(BELONGS))
+    assert choice.ownership_guarded is False
+    assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
+
+
+@pytest.mark.parametrize(
+    ("reason", "kind", "rule"),
+    [
+        ("the actor is unauthorized", None, "no_match"),
+        ("the plan is not authorized by session", None, "no_match"),
+        ("the session customer identity is unknown", None, "no_match"),
+        ("the actor is a guest but the widget is not paid", "state", "reason_terms"),
+        (
+            "the widget is owned by the session customer but is pending",
+            "state",
+            "reason_terms",
+        ),
+        ("the guest's widget is still pending", "state", "reason_terms"),
+        ("the owner edits a widget that is not allowed", "flag", "reason_terms"),
+        (
+            "the actor is unauthorized and the price exceeds the limit",
+            "bound",
+            "reason_terms",
+        ),
+    ],
+)
+def test_a_reason_that_does_not_deny_ownership_leaves_the_row_in_charge(
+    reason, kind, rule
+) -> None:
+    choice = _choose(reason, _row(BELONGS))
+    assert choice.ownership_guarded is True
+    assert (choice.kind, choice.rule) == (kind, rule)
+
+
+def test_a_denial_wins_on_the_reason_variable_field_path_too() -> None:
+    owner = _var("PM-1-1", "edited", "state:widgets.owner_id")
+    choice = _choose(
+        "the widget does not belong to the session customer", _row(owner, BELONGS)
+    )
+    assert choice.ownership_guarded is False
+    assert choice.kind == "ownership"
+
+
+def test_a_consent_reason_is_no_denial() -> None:
+    choice = _choose(
+        "the edit lacks another user's explicit confirmation", _row(BELONGS)
+    )
+    assert choice.ownership_guarded is False
+    assert choice.kind is None
+
+
 # --- dealing -----------------------------------------------------------------
 
 
