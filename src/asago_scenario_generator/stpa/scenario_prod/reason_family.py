@@ -13,38 +13,54 @@ mapping; the first rule that matches decides:
 
 1. ``timing_slot``: a WRONG_TIMING ICA keeps the first ``prior_read``
    family whatever its reason (applied by the slot type, not here).
-2. ``ownership_reason`` -> ``ownership`` when the reason names an owner,
-   belonging, identity, actor, party, principal or membership term; or when
-   it is about the session (a session or authenticated term, or a reason
-   variable read from a ``session:`` reference) and names no limit term.
-   Precedence: a limit term (amount, balance, limit, exceeds...) wins over
-   session wording, which then only qualifies the limit ("the amount exceeds
-   the session spending limit" goes on to rules 3-4); an ownership or actor
-   term wins over a limit term. When the operation offers no ownership
-   family the ICA gets no hint; it does not fall through.
+2. ``ownership_reason`` -> ``ownership`` when the reason has an ownership
+   source and states no limit failure. The sources are: an ownership
+   relation (owner, owned, belongs, identity, party, member, guest, host);
+   a failed authentication or authorization predicated of the session or a
+   principal ("the actor is unauthorized", "not authorized for the session",
+   "without an authenticated session", "the user is unauthenticated", but
+   not "the customer's authorized intent" or "authorized by the customer's
+   order", whose object is something else); or a failed authorization in a
+   reason whose variable is read from a ``session:`` reference. A mention of
+   the session or a principal alone is not a source. When the operation
+   offers no ownership family the ICA gets no hint; it does not fall
+   through.
 3. ``reason_variable_field``: the reason variable is read from a ``state:``
    field that a family of the operation cites -> that family's kind
    (``ownership``, ``flag``, ``bound``, ``state`` in that order).
-4. ``reason_terms``: the reason names a limit term -> ``bound``; else an
-   eligibility term -> ``flag``; else a lifecycle value -> ``state``.
+4. ``reason_terms``: the reason states a limit failure -> ``bound``; else
+   an eligibility term -> ``flag``; else a lifecycle value -> ``state``.
 5. ``no_match``: no hint; the ICA keeps one plain candidate. Intent reasons
    ("does not match authorized intent", "intent unknown", "unauthorized
-   transaction") name no family term and take this path.
+   transaction") have no ownership source and no family term and take this
+   path.
 
-Context guard: ``ownership`` is never chosen when another variable of the
-cited row already says the record belongs to the session principal. That
-needs an affirmative ownership statement about a record and the principal:
-the variable is read from a ``state:`` field (the record), its value or
-description names an owner, belonging, party, membership, relationship or
-association relation, it names the principal (a principal term, or a
-``session:`` reference), and its value is not negated (a negation term, a
-contracted "n't", or an un-, non- or dis- prefix on a participle such as
-"unowned"). An ownership test would
-contradict the ICA's own context, so the rules continue without ownership
-and the ICA gets what rules 3-5 give, or no hint. Evidence shape alone
-("within limit" read from a session and a state field), or a variable that
-only describes the session principal ("authenticated actor is the guest"),
-does not guard.
+Precedence: a reason is a limit reason only when it states a limit failure
+(exceeds, over, above, beyond, greater, more, less, maximum, minimum, limit,
+cap, remaining, insufficient, threshold...). A bare object noun (amount,
+plan, price) states none. A stated limit failure wins over every ownership
+source ("the amount exceeds the session spending limit" and "the actor is
+unauthorized and the amount exceeds the limit" get ``bound``); otherwise an
+ownership source wins ("the session is unauthenticated when changing the
+amount" gets ``ownership``). So "the requested amount or plan is not
+authorized by session", which states a failed session authorization and no
+limit failure, takes ``ownership``: the amount and plan are what was not
+authorized, not a limit that was broken.
+
+Context guard (off unless a row value affirms ownership): ``ownership`` is
+withheld only when another variable of the cited row is read from a
+``state:`` field (the record) and its value itself states that the record is
+the principal's: a possession statement (belongs to, owned by, owner,
+member) naming the principal in the value or read from a ``session:``
+reference, or a role statement (a principal "is" or "are" the guest, host,
+owner, member or party). A negated value (a negation term, a contracted
+"n't", or an un-, non- or dis- prefix such as "unowned") never guards. The
+variable's description does not count, so a value such as "pending",
+"unresolved" or "actor is a stranger" never guards, whatever the variable
+is about. A wrongly withheld ownership hint costs more than a wrongly dealt
+one, so the guard errs towards dealing. When it does withhold, an ownership
+test would contradict the ICA's own context; the rules continue without
+ownership and the ICA gets what rules 3-5 give, or no hint.
 
 The term lists below are the only lexical matching; everything else is exact
 lookup.
@@ -85,9 +101,10 @@ REASON_FAMILY_RULES: tuple[ReasonRule, ...] = (
     ReasonRule(
         "ownership_reason",
         ("ownership",),
-        "The reason names an ownership, identity, actor or party term; or it "
-        "is about the session (session term or session-read reason variable) "
-        "and names no limit term, which would win.",
+        "The reason states an ownership relation, a failed authentication or "
+        "authorization of the session or a principal, or a failed "
+        "authorization read from the session; and no limit failure, which "
+        "would win.",
     ),
     ReasonRule(
         "reason_variable_field",
@@ -97,11 +114,12 @@ REASON_FAMILY_RULES: tuple[ReasonRule, ...] = (
     ReasonRule(
         "reason_terms",
         ("bound", "flag", "state"),
-        "The reason names a limit, eligibility or lifecycle term.",
+        "The reason states a limit failure, or names an eligibility or lifecycle term.",
     ),
     ReasonRule("no_match", (), "No rule matches: no hint."),
 )
 
+# An ownership relation stated by a reason.
 OWNERSHIP_TERMS = frozenset(
     {
         "owner",
@@ -111,21 +129,20 @@ OWNERSHIP_TERMS = frozenset(
         "ownership",
         "belong",
         "belongs",
+        "belonged",
         "belonging",
         "identity",
         "identities",
-        "actor",
-        "actors",
         "party",
         "parties",
-        "principal",
         "member",
         "membership",
+        "guest",
+        "host",
     }
 )
-# Session wording gives ownership only when the reason names no limit term.
-SESSION_TERMS = frozenset({"session", "sessions", "authenticated", "unauthenticated"})
-# Words naming the principal a record may belong to, read by the guard.
+SESSION_TERMS = frozenset({"session", "sessions"})
+# Words naming the session or a principal a record may belong to.
 PRINCIPAL_TERMS = frozenset(
     {
         "actor",
@@ -142,50 +159,69 @@ PRINCIPAL_TERMS = frozenset(
         *SESSION_TERMS,
     }
 )
-# The subset that names a record's relation to a principal, read by the
-# context guard; identity and session words alone do not.
-RELATION_TERMS = frozenset(
+# Authentication and authorization words; failed when negated or prefixed.
+AUTH_TERMS = frozenset(
     {
-        "owner",
-        "owners",
-        "owned",
-        "owns",
-        "ownership",
+        "authorized",
+        "authorised",
+        "authorization",
+        "authorisation",
+        "authenticated",
+        "authentication",
+        "verified",
+        "verification",
+        "confirmed",
+    }
+)
+# A row value affirming the record is the principal's: possession wording,
+# or a principal that "is" one of these roles.
+POSSESSION_TERMS = frozenset(
+    {
         "belong",
         "belongs",
         "belonged",
         "belonging",
-        "party",
-        "parties",
+        "owned",
+        "owns",
+        "owner",
+        "owners",
         "member",
-        "membership",
-        "relationship",
-        "association",
     }
 )
+ROLE_TERMS = frozenset({"guest", "host", "owner", "member", "party"})
+_COPULAS = frozenset({"is", "are"})
+# Words skipped between a failed authorization word and its principal.
+_LINKS = frozenset({"for", "by", "to", "of", "the", "a", "an", "this", "that", "its"})
+_WINDOW = 3
 _KIND_TERMS: tuple[tuple[FamilyKind, frozenset[str]], ...] = (
     (
         "bound",
+        # A stated limit failure; a bare noun such as amount or price is not.
         frozenset(
             {
-                "amount",
-                "amounts",
-                "balance",
-                "limit",
-                "limits",
                 "exceed",
                 "exceeds",
                 "exceeded",
                 "exceeding",
+                "over",
+                "above",
+                "beyond",
                 "greater",
+                "more",
                 "less",
+                "fewer",
+                "below",
                 "maximum",
+                "max",
                 "minimum",
-                "threshold",
-                "quantity",
-                "total",
+                "min",
+                "limit",
+                "limits",
+                "cap",
+                "capped",
                 "remaining",
-                "price",
+                "insufficient",
+                "threshold",
             }
         ),
     ),
@@ -377,13 +413,17 @@ def choose_reason_family(
     variable = reason_variable(reason.reason, reason.row)
     pm_id = variable.pm_id if variable is not None else None
     labels = _field_labels(variable)
-    terms = frozenset(reason_terms(reason.reason))
+    words = reason_terms(reason.reason)
+    terms = frozenset(words)
     guard = _row_says_session_owns(reason.row, variable)
     guarded = False
 
-    about_session = _reads_session(variable) or bool(terms & SESSION_TERMS)
-    names_limit = bool(terms & _LIMIT_TERMS)
-    if terms & OWNERSHIP_TERMS or (about_session and not names_limit):
+    ownership_source = (
+        bool(terms & OWNERSHIP_TERMS)
+        or _principal_auth_failure(words)
+        or (_reads_session(variable) and _auth_failure(words))
+    )
+    if ownership_source and not terms & _LIMIT_TERMS:
         if not guard:
             return ReasonFamilyChoice(
                 "ownership", "ownership_reason", pm_id, False, labels
@@ -520,14 +560,72 @@ def _row_says_session_owns(
     for variable in row.variables:
         if variable is reason_var:
             continue
-        words = frozenset(reason_terms(variable.value))
-        about = words | frozenset(reason_terms(variable.description or ""))
-        states_ownership = (
-            _field_labels(variable) != ()
-            and bool(about & RELATION_TERMS)
-            and (_reads_session(variable) or bool(about & PRINCIPAL_TERMS))
-        )
-        if states_ownership and not _negated(words):
+        if _field_labels(variable) and _affirms_ownership(variable):
+            return True
+    return False
+
+
+def _affirms_ownership(variable: ContextVariable) -> bool:
+    """Return whether the value itself states the record is the principal's."""
+    words = reason_terms(variable.value)
+    terms = frozenset(words)
+    if _negated(terms):
+        return False
+    if terms & POSSESSION_TERMS and (
+        terms & PRINCIPAL_TERMS or _reads_session(variable)
+    ):
+        return True
+    return any(
+        word in PRINCIPAL_TERMS
+        and index + 1 < len(words)
+        and words[index + 1] in _COPULAS
+        and bool(set(words[index + 2 : index + 2 + _WINDOW + 1]) & ROLE_TERMS)
+        for index, word in enumerate(words)
+    )
+
+
+def _auth_failure_at(words: Sequence[str], index: int) -> bool:
+    """Return whether the word at ``index`` is a failed auth word."""
+    word = words[index]
+    if word in AUTH_TERMS:
+        return any(w in NEGATION_TERMS for w in words[max(0, index - _WINDOW) : index])
+    return any(
+        word.startswith(prefix) and word[len(prefix) :] in AUTH_TERMS
+        for prefix in _NEGATED_PREFIXES
+    )
+
+
+def _auth_failure(words: Sequence[str]) -> bool:
+    """Return whether the reason states any failed authentication or authorization."""
+    return any(_auth_failure_at(words, index) for index in range(len(words)))
+
+
+def _principal_at(words: Sequence[str], index: int) -> bool:
+    """Return whether a principal word, not a possessive, stands at ``index``."""
+    return words[index] in PRINCIPAL_TERMS and (
+        index + 1 >= len(words) or words[index + 1] != "s"
+    )
+
+
+def _principal_auth_failure(words: Sequence[str]) -> bool:
+    """Return whether a failed auth word is predicated of the session or a principal.
+
+    The principal stands within three words before it ("the actor is
+    unauthorized") or after it past linking words ("not authorized for the
+    session", "without an authenticated session"). A possessive principal
+    ("the customer's authorized intent") names the owner of something else.
+    """
+    for index in range(len(words)):
+        if not _auth_failure_at(words, index):
+            continue
+        if any(_principal_at(words, j) for j in range(max(0, index - _WINDOW), index)):
+            return True
+        after = index + 1
+        while (
+            after < len(words) and after - index <= _WINDOW and words[after] in _LINKS
+        ):
+            after += 1
+        if after < len(words) and _principal_at(words, after):
             return True
     return False
 
@@ -543,9 +641,11 @@ def _negated(words: frozenset[str]) -> bool:
 
 __all__ = [
     "NEGATION_TERMS",
+    "AUTH_TERMS",
     "OWNERSHIP_TERMS",
+    "POSSESSION_TERMS",
     "PRINCIPAL_TERMS",
-    "RELATION_TERMS",
+    "ROLE_TERMS",
     "SESSION_TERMS",
     "REASON_FAMILY_RULES",
     "TIMING_CHOICE",

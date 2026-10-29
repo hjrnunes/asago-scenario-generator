@@ -965,13 +965,14 @@ distinction (`ownership`, `flag`, `bound`, `state`, or `prior_read`) with the
 exact operation argument, field paths and candidate records derived from the
 operation schema and TARGET-STATE. For an INCORRECT ICA the ICA's stated reason
 chooses the kind (`stpa.scenario_prod.reason_family`, whose
-`REASON_FAMILY_RULES` is the mapping): an ownership, identity, actor or
-party reason gets `ownership`, and so does a session-authorization reason
-that names no limit (a limit term wins over session wording); a reason read
-from a state field gets the family that cites that field; limit, eligibility
+`REASON_FAMILY_RULES` is the mapping): a reason stating an ownership
+relation, or a failed authentication or authorization of the session or a
+principal, gets `ownership` unless it also states a limit failure, which wins
+(a bare noun such as "amount" is not one); a reason read from a state field
+gets the family that cites that field; a stated limit failure, eligibility
 and lifecycle terms get `bound`, `flag` and `state`; any other reason gets no
-hint. Ownership is withheld when another value of the cited row affirmatively
-states that the record belongs to the session principal. The ICA yields one candidate per family of the chosen
+hint. Ownership is withheld only when another value of the cited row itself
+states that the record is the session principal's. The ICA yields one candidate per family of the chosen
 kind, up to the cap, so several ICAs of a slot can share a family; a WRONG_TIMING
 ICA keeps the first `prior_read` family. Separately, every candidate's request
 renders the context-table row its ICA cites (resolved by the row's ID, with each
