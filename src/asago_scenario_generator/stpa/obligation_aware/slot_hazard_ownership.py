@@ -8,10 +8,14 @@ the slot then follows the slot's action, while the hazard points at the
 other one.
 
 The check is deterministic.  A hazard depends on an operation when its
-description names, as a whole identifier, an operation of the target's
+description names an operation of the target's
 declared inventory (the execution target profile's operations, which Stage 5
 checks conditions against) or the ``operation`` of some control action in
-the final structure.  A hazard that names no such operation is not checked.
+the final structure.  An identifier-like name (``escalate_trust_safety``,
+``getOrder``, ``retrieve-1``) is named wherever it stands as a whole
+identifier; a plain word such as ``update`` only when quoted or backticked,
+so ordinary prose does not name it.  A hazard that names no such operation
+is not checked.
 For each hazard an ICA cites, at least one named operation must be the
 operation of the slot's own control action; otherwise the ICA is flagged
 with the slots that own the named operations, and with the named operations
@@ -158,14 +162,24 @@ def declared_operation_names(execution_target_profile: Any) -> tuple[str, ...]:
 
 
 def _named_operations(text: str, operations: Iterable[str]) -> tuple[str, ...]:
-    """Return the operations *text* names as whole identifiers, sorted."""
-    return tuple(
-        sorted(
-            name
-            for name in operations
-            if re.search(rf"(?<![\w]){re.escape(name)}(?![\w])", text)
-        )
-    )
+    """Return the operations *text* names, sorted.
+
+    An identifier-like name (with ``_``, a digit, or a camelCase hump) counts
+    wherever it stands as a whole identifier.  A plain word such as
+    ``update`` counts only quoted or backticked, so ordinary prose ("an
+    inaccurate update") does not name an operation.
+    """
+    return tuple(sorted(name for name in operations if _names(text, name)))
+
+
+def _names(text: str, name: str) -> bool:
+    escaped = re.escape(name)
+    if _IDENTIFIER_LIKE.search(name):
+        return re.search(rf"(?<![\w]){escaped}(?![\w])", text) is not None
+    return re.search(rf"(?:`{escaped}`|'{escaped}'|\"{escaped}\")", text) is not None
+
+
+_IDENTIFIER_LIKE = re.compile(r"[_\d]|[a-z][A-Z]")
 
 
 def _slot_mismatches(

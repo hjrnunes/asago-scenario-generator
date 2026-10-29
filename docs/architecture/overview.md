@@ -285,8 +285,10 @@ operation that another control action invokes. Final-ICA verification checks
 this without a model call: a cited hazard whose description names an
 operation must name the operation of the slot's own action. An operation is a
 name in the execution target profile's operations (the inventory Stage 5
-checks conditions against) or the `operation` of some control action. An ICA
-that fails the check keeps its slot and is flagged with
+checks conditions against) or the `operation` of some control action. An
+identifier-like name (with `_`, a digit, or camelCase) is named wherever it
+appears as a whole identifier; a plain word such as `update` only when quoted
+or backticked, so ordinary prose does not name it. An ICA that fails the check keeps its slot and is flagged with
 `ica_hazard_operation_outside_slot`, in its `quality_warnings` and in the
 verification batch diagnostics, naming the slot or slots whose action owns the
 operation, or saying that no slot owns it when no control action invokes it.

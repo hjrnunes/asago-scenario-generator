@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
@@ -481,3 +483,47 @@ def test_flagging_twice_adds_each_warning_once() -> None:
 
     assert once == twice
     assert len(once.slots[0].icas[0].quality_warnings) == 1
+
+
+def _generic(text: str) -> tuple:
+    """Check the RESP-8 slot against a hazard text and an `update` inventory."""
+    return find_slot_hazard_mismatches(
+        ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+        _hazard_text(text),
+        _unowned_structure(),
+        operation_inventory=("update",),
+    )
+
+
+def test_a_generic_operation_name_in_prose_is_not_an_operation() -> None:
+    assert _generic("An inaccurate update leaves the guest confused.") == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "A concern is never sent through `update`.",
+        "A concern is never sent through 'update'.",
+        'A concern is never sent through "update".',
+    ],
+    ids=["backticked", "single-quoted", "double-quoted"],
+)
+def test_a_quoted_generic_operation_name_is_an_operation(text) -> None:
+    [mismatch] = _generic(text)
+
+    assert mismatch.hazard_operations == ("update",)
+    assert mismatch.unowned_operations == ("update",)
+
+
+@pytest.mark.parametrize(
+    "name", ["notify_staff", "getOrder", "retrieve-1"], ids=["snake", "camel", "digit"]
+)
+def test_an_identifier_like_name_counts_without_quotes(name) -> None:
+    [mismatch] = find_slot_hazard_mismatches(
+        ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+        _hazard_text(f"A concern is never handed to {name} for review."),
+        _unowned_structure(),
+        operation_inventory=(name,),
+    )
+
+    assert mismatch.hazard_operations == (name,)
