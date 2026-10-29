@@ -225,8 +225,10 @@ from the exact mapping path. The raw mapping path never enters the prompt.
 Each question's reviewed risk carries the risk card's class description next
 to its threat, consequence, and impact. Routing judges `risk_alignment`
 against the class; the threat, consequence, and impact are the source
-policy's example of that class. Slot filling's view of the question leaves
-the class description out.
+policy's example of that class. A class that names a kind of outcome
+(hallucination, disinformation, lack of robustness) is aligned with a
+mechanism that produces that outcome in this system. Slot filling's view of
+the question leaves the class description out.
 A routing batch holds up to `max_batch_size` (default 8) questions, and each
 question states its own `attack_pattern_id` and `attack_pattern_name`; the
 concern glossary describes each pattern once. Each provider route echoes its
@@ -1029,6 +1031,15 @@ class within the system boundary. A card with no recorded restatement falls
 back to its class description, and every card is shown whatever its scope.
 The disposition repair and the risk-coverage review label the consequence the
 same way.
+
+A loss names only channels inside the deployed system: its replies and chat,
+its tool calls, and the backend those calls reach. A third-party model
+provider or other outside service, and prompts as a channel data leaks
+through, are the policy's setting, not this system's. The disposition repair
+cites no declared loss whose only channel is one of those. The risk-coverage
+review judges each card against its class: the actor or path and the loss of
+its grounded-path test are the class's within this system, not the policy
+example's.
 
 Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic

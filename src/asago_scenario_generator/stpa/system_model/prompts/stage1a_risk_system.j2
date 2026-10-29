@@ -144,6 +144,17 @@ actors and assets. Use it to understand the class. Do not restate it as a
 loss, and do not carry its actors or assets into a loss unless the use case
 describes them.
 
+### Loss channels
+
+A loss reaches its stakeholder through the deployed system: its replies
+and chat, its tool calls, or the backend records and services those
+tool calls reach. Name only those channels in a loss. Do not name a
+third-party model provider, model vendor, or other outside service as a
+channel a loss passes through, not even as an alternative ("or via the model
+provider"), and do not name prompts as a channel through which data leaks.
+Where a risk class concerns data reaching an outside party, state the loss as
+the data leaving through this system's replies, tool calls, or backend.
+
 ### Acronym expansion
 
 On first use, expand every acronym: write 'Personally Identifiable Information (PII)' not just 'PII'. After the first expansion, the short form alone is acceptable.

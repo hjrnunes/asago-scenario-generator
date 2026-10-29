@@ -4,5 +4,19 @@ cases:
     required:
       - '"loss_ids": ["<declared-loss-id>"]'
       - a loss ID from the declared loss registry in the user message
+      - >-
+        A declared loss accounts for a card only through a channel inside the
+        deployed system: its replies and chat, its tool calls, or the backend
+        records and services those tool calls reach.
+      - >-
+        Reject a declared loss whose only channel is a third-party model
+        provider, model vendor, or other outside service, or prompts used as a
+        channel through which data leaks: do not cite it for any card. A loss
+        that also names a channel inside the system accounts for a card through
+        that channel alone.
+      - >-
+        Cite another declared loss that reaches the card's harm through this
+        system's own channels, or, when none does, mark the card
+        `not_applicable` with a reason that says so.
     forbidden:
       - '"L-1"'

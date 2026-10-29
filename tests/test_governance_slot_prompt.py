@@ -60,9 +60,11 @@ _GOLDEN_SLOT_USER_EMPTY = (
 # matching a real slot, and again when the goal-redirection rule moved into
 # the mechanism library's entries, and again when each route began echoing its
 # question's attack_pattern_id, and again when risk alignment began judging the
-# risk class, with the threat and consequence as the policy's example.
+# risk class, with the threat and consequence as the policy's example, and
+# again when a consequence the mechanism produces began to count as alignment
+# for an outcome class such as hallucination.
 _GOLDEN_ROUTING_SYSTEM = (
-    "568774347d55208c6d608b5367729b571f81815a5d03e3dd847acc9b79a619a9"
+    "e01ea61f6e94adc7af0132545197a698d16555807c7b1f9034d607d31b7c4829"
 )
 # The routing user digest was recaptured when slot IDs left the ID glossary for
 # a UCA type legend, when routing stopped offering WRONG_DURATION slots that
