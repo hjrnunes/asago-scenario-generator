@@ -119,8 +119,17 @@ class VerificationRecord(_Read):
     correction: Any = None
 
 
+class VerificationDiagnostic(_Read):
+    """One diagnostic of the verification batch, such as a slot/hazard flag."""
+
+    code: str
+    detail: str
+    refs: list[str] = Field(default_factory=list)
+
+
 class _Verification(_Read):
     records: list[VerificationRecord] = Field(default_factory=list)
+    diagnostics: list[VerificationDiagnostic] = Field(default_factory=list)
 
 
 class _IcaEvidence(_Read):

@@ -5,7 +5,9 @@ action invokes no operation can tie itself to a hazard about another action's
 operation.  The final-ICA verification flags such an ICA, on the ICA and in
 the verification batch, and names the slot that owns the operation.  A slot
 that acts through other actions, an operation named only as an example, and
-an operation whose output the slot's action shares are not flagged.
+an operation whose output the slot's action shares are not flagged, unless the
+target profile interprets that operation as a state change.  A hazard
+operation no control action invokes is a coverage finding, not a slot flag.
 """
 
 from __future__ import annotations
@@ -51,16 +53,25 @@ from asago_scenario_generator.stpa.obligation_aware.prompts import (
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     SlotFillRunResult,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    TargetOperationEffect,
+)
 from tests.helpers.execution_classification import _target_profile
+from tests.helpers.kc_decision import kc_profile, kc_tool
 from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
     SLOT_HAZARD_MISMATCH_CODE,
+    UNINVOKED_HAZARD_OPERATION_CODE,
     SlotHazardMismatch,
+    UninvokedHazardOperation,
+    declared_operation_effects,
     declared_operation_names,
     find_slot_hazard_mismatches,
+    find_uninvoked_hazard_operations,
     flag_slot_hazard_mismatches,
 )
 
 CODE = SLOT_HAZARD_MISMATCH_CODE
+COVERAGE_CODE = UNINVOKED_HAZARD_OPERATION_CODE
 
 
 class _Supporting:
@@ -208,6 +219,10 @@ def _flags(batch) -> list:
     return [item for item in batch.diagnostics if item.code == CODE]
 
 
+def _coverage(batch) -> list:
+    return [item for item in batch.diagnostics if item.code == COVERAGE_CODE]
+
+
 def _icas(enumeration: ICAEnumeration) -> dict[str, ICA]:
     return {ica.ica_id: ica for slot in enumeration.slots for ica in slot.icas}
 
@@ -322,22 +337,52 @@ def _unowned_structure() -> ControlStructure:
     return structure
 
 
-def test_a_declared_operation_no_action_invokes_is_flagged_as_unowned() -> None:
-    [mismatch] = find_slot_hazard_mismatches(
-        ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+def _uninvoked(slot: ICASlot, losses: LossAnalysis, structure, inventory=()):
+    return find_uninvoked_hazard_operations(
+        ICAEnumeration(slots=[slot]),
+        losses,
+        structure,
+        operation_inventory=inventory,
+    )
+
+
+def test_a_declared_operation_no_action_invokes_is_not_a_slot_flag() -> None:
+    # No slot owns the operation, so the tie cannot be judged; the gap is in
+    # the structure's coverage of the target.
+    assert (
+        find_slot_hazard_mismatches(
+            ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+            _losses(),
+            _unowned_structure(),
+            operation_inventory=("escalate_trust_safety",),
+        )
+        == ()
+    )
+
+
+def test_a_declared_operation_no_action_invokes_is_a_coverage_finding() -> None:
+    [finding] = _uninvoked(
+        _slot("RESP-8", "CA-8-1", "H-3", "SC-1"),
         _losses(),
         _unowned_structure(),
-        operation_inventory=("escalate_trust_safety",),
+        ("escalate_trust_safety",),
     )
 
-    assert mismatch.owning_slot_ids == ()
-    assert mismatch.unowned_operations == ("escalate_trust_safety",)
-    assert mismatch.reason.endswith(
-        "no slot owns `escalate_trust_safety`: no control action invokes it"
+    assert finding == UninvokedHazardOperation(
+        ica_id="RESP-8:CA-8-1:NOT_PROVIDED:1",
+        slot_id="RESP-8:CA-8-1:NOT_PROVIDED",
+        control_action_id="CA-8-1",
+        hazard_id="H-3",
+        operations=("escalate_trust_safety",),
+    )
+    assert finding.reason == (
+        "hazard H-3 names `escalate_trust_safety`, but no control action "
+        "invokes it, so no slot owns it; ICA RESP-8:CA-8-1:NOT_PROVIDED:1 of "
+        "slot RESP-8:CA-8-1:NOT_PROVIDED cites the hazard"
     )
 
 
-def test_an_unowned_operation_is_flagged_by_the_verification() -> None:
+def test_the_verification_records_an_uninvoked_operation_as_coverage() -> None:
     filtered, batch = verify_final_ica_batch(
         _Supporting(),
         ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
@@ -346,38 +391,82 @@ def test_an_unowned_operation_is_flagged_by_the_verification() -> None:
         operation_inventory=("escalate_trust_safety",),
     )
 
-    [flag] = _flags(batch)
-    assert "no slot owns `escalate_trust_safety`" in flag.detail
-    [warning] = _icas(filtered)["RESP-8:CA-8-1:NOT_PROVIDED:1"].quality_warnings
-    assert "no slot owns `escalate_trust_safety`" in warning
+    assert _flags(batch) == []
+    [finding] = _coverage(batch)
+    assert finding.refs == ("RESP-8:CA-8-1:NOT_PROVIDED:1",)
+    assert "no control action invokes it" in finding.detail
+    # The coverage finding is about the structure, not the ICA's text.
+    assert _icas(filtered)["RESP-8:CA-8-1:NOT_PROVIDED:1"].quality_warnings == []
 
 
-def test_a_hazard_naming_an_owned_and_an_unowned_operation_names_both() -> None:
+def test_a_hazard_naming_an_owned_and_an_unowned_operation_splits_them() -> None:
     losses = _hazard_text(
         "A concern reaches neither `escalate_trust_safety` nor `notify_staff`."
     )
+    slot = _slot("RESP-8", "CA-8-1", "H-3", "SC-1")
+    inventory = ("escalate_trust_safety", "notify_staff")
 
     [mismatch] = find_slot_hazard_mismatches(
-        ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+        ICAEnumeration(slots=[slot]),
         losses,
         _structure(),
-        operation_inventory=("escalate_trust_safety", "notify_staff"),
+        operation_inventory=inventory,
     )
+    [finding] = _uninvoked(slot, losses, _structure(), inventory)
 
     assert mismatch.hazard_operations == ("escalate_trust_safety", "notify_staff")
     assert mismatch.owning_slot_ids == ("RESP-7:CA-7-2:NOT_PROVIDED",)
-    assert mismatch.unowned_operations == ("notify_staff",)
-    assert "the owning slot is RESP-7:CA-7-2:NOT_PROVIDED" in mismatch.reason
-    assert "no slot owns `notify_staff`" in mismatch.reason
+    assert mismatch.reason.endswith("the owning slot is RESP-7:CA-7-2:NOT_PROVIDED")
+    assert "notify_staff" not in mismatch.reason.split(";")[-1]
+    assert finding.operations == ("notify_staff",)
 
 
-def test_a_name_in_neither_the_inventory_nor_an_action_is_not_an_operation() -> None:
+def test_an_uninvoked_operation_beside_a_reached_one_is_not_recorded() -> None:
+    # The slot's own operation is named too, so the slot check passes the
+    # hazard and the coverage diagnostic, decided the same way, stays silent.
+    structure = _structure()
+    structure.responsibilities[1].control_actions[0].operation = "send_reply"
+    losses = _hazard_text("A concern reaches neither `send_reply` nor `notify_staff`.")
+    slot = _slot("RESP-8", "CA-8-1", "H-3", "SC-1")
+
+    assert _uninvoked(slot, losses, structure, ("notify_staff",)) == ()
+    assert _mismatches(slot, losses, structure) == ()
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {
+            "description": "Tell the safety desk a concern was reported",
+            "target": {"type": "responsibility", "id": "RESP-7"},
+        },
+        {
+            "description": "Record the concern in session memory",
+            "effect_kind": "state_change",
+        },
+    ],
+    ids=["message-to-another-controller", "state-change"],
+)
+def test_coverage_skips_the_slots_the_slot_check_skips(fields) -> None:
+    structure = _with_action(**fields)
+    structure.responsibilities[0].control_actions[0].operation = None
+
     assert (
-        _mismatches(
-            _slot("RESP-8", "CA-8-1", "H-3", "SC-1"), _losses(), _unowned_structure()
+        _uninvoked(
+            _slot("RESP-8", "CA-8-1", "H-3", "SC-1"),
+            _losses(),
+            structure,
+            ("escalate_trust_safety",),
         )
         == ()
     )
+
+
+def test_a_name_in_neither_the_inventory_nor_an_action_is_not_an_operation() -> None:
+    slot = _slot("RESP-8", "CA-8-1", "H-3", "SC-1")
+
+    assert _mismatches(slot, _losses(), _unowned_structure()) == ()
+    assert _uninvoked(slot, _losses(), _unowned_structure()) == ()
 
 
 # The fixture profile declares one operation, `retrieve-1`, that no control
@@ -400,7 +489,7 @@ class _Recording(_Supporting):
         return super().verify_ica_hazards(requests, **kwargs)
 
 
-def _run_ica_with(profile, tmp_path):
+def _run_ica_with(profile, tmp_path, *, losses=None, structure=None):
     """Run the synthesis ICA stage on the RESP-8 slot; return what it saw."""
     enumeration = ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")])
     seen: dict = {}
@@ -416,8 +505,8 @@ def _run_ica_with(profile, tmp_path):
         (),
         (),
         None,
-        _declared_losses(),
-        _unowned_structure(),
+        losses or _declared_losses(),
+        structure or _unowned_structure(),
         None,
         SynthesisInputs(
             use_case="A guest chat assistant.",
@@ -430,15 +519,13 @@ def _run_ica_with(profile, tmp_path):
     return run.value, seen["inputs"], verifier.requests
 
 
-def test_synthesis_flags_a_declared_operation_no_action_invokes(tmp_path) -> None:
+def test_synthesis_records_a_declared_operation_no_action_invokes(tmp_path) -> None:
     verified, _, _ = _run_ica_with(_target_profile(), tmp_path)
 
-    [flag] = _flags(verified.ica_hazard_verification)
-    assert f"no slot owns `{_DECLARED}`" in flag.detail
-    [warning] = _icas(verified.ica_enumeration)[
-        "RESP-8:CA-8-1:NOT_PROVIDED:1"
-    ].quality_warnings
-    assert f"no slot owns `{_DECLARED}`" in warning
+    assert _flags(verified.ica_hazard_verification) == []
+    [finding] = _coverage(verified.ica_hazard_verification)
+    assert f"names `{_DECLARED}`, but no control action invokes it" in finding.detail
+    assert finding.refs == ("RESP-8:CA-8-1:NOT_PROVIDED:1",)
 
 
 def test_the_inventory_reaches_no_model_request(tmp_path) -> None:
@@ -453,12 +540,12 @@ def test_the_inventory_reaches_no_model_request(tmp_path) -> None:
     assert build_ica_hazard_verification_prompts(
         tuple(with_profile[2])
     ) == build_ica_hazard_verification_prompts(tuple(without_profile[2]))
-    assert f"no slot owns `{_DECLARED}`" not in "".join(
+    assert "no control action invokes" not in "".join(
         build_ica_hazard_verification_prompts(tuple(with_profile[2]))
     )
-    # Only the deterministic check differs.
-    assert _flags(with_profile[0].ica_hazard_verification)
-    assert not _flags(without_profile[0].ica_hazard_verification)
+    # Only the deterministic coverage diagnostic differs.
+    assert _coverage(with_profile[0].ica_hazard_verification)
+    assert not _coverage(without_profile[0].ica_hazard_verification)
 
 
 def test_declared_operation_names_reads_every_resource_operation() -> None:
@@ -491,11 +578,11 @@ def test_flagging_twice_adds_each_warning_once() -> None:
 
 def _generic(text: str) -> tuple:
     """Check the RESP-8 slot against a hazard text and an `update` inventory."""
-    return find_slot_hazard_mismatches(
-        ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+    return _uninvoked(
+        _slot("RESP-8", "CA-8-1", "H-3", "SC-1"),
         _hazard_text(text),
         _unowned_structure(),
-        operation_inventory=("update",),
+        ("update",),
     )
 
 
@@ -513,24 +600,23 @@ def test_a_generic_operation_name_in_prose_is_not_an_operation() -> None:
     ids=["backticked", "single-quoted", "double-quoted"],
 )
 def test_a_quoted_generic_operation_name_is_an_operation(text) -> None:
-    [mismatch] = _generic(text)
+    [finding] = _generic(text)
 
-    assert mismatch.hazard_operations == ("update",)
-    assert mismatch.unowned_operations == ("update",)
+    assert finding.operations == ("update",)
 
 
 @pytest.mark.parametrize(
     "name", ["notify_staff", "getOrder", "retrieve-1"], ids=["snake", "camel", "digit"]
 )
 def test_an_identifier_like_name_counts_without_quotes(name) -> None:
-    [mismatch] = find_slot_hazard_mismatches(
-        ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")]),
+    [finding] = _uninvoked(
+        _slot("RESP-8", "CA-8-1", "H-3", "SC-1"),
         _hazard_text(f"A concern is never handed to {name} for review."),
         _unowned_structure(),
-        operation_inventory=(name,),
+        (name,),
     )
 
-    assert mismatch.hazard_operations == (name,)
+    assert finding.operations == (name,)
 
 
 # Only an action that acts through its own output or operation is checked.
@@ -704,6 +790,121 @@ def test_feedback_that_carries_no_shared_output_keeps_the_flag(
     [mismatch] = _mismatches(_reply_slot(), _losses(), structure)
 
     assert mismatch.owning_slot_ids == ("RESP-7:CA-7-2:NOT_PROVIDED",)
+
+
+def _relay_mismatches(effects, *, reader="RESP-8", source="CP-1"):
+    """Check the reply slot against the escalation hazard with *effects*."""
+    structure = _feedback_structure(
+        reader=reader, source=source, source_kind="operation_result"
+    )
+    return find_slot_hazard_mismatches(
+        ICAEnumeration(slots=[_reply_slot()]),
+        _losses(),
+        structure,
+        operation_effects=effects,
+    )
+
+
+@pytest.mark.parametrize("effect", ["create", "update", "delete"])
+def test_a_reply_that_relays_a_state_change_is_flagged(effect) -> None:
+    # Reporting the outcome of a state change does not make the change, so a
+    # hazard about the change belongs to the action that invokes it.
+    [mismatch] = _relay_mismatches({"escalate_trust_safety": effect})
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)
+    assert mismatch.owning_slot_ids == ("RESP-7:CA-7-2:NOT_PROVIDED",)
+
+
+def test_an_interpreted_effect_counts_as_its_value() -> None:
+    assert _relay_mismatches({"escalate_trust_safety": TargetOperationEffect.update})
+
+
+@pytest.mark.parametrize(
+    "effects",
+    [
+        None,
+        {},
+        {"escalate_trust_safety": "observe"},
+        {"escalate_trust_safety": "read"},
+        {"escalate_trust_safety": "execute"},
+        {"escalate_trust_safety": "unknown"},
+        {"another_operation": "update"},
+    ],
+    ids=["none", "empty", "observe", "read", "execute", "unknown", "other-op"],
+)
+def test_a_reply_that_relays_an_operation_with_no_state_change_is_not_flagged(
+    effects,
+) -> None:
+    assert _relay_mismatches(effects) == ()
+
+
+def test_an_operation_that_reads_the_slots_output_still_reaches_a_state_change() -> (
+    None
+):
+    # The escalation decides on what the reply produced, so the reply is an
+    # upstream cause even of a state change.
+    assert (
+        _relay_mismatches(
+            {"escalate_trust_safety": "update"}, reader="RESP-7", source="CP-2"
+        )
+        == ()
+    )
+
+
+def test_a_slot_that_invokes_a_state_change_reaches_it() -> None:
+    structure = _structure()
+    assert (
+        find_slot_hazard_mismatches(
+            ICAEnumeration(slots=[_slot("RESP-7", "CA-7-2", "H-3", "SC-1")]),
+            _losses(),
+            structure,
+            operation_effects={"escalate_trust_safety": "update"},
+        )
+        == ()
+    )
+
+
+def test_declared_operation_effects_reads_the_interpretations() -> None:
+    profile = kc_profile(
+        kc_tool("modify_booking", effect="update"),
+        kc_tool("get_listing", effect="observe"),
+    )
+
+    assert declared_operation_effects(profile) == {
+        "modify_booking": "update",
+        "get_listing": "observe",
+    }
+    assert declared_operation_effects(None) == {}
+    assert declared_operation_effects(SimpleNamespace(resources=[])) == {}
+
+
+@pytest.mark.parametrize(
+    ("effect", "flagged"),
+    [("update", True), ("observe", False)],
+)
+def test_synthesis_passes_the_profiles_effects_to_the_check(
+    tmp_path, effect, flagged
+) -> None:
+    # The safety lookup invokes the profile's declared operation, and the
+    # reply relays its result.
+    relay = _feedback_structure(
+        reader="RESP-8", source="CP-1", source_kind="operation_result"
+    )
+    relay.responsibilities[0].control_actions[0].operation = _DECLARED
+    fixture = _target_profile().model_dump(mode="json", exclude={"semantic_digest"})
+    [interpretation] = fixture["interpretations"]
+    profile = type(_target_profile()).model_validate(
+        {**fixture, "interpretations": [{**interpretation, "likely_effect": effect}]}
+    )
+
+    verified, inputs, requests = _run_ica_with(profile, tmp_path, structure=relay)
+
+    assert bool(_flags(verified.ica_hazard_verification)) is flagged
+    # The effects reach neither the ICA fill nor the verifier's prompt.
+    assert inputs.execution_target_profile is None
+    assert "likely_effect" not in "".join(
+        build_ica_hazard_verification_prompts(tuple(requests))
+    )
 
 
 def test_a_confirmation_reply_tied_to_a_storage_hazard_is_flagged() -> None:

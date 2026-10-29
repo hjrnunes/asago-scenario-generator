@@ -30,7 +30,7 @@ SCHEMA = (
 )
 SECTIONS = (
     "answer how risks slots testability obligations mechanism-suggestions failed "
-    "warnings hazards scenarios "
+    "warnings slot-hazard-ties uninvoked-operations hazards scenarios "
     "target handoff effort"
 ).split()
 
