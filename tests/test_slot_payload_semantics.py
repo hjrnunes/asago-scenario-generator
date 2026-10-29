@@ -142,3 +142,121 @@ class TestValidateSlotPayloadSemantics:
             _validate_slot_payload_semantics(
                 _payload(results=(_result("proposed_not_applicable"),)), request
             )
+
+
+# --- a NOT_PROVIDED finding that repeats an INCORRECT finding --------------
+
+_ROW_VALID = "CA-1-1:ctx-1"
+_ROW_INVALID = "CA-1-1:ctx-2"
+
+
+def _valued_structure():
+    """CA-1-1 reads PM-1-1, so its context table has one row per value."""
+    structure = _control_structure()
+    [resp] = structure.responsibilities
+    [part] = resp.process_model_parts
+    [action] = resp.control_actions
+    return structure.model_copy(
+        update={
+            "responsibilities": (
+                resp.model_copy(
+                    update={
+                        "process_model_parts": (
+                            part.model_copy(update={"values": ["valid", "invalid"]}),
+                        ),
+                        "control_actions": (
+                            action.model_copy(
+                                update={"process_model_refs": ["PM-1-1"]}
+                            ),
+                        ),
+                    }
+                ),
+            )
+        }
+    )
+
+
+def _two_slot_request() -> Any:
+    structure = _valued_structure()
+    by_type = {slot.uca_type.value: slot for slot in create_slots(structure)}
+    base = _provider_slot_request()
+    return base.model_copy(
+        update={
+            "slots": (by_type["INCORRECT"], by_type["NOT_PROVIDED"]),
+            "control_structure": structure,
+        }
+    )
+
+
+def _slot_finding(deviation: str, row: str | None) -> dict[str, Any]:
+    return {**_finding(), "deviation": deviation, "context_row": row}
+
+
+def _two_slot_payload(
+    incorrect_row: str | None, omitted_row: str | None
+) -> _SlotProviderPayload:
+    request = _two_slot_request()
+    incorrect, omitted = request.slots
+    return _SlotProviderPayload.model_validate(
+        {
+            "filled_slots": [
+                {
+                    "slot_id": incorrect.slot_id,
+                    "is_na": False,
+                    "na_rationale": None,
+                    "findings": [
+                        _slot_finding(
+                            "The request is validated against the wrong rule.",
+                            incorrect_row,
+                        )
+                    ],
+                    "consideration_results": [],
+                },
+                {
+                    "slot_id": omitted.slot_id,
+                    "is_na": False,
+                    "na_rationale": None,
+                    "findings": [
+                        _slot_finding(
+                            "The request is not validated before it is accepted.",
+                            omitted_row,
+                        )
+                    ],
+                    "consideration_results": [],
+                },
+            ]
+        }
+    )
+
+
+class TestInvertedOmission:
+    def test_an_omission_repeating_an_incorrect_finding_is_corrected(self) -> None:
+        request = _two_slot_request()
+        incorrect, omitted = request.slots
+
+        with pytest.raises(ValueError) as raised:
+            _validate_slot_payload_semantics(
+                _two_slot_payload(_ROW_INVALID, _ROW_INVALID), request
+            )
+
+        assert str(raised.value) == (
+            f"{omitted.slot_id} finding 0 repeats {incorrect.slot_id} finding 0: "
+            f"both cite context row {_ROW_INVALID}, hazards H-1 and constraints "
+            "SC-1. The NOT_PROVIDED finding states that omitting the action in "
+            "that context causes the hazard, and the INCORRECT finding that "
+            "providing it does. If providing the action in that context is the "
+            "hazard, remove the NOT_PROVIDED finding (set the slot to N/A when "
+            "no finding remains). Keep it only when the omission itself leads to "
+            "a hazard or constraint the INCORRECT finding does not cite, and "
+            "cite only those."
+        )
+
+    def test_findings_on_different_rows_pass(self) -> None:
+        _validate_slot_payload_semantics(
+            _two_slot_payload(_ROW_VALID, _ROW_INVALID), _two_slot_request()
+        )
+
+    def test_findings_that_cite_no_row_pass(self) -> None:
+        _validate_slot_payload_semantics(
+            _two_slot_payload(None, None), _two_slot_request()
+        )
