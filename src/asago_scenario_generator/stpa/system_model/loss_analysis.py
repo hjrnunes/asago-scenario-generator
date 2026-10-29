@@ -114,6 +114,10 @@ from asago_scenario_generator.stpa.system_model.loss_analysis_repair import (
     select_reference_repairs,
 )
 from asago_scenario_generator.stpa.system_model.repair_ids import IdSpace
+from asago_scenario_generator.stpa.system_model.risk_actionability import (
+    ActionabilityDecision,
+    RiskActionabilityRecord,
+)
 from asago_scenario_generator.stpa.system_model.rule_span_repair import (
     RuleSpanRepairRecord,
     record_rule_span_repairs,
@@ -489,22 +493,57 @@ class _Stage1aRevisionPatch(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-def _compact_risk_card_evidence(risk_cards: Iterable[RiskCard]) -> list[str]:
+def _in_boundary_statements(
+    risk_actionability: RiskActionabilityRecord | None,
+) -> dict[str, tuple[str, str]]:
+    """Each card's system action and affected stakeholder, where one is recorded.
+
+    Only a model's ``actionable`` decision restates the card's class inside
+    the system boundary; a fallback or any other decision names neither, so
+    its card falls back to the class description.
+    """
+    if risk_actionability is None:
+        return {}
+    statements: dict[str, tuple[str, str]] = {}
+    for entry in risk_actionability.entries:
+        action = (entry.system_action or "").strip()
+        stakeholder = (entry.affected_stakeholder or "").strip()
+        if (
+            entry.source == "model"
+            and entry.decision is ActionabilityDecision.actionable
+            and action
+            and stakeholder
+        ):
+            statements[entry.risk_id] = (action, stakeholder)
+    return statements
+
+
+def _compact_risk_card_evidence(
+    risk_cards: Iterable[RiskCard],
+    risk_actionability: RiskActionabilityRecord | None = None,
+) -> list[str]:
     """Select complete semantic fields for the provider-facing risk view.
 
     The risk extraction can contain bookkeeping, scores, evidence spans, and
     mitigation prose that duplicate the core assessment.  Keep each card's
-    exact ID, name, full risk description, and full consequence; the typed
-    cards remain authoritative and are never mutated or truncated.
+    exact ID, name, full class description, the in-boundary restatement the
+    actionability record holds for it, and the full consequence labelled as
+    the source policy's example.  Every card is kept; the typed cards remain
+    authoritative and are never mutated or truncated.
     """
+    statements = _in_boundary_statements(risk_actionability)
     evidence: list[str] = []
     for card in risk_cards:
         fragments = [
             f"{card.risk_id} — {card.risk_name}",
-            f"description: {card.risk_description}",
+            f"class description: {card.risk_description}",
         ]
+        if card.risk_id in statements:
+            action, stakeholder = statements[card.risk_id]
+            fragments.append(f"in-boundary system action: {action}")
+            fragments.append(f"in-boundary affected stakeholder: {stakeholder}")
         if card.consequence:
-            fragments.append(f"consequence: {card.consequence}")
+            fragments.append(f"policy example consequence: {card.consequence}")
         evidence.append("; ".join(fragments))
     return evidence
 
@@ -1136,6 +1175,7 @@ def derive_loss_analysis(
     normalization_warnings: list[str] | None = None,
     repair_record: RepairRecord | None = None,
     target_evidence: TargetEvidence | None = None,
+    risk_actionability: RiskActionabilityRecord | None = None,
 ) -> LossAnalysis:
     """Run Stage 1a: derive loss analysis via two sequential LLM calls.
 
@@ -1170,6 +1210,9 @@ def derive_loss_analysis(
         target_evidence: Optional discovered target evidence.  Both calls
             render it to ground hazards and constraints; losses stay derived
             from risk cards and the use case.
+        risk_actionability: Optional scope record of the risk cards.  A card
+            with an in-boundary system action and affected stakeholder shows
+            them in the risk derivation call; every card is still shown.
 
     Returns:
         Validated LossAnalysis model.
@@ -1183,7 +1226,7 @@ def derive_loss_analysis(
     # Keep the provider context small enough to leave completion room for a
     # complete graph.  The original typed inputs remain authoritative for
     # validation and persistence; these are prompt-only projections.
-    compact_risk_evidence = _compact_risk_card_evidence(risk_cards)
+    compact_risk_evidence = _compact_risk_card_evidence(risk_cards, risk_actionability)
     risk_prompt_vars: dict[str, object] = {
         "use_case_text": use_case_text,
         "risk_cards": risk_cards,

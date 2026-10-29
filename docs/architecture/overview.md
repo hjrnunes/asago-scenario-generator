@@ -222,6 +222,11 @@ and the hashes of every obligation-aware template, included partial, and
 Each structural route carries independent typed mechanism-plausibility and
 reviewed-risk-alignment decisions plus a plain mapping-strength label derived
 from the exact mapping path. The raw mapping path never enters the prompt.
+Each question's reviewed risk carries the risk card's class description next
+to its threat, consequence, and impact. Routing judges `risk_alignment`
+against the class; the threat, consequence, and impact are the source
+policy's example of that class. Slot filling's view of the question leaves
+the class description out.
 A routing batch holds up to `max_batch_size` (default 8) questions, and each
 question states its own `attack_pattern_id` and `attack_pattern_name`; the
 concern glossary describes each pattern once. Each provider route echoes its
@@ -296,12 +301,22 @@ cites no context row is not compared.
 Every slot is offered every hazard, so an ICA can cite a hazard about an
 operation that another control action invokes. Final-ICA verification checks
 this without a model call: a cited hazard whose description names an
-operation must name the operation of the slot's own action. An operation is a
+operation must name one the slot's own action reaches. An operation is a
 name in the execution target profile's operations (the inventory Stage 5
 checks conditions against) or the `operation` of some control action. An
 identifier-like name (with `_`, a digit, or camelCase) is named wherever it
 appears as a whole identifier; a plain word such as `update` only when quoted
-or backticked, so ordinary prose does not name it. An ICA that fails the check keeps its slot and is flagged with
+or backticked, so ordinary prose does not name it. A name that follows an
+example marker ("e.g.", "such as", "like", "for example", "for instance",
+"including") in the same clause is an example of a wider hazard and does not count. Only a
+responsibility slot whose action acts through its own output or operation is
+checked; a coordination link, a message to another controller
+(`agent_message`), a `state_change`, and a `tool_call` without an `operation`
+act through other actions, so a hazard about another action's operation is
+their expected causal path. The action reaches an operation it invokes, and
+one whose action shares an output with it: either action reads a
+process-model part that an `operation_result` or `retrieved_content` feedback
+channel updates from the controlled process the other targets. An ICA that fails the check keeps its slot and is flagged with
 `ica_hazard_operation_outside_slot`, in its `quality_warnings` and in the
 verification batch diagnostics, naming the slot or slots whose action owns the
 operation, or saying that no slot owns it when no control action invokes it.
@@ -592,7 +607,11 @@ and channel only where a later decision depends on it, with the channel's
 source and trust taken from what the result carries. An answer or other text
 an operation returns in reply to a question, or the refusal or hand-off it
 returns instead, is retrieved content, and its variable claims no record
-state the text does not carry. Code adds no such
+state the text does not carry. A result that only acknowledges a request,
+including one that stores, submits or queues an item for another party's
+later action, reports that acceptance and the status it was stored with, not
+the outcome of that later action; a variable for the outcome needs feedback
+from where the outcome is recorded, or stays unknown. Code adds no such
 channel itself, since a declared output does not establish where its
 information originates or whether an adversary can author it.
 
@@ -914,6 +933,15 @@ from compilation. The consumer never defaults an internal agent channel,
 indirect carrier, target action, state store, external action, or real clock
 to ordinary chat.
 
+Stage 1a's risk derivation shows each risk card's class description, the
+in-boundary system action and affected stakeholder that the scope
+classification recorded for an actionable card, and the card's consequence
+labelled as the source policy's example of the class. Losses come from the
+class within the system boundary. A card with no recorded restatement falls
+back to its class description, and every card is shown whatever its scope.
+The disposition repair and the risk-coverage review label the consequence the
+same way.
+
 Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic
 objects are never serialized. Stage 1a classifies losses from either
@@ -951,7 +979,48 @@ restate as it was, and a restated one keeps its constraint citations in
 order, so an exact restatement changes nothing. The Stage 2 manifest records
 `critic_revision.status` as `applied`, `unchanged` (the reply was accepted
 and changed nothing), or `discarded` with its `reason`, and the run
-manifest's `revised` agrees with it. The empty-responsibility cleanup is
+manifest's `revised` agrees with it.
+
+The revision user prompt shows each critic gap with a code-assigned ID,
+`G-1` to `G-n` in finding order. The reply's `gap_dispositions` gives one
+entry per gap: `gap_id`, `disposition` (`addressed`, `dismissed`, or
+`recommendation`), `element_ids`, and a one-sentence `justification`. A
+dismissal or recommendation is only for a gap the reply leaves unchanged; an
+`addressed` gap must name elements the reply adds or modifies. Code checks
+each claim against the elements the published structure adds or changes
+relative to the no-revision output (a responsibility whose child changes is
+changed too). Normalization numbers elements by position, so an inserted
+element can take an existing element's published ID; the check follows each
+element from the reply to the published structure and compares elements by
+that identity, with its ID and reference fields rewritten the same way, so a
+change of ID alone is not a change. Only those fields are rewritten: the
+`ElementRef` fields the model declares, plus the text references
+(`process_model_refs`, `updates`, and a link's `source`, `target` and
+`shared_pm`); values, descriptions and other data are compared as written,
+even when they look like an ID. A claimed ID the reply wrote names the element it
+wrote under that ID, including a new link's mechanism whose colliding ID the
+merge renumbered; any other claimed ID is read as a published ID. A claim
+that names a responsibility or link together with elements it holds is
+judged by those elements, not by the parent's change. A parent named alone
+counts when it changed on its own (its own fields, a new parent, or a lost
+child), or through a changed child that no other gap's `addressed` claim
+names: a child another gap names is that gap's change. A gap with
+no disposition, a gap with more than one disposition, a disposition for an
+unknown gap ID, and an `addressed` claim that changed none of its IDs are
+unresolved. The check sends no request and never rejects or re-asks the
+reply. An `applied` or `unchanged` record adds `gap_dispositions` (the count
+of each disposition, leaving out every disposition of a gap given more than
+one) and `unresolved_gaps` (each gap ID with its reason); a
+`discarded` record does not. Each unresolved gap is also a
+`Revision left critic gap G-n unresolved: ...` post-revision warning, each
+dismissal or recommendation keeps its `Revision dismissed finding G-n ...`
+warning, and a process-model variable the revision added (by identity, not
+by published ID) that no control action reads is reported as a
+post-revision warning. A reply written before
+dispositions, with free-text `dismissed_gaps`, still loads: each entry keeps
+its `Revision dismissed finding: ...` warning and the record has no gap
+review. The request schema no longer offers `dismissed_gaps`, and the
+revision correction shows the prior reply without it. The empty-responsibility cleanup is
 reported only by its `Stripped empty responsibility ...` post-revision
 warning. The replay gate holds no copy of the run's target evidence, so it
 does not reject an `applied` record whose structure differs from its input

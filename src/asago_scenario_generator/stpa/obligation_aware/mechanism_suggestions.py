@@ -16,7 +16,7 @@ against the mechanism's library entry.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import MappingProxyType
 from typing import Literal
 
@@ -91,8 +91,8 @@ class MechanismProposal:
 
     proposed: tuple[ProposedSuggestion, ...] = ()
     structural: tuple[ProposedSuggestion, ...] = ()
-    filtered: Mapping[tuple[MechanismId, str], tuple[DropReason, ...]] = (
-        MappingProxyType({})
+    filtered: Mapping[tuple[MechanismId, str], tuple[DropReason, ...]] = field(
+        default_factory=lambda: MappingProxyType({})
     )
 
     def candidates(self) -> tuple[MechanismCandidate, ...]:

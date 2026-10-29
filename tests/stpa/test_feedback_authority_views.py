@@ -461,6 +461,8 @@ def _unassessed_belief(tmp_path: Path) -> tuple[str, str]:
 # carry the later decision-rule source (the controller's handle and the
 # evidence sentence for it); the user value also carries that handle's later
 # rule description and the misreading sentence of its selection guidance.
+# The critic system value also carries the later evidence-source paragraph of
+# ``critic_system.j2``.
 _UNASSESSED_REQUESTS = {
     "stage5-context": (
         _unassessed_stage5,
@@ -484,7 +486,7 @@ _UNASSESSED_REQUESTS = {
     ),
     "critic": (
         _critic_request,
-        "e41350d0e23d2960e583dc725966d5a8ecdc0991c7f429a55278f22ab2489ba4",
+        "25e4dea6a98feb7c4807fdb2b51cfe59f59161a20e628d246f50b04661e6b98f",
         "e97dfb0f129e9eeba7df7335ef90c8f0dddae97b33ab6d6f9ce8a80ac71fee7f",
     ),
     "context-coverage": (

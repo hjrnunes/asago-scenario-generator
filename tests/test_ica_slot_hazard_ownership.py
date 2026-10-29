@@ -1,9 +1,11 @@
-"""An ICA's hazard must depend on an operation its own slot's action invokes.
+"""An ICA's hazard must depend on an operation its own slot's action reaches.
 
 ICA synthesis offers every hazard to every slot, so a slot whose control
 action invokes no operation can tie itself to a hazard about another action's
 operation.  The final-ICA verification flags such an ICA, on the ICA and in
-the verification batch, and names the slot that owns the operation.
+the verification batch, and names the slot that owns the operation.  A slot
+that acts through other actions, an operation named only as an example, and
+an operation whose output the slot's action shares are not flagged.
 """
 
 from __future__ import annotations
@@ -16,6 +18,8 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
     ControlledProcess,
+    FeedbackChannel,
+    ProcessModelPart,
     Responsibility,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import (
@@ -527,3 +531,279 @@ def test_an_identifier_like_name_counts_without_quotes(name) -> None:
     )
 
     assert mismatch.hazard_operations == (name,)
+
+
+# Only an action that acts through its own output or operation is checked.
+# The cases below are synthetic versions of flags the check used to raise on
+# saved runs and that a reader judged to be real causal paths.
+
+
+def _with_action(**fields) -> ControlStructure:
+    """The structure with the RESP-8 action replaced by one built from *fields*."""
+    structure = _structure()
+    action = {
+        "ca_id": "CA-8-1",
+        "description": "Act on a reported concern",
+        "target": {"type": "controlled_process", "id": "CP-2"},
+        **fields,
+    }
+    structure.responsibilities[1].control_actions = [
+        ControlAction.model_validate(action)
+    ]
+    return structure
+
+
+@pytest.mark.parametrize(
+    "fields",
+    [
+        {
+            "description": "Tell the safety desk a concern was reported",
+            "target": {"type": "responsibility", "id": "RESP-7"},
+        },
+        {
+            "description": "Record the concern in session memory",
+            "effect_kind": "state_change",
+        },
+        {"description": "Invoke a backend operation", "effect_kind": "tool_call"},
+    ],
+    ids=[
+        "message-to-another-controller",
+        "state-change",
+        "tool-call-without-operation",
+    ],
+)
+def test_an_action_that_acts_through_another_is_not_checked(fields) -> None:
+    assert (
+        _mismatches(
+            _slot("RESP-8", "CA-8-1", "H-3", "SC-1"), _losses(), _with_action(**fields)
+        )
+        == ()
+    )
+
+
+def test_a_coordination_link_slot_is_not_checked() -> None:
+    slot = ICASlot(
+        slot_id="CL-1:CM-1:NOT_PROVIDED",
+        coordination_link="CL-1",
+        control_action="CM-1",
+        uca_type="NOT_PROVIDED",
+        is_na=False,
+        icas=[_ica("CL-1:CM-1:NOT_PROVIDED", "H-3", "SC-1")],
+    )
+
+    assert _mismatches(slot, _losses(), _structure()) == ()
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Critical actions, such as `escalate_trust_safety`, run without review.",
+        "A tool (e.g. `escalate_trust_safety`) runs without review.",
+        "Operations like escalate_trust_safety run without review.",
+    ],
+    ids=["such-as", "e.g.", "like"],
+)
+def test_an_operation_named_only_as_an_example_is_not_a_dependency(text) -> None:
+    assert (
+        _mismatches(
+            _slot("RESP-8", "CA-8-1", "H-3", "SC-1"), _hazard_text(text), _structure()
+        )
+        == ()
+    )
+
+
+def test_an_operation_named_again_outside_the_example_still_counts() -> None:
+    losses = _hazard_text(
+        "Critical actions, such as `escalate_trust_safety`, run unreviewed. "
+        "A concern never reaches `escalate_trust_safety`."
+    )
+
+    [mismatch] = _mismatches(
+        _slot("RESP-8", "CA-8-1", "H-3", "SC-1"), losses, _structure()
+    )
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)
+
+
+def _feedback_structure(
+    *, reader: str, source: str, source_kind: str
+) -> ControlStructure:
+    """A reply (CA-8-1 on CP-2), a safety lookup (CA-7-2 on CP-1), and CP-3.
+
+    The *reader* responsibility has a feedback channel from *source* of kind
+    *source_kind*, and its action reads the part that channel updates.
+    """
+    structure = _structure()
+    structure.responsibilities[0].control_actions[
+        0
+    ].description = "Look up the safety record"
+    structure.controlled_processes.append(
+        ControlledProcess(cp_id="CP-3", description="Booking store")
+    )
+    for resp in structure.responsibilities:
+        if resp.resp_id != reader:
+            continue
+        pm_id = f"PM-{reader.removeprefix('RESP-')}-1"
+        resp.process_model_parts = [
+            ProcessModelPart(pm_id=pm_id, description="The looked-up record")
+        ]
+        resp.feedback_channels = [
+            FeedbackChannel(
+                fb_id=f"FB-{reader.removeprefix('RESP-')}-1",
+                description="The record the other action produced",
+                updates=pm_id,
+                source={"type": "controlled_process", "id": source},
+                source_kind=source_kind,
+            )
+        ]
+        resp.control_actions[-1].process_model_refs = [pm_id]
+    return ControlStructure.model_validate(structure.model_dump())
+
+
+def _reply_slot() -> ICASlot:
+    return _slot("RESP-8", "CA-8-1", "H-3", "SC-1")
+
+
+@pytest.mark.parametrize("source_kind", ["operation_result", "retrieved_content"])
+def test_a_reply_that_relays_the_operations_output_is_not_flagged(source_kind) -> None:
+    # The reply reads what the lookup returned, so a hazard about that output
+    # reaches the user through the reply itself.
+    structure = _feedback_structure(
+        reader="RESP-8", source="CP-1", source_kind=source_kind
+    )
+
+    assert _mismatches(_reply_slot(), _losses(), structure) == ()
+
+
+def test_an_operation_that_reads_the_slots_output_is_not_flagged() -> None:
+    # The escalation decides on what the slot's action produced, so the slot's
+    # deviation is an upstream cause of the escalation hazard.
+    structure = _feedback_structure(
+        reader="RESP-7", source="CP-2", source_kind="operation_result"
+    )
+
+    assert _mismatches(_reply_slot(), _losses(), structure) == ()
+
+
+@pytest.mark.parametrize(
+    ("reader", "source", "source_kind"),
+    [
+        ("RESP-8", "CP-1", "user_message"),
+        ("RESP-7", "CP-2", "session_context"),
+        ("RESP-8", "CP-3", "operation_result"),
+    ],
+    ids=["user-message", "session-context", "another-process"],
+)
+def test_feedback_that_carries_no_shared_output_keeps_the_flag(
+    reader, source, source_kind
+) -> None:
+    structure = _feedback_structure(
+        reader=reader, source=source, source_kind=source_kind
+    )
+
+    [mismatch] = _mismatches(_reply_slot(), _losses(), structure)
+
+    assert mismatch.owning_slot_ids == ("RESP-7:CA-7-2:NOT_PROVIDED",)
+
+
+def test_a_confirmation_reply_tied_to_a_storage_hazard_is_flagged() -> None:
+    # A confirmation message cannot make the submit operation store fields
+    # outside its schema: the hazard belongs to the submit action.
+    structure = _structure()
+    structure.responsibilities[0].control_actions[0].operation = "submit_form"
+    losses = _hazard_text(
+        "The `submit_form` operation stores fields outside the schema."
+    )
+
+    [mismatch] = _mismatches(_reply_slot(), losses, structure)
+
+    assert mismatch.hazard_operations == ("submit_form",)
+    assert mismatch.owning_slot_ids == ("RESP-7:CA-7-2:NOT_PROVIDED",)
+
+
+def test_an_operation_slot_tied_to_another_operations_hazard_is_flagged() -> None:
+    # The slot summarizes a record; the hazard is about what another
+    # operation answers, and neither reads the other's output.
+    structure = _with_action(
+        description="Summarize the conversation",
+        effect_kind="tool_call",
+        operation="summarize_record",
+    )
+    losses = _hazard_text("Answers from `escalate_trust_safety` contain diagnoses.")
+
+    [mismatch] = _mismatches(_reply_slot(), losses, structure)
+
+    assert mismatch.slot_operation == "summarize_record"
+    assert mismatch.owning_slot_ids == ("RESP-7:CA-7-2:NOT_PROVIDED",)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "The assistant is likely to omit `escalate_trust_safety`.",
+        "The likelihood rises that `escalate_trust_safety` is never called.",
+    ],
+    ids=["likely", "likelihood"],
+)
+def test_a_word_that_starts_with_an_example_marker_is_not_a_marker(text) -> None:
+    [mismatch] = _mismatches(_reply_slot(), _hazard_text(text), _structure())
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)
+
+
+def test_an_example_marker_counts_in_any_case() -> None:
+    losses = _hazard_text("Actions (E.g. `escalate_trust_safety`) run without review.")
+
+    assert _mismatches(_reply_slot(), losses, _structure()) == ()
+
+
+@pytest.mark.parametrize("stop", ["!", "?"])
+def test_an_example_ends_at_an_exclamation_or_question_mark(stop) -> None:
+    losses = _hazard_text(
+        f"Actions such as `escalate_trust_safety` run{stop} "
+        "The assistant omits `escalate_trust_safety`."
+    )
+
+    [mismatch] = _mismatches(_reply_slot(), losses, _structure())
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Unapproved disclosures, such as sending Dr. Lee's diagnosis through "
+        "`escalate_trust_safety`, occur without consent.",
+        "Transfers, such as moving U.S. records through `escalate_trust_safety`, "
+        "occur without consent.",
+        "Disclosures, such as sending J. Lee's file through "
+        "`escalate_trust_safety`, occur without consent.",
+    ],
+    ids=["title", "dotted-acronym", "initial"],
+)
+def test_an_abbreviations_period_does_not_end_an_example(text) -> None:
+    assert _mismatches(_reply_slot(), _hazard_text(text), _structure()) == ()
+
+
+def test_a_sentence_end_still_ends_an_example() -> None:
+    losses = _hazard_text(
+        "Actions such as reviews run late. The assistant omits `escalate_trust_safety`."
+    )
+
+    [mismatch] = _mismatches(_reply_slot(), losses, _structure())
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)
+
+
+@pytest.mark.parametrize(
+    "token", ["report.json", "example.com", "v1.2"], ids=["file", "domain", "version"]
+)
+def test_a_dotted_name_that_is_no_abbreviation_still_ends_an_example(token) -> None:
+    losses = _hazard_text(
+        f"The assistant performs actions such as writing to {token}. "
+        "It never calls `escalate_trust_safety`."
+    )
+
+    [mismatch] = _mismatches(_reply_slot(), losses, _structure())
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)

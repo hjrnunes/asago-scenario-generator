@@ -174,7 +174,8 @@ def test_user_prompt_carries_findings_and_task_without_the_structure(
         "Suggested remedy: Add a provenance feedback channel",
         "Outcome verification: absent_unjustified",
         "add the missing element(s) to the RevisionDelta",
-        "dismiss it with a one-sentence justification in dismissed_gaps",
+        "dismiss it with a one-sentence justification in its gap disposition",
+        "**G-1** **missing_feedback**",
         "Focus on real behavioral deficiencies",
         "duplicate existing coverage or target capabilities the system does not have",
     ):

@@ -102,9 +102,9 @@
    {
     "max_completion_tokens": "864a936a35324151e1c79c44a2e903ff2497f52fa892282d340585f493c637f0",
     "response_schema": "34b4f86a5668062f2a194748d44e33e4c2d56f1ab51bef937dc76d2bf49983d4",
-    "system_prompt": "42509b3ad6f65add8deee17241a157e126596788fe5f188082bf1e4ff48ec969",
+    "system_prompt": "6ef7dd2cecb020049cad85fe962755701cb46fe8a266f9fe23997dc519f0b79b",
     "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
-    "user_prompt": "96a70ace6802c62d2fa7d93d3a93a29d0d57ecd0eabec421266e9a14bd0c53d6"
+    "user_prompt": "d61c2e3d2ba62ca34c738ceb21ce3aa5e667e639d5d391d4b772d616ba74272a"
    }
   ],
   "semantic_digest": "2e155f86cc2ab48e5e0eb80a6911cb30fcad93578dd4c16a1a3a5f8faed645ff"
@@ -115,9 +115,9 @@
    {
     "max_completion_tokens": "864a936a35324151e1c79c44a2e903ff2497f52fa892282d340585f493c637f0",
     "response_schema": "34b4f86a5668062f2a194748d44e33e4c2d56f1ab51bef937dc76d2bf49983d4",
-    "system_prompt": "42509b3ad6f65add8deee17241a157e126596788fe5f188082bf1e4ff48ec969",
+    "system_prompt": "6ef7dd2cecb020049cad85fe962755701cb46fe8a266f9fe23997dc519f0b79b",
     "temperature": "44896b09365746b5f7167ee4d64988a38f7f4628803cbf86224e74eeb7c69e9d",
-    "user_prompt": "d1f07b162bf90bb889ac62e04e9af81fb98121e1fdecd4266880eeca499fe77b"
+    "user_prompt": "9ef8762d1a34efdb21c30b1ace4309bc4760c0c87086698f3b4ba7e2990f00d7"
    }
   ],
   "semantic_digest": "2e155f86cc2ab48e5e0eb80a6911cb30fcad93578dd4c16a1a3a5f8faed645ff"

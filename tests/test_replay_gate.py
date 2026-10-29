@@ -1727,6 +1727,15 @@ def _critic_run(
         (root / "synthesis-report.html").unlink()
 
 
+_GAP_COUNTS = {"addressed": 2, "dismissed": 1, "recommendation": 0}
+_GAP_REVIEW = {
+    "gap_dispositions": _GAP_COUNTS,
+    "unresolved_gaps": [
+        {"gap_id": "G-2", "reason": "claimed addressed but did not change RESP-5"}
+    ],
+}
+
+
 def _critic_differences(
     trees: tuple[Path, Path, dict[str, str]],
     record: Any,
@@ -1861,6 +1870,34 @@ def test_an_added_critic_revision_with_unusable_warnings_fails(
         ),
         ({"status": "discarded", "reason": 7}, "is not a revision failure"),
         ({"status": "discarded", "reason": "the model refused"}, "is not a revision"),
+        (
+            {"status": "applied", "gap_dispositions": _GAP_COUNTS},
+            "holds ['status'], not",
+        ),
+        (
+            {"status": "discarded", "reason": _DEGRADED, **_GAP_REVIEW},
+            "holds ['reason', 'status']",
+        ),
+        (
+            {**_GAP_REVIEW, "status": "applied", "gap_dispositions": {"addressed": 1}},
+            "is not a count for each of addressed, dismissed, recommendation",
+        ),
+        (
+            {
+                **_GAP_REVIEW,
+                "status": "applied",
+                "gap_dispositions": {**_GAP_COUNTS, "dismissed": -1},
+            },
+            "is not a count for each of",
+        ),
+        (
+            {
+                **_GAP_REVIEW,
+                "status": "applied",
+                "unresolved_gaps": [{"gap_id": "G-1"}],
+            },
+            "is not a list of gap_id and reason entries",
+        ),
     ],
 )
 def test_a_malformed_added_critic_revision_fails(
@@ -2419,6 +2456,39 @@ def test_an_applied_revision_that_drops_a_prefixed_binding_passes(
     assert record == {"status": "applied"}
     assert revised_structure.responsibilities[0].control_actions[1].operation is None
     assert replay_gate._critic_revision_problem(record, tmp_path, {}) is None
+
+
+@pytest.mark.parametrize("status", ["applied", "unchanged"])
+def test_a_recording_without_the_critic_revision_accepts_one_with_a_gap_review(
+    trees, status: str
+) -> None:
+    versions = "changed" if status == "applied" else "unchanged"
+    differences = _critic_differences(
+        trees, {"status": status, **_GAP_REVIEW}, versions=versions
+    )
+
+    assert differences == []
+
+
+def test_a_recorded_critic_revision_without_a_gap_review_accepts_one(trees) -> None:
+    differences = _critic_differences(
+        trees,
+        {"status": "applied", **_GAP_REVIEW},
+        recorded_record={"status": "applied"},
+    )
+
+    assert differences == []
+
+
+def test_a_gap_review_that_differs_from_the_recording_fails(trees) -> None:
+    differences = _critic_differences(
+        trees,
+        {"status": "applied", **_GAP_REVIEW},
+        recorded_record={"status": "applied", **_GAP_REVIEW, "unresolved_gaps": []},
+    )
+
+    assert [d.path for d in differences] == ["run-manifest.yaml"]
+    assert "unresolved_gaps" in differences[0].detail
 
 
 def test_a_critic_revision_both_sides_hold_compares_as_usual(trees) -> None:

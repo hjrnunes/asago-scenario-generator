@@ -20,12 +20,14 @@ These are the losses the prior response declared, with their meanings. A
 
 The prior response failed risk accounting for exactly these supplied cards.
 The reason recorded for each one is shown. Return one corrected
-`risk_dispositions` entry for each.
+`risk_dispositions` entry for each. A card's description is its risk class;
+its policy example consequence is the source policy's example of that class,
+written in the policy's own setting. Judge the accounting against the class.
 
 {% for card in selected_cards %}
 ### {{ card.risk_id }} — {{ card.risk_name }}
 - **Description:** {{ card.risk_description }}
-- **Consequence:** {{ card.consequence or "N/A" }}
+- **Policy example consequence:** {{ card.consequence or "N/A" }}
 - **Why it was selected:** {{ reasons | selectattr("0", "eq", card.risk_id) | map(attribute="1") | join("; ") }}
 {% endfor %}
 

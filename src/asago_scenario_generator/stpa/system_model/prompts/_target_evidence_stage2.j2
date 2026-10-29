@@ -41,7 +41,13 @@
   claim the state of a record, such as whether a record is approved,
   current, or reviewed, because the text does not carry that state. A result
   that only acknowledges that a request was accepted or handed off reports
-  that acknowledgement, not the state of whoever handles the request. When
+  that acknowledgement, not the state of whoever handles the request. Likewise,
+  an operation that stores, submits, or queues an item for another party's
+  later action, such as a review or an approval, reports that the item was
+  accepted and the status it was stored with, not the outcome of that later
+  action. A variable for that outcome needs feedback from where the outcome is
+  recorded, for example an operation that reads the record, or it stays
+  unknown. When
   the evidence does not say what a result reports, add no variable or
   channel for it.
 {%- endif %}

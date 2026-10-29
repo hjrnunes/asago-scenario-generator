@@ -551,6 +551,17 @@ def project_governance_question(
     )
 
 
+def _with_risk_class(
+    question: ProviderObligationQuestion, brief: NeutralObligationBrief
+) -> ProviderObligationQuestion:
+    """Add the reviewed risk's class description, falling back to its name."""
+    risk = question.reviewed_risk
+    description = _description(brief.risk_ref.risk_description, risk.name)
+    return question.model_copy(
+        update={"reviewed_risk": risk.model_copy(update={"description": description})}
+    )
+
+
 def _slot_question(
     brief: NeutralObligationBrief,
 ) -> ProviderObligationQuestion | ProviderGovernanceQuestion:
@@ -1180,9 +1191,13 @@ def project_obligation_routing_context(
     control_structure: ControlStructure,
     slots: Sequence[SlotPlaceholder] = (),
 ) -> ProviderRoutingContext:
-    """Build the compact provider view for one routing batch."""
+    """Build the compact provider view for one routing batch.
+
+    Each reviewed risk carries its class description, which routing judges
+    alignment against.
+    """
     questions = tuple(
-        project_obligation_question(brief)
+        _with_risk_class(project_obligation_question(brief), brief)
         for brief in sorted(briefs, key=obligation_order_key)
     )
     if not questions:
