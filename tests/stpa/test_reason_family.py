@@ -418,6 +418,28 @@ def test_contracted_and_prefixed_negatives_do_not_guard(value) -> None:
     assert choice.kind == "ownership"
 
 
+@pytest.mark.parametrize(
+    "description",
+    [
+        "The actor's relationship to the reservation.",
+        "Association of the actor with the reservation",
+    ],
+)
+def test_a_relationship_statement_about_the_principal_guards(description) -> None:
+    party = _var(
+        "PM-1-1",
+        "actor is guest",
+        "session:authenticated_actor_id",
+        "state:widgets.owner_id",
+        description=description,
+    )
+    choice = _choose(
+        "the actor is a guest but the widget is still pending", _row(party)
+    )
+    assert choice.ownership_guarded is True
+    assert (choice.kind, choice.rule) == ("state", "reason_terms")
+
+
 def test_an_ownership_statement_must_name_the_principal() -> None:
     record_only = _var("PM-1-2", "belongs to a listing", "state:widgets.owner_id")
     choice = _choose("the actor is unauthorized", _row(record_only))
