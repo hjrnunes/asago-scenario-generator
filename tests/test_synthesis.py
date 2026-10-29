@@ -2694,7 +2694,7 @@ def test_default_scenarios_use_the_family_plan_threats(
     monkeypatch.setattr(
         "asago_scenario_generator.stpa.scenario_prod.condition_family."
         "plan_family_candidates",
-        lambda *a: planned,
+        lambda *a, **k: planned,
     )
     monkeypatch.setattr(
         "asago_scenario_generator.stpa.scenario_prod.run.run_sp3",

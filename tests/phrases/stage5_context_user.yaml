@@ -30,6 +30,7 @@ cases:
       - As a cause, this rule selects the unsafe action
       - in the hazardous context where
     forbidden:
+      - "## Cited context row"
       - compatible_mechanisms
       - "`stimulus`"
       - Allowed Stimulus Categories
@@ -341,3 +342,45 @@ cases:
       - *call-boundary
       - failure_call
       - "`not_called` on a lookup"
+  cited-context-row:
+    required:
+      - "## Cited context row"
+      - &row-meaning >-
+        The unsafe control action above was stated for one row of its control
+        action's context table. Each entry gives one process-model variable
+        and the value it holds in that row; together they describe the
+        context the unsafe control action assumes.
+      - &row-reason >-
+        The value the unsafe control action's reason states is what makes the
+        action unsafe; the other values describe the setting in which it
+        does.
+      - &row-evidence >-
+        `evidence_refs` name where a value is read from:
+        `state:<collection>.<field>` is that field of the TARGET-STATE
+        records, `session:<name>` a session fact,
+        `argument:<operation>.<name>` an argument of that operation,
+        `operation:<name>` that operation, and `policy:<observation_ref>` the
+        captured target read with that `observation_ref`, such as
+        `TARGET-READ-001`. An empty list means no supplied fact carries the
+        value.
+      - >-
+        When `record_selection` names a record, select a record whose facts
+        agree with every row value they show; do not select a record whose
+        facts contradict the row.
+    once:
+      - "## Cited context row"
+    ordered:
+      - - "## Immutable Scenario Generation Context"
+        - "## Cited context row"
+        - "## Observation contract"
+    forbidden:
+      - CA-1-1:ctx-4
+      - PM-1-1
+  cited-context-row-no-condition:
+    required:
+      - "## Cited context row"
+      - *row-meaning
+      - *row-reason
+      - *row-evidence
+    forbidden:
+      - "`record_selection` names a record"

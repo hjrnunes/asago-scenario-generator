@@ -974,6 +974,31 @@ request-specific values. Temporal outcomes reuse the factor-condition local
 handle resolver, and target-backed action-value predicates must name an observed
 input-schema argument.
 
+A Stage 5 request can carry two code-supplied aids for the condition. The
+condition-family hint (`stpa.scenario_prod.condition_family`) names one kind of
+distinction (`ownership`, `flag`, `bound`, `state`, or `prior_read`) with the
+exact operation argument, field paths and candidate records derived from the
+operation schema and TARGET-STATE. For an INCORRECT ICA the ICA's stated reason
+chooses the kind (`stpa.scenario_prod.reason_family`, whose
+`REASON_FAMILY_RULES` is the mapping): a reason stating an ownership
+relation, a failed authentication or authorization of the session or a
+principal, or a failed comparison of the record with the session principal
+("does not match the session customer") gets `ownership`, even when it also
+states a limit failure; a limit failure (not a bare noun such as "amount")
+wins only over session wording that is no ownership source ("exceeds the
+session spending limit"). The same precedence holds whether or not the ICA
+cites a row. Otherwise a reason read from a state field gets the family that
+cites that field; a stated limit failure, eligibility and lifecycle terms get
+`bound`, `flag` and `state`; any other reason gets no hint. Ownership is withheld only when another value of the cited row itself
+states that the record is the session principal's. The ICA yields one candidate per family of the chosen
+kind, up to the cap, so several ICAs of a slot can share a family; a WRONG_TIMING
+ICA keeps the first `prior_read` family. Separately, every candidate's request
+renders the context-table row its ICA cites (resolved by the row's ID, with each
+variable's description, value and evidence references) and asks that a selected
+record agree with it; an ICA that cites no row gets no row section. The run
+writes each candidate's hint, the rule that chose it, and the cited row's ID to
+`condition-families.yaml` (`condition-families-v2`).
+
 ## Test boundary
 
 Unit tests under `tests/` are the behavior contract, and the phrase tables in

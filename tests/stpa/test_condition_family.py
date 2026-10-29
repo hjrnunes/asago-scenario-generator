@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 import yaml
@@ -41,6 +41,11 @@ from asago_scenario_generator.stpa.scenario_prod.condition_family import (
     expand_family_candidates,
     family_honoured,
     plan_family_candidates,
+)
+from asago_scenario_generator.stpa.scenario_prod.reason_family import (
+    CitedContextRow,
+    ContextVariable,
+    IcaReason,
 )
 from asago_scenario_generator.stpa.scenario_prod.deduplication import (
     deduplicate_scenario_specs,
@@ -379,6 +384,7 @@ def test_consistent_renames_yield_isomorphic_families() -> None:
 class _Threat:
     ica_slot_id: str
     ica_id: str
+    ica_text: str = ""
 
 
 def _threats(*slots: tuple[str, int]) -> list[_Threat]:
@@ -401,44 +407,57 @@ _SIX = tuple(
 ) + (_family("prior_read", 9),)
 
 
-def test_incorrect_slots_fan_out_round_robin_across_icas() -> None:
+def _reasons(*items: tuple[str, str]) -> dict[str, IcaReason]:
+    return {ica_id: IcaReason(reason=reason, row=None) for ica_id, reason in items}
+
+
+def test_incorrect_icas_fan_out_over_their_reasons_families() -> None:
     threats = _threats(("RESP-1:CA-1-1:INCORRECT", 2))
-    plan = expand_family_candidates(threats, lambda action: _SIX)
+    reasons = _reasons(
+        ("RESP-1:CA-1-1:INCORRECT:1", "the widget belongs to another owner"),
+        ("RESP-1:CA-1-1:INCORRECT:2", "the widget is still pending"),
+    )
+    plan = expand_family_candidates(threats, lambda action: _SIX, reasons=reasons)
 
     assert [threat.ica_id for threat in plan.threats] == [
         "RESP-1:CA-1-1:INCORRECT:1",
         "RESP-1:CA-1-1:INCORRECT:1",
-        "RESP-1:CA-1-1:INCORRECT:1",
-        "RESP-1:CA-1-1:INCORRECT:2",
         "RESP-1:CA-1-1:INCORRECT:2",
         "RESP-1:CA-1-1:INCORRECT:2",
     ]
     assert [item.family for item in plan.candidates] == [
         _SIX[0],
-        _SIX[2],
-        _SIX[4],
         _SIX[1],
-        _SIX[3],
+        _SIX[4],
         _SIX[5],
     ]
     assert all(item.capped_out == () for item in plan.candidates)
 
 
 def test_each_ica_is_capped_and_logs_the_rest() -> None:
+    owned = tuple(_family("ownership", number) for number in range(6))
     threats = _threats(("RESP-1:CA-1-1:INCORRECT", 1))
-    plan = expand_family_candidates(threats, lambda action: _SIX, cap=4)
+    reasons = _reasons(("RESP-1:CA-1-1:INCORRECT:1", "the actor is unauthorized"))
+    plan = expand_family_candidates(
+        threats, lambda action: owned, reasons=reasons, cap=4
+    )
 
     assert len(plan.threats) == 4
-    assert [item.family for item in plan.candidates] == list(_SIX[:4])
-    assert plan.candidates[0].capped_out == _SIX[4:6]
+    assert [item.family for item in plan.candidates] == list(owned[:4])
+    assert plan.candidates[0].capped_out == owned[4:6]
     assert all(item.capped_out == () for item in plan.candidates[1:])
 
 
-def test_ica_without_an_assigned_family_keeps_one_plain_candidate() -> None:
+def test_ica_without_a_matching_reason_keeps_one_plain_candidate() -> None:
     threats = _threats(("RESP-1:CA-1-1:INCORRECT", 3))
-    plan = expand_family_candidates(threats, lambda action: _SIX[:2])
-    assert [item.family for item in plan.candidates] == [_SIX[0], _SIX[1], None]
-    assert len(plan.threats) == 3
+    reasons = _reasons(
+        ("RESP-1:CA-1-1:INCORRECT:1", "the actor is unauthorized"),
+        ("RESP-1:CA-1-1:INCORRECT:2", "the request does not match authorized intent"),
+        ("RESP-1:CA-1-1:INCORRECT:3", "the intent is unknown"),
+    )
+    plan = expand_family_candidates(threats, lambda action: _SIX, reasons=reasons)
+    assert [item.family for item in plan.candidates] == [_SIX[0], _SIX[1], None, None]
+    assert len(plan.threats) == 4
 
 
 def test_other_slots_do_not_fan_out() -> None:
@@ -469,17 +488,19 @@ def test_expansion_keeps_scenario_numbering_contiguous() -> None:
         ("RESP-2:CA-2-1:INCORRECT", 1),
     )
     plan = expand_family_candidates(
-        threats, lambda action: _SIX if action == "CA-1-1" else ()
+        threats,
+        lambda action: _SIX if action == "CA-1-1" else (),
+        reasons=_reasons(("RESP-1:CA-1-1:INCORRECT:1", "the actor is unauthorized")),
     )
     builders = _candidate_outcome_builders(list(plan.threats))
 
-    assert len(builders) == len(plan.threats) == len(plan.candidates) == 6
+    assert len(builders) == len(plan.threats) == len(plan.candidates) == 4
     assert [builder.scenario_id for builder in builders] == [
-        f"SCN-{index:03d}" for index in range(1, 7)
+        f"SCN-{index:03d}" for index in range(1, 5)
     ]
     assert [builder.ica_id for builder in builders] == [
         "RESP-1:CA-1-1:NOT_PROVIDED:1",
-        *["RESP-1:CA-1-1:INCORRECT:1"] * 4,
+        *["RESP-1:CA-1-1:INCORRECT:1"] * 2,
         "RESP-2:CA-2-1:INCORRECT:1",
     ]
 
@@ -543,7 +564,13 @@ def test_plan_resolves_realized_operations_by_action() -> None:
         ("RESP-2:CA-2-1:INCORRECT", 1),
         ("RESP-3:CA-3-1:INCORRECT", 1),
     )
-    plan = plan_family_candidates(threats, _realization(), _snapshot())
+    reasons = _reasons(
+        ("RESP-1:CA-1-1:INCORRECT:1", "the widget belongs to another owner"),
+        ("RESP-1:CA-1-1:WRONG_TIMING:1", "the widget is edited before it is read"),
+        ("RESP-2:CA-2-1:INCORRECT:1", "reading the widget is not allowed"),
+        ("RESP-3:CA-3-1:INCORRECT:1", "the actor is unauthorized"),
+    )
+    plan = plan_family_candidates(threats, _realization(), _snapshot(), reasons=reasons)
 
     kinds = [
         (threat.ica_id, item.family.kind if item.family else None)
@@ -551,13 +578,8 @@ def test_plan_resolves_realized_operations_by_action() -> None:
     ]
     assert kinds == [
         ("RESP-1:CA-1-1:INCORRECT:1", "ownership"),
-        ("RESP-1:CA-1-1:INCORRECT:1", "flag"),
-        ("RESP-1:CA-1-1:INCORRECT:1", "bound"),
-        ("RESP-1:CA-1-1:INCORRECT:1", "state"),
         ("RESP-1:CA-1-1:WRONG_TIMING:1", "prior_read"),
-        ("RESP-2:CA-2-1:INCORRECT:1", "ownership"),
         ("RESP-2:CA-2-1:INCORRECT:1", "flag"),
-        ("RESP-2:CA-2-1:INCORRECT:1", "state"),
         ("RESP-3:CA-3-1:INCORRECT:1", None),
     ]
 
@@ -670,9 +692,28 @@ def test_honoured_diagnostic_per_family_kind() -> None:
 
 
 def test_sidecar_records_hint_capped_families_and_honoured(tmp_path) -> None:
-    families = _families(EDIT)
+    (owned,) = _kind(_families(EDIT), "ownership")
+    families = (owned, replace(owned, argument="owner_id", argument_role="subject"))
     threats = _threats(("RESP-1:CA-1-1:INCORRECT", 1))
-    plan = expand_family_candidates(threats, lambda action: families, cap=1)
+    row = CitedContextRow(
+        row_id="CA-1-1:ctx-2",
+        variables=(
+            ContextVariable(
+                pm_id="PM-1-1",
+                description="Widget owner",
+                value="owned by another owner",
+                evidence_refs=("session:authenticated_owner_id",),
+            ),
+        ),
+    )
+    reasons = {
+        "RESP-1:CA-1-1:INCORRECT:1": IcaReason(
+            reason="the widget is owned by another owner", row=row
+        )
+    }
+    plan = expand_family_candidates(
+        threats, lambda action: families, reasons=reasons, cap=1
+    )
     plans = (*plan.candidates, CandidateFamilyPlan())
     builders = _candidate_outcome_builders(
         [*plan.threats, _Threat("RESP-1:CA-1-1:NOT_PROVIDED", "x")]
@@ -684,13 +725,20 @@ def test_sidecar_records_hint_capped_families_and_honoured(tmp_path) -> None:
     _write_condition_families(tmp_path, builders, plans, [spec])
 
     payload = yaml.safe_load((tmp_path / "condition-families.yaml").read_text())
-    assert payload["schema_version"] == "condition-families-v1"
+    assert payload["schema_version"] == "condition-families-v2"
     first, second = payload["scenarios"]
     assert first["scenario_id"] == "SCN-001"
     assert first["family"]["kind"] == "ownership"
     assert first["binding"] == "field_name"
-    assert [item["kind"] for item in first["capped_out"]] == ["flag", "bound", "state"]
+    assert [item["argument"] for item in first["capped_out"]] == ["owner_id"]
     assert first["honoured"] == "honoured"
+    assert first["reason_hint"] == {
+        "kind": "ownership",
+        "rule": "ownership_reason",
+        "reason_variable": "PM-1-1",
+        "ownership_guarded": False,
+    }
+    assert first["context_row"] == "CA-1-1:ctx-2"
     assert second == {
         "scenario_id": "SCN-002",
         "ica_id": "x",
@@ -698,6 +746,8 @@ def test_sidecar_records_hint_capped_families_and_honoured(tmp_path) -> None:
         "binding": None,
         "capped_out": [],
         "honoured": None,
+        "reason_hint": None,
+        "context_row": None,
     }
 
 

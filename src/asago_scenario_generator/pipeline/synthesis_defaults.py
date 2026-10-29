@@ -524,6 +524,9 @@ def _default_scenarios(
     from asago_scenario_generator.stpa.scenario_prod.condition_family import (
         plan_family_candidates,
     )
+    from asago_scenario_generator.stpa.scenario_prod.reason_family import (
+        ica_reasons,
+    )
     from asago_scenario_generator.stpa.scenario_prod.run import run_sp3
     from asago_scenario_generator.stpa.scenario_prod.stage5.cross_scenario import (
         ica_process_model_contexts,
@@ -539,7 +542,10 @@ def _default_scenarios(
     ordinary_icas = _ordinary_icas(ica_enumeration)
     enriched = enrich_threats(ordinary_icas, control_structure)
     family_plan = plan_family_candidates(
-        enriched.structural_threats, target_realization, target_observations
+        enriched.structural_threats,
+        target_realization,
+        target_observations,
+        reasons=ica_reasons(ordinary_icas, control_structure),
     )
     if len(family_plan.threats) != len(enriched.structural_threats):
         enriched = enriched.model_copy(

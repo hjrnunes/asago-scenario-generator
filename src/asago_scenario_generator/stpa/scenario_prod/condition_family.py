@@ -34,6 +34,9 @@ Families, in fan-out priority order:
 ``prior_read`` is a separate timing hint: a read-only operation takes an
 argument bound to the same key domain as one of this operation's record-key
 arguments.
+
+Which family an ICA's candidates carry is decided by the ICA's stated
+reason (``reason_family``), not by its position in the slot.
 """
 
 from __future__ import annotations
@@ -69,6 +72,14 @@ from .condition_index import (
     record_path,
 )
 from .realized_operation import realized_operation
+from .reason_family import (
+    TIMING_CHOICE,
+    CitedContextRow,
+    IcaReason,
+    ReasonFamilyChoice,
+    choose_reason_family,
+    hinted_families,
+)
 from .target_observations import TargetObservationSnapshot
 
 FamilyKind = Literal["ownership", "flag", "bound", "state", "prior_read"]
@@ -81,7 +92,7 @@ DEFAULT_CANDIDATE_CAP = 4
 FAN_OUT_SLOT_TYPE = "INCORRECT"
 PRIOR_READ_SLOT_TYPE = "WRONG_TIMING"
 CONDITION_FAMILIES_FILENAME = "condition-families.yaml"
-CONDITION_FAMILIES_SCHEMA_VERSION = "condition-families-v1"
+CONDITION_FAMILIES_SCHEMA_VERSION = "condition-families-v2"
 
 _READ_EFFECTS = frozenset({"read", "observe"})
 _NUMERIC_TYPES = frozenset({"number", "integer"})
@@ -142,10 +153,17 @@ class ConditionFamily:
 
 @dataclass(frozen=True)
 class CandidateFamilyPlan:
-    """The family hint of one Stage 5 candidate and what the cap dropped."""
+    """The family hint of one Stage 5 candidate and what the cap dropped.
+
+    ``reason`` records how the ICA's reason chose the hint (``None`` when no
+    family was offered or the slot takes none); ``context_row`` is the row
+    the ICA cites, rendered in the candidate's Stage 5 request.
+    """
 
     family: ConditionFamily | None = None
     capped_out: tuple[ConditionFamily, ...] = ()
+    reason: ReasonFamilyChoice | None = None
+    context_row: CitedContextRow | None = None
 
 
 @dataclass(frozen=True)
@@ -215,21 +233,26 @@ def plan_family_candidates(
     realization: TargetRealizationResult | None,
     observations: TargetObservationSnapshot | None,
     *,
+    reasons: Mapping[str, IcaReason] | None = None,
     cap: int = DEFAULT_CANDIDATE_CAP,
 ) -> FamilyPlan:
-    """Expand INCORRECT threats by family and hint WRONG_TIMING threats.
+    """Expand INCORRECT threats by their reason's family and hint WRONG_TIMING.
 
-    For each INCORRECT slot whose action has a realized operation, the
-    fan-out families are dealt round-robin across the slot's ICAs in threat
-    order. Each ICA yields one candidate per assigned family, at most
-    ``cap``; the rest are recorded as capped out on its first candidate. An
-    ICA with no family keeps one candidate without a hint. A WRONG_TIMING
-    ICA keeps one candidate with the first prior-read family. Every other
-    threat keeps one candidate without a hint.
+    For each INCORRECT ICA whose action has a realized operation, the ICA's
+    reason (``reasons`` by ICA ID, else its ICA text) chooses one fan-out
+    kind (``reason_family.REASON_FAMILY_RULES``), and the ICA yields one
+    candidate per family of that kind, at most ``cap``; the rest are
+    recorded as capped out on its first candidate. Several ICAs of a slot
+    may get the same families. An ICA whose reason matches no family keeps
+    one candidate without a hint. A WRONG_TIMING ICA keeps one candidate
+    with the first prior-read family. Every other threat keeps one
+    candidate without a hint. Every candidate carries its ICA's cited row.
     """
 
     if realization is None or observations is None:
-        return expand_family_candidates(threats, lambda _action_id: (), cap=cap)
+        return expand_family_candidates(
+            threats, lambda _action_id: (), reasons=reasons, cap=cap
+        )
     state = StateIndex.from_fact_values(target_observation_fact_values(observations))
     observed = tuple(record.operation for record in realization.operation_records)
 
@@ -242,13 +265,14 @@ def plan_family_candidates(
             return ()
         return derive_condition_families(operation, observed, state)
 
-    return expand_family_candidates(threats, families_for, cap=cap)
+    return expand_family_candidates(threats, families_for, reasons=reasons, cap=cap)
 
 
 def expand_family_candidates(
     threats: Sequence[Any],
     families_for_action: Callable[[str], Sequence[ConditionFamily]],
     *,
+    reasons: Mapping[str, IcaReason] | None = None,
     cap: int = DEFAULT_CANDIDATE_CAP,
 ) -> FamilyPlan:
     """Apply the fan-out rules of ``plan_family_candidates`` to known families.
@@ -260,21 +284,31 @@ def expand_family_candidates(
     if cap < 1:
         raise ValueError("cap must be at least 1")
     families_for = _cached_families(families_for_action)
-    assigned = _assign_fan_out_families(threats, families_for)
 
     expanded: list[Any] = []
     plans: list[CandidateFamilyPlan] = []
-    for index, threat in enumerate(threats):
+    for threat in threats:
         parts = threat.ica_slot_id.split(":")
         slot_type = parts[2] if len(parts) >= 3 else ""
-        if slot_type == FAN_OUT_SLOT_TYPE and assigned.get(index):
-            for plan in _fan_out_plans(assigned[index], cap):
-                expanded.append(threat)
-                plans.append(plan)
-            continue
-        expanded.append(threat)
-        plans.append(_single_candidate_plan(slot_type, parts, families_for))
+        reason = _threat_reason(threat, reasons)
+        if slot_type == FAN_OUT_SLOT_TYPE and len(parts) >= 3:
+            threat_plans = _reason_plans(reason, families_for(parts[1]), cap)
+        else:
+            threat_plans = [
+                _single_candidate_plan(slot_type, parts, families_for, reason.row)
+            ]
+        for plan in threat_plans:
+            expanded.append(threat)
+            plans.append(plan)
     return FamilyPlan(tuple(expanded), tuple(plans))
+
+
+def _threat_reason(threat: Any, reasons: Mapping[str, IcaReason] | None) -> IcaReason:
+    """Return the threat's ICA reason, or its ICA text with no cited row."""
+    ica_id = getattr(threat, "ica_id", None)
+    if reasons is not None and ica_id in reasons:
+        return reasons[ica_id]
+    return IcaReason(reason=threat.ica_text)
 
 
 def _cached_families(
@@ -291,35 +325,24 @@ def _cached_families(
     return families_for
 
 
-def _assign_fan_out_families(
-    threats: Sequence[Any],
-    families_for: Callable[[str], tuple[ConditionFamily, ...]],
-) -> dict[int, list[ConditionFamily]]:
-    """Deal each fan-out slot's families round-robin over the slot's threats."""
-    slot_members: dict[str, list[int]] = {}
-    for index, threat in enumerate(threats):
-        slot_members.setdefault(threat.ica_slot_id, []).append(index)
-
-    assigned: dict[int, list[ConditionFamily]] = {}
-    for slot_id, members in slot_members.items():
-        parts = slot_id.split(":")
-        if len(parts) < 3 or parts[2] != FAN_OUT_SLOT_TYPE:
-            continue
-        fan_out = [
-            family for family in families_for(parts[1]) if family.kind in FAN_OUT_KINDS
-        ]
-        for position, family in enumerate(fan_out):
-            assigned.setdefault(members[position % len(members)], []).append(family)
-    return assigned
-
-
-def _fan_out_plans(
-    families: list[ConditionFamily], cap: int
+def _reason_plans(
+    reason: IcaReason, families: Sequence[ConditionFamily], cap: int
 ) -> list[CandidateFamilyPlan]:
-    """Return one plan per kept family; the first records the capped-out rest."""
-    kept, capped = families[:cap], tuple(families[cap:])
+    """Return an INCORRECT ICA's plans: one per hinted family, else one plain.
+
+    The first plan records the capped-out rest. An action that offers no
+    fan-out family records no reason choice.
+    """
+    fan_out = [family for family in families if family.kind in FAN_OUT_KINDS]
+    if not fan_out:
+        return [CandidateFamilyPlan(context_row=reason.row)]
+    choice = choose_reason_family(reason, fan_out)
+    hinted = hinted_families(choice, fan_out)
+    if not hinted:
+        return [CandidateFamilyPlan(reason=choice, context_row=reason.row)]
+    kept, capped = hinted[:cap], tuple(hinted[cap:])
     return [
-        CandidateFamilyPlan(family, capped if position == 0 else ())
+        CandidateFamilyPlan(family, capped if position == 0 else (), choice, reason.row)
         for position, family in enumerate(kept)
     ]
 
@@ -328,15 +351,16 @@ def _single_candidate_plan(
     slot_type: str,
     parts: list[str],
     families_for: Callable[[str], tuple[ConditionFamily, ...]],
+    row: CitedContextRow | None,
 ) -> CandidateFamilyPlan:
     """Return the plan of a threat that keeps exactly one candidate."""
     if slot_type != PRIOR_READ_SLOT_TYPE:
-        return CandidateFamilyPlan()
+        return CandidateFamilyPlan(context_row=row)
     prior = [family for family in families_for(parts[1]) if family.kind == "prior_read"]
     return (
-        CandidateFamilyPlan(prior[0], tuple(prior[1:]))
+        CandidateFamilyPlan(prior[0], tuple(prior[1:]), TIMING_CHOICE, row)
         if prior
-        else CandidateFamilyPlan()
+        else CandidateFamilyPlan(context_row=row)
     )
 
 

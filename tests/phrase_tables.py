@@ -414,6 +414,32 @@ def _realistic_request_facts(tool_call: bool = True) -> dict[str, object]:
     }
 
 
+def _cited_context_row() -> object:
+    """Return a cited context row with a session, a state and a bare variable."""
+    from asago_scenario_generator.stpa.scenario_prod.reason_family import (
+        CitedContextRow,
+        ContextVariable,
+    )
+
+    return CitedContextRow(
+        row_id="CA-1-1:ctx-4",
+        variables=(
+            ContextVariable(
+                pm_id="PM-1-1",
+                description="Authorization of the requested amount",
+                value="not authorized by session",
+                evidence_refs=("session:authenticated_customer_id",),
+            ),
+            ContextVariable(
+                pm_id="PM-1-2",
+                description="Refund eligibility of the order",
+                value="eligible",
+                evidence_refs=("state:orders.refund_eligible",),
+            ),
+        ),
+    )
+
+
 def _authority_slot_request() -> tuple[str, str]:
     request = authority_slot_request()
     return build_synthesis_slot_prompts(
@@ -995,6 +1021,12 @@ CASES: dict[str, Callable[[str], str]] = {
     "archive-item": _stage5(_archive_item_facts),
     "commit-operation": _stage5(_commit_operation_facts),
     "realistic-request": _stage5(_realistic_request_facts),
+    "cited-context-row": _stage5(
+        lambda: {**_realistic_request_facts(), "context_row": _cited_context_row()}
+    ),
+    "cited-context-row-no-condition": _stage5(
+        lambda: {"context_row": _cited_context_row()}
+    ),
     "realistic-no-tool-call": _stage5(lambda: _realistic_request_facts(False)),
     "realistic-tool-call-action": _stage5(
         _realistic_request_facts, _tool_call_action_context
