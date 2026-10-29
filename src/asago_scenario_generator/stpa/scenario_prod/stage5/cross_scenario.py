@@ -17,17 +17,34 @@ scenario-specific observable boundary for acceptable behavior" and names one
 ``operation_name`` (``prompts/stage5_context_system.j2``, "Scenario-specific
 safe observable outcome"; ``SafeObservableOutcome``); nothing states that it
 is the only call the agent makes, so the agent may make other calls before or
-after it. Its ``record_refs`` name the observations the safe call reads
-(``TARGET-STATE``), never a record path, which Stage 5 moves to
-``fact_refs``; they bind no argument value. On that one argument-less call,
-on an incomplete capture, a ``not_called`` comparison is false when the known
-call rules it out (it calls that operation and the comparison has no
-``where`` item), otherwise unknown; ``order`` comparisons and comparisons on
-the call's arguments remain unknown. The result is therefore
-``inconclusive`` or ``not_detected``. An ``inconclusive`` pair is recorded
-and never withdraws; only ``detected`` does. With the fields the safe outcome
-has today no condition is ``detected`` on such a call, so in practice the
-check records the undecided pairs and withdraws nothing.
+after it, and the check evaluates with ``complete=False``. Its
+``record_refs`` name the observations the safe call reads (``TARGET-STATE``),
+never a record path, which Stage 5 moves to ``fact_refs``; they bind no
+argument value.
+
+The safe call's arguments are those of the safe outcome's optional
+``call_arguments``: the typed values the safe call is made with, which Stage 5
+states only when the safe behavior is that the agent makes that call, and
+validates against the operation's supplied parameters and values. Without
+them the call has no arguments.
+
+On that one call, on an incomplete capture, a value comparison holds when
+the call's values satisfy it; otherwise it is unknown, since another call of
+that operation may be missing from the capture, and so is a comparison on
+another operation. A ``not_called`` comparison is false when the known call
+rules it out (it calls that operation and matches every ``where`` item),
+otherwise unknown; ``order`` comparisons remain unknown, since an earlier call
+may be missing from the capture. A pair is therefore ``detected`` only when the
+condition is a value condition on the safe call's own arguments that its
+values satisfy. An ``inconclusive`` pair is recorded and never withdraws; only
+``detected`` does. Without ``call_arguments`` no condition is ``detected``, so
+a run whose safe outcomes state none withdraws nothing.
+
+A safe call must not satisfy its own scenario's bound condition: what the
+scenario states as safe would then be its own failure. Such a safe call's
+values contradict the scenario, so they are not used: its pairs are evaluated
+on the argument-less call, and the scenario is listed in
+``contradicting_safe_calls``.
 
 A withdrawn scenario is B: B's condition is what the consumer runs, and it
 would fail an agent that does what A states as safe. When both directions
@@ -39,12 +56,13 @@ no context are never siblings.
 from __future__ import annotations
 
 import itertools
+import json
 from collections.abc import Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Literal
 
 import yaml
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, StrictStr
 
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
@@ -80,6 +98,10 @@ class CrossScenarioPair(_ClosedModel):
     process_model_context: dict[str, str] = Field(min_length=1)
     safe_operation_name: StrictStr
     safe_record_refs: list[StrictStr]
+    # The arguments the safe call was evaluated with; absent when it had none.
+    safe_call_arguments: dict[str, JsonValue] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
     tool_call_condition: ToolCallCondition
     outcome: Literal["detected", "inconclusive"]
     outcome_reason: StrictStr
@@ -88,10 +110,17 @@ class CrossScenarioPair(_ClosedModel):
         """Render the candidate diagnostic of the withdrawn scenario."""
         refs = ", ".join(self.safe_record_refs) or "none"
         context = ", ".join(f"{k}={v}" for k, v in self.process_model_context.items())
+        call = self.safe_operation_name
+        if self.safe_call_arguments is not None:
+            arguments = ", ".join(
+                f"{name}={json.dumps(value)}"
+                for name, value in self.safe_call_arguments.items()
+            )
+            call = f"{call}({arguments})"
         return (
             f"{CROSS_SCENARIO_CONFLICT}: {self.scenario_id} withdrawn from "
             f"publication: the safe outcome of {self.safe_scenario_id} (call "
-            f"{self.safe_operation_name}, record_refs {refs}) satisfies its "
+            f"{call}, record_refs {refs}) satisfies its "
             f"tool_call_condition; both are on {self.control_action_id} in "
             f"process-model context {context}"
         )
@@ -111,6 +140,11 @@ class CrossScenarioCheck(_ClosedModel):
     # Pairs the safe call cannot decide; recorded only.
     inconclusive: list[CrossScenarioPair] = Field(default_factory=list)
     withdrawn: list[StrictStr] = Field(default_factory=list)
+    # Scenarios whose stated safe call satisfies their own condition; their
+    # call_arguments are not used.
+    contradicting_safe_calls: list[StrictStr] = Field(
+        default_factory=list, exclude_if=lambda value: not value
+    )
 
     def diagnostics_for(self, scenario_id: str) -> list[str]:
         """Return the diagnostics of one withdrawn scenario, in pair order."""
@@ -165,6 +199,17 @@ def check_cross_scenario_conflicts(
     eligible = 0
     evaluated = 0
     not_detected = 0
+    arguments_by_scenario: dict[str, dict[str, JsonValue]] = {}
+    contradicting: list[str] = []
+    for members in groups.values():
+        for spec in members:
+            arguments = _safe_call_arguments(spec)
+            if arguments is None:
+                continue
+            if _satisfies_own_condition(spec, arguments):
+                contradicting.append(spec.scenario_id)
+            else:
+                arguments_by_scenario[spec.scenario_id] = arguments
     decided: dict[str, list[CrossScenarioPair]] = {
         DETECTED[0]: [],
         INCONCLUSIVE[0]: [],
@@ -179,7 +224,8 @@ def check_cross_scenario_conflicts(
             if outcome is None or outcome.operation_name is None or condition is None:
                 continue
             evaluated += 1
-            call = {"name": outcome.operation_name, "arguments": {}}
+            arguments = arguments_by_scenario.get(safe.scenario_id)
+            call = {"name": outcome.operation_name, "arguments": arguments or {}}
             # complete=False: the safe outcome does not exclude other calls.
             result, result_reason, _ = evaluate_condition_v2(
                 condition.model_dump(mode="json"), [call], False
@@ -195,6 +241,7 @@ def check_cross_scenario_conflicts(
                     process_model_context=dict(context_items),
                     safe_operation_name=outcome.operation_name,
                     safe_record_refs=list(outcome.record_refs),
+                    safe_call_arguments=arguments,
                     tool_call_condition=condition,
                     outcome=result,
                     outcome_reason=result_reason,
@@ -210,7 +257,31 @@ def check_cross_scenario_conflicts(
         conflicts=conflicts,
         inconclusive=decided[INCONCLUSIVE[0]],
         withdrawn=sorted({item.scenario_id for item in conflicts}),
+        contradicting_safe_calls=sorted(contradicting),
     )
+
+
+def _safe_call_arguments(spec: ScenarioSpec) -> dict[str, JsonValue] | None:
+    """Return the arguments the safe outcome states its call is made with."""
+    outcome = spec.safe_observable_outcome
+    if outcome is None or outcome.call_arguments is None:
+        return None
+    return {item.argument: item.value for item in outcome.call_arguments}
+
+
+def _satisfies_own_condition(
+    spec: ScenarioSpec, arguments: Mapping[str, JsonValue]
+) -> bool:
+    """Return whether the stated safe call is the scenario's own failure."""
+    outcome = spec.safe_observable_outcome
+    condition = spec.tool_call_condition
+    if outcome is None or condition is None:
+        return False
+    call = {"name": outcome.operation_name, "arguments": dict(arguments)}
+    result, _, _ = evaluate_condition_v2(
+        condition.model_dump(mode="json"), [call], False
+    )
+    return result == DETECTED[0]
 
 
 def write_cross_scenario_check(run_dir: Path, check: CrossScenarioCheck) -> Path:
