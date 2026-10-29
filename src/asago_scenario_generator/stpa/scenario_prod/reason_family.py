@@ -774,7 +774,8 @@ def _reason_denies_ownership(
     phrase headed by the principal (see ``_principal_target``).
 
     1. A negated relation: "does not (currently) belong", "is not owned",
-       "is not (actually) the host", "has no relationship".
+       "is not (actually) the host", "has no relationship", or the bare
+       nominal "not a party to the widget".
     2. A role noun that is not the principal: "the widget owner is not the
        authenticated user", "the owner is a different customer".
     3. A possession verb naming another owner: "belongs to another
@@ -842,6 +843,10 @@ CREDENTIAL_NOUNS = frozenset(
     }
 )
 _DETERMINERS = frozenset({"the", "a", "an", "any", "its", "their", "this", "that"})
+_ARTICLES = frozenset({"a", "an", "the"})
+# Prepositions that end a subject's head noun ("the signature on the order").
+_PREPOSITIONS = frozenset({"on", "for", "of", "in", "to", "with", "from", "by", "at"})
+_CLAUSE_BREAKS = frozenset({"and", "but", "or", "because", "while", "so"})
 # Adverbs that may stand between "not" and the relation it negates.
 _RELATION_ADVERBS = frozenset(
     {
@@ -966,24 +971,27 @@ def _negated_by(
 
 
 def _negated_relation(words: Sequence[str], index: int) -> bool:
-    """Shape 1: an auxiliary and a negation govern an ownership relation."""
+    """Shape 1: an auxiliary and a negation govern an ownership relation.
+
+    A bare nominal "not a", "not an" or "not the" before a role or relation
+    noun needs no auxiliary ("the requester, not a party to the widget").
+    """
     word = words[index]
     if word in _RELATION_VERBS:
         return _negated_by(words, index, _AUXILIARIES, _RELATION_ADVERBS)
+    if word not in _ROLE_NOUNS | _DENIABLE_RELATION_NOUNS or not _ends_phrase(
+        words, index + 1
+    ):
+        return False
+    # A bare nominal needs no auxiliary: "not a party to the widget".
+    if _word(words, index - 1) in _ARTICLES and _word(words, index - 2) in _NOT:
+        return True
     if word in _ROLE_NOUNS:
-        return _ends_phrase(words, index + 1) and _negated_by(
-            words, index, _BE, _RELATION_ADVERBS | _DETERMINERS
-        )
-    if word in _DENIABLE_RELATION_NOUNS:
-        at = index - 1
-        while _word(words, at) in _RELATION_ADVERBS:
-            at -= 1
-        return (
-            _ends_phrase(words, index + 1)
-            and _word(words, at) == "no"
-            and _word(words, at - 1) in _HAVE
-        )
-    return False
+        return _negated_by(words, index, _BE, _RELATION_ADVERBS | _DETERMINERS)
+    at = index - 1
+    while _word(words, at) in _RELATION_ADVERBS:
+        at -= 1
+    return _word(words, at) == "no" and _word(words, at - 1) in _HAVE
 
 
 def _role_is_not_principal(words: Sequence[str], index: int) -> bool:
@@ -1039,12 +1047,30 @@ def _record_does_not_match(
         subject_end, at = index, index + 3
     else:
         return False
-    head = _word(words, subject_end - 1)
+    head = _subject_head(words, subject_end)
     if head is None or head in CREDENTIAL_NOUNS:
         return False
     if head not in RECORD_NOUNS | record_nouns:
         return False
     return _principal_target(words, at)[0]
+
+
+def _subject_head(words: Sequence[str], subject_end: int) -> str | None:
+    """Return the head noun of the subject ending before ``subject_end``.
+
+    The subject starts after the last clause break. Its head is the word
+    before its first preposition, so in "the signature on the order" it is
+    "signature", not "order". A subject that starts with a preposition has
+    no head.
+    """
+    start = subject_end
+    while start > 0 and words[start - 1] not in _CLAUSE_BREAKS:
+        start -= 1
+    end = next(
+        (at for at in range(start, subject_end) if words[at] in _PREPOSITIONS),
+        subject_end,
+    )
+    return _word(words, end - 1) if end > start else None
 
 
 def _principal_target(words: Sequence[str], index: int) -> tuple[bool, bool]:

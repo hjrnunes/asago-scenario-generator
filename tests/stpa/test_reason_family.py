@@ -738,6 +738,9 @@ def test_the_reason_variable_itself_never_guards() -> None:
         # A record compared with the principal's identifier.
         "the order does not match the authenticated customer identity",
         "the request does not match the session:authenticated_customer_id",
+        # A bare nominal denial needs no auxiliary.
+        "Not a party to the widget",
+        "the requester, not a party to the widget, edits it",
         # The negation follows the owner it denies.
         "The widget owner is not the authenticated user",
         "the widget's owner is a different customer",
@@ -800,6 +803,19 @@ def test_a_reason_that_denies_ownership_wins_over_an_affirming_row(reason) -> No
         # A credential is no record.
         ("The password does not match the authenticated user", None, "no_match"),
         ("The signature does not match the authenticated user", None, "no_match"),
+        # The subject's head stands before its prepositional modifier.
+        (
+            "The signature on the order does not match the authenticated user",
+            None,
+            "no_match",
+        ),
+        (
+            "the approval for the order does not match the authenticated user",
+            None,
+            "no_match",
+        ),
+        # A role noun in a bare nominal must still head its phrase.
+        ("Not a party approval was given for the widget", None, "no_match"),
         # A possessive principal followed by a noun is no principal target.
         (
             "the request does not match the authenticated customer's identity",
