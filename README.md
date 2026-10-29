@@ -13,9 +13,8 @@ unknown relationship remains explicit rather than becoming an invented rule.
 when the stage ends. Each earlier version is named after the step that left
 it: `loss-analysis-draft.yaml`, `loss-analysis-reviewed.yaml` and
 `loss-analysis-reviewed-corrected.yaml`; `control-structure-draft.yaml`,
-`control-structure-reviewed.yaml`, `control-structure-evidence-bound.yaml`,
-`control-structure-revised.yaml` and `control-structure-operation-feedback.yaml`
-(written only when operation-result feedback was added). A version is written only when its YAML text
+`control-structure-reviewed.yaml`, `control-structure-evidence-bound.yaml` and
+`control-structure-revised.yaml`. A version is written only when its YAML text
 differs from the next version's, so an absent version equals the next version
 present on disk, ending with the normal file. A stage that fails before it
 publishes the normal file keeps the last version it reached. Every writer of

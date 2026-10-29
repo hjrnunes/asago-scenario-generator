@@ -569,8 +569,6 @@ SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "risk_coverage_review": 2,
     "profile": 1,
     "target_evidence": 0,
-    # Operation-result feedback derived from typed fields and the evidence.
-    "operation_feedback": 1,
     "feedback_authority": 1,
     "kc_decision": 0,
     "risk_actionability": 1,

@@ -102,6 +102,10 @@ from asago_scenario_generator.stpa.system_model.control_structure import (
     DuplicateControlledProcess,
     UnknownReference,
 )
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    EvidenceOperation,
+    TargetEvidence,
+)
 from asago_scenario_generator.stpa.target_realization.provider import (
     PROMPTS_DIR as TARGET_REALIZATION_PROMPTS_DIR,
 )
@@ -219,6 +223,26 @@ ONE_RESPONSIBILITY = {
             ],
         )
     ],
+}
+
+# Observed operations, two of which declare an output they return.
+OPERATION_RESULTS = {
+    **NEUTRAL_STATUS,
+    "target_evidence": TargetEvidence(
+        operations=tuple(
+            EvidenceOperation(
+                name=name,
+                description="Observed.",
+                arguments=(),
+                returns_result=returns_result,
+            )
+            for name, returns_result in (
+                ("cancel_order", True),
+                ("lookup_order", True),
+                ("notify_courier", False),
+            )
+        )
+    ),
 }
 
 UNKNOWN_REFERENCES = {
@@ -775,6 +799,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "actionability-risks": _system_model(**ACTIONABILITY_RISKS),
     "neutral-status": _system_model(**NEUTRAL_STATUS),
     "one-responsibility": _system_model(**ONE_RESPONSIBILITY),
+    "operation-results": _system_model(**OPERATION_RESULTS),
     "test-use-case": _system_model(
         use_case_text="Test use case", selected_constraints=[]
     ),

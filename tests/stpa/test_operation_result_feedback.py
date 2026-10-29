@@ -1,10 +1,12 @@
-"""Feedback a responsibility receives from the operations it invokes.
+"""What Stage 2 is told, and keeps, about the results invoked operations return.
 
-An observed operation that declares an output returns its result to the
-caller.  A tool-call action bound to such an operation therefore has
-feedback from the process it targets back to the responsibility that issues
-it; the step adds that channel, and the variable it updates, only where the
-structure has no channel from that process to that responsibility.
+An observed operation that declares an output returns it to the
+responsibility that invokes it.  The evidence records that fact and the
+Stage 2 requests that model process-model variables and feedback name each
+such operation.  What a result reports, where its information originates and
+how far it can be trusted are the model's decisions: code adds no feedback
+channel of its own, so an acknowledgement-only operation gains none and a
+retrieval channel keeps the kind the model gave it.
 """
 
 from __future__ import annotations
@@ -12,249 +14,170 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import yaml
+
 from asago_scenario_generator.stpa.models.control_structure import (
-    ControlAction,
-    ControlActionEffectKind,
-    ControlledProcess,
     ControlStructure,
-    ElementRef,
-    FeedbackChannel,
     FeedbackSourceKind,
-    ProcessModelPart,
     ReferenceType,
-    Responsibility,
 )
 from asago_scenario_generator.stpa.models.execution_classification import (
     ExecutionTargetProfile,
 )
-from asago_scenario_generator.stpa.spec_diagnostics import (
-    SpecCheck,
-    diagnose_final_artifacts,
-)
-from asago_scenario_generator.stpa.system_model.operation_feedback import (
-    add_operation_result_feedback,
+from asago_scenario_generator.stpa.system_model.control_structure import (
+    ControlElementSet,
+    CoordinationAnalysis,
+    _CoordinationProviderEnvelope,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
-    EvidenceOperation,
-    TargetEvidence,
     build_target_evidence,
 )
-from tests.helpers.stpa_builders import make_loss_analysis
+from tests.helpers.calls_log import read_calls_jsonl
+from tests.stpa.sp1_helpers import (
+    run_sp1_default,
+    setup_sp1_mock_client,
+    valid_empty_coordination_analysis_dict,
+)
 
 FIXTURES = Path(__file__).resolve().parents[1] / "fixtures" / "miniocciai-baseline-rev2"
 
-
-def _cp(cp_id: str) -> ElementRef:
-    return ElementRef(type=ReferenceType.controlled_process, id=cp_id)
+RESULT_INSTRUCTION = "return what they report to the responsibility that invokes them"
 
 
-def _evidence(*operations: tuple[str, bool]) -> TargetEvidence:
-    return TargetEvidence(
-        operations=tuple(
-            EvidenceOperation(
-                name=name,
-                description="Observed.",
-                arguments=(),
-                returns_result=returns_result,
-            )
-            for name, returns_result in operations
-        )
-    )
-
-
-def _action(
-    ca_id: str,
-    *,
-    operation: str | None = "process_refund",
-    target: ElementRef | None = None,
-    effect_kind: ControlActionEffectKind = ControlActionEffectKind.tool_call,
-) -> ControlAction:
-    return ControlAction(
-        ca_id=ca_id,
-        description=f"Action {ca_id}",
-        target=target or _cp("CP-2"),
-        effect_kind=effect_kind,
-        operation=operation,
-        process_model_refs=["PM-1-1"],
-    )
-
-
-def _structure(
-    *actions: ControlAction, channels: list[FeedbackChannel] | None = None
-) -> ControlStructure:
-    return ControlStructure(
-        controlled_processes=[
-            ControlledProcess(cp_id="CP-1", description="Conversation"),
-            ControlledProcess(cp_id="CP-2", description="Payment engine"),
-        ],
-        responsibilities=[
-            Responsibility(
-                resp_id="RESP-1",
-                description="Execute refunds",
-                process_model_parts=[
-                    ProcessModelPart(
-                        pm_id="PM-1-1",
-                        description="Refund eligibility",
-                        values=["eligible", "not eligible", "unknown"],
-                    )
-                ],
-                control_actions=list(actions),
-                feedback_channels=channels
-                if channels is not None
-                else [
-                    FeedbackChannel(
-                        fb_id="FB-1-1",
-                        description="User request",
-                        updates="PM-1-1",
-                        source=_cp("CP-1"),
-                        source_kind=FeedbackSourceKind.user_message,
-                    )
-                ],
-            )
-        ],
-    )
-
-
-def _feedback_findings(structure: ControlStructure) -> list[tuple[str, ...]]:
-    diagnostics = diagnose_final_artifacts(
-        loss_analysis=make_loss_analysis(),
-        control_structure=structure,
-        ica_enumeration=None,
-    )
-    return [
-        finding.subject_ids
-        for finding in diagnostics.findings
-        if finding.check is SpecCheck.controlled_process_without_feedback
-    ]
-
-
-def test_tool_call_result_becomes_feedback_from_the_target_to_the_caller() -> None:
-    structure = _structure(_action("CA-1-1"))
-    assert _feedback_findings(structure) == [("CP-2", "RESP-1", "CA-1-1")]
-
-    fed = add_operation_result_feedback(structure, _evidence(("process_refund", True)))
-
-    resp = fed.responsibilities[0]
-    part = resp.process_model_parts[-1]
-    channel = resp.feedback_channels[-1]
-    assert part.pm_id == "PM-1-2"
-    assert "process_refund" in part.description
-    assert "CA-1-1" in part.description
-    # No finite set of outcomes is established by the evidence.
-    assert part.values == []
-    assert part.feedback_source is None
-    assert channel.fb_id == "FB-1-2"
-    assert channel.updates == "PM-1-2"
-    assert channel.source == _cp("CP-2")
-    assert channel.source_kind is FeedbackSourceKind.operation_result
-    assert "process_refund" in channel.description
-    # Authority over the variable is a semantic judgement the step leaves open.
-    assert channel.authority_for_update is None
-    # No action newly depends on the variable, so no context table changes.
-    assert [ca.process_model_refs for ca in resp.control_actions] == [["PM-1-1"]]
-    assert _feedback_findings(fed) == []
-
-
-def test_each_bound_action_on_an_unobserved_process_gets_its_own_channel() -> None:
-    structure = _structure(
-        _action("CA-1-1"),
-        _action("CA-1-2", operation="schedule_payment"),
-    )
-
-    fed = add_operation_result_feedback(
-        structure,
-        _evidence(("process_refund", True), ("schedule_payment", True)),
-    )
-
-    resp = fed.responsibilities[0]
-    assert [pm.pm_id for pm in resp.process_model_parts] == [
-        "PM-1-1",
-        "PM-1-2",
-        "PM-1-3",
-    ]
-    assert [(fb.fb_id, fb.updates) for fb in resp.feedback_channels] == [
-        ("FB-1-1", "PM-1-1"),
-        ("FB-1-2", "PM-1-2"),
-        ("FB-1-3", "PM-1-3"),
-    ]
-    assert "schedule_payment" in resp.feedback_channels[-1].description
-
-
-def test_a_process_the_responsibility_already_observes_is_left_alone() -> None:
-    structure = _structure(
-        _action("CA-1-1"),
-        channels=[
-            FeedbackChannel(
-                fb_id="FB-1-1",
-                description="Refund eligibility from the engine",
-                updates="PM-1-1",
-                source=_cp("CP-2"),
-                source_kind=FeedbackSourceKind.operation_result,
-            )
-        ],
-    )
-
-    fed = add_operation_result_feedback(structure, _evidence(("process_refund", True)))
-
-    assert fed == structure
-
-
-def test_actions_without_a_returned_result_are_left_alone() -> None:
-    structure = _structure(
-        _action("CA-1-1", operation="silent_operation"),
-        _action("CA-1-2", operation=None),
-        _action(
-            "CA-1-3",
-            effect_kind=ControlActionEffectKind.model_output,
-            target=_cp("CP-1"),
-        ),
-        _action(
-            "CA-1-4",
-            effect_kind=ControlActionEffectKind.model_output,
-        ),
-        _action("CA-1-5", operation="unobserved_operation"),
-    )
-
-    fed = add_operation_result_feedback(
-        structure,
-        _evidence(("process_refund", True), ("silent_operation", False)),
-    )
-
-    assert fed == structure
-
-
-def test_no_evidence_leaves_the_structure_unchanged() -> None:
-    structure = _structure(_action("CA-1-1"))
-
-    assert add_operation_result_feedback(structure, None) is structure
-
-
-def test_the_input_structure_is_not_mutated() -> None:
-    structure = _structure(_action("CA-1-1"))
-    before = structure.model_dump()
-
-    add_operation_result_feedback(structure, _evidence(("process_refund", True)))
-
-    assert structure.model_dump() == before
-
-
-def test_evidence_records_whether_an_operation_declares_a_result() -> None:
-    profile = ExecutionTargetProfile.model_validate(
+def _profile() -> ExecutionTargetProfile:
+    return ExecutionTargetProfile.model_validate(
         json.loads((FIXTURES / "execution-target-profile.json").read_text())
     )
-    tools = profile.inventory.tools
-    silent = tools[0].model_copy(update={"output_schema": None})
-    profile = profile.model_copy(
-        update={
-            "inventory": profile.inventory.model_copy(
-                update={"tools": (silent, *tools[1:])}
-            )
-        }
+
+
+def _profile_with_outputs(**outputs: object) -> ExecutionTargetProfile:
+    """The fixture profile with the named tools' ``output_schema`` replaced."""
+    profile = _profile()
+    tools = tuple(
+        tool.model_copy(update={"output_schema": outputs[tool.name]})
+        if tool.name in outputs
+        else tool
+        for tool in profile.inventory.tools
     )
+    inventory = profile.inventory.model_copy(update={"tools": tools})
+    return profile.model_copy(update={"inventory": inventory})
+
+
+def test_a_declared_output_marks_the_operation_as_returning_a_result() -> None:
+    profile = _profile_with_outputs(get_referral=None, get_education={})
 
     evidence = build_target_evidence(profile, None)
 
     assert evidence is not None
     returns = {item.name: item.returns_result for item in evidence.operations}
-    assert returns[silent.name] is False
-    assert all(returns[tool.name] for tool in tools[1:])
+    # No declared output is not evidence of a result.
+    assert returns["get_referral"] is False
+    # An empty schema still declares an output, whatever its shape.
+    assert returns["get_education"] is True
+    assert returns["escalate_to_clinician"] is True
+
+
+# Call 2b binds an acknowledgement-only operation (an escalation) with no
+# channel from its target, and a retrieval whose channel the model classified
+# as retrieved content.
+_ACK_AND_RETRIEVAL = {
+    "control_actions": [
+        {
+            "ca_id": "CA-1-1",
+            "description": "Escalate the conversation to a clinician",
+            "target": {"type": "controlled_process", "id": "CP-1"},
+            "effect_kind": "tool_call",
+            "temporality": "discrete",
+            "operation": "escalate_to_clinician",
+            "process_model_refs": ["PM-1-1"],
+        },
+        {
+            "ca_id": "CA-1-2",
+            "description": "Retrieve education material",
+            "target": {"type": "controlled_process", "id": "CP-2"},
+            "effect_kind": "tool_call",
+            "temporality": "discrete",
+            "operation": "get_education",
+            "process_model_refs": ["PM-1-1"],
+        },
+    ],
+    "feedback": [
+        {
+            "fb_id": "FB-1-1",
+            "description": "Education text the retrieval returns",
+            "updates": "PM-1-1",
+            "source": {"type": "controlled_process", "id": "CP-2"},
+            "source_kind": "retrieved_content",
+        }
+    ],
+    "controlled_processes": [
+        {"cp_id": "CP-1", "description": "Clinician escalation queue"},
+        {"cp_id": "CP-2", "description": "Education library"},
+    ],
+}
+
+
+def _run(tmp_path: Path, profile: ExecutionTargetProfile):
+    client = setup_sp1_mock_client()
+    client.set_response_for(ControlElementSet, _ACK_AND_RETRIEVAL)
+    review = valid_empty_coordination_analysis_dict(
+        constraint_ids=("SC-1", "SC-2"), action_ids=("CA-1-1", "CA-1-2")
+    )
+    for row in review["semantic_review"]["actions"]:
+        row["effect_kind"] = "tool_call"
+        row["rationale"] = "The action invokes an observed operation."
+    client.set_response_for(CoordinationAnalysis, review)
+    client.set_response_for(_CoordinationProviderEnvelope, review)
+    result = run_sp1_default(
+        client, tmp_path, target_evidence=build_target_evidence(profile, None)
+    )
+    assert result.control_structure is not None
+    return result
+
+
+def test_stage2_requests_name_the_operations_that_return_a_result(
+    tmp_path: Path,
+) -> None:
+    _run(tmp_path, _profile_with_outputs(get_referral=None))
+
+    rendered = {
+        entry["step"]: entry["user_prompt_text"]
+        for entry in read_calls_jsonl(tmp_path)
+        if entry["step"]
+        in {"call_2a_responsibilities", "call_2b_control_elements", "critic"}
+    }
+    assert set(rendered) == {
+        "call_2a_responsibilities",
+        "call_2b_control_elements",
+        "critic",
+    }
+    for prompt in rendered.values():
+        text = " ".join(prompt.split())
+        assert RESULT_INSTRUCTION in text
+        listed = text.split(RESULT_INSTRUCTION, 1)[1].split(".", 1)[0]
+        assert "`operation:escalate_to_clinician`" in listed
+        assert "`operation:get_education`" in listed
+        assert "operation:get_referral" not in listed
+
+
+def test_code_adds_no_feedback_for_an_acknowledgement_or_a_retrieval(
+    tmp_path: Path,
+) -> None:
+    result = _run(tmp_path, _profile())
+
+    published = ControlStructure.model_validate(
+        yaml.safe_load((tmp_path / "control-structure.yaml").read_text())
+    )
+    for structure in (result.control_structure, published):
+        (resp,) = structure.responsibilities
+        assert [pm.pm_id for pm in resp.process_model_parts] == ["PM-1-1"]
+        assert [
+            (fb.fb_id, fb.source.id, fb.source_kind) for fb in resp.feedback_channels
+        ] == [("FB-1-1", "CP-2", FeedbackSourceKind.retrieved_content)]
+        # The escalation's target still sends no feedback: whether its
+        # acknowledgement reports anything is the model's call, not code's.
+        assert not any(
+            fb.source.type is ReferenceType.controlled_process
+            and fb.source.id == "CP-1"
+            for fb in resp.feedback_channels
+        )
