@@ -47,6 +47,7 @@ from asago_scenario_generator.stpa.scenario_prod.reason_family import (
     ContextVariable,
     IcaReason,
     choose_reason_family,
+    hinted_families,
     ica_reasons,
     reason_terms,
     reason_variable,
@@ -239,12 +240,56 @@ def test_intent_reasons_take_the_no_match_path(reason) -> None:
         "the refund amount exceeds the remaining balance",
         "the requested quantity is above the maximum",
         "the balance is insufficient for the amount",
-        "the actor is unauthorized and the amount exceeds the limit",
     ],
 )
 def test_a_stated_limit_failure_gives_bound(reason) -> None:
     choice = _choose(reason)
     assert (choice.kind, choice.rule) == ("bound", "reason_terms")
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the actor is unauthorized and the amount exceeds the limit",
+        "the order does not belong to the authenticated customer and the amount "
+        "exceeds the remaining balance",
+        "the target identity does not match the authenticated customer and the "
+        "amount exceeds limits",
+        "the remaining session is unauthenticated",
+        "the assistant helps take over another customer account",
+    ],
+)
+def test_an_ownership_source_wins_over_a_limit_failure(reason) -> None:
+    choice = _choose(reason)
+    assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
+
+
+LIMITED = _var("PM-1-3", "exceeds the limit", "state:widgets.price")
+
+
+@pytest.mark.parametrize(
+    "row", [None, _row(ACTOR), _row(LIMITED), _row(ACTOR, LIMITED)]
+)
+def test_ownership_with_a_limit_failure_holds_with_or_without_a_cited_row(row) -> None:
+    choice = _choose("the actor is unauthorized and the amount exceeds the limit", row)
+    assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
+
+
+OWNER_FIELD_LIMIT = _var("PM-1-4", "exceeds the limit", "state:widgets.owner_id")
+
+
+@pytest.mark.parametrize(
+    ("row", "families"),
+    [
+        (None, [PRICE]),
+        (_row(LIMITED), [PRICE]),
+        (_row(OWNER_FIELD_LIMIT), [PRICE]),
+    ],
+)
+def test_a_limit_reason_gives_bound_with_or_without_a_cited_row(row, families) -> None:
+    choice = _choose("the price exceeds the limit", row)
+    assert choice.kind == "bound"
+    assert hinted_families(choice, FAMILIES) == families
 
 
 @pytest.mark.parametrize(
@@ -460,7 +505,18 @@ def test_an_affirmative_ownership_value_guards(value, refs) -> None:
     assert choice.kind is None
 
 
-@pytest.mark.parametrize("value", ["pending", "unresolved", "actor is a stranger"])
+@pytest.mark.parametrize(
+    "value",
+    [
+        "pending",
+        "unresolved",
+        "actor is a stranger",
+        "actor is the former owner",
+        "owner verification pending",
+        "requester is the previous guest",
+        "actor is a prospective member",
+    ],
+)
 def test_a_relationship_description_without_an_affirming_value_does_not_guard(
     value,
 ) -> None:
