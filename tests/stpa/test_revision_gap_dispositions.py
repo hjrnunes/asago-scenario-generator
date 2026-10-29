@@ -38,6 +38,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
 )
 from asago_scenario_generator.stpa.system_model.revision_dispositions import (
     GapDisposition,
+    RevisionIdentity,
     changed_element_ids,
     critic_gap_ids,
     review_gap_dispositions,
@@ -157,12 +158,17 @@ def _reply(
     }
 
 
-def _revise(reply: dict[str, Any], tmp_path: Path, findings=_FINDINGS):
+def _revise(
+    reply: dict[str, Any],
+    tmp_path: Path,
+    findings=_FINDINGS,
+    reviewed: ControlStructure | None = None,
+):
     client = MockLLMClient()
     client.set_response_queue([reply])
     outcome = revise_control_structure(
         llm_client=client,  # type: ignore[arg-type]
-        control_structure=_reviewed(),
+        control_structure=reviewed or _reviewed(),
         critic_findings=findings,
         use_case_text="Drafts are stored for later review by a person.",
         run_dir=tmp_path,
@@ -350,6 +356,177 @@ def test_a_claim_may_name_the_id_the_reply_wrote_for_a_renumbered_element(
 
 
 # ---------------------------------------------------------------------------
+# Element identity across the merge's renumbering
+# ---------------------------------------------------------------------------
+
+
+def _resp_1_with_a_variable_inserted_first(*, read_new_variable: bool) -> dict:
+    """RESP-1 restated with a new variable, written PM-1-2, before PM-1-1.
+
+    Normalization numbers by position, so the new variable publishes as
+    PM-1-1 and the unchanged original as PM-1-2.
+    """
+    resp = _reviewed().responsibilities[0].model_dump(mode="json", exclude_none=True)
+    resp["process_model_parts"].insert(
+        0, {"pm_id": "PM-1-2", "description": "Stored draft status", "values": []}
+    )
+    if read_new_variable:
+        resp["control_actions"][0]["process_model_refs"].append("PM-1-2")
+    return resp
+
+
+def _inserted_reply(*element_ids: str, read_new_variable: bool = True) -> dict:
+    return {
+        "modified_responsibilities": [
+            _resp_1_with_a_variable_inserted_first(read_new_variable=read_new_variable)
+        ],
+        "gap_dispositions": [
+            _disposition("G-1", "addressed", *element_ids),
+            _disposition("G-2", "dismissed"),
+            _disposition("G-3", "dismissed"),
+            _disposition("G-4", "dismissed"),
+        ],
+    }
+
+
+def _published_variables(outcome) -> list[tuple[str, str]]:
+    resp = outcome.structure.responsibilities[0]
+    return [(pm.pm_id, pm.description) for pm in resp.process_model_parts]
+
+
+def test_a_claim_naming_a_renumbered_unchanged_variable_is_unresolved(
+    tmp_path,
+) -> None:
+    # The claim names the original variable the reply restated unchanged.
+    outcome, _ = _revise(_inserted_reply("PM-1-1"), tmp_path)
+
+    assert outcome.applied is True
+    assert _published_variables(outcome) == [
+        ("PM-1-1", "Stored draft status"),
+        ("PM-1-2", "Store drafts for review state"),
+    ]
+    assert outcome.gap_review is not None
+    assert [(gap.gap_id, gap.reason) for gap in outcome.gap_review.unresolved] == [
+        ("G-1", "claimed addressed but did not change PM-1-1")
+    ]
+
+
+def test_a_claim_naming_the_inserted_variable_as_written_is_resolved(
+    tmp_path,
+) -> None:
+    outcome, _ = _revise(_inserted_reply("PM-1-2"), tmp_path)
+
+    assert outcome.gap_review is not None
+    assert outcome.gap_review.unresolved == ()
+
+
+def test_an_inserted_unread_variable_is_reported_under_its_published_id(
+    tmp_path,
+) -> None:
+    outcome, _ = _revise(_inserted_reply("PM-1-2", read_new_variable=False), tmp_path)
+
+    assert (
+        "Revision added process-model variable PM-1-1 (Stored draft status) that "
+        "no control action reads."
+    ) in outcome.warnings
+    # The original keeps its reader under its new published ID.
+    assert not [w for w in outcome.warnings if "PM-1-2 (" in w]
+
+
+def _reviewed_with_two_links() -> ControlStructure:
+    structure = _reviewed().model_dump(mode="json")
+    structure["coordination_links"] = [
+        {
+            "link_id": f"CL-{number}",
+            "source": "RESP-1",
+            "target": f"RESP-{number + 1}",
+            "shared_pm": "PM-1-1",
+            "coordination_mechanism": {
+                "cm_id": f"CM-{number}",
+                "description": f"Shared draft state {number}",
+                "payload": "draft state",
+            },
+            "description": f"Coordinate drafts with RESP-{number + 1}",
+        }
+        for number in (1, 2)
+    ]
+    return ControlStructure.model_validate(structure)
+
+
+def test_a_claim_naming_a_new_mechanism_by_its_colliding_written_id_is_resolved(
+    tmp_path,
+) -> None:
+    reply = {
+        "new_coordination_links": [
+            {
+                "link_id": "CL-3",
+                "source": "RESP-2",
+                "target": "RESP-3",
+                "shared_pm": "PM-2-1",
+                # Collides with the existing CL-1 mechanism; it publishes as CM-3.
+                "coordination_mechanism": {
+                    "cm_id": "CM-1",
+                    "description": "Shared ownership state",
+                    "payload": "draft owner",
+                },
+                "description": "Coordinate ownership with escalation",
+            }
+        ],
+        "gap_dispositions": [
+            _disposition("G-1", "addressed", "CM-1"),
+            _disposition("G-2", "addressed", "CL-3"),
+            _disposition("G-3", "dismissed"),
+            _disposition("G-4", "dismissed"),
+        ],
+    }
+
+    outcome, _ = _revise(reply, tmp_path, reviewed=_reviewed_with_two_links())
+
+    assert outcome.applied is True
+    mechanisms = [
+        link.coordination_mechanism.cm_id
+        for link in outcome.structure.coordination_links
+    ]
+    assert mechanisms == ["CM-1", "CM-2", "CM-3"]
+    assert outcome.gap_review is not None
+    assert outcome.gap_review.unresolved == ()
+
+
+def test_a_claim_naming_an_existing_mechanism_by_published_id_is_unresolved(
+    tmp_path,
+) -> None:
+    reply = {
+        "new_coordination_links": [
+            {
+                "link_id": "CL-3",
+                "source": "RESP-2",
+                "target": "RESP-3",
+                "shared_pm": "PM-2-1",
+                "coordination_mechanism": {
+                    "cm_id": "CM-3",
+                    "description": "Shared ownership state",
+                    "payload": "draft owner",
+                },
+                "description": "Coordinate ownership with escalation",
+            }
+        ],
+        "gap_dispositions": [
+            _disposition("G-1", "addressed", "CM-2"),
+            _disposition("G-2", "dismissed"),
+            _disposition("G-3", "dismissed"),
+            _disposition("G-4", "dismissed"),
+        ],
+    }
+
+    outcome, _ = _revise(reply, tmp_path, reviewed=_reviewed_with_two_links())
+
+    assert outcome.gap_review is not None
+    assert [(gap.gap_id, gap.reason) for gap in outcome.gap_review.unresolved] == [
+        ("G-1", "claimed addressed but did not change CM-2")
+    ]
+
+
+# ---------------------------------------------------------------------------
 # A variable the revision added that no control action reads
 # ---------------------------------------------------------------------------
 
@@ -392,16 +569,49 @@ def test_an_added_variable_an_action_reads_is_not_reported(tmp_path) -> None:
     assert not [w for w in outcome.warnings if "no control action reads" in w]
 
 
-def test_a_pre_existing_unread_variable_is_not_reported() -> None:
+def test_a_pre_existing_unread_variable_is_not_reported(tmp_path) -> None:
     reviewed = _reviewed()
     reviewed.responsibilities[1].process_model_parts.append(
         ProcessModelPart(pm_id="PM-2-2", description="Unread before the revision")
     )
-    published = reviewed.model_copy(deep=True)
-    # A restatement may reword the variable's description; its ID is kept.
-    published.responsibilities[1].process_model_parts[1].description = "Reworded"
+    resp_2 = reviewed.responsibilities[1].model_dump(mode="json", exclude_none=True)
+    # A restatement may reword the variable's description; it is still the
+    # reviewed variable.
+    resp_2["process_model_parts"][1]["description"] = "Reworded"
+    reply = {
+        "modified_responsibilities": [resp_2],
+        "gap_dispositions": [
+            _disposition("G-1", "addressed", "PM-2-2"),
+            _disposition("G-2", "dismissed"),
+            _disposition("G-3", "dismissed"),
+            _disposition("G-4", "dismissed"),
+        ],
+    }
 
-    assert unread_added_process_model_warnings(reviewed, published) == []
+    outcome, _ = _revise(reply, tmp_path, reviewed=reviewed)
+
+    assert outcome.applied is True
+    assert not [w for w in outcome.warnings if "no control action reads" in w]
+    assert outcome.gap_review is not None
+    assert outcome.gap_review.unresolved == ()
+
+
+def test_the_helper_reports_an_unread_variable_whose_identity_is_new() -> None:
+    published = _reviewed()
+    published.responsibilities[1].process_model_parts.append(
+        ProcessModelPart(pm_id="PM-2-2", description="Unread variable")
+    )
+    identity = RevisionIdentity.unchanged(published)
+
+    assert unread_added_process_model_warnings(published, identity) == []
+    new = RevisionIdentity(
+        identities={**identity.identities, "PM-2-2": ("new", "PM", 1, 1)},
+        written={},
+    )
+    assert unread_added_process_model_warnings(published, new) == [
+        "Revision added process-model variable PM-2-2 (Unread variable) that no "
+        "control action reads."
+    ]
 
 
 # ---------------------------------------------------------------------------

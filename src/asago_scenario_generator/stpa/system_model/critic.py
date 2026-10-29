@@ -13,6 +13,7 @@ which is merged programmatically into the existing ControlStructure.
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 import logging
 import re
 from dataclasses import dataclass
@@ -71,11 +72,12 @@ from asago_scenario_generator.stpa.system_model.revision_dispositions import (
     DispositionKind,
     GapDisposition,
     GapReview,
+    RevisionIdentity,
     changed_element_ids,
     critic_gap_ids,
     review_gap_dispositions,
     set_aside_warnings,
-    source_id_aliases,
+    revision_identity,
     unread_added_process_model_warnings,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
@@ -772,7 +774,7 @@ def _finish_revision(
     )
     if _delta_has_changes(revision_delta):
         try:
-            merged, merge_warnings, aliases = _merge_revision_delta_with_aliases(
+            merged, merge_warnings, identity = _merge_revision_delta_with_identity(
                 control_structure, revision_delta, dropped_authority=dropped_authority
             )
         except Exception as exc:
@@ -792,12 +794,12 @@ def _finish_revision(
             review = _gap_review(
                 revision_delta,
                 critic_findings,
-                changed_ids=changed_element_ids(unrevised, output),
-                aliases=aliases,
+                changed_ids=changed_element_ids(unrevised, output, identity),
+                written=identity.written,
             )
             revision_warnings.extend(_gap_review_warnings(review))
             revision_warnings.extend(
-                unread_added_process_model_warnings(control_structure, output)
+                unread_added_process_model_warnings(output, identity)
             )
             return _with_heuristics(
                 RevisionOutcome(
@@ -825,7 +827,7 @@ def _gap_review(
     critic_findings: CriticFindings,
     *,
     changed_ids: frozenset[str],
-    aliases: dict[str, frozenset[str]] | None = None,
+    written: Mapping[str, frozenset[str]] | None = None,
 ) -> GapReview | None:
     """Check the reply's gap dispositions; ``None`` for a free-text-only reply."""
     if revision_delta.dismissed_gaps and not revision_delta.gap_dispositions:
@@ -834,7 +836,7 @@ def _gap_review(
         revision_delta.gap_dispositions,
         gap_count=len(critic_findings.gaps),
         changed_ids=changed_ids,
-        aliases=aliases,
+        written=written,
     )
 
 
@@ -1371,28 +1373,42 @@ def _merge_revision_delta(
 
     Returns a tuple of (merged ControlStructure, repair and stitch warnings).
     """
-    merged, warnings, _ = _merge_revision_delta_with_aliases(
+    merged, warnings, _ = _merge_revision_delta_with_identity(
         cs, delta, dropped_authority=dropped_authority
     )
     return merged, warnings
 
 
-def _merge_revision_delta_with_aliases(
+def _merge_revision_delta_with_identity(
     cs: ControlStructure,
     delta: RevisionDelta,
     *,
     dropped_authority: frozenset[tuple[str, str]] = frozenset(),
-) -> tuple[ControlStructure, list[str], dict[str, frozenset[str]]]:
-    """Merge as :func:`_merge_revision_delta`; also map written IDs to published ones."""
+) -> tuple[ControlStructure, list[str], RevisionIdentity]:
+    """Merge as :func:`_merge_revision_delta`; also follow each element's identity.
+
+    The stitch renumbers a new link's colliding mechanism ID, so the ID the
+    reply wrote is read from the delta, before the stitch.
+    """
     delta, label_warnings = _restore_descriptions_with_pasted_labels(cs, delta)
     delta, kind_warnings = _move_source_kinds_out_of_source_refs(delta)
+    written_mechanism_ids: dict[str, str] = {}
+    for link in delta.new_coordination_links:
+        written_mechanism_ids.setdefault(
+            link.link_id, link.coordination_mechanism.cm_id
+        )
     stitched, stitch_warnings = _stitch_revision_delta(cs, delta, dropped_authority)
     merged = validate_normalized_control_structure(stitched)
-    return (
+    identity = revision_identity(
+        cs,
+        stitched,
         merged,
-        label_warnings + kind_warnings + stitch_warnings,
-        source_id_aliases(stitched, merged),
+        restated_ids=frozenset(
+            resp.resp_id for resp in delta.modified_responsibilities
+        ),
+        written_mechanism_ids=written_mechanism_ids,
     )
+    return merged, label_warnings + kind_warnings + stitch_warnings, identity
 
 
 # The labels a revision prompt has shown for an element's typed fields, mapped

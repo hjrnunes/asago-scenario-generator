@@ -73,15 +73,17 @@ def review_gap_dispositions(
     *,
     gap_count: int,
     changed_ids: frozenset[str],
-    aliases: Mapping[str, frozenset[str]] | None = None,
+    written: Mapping[str, frozenset[str]] | None = None,
 ) -> GapReview:
     """Check each disposition against the elements the revision changed.
 
     *changed_ids* are the published IDs of the elements the revision adds or
-    changes.  *aliases* maps an ID the reply wrote to the published IDs it
-    became, so a claim may name an element either way.
+    changes.  *written* maps each ID the reply wrote to the published IDs of
+    the elements it wrote under that ID (see :class:`RevisionIdentity`).  A
+    claimed ID the reply wrote names those elements; any other claimed ID is
+    read as a published ID.
     """
-    aliases = aliases or {}
+    written = written or {}
     gap_ids = critic_gap_ids(gap_count)
     counts = {kind: 0 for kind in DISPOSITION_KINDS}
     by_gap: dict[str, list[GapDisposition]] = {}
@@ -94,9 +96,9 @@ def review_gap_dispositions(
             unknown.append(item.gap_id)
 
     def changed(element_id: str) -> bool:
-        return element_id in changed_ids or bool(
-            aliases.get(element_id, frozenset()) & changed_ids
-        )
+        if element_id in written:
+            return bool(written[element_id] & changed_ids)
+        return element_id in changed_ids
 
     unresolved: list[UnresolvedGap] = []
     for gap_id in gap_ids:
@@ -137,107 +139,260 @@ def set_aside_warnings(dispositions: Iterable[GapDisposition]) -> list[str]:
     return warnings
 
 
-def _children(responsibility: Any) -> Iterator[tuple[str, str, Any]]:
-    """Yield ``(kind, id, element)`` for each child element of *responsibility*."""
-    for kind, items, key in (
-        ("RC", responsibility.responsibility_constraints, "rc_id"),
-        ("PM", responsibility.process_model_parts, "pm_id"),
-        ("CA", responsibility.control_actions, "ca_id"),
-        ("FB", responsibility.feedback_channels, "fb_id"),
+_CHILD_LISTS = (
+    ("RC", "responsibility_constraints", "rc_id"),
+    ("PM", "process_model_parts", "pm_id"),
+    ("CA", "control_actions", "ca_id"),
+    ("FB", "feedback_channels", "fb_id"),
+)
+
+# An element's identity: ``("reviewed", id)`` for an element of the reviewed
+# structure, under its reviewed ID; ``("new", ...)`` for an element the
+# revision added, keyed by its place in the merged structure.
+Identity = tuple[Any, ...]
+
+
+def _reviewed(element_id: str) -> Identity:
+    return ("reviewed", element_id)
+
+
+@dataclass(frozen=True)
+class RevisionIdentity:
+    """Which element each published ID is, across the merge's renumbering.
+
+    Normalization numbers elements by position, so an inserted element can
+    take the published ID an existing one had, and the existing one moves to
+    another.  ``identities`` maps each published ID of the merged structure to
+    its element's identity.  ``written`` maps each ID the reply wrote for an
+    element it restated or added to the published IDs of those elements.
+    """
+
+    identities: Mapping[str, Identity]
+    written: Mapping[str, frozenset[str]]
+
+    @classmethod
+    def unchanged(cls, structure: ControlStructure) -> RevisionIdentity:
+        """The identity of a structure no reply changed: each ID is its own."""
+        identities: dict[str, Identity] = {}
+        for responsibility in structure.responsibilities:
+            identities[responsibility.resp_id] = _reviewed(responsibility.resp_id)
+            for _, items, key in _CHILD_LISTS:
+                for item in getattr(responsibility, items):
+                    identities[getattr(item, key)] = _reviewed(getattr(item, key))
+        for process in structure.controlled_processes:
+            identities[process.cp_id] = _reviewed(process.cp_id)
+        for link in structure.coordination_links:
+            identities[link.link_id] = _reviewed(link.link_id)
+            cm_id = link.coordination_mechanism.cm_id
+            identities[cm_id] = _reviewed(cm_id)
+        return cls(identities=identities, written={})
+
+
+def revision_identity(
+    reviewed: ControlStructure,
+    stitched: ControlStructure,
+    merged: ControlStructure,
+    *,
+    restated_ids: frozenset[str],
+    written_mechanism_ids: Mapping[str, str],
+) -> RevisionIdentity:
+    """Follow each element from the reply to the merged structure.
+
+    *stitched* is the reply stitched onto *reviewed*: the reviewed
+    responsibilities in order, those in *restated_ids* replaced by the
+    reply's restatement, then the new responsibilities; the reviewed
+    processes and links, then the new ones.  *merged* is its normalized form,
+    which keeps that layout.  A restated responsibility's child is the
+    reviewed child of that responsibility with the ID the reply wrote, if
+    there is one, and new otherwise.  *written_mechanism_ids* maps each new
+    link's ID to the mechanism ID the reply wrote, which the stitch may have
+    renumbered to avoid a collision.
+    """
+    identities: dict[str, Identity] = {}
+    written: dict[str, set[str]] = {}
+
+    def record(published: str, identity: Identity, written_id: Any) -> None:
+        identities[published] = identity
+        if isinstance(written_id, str):
+            written.setdefault(written_id, set()).add(published)
+
+    reviewed_children = {
+        responsibility.resp_id: {
+            kind: {getattr(item, key) for item in getattr(responsibility, items)}
+            for kind, items, key in _CHILD_LISTS
+        }
+        for responsibility in reviewed.responsibilities
+    }
+    kept = len(reviewed.responsibilities)
+    for r_index, (source, target) in enumerate(
+        zip(stitched.responsibilities, merged.responsibilities)
     ):
-        for item in items:
-            yield kind, getattr(item, key), item
-
-
-def _elements(structure: ControlStructure) -> Iterator[tuple[tuple, str, Any]]:
-    """Yield ``(position, id, element)`` for every identified element.
-
-    The position names the element by its place in the structure, so two
-    structures with the same list layout can be walked side by side.
-    """
-    for r_index, responsibility in enumerate(structure.responsibilities):
-        yield ("RESP", r_index), responsibility.resp_id, responsibility
-        counters: dict[str, int] = {}
-        for kind, element_id, item in _children(responsibility):
-            index = counters.get(kind, 0)
-            counters[kind] = index + 1
-            yield (kind, r_index, index), element_id, item
-    for index, process in enumerate(structure.controlled_processes):
-        yield ("CP", index), process.cp_id, process
-    for index, link in enumerate(structure.coordination_links):
-        yield ("CL", index), link.link_id, link
-        mechanism = link.coordination_mechanism
-        yield ("CM", index), mechanism.cm_id, mechanism
-
-
-def _payloads(structure: ControlStructure) -> dict[str, list[Any]]:
-    payloads: dict[str, list[Any]] = {}
-    for _, element_id, element in _elements(structure):
-        payloads.setdefault(element_id, []).append(element.model_dump(mode="json"))
-    return payloads
-
-
-def changed_element_ids(
-    before: ControlStructure, after: ControlStructure
-) -> frozenset[str]:
-    """Return the IDs of the elements *after* adds or changes relative to *before*.
-
-    A responsibility whose child changes is changed itself, and so is a link
-    whose mechanism changes.
-    """
-    old = _payloads(before)
-    return frozenset(
-        element_id
-        for element_id, payload in _payloads(after).items()
-        if old.get(element_id) != payload
+        is_new = r_index >= kept
+        restated = not is_new and source.resp_id in restated_ids
+        record(
+            target.resp_id,
+            ("new", "RESP", r_index) if is_new else _reviewed(source.resp_id),
+            source.resp_id if is_new or restated else None,
+        )
+        known = {} if is_new else reviewed_children.get(source.resp_id, {})
+        for kind, items, key in _CHILD_LISTS:
+            claimed: set[str] = set()
+            for index, (child, published) in enumerate(
+                zip(getattr(source, items), getattr(target, items))
+            ):
+                child_id = getattr(child, key)
+                identity: Identity = ("new", kind, r_index, index)
+                if child_id in known.get(kind, ()) and child_id not in claimed:
+                    claimed.add(child_id)
+                    identity = _reviewed(child_id)
+                record(
+                    getattr(published, key),
+                    identity,
+                    child_id if is_new or restated else None,
+                )
+    kept = len(reviewed.controlled_processes)
+    for index, (source, target) in enumerate(
+        zip(stitched.controlled_processes, merged.controlled_processes)
+    ):
+        is_new = index >= kept
+        record(
+            target.cp_id,
+            ("new", "CP", index) if is_new else _reviewed(source.cp_id),
+            source.cp_id if is_new else None,
+        )
+    kept = len(reviewed.coordination_links)
+    for index, (source, target) in enumerate(
+        zip(stitched.coordination_links, merged.coordination_links)
+    ):
+        is_new = index >= kept
+        mechanism = source.coordination_mechanism.cm_id
+        record(
+            target.link_id,
+            ("new", "CL", index) if is_new else _reviewed(source.link_id),
+            source.link_id if is_new else None,
+        )
+        record(
+            target.coordination_mechanism.cm_id,
+            ("new", "CM", index) if is_new else _reviewed(mechanism),
+            written_mechanism_ids.get(source.link_id, mechanism) if is_new else None,
+        )
+    return RevisionIdentity(
+        identities=identities,
+        written={key: frozenset(ids) for key, ids in written.items()},
     )
 
 
-def source_id_aliases(
-    stitched: ControlStructure, merged: ControlStructure
-) -> dict[str, frozenset[str]]:
-    """Map each ID the reply wrote to the published IDs it became.
+def _in_reviewed_terms(value: Any, tokens: Mapping[str, str]) -> Any:
+    """Rewrite every published ID in *value* to its reviewed ID or new token."""
+    if isinstance(value, dict):
+        return {key: _in_reviewed_terms(item, tokens) for key, item in value.items()}
+    if isinstance(value, list):
+        return [_in_reviewed_terms(item, tokens) for item in value]
+    if isinstance(value, str):
+        return tokens.get(value, value)
+    return value
 
-    *stitched* is the delta stitched onto the reviewed structure before
-    normalization, and *merged* its normalized form; normalization keeps the
-    list layout and assigns IDs from position.
+
+def _token(identity: Identity) -> str:
+    if identity[0] == "reviewed":
+        return identity[1]
+    return "new:" + ":".join(map(str, identity[1:]))
+
+
+def _flat_elements(
+    structure: ControlStructure,
+) -> Iterator[tuple[str, Any, tuple[str, ...]]]:
+    """Yield ``(id, element, nested fields)`` for every identified element.
+
+    The nested fields hold other identified elements; they are compared on
+    their own, not as part of the element that holds them.
     """
-    published = {position: element_id for position, element_id, _ in _elements(merged)}
-    aliases: dict[str, set[str]] = {}
-    for position, element_id, _ in _elements(stitched):
-        if position in published and isinstance(element_id, str):
-            aliases.setdefault(element_id, set()).add(published[position])
-    return {source: frozenset(ids) for source, ids in aliases.items()}
+    children = tuple(items for _, items, _ in _CHILD_LISTS)
+    for responsibility in structure.responsibilities:
+        yield responsibility.resp_id, responsibility, children
+        for _, items, key in _CHILD_LISTS:
+            for item in getattr(responsibility, items):
+                yield getattr(item, key), item, ()
+    for process in structure.controlled_processes:
+        yield process.cp_id, process, ()
+    for link in structure.coordination_links:
+        yield link.link_id, link, ("coordination_mechanism",)
+        mechanism = link.coordination_mechanism
+        yield mechanism.cm_id, mechanism, ()
+
+
+def _members(element: Any, nested: tuple[str, ...]) -> list[str]:
+    """Return the IDs of the identified elements *element* holds."""
+    ids: list[str] = []
+    for field in nested:
+        value = getattr(element, field)
+        for item in value if isinstance(value, list) else [value]:
+            ids.extend(
+                getattr(item, key)
+                for key in ("rc_id", "pm_id", "ca_id", "fb_id", "cm_id")
+                if hasattr(item, key)
+            )
+    return ids
+
+
+def changed_element_ids(
+    before: ControlStructure,
+    after: ControlStructure,
+    identity: RevisionIdentity | None = None,
+) -> frozenset[str]:
+    """Return the published IDs of the elements *after* adds or changes.
+
+    *before* holds reviewed IDs; *identity* says which element each ID of
+    *after* is (by default, the element with the same ID).  Elements are
+    compared by identity, with every reference rewritten to the identity it
+    names, so an ID that changed only by renumbering is not a change.  A
+    responsibility is changed when its own fields change, when it gains or
+    loses a child, or when a child changes; a link, when its own fields or its
+    mechanism change.  The order of the children does not count.
+    """
+    identity = identity or RevisionIdentity.unchanged(after)
+    tokens = {
+        published: _token(element) for published, element in identity.identities.items()
+    }
+    old: dict[str, tuple[Any, frozenset[str]]] = {}
+    for element_id, element, nested in _flat_elements(before):
+        old[element_id] = (
+            element.model_dump(mode="json", exclude=set(nested)),
+            frozenset(_members(element, nested)),
+        )
+    changed: set[str] = set()
+    for element_id, element, nested in _flat_elements(after):
+        token = tokens.get(element_id)
+        payload = _in_reviewed_terms(
+            element.model_dump(mode="json", exclude=set(nested)), tokens
+        )
+        members = frozenset(
+            tokens.get(member, member) for member in _members(element, nested)
+        )
+        if token is None or old.get(token) != (payload, members):
+            changed.add(element_id)
+    changed.update(
+        element_id
+        for element_id, element, nested in _flat_elements(after)
+        if nested and changed.intersection(_members(element, nested))
+    )
+    return frozenset(changed)
 
 
 def unread_added_process_model_warnings(
-    reviewed: ControlStructure, published: ControlStructure
+    published: ControlStructure, identity: RevisionIdentity
 ) -> list[str]:
     """Warn about each process-model variable the revision added that no action reads.
 
-    A variable is added when the reviewed structure has neither its ID nor a
-    variable with the same description in the same responsibility.
+    A variable is added when its identity is new, whatever published ID it
+    took; it is read when a control action of its responsibility lists that ID.
     """
-    reviewed_ids = {
-        pm.pm_id
-        for resp in reviewed.responsibilities
-        for pm in resp.process_model_parts
-    }
-    reviewed_descriptions = {
-        (resp.resp_id, " ".join(pm.description.split()).casefold())
-        for resp in reviewed.responsibilities
-        for pm in resp.process_model_parts
-    }
     warnings: list[str] = []
     for resp in published.responsibilities:
         read = {ref for ca in resp.control_actions for ref in ca.process_model_refs}
         for pm in resp.process_model_parts:
-            description = (resp.resp_id, " ".join(pm.description.split()).casefold())
-            if (
-                pm.pm_id in reviewed_ids
-                or description in reviewed_descriptions
-                or pm.pm_id in read
-            ):
+            element = identity.identities.get(pm.pm_id, ("new",))
+            if element[0] == "reviewed" or pm.pm_id in read:
                 continue
             warnings.append(
                 f"Revision added process-model variable {pm.pm_id} "

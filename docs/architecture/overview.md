@@ -895,8 +895,14 @@ dismissal or recommendation is only for a gap the reply leaves unchanged; an
 `addressed` gap must name elements the reply adds or modifies. Code checks
 each claim against the elements the published structure adds or changes
 relative to the no-revision output (a responsibility whose child changes is
-changed too), accepting either the ID the reply wrote or the ID the element
-is published under. A gap with no disposition, a disposition for an unknown
+changed too). Normalization numbers elements by position, so an inserted
+element can take an existing element's published ID; the check follows each
+element from the reply to the published structure and compares elements by
+that identity, with references rewritten the same way, so a change of ID
+alone is not a change. A claimed ID the reply wrote names the element it
+wrote under that ID, including a new link's mechanism whose colliding ID the
+merge renumbered; any other claimed ID is read as a published ID. A gap with
+no disposition, a disposition for an unknown
 gap ID, and an `addressed` claim that changed none of its IDs are
 unresolved. The check sends no request and never rejects or re-asks the
 reply. An `applied` or `unchanged` record adds `gap_dispositions` (the count
@@ -904,8 +910,9 @@ of each disposition) and `unresolved_gaps` (each gap ID with its reason); a
 `discarded` record does not. Each unresolved gap is also a
 `Revision left critic gap G-n unresolved: ...` post-revision warning, each
 dismissal or recommendation keeps its `Revision dismissed finding G-n ...`
-warning, and a process-model variable the revision added that no control
-action reads is reported as a post-revision warning. A reply written before
+warning, and a process-model variable the revision added (by identity, not
+by published ID) that no control action reads is reported as a
+post-revision warning. A reply written before
 dispositions, with free-text `dismissed_gaps`, still loads: each entry keeps
 its `Revision dismissed finding: ...` warning and the record has no gap
 review. The request schema no longer offers `dismissed_gaps`. The empty-responsibility cleanup is
