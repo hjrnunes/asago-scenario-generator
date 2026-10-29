@@ -30,7 +30,9 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
+import importlib.util
 from pathlib import Path
+import sys
 import tempfile
 from types import SimpleNamespace
 
@@ -154,11 +156,19 @@ from tests.helpers.projection_factory import get_test_raw_pattern
 
 PHRASES_DIR = Path(__file__).with_name("phrases")
 KINDS = ("required", "once", "forbidden", "ordered")
+# The conflict review pilot is a research script with its own prompts.
+CONFLICT_REVIEW_SCRIPT = (
+    Path(__file__).resolve().parents[1] / "scripts" / "conflict_review_pilot.py"
+)
+CONFLICT_REVIEW_PROMPTS_DIR = (
+    CONFLICT_REVIEW_SCRIPT.parent / "conflict_review" / "prompts"
+)
 PROMPT_DIRS = (
     SYSTEM_MODEL_PROMPTS_DIR,
     STAGE5_PROMPTS_DIR,
     OBLIGATION_AWARE_PROMPTS_DIR,
     TARGET_REALIZATION_PROMPTS_DIR,
+    CONFLICT_REVIEW_PROMPTS_DIR,
 )
 # Requests built in Python, each pinned by the table of the same name.
 REQUESTS = (
@@ -172,6 +182,7 @@ _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
 _NARRATE_TEMPLATES = ("stage6_narrate_system.j2", "stage6_narrate_user.j2")
 _GHERKIN_TEMPLATES = ("stage6_gherkin_system.j2", "stage6_gherkin_user.j2")
 _BELIEF_TEMPLATES = ("stage5_belief_system.j2", "stage5_belief_user.j2")
+_CONFLICT_REVIEW_TEMPLATES = ("conflict_review_system.j2", "conflict_review_user.j2")
 
 # Stage 1a user templates take the use case and the existing records; the
 # system templates ignore these arguments.
@@ -692,6 +703,47 @@ def _narrate() -> Callable[[str], str]:
     return render
 
 
+def _conflict_review_script():
+    name = "conflict_review_pilot_script"
+    if name not in sys.modules:
+        spec = importlib.util.spec_from_file_location(name, CONFLICT_REVIEW_SCRIPT)
+        assert spec is not None and spec.loader is not None
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[name] = module
+        spec.loader.exec_module(module)
+    return sys.modules[name]
+
+
+def _conflict_review(*, requests: bool) -> Callable[[str], str]:
+    def render(template: str) -> str:
+        script = _conflict_review_script()
+        case = script.fixture_case(
+            {
+                "fixture_id": "FX-00",
+                "expected_class": "no_conflict",
+                "expected_over_refusal": False,
+                "situation": "An assistant reads records.",
+                "requirements": [
+                    {"id": "R1", "origin": "security constraint", "text": "Keep it."},
+                    {"id": "R2", "origin": "business requirement", "text": "Send it."},
+                ],
+                "safeguard": {"id": "SA-1", "refines": "R1", "text": "Strip it."},
+                "requests": [
+                    {"id": "Q1", "expected": "allow", "text": "Send the notice."},
+                    {"id": "Q2", "expected": "block", "text": "Send me theirs."},
+                ],
+            }
+        )
+        if not requests:
+            case.sections = case.sections[:-1]
+            case.request_ids = ()
+            case.identifiers = ("R1", "R2", "SA-1")
+        prompts = script.render_review_prompts(case)
+        return dict(zip(_CONFLICT_REVIEW_TEMPLATES, prompts))[template]
+
+    return render
+
+
 def _gherkin() -> Callable[[str], str]:
     facts = ScenarioFacts(
         scenario_id="SCN-001",
@@ -932,6 +984,8 @@ CASES: dict[str, Callable[[str], str]] = {
         _revision_merge_and_authority_correction
     ),
     **{case: _obligation_aware(case) for case in OBLIGATION_AWARE_BUILDS},
+    "conflict-review": _conflict_review(requests=True),
+    "conflict-review-no-requests": _conflict_review(requests=False),
 }
 
 
