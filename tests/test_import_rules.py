@@ -570,6 +570,8 @@ SYSTEM_MODEL_LAYERS: dict[str, int] = {
     "profile": 1,
     "target_evidence": 0,
     "feedback_authority": 1,
+    # The revision's gap dispositions and what it changed; models only.
+    "revision_dispositions": 0,
     "kc_decision": 0,
     "risk_actionability": 1,
     "stated_rule_coverage": 1,

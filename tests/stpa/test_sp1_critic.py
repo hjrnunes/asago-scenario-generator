@@ -96,6 +96,7 @@ def _effect_kind_revision_delta(effect_kind: str) -> dict:
                         "target": {"type": "responsibility", "id": "RESP-3"},
                         "effect_kind": effect_kind,
                         "temporality": "instantaneous",
+                        "process_model_refs": ["PM-3-1"],
                     }
                 ],
                 "feedback_channels": [
@@ -111,7 +112,20 @@ def _effect_kind_revision_delta(effect_kind: str) -> dict:
         "new_controlled_processes": [],
         "new_coordination_links": [],
         "modified_responsibilities": [],
-        "dismissed_gaps": [],
+        "gap_dispositions": [
+            {
+                "gap_id": "G-1",
+                "disposition": "addressed",
+                "element_ids": ["RESP-3"],
+                "justification": "Adds the input classification responsibility.",
+            },
+            {
+                "gap_id": "G-2",
+                "disposition": "addressed",
+                "element_ids": ["FB-3-1"],
+                "justification": "Adds the classification result feedback.",
+            },
+        ],
     }
 
 

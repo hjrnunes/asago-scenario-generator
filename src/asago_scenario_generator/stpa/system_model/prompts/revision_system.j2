@@ -83,12 +83,12 @@ Your task is to address gaps identified by the completeness critic. This is a si
   when the use-case or typed factual context explicitly establishes the
   separate function, operation, information, or feedback source they represent.
   Keep a requirement-backed safeguard that is not such a source-established
-  function as a design recommendation in `dismissed_gaps`; do not emit it in
-  the current-state delta.
-- You may DISMISS a finding if you judge it to be a false positive — add it to dismissed_gaps with a one-sentence justification. A finding that is a
+  function as a `recommendation` gap disposition; do not emit it in the
+  current-state delta.
+- You may DISMISS a finding if you judge it to be a false positive — give it a `dismissed` gap disposition with a one-sentence justification. A finding that is a
   requirement-backed design recommendation, rather than an omitted
-  source-established function, may likewise be retained in that rationale;
-  label it as proposed rather than present.
+  source-established function, takes a `recommendation` gap disposition
+  instead; its justification labels it as proposed rather than present.
 - Ensure new elements connect properly (sources, targets, feedback).
 - Maintain solution-neutrality: no implementation-specific terms (LLM, proxy, orchestrator, guardrail, prompt, API).
 - Do not lose existing responsibilities or their elements.
@@ -102,19 +102,19 @@ Your task is to address gaps identified by the completeness critic. This is a si
   establish a separate installed function. Emit a new or modified element only
   when the use-case or typed factual context establishes the distinct function,
   operation, information, or feedback source currently omitted. Keep a
-  requirement-backed recommendation in `dismissed_gaps` when that evidence is
-  absent.
+  requirement-backed recommendation as a `recommendation` gap disposition when
+  that evidence is absent.
 - Preserve source-stated authorized or conditional operations and distinct
   named functions. Do not turn an "only when" condition into an unconditional
   denial, merge separate functions into a generic responsibility/action, or
   treat a recommendation as an existing element or attackable controller. Keep
-  a critic's proposed safeguard in the dismissed-gaps rationale unless the
+  a critic's proposed safeguard in a recommendation's justification unless the
   source establishes the omitted function; do not add one solely because of an
   unsupported attack path.
 - Treat the Existing Control Structure section as current-state evidence. Do not
   copy a critic's recommendation into that diagram as if it were observed;
-  address a justified recommendation only in a dismissed-gaps rationale. Use
-  the new/modified delta only for a source-established omitted function.
+  address a justified recommendation only in a recommendation's justification.
+  Use the new/modified delta only for a source-established omitted function.
 - All ElementRef references must be valid.
 - All feedback channel updates must reference a PM in the same responsibility.
 - Existing PM/CA/FB/CP/CL/CM IDs shown with their descriptions are
@@ -212,7 +212,7 @@ an untrusted one does not by itself make it non-authoritative.
 
 ## Output format
 Produce a RevisionDelta with only new and modified elements. Do NOT restate the entire control structure.
-The modified_responsibilities list must contain ONLY responsibilities you are CHANGING. The dismissed_gaps list should contain one-sentence justifications for any findings you chose not to address.
+The modified_responsibilities list must contain ONLY responsibilities you are CHANGING. The gap_dispositions list holds one disposition per critic gap, as the task describes: `addressed` gaps name the elements this reply adds or changes, and `dismissed` or `recommendation` gaps are ones this reply leaves unchanged.
 
 Return exactly one JSON object with this schema (all five top-level fields are
 required; use an empty list when a field has no entries):
@@ -223,7 +223,7 @@ required; use an empty list when a field has no entries):
   "new_controlled_processes": [],
   "new_coordination_links": [],
   "modified_responsibilities": [],
-  "dismissed_gaps": []
+  "gap_dispositions": []
 }
 ```
 
@@ -251,7 +251,7 @@ IDs are references, not replacement prose:
     }
   ],
   "modified_responsibilities": [],
-  "dismissed_gaps": []
+  "gap_dispositions": []
 }
 ```
 
@@ -310,6 +310,13 @@ example with one new greenhouse responsibility and its controlled process is:
   ],
   "new_coordination_links": [],
   "modified_responsibilities": [],
-  "dismissed_gaps": []
+  "gap_dispositions": [
+    {
+      "gap_id": "G-1",
+      "disposition": "addressed",
+      "element_ids": ["RESP-3", "CP-3"],
+      "justification": "Adds the greenhouse climate responsibility and the climate process it controls."
+    }
+  ]
 }
 ```

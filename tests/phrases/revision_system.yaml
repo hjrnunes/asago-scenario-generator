@@ -6,8 +6,19 @@ cases:
       - "## Supplied Use-Case Evidence"
       - Test use case
       - >-
-        Keep a critic's proposed safeguard in the dismissed-gaps rationale
+        Keep a critic's proposed safeguard in a recommendation's justification
         unless the source establishes the omitted function
+      - >-
+        give it a `dismissed` gap disposition with a one-sentence justification
+      - >-
+        takes a `recommendation` gap disposition instead; its justification
+        labels it as proposed rather than present.
+      - >-
+        The gap_dispositions list holds one disposition per critic gap, as the
+        task describes: `addressed` gaps name the elements this reply adds or
+        changes, and `dismissed` or `recommendation` gaps are ones this reply
+        leaves unchanged.
+      - '"gap_dispositions": []' 
       - Use the new/modified delta only for a source-established omitted function
       - Treat the Existing Control Structure section as current-state evidence
       - Do not copy a critic's recommendation into that diagram as if it were observed
@@ -83,3 +94,5 @@ cases:
     forbidden:
       - STPA-Sec
       - An omitted assessment means `unknown`.
+      - dismissed_gaps
+      - dismissed-gaps

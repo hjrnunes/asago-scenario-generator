@@ -13,6 +13,7 @@ which is merged programmatically into the existing ControlStructure.
 from __future__ import annotations
 
 import copy
+from collections.abc import Mapping
 import logging
 import re
 from dataclasses import dataclass
@@ -27,6 +28,7 @@ from pydantic import (
     ValidationInfo,
     field_validator,
 )
+from pydantic.json_schema import SkipJsonSchema
 
 from asago_scenario_generator.models.capability_profile import (
     ZONE_DISPLAY_NAMES,
@@ -65,6 +67,18 @@ from asago_scenario_generator.stpa.system_model.feedback_authority import (
     FeedbackAuthorityError,
     feedback_authority_defect,
     validate_all_feedback_authority_assessments,
+)
+from asago_scenario_generator.stpa.system_model.revision_dispositions import (
+    DispositionKind,
+    GapDisposition,
+    GapReview,
+    RevisionIdentity,
+    changed_element_ids,
+    critic_gap_ids,
+    review_gap_dispositions,
+    set_aside_warnings,
+    revision_identity,
+    unread_added_process_model_warnings,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     TargetEvidence,
@@ -188,7 +202,9 @@ class RevisionDelta(BaseModel):
 
     Instead of restating the entire ControlStructure, the LLM returns
     only the new and modified elements. These are merged programmatically
-    into the existing ControlStructure.
+    into the existing ControlStructure.  ``gap_dispositions`` says what the
+    reply did with each critic gap.  ``dismissed_gaps`` is the free-text list
+    that replies written before dispositions held; it is read, never asked for.
     """
 
     # A revision response is a closed wire object.  In particular, accepting
@@ -201,6 +217,7 @@ class RevisionDelta(BaseModel):
     new_controlled_processes: list[ControlledProcess] = Field(default_factory=list)
     new_coordination_links: list[CoordinationLink] = Field(default_factory=list)
     modified_responsibilities: list[Responsibility] = Field(default_factory=list)
+    gap_dispositions: list[GapDisposition] = Field(default_factory=list)
     dismissed_gaps: list[str] = Field(default_factory=list)
 
 
@@ -284,20 +301,29 @@ class _RevisionLink(_RevisionWire):
     description: _Text
 
 
+class _RevisionGapDisposition(_RevisionWire):
+    gap_id: _Text
+    disposition: DispositionKind
+    element_ids: list[_Text] = []
+    justification: _Text
+
+
 # The revision response as the model must write it, and the schema the request
 # sends.  It narrows ``RevisionDelta`` to the wire objects the way
 # ``_ControlElementProviderSet`` narrows Call 2b, so a reply the schema allows is
 # a reply the wire models accept.  Every object is closed and every collection
 # that is present must be a list; an omitted collection is empty.  IDs,
 # reference types, and action kinds stay as written for normalization and
-# assembly to settle.  A docstring here would reach the model as the schema
+# assembly to settle.  The schema leaves out ``dismissed_gaps``, which only
+# earlier replies hold.  A docstring here would reach the model as the schema
 # description.
 class _RevisionDeltaProviderSet(RevisionDelta):
     new_responsibilities: list[_RevisionResponsibility] = []
     new_controlled_processes: list[_RevisionControlledProcess] = []
     new_coordination_links: list[_RevisionLink] = []
     modified_responsibilities: list[_RevisionResponsibility] = []
-    dismissed_gaps: list[_Text] = []
+    gap_dispositions: list[_RevisionGapDisposition] = []
+    dismissed_gaps: SkipJsonSchema[list[_Text]] = []
 
 
 class RevisionMergeAndAuthorityError(ExactFeedbackError):
@@ -672,11 +698,15 @@ class RevisionOutcome:
 
     ``applied`` is true exactly when ``structure`` is the reply's output and
     that differs from the no-revision output; see :func:`revision_step_output`.
+    ``gap_review`` checks the reply's gap dispositions against what it
+    changed.  It is ``None`` when the reply is discarded, and for a reply
+    that gives only free-text ``dismissed_gaps``.
     """
 
     structure: ControlStructure
     warnings: list[str]
     applied: bool
+    gap_review: GapReview | None = None
 
 
 def revision_step_output(
@@ -729,18 +759,22 @@ def _finish_revision(
     The reply is applied exactly when its output differs from the
     no-revision output, both from :func:`revision_step_output`.  Otherwise
     the no-revision output is published, with the warnings that concern the
-    reply.
+    reply.  An applied or unchanged reply's gap dispositions are checked
+    against the elements its output adds or changes; each unresolved gap, and
+    each process-model variable the reply added that no action reads, adds a
+    warning.  The check never rejects the reply.
     """
     revision_warnings = [
         f"Revision dismissed finding: {justification}"
         for justification in revision_delta.dismissed_gaps
     ]
+    revision_warnings.extend(set_aside_warnings(revision_delta.gap_dispositions))
     unrevised, cleanup_warnings = revision_step_output(
         control_structure, baseline=control_structure, target_evidence=target_evidence
     )
     if _delta_has_changes(revision_delta):
         try:
-            merged, merge_warnings = _merge_revision_delta(
+            merged, merge_warnings, identity = _merge_revision_delta_with_identity(
                 control_structure, revision_delta, dropped_authority=dropped_authority
             )
         except Exception as exc:
@@ -752,13 +786,25 @@ def _finish_revision(
             merged, baseline=control_structure, target_evidence=target_evidence
         )
         # Warnings are accumulated in chronological order: dismissal → merge →
-        # strip → binding → heuristics, so consumers see the earliest
-        # root-cause first.
+        # strip → binding → gap review → heuristics, so consumers see the
+        # earliest root-cause first.
         revision_warnings.extend(merge_warnings)
         if output != unrevised:
             revision_warnings.extend(output_warnings)
+            review = _gap_review(
+                revision_delta,
+                critic_findings,
+                changed_ids=changed_element_ids(unrevised, output, identity),
+                written=identity.written,
+            )
+            revision_warnings.extend(_gap_review_warnings(review))
+            revision_warnings.extend(
+                unread_added_process_model_warnings(output, identity)
+            )
             return _with_heuristics(
-                RevisionOutcome(output, revision_warnings, applied=True),
+                RevisionOutcome(
+                    output, revision_warnings, applied=True, gap_review=review
+                ),
                 loss_analysis,
             )
         # Keep what the processing removed from the reply, not what it
@@ -768,9 +814,34 @@ def _finish_revision(
         )
     revision_warnings.extend(cleanup_warnings)
     revision_warnings.extend(_no_change_warnings(critic_findings, revision_delta))
+    review = _gap_review(revision_delta, critic_findings, changed_ids=frozenset())
+    revision_warnings.extend(_gap_review_warnings(review))
     return _with_heuristics(
-        RevisionOutcome(unrevised, revision_warnings, applied=False), loss_analysis
+        RevisionOutcome(unrevised, revision_warnings, applied=False, gap_review=review),
+        loss_analysis,
     )
+
+
+def _gap_review(
+    revision_delta: RevisionDelta,
+    critic_findings: CriticFindings,
+    *,
+    changed_ids: frozenset[str],
+    written: Mapping[str, frozenset[str]] | None = None,
+) -> GapReview | None:
+    """Check the reply's gap dispositions; ``None`` for a free-text-only reply."""
+    if revision_delta.dismissed_gaps and not revision_delta.gap_dispositions:
+        return None
+    return review_gap_dispositions(
+        revision_delta.gap_dispositions,
+        gap_count=len(critic_findings.gaps),
+        changed_ids=changed_ids,
+        written=written,
+    )
+
+
+def _gap_review_warnings(review: GapReview | None) -> list[str]:
+    return [] if review is None else [gap.warning for gap in review.unresolved]
 
 
 def _with_heuristics(
@@ -782,6 +853,7 @@ def _with_heuristics(
         outcome.structure,
         [*outcome.warnings, *post_revision.errors, *post_revision.warnings],
         outcome.applied,
+        outcome.gap_review,
     )
 
 
@@ -791,7 +863,12 @@ def _no_change_warnings(
     """Explain a revision that left the reviewed structure in force."""
     if not critic_findings.gaps:
         return []
-    if len(revision_delta.dismissed_gaps) >= len(critic_findings.gaps):
+    set_aside = {
+        item.gap_id
+        for item in revision_delta.gap_dispositions
+        if item.disposition != "addressed"
+    } & set(critic_gap_ids(len(critic_findings.gaps)))
+    if len(revision_delta.dismissed_gaps) + len(set_aside) >= len(critic_findings.gaps):
         return _all_dismissed_no_change_warning(critic_findings)
     return [
         "Revision made no structural changes for explicit critic gaps; the "
@@ -868,6 +945,7 @@ def revise_control_structure(
         use_case_text=use_case_text,
         control_structure=control_structure,
         critic_findings=critic_findings,
+        gap_ids=critic_gap_ids(len(critic_findings.gaps)),
         target_evidence=target_evidence,
     )
 
@@ -938,7 +1016,10 @@ def revise_control_structure(
         target_evidence=target_evidence,
     )
     return RevisionOutcome(
-        outcome.structure, [*authority_warnings, *outcome.warnings], outcome.applied
+        outcome.structure,
+        [*authority_warnings, *outcome.warnings],
+        outcome.applied,
+        outcome.gap_review,
     )
 
 
@@ -1292,13 +1373,42 @@ def _merge_revision_delta(
 
     Returns a tuple of (merged ControlStructure, repair and stitch warnings).
     """
+    merged, warnings, _ = _merge_revision_delta_with_identity(
+        cs, delta, dropped_authority=dropped_authority
+    )
+    return merged, warnings
+
+
+def _merge_revision_delta_with_identity(
+    cs: ControlStructure,
+    delta: RevisionDelta,
+    *,
+    dropped_authority: frozenset[tuple[str, str]] = frozenset(),
+) -> tuple[ControlStructure, list[str], RevisionIdentity]:
+    """Merge as :func:`_merge_revision_delta`; also follow each element's identity.
+
+    The stitch renumbers a new link's colliding mechanism ID, so the ID the
+    reply wrote is read from the delta, before the stitch.
+    """
     delta, label_warnings = _restore_descriptions_with_pasted_labels(cs, delta)
     delta, kind_warnings = _move_source_kinds_out_of_source_refs(delta)
+    written_mechanism_ids: dict[str, str] = {}
+    for link in delta.new_coordination_links:
+        written_mechanism_ids.setdefault(
+            link.link_id, link.coordination_mechanism.cm_id
+        )
     stitched, stitch_warnings = _stitch_revision_delta(cs, delta, dropped_authority)
-    return (
-        validate_normalized_control_structure(stitched),
-        label_warnings + kind_warnings + stitch_warnings,
+    merged = validate_normalized_control_structure(stitched)
+    identity = revision_identity(
+        cs,
+        stitched,
+        merged,
+        restated_ids=frozenset(
+            resp.resp_id for resp in delta.modified_responsibilities
+        ),
+        written_mechanism_ids=written_mechanism_ids,
     )
+    return merged, label_warnings + kind_warnings + stitch_warnings, identity
 
 
 # The labels a revision prompt has shown for an element's typed fields, mapped

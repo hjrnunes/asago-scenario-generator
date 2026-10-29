@@ -41,6 +41,9 @@ from asago_scenario_generator.stpa.system_model.critic import (
     discarded_revision_reason,
     run_revision,
 )
+from asago_scenario_generator.stpa.system_model.revision_dispositions import (
+    critic_gap_ids,
+)
 from tests.stpa.sp1_helpers import MockLLMClient
 from tests.helpers.revision_delta import _make_control_structure
 
@@ -503,9 +506,12 @@ class TestRevisionDelta13ChecklistEachGap:
             use_case_text="Test",
             control_structure=_make_control_structure(),
             critic_findings=findings,
+            gap_ids=critic_gap_ids(len(findings.gaps)),
         )
         assert "missing_responsibility" in rendered
         assert "missing_feedback" in rendered
+        assert "**G-1** **missing_responsibility**" in rendered
+        assert "**G-2** **missing_feedback**" in rendered
         assert "Missing input validation" in rendered
         assert "Missing outcome feedback" in rendered
         assert "Add input validation responsibility" in rendered

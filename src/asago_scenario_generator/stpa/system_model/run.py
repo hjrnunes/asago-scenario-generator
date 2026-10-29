@@ -12,6 +12,7 @@ import hashlib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -50,6 +51,7 @@ from asago_scenario_generator.stpa.system_model.critic import (
     CriticFindings,
     discarded_revision_reason,
     run_completeness_critic,
+    RevisionOutcome,
     revise_control_structure,
     sanitize_critic_ids,
 )
@@ -93,6 +95,9 @@ from asago_scenario_generator.stpa.system_model.stated_rule_coverage import (
     coverage_warnings,
     finalize_stated_rule_coverage,
     manifest_summary as stated_rule_manifest_summary,
+)
+from asago_scenario_generator.stpa.system_model.revision_dispositions import (
+    GapReview,
 )
 from asago_scenario_generator.stpa.system_model.target_evidence import (
     check_evidence_bindings,
@@ -471,7 +476,7 @@ class _Stage2Result:
     model_call_count: int = 0
     uncited_constraints: list[str] = field(default_factory=list)
     # None when the critic found no gap, so no revision was requested.
-    critic_revision: dict[str, str] | None = None
+    critic_revision: dict[str, Any] | None = None
 
 
 def _try_derive_loss_analysis(
@@ -770,6 +775,14 @@ def _derive_stage2_control_structure(
 
 
 def _maybe_apply_revision(
+    control_structure: ControlStructure, **kwargs: Any
+) -> tuple[ControlStructure, list[str], bool]:
+    """Apply a critic revision only when unjustified gaps are present."""
+    outcome = _maybe_revise(control_structure, **kwargs)
+    return outcome.structure, outcome.warnings, outcome.applied
+
+
+def _maybe_revise(
     control_structure: ControlStructure,
     *,
     critic_findings: CriticFindings,
@@ -780,10 +793,10 @@ def _maybe_apply_revision(
     loader: TemplateLoader,
     temperature: float,
     target_evidence: TargetEvidence | None = None,
-) -> tuple[ControlStructure, list[str], bool]:
-    """Apply a critic revision only when unjustified gaps are present."""
+) -> RevisionOutcome:
+    """Run a critic revision only when unjustified gaps are present."""
     if not critic_findings.gaps:
-        return control_structure, [], False
+        return RevisionOutcome(control_structure, [], applied=False)
 
     # The revision step publishes the reply's output when it differs from the
     # no-revision output and that output otherwise; both come from the same
@@ -799,7 +812,7 @@ def _maybe_apply_revision(
         temperature=temperature,
         target_evidence=target_evidence,
     )
-    return outcome.structure, outcome.warnings, outcome.applied
+    return outcome
 
 
 def _run_stage_2_block(
@@ -920,7 +933,7 @@ def _run_stage_2_steps(
     )
 
     # Revision (single attempt if unjustified gaps; graceful on failure)
-    control_structure, post_revision_warnings, revised = _maybe_apply_revision(
+    revision = _maybe_revise(
         control_structure,
         critic_findings=critic_findings,
         llm_client=llm_client,
@@ -931,9 +944,14 @@ def _run_stage_2_steps(
         temperature=temperature,
         target_evidence=target_evidence,
     )
+    control_structure = revision.structure
+    post_revision_warnings, revised = revision.warnings, revision.applied
     versions.add(control_structure, "control-structure-revised.yaml")
     critic_revision = _critic_revision_record(
-        critic_findings, post_revision_warnings, revised=revised
+        critic_findings,
+        post_revision_warnings,
+        revised=revised,
+        gap_review=revision.gap_review,
     )
     if critic_revision is not None and "reason" in critic_revision:
         stage_warnings.append(
@@ -983,19 +1001,26 @@ def _critic_revision_record(
     post_revision_warnings: list[str],
     *,
     revised: bool,
-) -> dict[str, str] | None:
+    gap_review: GapReview | None = None,
+) -> dict[str, Any] | None:
     """Say whether the requested critic revision was applied or discarded.
 
     ``applied`` changed the structure; ``unchanged`` was accepted but changed
     nothing.  A ``discarded`` revision leaves the reviewed structure in force;
     its reason is the warning ``run_revision`` recorded for the rejected reply.
+    An applied or unchanged reply that gave gap dispositions also records
+    ``gap_dispositions`` (the count of each disposition) and
+    ``unresolved_gaps`` (each unresolved gap ID with its reason).
     """
     if not critic_findings.gaps:
         return None
     reason = discarded_revision_reason(post_revision_warnings)
     if reason is not None:
         return {"status": "discarded", "reason": reason}
-    return {"status": "applied" if revised else "unchanged"}
+    record: dict[str, Any] = {"status": "applied" if revised else "unchanged"}
+    if gap_review is not None:
+        record.update(gap_review.record())
+    return record
 
 
 def _compute_input_hashes(
@@ -1053,7 +1078,7 @@ def _write_manifest(
     target_evidence: TargetEvidence | None = None,
     stated_rule_coverage: StatedRuleCoverageArtifact | None = None,
     uncited_constraints: list[str] | None = None,
-    critic_revision: dict[str, str] | None = None,
+    critic_revision: dict[str, Any] | None = None,
 ) -> None:
     """Write the run manifest with stage summary, input hashes, and prompt hashes."""
     input_hashes = _compute_input_hashes(
@@ -1213,7 +1238,7 @@ def _stage_2_summary(
     uncited_constraints: list[str] | None,
     risk_coverage_review: RiskCoverageReviewOutcome | None,
     stage_1a_pinned: bool,
-    critic_revision: dict[str, str] | None = None,
+    critic_revision: dict[str, Any] | None = None,
 ) -> dict[str, object]:
     """Summarize Stage 2 calls, uncited constraints, revision, review digest."""
     stage_2_summary: dict[str, object] = {
