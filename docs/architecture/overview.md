@@ -1030,6 +1030,12 @@ back to its class description, and every card is shown whatever its scope.
 The disposition repair and the risk-coverage review label the consequence the
 same way.
 
+A loss names only channels inside the deployed system: its replies and chat,
+its tool calls, and the backend those calls reach. A third-party model
+provider or other outside service, and prompts as a channel data leaks
+through, are the policy's setting, not this system's. The disposition repair
+cites no declared loss whose only channel is one of those.
+
 Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic
 objects are never serialized. Stage 1a classifies losses from either
