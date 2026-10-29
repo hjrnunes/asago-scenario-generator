@@ -520,9 +520,10 @@ def condition_findings(
     ``named_operations`` holds the operations the observation criteria and the
     safe outcome name; with none named, no ``not_called`` is judged.
 
-    Run it on a condition that passed :func:`check_discriminating_condition`:
-    the checks here read the normalized record selection and rely on every
-    reference resolving.
+    Run it on a condition that passed :func:`check_discriminating_condition`,
+    or whose only violations are self-comparisons
+    (:func:`violations_are_self_comparisons`): the checks here read the
+    normalized record selection and rely on every reference resolving.
     """
 
     state = StateIndex.from_fact_values(universe.fact_values)
@@ -672,39 +673,69 @@ def _self_comparisons(
     """
 
     for index, comparison in enumerate(condition.comparisons):
-        if not isinstance(comparison, ValueComparison):
-            continue
-        sides = (comparison.left, comparison.right)
-        facts = [side for side in sides if isinstance(side, FactOperand)]
-        literals = [side for side in sides if isinstance(side, LiteralOperand)]
-        if len(facts) == 2 and facts[0].path == facts[1].path:
-            path = facts[0].path
-            claim = (
-                f"itself: fact {path} {comparison.op} fact {path} holds always or never"
-            )
-        elif len(facts) == 1 and len(literals) == 1:
-            path, literal = facts[0].path, literals[0].value
-            found, value = resolve_fact(universe.fact_values, path)
-            literal_left = sides[0] is literals[0]
-            if not found or not _own_value_never_holds(
-                comparison.op, value, literal, literal_left=literal_left
-            ):
-                continue
-            texts = [f"fact {path}", f"literal {_render(literal)}"]
-            left_text, right_text = texts[::-1] if literal_left else texts
-            claim = (
-                f"its own observed value {_render(value)}: {left_text} "
-                f"{comparison.op} {right_text} never holds"
-            )
-        else:
-            continue
-        yield ConditionFinding(
-            SELF_COMPARISON,
-            f"comparisons[{index}] compares fact {path} with {claim}, whatever "
-            "the agent does. Compare the fact with a fact of another record "
-            "or with an argument of the unsafe tool call, such as the "
-            "argument that names the record the call acts on",
+        finding = _self_comparison(index, comparison, universe)
+        if finding is not None:
+            yield finding
+
+
+def violations_are_self_comparisons(
+    outcome: ConditionCheckOutcome, universe: ConditionUniverse
+) -> bool:
+    """Return whether every violated comparison compares a fact with itself.
+
+    Such a condition resolves and fails only because of those comparisons,
+    so the self-comparison finding, not the violated comparison, says what
+    to change.
+    """
+
+    if outcome.reference_errors or outcome.check is None or outcome.condition is None:
+        return False
+    comparisons = outcome.condition.comparisons
+    violated = [
+        item.index for item in outcome.check.comparisons if item.result == "violated"
+    ]
+    return bool(violated) and all(
+        _self_comparison(index, comparisons[index], universe) is not None
+        for index in violated
+    )
+
+
+def _self_comparison(
+    index: int, comparison: Comparison, universe: ConditionUniverse
+) -> ConditionFinding | None:
+    """Return the finding for one comparison of a fact with itself, if it is one."""
+
+    if not isinstance(comparison, ValueComparison):
+        return None
+    sides = (comparison.left, comparison.right)
+    facts = [side for side in sides if isinstance(side, FactOperand)]
+    literals = [side for side in sides if isinstance(side, LiteralOperand)]
+    if len(facts) == 2 and facts[0].path == facts[1].path:
+        path = facts[0].path
+        claim = f"itself: fact {path} {comparison.op} fact {path} holds always or never"
+    elif len(facts) == 1 and len(literals) == 1:
+        path, literal = facts[0].path, literals[0].value
+        found, value = resolve_fact(universe.fact_values, path)
+        literal_left = sides[0] is literals[0]
+        if not found or not _own_value_never_holds(
+            comparison.op, value, literal, literal_left=literal_left
+        ):
+            return None
+        texts = [f"fact {path}", f"literal {_render(literal)}"]
+        left_text, right_text = texts[::-1] if literal_left else texts
+        claim = (
+            f"its own observed value {_render(value)}: {left_text} "
+            f"{comparison.op} {right_text} never holds"
         )
+    else:
+        return None
+    return ConditionFinding(
+        SELF_COMPARISON,
+        f"comparisons[{index}] compares fact {path} with {claim}, whatever "
+        "the agent does. Compare the fact with a fact of another record "
+        "or with an argument of the unsafe tool call, such as the "
+        "argument that names the record the call acts on",
+    )
 
 
 def _own_value_never_holds(
@@ -1406,4 +1437,5 @@ __all__ = [
     "kind_mismatch",
     "resolve_fact",
     "target_observation_fact_values",
+    "violations_are_self_comparisons",
 ]

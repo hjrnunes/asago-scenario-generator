@@ -28,8 +28,9 @@ mapping; the first rule that matches decides:
    with the principal's intent or eligibility); or a failed authorization
    in a reason whose variable is read from a ``session:`` reference. A
    mention of the session or a principal alone is not a source, and neither
-   is a missing user confirmation or "another user confirmation", which is
-   consent rather than authentication or a record of the principal's. When the operation offers no ownership family the ICA
+   is a missing user confirmation or "another user confirmation" (also
+   past a consent modifier: "another user's explicit confirmation"), which
+   is consent rather than authentication or a record of the principal's. When the operation offers no ownership family the ICA
    gets no hint; it does not fall through.
 3. ``reason_variable_field``: the reason variable is read from a ``state:``
    field that a family of the operation cites -> that family's kind
@@ -50,8 +51,9 @@ belong to the authenticated customer and the amount exceeds the balance"
 get ``ownership``), because keeping the ownership, identity, actor or
 session qualifier is the point and a wrongly withheld ownership hint costs
 more. A limit failure (exceeds, over, above, beyond, greater, more, less,
-maximum, minimum, limit, cap, remaining, insufficient, threshold...) wins
-only over wording that is not an ownership source: "the amount exceeds the
+maximum, minimum, limit, cap, remaining, insufficient, threshold...; not
+the "over" of "take over") wins only over wording that is not an ownership
+source: "the amount exceeds the
 session spending limit", where the session merely owns the limit, gets
 ``bound``. A bare object noun (amount, plan, price) states no limit failure,
 so "the requested amount or plan is not authorized by session", a failed
@@ -286,10 +288,26 @@ UNSETTLED_TERMS = frozenset(
         "alleged",
     }
 )
-# A principal followed by one of these names the principal's act, not a
-# record of theirs ("another user confirmation"): no compared record.
+# A principal followed by one of these, past consent modifiers only, names
+# the principal's act, not a record of theirs ("another user confirmation",
+# "another user's explicit confirmation"): no compared record.
 CONSENT_TERMS = frozenset(
     {"confirmation", "confirmations", "approval", "approvals", "consent", "consents"}
+)
+# Words that may qualify a consent noun between it and the principal
+# ("another user's prior written approval"); any other word is the head of
+# the principal's noun phrase, such as a record ("another user's account").
+CONSENT_MODIFIERS = frozenset(
+    {
+        "explicit",
+        "express",
+        "prior",
+        "advance",
+        "written",
+        "verbal",
+        "formal",
+        "informed",
+    }
 )
 # What a comparison with the principal's intent names; such a reason is an
 # intent reason, not an ownership one. A principal's eligibility is likewise
@@ -533,9 +551,8 @@ def choose_reason_family(
                 "ownership", "ownership_reason", pm_id, False, labels
             )
         guarded = True
-    field_kinds = (
-        ("bound",) if terms & _LIMIT_TERMS else ("ownership", "flag", "bound", "state")
-    )
+    limit = _limit_failure(words)
+    field_kinds = ("bound",) if limit else ("ownership", "flag", "bound", "state")
     for kind in field_kinds:
         if not any(
             family.kind == kind and set(family.field_paths) & set(labels)
@@ -546,13 +563,15 @@ def choose_reason_family(
             guarded = True
             continue
         return ReasonFamilyChoice(kind, "reason_variable_field", pm_id, guarded, labels)
-    for kind, words in _KIND_TERMS:
-        if terms & words:
+    for kind, kind_terms in _KIND_TERMS:
+        if limit if kind == "bound" else terms & kind_terms:
             return ReasonFamilyChoice(kind, "reason_terms", pm_id, guarded, labels)
     return ReasonFamilyChoice(None, "no_match", pm_id, guarded, labels)
 
 
 _LIMIT_TERMS = dict(_KIND_TERMS)["bound"]
+# A form of "take" right before "over" names a takeover, not a limit.
+_TAKE_FORMS = frozenset({"take", "takes", "taking", "took", "taken"})
 _RELATION_WORDS = POSSESSION_TERMS | ROLE_TERMS | {"ownership", "membership"}
 _RELATION_NOUNS = frozenset({"verification", "confirmation", "approval", "check"})
 _ATTRIBUTE_TERMS = INTENT_TERMS | dict(_KIND_TERMS)["flag"]
@@ -718,6 +737,19 @@ def _relation_not_current(words: Sequence[str]) -> bool:
     return False
 
 
+def _limit_failure(words: Sequence[str]) -> bool:
+    """Return whether the reason states a limit failure.
+
+    "over" right after a form of "take" ("could take over the account")
+    states a takeover, not an exceeded limit.
+    """
+    return any(
+        word in _LIMIT_TERMS
+        and not (word == "over" and index > 0 and words[index - 1] in _TAKE_FORMS)
+        for index, word in enumerate(words)
+    )
+
+
 def _auth_failure_at(words: Sequence[str], index: int) -> bool:
     """Return whether the word at ``index`` is a failed auth word."""
     word = words[index]
@@ -760,8 +792,9 @@ def _principal_comparison_failure(words: Sequence[str]) -> bool:
     is the owner of what is compared ("the authenticated customer's
     orders"), unless what follows within four words is the principal's
     intent or an eligibility term: an attribute, not a record of theirs. A
-    principal followed by a consent noun ("another user confirmation")
-    names the principal's act, not a compared record.
+    principal whose noun phrase is a consent ("another user confirmation",
+    "another user's explicit confirmation") names the principal's act, not a
+    compared record.
     """
     for index, word in enumerate(words):
         if word in COMPARISON_TERMS:
@@ -776,10 +809,24 @@ def _principal_comparison_failure(words: Sequence[str]) -> bool:
         compared = list(words[principal + 1 : principal + 6])
         if compared[:1] == ["s"] and set(compared) & _ATTRIBUTE_TERMS:
             continue
-        noun = compared[1:2] if compared[:1] == ["s"] else compared[:1]
-        if noun and noun[0] in CONSENT_TERMS:
+        if _names_consent(compared[1:] if compared[:1] == ["s"] else compared):
             continue
         return True
+    return False
+
+
+def _names_consent(phrase: Sequence[str]) -> bool:
+    """Return whether the words after a principal name the principal's consent.
+
+    The first word that is not a consent modifier must be a consent noun
+    ("another user's prior written approval"). Any other word ends the
+    check: in "another user's account approval status" and "another
+    customer's order without confirmation" the principal's record is
+    compared, not their consent.
+    """
+    for word in phrase:
+        if word not in CONSENT_MODIFIERS:
+            return word in CONSENT_TERMS
     return False
 
 
@@ -815,6 +862,7 @@ __all__ = [
     "NEGATION_TERMS",
     "AUTH_TERMS",
     "COMPARISON_TERMS",
+    "CONSENT_MODIFIERS",
     "CONSENT_TERMS",
     "FAILED_COMPARISON_TERMS",
     "INTENT_TERMS",
