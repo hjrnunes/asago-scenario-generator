@@ -16,6 +16,11 @@
 # where the agent must stop, explain or escalate (blocking or escalating it
 # both count; allowing it does not). ``expected_over_refusal`` says whether
 # the safeguard as written blocks a legitimate, authorized request.
+#
+# ``resources`` lists the typed budgets, deadlines, retry limits and reviewer
+# capacities a fixture supplies (``RES-<n>``); the review shows them under
+# "Stated resources". A fixture whose text relies on such a limit supplies it
+# here, so the finding may turn on it.
 schema_version: conflict-review-fixtures-v1
 fixtures:
   - fixture_id: FX-01
@@ -125,6 +130,14 @@ fixtures:
       per merchant. At 16:40 the on-call operator issued a halt because of a
       suspected duplicate file. Thirty payouts are still pending and the
       operator has not resumed the batch.
+    resources:
+      - resource_id: RES-1
+        kind: deadline
+        value: 20
+        unit: minutes
+        applies_to: >-
+          completing every payout of the day's batch, counted from the 16:40
+          halt to 17:00
     requirements:
       - id: R1
         origin: safety constraint
@@ -208,6 +221,13 @@ fixtures:
       whether a refund was applied. When issue_refund times out, the agent
       cannot tell whether the refund went through. A refund call for order
       7731 has just timed out.
+    resources:
+      - resource_id: RES-1
+        kind: retry_limit
+        value: 3
+        unit: attempts
+        applies_to: >-
+          issue_refund calls for one order after a timeout
     requirements:
       - id: R1
         origin: reliability requirement
@@ -251,6 +271,13 @@ fixtures:
       applies a second refund. The get_refund_status operation reports
       whether a refund for an order has been applied. A refund call for order
       7731 has just timed out.
+    resources:
+      - resource_id: RES-1
+        kind: retry_limit
+        value: 3
+        unit: attempts
+        applies_to: >-
+          issue_refund calls for one order after a timeout
     requirements:
       - id: R1
         origin: reliability requirement
@@ -293,6 +320,13 @@ fixtures:
       The conversation has just started and no tool call has been made. The
       signed-in account owner asks to change the delivery address of an open
       order.
+    resources:
+      - resource_id: RES-1
+        kind: tool_call_budget
+        value: 3
+        unit: tool calls
+        applies_to: >-
+          each conversation; the platform rejects any further call
     requirements:
       - id: R1
         origin: security constraint
@@ -535,6 +569,13 @@ fixtures:
     situation: >-
       A store's support agent issues refunds with the issue_refund operation.
       A refund call for order 7731 has just timed out.
+    resources:
+      - resource_id: RES-1
+        kind: retry_limit
+        value: 3
+        unit: attempts
+        applies_to: >-
+          issue_refund calls for one order after a timeout
     requirements:
       - id: R1
         origin: reliability requirement

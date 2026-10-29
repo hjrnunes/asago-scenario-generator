@@ -1,4 +1,7 @@
 Case {{ case_id }}
+
+## Under review
+{{ under_review }}
 {%- for section in sections %}
 
 ## {{ section.title }}
@@ -11,12 +14,22 @@ Case {{ case_id }}
 {%- endfor %}
 {%- endfor %}
 
+## Stated resources
+
+{% if resources -%}
+{% for item in resources -%}
+[{{ item.ref }}] ({{ item.kind }}) {{ item.amount }}: {{ item.applies_to }}
+{% endfor -%}
+{% else -%}
+The case supplies no typed tool-call budget, deadline, retry limit or reviewer capacity.
+{% endif %}
 ## Identifiers you may cite
 {{ identifiers | join(", ") }}
 
-## Request decisions
+## What to return
 {% if request_ids -%}
-Return one request decision for each of: {{ request_ids | join(", ") }}.
+Judge each listed request once in "request_judgements": {{ request_ids | join(", ") }}. Return an empty "authorized_requests" list.
 {% else -%}
-This case lists no requests; return an empty "request_decisions" list.
+This case lists no requests. First list in "authorized_requests" the requests the use case authorizes that a safe alternative under review acts on, each citing its UC paragraph; then judge each once in "request_judgements".
 {% endif -%}
+"requirements" must cite {% if review_refs | length == 1 %}{{ review_refs[0] }}{% else %}at least one of {{ review_refs | join(", ") }}{% endif %}, and at least one {% if source == "fixture" %}requirement (R identifier){% else %}use-case paragraph, constraint or obligation (UC- or SC- identifier){% endif %}.
