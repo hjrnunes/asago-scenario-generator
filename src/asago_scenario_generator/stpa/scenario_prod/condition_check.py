@@ -68,6 +68,7 @@ OPERAND_MISMATCH = "discriminating_condition_operand_mismatch"
 LITERAL_UNSUPPORTED = "discriminating_condition_literal_unsupported"
 OPERATION_MISMATCH = "discriminating_condition_operation_mismatch"
 ORDER_UNSCOPED = "discriminating_condition_order_unscoped"
+SELF_COMPARISON = "discriminating_condition_self_comparison"
 
 
 @dataclass(frozen=True)
@@ -528,6 +529,7 @@ def condition_findings(
     return (
         *_operand_mismatches(condition, universe, state),
         *_unsupported_literals(condition, universe),
+        *_self_comparisons(condition, universe),
         *_unscoped_not_called(condition, named_operations),
         *_unscoped_orders(condition, universe),
     )
@@ -655,6 +657,70 @@ def _unsupported_literals(
                 "Compare with a supplied value, or replace the comparison with "
                 "one that does not need a literal",
             )
+
+
+def _self_comparisons(
+    condition: DiscriminatingCondition, universe: ConditionUniverse
+) -> Iterator[ConditionFinding]:
+    """Flag a fact compared with itself or with its own observed value.
+
+    The fact's value does not change with what the agent does, so the
+    comparison holds always or never. A literal holding the fact's value is
+    flagged only under an operator that then never holds (``ne``,
+    ``not_in``, ``lt``, ``gt``); ``eq``, ``in``, ``ge``, and ``le`` restate
+    the observed state, as a record's flag compared with its value does.
+    """
+
+    for index, comparison in enumerate(condition.comparisons):
+        if not isinstance(comparison, ValueComparison):
+            continue
+        sides = (comparison.left, comparison.right)
+        facts = [side for side in sides if isinstance(side, FactOperand)]
+        literals = [side for side in sides if isinstance(side, LiteralOperand)]
+        if len(facts) == 2 and facts[0].path == facts[1].path:
+            path = facts[0].path
+            claim = (
+                f"itself: fact {path} {comparison.op} fact {path} holds always or never"
+            )
+        elif len(facts) == 1 and len(literals) == 1:
+            path, literal = facts[0].path, literals[0].value
+            found, value = resolve_fact(universe.fact_values, path)
+            literal_left = sides[0] is literals[0]
+            if not found or not _own_value_never_holds(
+                comparison.op, value, literal, literal_left=literal_left
+            ):
+                continue
+            texts = [f"fact {path}", f"literal {_render(literal)}"]
+            left_text, right_text = texts[::-1] if literal_left else texts
+            claim = (
+                f"its own observed value {_render(value)}: {left_text} "
+                f"{comparison.op} {right_text} never holds"
+            )
+        else:
+            continue
+        yield ConditionFinding(
+            SELF_COMPARISON,
+            f"comparisons[{index}] compares fact {path} with {claim}, whatever "
+            "the agent does. Compare the fact with a fact of another record "
+            "or with an argument of the unsafe tool call, such as the "
+            "argument that names the record the call acts on",
+        )
+
+
+def _own_value_never_holds(
+    op: str, value: object, literal: object, *, literal_left: bool
+) -> bool:
+    """Return whether a literal holding ``value`` makes the comparison fail."""
+
+    items = (
+        literal
+        if op in MEMBERSHIP_OPERATORS and isinstance(literal, list)
+        else [literal]
+    )
+    if not any(_same(value, item) for item in items):
+        return False
+    left, right = (literal, value) if literal_left else (value, literal)
+    return _type_error(op, left, right) is None and not _compare(op, left, right)
 
 
 def _string_literals(comparison: Comparison) -> list[str]:
@@ -1327,6 +1393,7 @@ __all__ = [
     "OPERATION_MISMATCH",
     "ORDER_UNSCOPED",
     "PRECONDITION_ONLY",
+    "SELF_COMPARISON",
     "ConditionCheckOutcome",
     "ConditionFinding",
     "ConditionUniverse",

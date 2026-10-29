@@ -179,6 +179,11 @@ cases:
         field holds its key); for ownership, compare that record's owner field
         with the session value.
       - >-
+        Never compare a fact with itself, or with a literal of its own observed
+        value under `ne`, `not_in`, `lt`, or `gt`: the fact's value does not
+        change with what the agent does, so the comparison never holds. Compare
+        it with a fact of another record or with an argument of the unsafe call.
+      - >-
         For an `order` comparison, choose as `requires_prior` an operation that
         reads the same record the unsafe operation acts on, and set
         `same_argument` to the shared record-key argument when both take it.

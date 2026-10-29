@@ -22,6 +22,7 @@ from ..condition_check import (
     OPERAND_MISMATCH,
     OPERATION_MISMATCH,
     ORDER_UNSCOPED,
+    SELF_COMPARISON,
 )
 
 
@@ -38,11 +39,12 @@ class IssueCode(StrEnum):
     discriminating_condition_missing = "discriminating_condition_missing"
     discriminating_condition_check_failed = "discriminating_condition_check_failed"
     # condition_check sits below Stage 5 and cannot import this enum, so it
-    # owns these four strings.
+    # owns these five strings.
     discriminating_condition_operand_mismatch = OPERAND_MISMATCH
     discriminating_condition_literal_unsupported = LITERAL_UNSUPPORTED
     discriminating_condition_operation_mismatch = OPERATION_MISMATCH
     discriminating_condition_order_unscoped = ORDER_UNSCOPED
+    discriminating_condition_self_comparison = SELF_COMPARISON
     discriminating_condition_polarity_inverted = (
         "discriminating_condition_polarity_inverted"
     )
@@ -70,6 +72,7 @@ CONDITION_FAILURE_CODES = (
     IssueCode.discriminating_condition_literal_unsupported,
     IssueCode.discriminating_condition_operation_mismatch,
     IssueCode.discriminating_condition_order_unscoped,
+    IssueCode.discriminating_condition_self_comparison,
     IssueCode.discriminating_condition_polarity_inverted,
     IssueCode.discriminating_condition_no_call,
     IssueCode.discriminating_condition_record_kind_mismatch,
