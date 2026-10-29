@@ -15,14 +15,20 @@ mapping; the first rule that matches decides:
    family whatever its reason (applied by the slot type, not here).
 2. ``ownership_reason`` -> ``ownership`` when the reason has an ownership
    source and states no limit failure. The sources are: an ownership
-   relation (owner, owned, belongs, identity, party, member, guest, host);
+   relation (owner, owned, belongs, identity, party, member, relationship,
+   association, guest, host);
    a failed authentication or authorization predicated of the session or a
    principal ("the actor is unauthorized", "not authorized for the session",
    "without an authenticated session", "the user is unauthenticated", but
    not "the customer's authorized intent" or "authorized by the customer's
-   order", whose object is something else); or a failed authorization in a
-   reason whose variable is read from a ``session:`` reference. A mention of
-   the session or a principal alone is not a source. When the operation
+   order", whose object is something else); a failed comparison of the
+   record with the session or a principal ("does not match the session
+   customer", "not present in the authenticated customer's orders", "other
+   than the authenticated actor", but not a comparison with the principal's
+   intent or eligibility); or a failed authorization in a reason whose variable is read
+   from a ``session:`` reference. A mention of the session or a principal
+   alone is not a source, and neither is a missing user confirmation, which
+   is consent rather than authentication. When the operation
    offers no ownership family the ICA gets no hint; it does not fall
    through.
 3. ``reason_variable_field``: the reason variable is read from a ``state:``
@@ -137,6 +143,8 @@ OWNERSHIP_TERMS = frozenset(
         "parties",
         "member",
         "membership",
+        "relationship",
+        "association",
         "guest",
         "host",
     }
@@ -170,7 +178,6 @@ AUTH_TERMS = frozenset(
         "authentication",
         "verified",
         "verification",
-        "confirmed",
     }
 )
 # A row value affirming the record is the principal's: possession wording,
@@ -190,8 +197,66 @@ POSSESSION_TERMS = frozenset(
 )
 ROLE_TERMS = frozenset({"guest", "host", "owner", "member", "party"})
 _COPULAS = frozenset({"is", "are"})
-# Words skipped between a failed authorization word and its principal.
-_LINKS = frozenset({"for", "by", "to", "of", "the", "a", "an", "this", "that", "its"})
+# Words skipped between a failed authorization or comparison word and the
+# principal it is predicated of: linking words and principal modifiers.
+_LINKS = frozenset(
+    {
+        "for",
+        "by",
+        "to",
+        "of",
+        "with",
+        "from",
+        "in",
+        "than",
+        "the",
+        "a",
+        "an",
+        "this",
+        "that",
+        "its",
+        "current",
+        "active",
+        "authenticated",
+        "existing",
+    }
+)
+# Comparison words that fail when negated, and ones that state a failure.
+COMPARISON_TERMS = frozenset(
+    {
+        "match",
+        "matches",
+        "matching",
+        "matched",
+        "correspond",
+        "corresponds",
+        "consistent",
+        "present",
+        "equal",
+        "equals",
+        "align",
+        "aligns",
+        "aligned",
+    }
+)
+FAILED_COMPARISON_TERMS = frozenset(
+    {
+        "mismatch",
+        "mismatches",
+        "mismatched",
+        "inconsistent",
+        "different",
+        "differs",
+        "differ",
+        "deviate",
+        "deviates",
+        "other",
+    }
+)
+# What a comparison with the principal's intent names; such a reason is an
+# intent reason, not an ownership one. A principal's eligibility is likewise
+# an attribute, not a record of theirs (see _principal_comparison_failure).
+INTENT_TERMS = frozenset({"intent", "intents", "intention", "intentions", "intended"})
 _WINDOW = 3
 _KIND_TERMS: tuple[tuple[FamilyKind, frozenset[str]], ...] = (
     (
@@ -421,6 +486,7 @@ def choose_reason_family(
     ownership_source = (
         bool(terms & OWNERSHIP_TERMS)
         or _principal_auth_failure(words)
+        or _principal_comparison_failure(words)
         or (_reads_session(variable) and _auth_failure(words))
     )
     if ownership_source and not terms & _LIMIT_TERMS:
@@ -446,6 +512,7 @@ def choose_reason_family(
 
 
 _LIMIT_TERMS = dict(_KIND_TERMS)["bound"]
+_ATTRIBUTE_TERMS = INTENT_TERMS | dict(_KIND_TERMS)["flag"]
 
 
 def hinted_families(
@@ -607,6 +674,43 @@ def _principal_at(words: Sequence[str], index: int) -> bool:
     )
 
 
+def _principal_after(words: Sequence[str], index: int) -> int | None:
+    """Return the position of a principal word after ``index`` past links."""
+    after = index + 1
+    while after < len(words) and after - index <= _WINDOW and words[after] in _LINKS:
+        after += 1
+    if after < len(words) and words[after] in PRINCIPAL_TERMS:
+        return after
+    return None
+
+
+def _principal_comparison_failure(words: Sequence[str]) -> bool:
+    """Return whether the reason states a failed comparison with a principal.
+
+    The comparison word is negated within three words before it ("does not
+    match") or states the failure itself ("inconsistent with", "other
+    than"), and a principal follows it past links. A possessive principal
+    is the owner of what is compared ("the authenticated customer's
+    orders"), unless what follows within four words is the principal's
+    intent or an eligibility term: an attribute, not a record of theirs.
+    """
+    for index, word in enumerate(words):
+        if word in COMPARISON_TERMS:
+            window = words[max(0, index - _WINDOW) : index]
+            if not any(w in NEGATION_TERMS for w in window):
+                continue
+        elif word not in FAILED_COMPARISON_TERMS:
+            continue
+        principal = _principal_after(words, index)
+        if principal is None:
+            continue
+        compared = list(words[principal + 1 : principal + 6])
+        if compared[:1] == ["s"] and set(compared) & _ATTRIBUTE_TERMS:
+            continue
+        return True
+    return False
+
+
 def _principal_auth_failure(words: Sequence[str]) -> bool:
     """Return whether a failed auth word is predicated of the session or a principal.
 
@@ -620,12 +724,8 @@ def _principal_auth_failure(words: Sequence[str]) -> bool:
             continue
         if any(_principal_at(words, j) for j in range(max(0, index - _WINDOW), index)):
             return True
-        after = index + 1
-        while (
-            after < len(words) and after - index <= _WINDOW and words[after] in _LINKS
-        ):
-            after += 1
-        if after < len(words) and _principal_at(words, after):
+        after = _principal_after(words, index)
+        if after is not None and _principal_at(words, after):
             return True
     return False
 
@@ -642,6 +742,9 @@ def _negated(words: frozenset[str]) -> bool:
 __all__ = [
     "NEGATION_TERMS",
     "AUTH_TERMS",
+    "COMPARISON_TERMS",
+    "FAILED_COMPARISON_TERMS",
+    "INTENT_TERMS",
     "OWNERSHIP_TERMS",
     "POSSESSION_TERMS",
     "PRINCIPAL_TERMS",
