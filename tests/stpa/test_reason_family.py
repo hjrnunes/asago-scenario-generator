@@ -732,6 +732,9 @@ def test_the_reason_variable_itself_never_guards() -> None:
         "the widget does not match the session user",
         "the widget record is other than the authenticated actor's",
         "the widget is held by someone other than the session customer",
+        # An adverb may qualify the negated relation.
+        "The widget does not currently belong to the session customer",
+        "the actor is not actually the owner of the widget",
         # The negation follows the owner it denies.
         "The widget owner is not the authenticated user",
         "the widget's owner is a different customer",
@@ -770,6 +773,16 @@ def test_a_reason_that_denies_ownership_wins_over_an_affirming_row(reason) -> No
         # An identity check and another principal's act compare no record.
         ("The supplied identity does not match the session user", None, "no_match"),
         ("another user's edit cancelled the widget", "state", "reason_terms"),
+        # An owner noun that modifies consent names the consent.
+        ("The edit proceeds without owner consent", None, "no_match"),
+        # Another principal's act, or identity, compares no record.
+        (
+            "The widget is edited by someone other than the session user",
+            None,
+            "no_match",
+        ),
+        ("Another user's identity is unknown", None, "no_match"),
+        ("another user's failed edit cancelled the widget", "state", "reason_terms"),
     ],
 )
 def test_a_reason_that_does_not_deny_ownership_leaves_the_row_in_charge(
