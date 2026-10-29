@@ -71,9 +71,7 @@ class SlotHazardMismatch:
         if len(self.owning_slot_ids) == 1:
             owner = f"the owning slot is {self.owning_slot_ids[0]}"
         else:
-            owner = "the operation is owned by several slots: " + ", ".join(
-                self.owning_slot_ids
-            )
+            owner = "the owning slots are " + ", ".join(self.owning_slot_ids)
         return (
             f"hazard {self.hazard_id} depends on {operations}, but control "
             f"action {self.control_action_id} of slot {self.slot_id} {invoked}; "
