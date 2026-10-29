@@ -19,8 +19,8 @@ from pydantic import BaseModel, ValidationError
 
 from asago_scenario_generator.stpa.infra.provider_record import (
     CallIdentity,
-    ReplayedProviderError,
     call_identity,
+    is_provider_failure,
     provider_requests_of,
 )
 from asago_scenario_generator.stpa.infra.transport_retry import (
@@ -809,22 +809,6 @@ class CallOutcome(Generic[_T]):
     failure: BaseException | None = None
     attempt_number: int = 1
     attempt_id: str | None = None
-
-
-def is_provider_failure(error: BaseException | None) -> bool:
-    """Tell whether *error* is a provider or transport failure, not a bad reply.
-
-    These are the errors the client raises when no reply arrived: a timeout,
-    any HTTP status error (a 4xx, or a 5xx its transport retry did not
-    clear), or a connection error.  A replay raises the same classes, or
-    :class:`ReplayedProviderError` for a class it cannot rebuild.
-    """
-    import openai
-
-    return isinstance(
-        error,
-        (openai.APIConnectionError, openai.APIStatusError, ReplayedProviderError),
-    )
 
 
 class ProviderCallError(ValueError):
