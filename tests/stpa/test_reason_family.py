@@ -231,9 +231,59 @@ def test_intent_reasons_take_the_no_match_path(reason) -> None:
     assert (choice.kind, choice.rule) == (None, "no_match")
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "The requested amount exceeds the session spending limit",
+        "the amount exceeds the authenticated customer's remaining balance",
+        "the requested amount or plan is not authorized by session",
+    ],
+)
+def test_a_limit_term_wins_over_an_incidental_session_mention(reason) -> None:
+    choice = _choose(reason)
+    assert (choice.kind, choice.rule) == ("bound", "reason_terms")
+
+
+def test_a_session_read_reason_variable_with_a_limit_term_gets_bound() -> None:
+    limit = _var("PM-1-1", "over the session limit", "session:spending_limit")
+    choice = _choose("the price is over the session limit", _row(limit))
+    assert (choice.kind, choice.rule, choice.reason_variable) == (
+        "bound",
+        "reason_terms",
+        "PM-1-1",
+    )
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the actor is unauthorized",
+        "the request is not authorized for the session",
+        "the user is unauthenticated",
+        "the amount belongs to another customer's order",
+    ],
+)
+def test_ownership_and_session_authorization_reasons_keep_ownership(reason) -> None:
+    choice = _choose(reason)
+    assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
+
+
 def test_an_ownership_reason_without_an_ownership_family_gets_no_hint() -> None:
     choice = _choose("the actor is unauthorized", families=(LOCKED, PRICE, STAGE))
     assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
+
+
+@pytest.mark.parametrize(
+    ("text", "words"),
+    [
+        ("Doesn't belong", ("does", "not", "belong")),
+        ("isn\u2019t owned", ("is", "not", "owned")),
+        ("cannot act", ("can", "not", "act")),
+        ("won't match", ("wo", "not", "match")),
+    ],
+)
+def test_contracted_negations_read_as_not(text, words) -> None:
+    assert reason_terms(text) == words
 
 
 def test_reason_terms_are_read_from_one_place() -> None:
@@ -263,9 +313,9 @@ def test_ownership_is_not_dealt_when_the_row_says_the_record_is_the_sessions() -
         "PM-1-1", "not authorized by session", "session:authenticated_owner_id"
     )
     row = _row(session_amount, BELONGS)
-    choice = _choose("the requested amount is not authorized by session", row)
+    choice = _choose("the cancelled plan is not authorized by session", row)
     assert choice.ownership_guarded is True
-    assert (choice.kind, choice.rule) == ("bound", "reason_terms")
+    assert (choice.kind, choice.rule) == ("state", "reason_terms")
 
 
 def test_a_guarded_reason_with_nothing_else_gets_no_hint() -> None:
@@ -335,6 +385,42 @@ def test_a_membership_variable_without_session_evidence_guards() -> None:
 )
 def test_a_value_that_only_identifies_the_session_does_not_guard(variable) -> None:
     choice = _choose("the actor is not a party to the booking", _row(variable))
+    assert choice.ownership_guarded is False
+    assert choice.kind == "ownership"
+
+
+def test_state_and_session_evidence_alone_does_not_guard() -> None:
+    limit = _var(
+        "PM-1-2", "within limit", "session:spending_limit", "state:widgets.price"
+    )
+    choice = _choose("the actor is unauthorized", _row(limit))
+    assert choice.ownership_guarded is False
+    assert choice.kind == "ownership"
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        "Doesn't belong to authenticated customer",
+        "isn't owned by the authenticated customer",
+        "never belonged to the session customer",
+        "unowned by the authenticated customer",
+        "non-member of the booking",
+        "disassociated from the authenticated customer",
+    ],
+)
+def test_contracted_and_prefixed_negatives_do_not_guard(value) -> None:
+    other = _var(
+        "PM-1-2", value, "session:authenticated_owner_id", "state:widgets.owner_id"
+    )
+    choice = _choose("the actor is unauthorized", _row(other))
+    assert choice.ownership_guarded is False
+    assert choice.kind == "ownership"
+
+
+def test_an_ownership_statement_must_name_the_principal() -> None:
+    record_only = _var("PM-1-2", "belongs to a listing", "state:widgets.owner_id")
+    choice = _choose("the actor is unauthorized", _row(record_only))
     assert choice.ownership_guarded is False
     assert choice.kind == "ownership"
 
@@ -517,6 +603,13 @@ def test_ica_reasons_resolve_the_cited_row_by_id() -> None:
                     ),
                     _ica(3, context_row="CA-1-1:ctx-9"),
                     _ica(4),
+                    _ica(
+                        5,
+                        process_model_context={
+                            "PM-1-1": "actor is owner",
+                            "PM-1-2": "allowed",
+                        },
+                    ),
                 ],
             )
         ]
@@ -550,6 +643,8 @@ def test_ica_reasons_resolve_the_cited_row_by_id() -> None:
     assert [v.value for v in second.row.variables] == ["actor is owner", "not allowed"]
     assert reasons[f"{SLOT}:3"].row is None
     assert reasons[f"{SLOT}:4"].row is None
+    # A process-model context without a cited row ID is not a cited row.
+    assert reasons[f"{SLOT}:5"].row is None
 
 
 def test_the_cited_row_prompt_view_carries_exact_values_without_ids() -> None:
@@ -642,6 +737,43 @@ def test_the_request_renders_the_cited_row_with_its_exact_values() -> None:
     assert user.index("## Immutable Scenario Generation Context") < user.index(
         "## Cited context row"
     )
+
+
+def test_every_reference_form_renders_verbatim_and_is_explained() -> None:
+    row = CitedContextRow(
+        row_id="CA-1-1:ctx-1",
+        variables=(
+            ContextVariable(
+                pm_id="PM-1-1",
+                description="Refund policy",
+                value="refunds need review",
+                evidence_refs=(
+                    "policy:TARGET-READ-001",
+                    "operation:process_refund",
+                    "argument:process_refund.amount",
+                ),
+            ),
+        ),
+    )
+    user = _stage5_user(row)
+    block = user[
+        user.index("## Cited context row") : user.index("## Observation contract")
+    ]
+    assert (
+        "  evidence_refs:\n"
+        "  - policy:TARGET-READ-001\n"
+        "  - operation:process_refund\n"
+        "  - argument:process_refund.amount\n"
+    ) in block
+    explained = " ".join(block.split())
+    for form in (
+        "`state:<collection>.<field>`",
+        "`session:<name>`",
+        "`argument:<operation>.<name>`",
+        "`operation:<name>`",
+        "`policy:<observation_ref>`",
+    ):
+        assert form in explained, form
 
 
 def test_the_record_agreement_rule_renders_only_with_the_condition_request() -> None:

@@ -352,9 +352,12 @@ cases:
       - &row-evidence >-
         `evidence_refs` name where a value is read from:
         `state:<collection>.<field>` is that field of the TARGET-STATE
-        records, `session:<name>` a session fact, and
-        `argument:<operation>.<name>` an argument of that operation. An empty
-        list means no supplied fact carries the value.
+        records, `session:<name>` a session fact,
+        `argument:<operation>.<name>` an argument of that operation,
+        `operation:<name>` that operation, and `policy:<observation_ref>` the
+        captured target read with that `observation_ref`, such as
+        `TARGET-READ-001`. An empty list means no supplied fact carries the
+        value.
       - >-
         When `record_selection` names a record, select a record whose facts
         agree with every row value they show; do not select a record whose
