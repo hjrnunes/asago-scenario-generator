@@ -28,8 +28,8 @@ mapping; the first rule that matches decides:
    with the principal's intent or eligibility); or a failed authorization
    in a reason whose variable is read from a ``session:`` reference. A
    mention of the session or a principal alone is not a source, and neither
-   is a missing user confirmation, which is consent rather than
-   authentication. When the operation offers no ownership family the ICA
+   is a missing user confirmation or "another user confirmation", which is
+   consent rather than authentication or a record of the principal's. When the operation offers no ownership family the ICA
    gets no hint; it does not fall through.
 3. ``reason_variable_field``: the reason variable is read from a ``state:``
    field that a family of the operation cites -> that family's kind
@@ -66,11 +66,15 @@ member) naming the principal in the value or read from a ``session:``
 reference, or a role statement (a principal "is" or "are" the guest, host,
 owner, member or party). A negated value (a negation term, a contracted
 "n't", or an un-, non- or dis- prefix such as "unowned") never guards, and
-neither does one whose relation is not current (former, previous, pending,
-prospective, claimed...). The
-variable's description does not count, so a value such as "pending",
-"unresolved" or "actor is a stranger" never guards, whatever the variable
-is about. A wrongly withheld ownership hint costs more than a wrongly dealt
+neither does one whose relation is not current: a non-current word (former,
+previous, pending, prospective, claimed...) right before an ownership or
+role word ("former owner", "pending owner verification", "prospective
+member") or right after one, possibly past a verification-type noun ("owner
+verification pending", "ownership pending"). The same word elsewhere ("the
+requested record belongs to ...", "... as expected") does not qualify the
+relation and does not stop the guard. The variable's description does not
+count, so a value such as "pending", "unresolved" or "actor is a stranger"
+never guards, whatever the variable is about. A wrongly withheld ownership hint costs more than a wrongly dealt
 one, so the guard errs towards dealing. When it does withhold, an ownership
 test would contradict the ICA's own context; the rules continue without
 ownership and the ICA gets what rules 3-5 give, or no hint.
@@ -262,7 +266,8 @@ FAILED_COMPARISON_TERMS = frozenset(
         "another",
     }
 )
-# A relation that is not current does not affirm ownership in the guard.
+# A relation that is not current does not affirm ownership in the guard;
+# these words count only next to an ownership or role word.
 UNSETTLED_TERMS = frozenset(
     {
         "former",
@@ -280,6 +285,11 @@ UNSETTLED_TERMS = frozenset(
         "claimed",
         "alleged",
     }
+)
+# A principal followed by one of these names the principal's act, not a
+# record of theirs ("another user confirmation"): no compared record.
+CONSENT_TERMS = frozenset(
+    {"confirmation", "confirmations", "approval", "approvals", "consent", "consents"}
 )
 # What a comparison with the principal's intent names; such a reason is an
 # intent reason, not an ownership one. A principal's eligibility is likewise
@@ -543,6 +553,8 @@ def choose_reason_family(
 
 
 _LIMIT_TERMS = dict(_KIND_TERMS)["bound"]
+_RELATION_WORDS = POSSESSION_TERMS | ROLE_TERMS | {"ownership", "membership"}
+_RELATION_NOUNS = frozenset({"verification", "confirmation", "approval", "check"})
 _ATTRIBUTE_TERMS = INTENT_TERMS | dict(_KIND_TERMS)["flag"]
 
 
@@ -667,7 +679,7 @@ def _affirms_ownership(variable: ContextVariable) -> bool:
     """Return whether the value itself states the record is the principal's."""
     words = reason_terms(variable.value)
     terms = frozenset(words)
-    if _negated(terms) or terms & UNSETTLED_TERMS:
+    if _negated(terms) or _relation_not_current(words):
         return False
     if terms & POSSESSION_TERMS and (
         terms & PRINCIPAL_TERMS or _reads_session(variable)
@@ -680,6 +692,30 @@ def _affirms_ownership(variable: ContextVariable) -> bool:
         and bool(set(words[index + 2 : index + 2 + _WINDOW + 1]) & ROLE_TERMS)
         for index, word in enumerate(words)
     )
+
+
+def _relation_not_current(words: Sequence[str]) -> bool:
+    """Return whether a non-current word qualifies an ownership or role word.
+
+    It stands right before the relation word ("former owner"), right after it
+    ("guest, pending"), or after it past one verification-type noun ("owner
+    verification pending").
+    """
+    for index, word in enumerate(words):
+        if word not in _RELATION_WORDS:
+            continue
+        if index > 0 and words[index - 1] in UNSETTLED_TERMS:
+            return True
+        following = list(words[index + 1 : index + 3])
+        if following[:1] and following[0] in UNSETTLED_TERMS:
+            return True
+        if (
+            len(following) == 2
+            and following[0] in _RELATION_NOUNS
+            and following[1] in UNSETTLED_TERMS
+        ):
+            return True
+    return False
 
 
 def _auth_failure_at(words: Sequence[str], index: int) -> bool:
@@ -723,7 +759,9 @@ def _principal_comparison_failure(words: Sequence[str]) -> bool:
     than"), and a principal follows it past links. A possessive principal
     is the owner of what is compared ("the authenticated customer's
     orders"), unless what follows within four words is the principal's
-    intent or an eligibility term: an attribute, not a record of theirs.
+    intent or an eligibility term: an attribute, not a record of theirs. A
+    principal followed by a consent noun ("another user confirmation")
+    names the principal's act, not a compared record.
     """
     for index, word in enumerate(words):
         if word in COMPARISON_TERMS:
@@ -737,6 +775,9 @@ def _principal_comparison_failure(words: Sequence[str]) -> bool:
             continue
         compared = list(words[principal + 1 : principal + 6])
         if compared[:1] == ["s"] and set(compared) & _ATTRIBUTE_TERMS:
+            continue
+        noun = compared[1:2] if compared[:1] == ["s"] else compared[:1]
+        if noun and noun[0] in CONSENT_TERMS:
             continue
         return True
     return False
@@ -774,6 +815,7 @@ __all__ = [
     "NEGATION_TERMS",
     "AUTH_TERMS",
     "COMPARISON_TERMS",
+    "CONSENT_TERMS",
     "FAILED_COMPARISON_TERMS",
     "INTENT_TERMS",
     "OWNERSHIP_TERMS",
