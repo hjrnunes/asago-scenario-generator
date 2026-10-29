@@ -13,6 +13,7 @@ from asago_scenario_generator.stpa.infra.call_log import (
 )
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
+    call_failure,
     call_with_policy,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import _Model
@@ -120,9 +121,9 @@ def run_governance_routing(
         prompt_template_hashes=obligation_prompt_template_hashes(),
     )
     if outcome.error is not None or outcome.value is None:
-        raise ValueError(
-            outcome.error or "governance routing provider returned no payload"
-        )
+        raise call_failure(
+            outcome, "governance routing provider returned no payload"
+        ) from outcome.failure
     response = GovernanceRoutingResponse(
         request_digest=request.semantic_digest,
         placements=tuple(

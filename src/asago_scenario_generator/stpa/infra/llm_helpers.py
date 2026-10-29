@@ -19,6 +19,7 @@ from pydantic import BaseModel, ValidationError
 
 from asago_scenario_generator.stpa.infra.provider_record import (
     CallIdentity,
+    ReplayedProviderError,
     call_identity,
     provider_requests_of,
 )
@@ -805,6 +806,44 @@ class CallOutcome(Generic[_T]):
     failure: BaseException | None = None
     attempt_number: int = 1
     attempt_id: str | None = None
+
+
+def is_provider_failure(error: BaseException | None) -> bool:
+    """Tell whether *error* is a provider or transport failure, not a bad reply.
+
+    These are the errors the client raises when no reply arrived: a timeout,
+    any HTTP status error (a 4xx, or a 5xx its transport retry did not
+    clear), or a connection error.  A replay raises the same classes, or
+    :class:`ReplayedProviderError` for a class it cannot rebuild.
+    """
+    import openai
+
+    return isinstance(
+        error,
+        (openai.APIConnectionError, openai.APIStatusError, ReplayedProviderError),
+    )
+
+
+class ProviderCallError(ValueError):
+    """A failed call whose cause was the provider or transport, not the reply.
+
+    The client has already made the only retry such a failure earns, so a
+    caller that re-asks after an invalid reply does not re-ask after this.
+    It is a ``ValueError`` so every handler of a failed call still sees it.
+    """
+
+
+def call_failure(outcome: CallOutcome[Any], default: str) -> ValueError:
+    """Return the error for a failed *outcome*, typed by its cause.
+
+    A provider or transport failure gives a :class:`ProviderCallError`;
+    any other failure a plain ``ValueError``.  Both carry the outcome's
+    error text, or *default* when it has none.
+    """
+    message = outcome.error or default
+    if is_provider_failure(outcome.failure):
+        return ProviderCallError(message)
+    return ValueError(message)
 
 
 @dataclass

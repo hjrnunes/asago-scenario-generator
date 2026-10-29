@@ -384,6 +384,8 @@ class MockLLMClient:
             raise exception
 
         content = self._configured_content(response_format, user_prompt)
+        if isinstance(content, BaseException):
+            raise content
         content = self._adapt_legacy_stage1a(content, response_format)
 
         return LLMResult(

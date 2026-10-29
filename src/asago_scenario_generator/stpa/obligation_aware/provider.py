@@ -40,6 +40,7 @@ from asago_scenario_generator.stpa.infra.call_log import (
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     ExactFeedbackError,
+    call_failure,
     call_with_policy,
     log_llm_call_failure,
     parse_llm_result,
@@ -1864,9 +1865,9 @@ class ObligationAwareLLMAdapter:
             prompt_template_hashes=_mechanism_prompt_hashes(),
         )
         if outcome.error is not None or outcome.value is None:
-            raise ValueError(
-                outcome.error or "structural routing provider returned no payload"
-            )
+            raise call_failure(
+                outcome, "structural routing provider returned no payload"
+            ) from outcome.failure
         response = _routing_response(request, outcome.value, calls=outcome.calls)
         mark_call_published(
             self.run_dir,

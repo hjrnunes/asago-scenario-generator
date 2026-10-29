@@ -36,6 +36,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     CallOutcome,
     CorrectionPolicy,
     call_with_policy,
+    is_provider_failure,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.ica_enumeration import (
@@ -603,22 +604,23 @@ class TargetDerivedICALlmFinder:
     ) -> dict[str, TargetDerivedICAVerificationItem]:
         """Collect one verifier decision per draft finding.
 
-        A failed call or an omitted finding is a technical gap, not a
+        A failed reply or an omitted finding is a technical gap, not a
         semantic rejection, so the omitted findings get one more verifier
-        call. Findings still undecided after it stay unverified.
+        call. A provider or transport failure gets none: the client already
+        made the one retry it earns. Findings still undecided stay unverified.
         """
-        decisions = _verification_decisions(self._verify(request, draft))
+        response, provider_failed = self._verify(request, draft)
+        decisions = _verification_decisions(response)
         _require_known_decision_ids(decisions, draft.findings)
         omitted = tuple(item for item in draft.findings if item.ica_id not in decisions)
-        if not omitted:
+        if not omitted or provider_failed:
             return decisions
-        retry = _verification_decisions(
-            self._verify(
-                request,
-                TargetDerivedICADraftResponse(findings=omitted),
-                step="verify_target_derived_icas_retry",
-            )
+        retry, _ = self._verify(
+            request,
+            TargetDerivedICADraftResponse(findings=omitted),
+            step="verify_target_derived_icas_retry",
         )
+        retry = _verification_decisions(retry)
         _require_known_decision_ids(retry, omitted)
         return {**decisions, **retry}
 
@@ -628,7 +630,9 @@ class TargetDerivedICALlmFinder:
         draft: TargetDerivedICADraftResponse,
         *,
         step: str = "verify_target_derived_icas",
-    ) -> TargetDerivedICAVerificationResponse:
+    ) -> tuple[TargetDerivedICAVerificationResponse, bool]:
+        """Return the verifier's response, empty when the call failed, and
+        whether it failed in the provider or transport."""
         system_prompt, user_prompt = self._derived_verification_prompts(request, draft)
         outcome = call_with_policy(
             llm_client=self._client,
@@ -643,8 +647,11 @@ class TargetDerivedICALlmFinder:
             max_completion_tokens=TARGET_REALIZATION_MAX_COMPLETION_TOKENS,
         )
         if outcome.error is not None or outcome.value is None:
-            return TargetDerivedICAVerificationResponse()
-        return outcome.value
+            return (
+                TargetDerivedICAVerificationResponse(),
+                is_provider_failure(outcome.failure),
+            )
+        return outcome.value, False
 
     def _derived_verification_prompts(
         self,

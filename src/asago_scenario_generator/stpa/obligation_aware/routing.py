@@ -24,6 +24,7 @@ from asago_scenario_generator.models.obligation_plan import (
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.infra.llm_helpers import (
+    ProviderCallError,
     RequestTally,
     count_requests,
 )
@@ -929,7 +930,9 @@ def _route_batch(
                 break
             response = candidate
             break
-        except PromptBudgetExceeded as exc:
+        except (PromptBudgetExceeded, ProviderCallError) as exc:
+            # The client already made the one retry a provider or transport
+            # failure earns; the re-ask here is only for an invalid reply.
             error = exc
             break
         except (TypeError, ValueError) as exc:
