@@ -534,6 +534,20 @@ def _validate_safe_observable_outcome(
         target_operation=target_operation,
         execution_target_profile=execution_target_profile,
     )
+    if outcome.call_arguments is not None:
+        _validate_safe_call_arguments(
+            outcome,
+            build_condition_universe(
+                execution_target_profile=execution_target_profile,
+                target_operation=target_operation,
+                target_observations=target_observations,
+            ),
+            _operation_input_schemas(
+                outcome.operation_name or "",
+                execution_target_profile=execution_target_profile,
+                target_operation=target_operation,
+            ),
+        )
     return _validate_safe_outcome_refs(outcome, target_observations, normalizations)
 
 
@@ -553,6 +567,7 @@ def _analytical_only_safe_outcome(
             "operation_name": None,
             "record_refs": (),
             "fact_refs": (),
+            "call_arguments": None,
         },
         reason="observable_contradicts_analytical_only_assessment",
         normalizations=normalizations,
@@ -582,6 +597,7 @@ def _reply_only_safe_outcome(
             "claim_level": "reply",
             "evidence": "assistant_message",
             "operation_name": None,
+            "call_arguments": None,
         },
         reason="observable_false_with_only_reply_criteria_supported",
         normalizations=normalizations,
@@ -619,12 +635,18 @@ def _only_supported_criterion_safe_outcome(
                 normalizations=normalizations,
             )
         return outcome
+    keeps_call = (
+        criterion.claim_level == "command_attempt"
+        and criterion.operation_name == outcome.operation_name
+    )
     return _replace_safe_outcome(
         outcome,
         {
             "claim_level": criterion.claim_level,
             "evidence": criterion.evidence,
             "operation_name": criterion.operation_name,
+            # The arguments are those of the call the outcome named.
+            "call_arguments": outcome.call_arguments if keeps_call else None,
         },
         reason="safe_outcome_differs_from_only_supported_criterion",
         normalizations=normalizations,
@@ -657,6 +679,130 @@ def _require_supported_safe_evidence(
             "safe observable outcome evidence is not captured by the observation "
             "contract",
         )
+
+
+def _validate_safe_call_arguments(
+    outcome: SafeObservableOutcome,
+    universe: ConditionUniverse,
+    input_schemas: Sequence[object],
+) -> None:
+    """Require each safe call argument to be supplied, with a supplied value.
+
+    The argument must be a parameter of ``operation_name`` in the supplied
+    inventory or its input schema; the value must fit the type, ``enum`` and
+    ``const`` the parameter's schema declares in every supplied input schema
+    of the operation (``input_schemas``); a string value must be a supplied
+    value (a fact or record key or value, a value a supplied read passed, or
+    a schema value). The parameter schemas are read from the input schemas
+    themselves, not from ``universe``, which leaves out the schemas of an
+    operation whose root it does not read: a parameter with no schema object,
+    or one whose type depends on a composition keyword, cannot be checked,
+    so its value is refused rather than accepted.
+    """
+
+    operation = outcome.operation_name or ""
+    declared = universe.operations.get(operation, frozenset())
+    problems = []
+    for index, item in enumerate(outcome.call_arguments or ()):
+        label = f"call_arguments[{index}] {item.argument!r}"
+        if item.argument not in declared:
+            listed = ", ".join(sorted(declared)) or "none"
+            problems.append(
+                f"{label} is not a parameter of {operation} (parameters: {listed})"
+            )
+            continue
+        problem = _parameter_value_problem(item.value, item.argument, input_schemas)
+        if problem is None and isinstance(item.value, str):
+            if item.value not in universe.literal_values:
+                problem = "is not a value the request supplies"
+        if problem is not None:
+            problems.append(f"{label} value {item.value!r} {problem}")
+    if problems:
+        raise ValidationIssueError(
+            IssueCode.safe_outcome_call_argument_not_supplied,
+            "safe observable outcome call_arguments must name parameters of "
+            "operation_name with supplied values: " + "; ".join(problems),
+        )
+
+
+# Keywords that make a parameter's accepted values depend on other schemas.
+_COMPOSITION_KEYWORDS = frozenset({"$ref", "allOf", "anyOf", "oneOf", "not", "if"})
+
+
+def _operation_input_schemas(
+    operation: str,
+    *,
+    execution_target_profile: ExecutionTargetProfile | None,
+    target_operation: TargetOperationObservation | None,
+) -> list[object]:
+    """Return the input schema of each supplied resource exposing ``operation``."""
+    if execution_target_profile is not None:
+        return [
+            resource.input_schema
+            for resource in execution_target_profile.resources
+            if any(item.operation_id == operation for item in resource.operations)
+        ]
+    if target_operation is not None and target_operation.operation_id == operation:
+        return [target_operation.input_schema]
+    return []
+
+
+def _parameter_value_problem(
+    value: object, argument: str, input_schemas: Sequence[object]
+) -> str | None:
+    """Return why ``value`` does not fit ``argument`` in some input schema."""
+    unverifiable = (
+        "cannot be checked: the supplied input schema declares no checkable "
+        f"schema for {argument}"
+    )
+    if not input_schemas:
+        return unverifiable
+    for input_schema in input_schemas:
+        properties = (
+            input_schema.get("properties")
+            if isinstance(input_schema, Mapping)
+            else None
+        )
+        schema = properties.get(argument) if isinstance(properties, Mapping) else None
+        if not isinstance(schema, Mapping) or _COMPOSITION_KEYWORDS & set(schema):
+            return unverifiable
+        problem = _safe_call_value_problem(value, schema)
+        if problem is not None:
+            return problem
+    return None
+
+
+def _safe_call_value_problem(value: object, schema: Mapping[str, Any]) -> str | None:
+    declared = schema.get("type")
+    names = [declared] if isinstance(declared, str) else declared
+    if isinstance(names, list) and names:
+        if not any(_fits_json_type(value, name) for name in names):
+            return f"does not have the declared type {declared}"
+    if isinstance(schema.get("enum"), list):
+        if not any(_same_json(value, item) for item in schema["enum"]):
+            return "is not one of the declared enum values"
+    if "const" in schema and not _same_json(value, schema["const"]):
+        return "is not the declared const value"
+    return None
+
+
+def _fits_json_type(value: object, name: object) -> bool:
+    if name == "boolean":
+        return isinstance(value, bool)
+    if isinstance(value, bool):
+        return False
+    if name == "integer":
+        return isinstance(value, int)
+    if name == "number":
+        return isinstance(value, (int, float))
+    if name == "string":
+        return isinstance(value, str)
+    # A call argument value is a scalar, so an array, object or null fits none.
+    return name not in ("array", "object", "null")
+
+
+def _same_json(left: object, right: object) -> bool:
+    return isinstance(left, bool) == isinstance(right, bool) and left == right
 
 
 def _validate_safe_outcome_refs(
@@ -807,12 +953,13 @@ def _replace_safe_outcome(
         normalizations.extend(
             Stage5Normalization(
                 field=f"safe_observable_outcome.{name}",
-                original=original[name],
-                normalized=changed[name],
+                original=original.get(name),
+                normalized=changed.get(name),
                 reason=reason,
             )
             for name in SafeObservableOutcome.model_fields
-            if original[name] != changed[name]
+            # ``call_arguments`` is left out of a dump when absent.
+            if original.get(name) != changed.get(name)
         )
     return normalized
 

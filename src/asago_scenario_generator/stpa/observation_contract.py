@@ -18,6 +18,8 @@ from pydantic import (
     ConfigDict,
     Field,
     StrictBool,
+    StrictFloat,
+    StrictInt,
     StrictStr,
     field_validator,
     model_validator,
@@ -136,6 +138,18 @@ class ObservationContract(ObservationContractModel):
         return any(item.kind == evidence and item.available for item in self.capture)
 
 
+class SafeCallArgument(ObservationContractModel):
+    """One argument of the call a safe outcome states the agent makes."""
+
+    argument: StrictStr = Field(min_length=1)
+    value: StrictBool | StrictInt | StrictFloat | StrictStr
+
+    @field_validator("argument")
+    @classmethod
+    def _strip_argument(cls, value: str) -> str:
+        return _stripped_text(value, "safe call argument name must not be blank")
+
+
 class SafeObservableOutcome(ObservationContractModel):
     """One scenario-specific boundary for the expected safe behavior.
 
@@ -143,6 +157,11 @@ class SafeObservableOutcome(ObservationContractModel):
     prose to the exact evidence boundary supplied to Stage 5.  An
     ``analytical_only`` outcome is represented explicitly with
     ``observable=False`` and no claim, operation, record, or fact references.
+
+    ``operation_name`` names the operation the boundary is about; the safe
+    behavior may be to call it or not to call it. ``call_arguments`` is
+    present only when the safe behavior is that the agent makes that call:
+    it gives the values the call is made with.
     """
 
     observable: StrictBool
@@ -152,6 +171,17 @@ class SafeObservableOutcome(ObservationContractModel):
     operation_name: StrictStr | None = Field(default=None, min_length=1)
     record_refs: tuple[StrictStr, ...] = ()
     fact_refs: tuple[StrictStr, ...] = ()
+    call_arguments: tuple[SafeCallArgument, ...] | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Present only when the safe behavior is that the agent makes the "
+            "operation_name call: the value of each argument of that call that "
+            "the scenario fixes, one entry per argument. Absent when the safe "
+            "behavior is that the call is not made, or no argument value is "
+            "known."
+        ),
+    )
 
     @field_validator("statement")
     @classmethod
@@ -177,6 +207,14 @@ class SafeObservableOutcome(ObservationContractModel):
             raise ValueError("safe observable outcome references must not be blank")
         return normalized
 
+    @field_validator("call_arguments")
+    @classmethod
+    def _empty_arguments_are_absent(
+        cls, value: tuple[SafeCallArgument, ...] | None
+    ) -> tuple[SafeCallArgument, ...] | None:
+        # An empty list states no value, which is what an absent field says.
+        return value or None
+
     @model_validator(mode="after")
     def validate_boundary(self) -> "SafeObservableOutcome":
         """Require a complete, internally consistent evidence boundary."""
@@ -187,10 +225,11 @@ class SafeObservableOutcome(ObservationContractModel):
                 raise ValueError(f"safe observable outcome {name} must be unique")
         if self.observable:
             self._require_matching_evidence()
+            self._require_call_for_arguments()
         elif self._has_evidence_boundary():
             raise ValueError(
                 "analytical-only safe outcomes must omit claim, operation, "
-                "record, and fact references"
+                "record, fact references, and call arguments"
             )
         return self
 
@@ -206,11 +245,30 @@ class SafeObservableOutcome(ObservationContractModel):
                 f"{self.claim_level} requires {expected}"
             )
 
+    def _require_call_for_arguments(self) -> None:
+        if self.call_arguments is None:
+            return
+        if self.claim_level != "command_attempt" or self.operation_name is None:
+            raise ValueError(
+                "safe observable outcome call_arguments require claim_level "
+                "command_attempt and an operation_name"
+            )
+        names = [item.argument for item in self.call_arguments]
+        if len(names) != len(set(names)):
+            raise ValueError(
+                "safe observable outcome call_arguments must name each argument once"
+            )
+
     def _has_evidence_boundary(self) -> bool:
         return (
             any(
                 value is not None
-                for value in (self.claim_level, self.evidence, self.operation_name)
+                for value in (
+                    self.claim_level,
+                    self.evidence,
+                    self.operation_name,
+                    self.call_arguments,
+                )
             )
             or bool(self.record_refs)
             or bool(self.fact_refs)

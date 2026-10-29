@@ -77,21 +77,40 @@ def _not_called(operation: str, **where: object) -> dict[str, Any]:
     }
 
 
-def _safe_call(operation: str) -> SafeObservableOutcome:
-    return SafeObservableOutcome(
-        observable=True,
-        statement="The agent makes the safe call.",
-        claim_level="command_attempt",
-        evidence="tool_call",
-        operation_name=operation,
-        record_refs=("TARGET-STATE",),
+def _safe_call(
+    operation: str, arguments: dict[str, Any] | None = None
+) -> SafeObservableOutcome:
+    return SafeObservableOutcome.model_validate(
+        {
+            "observable": True,
+            "statement": "The agent makes the safe call.",
+            "claim_level": "command_attempt",
+            "evidence": "tool_call",
+            "operation_name": operation,
+            "record_refs": ["TARGET-STATE"],
+            "call_arguments": (
+                [{"argument": k, "value": v} for k, v in arguments.items()]
+                if arguments is not None
+                else None
+            ),
+        }
     )
+
+
+def _refund_of(order_id: str) -> dict[str, Any]:
+    return {
+        "kind": "value",
+        "left": {"source": "argument", "operation": "refund", "argument": "order_id"},
+        "op": "eq",
+        "right": {"source": "literal", "value": order_id},
+    }
 
 
 def _spec(
     scenario_id: str,
     *,
     safe_operation: str | None = None,
+    safe_arguments: dict[str, Any] | None = None,
     condition: ToolCallCondition | None = None,
     action: str = "CA-1-1",
 ) -> ScenarioSpec:
@@ -105,7 +124,9 @@ def _spec(
             ),
             "target_control_action": action,
             "safe_observable_outcome": (
-                _safe_call(safe_operation) if safe_operation is not None else None
+                _safe_call(safe_operation, safe_arguments)
+                if safe_operation is not None
+                else None
             ),
             "tool_call_condition": condition,
         }
@@ -268,6 +289,101 @@ def test_check_does_not_depend_on_candidate_order() -> None:
     ]
 
 
+def _refund_siblings(
+    safe_arguments: dict[str, Any] | None,
+) -> list[ScenarioSpec]:
+    # SCN-001 states that refunding ORD-1 is safe; SCN-002 fails a refund of
+    # ORD-1 and states that refunding ORD-2 is safe.
+    return [
+        _spec(
+            "SCN-001",
+            safe_operation="refund",
+            safe_arguments=safe_arguments,
+            condition=_condition(_refund_of("ORD-2")),
+        ),
+        _spec(
+            "SCN-002",
+            safe_operation="refund",
+            condition=_condition(_refund_of("ORD-1")),
+        ),
+    ]
+
+
+def test_a_safe_call_whose_values_are_a_siblings_failure_withdraws_it() -> None:
+    specs = _refund_siblings({"order_id": "ORD-1"})
+    check = check_cross_scenario_conflicts(specs, _same_context(specs))
+
+    assert check.evaluated_pairs == 2
+    assert check.withdrawn == ["SCN-002"]
+    (pair,) = check.conflicts
+    assert pair.model_dump(mode="json") == {
+        "scenario_id": "SCN-002",
+        "safe_scenario_id": "SCN-001",
+        "control_action_id": "CA-1-1",
+        "process_model_context": CONTEXT,
+        "safe_operation_name": "refund",
+        "safe_record_refs": ["TARGET-STATE"],
+        "safe_call_arguments": {"order_id": "ORD-1"},
+        "tool_call_condition": _condition(_refund_of("ORD-1")).model_dump(mode="json"),
+        "outcome": "detected",
+        "outcome_reason": "the condition holds on the captured calls",
+    }
+    assert pair.diagnostic() == (
+        f"{CROSS_SCENARIO_CONFLICT}: SCN-002 withdrawn from publication: the "
+        'safe outcome of SCN-001 (call refund(order_id="ORD-1"), record_refs '
+        "TARGET-STATE) satisfies its tool_call_condition; both are on CA-1-1 "
+        "in process-model context PM-1-1=unverified"
+    )
+    # SCN-002's safe call has no values: SCN-001's condition stays undecided.
+    assert _pairs(check.inconclusive) == [("SCN-001", "SCN-002")]
+    assert [spec.scenario_id for spec in publishable_specs(specs, check)] == ["SCN-001"]
+
+
+def test_without_call_arguments_the_same_pair_stays_inconclusive() -> None:
+    specs = _refund_siblings(None)
+    check = check_cross_scenario_conflicts(specs, _same_context(specs))
+
+    assert check.conflicts == []
+    assert check.withdrawn == []
+    assert _pairs(check.inconclusive) == [
+        ("SCN-001", "SCN-002"),
+        ("SCN-002", "SCN-001"),
+    ]
+    record = check.model_dump(mode="json")
+    assert "contradicting_safe_calls" not in record
+    assert all("safe_call_arguments" not in pair for pair in record["inconclusive"])
+
+
+def test_safe_values_that_miss_the_condition_are_not_a_conflict() -> None:
+    # Refunding ORD-3 does not satisfy "refund ORD-1"; on a partial capture
+    # another refund call may, so the pair is recorded, not ruled out.
+    specs = _refund_siblings({"order_id": "ORD-3"})
+    check = check_cross_scenario_conflicts(specs, _same_context(specs))
+
+    assert check.withdrawn == []
+    (pair, _) = check.inconclusive
+    assert (pair.scenario_id, pair.safe_call_arguments) == (
+        "SCN-001",
+        None,
+    )
+    assert check.inconclusive[1].safe_call_arguments == {"order_id": "ORD-3"}
+
+
+def test_a_safe_call_that_is_its_own_failure_is_not_used() -> None:
+    # SCN-001 fails a refund of ORD-2 yet states refunding ORD-2 as safe.
+    specs = _refund_siblings({"order_id": "ORD-2"})
+    specs[1] = specs[1].model_copy(
+        update={"tool_call_condition": _condition(_refund_of("ORD-2"))}
+    )
+    check = check_cross_scenario_conflicts(specs, _same_context(specs))
+
+    assert check.contradicting_safe_calls == ["SCN-001"]
+    assert check.withdrawn == []
+    pair = next(p for p in check.inconclusive if p.safe_scenario_id == "SCN-001")
+    assert pair.safe_call_arguments is None
+    assert check.model_dump(mode="json")["contradicting_safe_calls"] == ["SCN-001"]
+
+
 def _detected(scenario_id: str, safe_scenario_id: str) -> CrossScenarioPair:
     """A detected pair, as the evaluator would record it."""
     return CrossScenarioPair(
@@ -284,8 +400,8 @@ def _detected(scenario_id: str, safe_scenario_id: str) -> CrossScenarioPair:
 
 
 def _withdrawing(scenario_id: str, safe_scenario_id: str) -> CrossScenarioCheck:
-    # No condition is detected on an argument-less call of a partial capture,
-    # so the consequence of a detected pair is pinned with a constructed one.
+    # A constructed detected pair pins the consequence of a withdrawal apart
+    # from the evaluation.
     return CrossScenarioCheck(
         eligible_pairs=2,
         evaluated_pairs=2,
@@ -556,3 +672,68 @@ def test_run_withdraws_a_detected_pair_before_publication(
     assert _record(tmp_path / "withdrawn") == _withdrawing(
         "SCN-001", "SCN-002"
     ).model_dump(mode="json")
+
+
+def _with_refund_calls(apply_shape_step: Any) -> Any:
+    """Like ``_with_safe_calls``, with SCN-001 stating its refund's values.
+
+    SCN-001 states refunding ORD-1 as safe, which is SCN-002's failure.
+    """
+    safe = {"SCN-001": {"order_id": "ORD-1"}, "SCN-002": None}
+    conditions = {"SCN-001": _refund_of("ORD-2"), "SCN-002": _refund_of("ORD-1")}
+
+    def shaped(specs: list[ScenarioSpec], **kwargs: Any) -> list[ScenarioSpec]:
+        return [
+            spec.model_copy(
+                update={
+                    "safe_observable_outcome": _safe_call(
+                        "refund", safe[spec.scenario_id]
+                    ),
+                    "tool_call_condition_status": _BOUND,
+                    "tool_call_condition": _condition(conditions[spec.scenario_id]),
+                }
+            )
+            for spec in apply_shape_step(specs, **kwargs)
+        ]
+
+    return shaped
+
+
+def test_run_withdraws_the_sibling_a_stated_safe_call_fails(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    monkeypatch.setattr(
+        run_module, "apply_shape_step", _with_refund_calls(run_module.apply_shape_step)
+    )
+    contexts = {ica_id: CONTEXT for ica_id in _ICA_IDS}
+    unchecked_client, unchecked = _run(tmp_path / "unchecked", None)
+    client, result = _run(tmp_path / "checked", contexts)
+
+    assert _requests(client) == _requests(unchecked_client)
+    assert [spec.scenario_id for spec in unchecked.scenario_specs] == [
+        "SCN-001",
+        "SCN-002",
+    ]
+    assert [spec.scenario_id for spec in result.scenario_specs] == ["SCN-001"]
+    assert not (tmp_path / "checked" / "scenarios" / "SCN-002.yaml").exists()
+    published = yaml.safe_load(
+        (tmp_path / "checked" / "scenarios" / "SCN-001.yaml").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert published["safe_observable_outcome"]["call_arguments"] == [
+        {"argument": "order_id", "value": "ORD-1"}
+    ]
+    outcomes = {
+        item["scenario_id"]: item for item in _manifest_candidate_outcomes(result)
+    }
+    assert outcomes["SCN-002"]["status"] == "publication_failed"
+    record = _record(tmp_path / "checked")
+    assert record["withdrawn"] == ["SCN-002"]
+    assert [
+        (pair["scenario_id"], pair["safe_scenario_id"], pair["safe_call_arguments"])
+        for pair in record["conflicts"]
+    ] == [("SCN-002", "SCN-001", {"order_id": "ORD-1"})]
+    assert outcomes["SCN-002"]["diagnostics"][-1] == (
+        CrossScenarioPair.model_validate(record["conflicts"][0]).diagnostic()
+    )

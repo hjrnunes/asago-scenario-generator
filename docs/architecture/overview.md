@@ -706,23 +706,38 @@ reference evaluator on the one call A's safe outcome names, its
 `operation_name`. The safe outcome is the observable boundary of acceptable
 behavior, not the whole behavior: nothing states that it is the agent's only
 call, so the call is evaluated as an incomplete capture. Its `record_refs`
-name observations, not records, so the call's arguments are unknown. On that
-capture a `not_called` comparison is false when the known call rules it out
-(it calls that operation and the comparison has no `where` item), otherwise
-unknown; `order` comparisons and comparisons on the call's arguments remain
-unknown. The result is therefore `inconclusive` or `not_detected`.
+name observations, not records. The call's arguments are those of the safe
+outcome's optional `call_arguments`: the typed values the safe call is made
+with, which Stage 5 states only when the safe behavior is that the agent makes
+that call, and checks against the operation's supplied parameters, the type,
+`enum` and `const` each parameter declares in the operation's input schema,
+and the supplied values (`safe_outcome_call_argument_not_supplied`
+otherwise; a parameter whose schema it cannot check, with no schema object or
+one built from composition keywords, is refused the same way). Without them the call has no arguments. On that capture a value
+comparison holds when the call's values satisfy it; otherwise it is unknown,
+since another call of that operation may be missing from the capture, and so
+is a comparison on another operation. A
+`not_called` comparison is false when the known call rules it out (it calls
+that operation and matches every `where` item), otherwise unknown; `order`
+comparisons remain unknown. A pair is therefore `detected` only when B's
+condition is a value condition on the safe call's own arguments that A's
+values satisfy; otherwise it is `inconclusive` or `not_detected`.
 Only `detected` withdraws B: its candidate outcome is `publication_failed`
 with a `cross_scenario_safe_outcome_conflict` diagnostic, and its handoff is
 not written; a pair detected both ways withdraws both. An `inconclusive` pair
-is recorded and never withdraws. With the fields the safe outcome has today
-no condition is `detected` on such a call, so the check records undecided
-pairs and withdraws nothing. The run writes `cross-scenario-conflicts.yaml`
+is recorded and never withdraws. Without `call_arguments` no condition is
+`detected`, so a run whose safe outcomes state none withdraws nothing. A safe
+call whose values satisfy its own scenario's condition contradicts that
+scenario: its values are not used, so its pairs are evaluated without
+arguments. The run writes `cross-scenario-conflicts.yaml`
 (`cross-scenario-conflicts-v1`): the counts of eligible, evaluated, and
 `not_detected` pairs; each detected and each inconclusive pair with both
-scenario IDs, the action, the context, A's operation and `record_refs`, B's
-condition, and the evaluator's outcome and reason; and the withdrawn IDs. The
-check reads only published fields and runs after the Gherkin step, so it adds
-no request and changes none.
+scenario IDs, the action, the context, A's operation, `record_refs` and the
+arguments its call was evaluated with (when it had any), B's condition, and
+the evaluator's outcome and reason; the withdrawn IDs; and, when there are
+any, the IDs of scenarios whose safe call contradicts them
+(`contradicting_safe_calls`). The check reads only published fields and runs
+after the Gherkin step, so it adds no request and changes none.
 
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
 Its closed prompt view contains the authoritative action, original deviation,
