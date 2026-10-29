@@ -1893,6 +1893,38 @@ def test_ica_verification_runs_without_an_obligation_adapter() -> None:
     assert batch.batch_id == "synthesis-ica-hazard-verification"
 
 
+def test_an_ica_whose_verification_failed_never_reaches_scenarios() -> None:
+    """A verification request that fails leaves its ICA out of Stage 5."""
+    from tests.helpers.ica_hazard_verification import _finding_pair, _stpa_inputs
+
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+
+    class Unavailable:
+        def verify_ica_hazards(self, requests, **_):
+            raise RuntimeError("verifier unavailable")
+
+    fill = SlotFillRunResult(
+        result=SynthesisSlotFillResult(
+            ica_enumeration=enumeration,
+            considerations=(_finding_pair(enumeration),),
+        )
+    )
+
+    verified = _run_ica_verification(
+        fill,
+        adapters=SynthesisAdapters(obligation_adapter=Unavailable()),
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        inputs=None,
+    )
+
+    batch = _ica_verification(verified)
+    assert {record.disposition for record in batch.records} == {"provider_failure"}
+    assert _ordinary_icas(verified).slots[0].icas == []
+    [pair] = _ica_considerations(verified)
+    assert pair.disposition == "unresolved" and pair.ica_ids == ()
+
+
 def test_scenarios_receive_the_unprojected_pairs_beside_the_projected_icas() -> None:
     """The projection drops the slot evidence; scenarios read it from the fill."""
     pair = _slot_pair()

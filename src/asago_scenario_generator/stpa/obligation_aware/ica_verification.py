@@ -1473,11 +1473,13 @@ def verify_final_ica_batch(
     control_structure: ControlStructure,
     batch_id: str = "ica-hazard-verification",
 ) -> tuple[ICAEnumeration, IcaHazardVerificationBatch]:
-    """Verify final ICAs and exclude only semantically unsupported findings.
+    """Verify final ICAs and keep only those with a supported verdict.
 
     The adapter is called once for the initial batch and at most once more for
     the subset that received a non-supported verdict.  Provider/protocol
-    failures remain typed records and do not erase ordinary STPA siblings.
+    failures remain typed records and do not erase ordinary STPA siblings,
+    but the ICA they leave unverified does not reach Stage 5, nor does any
+    ICA when no verifier was supplied.
     A correction failure cannot rehabilitate a previously rejected finding.
     Each final ICA whose hazard depends on another action's operation is
     flagged, on the ICA and in the batch diagnostics, and kept in its slot.
@@ -1500,12 +1502,13 @@ def verify_final_ica_batch(
         enumeration, flags = _flag_slot_hazards(
             enumeration, loss_analysis, control_structure
         )
-        return enumeration, _failed_batch(
+        batch = _failed_batch(
             batch_id,
             requests,
             "no ICA hazard verification adapter was supplied",
             diagnostics=flags,
         )
+        return _exclude_unsupported_icas(enumeration, batch), batch
     records, unsupported, initial_diagnostics, call_evidence = (
         _verify_initial_request_groups(method, requests, batch_id=batch_id)
     )
@@ -1995,8 +1998,13 @@ def _exclude_unsupported_icas(
     enumeration: ICAEnumeration,
     batch: IcaHazardVerificationBatch,
 ) -> ICAEnumeration:
-    """Remove only final non-supported ICAs; preserve valid slot siblings."""
-    excluded = _final_excluded_ica_ids(batch)
+    """Remove every final ICA without a supported verdict; keep its siblings.
+
+    An ICA whose verification failed without a verdict is unverified, not
+    supported, so it is removed too. Its record keeps the error as the
+    reason, and a slot left with no ICA says it could not be verified.
+    """
+    excluded = _excluded_ica_ids(batch)
     if not excluded:
         return enumeration
     terminal_na_reasons = {
@@ -2004,35 +2012,23 @@ def _exclude_unsupported_icas(
         for record in batch.records
         if record.disposition == "not_applicable" and record.correction is not None
     }
+    unverified = {record.ica_id for record in batch.records if _is_unverified(record)}
     return ICAEnumeration(
         slots=[
             _exclude_from_slot(
                 slot,
                 excluded,
                 terminal_na_reasons=terminal_na_reasons,
+                unverified=unverified,
             )
             for slot in enumeration.slots
         ]
     )
 
 
-def _final_excluded_ica_ids(batch: IcaHazardVerificationBatch) -> set[str]:
-    excluded = {
-        record.ica_id for record in batch.records if _record_excludes_generation(record)
-    }
-    # A final ICA whose narrow request could not be constructed is still
-    # retained in the batch diagnostics, but it cannot enter Stage 5 without
-    # complete authoritative hazard/loss lineage.
-    excluded.update(batch.incomplete_ica_ids)
-    return excluded
-
-
-def _record_excludes_generation(record: IcaHazardVerificationRecord) -> bool:
-    if record.disposition != "provider_failure":
-        return record.disposition != "supported"
-    # A failed first review has no semantic verdict. A failed repair does:
-    # keep that rejection effective without inventing a verdict on the repair.
-    return any(
+def _is_unverified(record: IcaHazardVerificationRecord) -> bool:
+    """Whether verification failed before any verdict rejected the ICA."""
+    return record.disposition == "provider_failure" and not any(
         attempt.verdict is not None and attempt.verdict.verdict != "supported"
         for attempt in record.attempts
     )
@@ -2043,6 +2039,7 @@ def _exclude_from_slot(
     excluded: set[str],
     *,
     terminal_na_reasons: Mapping[str, str] | None = None,
+    unverified: set[str] | None = None,
 ) -> ICASlot:
     # A slot with no ICAs had nothing to verify; keep its own unresolved reason.
     if slot.is_na or not slot.icas:
@@ -2053,6 +2050,8 @@ def _exclude_from_slot(
     reason = _terminal_na_reason(slot, terminal_na_reasons or {})
     if reason:
         return _excluded_slot_as_na(slot, reason)
+    if {ica.ica_id for ica in slot.icas} <= (unverified or set()):
+        return _excluded_slot_as_unresolved(slot, _UNVERIFIED_SLOT_REASON)
     return _excluded_slot_as_unresolved(slot)
 
 
@@ -2085,7 +2084,18 @@ def _excluded_slot_as_na(slot: ICASlot, reason: str) -> ICASlot:
     )
 
 
-def _excluded_slot_as_unresolved(slot: ICASlot) -> ICASlot:
+_REJECTED_SLOT_REASON = (
+    "All final ICAs in this slot failed independent semantic hazard/loss verification."
+)
+_UNVERIFIED_SLOT_REASON = (
+    "No final ICA in this slot could be verified: independent semantic "
+    "hazard/loss verification failed without a verdict."
+)
+
+
+def _excluded_slot_as_unresolved(
+    slot: ICASlot, reason: str = _REJECTED_SLOT_REASON
+) -> ICASlot:
     """Retain a fully excluded slot as unresolved, never justified N/A."""
     return ICASlot.model_validate(
         {
@@ -2093,10 +2103,7 @@ def _excluded_slot_as_unresolved(slot: ICASlot) -> ICASlot:
             "is_na": False,
             "icas": [],
             "na_justification": None,
-            "unresolved_reason": (
-                "All final ICAs in this slot failed independent semantic "
-                "hazard/loss verification."
-            ),
+            "unresolved_reason": reason,
         }
     )
 
@@ -2182,7 +2189,8 @@ def _excluded_ica_ids(batch: IcaHazardVerificationBatch) -> set[str]:
         record.ica_id for record in batch.records if record.disposition != "supported"
     }
     # Projection failures have no record (there is no request digest to bind),
-    # so carry their exact ICA identities separately into accounting.
+    # so carry their exact ICA identities separately into accounting. Such an
+    # ICA cannot enter Stage 5 without complete hazard/loss lineage either.
     excluded.update(batch.incomplete_ica_ids)
     return excluded
 

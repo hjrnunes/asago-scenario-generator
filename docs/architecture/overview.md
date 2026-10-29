@@ -749,7 +749,11 @@ as an explicit exclusion while sibling ICAs proceed. A technical correction/rech
 failure retains its provider-failure disposition and original semantic attempt,
 but cannot admit the rejected ICA. Unverified replacement prose is never
 applied to the enumeration; only independently supported corrections are applied.
-An initial provider outage with no semantic verdict remains distinguishable.
+An initial provider outage with no semantic verdict remains distinguishable:
+the ICA is unverified, its record keeps the `provider_failure` disposition and
+the error, and it does not reach Stage 5, because only a supported verdict
+admits an ICA. A slot left with no ICA this way is unresolved and says it
+could not be verified. No verification request is repeated for it.
 Taxonomy concepts and mapping evidence do not enter this verifier. Mapping strength is instead
 derived deterministically from the complete pinned relation path.
 
