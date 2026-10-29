@@ -20,6 +20,11 @@ detector. The semantics are the arm 1 evaluator's, which the
 - An observed record selection adds, per argument value, a ``where`` item on
   every ``not_called`` comparison of its operation, or else an ``eq``
   comparison appended after the condition's own comparisons.
+- An ownership selection is an exception when the caller names the
+  operation whose call the scenario declares as its failure. The selected
+  record is one example of a record outside the session subject's reach, so
+  an ``eq`` on its key would miss every other such record; see
+  :func:`_ownership_bindings` for what replaces it.
 
 Facts are the producer's target-observation fact values
 (:func:`~asago_scenario_generator.stpa.scenario_prod.condition_check.target_observation_fact_values`).
@@ -29,7 +34,7 @@ Stage 5 check's stricter ones on mixed-type operands.
 
 from __future__ import annotations
 
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Iterator, Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -58,6 +63,10 @@ from asago_scenario_generator.stpa.tool_call_condition import (
 Truth = bool | None
 
 _UNRESOLVED = object()
+_STATE_PREFIX = "TARGET-STATE."
+# What replaces an ownership selection: a comparison, or None when a
+# comparison of the condition already covers it.
+_Replacement = dict[str, Any] | None
 
 
 @dataclass(frozen=True)
@@ -93,8 +102,16 @@ def bind_tool_call_condition(
     fact_values: Mapping[str, object],
     *,
     condition_omitted_reason: str | None = None,
+    failure_operation: str | None = None,
+    read_arguments: Mapping[str, Mapping[str, frozenset[str]]] | None = None,
 ) -> ToolCallBinding:
-    """Bind *condition* against *fact_values*; see the module docstring."""
+    """Bind *condition* against *fact_values*; see the module docstring.
+
+    ``failure_operation`` is the operation whose call the scenario declares
+    as its failure; only a selection on it can be an ownership selection.
+    ``read_arguments`` maps a read operation to the values its supplied reads
+    passed per argument.
+    """
 
     raw = (
         condition.model_dump(mode="json")
@@ -123,7 +140,10 @@ def bind_tool_call_condition(
         return _not_executable(
             REASON_UNRESOLVED_FACT, f"unresolved fact operand {error.path!r}"
         )
-    comparisons = _apply_selection(comparisons, raw, fact_values)
+    ownership = _ownership_bindings(
+        raw, fact_values, failure_operation, read_arguments or {}
+    )
+    comparisons = _apply_selection(comparisons, raw, fact_values, ownership)
     unknown = _first_index(statics, None)
     if unknown is not None:
         return _not_executable(
@@ -131,11 +151,15 @@ def bind_tool_call_condition(
             f"state predicate comparisons[{unknown}] is unknown in the target "
             "state and none is false",
         )
+    detail = "every fact operand resolved and every state predicate holds"
+    if ownership:
+        detail += (
+            f"; the selection on {failure_operation} covers every value outside "
+            "the session subject's records, not only the selected record"
+        )
     return ToolCallBinding(
         ToolCallConditionStatus(
-            status=TOOL_CALL_CONDITION_BOUND,
-            reason=REASON_BOUND,
-            detail="every fact operand resolved and every state predicate holds",
+            status=TOOL_CALL_CONDITION_BOUND, reason=REASON_BOUND, detail=detail
         ),
         ToolCallCondition.model_validate({"comparisons": comparisons}),
     )
@@ -269,14 +293,23 @@ def _has_session_equality(
 def _session_value(fact_values: Mapping[str, object]) -> str | None:
     """Return the session subject of the observed state, if exactly one exists."""
 
-    prefix = "TARGET-STATE."
+    subject = _session_subject(fact_values)
+    return subject[1] if subject is not None else None
+
+
+def _session_subject(fact_values: Mapping[str, object]) -> tuple[str, str] | None:
+    """Return the session subject's fact path and value, if exactly one exists."""
+
     state = {
-        path.removeprefix(prefix): value
+        path.removeprefix(_STATE_PREFIX): value
         for path, value in fact_values.items()
-        if path.startswith(prefix) and "." not in path.removeprefix(prefix)
+        if path.startswith(_STATE_PREFIX)
+        and "." not in path.removeprefix(_STATE_PREFIX)
     }
     subject = resolve_session_subject(state)
-    return subject.value if subject.observed else None
+    if not subject.observed or subject.path is None or subject.value is None:
+        return None
+    return _STATE_PREFIX + ".".join(subject.path), subject.value
 
 
 def _is_session_equality(
@@ -448,14 +481,19 @@ def _apply_selection(
     comparisons: list[dict[str, Any]],
     raw: Mapping[str, Any],
     fact_values: Mapping[str, object],
+    ownership: Mapping[int, _Replacement],
 ) -> list[dict[str, Any]]:
     not_called = {
         item["operation"] for item in comparisons if item["kind"] == "not_called"
     }
     appended: list[dict[str, Any]] = []
-    for item in _observed_argument_values(raw):
+    for position, item in enumerate(_observed_argument_values(raw)):
         wanted = selection_wanted_value(item["path"], fact_values)
-        if item["operation"] in not_called:
+        if position in ownership:
+            replacement = ownership[position]
+            if replacement is not None:
+                appended.append(replacement)
+        elif item["operation"] in not_called:
             for comparison in comparisons:
                 if (
                     comparison["kind"] == "not_called"
@@ -478,6 +516,459 @@ def _apply_selection(
                 }
             )
     return comparisons + appended
+
+
+def _ownership_bindings(
+    raw: Mapping[str, Any],
+    fact_values: Mapping[str, object],
+    operation: str | None,
+    read_arguments: Mapping[str, Mapping[str, frozenset[str]]],
+) -> dict[int, _Replacement]:
+    """Return what replaces each ownership selection, by selection position.
+
+    Only selections on ``operation`` can be replaced, and only when the
+    supplied reads called ``operation``: its call then returns the record it
+    names, so a call reaching a record outside the session subject's reach
+    discloses that record. Every selection must be on ``operation``, and the
+    condition must concern that call alone: every comparison is a ``value``
+    comparison; an argument operand is one of ``operation`` and is compared
+    with a literal or the session subject; a comparison without an argument
+    compares fields of the selected record, the session subject, or
+    literals, with each compared field present and not null on every record
+    of the selected record's collection. Otherwise every selection keeps its
+    ``eq``.
+
+    - An argument the condition compares ``ne`` with the session subject is
+      covered by that comparison when the supplied reads of ``operation``
+      passed the session subject for it and every value they passed is a
+      subject id (see :func:`_subject_domain`). Its selection then adds
+      nothing. Otherwise the selection is handled as below or keeps its
+      ``eq``.
+    - Owner fields of the selected record compared ``ne`` with the session
+      subject make the selected record one the subject is not entitled to.
+      The entitled records are those of its collection that fail the
+      condition's record comparisons. A selection of the record's key, or of
+      an owner field for an argument of another name, binds ``not_in`` the
+      entitled keys when the supplied state settles the set: the supplied
+      reads of ``operation`` passed only keys of the collection for that
+      argument, every read of such a key confirms the key's owner fields
+      (see :func:`_reads_disagree`), the set is not empty, and no record
+      left out of it is named by a record that names the session subject.
+      The supplied state collection is taken as the whole collection; these
+      checks reject evidence that contradicts it, they do not prove it.
+    - A selection of an owner field for an argument of the same name binds
+      ``not_in`` the session subject under the read evidence of the first
+      case.
+    """
+
+    session = _session_subject(fact_values)
+    selection = raw.get("record_selection")
+    if (
+        operation not in read_arguments
+        or session is None
+        or not isinstance(selection, Mapping)
+        or selection.get("status") != "observed"
+    ):
+        return {}
+    items = selection.get("argument_values") or ()
+    if any(item["operation"] != operation for item in items):
+        return {}
+    comparisons = raw.get("comparisons") or []
+    record_path = selection.get("record_path")
+    scope = _record_scope(comparisons, operation, record_path, fact_values, session)
+    if scope is None:
+        return {}
+    reads = read_arguments[operation]
+    covered = _arguments_ne_session(comparisons, operation, session)
+    collections = _record_collections(fact_values)
+    replaced: dict[int, _Replacement] = {}
+    for position, item in enumerate(items):
+        argument, path = item["argument"], item["path"]
+        passed = reads.get(argument, frozenset())
+        field_name = path.removeprefix(f"{record_path}.")
+        subject_ids = session[1] in passed and _subject_domain(
+            passed, argument, collections, session[1]
+        )
+        if argument in covered and subject_ids:
+            replaced[position] = None
+        elif field_name in scope.owners and argument == field_name:
+            if subject_ids:
+                replaced[position] = _not_in(operation, argument, [session[1]])
+        elif path == record_path or field_name in scope.owners:
+            entitled = _entitled_keys(scope, argument, passed, fact_values, session)
+            if entitled is not None:
+                replaced[position] = _not_in(operation, argument, entitled)
+    return replaced
+
+
+@dataclass(frozen=True)
+class _RecordScope:
+    """The selected record's collection and the condition's record comparisons."""
+
+    record_path: str
+    collection: Mapping[str, Mapping[str, Any]]
+    comparisons: tuple[Mapping[str, Any], ...]
+    owners: frozenset[str]
+
+
+def _record_scope(
+    comparisons: Iterable[Mapping[str, Any]],
+    operation: str,
+    record_path: Any,
+    fact_values: Mapping[str, object],
+    session: tuple[str, str],
+) -> _RecordScope | None:
+    """Return the record comparisons, or ``None`` when the condition is not one call's.
+
+    ``None`` when a comparison is not a ``value`` comparison, names another
+    operation, compares an argument with anything but a literal or the
+    session subject (a field of the selected record would bind that one
+    record's value for every record), cites a fact outside the selected
+    record other than the session subject, or compares a field that some
+    record of the collection lacks or holds as null.
+    """
+
+    collection = _collection(record_path, fact_values)
+    if collection is None:
+        return None
+    owners: set[str] = set()
+    record_comparisons: list[Mapping[str, Any]] = []
+    for item in comparisons:
+        if item.get("kind") != "value":
+            return None
+        sides = (item["left"], item["right"])
+        named = [side for side in sides if side.get("source") == "argument"]
+        if any(side.get("operation") != operation for side in named):
+            return None
+        if named:
+            if len(named) > 1 or not any(
+                side.get("source") == "literal" or _is_session_operand(side, session)
+                for side in sides
+                if side.get("source") != "argument"
+            ):
+                return None
+            continue
+        fields = [_record_field(side, record_path) for side in sides]
+        for side, field_name in zip(sides, fields):
+            if field_name is None and not (
+                side.get("source") == "literal" or _is_session_operand(side, session)
+            ):
+                return None
+            if field_name is not None and any(
+                record.get(field_name) is None for record in collection.values()
+            ):
+                return None
+        record_comparisons.append(item)
+        for field_name, other in zip(fields, reversed(sides)):
+            if (
+                field_name
+                and item["op"] == "ne"
+                and _is_session_operand(other, session)
+            ):
+                owners.add(field_name)
+    return _RecordScope(
+        str(record_path), collection, tuple(record_comparisons), frozenset(owners)
+    )
+
+
+def _entitled_keys(
+    scope: _RecordScope,
+    argument: str,
+    passed: frozenset[str],
+    fact_values: Mapping[str, object],
+    session: tuple[str, str],
+) -> list[str] | None:
+    """Return the keys of the records the session subject is entitled to.
+
+    ``None`` unless the set is complete and sound: the condition names owner
+    fields, the reads passed ``argument`` only keys of the collection and
+    agree with the state on those keys' owner fields, the record
+    comparisons hold on the selected record and are known on every record,
+    the set is not empty, and no record left out of it is named by a record
+    that names the session subject.
+    """
+
+    collection = scope.collection
+    if (
+        not scope.owners
+        or not passed
+        or not all(value in collection for value in passed)
+        or _reads_disagree(scope, argument, fact_values)
+    ):
+        return None
+    selected = scope.record_path.rsplit(".", 1)[-1]
+    entitled: list[str] = []
+    for key, record in collection.items():
+        truths = [
+            compare(
+                item["op"],
+                _record_operand(item["left"], scope.record_path, record, session),
+                _record_operand(item["right"], scope.record_path, record, session),
+            )
+            for item in scope.comparisons
+        ]
+        if None in truths:
+            return None
+        if all(truths):
+            continue
+        if key == selected:
+            return None
+        entitled.append(key)
+    linked = _session_linked_values(fact_values, session[1])
+    if not entitled or any(key in linked for key in collection if key not in entitled):
+        return None
+    return sorted(entitled)
+
+
+def _reads_disagree(
+    scope: _RecordScope, argument: str, fact_values: Mapping[str, object]
+) -> bool:
+    """Return whether a supplied read of a key fails to confirm its owners.
+
+    A read of a key is an observation whose ``arguments.<argument>`` fact is
+    a key of the collection. An ``arguments.<argument>`` fact that is
+    ambiguous (the read's content also carries an ``arguments`` object that
+    disagrees with the call) or not a string leaves the read's key unknown,
+    which counts as disagreement. The records it returns for that key are the
+    objects in its content, at any depth, that hold the key as a value. The
+    read agrees only when at least one such record exists and every one of
+    them holds each owner field with the state's value; a missing record or
+    owner field is not agreement.
+    """
+
+    marker = f".arguments.{argument}"
+    for path in fact_values:
+        if not path.endswith(marker) or path.startswith(_STATE_PREFIX):
+            continue
+        found, key = resolve_fact(fact_values, path)
+        if not found or not isinstance(key, str):
+            return True
+        record = scope.collection.get(key)
+        if record is None:
+            continue
+        returned = [
+            item
+            for item in _objects(_read_content(fact_values, path.removesuffix(marker)))
+            if key in item.values()
+        ]
+        if not returned or any(
+            owner not in item or item[owner] != record.get(owner)
+            for item in returned
+            for owner in scope.owners
+        ):
+            return True
+    return False
+
+
+def _read_content(fact_values: Mapping[str, object], read: str) -> dict[str, object]:
+    """Rebuild the top-level content object of one read from its fact paths."""
+
+    prefix = f"{read}."
+    return {
+        path.removeprefix(prefix): value
+        for path, value in fact_values.items()
+        if path.startswith(prefix)
+        and "." not in path.removeprefix(prefix)
+        and path.removeprefix(prefix) != "arguments"
+    }
+
+
+def _objects(value: object) -> Iterator[Mapping[str, object]]:
+    """Yield every object in a JSON value, the value itself first."""
+
+    if isinstance(value, Mapping):
+        yield value
+        for child in value.values():
+            yield from _objects(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _objects(child)
+
+
+def _scalars(value: object) -> Iterator[object]:
+    """Yield every scalar in a JSON value, at any depth."""
+
+    if isinstance(value, Mapping):
+        for child in value.values():
+            yield from _scalars(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _scalars(child)
+    else:
+        yield value
+
+
+def _record_collections(
+    fact_values: Mapping[str, object],
+) -> dict[str, Mapping[str, Mapping[str, Any]]]:
+    """Return every record collection of the state, by name."""
+
+    collections: dict[str, Mapping[str, Mapping[str, Any]]] = {}
+    for path, records in fact_values.items():
+        name = path.removeprefix(_STATE_PREFIX)
+        if (
+            name != path
+            and "." not in name
+            and isinstance(records, Mapping)
+            and records
+            and all(isinstance(record, Mapping) for record in records.values())
+        ):
+            collections[name] = records
+    return collections
+
+
+def _subject_domain(
+    passed: frozenset[str],
+    argument: str,
+    collections: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    session: str,
+) -> bool:
+    """Return whether every value the reads passed for ``argument`` is a subject id.
+
+    A passed value that is no record key is one. A passed value that is a
+    record key is one only when it is a key of the subject's own collection
+    and of no other. The subject's own collection is the one collection that
+    has the session subject as a record key, provided that record holds the
+    session subject under ``argument`` (the collection is keyed by the
+    argument's ids), names it in no other field, and no other record of
+    that collection names it in any field. A record that names the subject
+    elsewhere, such as an owner field, shows the subject owns records of
+    that collection whose keys only happen to share its id. Records of other
+    collections that name the subject do not matter here. Any other case leaves open
+    whether the argument takes subject ids or record keys.
+    """
+
+    if not any(
+        value in records for value in passed for records in collections.values()
+    ):
+        return True
+    own = [name for name, records in collections.items() if session in records]
+    if len(own) != 1:
+        return False
+    record = collections[own[0]][session]
+    if record.get(argument) != session or any(
+        value == session for name, value in record.items() if name != argument
+    ):
+        return False
+    if any(
+        session in _scalars(other)
+        for key, other in collections[own[0]].items()
+        if key != session
+    ):
+        return False
+    return all(
+        {name for name, records in collections.items() if value in records} == {own[0]}
+        for value in passed
+        if any(value in records for records in collections.values())
+    )
+
+
+def _arguments_ne_session(
+    comparisons: Iterable[Mapping[str, Any]],
+    operation: str,
+    session: tuple[str, str],
+) -> set[str]:
+    """Return the arguments of ``operation`` compared ``ne`` with the session subject."""
+
+    covered: set[str] = set()
+    for item in comparisons:
+        if item.get("kind") != "value" or item.get("op") != "ne":
+            continue
+        for mine, other in (
+            (item["left"], item["right"]),
+            (item["right"], item["left"]),
+        ):
+            if (
+                mine.get("source") == "argument"
+                and mine.get("operation") == operation
+                and _is_session_operand(other, session)
+            ):
+                covered.add(mine["argument"])
+    return covered
+
+
+def _session_linked_values(
+    fact_values: Mapping[str, object], session: str
+) -> frozenset[object]:
+    """Return the field values of every record that names the session subject.
+
+    A key among them is a record the state links to the subject, for example
+    the listing of the subject's own reservation, so the condition's owner
+    fields alone do not settle whether the subject may reach it.
+    """
+
+    values: set[object] = set()
+    for path, records in fact_values.items():
+        name = path.removeprefix(_STATE_PREFIX)
+        if name == path or "." in name or not isinstance(records, Mapping):
+            continue
+        for record in records.values():
+            if isinstance(record, Mapping) and session in record.values():
+                values.update(
+                    value for value in record.values() if isinstance(value, str)
+                )
+    return frozenset(values)
+
+
+def _collection(
+    record_path: Any, fact_values: Mapping[str, object]
+) -> Mapping[str, Mapping[str, Any]] | None:
+    """Return the records of the collection ``record_path`` selects a record of."""
+
+    if not isinstance(record_path, str) or not record_path.startswith(_STATE_PREFIX):
+        return None
+    segments = record_path.removeprefix(_STATE_PREFIX).split(".")
+    if len(segments) != 2:
+        return None
+    found, records = resolve_fact(fact_values, _STATE_PREFIX + segments[0])
+    if (
+        not found
+        or not isinstance(records, Mapping)
+        or segments[1] not in records
+        or not all(isinstance(record, Mapping) for record in records.values())
+    ):
+        return None
+    return records
+
+
+def _record_field(operand: Mapping[str, Any], record_path: Any) -> str | None:
+    """Return the field a fact operand names directly inside the selected record."""
+
+    path = operand.get("path")
+    if operand.get("source") != "fact" or not isinstance(path, str):
+        return None
+    name = path.removeprefix(f"{record_path}.")
+    return name if name != path and "." not in name else None
+
+
+def _record_operand(
+    operand: Mapping[str, Any],
+    record_path: str,
+    record: Mapping[str, Any],
+    session: tuple[str, str],
+) -> Any:
+    field_name = _record_field(operand, record_path)
+    if field_name is not None:
+        found = record.get(field_name)
+        return _UNRESOLVED if found is None else found
+    if operand.get("source") == "literal":
+        return operand["value"]
+    return session[1]
+
+
+def _is_session_operand(operand: Mapping[str, Any], session: tuple[str, str]) -> bool:
+    if operand.get("source") == "fact":
+        return operand.get("path") == session[0]
+    return operand.get("source") == "literal" and operand.get("value") == session[1]
+
+
+def _not_in(operation: str, argument: str, values: list[str]) -> dict[str, Any]:
+    return {
+        "kind": "value",
+        "left": {"source": "argument", "operation": operation, "argument": argument},
+        "op": "not_in",
+        "right": {"source": "literal", "value": list(values)},
+    }
 
 
 def compare(op: str, left: Any, right: Any) -> Truth:

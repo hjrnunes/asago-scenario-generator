@@ -874,6 +874,67 @@ wrong, so code derives nothing either. A scenario on the `failure_call`
 route without a derived condition is published without one
 (`tool_call_condition_status` `not_executable`, reason `no_condition`), and
 the consumer rejects that command attempt as `tool_call_condition_missing`.
+
+Binding normally turns each `record_selection` argument into an `eq` on the
+selected value. An ownership selection is bound differently, because its
+record is one example of a record outside the session subject's reach, not
+the extent of the failure. Only the operation the scenario declares as its
+whole failure can have one: the unsafe control action is `INCORRECT`, the
+safe outcome is a `command_attempt` on the operation, every observation
+criterion with a claim level is a `command_attempt` on the same operation,
+the failure call (when the draft has one) is an `incorrect_call` of it, and
+a supplied target read called it. Every selection must be on that
+operation, and the condition must concern that call alone: only `value`
+comparisons; an argument operand is one of that operation's and is compared
+with a literal or the session subject, never with a field of the selected
+record (that value would be frozen for every record); other operands are
+fields of the selected record, the session subject, or literals, with every
+compared field present and not null on each record of the selected
+record's collection. Anything else keeps every `eq`. Within that scope:
+
+- An argument the condition compares `ne` with the session subject loses
+  its selection only when the supplied reads of the operation passed the
+  session subject for it and every value they passed is a subject id. A
+  passed value that is no record key is one. A passed value that is a
+  record key is one only when it is a key of the subject's own collection
+  and of no other collection. The subject's own collection is the single
+  collection that has the session subject as a record key, and only when
+  that record holds the session subject under the argument's name and
+  names it in no other field, and no other record of that collection names
+  the subject in any field. A record that names the subject in another
+  field, such as an owner field, shows the subject owns records of that
+  collection whose keys only share its id; records of other collections
+  that name the subject do not count against it. Otherwise a value that is both a subject id and
+  a record key (numbers and UUIDs can be both) leaves the argument's domain
+  open, so it is treated as below.
+- When the condition compares owner fields of the selected record `ne` with
+  the session subject, the records those comparisons fail are the entitled
+  ones. A selection of the record key, or of an owner field for an argument
+  of another name, binds `not_in` the entitled keys when the supplied state
+  settles the set: the reads of the operation passed only keys of the
+  collection for that argument; every read's argument fact for it resolves
+  to one string (a read whose content repeats an `arguments` object that
+  disagrees with the call leaves it ambiguous, which declines); in every read of such a key, at least one
+  object in its content holds that key, and every object that holds it
+  holds each owner field with the state's value (no such object, or a
+  missing owner field, counts as disagreement);
+  the set is not empty; and no record it leaves out is named by a record
+  that names the session subject. An owner field selected for an argument
+  of its own name binds `not_in` the session subject under the same read
+  evidence as the first case.
+- Every other selection keeps its `eq`.
+
+These checks reject evidence that contradicts the supplied state; they do
+not prove the collection complete. A non-empty set of observed reads says
+nothing about records no read touched. The binder takes the supplied
+`TARGET-STATE` collection as the whole collection, because the target
+observations are the producer's supplied context for the target's records
+and Stage 5 cites records only from them; a capture that holds only part of
+a collection would make the entitled set too small.
+
+The bound status detail says when a selection was replaced. Every result
+stays within `tool-call-condition-v2`; the condition still flags a call the
+target refuses, since v2 carries no call outcome.
 Runtime-readiness
 concerns (chat surfaces, clocks, observers, locators, credentials, and endpoint
 details) belong to the consumer. A caller-requested environment basis

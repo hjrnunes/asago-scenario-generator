@@ -10,10 +10,12 @@ from asago_scenario_generator.stpa.models.causal_factor import (
     CausalEvidenceStatus,
     CausalFactorKind,
 )
+from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.models.semantic_conditions import (
     SemanticCondition,
 )
 from asago_scenario_generator.stpa.observation_contract import (
+    FailureCall,
     ObservationAssessment,
     ObservationContract,
     ObservationCriterion,
@@ -92,6 +94,46 @@ def _discriminating_condition_result(
     return checked.condition, checked.check, None
 
 
+def declared_failure_operation(
+    safe_outcome: BaseModel | None,
+    failure_call: FailureCall | None,
+    *,
+    uca_type: UCAType,
+    observation_criteria: Sequence[BaseModel],
+) -> str | None:
+    """Return the operation whose call the scenario declares as its whole failure.
+
+    The unsafe control action must be ``INCORRECT`` (provided with an unsafe
+    value): a timing, duration, or omission category concerns when or
+    whether the action happens, which no set of records states. The safe
+    outcome must be a command attempt on one operation, every observation
+    criterion that declares a claim level must be a command attempt on that
+    same operation, and a failure call, when the draft has one, must be an
+    incorrect call of it. A reply-level claim, a claim on another operation,
+    a missing call, or a failure call of another operation declares none,
+    so the binder keeps the selection the model wrote.
+    """
+
+    if uca_type is not UCAType.incorrect or safe_outcome is None:
+        return None
+    if getattr(safe_outcome, "claim_level", None) != "command_attempt":
+        return None
+    operation = getattr(safe_outcome, "operation_name", None)
+    for criterion in observation_criteria:
+        level = getattr(criterion, "claim_level", None)
+        if level is not None and (
+            level != "command_attempt"
+            or getattr(criterion, "operation_name", None) != operation
+        ):
+            return None
+    if failure_call is not None and (
+        failure_call.kind != "incorrect_call"
+        or failure_call.operation_name != operation
+    ):
+        return None
+    return operation
+
+
 def _materialize_adversary(draft: BaseModel) -> Adversary:
     """Derive the compiler-owned adversary fields.
 
@@ -160,6 +202,17 @@ def compile_scenario_spec(
             condition,
             condition_universe.fact_values if condition_universe is not None else {},
             condition_omitted_reason=omitted_reason,
+            failure_operation=declared_failure_operation(
+                outcome.safe_observable_outcome,
+                getattr(outcome, "failure_call", None),
+                uca_type=context.ica.uca_type,
+                observation_criteria=outcome.observation_criteria,
+            ),
+            read_arguments=(
+                condition_universe.read_arguments
+                if condition_universe is not None
+                else None
+            ),
         )
     return assemble_scenario_spec(
         assembly,
