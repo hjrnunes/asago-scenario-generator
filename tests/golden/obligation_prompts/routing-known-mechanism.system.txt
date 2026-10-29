@@ -76,6 +76,14 @@ do not define it. A mechanism that realizes the class in this system supports al
 even when its actor, data, or setting differs from the policy example, and resemblance to
 the example alone is not alignment evidence.
 
+Some classes name a kind of outcome rather than a particular actor, asset, or operation:
+hallucination, disinformation, lack of robustness, and the like. For such a class, a
+consequence the attack mechanism produces in this system counts as alignment: a mechanism
+that makes the system state false, fabricated, misleading, or erroneous content realizes a
+hallucination, disinformation, or robustness class, even though the class does not name that
+mechanism and also arises without an attack. Do not choose `mismatch` because such a class is
+broader than the mechanism or is not itself an attack technique.
+
 Supply a short rationale for each decision. The mapping-strength label, when shown in
 the read-only question context, is discovery metadata and must not be returned or copied.
 Category expansion discovers possibilities; it is not proof of alignment or mismatch.

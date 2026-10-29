@@ -225,8 +225,10 @@ from the exact mapping path. The raw mapping path never enters the prompt.
 Each question's reviewed risk carries the risk card's class description next
 to its threat, consequence, and impact. Routing judges `risk_alignment`
 against the class; the threat, consequence, and impact are the source
-policy's example of that class. Slot filling's view of the question leaves
-the class description out.
+policy's example of that class. A class that names a kind of outcome
+(hallucination, disinformation, lack of robustness) is aligned with a
+mechanism that produces that outcome in this system. Slot filling's view of
+the question leaves the class description out.
 A routing batch holds up to `max_batch_size` (default 8) questions, and each
 question states its own `attack_pattern_id` and `attack_pattern_name`; the
 concern glossary describes each pattern once. Each provider route echoes its
