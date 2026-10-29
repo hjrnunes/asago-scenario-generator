@@ -205,7 +205,9 @@ class TestControlStructureVersions:
     def _unchanged(control_structure, *_args, **_kwargs):
         return control_structure, []
 
-    def _run(self, run_dir: Path, writes: Counter | None = None, *, bind=None):
+    def _run(
+        self, run_dir: Path, writes: Counter | None = None, *, bind=None, feed=None
+    ):
         base = "asago_scenario_generator.stpa.system_model.run."
 
         def revise(*, control_structure, **_kwargs):
@@ -237,6 +239,10 @@ class TestControlStructureVersions:
             ),
             patch(base + "revise_control_structure", side_effect=revise),
         ]
+        if feed is not None:
+            patches.append(
+                patch(base + "add_operation_result_feedback", side_effect=feed)
+            )
         if writes is not None:
             patches.extend(_spy_canonical_writes(writes))
         with ExitStack() as stack:
@@ -259,6 +265,27 @@ class TestControlStructureVersions:
         assert revised == f"{bound} revised"
         # Placement is the last step: its version is the canonical file.
         _absent(tmp_path, "control-structure-placed.yaml")
+
+    def test_operation_result_feedback_follows_revision_and_precedes_placement(
+        self, tmp_path
+    ):
+        def feed(control_structure, *_args, **_kwargs):
+            structure, _warnings = self._tagged("fed")(control_structure)
+            return structure
+
+        result = self._run(tmp_path, feed=feed)
+
+        revised = self._description(tmp_path, "control-structure-revised.yaml")
+        assert revised.endswith("bound revised")
+        assert self._description(
+            tmp_path, "control-structure-operation-feedback.yaml"
+        ) == (f"{revised} fed")
+        assert self._description(tmp_path, "control-structure.yaml") == (
+            f"{revised} fed placed"
+        )
+        assert result.control_structure.responsibilities[0].description.endswith(
+            "revised fed placed"
+        )
 
     def test_canonical_holds_the_final_version(self, tmp_path):
         result = self._run(tmp_path)
@@ -298,5 +325,6 @@ class TestControlStructureVersions:
             "control-structure-reviewed.yaml",
             "control-structure-evidence-bound.yaml",
             "control-structure-revised.yaml",
+            "control-structure-operation-feedback.yaml",
             "control-structure-placed.yaml",
         )

@@ -119,8 +119,13 @@ settle it.
 
 Across the sample the pattern is the same: actions that write or notify
 through a tool have no `operation_result` channel for that tool's result.
-That the pattern recurs across use cases and arms suggests a systematic
-omission in how the structure is derived; this was not traced to a cause.
+The cause is in how Stage 2 derives the structure: a feedback channel exists
+only as the update of a process-model part (`FeedbackChannel.updates` is
+required, and Call 2b derives feedback part by part), and Call 2a derives
+the parts before any action exists, so no part holds what a controller
+learns from the operations it invokes. The evidence block also omitted
+whether an operation returns a result. Stage 2 now adds that feedback; see
+[Counts with operation-result feedback](#counts-with-operation-result-feedback).
 
 ### `hazard_without_ica`
 
@@ -169,3 +174,53 @@ none was established as a system deficiency: in every sampled feedback
 finding the target's tool returns a result the structure does not model.
 
 `ica_without_related_constraints` produced no finding to sample.
+
+## Counts with operation-result feedback
+
+Stage 2 now models the result an invoked operation returns as feedback to
+the responsibility that invoked it
+(`stpa.system_model.operation_feedback.add_operation_result_feedback`, run
+after the critic revision and before reply-constraint placement). For each
+`tool_call` action bound to an observed operation that declares an output,
+on a controlled process from which the issuing responsibility has no
+feedback channel, it adds an `operation_result` channel from the action's
+target and the process-model part that channel updates. The part has no
+values and no action references it; the channel carries no authority
+assessment.
+
+The step runs after the last step that adds or changes actions, and
+placement changes only constraint citations, so applying it to each run's
+final structure reproduces what Stage 2 would now publish. The sweep was
+re-run that way, with the operations of the target profile each run's
+`generate` stage was given (the last `--target-profile` of its recorded
+arguments; in every run it lists the same tools and outputs as the
+discovery profile, and every tool declares an output):
+
+```bash
+OUT=$(mktemp -d)
+uv run --frozen python WRAPPER --out-dir "$OUT/sweep" RUNS/stpo7-* RUNS/stpo7b-*
+```
+
+where `WRAPPER` replaces the sweep's `load_final_artifacts` with one that
+applies the step to the loaded structure, then calls the sweep's `main`. The
+same 63 runs were diagnosed. The step added 190 channels in 58 runs; a
+second application adds none.
+
+| Check | stpo7 airbnb | stpo7 klarna | stpo7 occiai | stpo7b airbnb | stpo7b klarna | stpo7b occiai | All |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| `controlled_process_without_feedback` | 8/9, 32 | 5/10, 9 | 4/8, 10 | 9/10, 39 | 7/16, 10 | 6/10, 10 | 39/63, 110 |
+| `controlled_process_unobserved` | 1/9, 1 | 4/10, 4 | 2/8, 3 | 3/10, 6 | 5/16, 5 | 3/10, 3 | 18/63, 22 |
+
+By arm: `controlled_process_without_feedback` baseline 20/32, 69 and current
+19/31, 41; `controlled_process_unobserved` baseline 9/32, 10 and current
+9/31, 12. Every other check's counts are unchanged.
+
+The 168 removed `controlled_process_without_feedback` findings are exactly
+those naming a bound tool call. The 110 that remain name no such action:
+79 name only replies (`model_output`, mostly to the conversation process,
+whose feedback is the user's next turn), 14 internal messages
+(`agent_message`), 7 tool calls bound to no observed operation, and 10
+other actions (state changes, an environment action, and actions whose
+`effect_kind` does not match their bound operation). The step derives
+nothing for them: the evidence states no result they return.
+

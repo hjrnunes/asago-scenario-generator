@@ -538,6 +538,17 @@ response repairs preserve valid function descriptions and ownership rather than
 inviting a wholesale redesign for an extra JSON field. These are generation
 instructions, not a claim that schema validation proves functional completeness.
 
+Stage 2 derives a feedback channel only as the update of a process-model
+part, and the parts are derived before any action exists, so the result an
+invoked operation returns is never modelled by the calls themselves. After
+the critic revision, code adds it from typed facts alone: for each
+`tool_call` action bound to an observed operation that declares an output,
+on a controlled process from which the issuing responsibility has no
+feedback channel, an `operation_result` channel from that process and the
+variable it updates. The variable has no values and no action depends on
+it, and the channel carries no authority assessment; which decision the
+result informs stays a modelling question.
+
 Systemic and target-derived ICA review share the pure
 `models.ica_enumeration.classify_ica_semantics` rule. Providers must describe
 the named action state and the supported/contradictory/unknown hazard path;

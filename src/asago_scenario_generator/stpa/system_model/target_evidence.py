@@ -53,12 +53,17 @@ class EvidenceArgument:
 
 @dataclass(frozen=True)
 class EvidenceOperation:
-    """One observed tool with its arguments and interpreted effect."""
+    """One observed tool with its arguments and interpreted effect.
+
+    ``returns_result`` records whether the tool declares an output, which
+    the tool returns to the caller that invoked it.
+    """
 
     name: str
     description: str
     arguments: tuple[EvidenceArgument, ...]
     effect: str | None = None
+    returns_result: bool = False
 
     @property
     def ref(self) -> str:
@@ -226,6 +231,7 @@ def _operations(profile: ExecutionTargetProfile) -> tuple[EvidenceOperation, ...
                 description=(tool.description or "").strip(),
                 arguments=arguments,
                 effect=None if effect in (None, "unknown") else effect,
+                returns_result=bool(tool.output_schema),
             )
         )
     return tuple(sorted(result, key=lambda item: item.name))

@@ -98,6 +98,9 @@ from asago_scenario_generator.stpa.system_model.target_evidence import (
     check_evidence_bindings,
     TargetEvidence,
 )
+from asago_scenario_generator.stpa.system_model.operation_feedback import (
+    add_operation_result_feedback,
+)
 from asago_scenario_generator.stpa.system_model.profile import (
     derive_capability_profile,
 )
@@ -932,6 +935,11 @@ def _run_stage_2_steps(
         target_evidence=target_evidence,
     )
     versions.add(control_structure, "control-structure-revised.yaml")
+    # A structure the step leaves as it is keeps the revised version's name.
+    fed = add_operation_result_feedback(control_structure, target_evidence)
+    if fed is not control_structure:
+        control_structure = fed
+        versions.add(control_structure, "control-structure-operation-feedback.yaml")
     critic_revision = _critic_revision_record(
         critic_findings, post_revision_warnings, revised=revised
     )
