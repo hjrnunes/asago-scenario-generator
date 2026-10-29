@@ -14,21 +14,38 @@ checks conditions against) or the ``operation`` of some control action in
 the final structure.  An identifier-like name (``escalate_trust_safety``,
 ``getOrder``, ``retrieve-1``) is named wherever it stands as a whole
 identifier; a plain word such as ``update`` only when quoted or backticked,
-so ordinary prose does not name it.  A hazard that names no such operation
-is not checked.
-For each hazard an ICA cites, at least one named operation must be the
-operation of the slot's own control action; otherwise the ICA is flagged
-with the slots that own the named operations, and with the named operations
-that no control action invokes, which no slot owns.
+so ordinary prose does not name it.  A name given as an example of a wider
+class ("critical actions such as ``modify_booking``", "(e.g. ``get_listing``)")
+does not count: the hazard is about the class, not that operation.  A hazard
+that names no such operation is not checked.
+
+Only a slot whose action acts directly, through its own output or its own
+operation, is checked: an action with effect ``model_output``, ``tool_call``,
+``environment_action``, or no recorded effect.  A coordination link, a
+message to another controller (``agent_message``), and a session or
+persistent state update (``state_change``) reach the controlled processes
+only through the actions that read what they pass on, so a hazard about such
+an action's operation is their expected causal path.  A ``tool_call`` action
+with no ``operation`` invokes an operation the structure does not identify,
+so it is not checked either.
+
+For each hazard an ICA cites, at least one named operation must be within
+reach of the slot's action: its own operation, or an operation whose action
+shares an operation's output with it.  Two actions share an output when one
+refers to a process-model part that a feedback channel of kind
+``operation_result`` or ``retrieved_content`` updates from the controlled
+process the other targets: a reply that reads a lookup's result relays it,
+and an operation that reads another's result depends on it.  Otherwise the
+ICA is flagged with the slots that own the named operations, and with the
+named operations that no control action invokes, which no slot owns.
 
 A mismatch is flagged, never moved.  The ICA's deviation, context, and loss
 were written for the slot's own action, so moving it to the owning slot
 would describe one action under another's identity.  An operation can also
 belong to several actions, and a hazard can name several operations, so the
-owning slot is often not unique.  A lexical match cannot tell a wrong tie
-from a real causal path through another action either (a wrong lookup that
-leads to a harmful update), so the flag removes nothing and leaves the
-judgement to the reader.
+owning slot is often not unique.  A structural check cannot tell every wrong
+tie from a real causal path through another action either, so the flag
+removes nothing and leaves the judgement to the reader.
 """
 
 from __future__ import annotations
@@ -116,14 +133,12 @@ def find_slot_hazard_mismatches(
         hazard.hazard_id: _named_operations(hazard.description, operations)
         for hazard in loss_analysis.hazards
     }
-    slot_operations = _slot_operations(control_structure)
+    reach = _Reach(control_structure)
     return tuple(
         mismatch
         for slot in enumeration.slots
         if not slot.is_na
-        for mismatch in _slot_mismatches(
-            slot, hazard_operations, owners, slot_operations
-        )
+        for mismatch in _slot_mismatches(slot, hazard_operations, owners, reach)
     )
 
 
@@ -141,13 +156,86 @@ def _operation_owners(
     return {name: tuple(pairs) for name, pairs in owners.items()}
 
 
-def _slot_operations(control_structure: ControlStructure) -> dict[tuple[str, str], str]:
-    return {
-        (resp.resp_id, action.ca_id): action.operation
-        for resp in control_structure.responsibilities
-        for action in resp.control_actions
-        if action.operation
-    }
+# Effects that reach the controlled processes only through other actions.
+_INDIRECT_EFFECTS = frozenset({"agent_message", "state_change"})
+# Feedback kinds that carry an operation's output to the controller.
+_OUTPUT_FEEDBACK = frozenset({"operation_result", "retrieved_content"})
+
+
+def _value(item: Any) -> Any:
+    return getattr(item, "value", item)
+
+
+class _Reach:
+    """Which operations a control action can reach in the final structure."""
+
+    def __init__(self, control_structure: ControlStructure) -> None:
+        self._actions: dict[tuple[str, str], Any] = {}
+        # (resp_id, pm_id) -> controlled processes whose output updates it
+        self._output_sources: dict[tuple[str, str], set[str]] = {}
+        self._invokers: dict[str, list[tuple[str, Any]]] = {}
+        for resp in control_structure.responsibilities:
+            for channel in getattr(resp, "feedback_channels", None) or ():
+                source = getattr(channel, "source", None)
+                if (
+                    source is not None
+                    and _value(source.type) == "controlled_process"
+                    and _value(getattr(channel, "source_kind", None))
+                    in _OUTPUT_FEEDBACK
+                ):
+                    self._output_sources.setdefault(
+                        (resp.resp_id, channel.updates), set()
+                    ).add(source.id)
+            for action in resp.control_actions:
+                self._actions[(resp.resp_id, action.ca_id)] = action
+                if action.operation:
+                    self._invokers.setdefault(action.operation, []).append(
+                        (resp.resp_id, action)
+                    )
+
+    def action(self, resp_id: str, ca_id: str) -> Any | None:
+        return self._actions.get((resp_id, ca_id))
+
+    def reaches(self, resp_id: str, action: Any, operation: str) -> bool:
+        """Whether *action* invokes *operation* or shares an output with it."""
+        if action.operation == operation:
+            return True
+        own_target = _target_process(action)
+        own_inputs = self._inputs(resp_id, action)
+        return any(
+            _target_process(invoker) in own_inputs
+            or (
+                own_target is not None
+                and own_target in self._inputs(invoker_resp, invoker)
+            )
+            for invoker_resp, invoker in self._invokers.get(operation, ())
+        )
+
+    def _inputs(self, resp_id: str, action: Any) -> set[str]:
+        """The controlled processes whose output *action* reads."""
+        return {
+            process
+            for pm_id in getattr(action, "process_model_refs", None) or ()
+            for process in self._output_sources.get((resp_id, pm_id), ())
+        }
+
+
+def _target_process(action: Any) -> str | None:
+    target = getattr(action, "target", None)
+    if target is None or _value(target.type) != "controlled_process":
+        return None
+    return target.id
+
+
+def _acts_directly(action: Any) -> bool:
+    """Whether the action's own output or operation carries its effect."""
+    target = getattr(action, "target", None)
+    if target is not None and _value(target.type) == "responsibility":
+        return False
+    effect = _value(getattr(action, "effect_kind", None))
+    if effect in _INDIRECT_EFFECTS:
+        return False
+    return not (effect == "tool_call" and not action.operation)
 
 
 def declared_operation_names(execution_target_profile: Any) -> tuple[str, ...]:
@@ -167,7 +255,9 @@ def _named_operations(text: str, operations: Iterable[str]) -> tuple[str, ...]:
     An identifier-like name (with ``_``, a digit, or a camelCase hump) counts
     wherever it stands as a whole identifier.  A plain word such as
     ``update`` counts only quoted or backticked, so ordinary prose ("an
-    inaccurate update") does not name an operation.
+    inaccurate update") does not name an operation.  A mention that follows
+    an example marker ("e.g.", "such as", "like", "for example", "for
+    instance", "including") in the same clause does not count; another mention can.
     """
     return tuple(sorted(name for name in operations if _names(text, name)))
 
@@ -175,33 +265,58 @@ def _named_operations(text: str, operations: Iterable[str]) -> tuple[str, ...]:
 def _names(text: str, name: str) -> bool:
     escaped = re.escape(name)
     if _IDENTIFIER_LIKE.search(name):
-        return re.search(rf"(?<![\w]){escaped}(?![\w])", text) is not None
-    return re.search(rf"(?:`{escaped}`|'{escaped}'|\"{escaped}\")", text) is not None
+        pattern = rf"(?<![\w]){escaped}(?![\w])"
+    else:
+        pattern = rf"(?:`{escaped}`|'{escaped}'|\"{escaped}\")"
+    return any(
+        not _EXAMPLE.search(_clause_before(text, match.start()))
+        for match in re.finditer(pattern, text)
+    )
+
+
+def _clause_before(text: str, end: int) -> str:
+    """Return the text from the start of *end*'s clause up to *end*."""
+    start = max(
+        (match.end() for match in _CLAUSE_END.finditer(text, 0, end)), default=0
+    )
+    return text[start:end]
 
 
 _IDENTIFIER_LIKE = re.compile(r"[_\d]|[a-z][A-Z]")
+_EXAMPLE = re.compile(
+    r"\b(?:e\.g\.|for example|for instance|such as|like|including)", re.IGNORECASE
+)
+# A clause ends at a sentence or clause stop, or a closing parenthesis; the
+# full stops inside "e.g." do not end one.
+_CLAUSE_END = re.compile(r"(?<!\be\.g)(?<!\be)\.(?=\s|$)|[;:)]")
 
 
 def _slot_mismatches(
     slot: ICASlot,
     hazard_operations: Mapping[str, tuple[str, ...]],
     owners: Mapping[str, tuple[tuple[str, str], ...]],
-    slot_operations: Mapping[tuple[str, str], str],
+    reach: _Reach,
 ) -> list[SlotHazardMismatch]:
-    # A coordination-link slot has no responsibility and invokes no operation.
-    own = slot_operations.get((str(slot.responsibility), slot.control_action))
+    # A coordination-link slot has no responsibility; it acts only through
+    # the controllers it connects.
+    if slot.responsibility is None:
+        return []
+    resp_id = str(slot.responsibility)
+    action = reach.action(resp_id, slot.control_action)
+    if action is None or not _acts_directly(action):
+        return []
     mismatches: list[SlotHazardMismatch] = []
     for ica in slot.icas:
         for hazard_id in ica.related_hazards:
             named = hazard_operations.get(hazard_id, ())
-            if not named or own in named:
+            if not named or any(reach.reaches(resp_id, action, name) for name in named):
                 continue
             mismatches.append(
                 SlotHazardMismatch(
                     ica_id=ica.ica_id,
                     slot_id=slot.slot_id,
                     control_action_id=slot.control_action,
-                    slot_operation=own,
+                    slot_operation=action.operation,
                     hazard_id=hazard_id,
                     hazard_operations=named,
                     owning_slot_ids=_owning_slot_ids(slot, named, owners),
