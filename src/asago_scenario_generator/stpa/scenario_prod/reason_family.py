@@ -29,8 +29,8 @@ mapping; the first rule that matches decides:
    in a reason whose variable is read from a ``session:`` reference. A
    mention of the session or a principal alone is not a source, and neither
    is a missing user confirmation or "another user confirmation" (also
-   past modifiers: "another user's explicit confirmation"), which is
-   consent rather than authentication or a record of the principal's. When the operation offers no ownership family the ICA
+   past a consent modifier: "another user's explicit confirmation"), which
+   is consent rather than authentication or a record of the principal's. When the operation offers no ownership family the ICA
    gets no hint; it does not fall through.
 3. ``reason_variable_field``: the reason variable is read from a ``state:``
    field that a family of the operation cites -> that family's kind
@@ -288,55 +288,25 @@ UNSETTLED_TERMS = frozenset(
         "alleged",
     }
 )
-# A principal whose noun phrase holds one of these names the principal's
-# act, not a record of theirs ("another user confirmation", "another user's
-# explicit confirmation"): no compared record.
+# A principal followed by one of these, past consent modifiers only, names
+# the principal's act, not a record of theirs ("another user confirmation",
+# "another user's explicit confirmation"): no compared record.
 CONSENT_TERMS = frozenset(
     {"confirmation", "confirmations", "approval", "approvals", "consent", "consents"}
 )
-# Words that end the noun phrase after a principal, as a negation term
-# does, so a consent noun past one is not the principal's.
-_PHRASE_BREAKS = frozenset(
+# Words that may qualify a consent noun between it and the principal
+# ("another user's prior written approval"); any other word is the head of
+# the principal's noun phrase, such as a record ("another user's account").
+CONSENT_MODIFIERS = frozenset(
     {
-        "for",
-        "by",
-        "to",
-        "of",
-        "with",
-        "from",
-        "in",
-        "on",
-        "at",
-        "than",
-        "as",
-        "the",
-        "a",
-        "an",
-        "this",
-        "that",
-        "and",
-        "or",
-        "but",
-        "is",
-        "are",
-        "was",
-        "were",
-        "be",
-        "been",
-        "has",
-        "have",
-        "had",
-        "does",
-        "do",
-        "did",
-        "will",
-        "would",
-        "can",
-        "could",
-        "should",
-        "must",
-        "may",
-        "might",
+        "explicit",
+        "express",
+        "prior",
+        "advance",
+        "written",
+        "verbal",
+        "formal",
+        "informed",
     }
 )
 # What a comparison with the principal's intent names; such a reason is an
@@ -848,16 +818,15 @@ def _principal_comparison_failure(words: Sequence[str]) -> bool:
 def _names_consent(phrase: Sequence[str]) -> bool:
     """Return whether the words after a principal name the principal's consent.
 
-    A consent noun counts within three words, past modifiers ("prior written
-    approval"), and before any preposition, verb, determiner or negation
-    ends the phrase: in "another customer's order without confirmation" the
-    confirmation is not the customer's.
+    The first word that is not a consent modifier must be a consent noun
+    ("another user's prior written approval"). Any other word ends the
+    check: in "another user's account approval status" and "another
+    customer's order without confirmation" the principal's record is
+    compared, not their consent.
     """
-    for word in phrase[:_WINDOW]:
-        if word in CONSENT_TERMS:
-            return True
-        if word in _PHRASE_BREAKS or word in NEGATION_TERMS:
-            return False
+    for word in phrase:
+        if word not in CONSENT_MODIFIERS:
+            return word in CONSENT_TERMS
     return False
 
 
@@ -893,6 +862,7 @@ __all__ = [
     "NEGATION_TERMS",
     "AUTH_TERMS",
     "COMPARISON_TERMS",
+    "CONSENT_MODIFIERS",
     "CONSENT_TERMS",
     "FAILED_COMPARISON_TERMS",
     "INTENT_TERMS",
