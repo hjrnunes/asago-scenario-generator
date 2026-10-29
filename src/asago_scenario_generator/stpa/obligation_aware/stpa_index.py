@@ -5,8 +5,9 @@ feedback to the actions and coordination links it reaches.
 :func:`mechanism_join` runs the same walk under the authority filter and
 records why each channel's candidates were kept or dropped.  Both take
 ``signature_retrieval``, off by default, which matches every channel against
-each mechanism library entry's signature instead of the fixed source-kind
-labels; no pipeline stage turns it on.
+each mechanism library entry's signature, narrowed by
+:data:`RETRIEVAL_SOURCE_KINDS`, instead of the fixed source-kind labels; no
+pipeline stage turns it on.
 
 The index is rebuilt per call rather than cached: the STPA models are mutable,
 so a cache keyed on them could serve records that were changed in place.
@@ -246,6 +247,28 @@ One controller's adversary-influenced belief or message can count as
 permission for the other.
 """
 
+RETRIEVAL_SOURCE_KINDS: Mapping[MechanismId, frozenset[FeedbackSourceKind]] = (
+    MappingProxyType(
+        {
+            MechanismId.forged_completion: frozenset(
+                {FeedbackSourceKind.operation_result, FeedbackSourceKind.other}
+            ),
+        }
+    )
+)
+"""The only source kinds signature retrieval proposes a listed mechanism from.
+
+Each set narrows its entry's signature ``source_kinds`` for signature
+retrieval alone.  The library signature stays as reviewed: its content is part
+of the mechanism-data digest the prompts record, so narrowing it would change
+what the join without the flag records.
+
+- ``forged_completion``: only a channel that carries an operation's own
+  report, ``operation_result`` or ``other``.  A user message or retrieved
+  content is not a completion report from the controlled process, and a live
+  verifier sample accepted no forged completion on those channels.
+"""
+
 
 @dataclass(frozen=True)
 class MechanismCandidate:
@@ -296,8 +319,9 @@ def mechanism_candidates(
 
     With *signature_retrieval*, every channel starts a path, and each path
     gets every library entry whose signature it fits, in library order
-    (:func:`signature_fits`).  The signature decides alone: the channel need
-    not be untrusted, and its authority is the filter's concern.  Each fixed
+    (:func:`signature_fits`), unless :func:`retrieval_admits` refuses the
+    channel's kind for that entry.  The channel need not be untrusted, and its
+    authority is the filter's concern.  Each fixed
     label is an entry that fits wherever the label applies, so the candidates
     without the flag are a subsequence of those with it.
 
@@ -342,6 +366,18 @@ def signature_fits(
     return True
 
 
+def retrieval_admits(
+    mechanism: MechanismId, source_kind: FeedbackSourceKind | None
+) -> bool:
+    """Whether signature retrieval may propose *mechanism* from *source_kind*.
+
+    A mechanism in :data:`RETRIEVAL_SOURCE_KINDS` needs one of its kinds there;
+    any other mechanism is left to its signature.
+    """
+    kinds = RETRIEVAL_SOURCE_KINDS.get(mechanism)
+    return kinds is None or source_kind in kinds
+
+
 def _path_mechanisms(
     channel: FeedbackChannel, crosses: bool, signature_retrieval: bool
 ) -> tuple[MechanismId, ...]:
@@ -351,6 +387,7 @@ def _path_mechanisms(
             entry.id
             for entry in bundled_mechanism_library().mechanisms
             if signature_fits(entry.signature, channel.source_kind, crosses)
+            and retrieval_admits(entry.id, channel.source_kind)
         )
     found = (
         SOURCE_MECHANISMS.get(channel.source_kind),
@@ -579,6 +616,7 @@ __all__ = [
     "ASSESSED_AUTHORITY",
     "CROSS_CONTROLLER_MECHANISM",
     "OWN_CONTROLLER_KINDS",
+    "RETRIEVAL_SOURCE_KINDS",
     "SOURCE_MECHANISMS",
     "DropReason",
     "DroppedCandidate",
@@ -592,5 +630,6 @@ __all__ = [
     "build_stpa_index",
     "mechanism_candidates",
     "mechanism_join",
+    "retrieval_admits",
     "signature_fits",
 ]
