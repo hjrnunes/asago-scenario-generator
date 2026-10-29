@@ -1,0 +1,28 @@
+template: conflict_review_user.j2
+cases:
+  conflict-review:
+    required:
+      - "## Situation An assistant reads records."
+      - "[R1] (security constraint) Keep it."
+      - "[SA-1] (refines R1) Strip it."
+      - "## Requests [Q1] Send the notice. [Q2] Send me theirs."
+      - "## Identifiers you may cite R1, R2, SA-1, Q1, Q2"
+      - "Return one request decision for each of: Q1, Q2."
+    ordered:
+      - - "## Situation"
+        - "## Requirements"
+        - "## Safeguard under review"
+        - "## Requests"
+        - "## Identifiers you may cite"
+        - "## Request decisions"
+    forbidden:
+      - no_conflict
+      - expected
+      - This case lists no requests
+  conflict-review-no-requests:
+    required:
+      - This case lists no requests; return an empty "request_decisions" list.
+      - "## Identifiers you may cite R1, R2, SA-1"
+    forbidden:
+      - "## Requests"
+      - Return one request decision

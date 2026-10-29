@@ -1,0 +1,22 @@
+Case {{ case_id }}
+{%- for section in sections %}
+
+## {{ section.title }}
+{%- for entry in section.entries %}
+
+{% if entry.ref %}[{{ entry.ref }}]{% if entry.heading %} {{ entry.heading }}{% endif %}
+{% elif entry.heading %}{{ entry.heading }}
+{% endif %}
+{{- entry.lines | join("\n") }}
+{%- endfor %}
+{%- endfor %}
+
+## Identifiers you may cite
+{{ identifiers | join(", ") }}
+
+## Request decisions
+{% if request_ids -%}
+Return one request decision for each of: {{ request_ids | join(", ") }}.
+{% else -%}
+This case lists no requests; return an empty "request_decisions" list.
+{% endif -%}
