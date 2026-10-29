@@ -93,6 +93,10 @@ STOP_MEANING = {
         "Absence claim lacks evidence",
         "The finding claims something is absent without evidence for the absence.",
     ),
+    "ica_hazard_correct_action_without_effect": (
+        "Correct action without effect",
+        "The finding's control action is issued correctly but does not take effect, which is out of scope.",
+    ),
     "ica_hazard_verification_provider_failure": (
         "Verification request failed",
         "The request that verifies the routed finding failed.",

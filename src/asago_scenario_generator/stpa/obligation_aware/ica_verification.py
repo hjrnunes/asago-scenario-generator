@@ -74,11 +74,17 @@ ICA_HAZARD_VERIFICATION_BATCH_DIGEST_DOMAIN = (
 
 ABSENCE_CONSEQUENCE_MAX_CHARS = 300
 ABSENCE_EVIDENCE_MISSING_CODE = "ica_hazard_absence_evidence_missing"
+# A finding whose named action is issued correctly but does not take effect is
+# out of scope: the verdict carries this rejection reason and the finding
+# stops at the code below.
+CORRECT_ACTION_WITHOUT_EFFECT = "correct_action_without_effect"
+CORRECT_ACTION_WITHOUT_EFFECT_CODE = "ica_hazard_correct_action_without_effect"
 ICA_VERIFICATION_EXCLUSION_CODES = frozenset(
     {
         "ica_hazard_verification_provider_failure",
         "ica_hazard_not_applicable",
         ABSENCE_EVIDENCE_MISSING_CODE,
+        CORRECT_ACTION_WITHOUT_EFFECT_CODE,
         "ica_hazard_correction_exhausted",
     }
 )
@@ -304,6 +310,12 @@ class IcaHazardVerificationVerdict(_VerificationModel):
     downgrade_reason: Literal["absence_evidence_missing"] | None = Field(
         default=None, exclude_if=lambda value: value is None
     )
+    # Why a contradictory verdict is out of scope rather than a defect a
+    # correction could repair: the named action is issued correctly but does
+    # not take effect. Left out when absent, so other verdicts keep their bytes.
+    rejection_reason: Literal["correct_action_without_effect"] | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
     @field_validator("absence_loss_ids")
     @classmethod
@@ -317,6 +329,8 @@ class IcaHazardVerificationVerdict(_VerificationModel):
             and self.verdict != "insufficient_evidence"
         ):
             raise ValueError("a downgrade reason belongs to insufficient_evidence only")
+        if self.rejection_reason is not None and self.verdict != "contradictory":
+            raise ValueError("a rejection reason belongs to contradictory only")
         carried = (bool(self.absence_loss_ids), self.absence_consequence is not None)
         if carried == (False, False):
             return self
@@ -680,6 +694,19 @@ def _set_batch_counts(
 
 def _is_absence_downgrade(verdict: IcaHazardVerificationVerdict | None) -> bool:
     return verdict is not None and verdict.downgrade_reason is not None
+
+
+def _is_without_effect(verdict: IcaHazardVerificationVerdict | None) -> bool:
+    return verdict is not None and verdict.rejection_reason is not None
+
+
+def _final_rejection_code(verdict: IcaHazardVerificationVerdict) -> str | None:
+    """Name a verdict that no correction round can repair, else None."""
+    if _is_absence_downgrade(verdict):
+        return ABSENCE_EVIDENCE_MISSING_CODE
+    if _is_without_effect(verdict):
+        return CORRECT_ACTION_WITHOUT_EFFECT_CODE
+    return None
 
 
 def _set_absence_missing_count(
@@ -1138,9 +1165,11 @@ def _record_initial_result(
         )
         return
     first_attempt = _semantic_attempt(request, verdict, 1)
-    if verdict.verdict == "supported" or _is_absence_downgrade(verdict):
+    final_code = _final_rejection_code(verdict)
+    if verdict.verdict == "supported" or final_code is not None:
         # A downgrade is final: the author's ICA was not found wanting, so a
-        # correction round has nothing to repair.
+        # correction round has nothing to repair. A correct action without
+        # effect is final too: it is out of scope, not a defect to repair.
         records[request.ica_id] = IcaHazardVerificationRecord(
             ica_id=request.ica_id,
             slot_id=request.slot_id,
@@ -1148,11 +1177,9 @@ def _record_initial_result(
             attempts=(first_attempt,),
             final_verdict=verdict,
         )
-        if _is_absence_downgrade(verdict):
+        if final_code is not None:
             diagnostics.append(
-                _verification_diagnostic(
-                    ABSENCE_EVIDENCE_MISSING_CODE, request, verdict.rationale
-                )
+                _verification_diagnostic(final_code, request, verdict.rationale)
             )
         return
     unsupported.append((request, verdict))
@@ -1752,8 +1779,9 @@ def _append_prior_verdict_diagnostic(
 ) -> None:
     if prior_verdict is None:
         return
-    if _is_absence_downgrade(prior_verdict):
-        code = ABSENCE_EVIDENCE_MISSING_CODE
+    final_code = _final_rejection_code(prior_verdict)
+    if final_code is not None:
+        code = final_code
     elif prior_verdict.verdict == "contradictory":
         code = "ica_hazard_contradictory"
     else:
@@ -2301,8 +2329,9 @@ def _consideration_exclusion_code(
         return "ica_hazard_verification_provider_failure"
     if terminal_not_applicable:
         return "ica_hazard_not_applicable"
-    if ABSENCE_EVIDENCE_MISSING_CODE in failure_codes:
-        return ABSENCE_EVIDENCE_MISSING_CODE
+    for code in (ABSENCE_EVIDENCE_MISSING_CODE, CORRECT_ACTION_WITHOUT_EFFECT_CODE):
+        if code in failure_codes:
+            return code
     return "ica_hazard_correction_exhausted"
 
 
@@ -2383,6 +2412,8 @@ def _uca_definition(uca_type: UCAType) -> str:
 
 
 __all__ = [
+    "CORRECT_ACTION_WITHOUT_EFFECT",
+    "CORRECT_ACTION_WITHOUT_EFFECT_CODE",
     "ICA_VERIFICATION_EXCLUSION_CODES",
     "ICA_HAZARD_VERIFICATION_BATCH_DIGEST_DOMAIN",
     "ICA_HAZARD_VERIFICATION_BATCH_SCHEMA_VERSION",

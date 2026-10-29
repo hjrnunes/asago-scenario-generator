@@ -90,12 +90,12 @@ EXPECTED_FACTORIES: dict[str, tuple[str, str, str]] = {
     "ica-1": (
         "_IcaHazardProviderPayload1",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "e7304cec427d195df09bfa06ca121a15fd54473e48a89eabc96bb4c496425f93",
+        "e97cc8799551404352f3c8974e065df8781b960e468b741d66f75d8c995e4dd9",
     ),
     "ica-4": (
         "_IcaHazardProviderPayload4",
         "asago_scenario_generator.stpa.obligation_aware.provider",
-        "6329bb5ef5e131db4eaa830c2ad652bded57661307488764c96076662b7099e2",
+        "aab6c69e4333602fa10c1cfe9f14aade1f3f25648071f6a1588db9c075e297c1",
     ),
     "mechanism-1": (
         "_MechanismVerdictPayload1",
