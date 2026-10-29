@@ -741,6 +741,9 @@ def test_the_reason_variable_itself_never_guards() -> None:
         # A bare nominal denial needs no auxiliary.
         "Not a party to the widget",
         "the requester, not a party to the widget, edits it",
+        # A possessive identifier names the principal, like the bare one.
+        "the request does not match the authenticated customer's identity",
+        "the order does not match the session customer's ID",
         # The negation follows the owner it denies.
         "The widget owner is not the authenticated user",
         "the widget's owner is a different customer",
@@ -816,9 +819,34 @@ def test_a_reason_that_denies_ownership_wins_over_an_affirming_row(reason) -> No
         ),
         # A role noun in a bare nominal must still head its phrase.
         ("Not a party approval was given for the widget", None, "no_match"),
-        # A possessive principal followed by a noun is no principal target.
+        # A relative clause or other embedding leaves the compared subject
+        # uncertain, so the row stays in charge.
         (
-            "the request does not match the authenticated customer's identity",
+            "The actor edits an account for which the password does not match "
+            "the session user",
+            None,
+            "no_match",
+        ),
+        (
+            "The actor edits an order for which the signature does not match "
+            "the session user",
+            None,
+            "no_match",
+        ),
+        (
+            "the actor edits an order whose request does not match the session user",
+            None,
+            "no_match",
+        ),
+        (
+            "the actor edits a booking where the account does not match the "
+            "authenticated customer",
+            None,
+            "no_match",
+        ),
+        # Without commas a non-restrictive clause reads like a restrictive one.
+        (
+            "the request, which the host submitted, does not match the session user",
             None,
             "no_match",
         ),

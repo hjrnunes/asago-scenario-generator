@@ -91,16 +91,18 @@ the principal ("the widget owner is not the authenticated user"); a
 possession verb naming another owner ("belongs to another customer", "held
 by someone other than the session customer"); or a record that does not
 match or is not the principal ("the order does not match the authenticated
-customer identity"), whose subject's head is a record noun, generic or named
-by the ICA's row and families, and never a credential. Then the guard is off
-and the reason's ownership source deals ``ownership``. Anything else leaves
-the cited row in charge, the safe default: a role noun modifying another
-noun ("without owner consent", "with no owner authorization"), a negated
-requirement ("does not need to match"), a principal's thing as the target
-("the authenticated customer's consent", "the user's identity"), a
-credential subject ("the password does not match"), a failed authorization
-("the actor is unauthorized"), or another principal's act ("edited by
-someone other than the session user").
+customer identity", "... the authenticated customer's identity"), whose
+subject's head is a record noun, generic or named by the ICA's row and
+families, and never a credential. Then the guard is off and the reason's
+ownership source deals ``ownership``. Anything else leaves the cited row in
+charge, the safe default: a role noun modifying another noun ("without owner
+consent", "with no owner authorization"), a negated requirement ("does not
+need to match"), a principal's thing other than an identifier as the target
+("the authenticated customer's consent"), a credential subject ("the
+password does not match"), a relative clause or other embedding before the
+denial ("an account for which the password does not match"), a failed
+authorization ("the actor is unauthorized"), or another principal's act
+("edited by someone other than the session user").
 
 The term lists below are the only lexical matching; everything else is exact
 lookup.
@@ -785,14 +787,32 @@ def _reason_denies_ownership(
        head noun must be a record noun (``RECORD_NOUNS`` or
        ``record_nouns``, the collections the ICA's row and families name),
        never a credential or identity noun.
+
+    A relative clause or other embedding before the denial ("an account for
+    which the password does not match", "an order whose request ...", "the
+    request, which the host submitted, does not match") leaves its subject
+    uncertain, so no shape counts past an ``EMBEDDING_MARKERS`` word. The
+    words carry no commas, so a non-restrictive clause cannot be told from a
+    restrictive one, and both keep the row in charge.
     """
+    embedded = next(
+        (index for index, word in enumerate(words) if word in EMBEDDING_MARKERS),
+        len(words),
+    )
     return any(
         _negated_relation(words, index)
         or _role_is_not_principal(words, index)
         or _possessed_by_another(words, index)
         or _record_does_not_match(words, index, record_nouns)
-        for index in range(len(words))
+        for index in range(embedded)
     )
+
+
+# Relative pronouns and adverbs that embed a clause whose subject the
+# reason's words cannot settle.
+EMBEDDING_MARKERS = frozenset(
+    {"which", "that", "who", "whom", "whose", "where", "wherein", "whereby"}
+)
 
 
 # Generic record nouns a record comparison may name as its subject.
@@ -1079,10 +1099,11 @@ def _principal_target(words: Sequence[str], index: int) -> tuple[bool, bool]:
     The phrase is determiners, "another", "other" or "different", and
     principal modifiers, then principal words whose last is the head ("the
     session user", "another customer"). The head may carry an identifier
-    noun ("the authenticated customer identity") or an elided possessive
-    ("the authenticated actor's"); after either the phrase must end. A
-    possessive followed by a noun ("the customer's consent", "the user's
-    identity") names the principal's thing, not the principal.
+    noun, bare or possessive ("the authenticated customer identity", "the
+    authenticated customer's identity"), or an elided possessive ("the
+    authenticated actor's"); after any of them the phrase must end. A
+    possessive followed by any other noun ("the customer's consent") names
+    the principal's thing, not the principal.
     """
     other = False
     at = index
@@ -1098,7 +1119,9 @@ def _principal_target(words: Sequence[str], index: int) -> tuple[bool, bool]:
         at += 1
     if head is None or head != at - 1:
         return False, other
-    if _word(words, at) in _IDENTIFIER_NOUNS or _word(words, at) == "s":
+    if _word(words, at) == "s":
+        at += 1
+    if _word(words, at) in _IDENTIFIER_NOUNS:
         at += 1
     return _ends_phrase(words, at), other
 
