@@ -322,8 +322,14 @@ def build_testability_summary(
     *,
     constraint_reach: Mapping[str, object] | None = None,
     channel_splits: Mapping[str, int] | None = None,
+    not_applicable: Sequence[Mapping[str, object]] | None = None,
 ) -> dict[str, object]:
-    """Build the deterministic run-level testability and deduplication view."""
+    """Build the deterministic run-level testability and deduplication view.
+
+    ``not_applicable`` lists the candidates code routed before Stage 5; they
+    have no scenario, so ``total`` does not count them. Given, the summary
+    counts them and the view lists them, an empty list included.
+    """
 
     counts = {
         "total": len(records),
@@ -334,6 +340,8 @@ def build_testability_summary(
         ),
     }
     counts["executable"] = counts["canonical"] + counts["duplicates"]
+    if not_applicable is not None:
+        counts["not_applicable"] = len(not_applicable)
     summary: dict[str, object] = {
         "schema_version": "scenario-testability-v1",
         "summary": counts,
@@ -346,6 +354,8 @@ def build_testability_summary(
         summary["constraint_reach"] = dict(constraint_reach)
     if channel_splits is not None:
         summary["channel_splits"] = dict(channel_splits)
+    if not_applicable is not None:
+        summary["not_applicable"] = [dict(entry) for entry in not_applicable]
     return summary
 
 

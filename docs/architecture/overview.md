@@ -1131,6 +1131,129 @@ record agree with it; an ICA that cites no row gets no row section. The run
 writes each candidate's hint, the rule that chose it, and the cited row's ID to
 `condition-families.yaml` (`condition-families-v2`).
 
+### Intent-type INCORRECT ICAs are routed before Stage 5
+
+A Stage 5 condition on a tool call can compare only the call's arguments,
+TARGET-STATE and TARGET-READ fact paths and literals. None of them represents
+what the user asked for. So a reason such as "the request does not match the
+customer's authorized intent", "the intent is unknown" or, for an intent
+variable, "unauthorized transaction" has nothing to test. Asking the model to
+narrow the reason does not help: it tests eligibility, amount or status
+instead, for example picking an ineligible order when the cited row says the
+order is eligible. Code therefore routes such an ICA before Stage 5
+(`stpa.scenario_prod.intent_reason`). An ICA is routed only when all of these
+hold:
+
+- its slot is INCORRECT and its control action's typed `effect_kind` is
+  `tool_call`, the path where Stage 5 writes an `incorrect_call` scenario;
+- its reason states nothing but an intent ground. The check is positive and
+  covers the whole reason, so anything beside the intent keeps the ICA on the
+  Stage 5 path: a bound, amount, currency, value, limit, timing or order,
+  status, eligibility, ownership, session, actor, identity or transaction
+  context. As a second guard, a reason with an ownership source of
+  `REASON_FAMILY_RULES`, a limit failure, or an eligibility or lifecycle term
+  is never routed;
+- the reason is about the user's intent, on one of two bases. When the
+  reason states the value of a cited row's variable, that variable decides
+  alone (`reason_variable`). It must:
+  - carry no target evidence (`state:`, `session:`, `argument:`,
+    `operation:`);
+  - have a description that, as a whole, affirmatively states that the
+    request and the principal's intent align. Two forms qualify:
+    - the alignment, match or consistency between the request and the
+      principal's (authorized) intent, in either order ("The alignment
+      between the requested operation and the customer's authorized
+      context/intent.");
+    - whether the request matches, aligns with or is consistent with that
+      intent ("Whether the requested operation matches the customer's
+      authorized intent.").
+
+    "context/intent" is accepted only in that slash form, never "context"
+    alone. Any other description keeps the ICA on Stage 5: one about who is
+    authorized ("Whether the user is authorized to perform the transaction
+    described by their intent."), about a classification ("the classified
+    intent produced by the classifier"), or about anything beyond the
+    alignment. As an extra layer, a description that names another ground
+    never qualifies: an amount, value or numeric range, a limit or bound, a
+    currency, eligibility, a status or lifecycle, timing, ownership, the
+    session, the actor or identity ("whether the payment amount specified by
+    the user's intent is between 0 and 100");
+  - have a value that is, as a whole, a sole failed or unknown intent ("does
+    not match authorized intent", "not aligned with authorized intent",
+    "intent unknown", "unauthorized transaction"). A value that adds another
+    ground ("... and the currency is wrong", "... before the authorization
+    status is confirmed", "... or transaction context") keeps the ICA on
+    Stage 5, whether that wording is in the reason or only in the value;
+
+  and the rest of the reason may only name the request ("the request", "the
+  requested operation"). A reason that states no row value must be, as a
+  whole, one of the intent-only forms (`reason_wording`). In those forms the
+  failed or unknown predicate applies to the intent itself. In one form the
+  request does not match, does not agree with, is not aligned or consistent
+  with, is inconsistent or misaligned with, or deviates from an intent ("the
+  request does not match the customer's authorized intent", "the request is
+  inconsistent with the customer's authorized intent", "the customer's
+  intent does not match the requested payment operation", "the refund is
+  executed without matching the customer's authorized intent"). In the other,
+  the intent is unknown ("the intent is unknown", "the user intent is
+  unknown", "intent unknown"). The intent may be qualified by its principal
+  as a noun or a possessive ("the user intent", "the guest's intent"). Such
+  a principal word is not counted as an ownership ground.
+
+So these keep reaching Stage 5:
+- session reasons ("not authorized for the session");
+- actor reasons ("the actor is unauthorized", "the actor is not the host or
+  the guest");
+- identity reasons ("record identity unknown", "not owned by the
+  authenticated customer");
+- bound reasons ("amount or plan not authorized by session");
+- timing reasons;
+- an intent ground stated beside any other ground ("... and the refund is
+  ineligible", "... and the amount is negative", "intent unknown before the
+  authorization status is confirmed", "... or transaction context");
+- a reason whose failure applies to something else ("the intent matches but
+  currency is different").
+
+A routed ICA keeps one candidate with no family hint. Its
+`CandidateFamilyPlan.not_applicable` holds the disposition: the reason code
+`intent_reason_not_groundable`, a reason for the reader, the basis, and the
+reason variable it read. The run sends that candidate no Stage 5 request and
+writes no scenario. The disposition is recorded in three places:
+
+- the candidate's outcome has status `not_applicable`, with `reason_code` and
+  the reason as its diagnostic. It appears in `synthesis-manifest.yaml`
+  `candidate_outcomes` and is counted in `scenario_counts.not_applicable`.
+- `testability.yaml` lists the candidate under `not_applicable`, with
+  `summary.not_applicable` as its count. `summary.total` still counts only
+  the scenarios Stage 5 wrote.
+- the report lists it in the testability section and counts it in the
+  handoff section.
+
+Every candidate is accounted exactly once:
+`requested = generated + functional_test + not_applicable + failed + skipped`.
+A not-applicable candidate is resolved but never attempted (`attempted`
+excludes it) and is not yield. The run status counts it towards completion,
+so a run whose other candidates all published is `completed`. Routed
+candidates are closed before any Stage 5 request is sent, so a Stage 5
+circuit break never marks one skipped and its abort diagnostic counts only
+the candidates it left unattempted. Obligation
+accounting is unchanged: an addressed obligation whose only finding is
+routed is still marked `generation_failed`.
+
+Timing decision: a prior read, such as an earlier `lookup_order`, is not
+treated as confirming the authorization status. A WRONG_TIMING ICA ("before
+the authorization status is confirmed") is never routed and keeps its Stage 5
+path with the `prior_read` hint. The code does not count such an ICA as
+faithfully kept: a prior read shows only that a read happened, not that it
+confirmed authorization.
+
+Open contract question: the faithful form of an intent reason would be a
+request operand bound to the user's turn, which the condition language does
+not have. The alternative is that intent-type ICAs are analytical by design on
+targets without request evidence. Until the contract decides, code takes the
+second reading, and a typed reason field from ICA authoring would replace the
+wording basis.
+
 ## Test boundary
 
 Unit tests under `tests/` are the behavior contract, and the phrase tables in

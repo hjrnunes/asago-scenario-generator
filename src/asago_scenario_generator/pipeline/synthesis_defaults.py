@@ -524,6 +524,9 @@ def _default_scenarios(
     from asago_scenario_generator.stpa.scenario_prod.condition_family import (
         plan_family_candidates,
     )
+    from asago_scenario_generator.stpa.scenario_prod.intent_reason import (
+        intent_dispositions,
+    )
     from asago_scenario_generator.stpa.scenario_prod.reason_family import (
         ica_reasons,
     )
@@ -541,11 +544,15 @@ def _default_scenarios(
     # accounting.  SP3 consumes only the ordinary enumeration.
     ordinary_icas = _ordinary_icas(ica_enumeration)
     enriched = enrich_threats(ordinary_icas, control_structure)
+    reasons = ica_reasons(ordinary_icas, control_structure)
+    # An intent-type INCORRECT tool-call ICA is routed here, before Stage 5:
+    # its candidate is recorded as not applicable and sends no request.
     family_plan = plan_family_candidates(
         enriched.structural_threats,
         target_realization,
         target_observations,
-        reasons=ica_reasons(ordinary_icas, control_structure),
+        reasons=reasons,
+        not_applicable=intent_dispositions(ordinary_icas, control_structure, reasons),
     )
     if len(family_plan.threats) != len(enriched.structural_threats):
         enriched = enriched.model_copy(

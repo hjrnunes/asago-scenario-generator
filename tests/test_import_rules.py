@@ -596,6 +596,9 @@ SCENARIO_PROD_LAYERS: dict[str, int] = {
     # The reason-to-family mapping reads the state index's field labels and
     # the control structure; condition families deal from it.
     "reason_family": 0,
+    # The intent-reason routing reads the reason mapping's terms and the
+    # control structure's effect kinds; condition families carry its result.
+    "intent_reason": 0,
     "condition_family": 0,
     "presentation": 1,
     # Tree-source collectors shared by presentation and validators.

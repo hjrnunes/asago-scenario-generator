@@ -104,6 +104,7 @@ class CandidateOutcome(_Read):
     ica_slot_id: str | None = None
     ica_id: str | None = None
     status: str
+    reason_code: str | None = None
     diagnostics: list[str] = Field(default_factory=list)
 
 
@@ -191,8 +192,19 @@ class TestabilityRow(_Read):
     key: _DedupKey = Field(default_factory=_DedupKey)
 
 
+class NotApplicableRow(_Read):
+    """A candidate code routed before Stage 5: kept and counted, never written."""
+
+    scenario_id: str
+    ica_slot_id: str | None = None
+    ica_id: str | None = None
+    reason_code: str
+    reason: str = ""
+
+
 class _Testability(_Read):
     scenarios: list[TestabilityRow] = Field(default_factory=list)
+    not_applicable: list[NotApplicableRow] = Field(default_factory=list)
 
 
 class _Batching(_Read):
@@ -226,6 +238,8 @@ class RunData:
     features: dict[str, str]
     policy: dict[str, Any] | None
     unreadable: dict[str, str] = field(default_factory=dict)
+    # The candidates the testability record lists as not applicable.
+    not_applicable: tuple[NotApplicableRow, ...] = ()
 
     def has(self, name: str) -> bool:
         """Tell whether *name* is a file of the output directory."""
@@ -405,4 +419,7 @@ def load_run(output_dir: Path | str) -> RunData:
         features=_read_features(output),
         policy=_read_policy(output, unreadable),
         unreadable=unreadable,
+        not_applicable=(
+            () if testability is None else tuple(testability.not_applicable)
+        ),
     )

@@ -26,8 +26,8 @@ from asago_scenario_generator.report_kit import (
 )
 
 QUESTION = (
-    "Duplicates and scenarios without a testable condition stay behind; "
-    "the rest go to authoring."
+    "Duplicates, scenarios without a testable condition and ICAs routed as "
+    "not applicable stay behind; the rest go to authoring."
 )
 CHECK_LABEL = {
     "satisfied": "holds in the seeded state",
@@ -144,6 +144,37 @@ def _analytical_table(run: RunData) -> Markup:
     ]
     columns = [Column("Scenario"), Column("Why", sortable=False)]
     return table(columns, rows, "testability-analytical")
+
+
+def _not_applicable(run: RunData) -> Markup:
+    """List the ICAs code routed before Stage 5, with their reason."""
+    entries = sorted(run.not_applicable, key=lambda entry: entry.scenario_id)
+    if not entries:
+        return Markup("")
+    rows = [
+        Row(
+            [
+                code_id(entry.scenario_id),
+                code_id(entry.ica_id or "none"),
+                code_id(entry.reason_code),
+                entry.reason,
+            ],
+            id=f"not-applicable-{entry.scenario_id}",
+        )
+        for entry in entries
+    ]
+    columns = [
+        Column("Candidate"),
+        Column("ICA"),
+        Column("Reason code"),
+        Column("Why", sortable=False),
+    ]
+    lead = Markup(
+        f"<h3>Not applicable</h3><p>{counted('testability.not_applicable', len(entries))} "
+        "ICAs were routed before Stage 5: no condition could test their reason, so "
+        "they are kept and counted but no scenario was written.</p>"
+    )
+    return join([lead, table(columns, rows, "testability-not-applicable")])
 
 
 def _rule_text(run: RunData, constraint_id: str) -> str:
@@ -266,6 +297,7 @@ def _body(run: RunData) -> Markup:
                 _analytical_table(run),
                 "testability-analytical-list",
             ),
+            _not_applicable(run),
             Markup("<h3>Rules reaching authoring</h3>"),
             _rules_table(run),
             Markup(

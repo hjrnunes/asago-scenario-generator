@@ -42,7 +42,8 @@ mapping; the first rule that matches decides:
 5. ``no_match``: no hint; the ICA keeps one plain candidate. Intent reasons
    ("does not match authorized intent", "intent unknown", "unauthorized
    transaction") have no ownership source and no family term and take this
-   path.
+   path; on a tool-call action ``intent_reason`` routes them before Stage 5,
+   so no family is chosen for them.
 
 Precedence, the same on every rule path and with or without a cited row:
 an ownership source wins over a stated limit failure ("the actor is
