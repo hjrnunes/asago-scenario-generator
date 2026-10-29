@@ -1167,6 +1167,80 @@ def test_the_correction_shows_an_undecodable_prior_reply_as_written(
     assert _shown_prior_reply(request) == '{"dismissed_gaps": ["legacy"'
 
 
+def _correction_after_raw_reply(tmp_path: Path, content: str) -> str:
+    """Revise after a first reply of *content*; return the correction request."""
+    corrected = _reply(
+        _disposition("G-1", "addressed", "PM-1-2"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        _disposition("G-3", "dismissed"),
+        _disposition("G-4", "dismissed"),
+    )
+    client = _transport_client(corrected)
+    first = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=3, completion_tokens=4),
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content=content), finish_reason="stop"
+            )
+        ],
+    )
+    create = client._client.chat.completions.create
+    create.side_effect = [first, *create.side_effect]
+
+    revise_control_structure(
+        llm_client=client,
+        control_structure=_reviewed(),
+        critic_findings=_FINDINGS,
+        use_case_text="Drafts are stored for later review by a person.",
+        run_dir=tmp_path,
+    )
+
+    return create.call_args_list[1].kwargs["messages"][-1]["content"]
+
+
+@pytest.mark.parametrize("opening", ["```json", "```"])
+def test_the_correction_shows_a_fenced_prior_reply_in_the_current_format(
+    tmp_path, opening: str
+) -> None:
+    invalid = {"new_responsibilities": "invalid list", "dismissed_gaps": ["legacy"]}
+
+    request = _correction_after_raw_reply(
+        tmp_path, f"{opening}\n{json.dumps(invalid)}\n```"
+    )
+
+    assert "dismissed_gaps" not in request
+    assert json.loads(_shown_prior_reply(request)) == {
+        "new_responsibilities": "invalid list"
+    }
+
+
+def test_a_fenced_prior_reply_keeps_line_separators_inside_its_strings(
+    tmp_path,
+) -> None:
+    # A literal U+2028 is valid inside a JSON string and must not split it.
+    invalid = {"new_responsibilities": "a\u2028b", "dismissed_gaps": ["legacy"]}
+    body = json.dumps(invalid, ensure_ascii=False)
+    assert "\u2028" in body
+
+    request = _correction_after_raw_reply(tmp_path, f"```json\n{body}\n```")
+
+    assert "dismissed_gaps" not in request
+    assert json.loads(_shown_prior_reply(request)) == {
+        "new_responsibilities": "a\u2028b"
+    }
+
+
+def test_an_unfenced_prior_reply_that_json_rejects_is_shown_as_written(
+    tmp_path,
+) -> None:
+    # JSON whitespace excludes U+00A0, so the text does not decode as written.
+    content = '\u00a0{"new_responsibilities": "x", "dismissed_gaps": ["legacy"]}\u00a0'
+
+    request = _correction_after_raw_reply(tmp_path, content)
+
+    assert _shown_prior_reply(request) == content
+
+
 def test_the_request_schema_offers_dispositions_and_not_free_text() -> None:
     schema = _RevisionDeltaProviderSet.model_json_schema()
 

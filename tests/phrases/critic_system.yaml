@@ -3,6 +3,15 @@ cases:
   no-probes:
     required:
       - An explicit requirement may still justify a proposed missing safeguard
+      - >-
+        Ask for a process-model part or feedback only when the supplied
+        evidence provides its source
+      - >-
+        an operation, tool result, record, or other supplied channel that
+        actually returns or carries that information
+      - >-
+        When no supplied source provides it, do not request it as if it were
+        available
       - Report source/function omissions as structural gaps
       - a recommendation is not an observed installed capability
       - >-

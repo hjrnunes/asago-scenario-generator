@@ -336,18 +336,27 @@ _UNREQUESTED_REVISION_FIELDS = frozenset(
 ) - frozenset(_RevisionDeltaProviderSet.model_json_schema()["properties"])
 
 
+# One JSON Markdown fence around the whole text.  Only ``\n`` (or ``\r\n``)
+# ends a fence line, so a line separator inside a JSON string stays in the body.
+_FENCED_REPLY = re.compile(
+    r"[ \t\r\n]*```(?:json)?[ \t]*\r?\n(.*)\r?\n[ \t]*```[ \t\r\n]*",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
 def _shown_revision_reply(content: Any) -> Any:
     """Show a correction the prior reply with only the fields the schema asks for.
 
     A reply kept as text, because it failed the schema, is shown as written
-    unless it is one JSON object holding such a field; that one is shown
-    decoded, without it.
+    unless it is one JSON object, bare or in one JSON fence, holding such a
+    field; that one is shown decoded, without it.
     """
     if isinstance(content, BaseModel):
         content = raw_model_data(content)
     if isinstance(content, str):
+        fenced = _FENCED_REPLY.fullmatch(content)
         try:
-            decoded = json.loads(content)
+            decoded = json.loads(content if fenced is None else fenced.group(1))
         except ValueError:
             return content
         if not isinstance(decoded, dict) or _UNREQUESTED_REVISION_FIELDS.isdisjoint(
