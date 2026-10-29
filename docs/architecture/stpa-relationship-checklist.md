@@ -10,11 +10,16 @@ defines the purpose of the analysis (losses, hazards, system-level
 constraints), §2.3 models the control structure, §2.4 identifies unsafe
 control actions, and §2.5 identifies loss scenarios.
 
-The ontology is used as a list, not as OWL with a reasoner. Under the open
-world assumption a reasoner cannot flag a missing link, and 118 of the
-ontology's 120 class restrictions are existential (`some`): many of them say
-only that an element *may* connect to another. The other two are
-`minQualifiedCardinality 1` on a loss scenario's causal factors.
+The ontology is used as a list, not as OWL with a reasoner. 118 of the
+ontology's 120 class restrictions are existential (`some`): each says that
+every instance of the class has at least one qualifying connection. Under
+the open world assumption a reasoner does not report a missing connection;
+it lets the connected individual stay unnamed, so it cannot flag the gaps
+this checklist is about. The other two restrictions are
+`minQualifiedCardinality 1` on a loss scenario's causal factors. Whether a
+connection holds for every analysis is a separate question, which the
+**STPA** column answers from the Handbook: some restrictions the ontology
+states for every instance hold only for some systems.
 
 The report-only checks in `stpa/spec_diagnostics.py` cover some rows; they
 are marked in the Diagnostics column. None of them is a gate. Counts and a
@@ -215,7 +220,7 @@ Function names without a module are in the module the layer names above.
 | O109 | `Sensor` is_part_of_lsc Link_sensor_controller | possible | Sensors are optional at the chosen abstraction (§2.3). | none | absent | absent | absent | absent |  |
 | O110 | `Sensor` is_part_of_lsh Link_sensor_HLC | possible | Sensors are optional at the chosen abstraction (§2.3). | none | absent | absent | absent | absent |  |
 | O111 | `Sensor` sends Feedback_of_CP | possible | Sensors are optional at the chosen abstraction (§2.3). | none | absent | absent | absent | absent |  |
-| O112 | `System` avoids Loss_mishap | required | The analysis starts from the losses to avoid (§2.2). | `LossAnalysis.risk_card_losses` + `use_case_losses` | no minimum count (0 to 16 per list) | provenance hard (`_validate_risk_card_provenance`); no minimum count | absent | absent |  |
+| O112 | `System` avoids Loss_mishap | required | The analysis starts from the losses to avoid (§2.2). | `LossAnalysis.risk_card_losses` + `use_case_losses` | list schemas allow 0 to 16 losses each (`loss_analysis.py:_Stage1aGapProviderDraft`, inherited by `_Stage1aRiskProviderDraft`); stage checks are hard: the risk call requires at least one risk-card loss when risk cards are supplied (`require_losses` → `_validate_loss_presence`), and the gap call's `_validate_complete_chain` rejects a draft with no declared or supplied loss | provenance hard (`_validate_risk_card_provenance`); no minimum count | absent | absent |  |
 | O113 | `System` has Goal | possible | The system purpose frames the analysis (§2.2). | none (use-case text) | absent | absent | absent | absent |  |
 | O114 | `System` respects Assumption | possible | Assumptions are recorded where they matter. | none | absent | absent | absent | absent |  |
 | O115 | `UCA` defines Loss_scenario_A | required | Scenarios are identified for UCAs (§2.5). | `ICA.loss_scenario` (text); `ScenarioSpec` per selected ICA | text: hard (`loss_consequence`, min length 1) | text: required field | n/a | not verified that every retained ICA gets a scenario |  |
@@ -227,19 +232,21 @@ Function names without a module are in the module the layer names above.
 
 ## Relationships the Handbook requires that the ontology lacks
 
+That every hazard is reached by at least one UCA is not listed here: the
+ontology states it as `Hazard` defines `UCA` (row O94).
+
 | # | Relationship | STPA | Why (Handbook) | Producer field | Wire | Load | Revision | Final artifact | Diagnostics |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | H1 | Every hazard has at least one system-level constraint | required | Constraints are derived from hazards (§2.2); the ontology states only constraint → hazard. | reverse of `SecurityConstraint.related_hazards` | hard in the density gate (`_hazards_without_constraint`), exempt when the review marks the hazard unresolved | absent | obligation: absent | advisory line in `loss-analysis-gates.yaml` | **hazard constraint** |
 | H2 | Every loss is reached by at least one hazard | required | Hazards are defined for the losses (§2.2); the ontology states only hazard → loss. | reverse of `Hazard.related_losses` | hard in the density gate (`_losses_without_hazard`) | absent | obligation: new losses unchecked | absent | |
 | H3 | A controlled process a controller acts on feeds back to that controller | required | The control loop closes through feedback to the controller that acts (§2.3); missing feedback is a flaw the analysis must record (§2.5). The ontology asks only that a process has *some* feedback link and a controller *some* feedback. | `ControlAction.target` and `FeedbackChannel.source` of the same responsibility | absent | absent | absent (critic judges it semantically) | absent; the heuristics accept a CP that is only a target | **(a)**, **unobserved** |
-| H4 | Every hazard is reached by at least one UCA | required | UCAs are traced to hazards (§2.4); a hazard no UCA reaches shows a gap in the structure or the UCA analysis. | reverse of `ICA.related_hazards` | absent (`hazard_offer.py` records only which hazards were offered to each slot) | absent | n/a | absent | **(b)** |
-| H5 | Every control action is analyzed under each UCA type | required | Each control action is examined for the four types (§2.4). | one `ICASlot` per action and type | by construction (`threat_enum.slot_creation.create_slots`); a failed or unsent slot becomes `unresolved_reason` (`slot_filling._fill_missing_request_slots`) | N/A needs `na_justification` (`ICASlot.validate_na_exclusivity`; an empty string passes); completeness absent | n/a | absent | |
-| H6 | Each UCA yields a controller constraint | required | Controller constraints are the inverse of UCAs (§2.4). | `ICA.related_constraints` (SC or RC IDs); `Responsibility.responsibility_constraints` | SC only: the fill wire cannot cite an RC (`_governance_errors`) | RC IDs accepted by `validate_against` | n/a | absent | **ica constraints** (any constraint) |
-| H7 | Every process-model variable is updated by feedback | required | The process model is updated through feedback (§2.3); an unfed belief is a scenario cause (§2.5). The ontology states only feedback → process model. | `FeedbackChannel.updates` | hard on Call 2b (`_check_every_process_model_part_has_feedback`) | absent | critic: post-revision warning; obligation: absent | warning (heuristics `_check_orphan_pms`) | |
-| H8 | Responsibilities trace to the constraints they implement, and every hazard reaches a responsibility | required | Responsibilities are derived from the system-level constraints (§2.3). | `Responsibility.security_constraint_refs` | hard on Call 3 (`semantic_review._reviewed_constraints` subset) | absent (no loss analysis at load) | critic: absent (refs unioned unchecked); obligation: hard (`_resolve_many`) | warning: uncited constraints (`heuristics.uncited_security_constraints`) and untraced hazards (heuristics `_check_hazard_tracing`) | |
-| H9 | A UCA's context is a combination of its controller's process-model values | required | Context tables combine process-model variable values (§2.4). | `ICA.context_row` against `control_action_context_table` | hard: the row must belong to the slot's action (`slot_filling._finding_context`); optional | absent | n/a | absent | |
-| H10 | Controllers acting on shared state coordinate through one owner | possible | Several controllers of one process are a scenario source (§2.5). | `CoordinationLink` with `coordination_process_model_owner` | hard on Call 3 only | existence only | absent | absent | |
-| H11 | A causal factor names an element of the scenario's control path | required | Scenarios are built over the control loop (§2.5). | `CausalFactor.source_id` | hard at Stage 5 assembly (`stage5/assemble._validate_assembled_factors`) and Stage 5 spec validation (`causal_factor.validate_factor_sources`; the scenario is dropped) | ID prefix only | n/a | absent | |
+| H4 | Every control action is analyzed under each UCA type | required | Each control action is examined for the four types (§2.4). | one `ICASlot` per action and type | by construction (`threat_enum.slot_creation.create_slots`); a failed or unsent slot becomes `unresolved_reason` (`slot_filling._fill_missing_request_slots`) | N/A needs `na_justification` (`ICASlot.validate_na_exclusivity`; an empty string passes); completeness absent | n/a | absent | |
+| H5 | Each UCA yields a controller constraint | required | Controller constraints are the inverse of UCAs (§2.4). | `ICA.related_constraints` (SC or RC IDs); `Responsibility.responsibility_constraints` | SC only: the fill wire cannot cite an RC (`_governance_errors`) | RC IDs accepted by `validate_against` | n/a | absent | **ica constraints** (any constraint) |
+| H6 | Every process-model variable is updated by feedback | required | The process model is updated through feedback (§2.3); an unfed belief is a scenario cause (§2.5). The ontology states only feedback → process model. | `FeedbackChannel.updates` | hard on Call 2b (`_check_every_process_model_part_has_feedback`) | absent | critic: post-revision warning; obligation: absent | warning (heuristics `_check_orphan_pms`) | |
+| H7 | Responsibilities trace to the constraints they implement, and every hazard reaches a responsibility | required | Responsibilities are derived from the system-level constraints (§2.3). | `Responsibility.security_constraint_refs` | hard on Call 3 (`semantic_review._reviewed_constraints` subset) | absent (no loss analysis at load) | critic: absent (refs unioned unchecked); obligation: hard (`_resolve_many`) | warning: uncited constraints (`heuristics.uncited_security_constraints`) and untraced hazards (heuristics `_check_hazard_tracing`) | |
+| H8 | A UCA's context is a combination of its controller's process-model values | required | Context tables combine process-model variable values (§2.4). | `ICA.context_row` against `control_action_context_table` | hard: the row must belong to the slot's action (`slot_filling._finding_context`); optional | absent | n/a | absent | |
+| H9 | Controllers acting on shared state coordinate through one owner | possible | Several controllers of one process are a scenario source (§2.5). | `CoordinationLink` with `coordination_process_model_owner` | hard on Call 3 only | existence only | absent | absent | |
+| H10 | A causal factor names an element of the scenario's control path | required | Scenarios are built over the control loop (§2.5). | `CausalFactor.source_id` | hard at Stage 5 assembly (`stage5/assemble._validate_assembled_factors`) and Stage 5 spec validation (`causal_factor.validate_factor_sources`; the scenario is dropped) | ID prefix only | n/a | absent | |
 
 ## Object properties
 
@@ -299,13 +306,13 @@ restriction.
   control-action target: `_check_controlled_process_references` counts a
   target or a feedback source, so an action whose target no channel observes
   passes (H3, O37).
-- Nothing flags a hazard that no retained ICA cites (H4, O94).
+- Nothing flags a hazard that no retained ICA cites (O94).
 - `ICA.related_constraints` defaults to `[]` (`stpa/models/ica_enumeration.py`)
   and neither loading nor revision requires it. The ICA fill wire does
   require one governing pair per finding, which is why no saved run has an
   ICA without constraints (O118).
 - The structural heuristics are reported and never block (O6, O33, O36,
-  O47, O49, O52, O56, H7, H8), and they run on the structure before the
+  O47, O49, O52, O56, H6, H7), and they run on the structure before the
   critic revision and reply placement.
 - The final control structure after an obligation-aware revision is not
   checked for typed actions: only Stage 2's `control-structure.yaml` is

@@ -20,9 +20,12 @@ uv run --frozen python scripts/spec_diagnostics_sweep.py --out-dir "$OUT/sweep" 
     RUNS/stpo7-* RUNS/stpo7b-*
 ```
 
-The script reads each run, writes only under `--out-dir`, and calls no model
-(see its docstring). A run is diagnosed on its final artifacts, each checked
-against the identity its `synthesis-manifest.yaml` pins:
+The script reads each run, writes nothing inside any run (it refuses every
+destination that would land in one), and calls no model (see its docstring).
+A run whose files cannot be read or parsed is skipped with the reason.
+
+A run is diagnosed on its final artifacts, each checked against the identity
+its `synthesis-manifest.yaml` pins:
 
 - final loss analysis: `loss-analysis.yaml` (identity matched in every
   diagnosed run);
@@ -31,8 +34,10 @@ against the identity its `synthesis-manifest.yaml` pins:
   revision, so none has `control-structure-final.yaml`; identity matched in
   every diagnosed run);
 - retained ICAs: the baseline slots of the effective view in
-  `target-realization.yaml`, ICA IDs checked against the view's baseline ICA
-  IDs. Target-derived slots (present in 19 runs) are outside the retained
+  `target-realization.yaml`, loaded with its integrity check
+  (`TargetRealizationResult.from_yaml`) and matched to the manifest's
+  `target_realization` identity (both held in every diagnosed run).
+  Target-derived slots (present in 19 runs) are outside the retained
   enumeration and were not read.
 
 ## Runs diagnosed and skipped
