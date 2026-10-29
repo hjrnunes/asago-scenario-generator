@@ -46,6 +46,7 @@ VALID = {
     "functional-record-unavailable.json",
     "functional-stated-belief.json",
     "safe-call-arguments.json",
+    "safe-call-not-made.json",
     "taxonomy-block.json",
 }
 
@@ -147,6 +148,12 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
     "failure-call-blank-operation.json": ([FAILURE_CALL], "blank", False),
     "safe-call-argument-value-not-scalar.json": ([SAFE_OUTCOME], None, True),
     "safe-call-argument-blank-name.json": ([SAFE_OUTCOME], "blank", False),
+    "safe-call-not-made-with-arguments.json": (
+        [SAFE_OUTCOME],
+        "call_made false",
+        False,
+    ),
+    "safe-call-made-not-boolean.json": ([SAFE_OUTCOME], None, True),
 }
 
 
@@ -168,7 +175,7 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
         if not path.name.startswith(("schema-", "v5-"))
     }
     assert listed == set(INVALID)
-    assert len(INVALID) == 48
+    assert len(INVALID) == 50
 
 
 @pytest.mark.parametrize("name", sorted(VALID))
@@ -225,6 +232,19 @@ def test_only_the_safe_call_fixture_carries_call_arguments() -> None:
     assert _load("valid/safe-call-arguments.json")["safe_observable_outcome"][
         "call_arguments"
     ] == [{"argument": "item_id", "value": "ITEM-2"}]
+
+
+def test_only_the_not_made_fixture_carries_call_made() -> None:
+    carrying = {
+        name
+        for name in VALID
+        if "call_made" in (_load(f"valid/{name}").get("safe_observable_outcome") or {})
+    }
+
+    assert carrying == {"safe-call-not-made.json"}
+    outcome = _load("valid/safe-call-not-made.json")["safe_observable_outcome"]
+    assert outcome["call_made"] is False
+    assert "call_arguments" not in outcome
 
 
 def test_only_the_taxonomy_fixture_carries_the_optional_block() -> None:

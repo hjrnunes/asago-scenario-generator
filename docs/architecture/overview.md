@@ -711,16 +711,23 @@ constraints at reach 0 and reach 1, and the constraints lost to
 `analytical_only` (an analytical scenario and no sent scenario). It is a
 record only: no later step reads it and no request changes.
 
-Before publication, `stage5.cross_scenario` checks the adversarial scenarios
-of the run against each other. Two scenarios are siblings when they are on the
-same control action and their ICAs cite the same process-model context (the
-variable values of one context-table row; an ICA that cites none has no
-sibling). For every ordered pair of siblings (A, B), B's bound
-`tool_call_condition` is evaluated with the `tool-call-condition-v2`
-reference evaluator on the one call A's safe outcome names, its
-`operation_name`. The safe outcome is the observable boundary of acceptable
-behavior, not the whole behavior: nothing states that it is the agent's only
-call, so the call is evaluated as an incomplete capture. Its `record_refs`
+Before publication, `stage5.cross_scenario` checks every scenario of the run
+against the others, functional tests (adversary kind `none`) included. Two
+scenarios are siblings when they are on the same control action and their
+ICAs cite the same process-model context (the variable values of one
+context-table row; an ICA that cites none has no sibling). For every ordered
+pair of siblings (A, B), B's bound `tool_call_condition` is evaluated with the
+`tool-call-condition-v2` reference evaluator on the one call A's safe outcome
+states the agent makes, of its `operation_name`. The safe behavior may be to
+call that operation or not to call it; the safe outcome's optional
+`call_made` says which (`true` or `false`, on a `command_attempt` outcome
+only). The outcome states a call when `call_made` is `true`, or, when
+`call_made` is absent, when it states `call_arguments`, which Stage 5 sets
+only for a call that is made. Otherwise A names no call and the pair is not
+evaluated. `call_made: false` with `call_arguments` is invalid. The safe
+outcome is the observable boundary of acceptable behavior, not the whole
+behavior: nothing states that it is the agent's only call, so the call is
+evaluated as an incomplete capture. Its `record_refs`
 name observations, not records. The call's arguments are those of the safe
 outcome's optional `call_arguments`: the typed values the safe call is made
 with, which Stage 5 states only when the safe behavior is that the agent makes
@@ -739,7 +746,8 @@ condition is a value condition on the safe call's own arguments that A's
 values satisfy; otherwise it is `inconclusive` or `not_detected`.
 Only `detected` withdraws B: its candidate outcome is `publication_failed`
 with a `cross_scenario_safe_outcome_conflict` diagnostic, and its handoff is
-not written; a pair detected both ways withdraws both. An `inconclusive` pair
+not written, a functional test's included; a pair detected both ways
+withdraws both. An `inconclusive` pair
 is recorded and never withdraws. Without `call_arguments` no condition is
 `detected`, so a run whose safe outcomes state none withdraws nothing. A safe
 call whose values satisfy its own scenario's condition contradicts that
@@ -752,7 +760,10 @@ arguments its call was evaluated with (when it had any), B's condition, and
 the evaluator's outcome and reason; the withdrawn IDs; and, when there are
 any, the IDs of scenarios whose safe call contradicts them
 (`contradicting_safe_calls`). The check reads only published fields and runs
-after the Gherkin step, so it adds no request and changes none.
+after the Gherkin step and before any handoff is written, so it adds no
+request and changes none. `sibling_pairs` is the pairing alone; research
+tooling that reads recorded scenarios uses it to count what the check
+evaluates.
 
 Final non-N/A ICAs cross an independent STPA attribution check before Stage 5.
 Its closed prompt view contains the authoritative action, original deviation,

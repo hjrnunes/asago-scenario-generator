@@ -159,9 +159,12 @@ class SafeObservableOutcome(ObservationContractModel):
     ``observable=False`` and no claim, operation, record, or fact references.
 
     ``operation_name`` names the operation the boundary is about; the safe
-    behavior may be to call it or not to call it. ``call_arguments`` is
-    present only when the safe behavior is that the agent makes that call:
-    it gives the values the call is made with.
+    behavior may be to call it or not to call it. ``call_made`` states which:
+    ``True`` when the safe behavior is that the agent makes that call,
+    ``False`` when it is that the agent does not, and absent when the outcome
+    does not say. ``call_arguments`` is present only when the safe behavior
+    is that the agent makes that call: it gives the values the call is made
+    with.
     """
 
     observable: StrictBool
@@ -171,6 +174,16 @@ class SafeObservableOutcome(ObservationContractModel):
     operation_name: StrictStr | None = Field(default=None, min_length=1)
     record_refs: tuple[StrictStr, ...] = ()
     fact_refs: tuple[StrictStr, ...] = ()
+    call_made: StrictBool | None = Field(
+        default=None,
+        exclude_if=lambda value: value is None,
+        description=(
+            "Whether the safe behavior is that the agent makes the "
+            "operation_name call: true when it makes that call, false when "
+            "the safe behavior is that the call is not made. Only on a "
+            "command_attempt outcome that names an operation_name."
+        ),
+    )
     call_arguments: tuple[SafeCallArgument, ...] | None = Field(
         default=None,
         exclude_if=lambda value: value is None,
@@ -229,7 +242,7 @@ class SafeObservableOutcome(ObservationContractModel):
         elif self._has_evidence_boundary():
             raise ValueError(
                 "analytical-only safe outcomes must omit claim, operation, "
-                "record, fact references, and call arguments"
+                "record, fact references, call_made, and call arguments"
             )
         return self
 
@@ -246,12 +259,27 @@ class SafeObservableOutcome(ObservationContractModel):
             )
 
     def _require_call_for_arguments(self) -> None:
+        on_call = self.claim_level == "command_attempt" and (
+            self.operation_name is not None
+        )
+        if self.call_made is not None and not on_call:
+            raise ValueError(
+                "safe observable outcome call_made requires claim_level "
+                "command_attempt and an operation_name"
+            )
         if self.call_arguments is None:
             return
-        if self.claim_level != "command_attempt" or self.operation_name is None:
+        if not on_call:
             raise ValueError(
                 "safe observable outcome call_arguments require claim_level "
                 "command_attempt and an operation_name"
+            )
+        if self.call_made is False:
+            raise ValueError(
+                "safe observable outcome call_made false states that the call "
+                "is not made, so it has no call_arguments: set call_arguments "
+                "to null, or set call_made to true when the safe behavior is "
+                "that the agent makes the call"
             )
         names = [item.argument for item in self.call_arguments]
         if len(names) != len(set(names)):
@@ -267,6 +295,7 @@ class SafeObservableOutcome(ObservationContractModel):
                     self.claim_level,
                     self.evidence,
                     self.operation_name,
+                    self.call_made,
                     self.call_arguments,
                 )
             )

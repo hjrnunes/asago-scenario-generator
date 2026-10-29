@@ -280,3 +280,83 @@ def test_a_parameter_whose_schema_cannot_be_checked_is_corrected(
         "'order_id' value 'ORD-104' cannot be checked: the supplied input "
         "schema declares no checkable schema for order_id"
     ) in " ".join(client.calls[1].user_prompt.split())
+
+
+def test_call_made_states_whether_the_safe_call_is_made() -> None:
+    assert _outcome(call_made=True).call_made is True
+    assert _outcome(call_made=False).call_made is False
+    assert _outcome(call_made=False).model_dump(mode="json")["call_made"] is False
+    # Absent, it reads as unstated and leaves the dump unchanged.
+    assert _outcome().call_made is None
+    assert "call_made" not in _outcome().model_dump(mode="json")
+
+
+def test_call_made_needs_a_command_attempt_on_an_operation() -> None:
+    with pytest.raises(ValidationError, match="call_made requires claim_level"):
+        SafeObservableOutcome.model_validate(
+            {
+                "observable": True,
+                "statement": "The assistant replies with the refund policy.",
+                "claim_level": "reply",
+                "evidence": "assistant_message",
+                "call_made": True,
+            }
+        )
+    with pytest.raises(ValidationError, match="analytical-only"):
+        SafeObservableOutcome.model_validate(
+            {
+                "observable": False,
+                "statement": "No capture shows the refund.",
+                "call_made": False,
+            }
+        )
+
+
+def test_a_call_that_is_not_made_has_no_arguments() -> None:
+    arguments = [{"argument": "order_id", "value": "ORD-104"}]
+
+    assert _outcome(call_made=True, call_arguments=arguments).call_arguments
+    with pytest.raises(
+        ValidationError, match="call_made false states that the call is not made"
+    ):
+        _outcome(call_made=False, call_arguments=arguments)
+
+
+def test_analytical_only_clears_call_made() -> None:
+    normalizations: list = []
+
+    cleared = _analytical_only_safe_outcome(_outcome(call_made=True), normalizations)
+
+    assert cleared.call_made is None
+    changed = {item.field: item for item in normalizations}
+    assert changed["safe_observable_outcome.call_made"].normalized is None
+
+
+def test_stage5_publishes_call_made(tmp_path) -> None:
+    payload = _payload(None)
+    payload["unsafe_outcome"]["safe_observable_outcome"]["call_made"] = False
+
+    client, (result, error) = _generate(tmp_path, payload)
+
+    assert error is None
+    assert len(client.calls) == 1
+    assert result.safe_observable_outcome.call_made is False
+
+
+def test_arguments_on_a_call_that_is_not_made_go_through_the_correction(
+    tmp_path,
+) -> None:
+    bad = _payload([{"argument": "order_id", "value": "ORD-104"}])
+    bad["unsafe_outcome"]["safe_observable_outcome"]["call_made"] = False
+    good = _payload(None)
+    good["unsafe_outcome"]["safe_observable_outcome"]["call_made"] = False
+
+    client, (result, error) = _generate(tmp_path, bad, good)
+
+    assert error is None
+    assert len(client.calls) == 2
+    assert "call_made false states that the call is not made" in " ".join(
+        client.calls[1].user_prompt.split()
+    )
+    assert result.safe_observable_outcome.call_made is False
+    assert result.safe_observable_outcome.call_arguments is None

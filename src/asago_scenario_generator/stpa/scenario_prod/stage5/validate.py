@@ -568,6 +568,7 @@ def _analytical_only_safe_outcome(
             "operation_name": None,
             "record_refs": (),
             "fact_refs": (),
+            "call_made": None,
             "call_arguments": None,
         },
         reason="observable_contradicts_analytical_only_assessment",
@@ -598,6 +599,7 @@ def _reply_only_safe_outcome(
             "claim_level": "reply",
             "evidence": "assistant_message",
             "operation_name": None,
+            "call_made": None,
             "call_arguments": None,
         },
         reason="observable_false_with_only_reply_criteria_supported",
@@ -646,7 +648,9 @@ def _only_supported_criterion_safe_outcome(
             "claim_level": criterion.claim_level,
             "evidence": criterion.evidence,
             "operation_name": criterion.operation_name,
-            # The arguments are those of the call the outcome named.
+            # Whether the call is made, and its arguments, are those of the
+            # call the outcome named.
+            "call_made": outcome.call_made if keeps_call else None,
             "call_arguments": outcome.call_arguments if keeps_call else None,
         },
         reason="safe_outcome_differs_from_only_supported_criterion",
@@ -959,7 +963,8 @@ def _replace_safe_outcome(
                 reason=reason,
             )
             for name in SafeObservableOutcome.model_fields
-            # ``call_arguments`` is left out of a dump when absent.
+            # ``call_made`` and ``call_arguments`` are left out of a dump
+            # when absent.
             if original.get(name) != changed.get(name)
         )
     return normalized

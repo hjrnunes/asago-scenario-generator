@@ -78,7 +78,10 @@ def _not_called(operation: str, **where: object) -> dict[str, Any]:
 
 
 def _safe_call(
-    operation: str, arguments: dict[str, Any] | None = None
+    operation: str,
+    arguments: dict[str, Any] | None = None,
+    *,
+    call_made: bool | None = True,
 ) -> SafeObservableOutcome:
     return SafeObservableOutcome.model_validate(
         {
@@ -88,6 +91,7 @@ def _safe_call(
             "evidence": "tool_call",
             "operation_name": operation,
             "record_refs": ["TARGET-STATE"],
+            "call_made": call_made,
             "call_arguments": (
                 [{"argument": k, "value": v} for k, v in arguments.items()]
                 if arguments is not None
@@ -111,6 +115,7 @@ def _spec(
     *,
     safe_operation: str | None = None,
     safe_arguments: dict[str, Any] | None = None,
+    call_made: bool | None = True,
     condition: ToolCallCondition | None = None,
     action: str = "CA-1-1",
 ) -> ScenarioSpec:
@@ -124,7 +129,7 @@ def _spec(
             ),
             "target_control_action": action,
             "safe_observable_outcome": (
-                _safe_call(safe_operation, safe_arguments)
+                _safe_call(safe_operation, safe_arguments, call_made=call_made)
                 if safe_operation is not None
                 else None
             ),
@@ -243,6 +248,51 @@ def test_a_condition_the_safe_call_rules_out_is_counted_only() -> None:
     assert check.not_detected_pairs == 1
     assert check.inconclusive == []
     assert check.conflicts == []
+
+
+def test_a_safe_outcome_whose_call_is_not_made_names_no_call() -> None:
+    # SCN-001's safe behavior is that the refund is not made. Its operation
+    # is the boundary, not a call, so it neither rules out SCN-002's
+    # "refund is never called" nor satisfies SCN-003's refund of ORD-1.
+    specs = [
+        _spec("SCN-001", safe_operation="refund", call_made=False),
+        _spec("SCN-002", condition=_condition(_not_called("refund"))),
+        _spec("SCN-003", condition=_condition(_refund_of("ORD-1"))),
+    ]
+    check = check_cross_scenario_conflicts(specs, _same_context(specs))
+
+    assert check.eligible_pairs == 6
+    assert check.evaluated_pairs == 0
+    assert check.not_detected_pairs == 0
+    assert check.inconclusive == []
+    assert check.conflicts == []
+
+
+def test_an_unstated_call_counts_only_when_its_values_are_stated() -> None:
+    # Without call_made, call_arguments are what state that the call is made.
+    unstated = [
+        _spec("SCN-001", safe_operation="refund", call_made=None),
+        _spec("SCN-002", condition=_condition(_not_called("refund"))),
+    ]
+    stated = [
+        _spec(
+            "SCN-001",
+            safe_operation="refund",
+            safe_arguments={"order_id": "ORD-1"},
+            call_made=None,
+        ),
+        _spec("SCN-002", condition=_condition(_refund_of("ORD-1"))),
+    ]
+
+    assert (
+        check_cross_scenario_conflicts(
+            unstated, _same_context(unstated)
+        ).evaluated_pairs
+        == 0
+    )
+    check = check_cross_scenario_conflicts(stated, _same_context(stated))
+    assert check.evaluated_pairs == 1
+    assert check.withdrawn == ["SCN-002"]
 
 
 def test_other_action_other_context_and_no_context_are_not_siblings() -> None:
@@ -588,7 +638,7 @@ def _record(run_dir: Path) -> dict[str, Any]:
     return yaml.safe_load(path.read_text(encoding="utf-8"))
 
 
-def test_run_records_sibling_pairs_and_keeps_functional_scenarios_out(
+def test_run_records_sibling_pairs_including_functional_scenarios(
     tmp_path: Path, monkeypatch: Any
 ) -> None:
     monkeypatch.setattr(
@@ -607,8 +657,10 @@ def test_run_records_sibling_pairs_and_keeps_functional_scenarios_out(
     for scenario_id in ("SCN-001", "SCN-002", "SCN-003"):
         assert (tmp_path / "checked" / "scenarios" / f"{scenario_id}.yaml").is_file()
     record = _record(tmp_path / "checked")
-    # SCN-003 shares the context but is functional: no pair names it.
-    assert record["eligible_pairs"] == 2
+    # SCN-003 is functional and shares the context, so it is a sibling. Its
+    # safe outcome is a reply and it binds no condition: no pair with it is
+    # evaluable.
+    assert record["eligible_pairs"] == 6
     assert record["evaluated_pairs"] == 2
     assert record["not_detected_pairs"] == 0
     assert record["conflicts"] == []
@@ -639,8 +691,9 @@ def test_run_withdraws_a_detected_pair_before_publication(
     monkeypatch.setattr(run_module, "check_cross_scenario_conflicts", withdraw_first)
     client, result = _run(tmp_path / "withdrawn", None)
 
-    # The check sees the adversarial specs only, and adds or changes no request.
-    assert seen == [["SCN-001", "SCN-002"]]
+    # The check sees every spec, functional ones included, and adds or
+    # changes no request.
+    assert seen == [["SCN-001", "SCN-002", "SCN-003"]]
     assert _requests(client) == _requests(baseline_client)
     assert [spec.scenario_id for spec in baseline.scenario_specs] == [
         "SCN-001",
@@ -736,4 +789,84 @@ def test_run_withdraws_the_sibling_a_stated_safe_call_fails(
     ] == [("SCN-002", "SCN-001", {"order_id": "ORD-1"})]
     assert outcomes["SCN-002"]["diagnostics"][-1] == (
         CrossScenarioPair.model_validate(record["conflicts"][0]).diagnostic()
+    )
+
+
+def _with_refund_beliefs(apply_belief_step: Any) -> Any:
+    """Run the real belief step, then give every spec a refund safe call.
+
+    The belief step runs before the functional specs are split off, so the
+    functional SCN-003 gets a safe call and a condition too. SCN-001 states
+    refunding ORD-1 as safe, which is SCN-003's failure.
+    """
+    safe = {
+        "SCN-001": {"order_id": "ORD-1"},
+        "SCN-002": None,
+        "SCN-003": {"order_id": "ORD-3"},
+    }
+    conditions = {
+        "SCN-001": _refund_of("ORD-2"),
+        "SCN-002": _refund_of("ORD-9"),
+        "SCN-003": _refund_of("ORD-1"),
+    }
+
+    def believed(specs: list[ScenarioSpec], **kwargs: Any) -> list[ScenarioSpec]:
+        return [
+            spec.model_copy(
+                update={
+                    "safe_observable_outcome": _safe_call(
+                        "refund", safe[spec.scenario_id]
+                    ),
+                    "tool_call_condition_status": _BOUND,
+                    "tool_call_condition": _condition(conditions[spec.scenario_id]),
+                }
+            )
+            for spec in apply_belief_step(specs, **kwargs)
+        ]
+
+    return believed
+
+
+def test_run_withdraws_a_functional_scenario_a_sibling_safe_call_fails(
+    tmp_path: Path, monkeypatch: Any
+) -> None:
+    monkeypatch.setattr(
+        run_module,
+        "apply_belief_step",
+        _with_refund_beliefs(run_module.apply_belief_step),
+    )
+    contexts = {ica_id: CONTEXT for ica_id in _ICA_IDS}
+    unchecked_client, unchecked = _run(tmp_path / "unchecked", None)
+    client, result = _run(tmp_path / "checked", contexts)
+
+    assert _requests(client) == _requests(unchecked_client)
+    assert [spec.scenario_id for spec in unchecked.functional_test_specs] == ["SCN-003"]
+    assert (tmp_path / "unchecked" / "scenarios" / "SCN-003.yaml").is_file()
+    assert result.functional_test_specs == []
+    assert [spec.scenario_id for spec in result.scenario_specs] == [
+        "SCN-001",
+        "SCN-002",
+    ]
+    scenarios = tmp_path / "checked" / "scenarios"
+    assert not (scenarios / "SCN-003.yaml").exists()
+    assert not (scenarios / "SCN-003.feature").exists()
+    record = _record(tmp_path / "checked")
+    assert record["eligible_pairs"] == 6
+    assert record["evaluated_pairs"] == 6
+    assert record["withdrawn"] == ["SCN-003"]
+    assert [
+        (pair["scenario_id"], pair["safe_scenario_id"]) for pair in record["conflicts"]
+    ] == [("SCN-003", "SCN-001")]
+    outcomes = {
+        item["scenario_id"]: item for item in _manifest_candidate_outcomes(result)
+    }
+    assert outcomes["SCN-003"]["status"] == "publication_failed"
+    assert outcomes["SCN-003"]["diagnostics"][-1] == (
+        CrossScenarioPair.model_validate(record["conflicts"][0]).diagnostic()
+    )
+    counts = _manifest_scenario_counts(result, len(result.scenario_envelopes))
+    assert (counts["generated"], counts["failed"], counts["functional_test"]) == (
+        2,
+        1,
+        0,
     )

@@ -580,9 +580,10 @@ def _run_stages_5_and_6(
 ) -> tuple[list[ScenarioSpec], list[Any], list[ScenarioSpec]]:
     """Generate Stage 5 specs, persist functional tests, and build envelopes.
 
-    Returns the published non-functional scenario specs (those the
-    cross-scenario check does not withdraw), their Stage 6 envelopes, and the
-    functional-test specs.
+    The cross-scenario check runs on every spec, functional tests included,
+    before any is published. Returns the published non-functional scenario
+    specs, their Stage 6 envelopes, and the published functional-test specs;
+    neither list holds a spec the check withdraws.
     """
     run_dir = inputs.run_dir
     profile = inputs.execution_target_profile
@@ -667,6 +668,13 @@ def _run_stages_5_and_6(
         deduplication_by_scenario=deduplication_by_scenario,
         observed_operations=observed_operations,
     )
+    # Every spec as published: functional tests pass the shape step unchanged.
+    cross_check = check_cross_scenario_conflicts(
+        deduplicated_specs, inputs.ica_process_model_contexts
+    )
+    write_cross_scenario_check(run_dir, cross_check)
+    _withdraw_conflicting_candidates(cross_check, candidate_builders)
+    functional_test_specs = publishable_specs(functional_test_specs, cross_check)
     _persist_functional_test_candidates(
         functional_test_specs,
         inputs.scenarios_dir,
@@ -683,11 +691,6 @@ def _run_stages_5_and_6(
         gherkins=gherkins,
         taxonomy=inputs.handoff_taxonomy,
     )
-    cross_check = check_cross_scenario_conflicts(
-        shaped_specs, inputs.ica_process_model_contexts
-    )
-    write_cross_scenario_check(run_dir, cross_check)
-    _withdraw_conflicting_candidates(cross_check, candidate_builders)
     published_specs = publishable_specs(shaped_specs, cross_check)
     scenario_envelopes = _collect_stage6_artifacts(
         published_specs,
