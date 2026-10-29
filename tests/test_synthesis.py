@@ -1594,9 +1594,7 @@ def test_default_stpa_workers_close_typed_consideration_and_accounting(
             return tuple(
                 {
                     "ica_id": request.ica_id,
-                    "verdict": (
-                        "supported" if correction else "insufficient_evidence"
-                    ),
+                    "verdict": ("supported" if correction else "insufficient_evidence"),
                     "rationale": "The typed STPA path is coherent after one correction.",
                     **(
                         {

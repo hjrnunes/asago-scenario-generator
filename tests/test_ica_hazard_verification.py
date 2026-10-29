@@ -391,9 +391,7 @@ class _SendingCorrectionFake(_CorrectionFake):
 
     def verify_ica_hazards(self, requests, *, correction=False):
         dispatch_requests(self.run_dir, 2 if correction else 1)
-        return super().verify_ica_hazards(
-            requests, correction=correction
-        )
+        return super().verify_ica_hazards(requests, correction=correction)
 
     def correct_ica_hazard(self, request, verdict):
         dispatch_requests(self.run_dir, 1)

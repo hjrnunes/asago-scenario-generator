@@ -594,9 +594,7 @@ def test_a_downgrade_in_the_second_round_is_named_the_same_way() -> None:
     class Rejects(_DowngradingVerifier):
         def verify_ica_hazards(self, requests, *, correction=False):
             if correction:
-                return super().verify_ica_hazards(
-                    requests, correction=correction
-                )
+                return super().verify_ica_hazards(requests, correction=correction)
             return [{"ica_id": item.ica_id, **first} for item in requests]
 
     adapter = Rejects(_DOWNGRADED)
