@@ -133,10 +133,44 @@ _STRUCTURAL_ID = re.compile(
     r"\b(?:PM|FB|CA)-\d+-\d+\b|\b(?:RESP|CL|CM|CP|H|L|SC|SEM)-\d+\b"
 )
 _FACT_ID = re.compile(r"\bF\d+\b")
-# Wording that attributes a false belief to the agent.
+# Wording that attributes a false belief, assumption or impression to the
+# agent, in any of its forms: a false-belief noun phrase ("a mistaken
+# assumption"), a belief verb qualified as wrong ("wrongly assumes", "believes,
+# wrongly,"), being under an impression, a mis- verb of judgement ("misreads"),
+# or a noun for a false belief ("misconception"). Verbs of acting or deciding,
+# such as "wrongly treats", describe a decision rule and stay allowed.
+_FALSE_ADJECTIVE = (
+    r"(?:false|wrong|mistaken|incorrect|erroneous|flawed|faulty|inaccurate"
+    r"|misguided|misplaced|untrue)"
+)
+_BELIEF_NOUN = (
+    r"(?:beliefs?|assumptions?|understanding|impressions?|premises?"
+    r"|conclusions?|notions?|perceptions?|interpretations?|picture)"
+)
+_FALSE_ADVERB = (
+    r"(?:incorrectly|wrongly|mistakenly|falsely|erroneously|wrongfully"
+    r"|inaccurately)"
+)
+_BELIEF_VERB = (
+    r"(?:believ\w*|think\w*|thought|assum\w*|conclud\w*|suppos\w*|presum\w*"
+    r"|perceiv\w*|infer\w*|judg\w*|understand\w*|understood|imagin\w*)"
+)
 _FALSE_BELIEF = re.compile(
-    r"\b(?:incorrectly|wrongly|mistakenly|falsely|erroneously)\s+believ"
-    r"|\bflawed\s+belief",
+    rf"\b{_FALSE_ADJECTIVE}\s+(?:\w+\s+)?{_BELIEF_NOUN}\b"
+    rf"|\b{_FALSE_ADVERB}\s+(?:\w+\s+)?{_BELIEF_VERB}\b"
+    rf"|\b{_BELIEF_VERB},?\s+{_FALSE_ADVERB}\b"
+    r"|\bunder\s+(?:the|a|an)\s+(?:\w+\s+)?"
+    r"(?:impression|illusion|misapprehension|belief|assumption)\b"
+    r"|\b(?:is|was|being)\s+mistaken\b"
+    r"|\bmis(?:believ|judg|read|interpret|understand|understood|perceiv"
+    r"|conceiv|apprehend|took|takes)\w*"
+    r"|\b(?:misconceptions?|misapprehensions?|delusions?|illusions?)\b",
+    re.IGNORECASE,
+)
+# A negation just before the wording denies the false belief instead of
+# attributing it: "holds no false belief", "rather than a mistaken assumption".
+_NEGATED = re.compile(
+    r"\b(?:no|not|never|without|nor|rather\s+than|instead\s+of)\b|n't\b",
     re.IGNORECASE,
 )
 _IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|\b[A-Z]{2,}-?\d+\b")
@@ -723,14 +757,35 @@ def _rule_reason_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[s
             "the sentence that says why the agent acts cites no decision rule "
             f"fact; cite the one whose rule it states: {', '.join(rule_ids)}"
         )
-    for index, sentence in enumerate(reply.sentences, 1):
-        if _FALSE_BELIEF.search(sentence.text):
+    labelled = [
+        *(
+            (f"sentence {index}", item.text)
+            for index, item in enumerate(reply.sentences, 1)
+        ),
+        ("the title", reply.title),
+    ]
+    for label, text in labelled:
+        wording = false_belief_wording(text)
+        if wording is not None:
             failures.append(
-                f"sentence {index} says the agent holds a false belief; its "
-                "belief is correct here, so explain the action by its faulty "
+                f'{label} attributes a false belief to the agent ("{wording}"); '
+                "its belief is correct here, so explain the action by its faulty "
                 "decision rule"
             )
     return failures
+
+
+def false_belief_wording(text: str) -> str | None:
+    """Return the first wording that attributes a false belief to the agent.
+
+    Wording that a negation in the four words before it denies, such as "holds
+    no false belief", does not count.
+    """
+    for match in _FALSE_BELIEF.finditer(text):
+        before = re.findall(r"[\w']+", text[: match.start()])[-4:]
+        if not _NEGATED.search(" ".join(before)):
+            return match.group(0)
+    return None
 
 
 def word_count(text: str) -> int:

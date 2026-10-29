@@ -30,8 +30,8 @@ cases:
       - >-
         Here the facts give a decision rule and no agent belief: the agent's
         belief is correct and the rule it applies is wrong, so write "because"
-        followed by that faulty decision rule instead, and do not say the
-        agent believes something false.
+        followed by that faulty decision rule instead, and do not attribute a
+        false belief, assumption, or impression to the agent in any wording.
     ordered:
       - - 1. The situation in which the agent acts.
         - 2. The unsafe action and its cause

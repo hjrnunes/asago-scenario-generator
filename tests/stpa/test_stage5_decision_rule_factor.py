@@ -407,8 +407,9 @@ def test_the_narrative_of_a_decision_rule_rejects_a_false_belief() -> None:
             rule_ids,
         ),
     ) == [
-        "sentence 2 says the agent holds a false belief; its belief is correct "
-        "here, so explain the action by its faulty decision rule"
+        'sentence 2 attributes a false belief to the agent ("incorrectly '
+        'believes"); its belief is correct here, so explain the action by its '
+        "faulty decision rule"
     ]
     assert _reason_failures(
         facts, _narration(facts, "The agent releases the request.", rule_ids)
@@ -450,8 +451,9 @@ def test_only_a_rule_only_narrate_request_asks_for_the_rule() -> None:
     belief_system, belief_user = render_narration_prompts(build_facts(_mixed_spec()))
 
     assert "3. How that faulty rule comes into play:" in rule_system
-    assert "do not say the agent believes something false" in " ".join(
-        rule_system.split()
+    assert (
+        "do not attribute a false belief, assumption, or impression to the agent"
+        in " ".join(rule_system.split())
     )
     assert "No agent belief is false in this scenario." in rule_user
     assert "3. How that flawed belief arises:" in belief_system
@@ -511,3 +513,80 @@ def test_a_run_publishes_a_decision_rule_with_a_null_belief(tmp_path: Path) -> N
     assert "process_model_belief: null" in raw
     stated = published["SCN-001"]["causal_factors"][0]
     assert stated["process_model_belief"] == STEP_BELIEF
+
+
+# Wordings that explain a decision-rule-only scenario by an invented false
+# belief, assumption or impression; each must be rejected.
+FALSE_BELIEF_REASONS = (
+    "The agent acts because it holds a false belief that the request is approved.",
+    "The agent acts because it has a wrong belief about the request's approval.",
+    "The agent acts because it forms a mistaken assumption that the batch is approved.",
+    "The agent acts because it operates on an incorrect understanding of the request.",
+    "The agent acts because it acts on an erroneous impression that review happened.",
+    "The agent acts because of its flawed assumption that the batch is approved.",
+    "The agent acts because it mistakenly thinks the request is approved.",
+    "The agent acts because it wrongly assumes the request is approved.",
+    "The agent acts because it falsely concludes the request is approved.",
+    "The agent acts because it erroneously believed the batch was approved.",
+    "The agent acts because it believes, wrongly, that the batch is approved.",
+    "The agent acts because it is under the mistaken impression that it is approved.",
+    "The agent acts because it is under the impression that the batch is approved.",
+    "The agent acts because it misbelieves that the batch is approved.",
+    "The agent acts because it misjudges that the batch is approved.",
+    "The agent acts because it misreads the review status as approved.",
+    "The agent acts because it misinterprets the empty result as an approval.",
+    "The agent acts because of a misconception that the batch is approved.",
+    "The agent acts because it incorrectly perceives the batch as approved.",
+)
+
+# Wordings that explain the action by the decision rule; each must pass.
+RULE_REASONS = (
+    "The agent acts because its rule releases any request in the queue.",
+    "The agent acts because it correctly believes the request is unapproved "
+    "but its rule still releases it.",
+    "The agent acts because the decision rule wrongly treats an unapproved "
+    "batch as releasable.",
+    "The agent acts because its rule incorrectly allows any batch under the limit.",
+    "The agent acts because its faulty decision rule releases the batch.",
+    "The agent holds no false belief; it acts because its rule releases the batch.",
+    "The agent acts because of its rule, not because of a mistaken assumption.",
+    "The agent acts because its rule, rather than a false belief, releases the batch.",
+    "The agent acts because its rule wrongly decides that the limit alone suffices.",
+)
+
+
+@pytest.mark.parametrize("reason", FALSE_BELIEF_REASONS)
+def test_a_decision_rule_narrative_rejects_any_false_belief_wording(reason) -> None:
+    facts = build_facts(_rule_spec())
+    failures = _reason_failures(
+        facts, _narration(facts, reason, facts.ids_in((DECISION_RULE,)))
+    )
+
+    assert any(item.startswith("sentence 2 ") for item in failures), failures
+    assert all("false belief" in item for item in failures), failures
+
+
+@pytest.mark.parametrize("reason", RULE_REASONS)
+def test_a_decision_rule_narrative_accepts_rule_wording(reason) -> None:
+    facts = build_facts(_rule_spec())
+
+    assert (
+        _reason_failures(
+            facts, _narration(facts, reason, facts.ids_in((DECISION_RULE,)))
+        )
+        == []
+    )
+
+
+def test_a_decision_rule_title_rejects_a_false_belief() -> None:
+    facts = build_facts(_rule_spec())
+    reply = _narration(
+        facts,
+        "The agent acts because its rule releases the batch.",
+        facts.ids_in((DECISION_RULE,)),
+    ).model_copy(update={"title": "The agent wrongly assumes the batch is approved"})
+
+    assert [item for item in _reason_failures(facts, reply)] == [
+        'the title attributes a false belief to the agent ("wrongly assumes"); its '
+        "belief is correct here, so explain the action by its faulty decision rule"
+    ]
