@@ -966,8 +966,10 @@ exact operation argument, field paths and candidate records derived from the
 operation schema and TARGET-STATE. For an INCORRECT ICA the ICA's stated reason
 chooses the kind (`stpa.scenario_prod.reason_family`, whose
 `REASON_FAMILY_RULES` is the mapping): a reason stating an ownership
-relation, or a failed authentication or authorization of the session or a
-principal, gets `ownership` unless it also states a limit failure, which wins
+relation, a failed authentication or authorization of the session or a
+principal, or a failed comparison of the record with the session principal
+("does not match the session customer") gets `ownership` unless it also
+states a limit failure, which wins
 (a bare noun such as "amount" is not one); a reason read from a state field
 gets the family that cites that field; a stated limit failure, eligibility
 and lifecycle terms get `bound`, `flag` and `state`; any other reason gets no
