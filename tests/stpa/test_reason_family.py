@@ -250,6 +250,25 @@ def test_a_stated_limit_failure_gives_bound(reason) -> None:
 @pytest.mark.parametrize(
     "reason",
     [
+        "an attacker could take over the session",
+        "the session is taken over by an attacker",
+        "the attacker takes over the account",
+    ],
+)
+def test_take_over_is_not_a_limit_failure(reason) -> None:
+    choice = _choose(reason)
+    assert (choice.kind, choice.rule) == (None, "no_match")
+
+
+def test_a_guarded_take_over_reason_gets_no_bound_hint() -> None:
+    choice = _choose("another user could take over the account", _row(BELONGS))
+    assert choice.ownership_guarded is True
+    assert (choice.kind, choice.rule) == (None, "no_match")
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
         "the actor is unauthorized and the amount exceeds the limit",
         "the order does not belong to the authenticated customer and the amount "
         "exceeds the remaining balance",
@@ -351,6 +370,39 @@ def test_a_failed_comparison_with_the_principal_is_ownership(reason) -> None:
 )
 def test_a_principals_consent_is_not_a_compared_record(reason) -> None:
     assert _choose(reason).kind is None
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "another user's explicit confirmation is required",
+        "the request lacks another customer's prior written approval",
+        "the change proceeds without another user explicit consent",
+    ],
+)
+def test_a_principals_consent_past_modifiers_is_not_a_compared_record(reason) -> None:
+    assert _choose(reason).kind is None
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the refund targets another customer's order without confirmation",
+        "the refund targets another customer's order for approval",
+    ],
+)
+def test_a_consent_word_outside_the_principals_noun_phrase_keeps_ownership(
+    reason,
+) -> None:
+    choice = _choose(reason)
+    assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
+
+
+def test_another_user_confirmation_with_or_without_a_modifier_gets_no_hint() -> None:
+    plain = _choose("another user confirmation is required")
+    modified = _choose("another user explicit confirmation is required")
+    assert (plain.kind, plain.rule) == (None, "no_match")
+    assert (modified.kind, modified.rule) == (None, "no_match")
 
 
 def test_a_failed_comparison_with_the_principals_intent_is_not_ownership() -> None:
