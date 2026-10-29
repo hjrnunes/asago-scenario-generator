@@ -14,15 +14,19 @@ from asago_scenario_generator.stpa.mechanism_library import (
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlStructure,
     FeedbackAuthorityStatus,
+    FeedbackSourceKind,
 )
 from asago_scenario_generator.stpa.obligation_aware.mechanism_suggestions import (
     propose_mechanism_suggestions,
 )
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
+    RETRIEVAL_SOURCE_KINDS,
     DropReason,
     MechanismCandidate,
     mechanism_candidates,
     mechanism_join,
+    retrieval_admits,
+    signature_fits,
 )
 
 _CP = {"type": "controlled_process", "id": "CP-1"}
@@ -187,15 +191,13 @@ def test_flag_on_matches_every_entry_signature_in_library_order() -> None:
     by_kind = _by_kind(mechanism_candidates(_structure(), signature_retrieval=True))
 
     assert by_kind == {
+        # forged_completion needs an operation's own report.
         "user_message": [
             ("user_claim", _LOCAL),
-            ("forged_completion", _LOCAL),
             ("user_claim", _MESSAGE),
             ("delegated_authority", _MESSAGE),
-            ("forged_completion", _MESSAGE),
             ("user_claim", _link("user_message")),
             ("delegated_authority", _link("user_message")),
-            ("forged_completion", _link("user_message")),
         ],
         "conversation_history": [
             ("stale_history", _LOCAL),
@@ -206,13 +208,10 @@ def test_flag_on_matches_every_entry_signature_in_library_order() -> None:
         ],
         "retrieved_content": [
             ("retrieved_instructions", _LOCAL),
-            ("forged_completion", _LOCAL),
             ("retrieved_instructions", _MESSAGE),
             ("delegated_authority", _MESSAGE),
-            ("forged_completion", _MESSAGE),
             ("retrieved_instructions", _link("retrieved_content")),
             ("delegated_authority", _link("retrieved_content")),
-            ("forged_completion", _link("retrieved_content")),
         ],
         # stale_feedback stays within the controller: no message, no link.
         "operation_result": [
@@ -328,9 +327,65 @@ def test_own_controller_channel_drops_every_signature_match() -> None:
     assert {item.candidate.mechanism for item in join.dropped} == {
         MechanismId.retrieved_instructions,
         MechanismId.delegated_authority,
-        MechanismId.forged_completion,
     }
     assert {item.reason for item in join.dropped} == {DropReason.own_controller}
+
+
+@pytest.mark.parametrize("kind", list(FeedbackSourceKind))
+def test_forged_completion_needs_an_operation_report_channel(
+    kind: FeedbackSourceKind,
+) -> None:
+    trusted = kind in {FeedbackSourceKind.operation_result, FeedbackSourceKind.other}
+
+    assert retrieval_admits(MechanismId.forged_completion, kind) is trusted
+    assert retrieval_admits(MechanismId.forged_completion, None) is False
+
+
+@pytest.mark.parametrize("kind", [*FeedbackSourceKind, None])
+def test_retrieval_leaves_every_other_mechanism_to_its_signature(
+    kind: FeedbackSourceKind | None,
+) -> None:
+    assert set(RETRIEVAL_SOURCE_KINDS) == {MechanismId.forged_completion}
+    for mechanism in set(MechanismId) - {MechanismId.forged_completion}:
+        assert retrieval_admits(mechanism, kind)
+
+
+def test_the_narrowed_kinds_stay_within_their_library_signature() -> None:
+    # A kind outside the signature would be one the narrowing never admits.
+    library = bundled_mechanism_library()
+    for mechanism, kinds in RETRIEVAL_SOURCE_KINDS.items():
+        signature = library.entry(mechanism).signature
+        assert kinds < set(signature.source_kinds), mechanism
+        for kind in set(signature.source_kinds) - kinds:
+            assert signature_fits(signature, kind, crosses=False)
+
+
+@pytest.mark.parametrize("kind", ["user_message", "retrieved_content"])
+def test_untrusted_report_channels_lose_only_forged_completion(kind: str) -> None:
+    for status in (None, "unknown", "non_authoritative"):
+        structure = _structure((kind,), authority=status)
+        on = mechanism_join(structure, signature_retrieval=True)
+        off = mechanism_join(structure)
+
+        assert MechanismId.forged_completion not in {
+            item.candidate.mechanism for item in (*on.kept, *on.dropped)
+        }
+        assert on == off
+
+
+@pytest.mark.parametrize("status", [None, "unknown", "authoritative"])
+def test_stale_feedback_is_unaffected_by_the_narrowing(status: str | None) -> None:
+    candidates = mechanism_candidates(
+        _structure(authority=status), signature_retrieval=True
+    )
+    stale = [
+        (kind, end)
+        for kind, pairs in _by_kind(candidates).items()
+        for mechanism, end in pairs
+        if mechanism == "stale_feedback"
+    ]
+
+    assert stale == [("operation_result", _LOCAL), ("session_context", _LOCAL)]
 
 
 def test_live_suggestions_never_turn_signature_retrieval_on() -> None:

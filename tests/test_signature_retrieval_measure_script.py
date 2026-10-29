@@ -41,7 +41,10 @@ def _channel(fb_id: str, pm_id: str, kind: str, authority: str | None = None) ->
 
 
 def _structure() -> dict:
-    """A user-message channel and an authoritative operation result, one action."""
+    """A user message, an authoritative operation result and an other report.
+
+    One action reads all three variables.
+    """
     return {
         "responsibilities": [
             {
@@ -50,6 +53,7 @@ def _structure() -> dict:
                 "process_model_parts": [
                     {"pm_id": "PM-1-1", "description": "Claim"},
                     {"pm_id": "PM-1-2", "description": "Order state"},
+                    {"pm_id": "PM-1-3", "description": "Refund sent"},
                 ],
                 "control_actions": [
                     {
@@ -57,12 +61,13 @@ def _structure() -> dict:
                         "description": "Refund",
                         "target": {"type": "controlled_process", "id": "CP-1"},
                         "effect_kind": "state_change",
-                        "process_model_refs": ["PM-1-1", "PM-1-2"],
+                        "process_model_refs": ["PM-1-1", "PM-1-2", "PM-1-3"],
                     }
                 ],
                 "feedback_channels": [
                     _channel("FB-1-1", "PM-1-1", "user_message"),
                     _channel("FB-1-2", "PM-1-2", "operation_result", "authoritative"),
+                    _channel("FB-1-3", "PM-1-3", "other"),
                 ],
             }
         ],
@@ -99,8 +104,8 @@ def _run(tmp_path: Path, name: str, accounting: dict | None = None) -> Path:
 
 
 _USER_CLAIM = ("user_claim", ("FB-1-1", "PM-1-1", "CA-1-1"))
-_FORGED_USER = ("forged_completion", ("FB-1-1", "PM-1-1", "CA-1-1"))
 _STALE = ("stale_feedback", ("FB-1-2", "PM-1-2", "CA-1-1"))
+_FORGED = ("forged_completion", ("FB-1-3", "PM-1-3", "CA-1-1"))
 
 
 def test_off_and_on_candidates_and_the_new_ones(tmp_path: Path) -> None:
@@ -112,12 +117,12 @@ def test_off_and_on_candidates_and_the_new_ones(tmp_path: Path) -> None:
     assert [(item.mechanism, item.path) for item in off.candidates] == [_USER_CLAIM]
     assert [(item.mechanism, item.path) for item in on.candidates] == [
         _USER_CLAIM,
-        _FORGED_USER,
         _STALE,
+        _FORGED,
     ]
     assert [(item.mechanism, item.path) for item in unit.new_candidates()] == [
-        _FORGED_USER,
         _STALE,
+        _FORGED,
     ]
     assert [item.candidate.mechanism for item in on.dropped] == ["forged_completion"]
 
@@ -137,7 +142,7 @@ def test_verifier_status_comes_only_from_recorded_replies(tmp_path: Path) -> Non
                 "mechanism_id": "forged_completion",
                 "slot_id": "RESP-1:CA-1-1:INCORRECT",
                 "stop_reason": "verifier_rejected",
-                "path_verdicts": [_verdict("FB-1-1", "PM-1-1", "no_verdict")],
+                "path_verdicts": [_verdict("FB-1-3", "PM-1-3", "no_verdict")],
             },
         ]
     )
@@ -147,7 +152,7 @@ def test_verifier_status_comes_only_from_recorded_replies(tmp_path: Path) -> Non
     row = script.unit_counts(unit, [unit])
 
     assert unit.verifier_status(_candidate(*_USER_CLAIM)) == "insufficient_evidence"
-    assert unit.verifier_status(_candidate(*_FORGED_USER)) == "unverified"
+    assert unit.verifier_status(_candidate(*_FORGED)) == "unverified"
     assert unit.verifier_status(_candidate(*_STALE)) == "unverified"
     assert row["off"]["verifier"] == {
         "accepted": 0,
@@ -226,7 +231,7 @@ def test_usefulness_reads_labels_by_structure_digest(tmp_path: Path) -> None:
         {
             "sha256": "0" * 64,
             "mechanism": "forged_completion",
-            "path": list(_FORGED_USER[1]),
+            "path": list(_FORGED[1]),
             "agreed": "incorrect",
         },
     ]
@@ -280,8 +285,8 @@ def test_live_check_lists_unverified_new_candidates_and_requests(
 
     # r2 is byte-identical to r1, so only r1's two new candidates need a reply.
     assert [(row["unit"], row["mechanism"]) for row in check["candidates"]] == [
-        ("a", "forged_completion"),
         ("a", "stale_feedback"),
+        ("a", "forged_completion"),
     ]
     assert check["requests"] == {"a": 1}
     assert check["total_requests"] == 1
