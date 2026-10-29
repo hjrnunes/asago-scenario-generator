@@ -236,12 +236,60 @@ def test_intent_reasons_take_the_no_match_path(reason) -> None:
     [
         "The requested amount exceeds the session spending limit",
         "the amount exceeds the authenticated customer's remaining balance",
-        "the requested amount or plan is not authorized by session",
+        "the refund amount exceeds the remaining balance",
+        "the requested quantity is above the maximum",
+        "the balance is insufficient for the amount",
+        "the actor is unauthorized and the amount exceeds the limit",
     ],
 )
-def test_a_limit_term_wins_over_an_incidental_session_mention(reason) -> None:
+def test_a_stated_limit_failure_gives_bound(reason) -> None:
     choice = _choose(reason)
     assert (choice.kind, choice.rule) == ("bound", "reason_terms")
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the session is unauthenticated when changing the amount",
+        "the amount is requested without an authenticated session",
+        "the plan is not authorized by session",
+    ],
+)
+def test_an_authentication_failure_wins_over_a_bare_amount_noun(reason) -> None:
+    choice = _choose(reason)
+    assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
+
+
+@pytest.mark.parametrize(
+    "reason", ["the amount is wrong", "the plan price is incorrect"]
+)
+def test_a_bare_object_noun_is_not_a_limit_reason(reason) -> None:
+    choice = _choose(reason)
+    assert (choice.kind, choice.rule) == (None, "no_match")
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the session token is stale",
+        "the refund parameters are not authorized by the customer's actual order",
+        "the request does not match the customer's authorized intent",
+    ],
+)
+def test_a_session_or_principal_mention_alone_is_not_ownership(reason) -> None:
+    assert _choose(reason).kind is None
+
+
+def test_amount_or_plan_not_authorized_by_session_is_a_session_failure() -> None:
+    # The reason states a failed session authorization and no limit failure,
+    # so it takes ownership; when its row says the record is the session
+    # customer's, the guard withholds ownership and nothing else matches.
+    reason = "the requested amount or plan is not authorized by session"
+    assert _choose(reason).kind == "ownership"
+    session = _var("PM-1-1", "not authorized by session", "session:x")
+    guarded = _choose(reason, _row(session, BELONGS))
+    assert guarded.ownership_guarded is True
+    assert (guarded.kind, guarded.rule) == (None, "no_match")
 
 
 def test_a_session_read_reason_variable_with_a_limit_term_gets_bound() -> None:
@@ -341,16 +389,40 @@ def test_a_negated_ownership_value_does_not_guard(value) -> None:
     assert choice.kind == "ownership"
 
 
-def test_a_membership_variable_without_session_evidence_guards() -> None:
-    party = _var(
-        "PM-1-2",
-        "guest of the booking",
-        "state:widgets.owner_id",
-        description="Booking membership",
-    )
-    choice = _choose("the session token is stale", _row(party))
+@pytest.mark.parametrize(
+    ("value", "refs"),
+    [
+        ("belongs to authenticated customer", ("session:x", "state:widgets.owner_id")),
+        ("owned by the session customer", ("state:widgets.owner_id",)),
+        ("actor is the guest", ("state:widgets.owner_id",)),
+        (
+            "authenticated actor is the host of the widget",
+            ("session:x", "state:widgets.owner_id"),
+        ),
+        ("requester is a member", ("state:widgets.owner_id",)),
+    ],
+)
+def test_an_affirmative_ownership_value_guards(value, refs) -> None:
+    other = _var("PM-1-2", value, *refs, description="Pending status")
+    choice = _choose("the actor is unauthorized", _row(other))
     assert choice.ownership_guarded is True
     assert choice.kind is None
+
+
+@pytest.mark.parametrize("value", ["pending", "unresolved", "actor is a stranger"])
+def test_a_relationship_description_without_an_affirming_value_does_not_guard(
+    value,
+) -> None:
+    other = _var(
+        "PM-1-2",
+        value,
+        "session:authenticated_owner_id",
+        "state:widgets.owner_id",
+        description="Relationship of the session customer to the widget",
+    )
+    choice = _choose("the actor is unauthorized", _row(other))
+    assert choice.ownership_guarded is False
+    assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
 
 
 @pytest.mark.parametrize(
