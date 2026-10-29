@@ -1103,25 +1103,47 @@ hold:
 
 - its slot is INCORRECT and its control action's typed `effect_kind` is
   `tool_call`, the path where Stage 5 writes an `incorrect_call` scenario;
-- its reason states no ground Stage 5 can test: no ownership source of
-  `REASON_FAMILY_RULES` (an ownership relation, a failed session or principal
-  authorization, a failed comparison with the session or a principal), no
-  limit failure, and no eligibility or lifecycle term;
-- the cited row's reason variable, if there is one, carries no target
-  evidence (`state:`, `session:`, `argument:`, `operation:`);
-- the reason is about intent. The structural basis comes first: the reason
-  variable's description names the user's intent (`reason_variable`).
-  Otherwise the wording basis applies: the reason states a failed comparison
-  with an intent, or an unknown intent (`reason_wording`). "intended" does
-  not count, and neither does an intent the action itself produces ("the
-  classified intent is incorrect").
+- its reason states nothing but an intent ground. The check is positive and
+  covers the whole reason, so anything beside the intent keeps the ICA on the
+  Stage 5 path: a bound, amount, currency, value, limit, timing or order,
+  status, eligibility, ownership, session, actor, identity or transaction
+  context. As a second guard, a reason with an ownership source of
+  `REASON_FAMILY_RULES`, a limit failure, or an eligibility or lifecycle term
+  is never routed;
+- the reason is about the user's intent, on one of two bases. When the
+  reason states the value of a cited row's variable, that variable decides
+  alone (`reason_variable`). It must:
+  - carry no target evidence (`state:`, `session:`, `argument:`,
+    `operation:`);
+  - have a description that names an intent but no classifier output ("the
+    classified intent produced by the classifier" is the action's output,
+    not the user's intent);
+  - have a value that states a failure ("does not match authorized intent",
+    "intent unknown", "unauthorized transaction");
 
-So session ("not authorized for the session"), actor ("the actor is
-unauthorized", "the actor is not the host or the guest"), identity ("record
-identity unknown", "not owned by the authenticated customer"), bound ("amount
-or plan not authorized by session") and timing reasons keep reaching Stage 5.
-So does an intent comparison stated beside one of them ("... and the refund is
-ineligible").
+  and the rest of the reason may only name the request ("the request", "the
+  requested operation"). A reason that states no row value must be, as a
+  whole, one of the intent-only forms (`reason_wording`). In those forms the
+  failed or unknown predicate applies to the intent itself: the request does
+  not match or deviates from an intent ("the request does not match the
+  customer's authorized intent", "the customer's intent does not match the
+  requested payment operation", "the refund is executed without matching the
+  customer's authorized intent"), or the intent is unknown ("the intent is
+  unknown", "intent unknown").
+
+So these keep reaching Stage 5:
+- session reasons ("not authorized for the session");
+- actor reasons ("the actor is unauthorized", "the actor is not the host or
+  the guest");
+- identity reasons ("record identity unknown", "not owned by the
+  authenticated customer");
+- bound reasons ("amount or plan not authorized by session");
+- timing reasons;
+- an intent ground stated beside any other ground ("... and the refund is
+  ineligible", "... and the amount is negative", "intent unknown before the
+  authorization status is confirmed", "... or transaction context");
+- a reason whose failure applies to something else ("the intent matches but
+  currency is different").
 
 A routed ICA keeps one candidate with no family hint. Its
 `CandidateFamilyPlan.not_applicable` holds the disposition: the reason code
@@ -1142,7 +1164,10 @@ Every candidate is accounted exactly once:
 `requested = generated + functional_test + not_applicable + failed + skipped`.
 A not-applicable candidate is resolved but never attempted (`attempted`
 excludes it) and is not yield. The run status counts it towards completion,
-so a run whose other candidates all published is `completed`. Obligation
+so a run whose other candidates all published is `completed`. Routed
+candidates are closed before any Stage 5 request is sent, so a Stage 5
+circuit break never marks one skipped and its abort diagnostic counts only
+the candidates it left unattempted. Obligation
 accounting is unchanged: an addressed obligation whose only finding is
 routed is still marked `generation_failed`.
 

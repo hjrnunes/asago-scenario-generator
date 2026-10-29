@@ -304,7 +304,9 @@ def test_a_classifier_variable_with_a_failure_value_is_not_routed() -> None:
 
 
 def test_an_intent_variable_whose_value_states_no_failure_is_not_routed() -> None:
-    matching = _var("PM-1-1", "matches authorized intent", description=INTENT.description)
+    matching = _var(
+        "PM-1-1", "matches authorized intent", description=INTENT.description
+    )
 
     assert _recognize("the request matches authorized intent", _row(matching)) is None
 
@@ -708,6 +710,10 @@ def test_a_circuit_break_keeps_each_routed_candidates_disposition(
     assert second.diagnostics == (routed.reason,)
     assert third.status is SP3CandidateStatus.skipped
     assert third.reason_code is None
+    # The abort names only the candidate it did not attempt.
+    assert any(
+        "Stage 5 aborted 1 remaining threats" in error for error in result.stage_errors
+    )
     # The testability record agrees with the candidate outcomes.
     testability = yaml.safe_load((tmp_path / TESTABILITY_FILENAME).read_text())
     assert [entry["scenario_id"] for entry in testability["not_applicable"]] == [

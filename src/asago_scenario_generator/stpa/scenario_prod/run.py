@@ -1001,15 +1001,21 @@ def _collect_stage5_specs(
     content_surface: ContentSurfaceFacts | None = None,
     condition_families: Sequence[CandidateFamilyPlan] | None = None,
 ) -> list[ScenarioSpec]:
-    """Generate and retain the valid Stage 5 specs in threat order."""
+    """Generate and retain the valid Stage 5 specs in threat order.
+
+    Each candidate routed before Stage 5 is closed as not applicable before
+    any request is sent, so a circuit break never marks it skipped.
+    """
     specs: list[ScenarioSpec] = []
     threats = enriched_threat_set.structural_threats
-    for index, threat in enumerate(threats):
-        plan = condition_families[index] if condition_families is not None else None
-        if plan is not None and plan.not_applicable is not None:
+    for index, plan in enumerate(condition_families or ()):
+        if plan.not_applicable is not None:
             _record_not_applicable(
                 _candidate_builder_at(candidate_builders, index), plan.not_applicable
             )
+    for index, threat in enumerate(threats):
+        plan = condition_families[index] if condition_families is not None else None
+        if plan is not None and plan.not_applicable is not None:
             continue
         result = _run_stage5_candidate(
             llm_client,
@@ -1035,7 +1041,12 @@ def _collect_stage5_specs(
         if result.scenario_spec is not None:
             specs.append(result.scenario_spec)
         if result.abort_remaining:
-            _record_stage5_abort(stage_errors, len(threats) - index - 1)
+            # A routed candidate is already closed; only the rest are aborted.
+            routed = sum(
+                plan.not_applicable is not None
+                for plan in (condition_families or ())[index + 1 :]
+            )
+            _record_stage5_abort(stage_errors, len(threats) - index - 1 - routed)
             _skip_stage5_remaining_candidates(candidate_builders, index)
             break
     return specs

@@ -14,31 +14,45 @@ An ICA is routed only when all of these hold:
 1. Its slot is INCORRECT and its control action is a ``tool_call`` (the
    typed effect kind of the control structure). An ICA of any other slot or
    effect kind keeps its path; a WRONG_TIMING ICA is never routed.
-2. Its reason (``reason_family.ica_reasons``) states no ground Stage 5 can
-   test: no ownership source (an ownership relation, a failed session or
-   principal authorization, a failed comparison with the session or a
-   principal), no limit failure, and no eligibility or lifecycle term. So
-   session, actor, identity and bound reasons keep reaching Stage 5, and so
-   does an intent comparison stated beside one of them.
-3. The cited row's variable whose value the reason states, if any, has no
-   target evidence (no ``state:``, ``session:``, ``argument:`` or
-   ``operation:`` reference): a reason read from a target fact is grounded.
-4. It is about intent, by one of two bases, the structural one first:
+2. Its reason (``reason_family.ica_reasons``) states nothing but an intent
+   ground. The check is positive and covers the whole reason: anything
+   beside the intent (a bound, amount, currency, value, limit, timing or
+   order, status, eligibility, ownership, session, actor, identity or
+   transaction context) keeps the ICA on the Stage 5 path. As a second
+   guard, a reason with an ownership source, a limit failure, or an
+   eligibility or lifecycle term of ``reason_family`` is never routed.
+3. When the reason states the value of a cited row's variable, that
+   variable decides alone: it must have no target evidence (no ``state:``,
+   ``session:``, ``argument:`` or ``operation:`` reference; a reason read
+   from a target fact is grounded) and pass the ``reason_variable`` basis
+   below. The wording basis applies only to a reason that states no row
+   value.
+4. It is about the user's intent, by one of two bases, the structural one
+   first:
 
-   - ``reason_variable``: that variable's description names the user's
-     intent ("intent" or "intention").
-   - ``reason_wording``: the reason itself states a failed comparison with
-     an intent ("does not match the customer's authorized intent", "the
-     customer's intent does not match", "deviates from the authorized
-     intent") or an unknown intent ("the intent is unknown", "intent
-     unknown"). "intended" and an intent the action produces ("the
-     classified intent is incorrect") do not count.
+   - ``reason_variable``: that variable's description names an intent and
+     no classifier output ("the classified intent produced by the
+     classifier" is the action's output, not the user's intent); its value
+     states a failure (a negation or "unknown": "does not match authorized
+     intent", "intent unknown", "unauthorized transaction"); and the rest
+     of the reason only names the request ("the request", "the requested
+     operation is").
+   - ``reason_wording``: the whole reason is one of ``_INTENT_ONLY_FORMS``,
+     where the failed or unknown predicate applies to the intent itself: a
+     request that does not match, or deviates from, an intent ("the
+     request does not match the customer's authorized intent", "the
+     customer's intent does not match the requested payment operation",
+     "the refund is executed without matching the customer's authorized
+     intent"), or an unknown intent ("the intent is unknown", "intent
+     unknown"). "the intent matches but currency is different" and "the
+     classified intent is incorrect" are no such form.
 
-The term lists below are the only lexical matching.
+The term lists and forms below are the only lexical matching.
 """
 
 from __future__ import annotations
 
+import re
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Literal
@@ -55,32 +69,90 @@ IntentBasis = Literal["reason_variable", "reason_wording"]
 
 _INCORRECT = "INCORRECT"
 _INTENT_NOUNS = frozenset({"intent", "intents", "intention", "intentions"})
-# A comparison word that states the failure itself; the negated forms of
-# ``reason_family.COMPARISON_TERMS`` ("does not match") count too.
-_FAILED_COMPARISON_TERMS = frozenset(
+_UNKNOWN_TERMS = frozenset({"unknown", "unclear", "undetermined", "unconfirmed"})
+# A description naming one of these is about an action's classification
+# output, not the user's intent.
+_CLASSIFIER_TERMS = frozenset(
     {
-        "mismatch",
-        "mismatches",
-        "mismatched",
-        "inconsistent",
-        "different",
-        "differs",
-        "differ",
-        "deviate",
-        "deviates",
-        "deviating",
+        "classified",
+        "classification",
+        "classifications",
+        "classifier",
+        "classifiers",
+        "classify",
+        "classifies",
+        "categorized",
+        "categorised",
+        "category",
+        "label",
+        "labelled",
+        "labeled",
+        "predicted",
+        "prediction",
+        "detected",
+        "detection",
+        "inferred",
+        "identified",
+        "produced",
+        "assigns",
+        "assigned",
+        "output",
     }
 )
-_UNKNOWN_TERMS = frozenset({"unknown", "unclear", "undetermined", "unconfirmed"})
+# The words a reason may add around an intent variable's value: they name
+# only the request ("the request", "the requested operation is").
+_FRAME_TERMS = frozenset(
+    {
+        "the",
+        "a",
+        "an",
+        "this",
+        "is",
+        "are",
+        "request",
+        "requested",
+        "operation",
+        "call",
+        "tool",
+        "refund",
+        "payment",
+        "transaction",
+        "action",
+    }
+)
 _TARGET_EVIDENCE_PREFIXES = ("state:", "session:", "argument:", "operation:")
-# Words before a comparison word that may negate it ("does not match").
-_NEGATION_WINDOW = 3
-# Words after a comparison word that may reach its intent noun ("does not
-# match the customer's authorized intent": the, customer, s, authorized).
-_AFTER_WINDOW = 6
-# Words before a comparison word that may hold its intent noun ("the
-# customer's intent does not match": intent, does, not).
-_BEFORE_WINDOW = 5
+# The intent-only reason forms, over the reason's words joined by spaces
+# (``reason_terms``: lower case, "n't" as "not", a possessive as "s").
+_DET = r"(?:(?:the|a|an|this) )?"
+_INTENT_PHRASE = (
+    _DET
+    + r"(?:(?:customer|user|requester|request) s )?"
+    + r"(?:(?:authorized|authorised|actual|expressed|stated|original) )*"
+    + r"(?:intent|intention)"
+)
+_REQUEST = (
+    _DET
+    + r"(?:requested )?(?:(?:refund|payment|tool) )?"
+    + r"(?:request|operation|call|refund|payment|transaction|action)"
+)
+_FAILS_TO_MATCH = r"(?:does|do|did|is|are) not (?:match|correspond to|align with)"
+_INTENT_ONLY_FORMS: tuple[re.Pattern[str], ...] = tuple(
+    re.compile(form)
+    for form in (
+        # "the request does not match the customer's authorized intent"
+        rf"{_REQUEST} {_FAILS_TO_MATCH} {_INTENT_PHRASE}",
+        # "the customer's intent does not match the requested payment operation"
+        rf"{_INTENT_PHRASE} {_FAILS_TO_MATCH} {_REQUEST}",
+        # "the request deviates from the customer's actual intent"
+        rf"{_REQUEST} (?:deviates|differs) from {_INTENT_PHRASE}",
+        # "the refund is executed without matching the customer's authorized intent"
+        rf"{_REQUEST} (?:(?:is|are|was|were) )?"
+        rf"(?:(?:executed|issued|made|performed|invoked|called) )?"
+        rf"without matching {_INTENT_PHRASE}",
+        # "the intent is unknown", "intent unknown"
+        rf"{_INTENT_PHRASE} (?:(?:is|are) )?(?:unknown|unclear|undetermined|unconfirmed)",
+    )
+)
 _FLAG_TERMS = dict(reason_family._KIND_TERMS)["flag"]
 _STATE_TERMS = dict(reason_family._KIND_TERMS)["state"]
 
@@ -124,11 +196,12 @@ def recognize_intent_reason(
     if _states_another_ground(words):
         return None
     variable = reason_variable(reason.reason, reason.row)
-    if variable is not None and _reads_target(variable):
-        return None
-    if variable is not None and _names_intent(variable):
+    if variable is not None:
+        # The cited variable the reason states decides alone.
+        if _reads_target(variable) or not _is_failed_user_intent(variable, words):
+            return None
         return _disposition(reason.reason, "reason_variable", variable.pm_id)
-    if _failed_intent_comparison(words) or _unknown_intent(words):
+    if _is_intent_only(words):
         return _disposition(reason.reason, "reason_wording", None)
     return None
 
@@ -206,36 +279,37 @@ def _reads_target(variable: reason_family.ContextVariable) -> bool:
     )
 
 
-def _names_intent(variable: reason_family.ContextVariable) -> bool:
-    """Return whether the variable's description names the user's intent."""
-    return bool(_INTENT_NOUNS & frozenset(reason_terms(variable.description or "")))
+def _is_failed_user_intent(
+    variable: reason_family.ContextVariable, words: Sequence[str]
+) -> bool:
+    """Return whether the reason states only a failed value of a user-intent variable.
+
+    The description names an intent and no classifier output, the value
+    states a failure, and the reason adds only words naming the request.
+    """
+    described = frozenset(reason_terms(variable.description or ""))
+    if not described & _INTENT_NOUNS or described & _CLASSIFIER_TERMS:
+        return False
+    value = reason_terms(variable.value)
+    if not frozenset(value) & (reason_family.NEGATION_TERMS | _UNKNOWN_TERMS):
+        return False
+    frame = _without_run(words, value)
+    return frame is not None and frozenset(frame) <= _FRAME_TERMS
 
 
-def _failed_intent_comparison(words: Sequence[str]) -> bool:
-    """Return whether a failed comparison word has an intent noun beside it."""
-    for index, word in enumerate(words):
-        if word in reason_family.COMPARISON_TERMS:
-            window = words[max(0, index - _NEGATION_WINDOW) : index]
-            if not any(w in reason_family.NEGATION_TERMS for w in window):
-                continue
-        elif word not in _FAILED_COMPARISON_TERMS:
-            continue
-        after = words[index + 1 : index + 1 + _AFTER_WINDOW]
-        before = words[max(0, index - _BEFORE_WINDOW) : index]
-        if _INTENT_NOUNS & frozenset((*after, *before)):
-            return True
-    return False
+def _without_run(words: Sequence[str], run: Sequence[str]) -> tuple[str, ...] | None:
+    """Return ``words`` without the first occurrence of ``run``, else ``None``."""
+    width = len(run)
+    for index in range(len(words) - width + 1):
+        if tuple(words[index : index + width]) == tuple(run):
+            return (*words[:index], *words[index + width :])
+    return None
 
 
-def _unknown_intent(words: Sequence[str]) -> bool:
-    """Return whether an intent noun is stated unknown ("intent is unknown")."""
-    for index, word in enumerate(words):
-        if word not in _INTENT_NOUNS:
-            continue
-        near = (*words[max(0, index - 1) : index], *words[index + 1 : index + 3])
-        if _UNKNOWN_TERMS & frozenset(near):
-            return True
-    return False
+def _is_intent_only(words: Sequence[str]) -> bool:
+    """Return whether the whole reason is one of ``_INTENT_ONLY_FORMS``."""
+    text = " ".join(words)
+    return any(form.fullmatch(text) for form in _INTENT_ONLY_FORMS)
 
 
 __all__ = [
