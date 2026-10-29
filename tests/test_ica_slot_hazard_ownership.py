@@ -28,19 +28,24 @@ from asago_scenario_generator.stpa.models.loss_analysis import (
     LossProvenance,
     SecurityConstraint,
 )
-from asago_scenario_generator.pipeline.synthesis_scenarios import (
-    _run_ica_verification,
+from asago_scenario_generator.pipeline.synthesis_scenarios import _run_ica
+from asago_scenario_generator.pipeline.synthesis_types import (
+    SynthesisAdapters,
+    SynthesisInputs,
 )
-from asago_scenario_generator.pipeline.synthesis_types import SynthesisAdapters
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     SynthesisSlotFillResult,
 )
 from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
     verify_final_ica_batch,
 )
+from asago_scenario_generator.stpa.obligation_aware.prompts import (
+    build_ica_hazard_verification_prompts,
+)
 from asago_scenario_generator.stpa.obligation_aware.slot_filling import (
     SlotFillRunResult,
 )
+from tests.helpers.execution_classification import _target_profile
 from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
     SLOT_HAZARD_MISMATCH_CODE,
     SlotHazardMismatch,
@@ -369,26 +374,85 @@ def test_a_name_in_neither_the_inventory_nor_an_action_is_not_an_operation() -> 
     )
 
 
-def test_synthesis_checks_against_the_target_profiles_operations() -> None:
-    enumeration = ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")])
-    profile = SimpleNamespace(
-        resources=[
-            SimpleNamespace(
-                operations=[SimpleNamespace(operation_id="escalate_trust_safety")]
-            )
-        ]
-    )
+# The fixture profile declares one operation, `retrieve-1`, that no control
+# action of the structure invokes.
+_DECLARED = "retrieve-1"
 
-    verified = _run_ica_verification(
-        SlotFillRunResult(result=SynthesisSlotFillResult(ica_enumeration=enumeration)),
-        adapters=SynthesisAdapters(obligation_adapter=_Supporting()),
-        loss_analysis=_losses(),
-        control_structure=_unowned_structure(),
-        inputs=SimpleNamespace(execution_target_profile=profile),
+
+def _declared_losses() -> LossAnalysis:
+    return _hazard_text(f"A reported safety concern is never passed to `{_DECLARED}`.")
+
+
+class _Recording(_Supporting):
+    """A supporting verifier that keeps every request it is shown."""
+
+    def __init__(self) -> None:
+        self.requests: list = []
+
+    def verify_ica_hazards(self, requests, **kwargs):
+        self.requests.extend(requests)
+        return super().verify_ica_hazards(requests, **kwargs)
+
+
+def _run_ica_with(profile, tmp_path):
+    """Run the synthesis ICA stage on the RESP-8 slot; return what it saw."""
+    enumeration = ICAEnumeration(slots=[_slot("RESP-8", "CA-8-1", "H-3", "SC-1")])
+    seen: dict = {}
+
+    def fill_icas(**kwargs):
+        seen["inputs"] = kwargs["inputs"]
+        return SlotFillRunResult(
+            result=SynthesisSlotFillResult(ica_enumeration=enumeration)
+        )
+
+    verifier = _Recording()
+    run = _run_ica(
+        (),
+        (),
+        None,
+        _declared_losses(),
+        _unowned_structure(),
+        None,
+        SynthesisInputs(
+            use_case="A guest chat assistant.",
+            output_dir=tmp_path,
+            execution_target_profile=profile,
+        ),
+        None,
+        SynthesisAdapters(fill_icas=fill_icas, obligation_adapter=verifier),
     )
+    return run.value, seen["inputs"], verifier.requests
+
+
+def test_synthesis_flags_a_declared_operation_no_action_invokes(tmp_path) -> None:
+    verified, _, _ = _run_ica_with(_target_profile(), tmp_path)
 
     [flag] = _flags(verified.ica_hazard_verification)
-    assert "no slot owns `escalate_trust_safety`" in flag.detail
+    assert f"no slot owns `{_DECLARED}`" in flag.detail
+    [warning] = _icas(verified.ica_enumeration)[
+        "RESP-8:CA-8-1:NOT_PROVIDED:1"
+    ].quality_warnings
+    assert f"no slot owns `{_DECLARED}`" in warning
+
+
+def test_the_inventory_reaches_no_model_request(tmp_path) -> None:
+    with_profile = _run_ica_with(_target_profile(), tmp_path)
+    without_profile = _run_ica_with(None, tmp_path)
+
+    # The ICA fill still receives the target-blind inputs.
+    assert with_profile[1].execution_target_profile is None
+    assert with_profile[1] == without_profile[1]
+    # The verifier is shown the same requests, rendered the same way.
+    assert with_profile[2] == without_profile[2]
+    assert build_ica_hazard_verification_prompts(
+        tuple(with_profile[2])
+    ) == build_ica_hazard_verification_prompts(tuple(without_profile[2]))
+    assert f"no slot owns `{_DECLARED}`" not in "".join(
+        build_ica_hazard_verification_prompts(tuple(with_profile[2]))
+    )
+    # Only the deterministic check differs.
+    assert _flags(with_profile[0].ica_hazard_verification)
+    assert not _flags(without_profile[0].ica_hazard_verification)
 
 
 def test_declared_operation_names_reads_every_resource_operation() -> None:

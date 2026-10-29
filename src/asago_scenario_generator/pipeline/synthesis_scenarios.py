@@ -7,7 +7,7 @@ each scenario context carries, accounting, and scenario realization.
 
 from __future__ import annotations
 
-from collections.abc import Iterable
+from collections.abc import Collection, Iterable
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -73,12 +73,21 @@ def _run_ica(
         # A stopped fill is terminal: the independent verifier sends no
         # request either.
         return StageRun(result, (_stopped_message(failure),), ("ica",))
+    from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
+        declared_operation_names,
+    )
+
+    # The model-facing inputs stay target-blind; only the deterministic
+    # slot/hazard check reads the declared operations, from the full inputs.
     verified = _run_ica_verification(
         result,
         adapters=adapters,
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         inputs=_systemic_inputs(inputs),
+        operation_inventory=declared_operation_names(
+            getattr(inputs, "execution_target_profile", None)
+        ),
     )
     return StageRun(verified, calls=("ica",))
 
@@ -140,15 +149,17 @@ def _run_ica_verification(
     loss_analysis: Any,
     control_structure: Any,
     inputs: SynthesisInputs,
+    operation_inventory: Collection[str] = (),
 ) -> Any:
-    """Run the independent ICA verifier before ordinary Stage 5."""
+    """Run the independent ICA verifier before ordinary Stage 5.
+
+    *operation_inventory* names the target's declared operations for the
+    deterministic slot/hazard check only; no model request receives it.
+    """
     from asago_scenario_generator.stpa.obligation_aware.ica_verification import (
         filter_ica_considerations,
         filter_mechanism_considerations,
         verify_final_ica_batch,
-    )
-    from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
-        declared_operation_names,
     )
 
     ordinary = result.ica_enumeration
@@ -159,9 +170,7 @@ def _run_ica_verification(
         loss_analysis=loss_analysis,
         control_structure=control_structure,
         batch_id="synthesis-ica-hazard-verification",
-        operation_inventory=declared_operation_names(
-            getattr(inputs, "execution_target_profile", None)
-        ),
+        operation_inventory=operation_inventory,
     )
 
     pairs = _ica_considerations(result)
