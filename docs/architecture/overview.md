@@ -968,12 +968,13 @@ chooses the kind (`stpa.scenario_prod.reason_family`, whose
 `REASON_FAMILY_RULES` is the mapping): a reason stating an ownership
 relation, a failed authentication or authorization of the session or a
 principal, or a failed comparison of the record with the session principal
-("does not match the session customer") gets `ownership` unless it also
-states a limit failure, which wins
-(a bare noun such as "amount" is not one); a reason read from a state field
-gets the family that cites that field; a stated limit failure, eligibility
-and lifecycle terms get `bound`, `flag` and `state`; any other reason gets no
-hint. Ownership is withheld only when another value of the cited row itself
+("does not match the session customer") gets `ownership`, even when it also
+states a limit failure; a limit failure (not a bare noun such as "amount")
+wins only over session wording that is no ownership source ("exceeds the
+session spending limit"). The same precedence holds whether or not the ICA
+cites a row. Otherwise a reason read from a state field gets the family that
+cites that field; a stated limit failure, eligibility and lifecycle terms get
+`bound`, `flag` and `state`; any other reason gets no hint. Ownership is withheld only when another value of the cited row itself
 states that the record is the session principal's. The ICA yields one candidate per family of the chosen
 kind, up to the cap, so several ICAs of a slot can share a family; a WRONG_TIMING
 ICA keeps the first `prior_read` family. Separately, every candidate's request

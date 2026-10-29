@@ -14,26 +14,28 @@ mapping; the first rule that matches decides:
 1. ``timing_slot``: a WRONG_TIMING ICA keeps the first ``prior_read``
    family whatever its reason (applied by the slot type, not here).
 2. ``ownership_reason`` -> ``ownership`` when the reason has an ownership
-   source and states no limit failure. The sources are: an ownership
-   relation (owner, owned, belongs, identity, party, member, relationship,
-   association, guest, host);
-   a failed authentication or authorization predicated of the session or a
-   principal ("the actor is unauthorized", "not authorized for the session",
-   "without an authenticated session", "the user is unauthenticated", but
-   not "the customer's authorized intent" or "authorized by the customer's
-   order", whose object is something else); a failed comparison of the
-   record with the session or a principal ("does not match the session
-   customer", "not present in the authenticated customer's orders", "other
-   than the authenticated actor", but not a comparison with the principal's
-   intent or eligibility); or a failed authorization in a reason whose variable is read
-   from a ``session:`` reference. A mention of the session or a principal
-   alone is not a source, and neither is a missing user confirmation, which
-   is consent rather than authentication. When the operation
-   offers no ownership family the ICA gets no hint; it does not fall
-   through.
+   source, whether or not it also states a limit failure. The sources are:
+   an ownership relation (owner, owned, belongs, identity, party, member,
+   relationship, association, guest, host); a failed authentication or
+   authorization predicated of the session or a principal ("the actor is
+   unauthorized", "not authorized for the session", "without an
+   authenticated session", "the user is unauthenticated", but not "the
+   customer's authorized intent" or "authorized by the customer's order",
+   whose object is something else); a failed comparison of the record with
+   the session or a principal ("does not match the session customer", "not
+   present in the authenticated customer's orders", "other than the
+   authenticated actor", "another customer's account", but not a comparison
+   with the principal's intent or eligibility); or a failed authorization
+   in a reason whose variable is read from a ``session:`` reference. A
+   mention of the session or a principal alone is not a source, and neither
+   is a missing user confirmation, which is consent rather than
+   authentication. When the operation offers no ownership family the ICA
+   gets no hint; it does not fall through.
 3. ``reason_variable_field``: the reason variable is read from a ``state:``
    field that a family of the operation cites -> that family's kind
-   (``ownership``, ``flag``, ``bound``, ``state`` in that order).
+   (``ownership``, ``flag``, ``bound``, ``state`` in that order). When the
+   reason states a limit failure, only ``bound`` may be chosen here, so a
+   cited row narrows the bound family but never changes the kind.
 4. ``reason_terms``: the reason states a limit failure -> ``bound``; else
    an eligibility term -> ``flag``; else a lifecycle value -> ``state``.
 5. ``no_match``: no hint; the ICA keeps one plain candidate. Intent reasons
@@ -41,17 +43,20 @@ mapping; the first rule that matches decides:
    transaction") have no ownership source and no family term and take this
    path.
 
-Precedence: a reason is a limit reason only when it states a limit failure
-(exceeds, over, above, beyond, greater, more, less, maximum, minimum, limit,
-cap, remaining, insufficient, threshold...). A bare object noun (amount,
-plan, price) states none. A stated limit failure wins over every ownership
-source ("the amount exceeds the session spending limit" and "the actor is
-unauthorized and the amount exceeds the limit" get ``bound``); otherwise an
-ownership source wins ("the session is unauthenticated when changing the
-amount" gets ``ownership``). So "the requested amount or plan is not
-authorized by session", which states a failed session authorization and no
-limit failure, takes ``ownership``: the amount and plan are what was not
-authorized, not a limit that was broken.
+Precedence, the same on every rule path and with or without a cited row:
+an ownership source wins over a stated limit failure ("the actor is
+unauthorized and the amount exceeds the limit" and "the order does not
+belong to the authenticated customer and the amount exceeds the balance"
+get ``ownership``), because keeping the ownership, identity, actor or
+session qualifier is the point and a wrongly withheld ownership hint costs
+more. A limit failure (exceeds, over, above, beyond, greater, more, less,
+maximum, minimum, limit, cap, remaining, insufficient, threshold...) wins
+only over wording that is not an ownership source: "the amount exceeds the
+session spending limit", where the session merely owns the limit, gets
+``bound``. A bare object noun (amount, plan, price) states no limit failure,
+so "the requested amount or plan is not authorized by session", a failed
+session authorization, takes ``ownership``: the amount and plan are what
+was not authorized, not a limit that was broken.
 
 Context guard (off unless a row value affirms ownership): ``ownership`` is
 withheld only when another variable of the cited row is read from a
@@ -60,7 +65,9 @@ the principal's: a possession statement (belongs to, owned by, owner,
 member) naming the principal in the value or read from a ``session:``
 reference, or a role statement (a principal "is" or "are" the guest, host,
 owner, member or party). A negated value (a negation term, a contracted
-"n't", or an un-, non- or dis- prefix such as "unowned") never guards. The
+"n't", or an un-, non- or dis- prefix such as "unowned") never guards, and
+neither does one whose relation is not current (former, previous, pending,
+prospective, claimed...). The
 variable's description does not count, so a value such as "pending",
 "unresolved" or "actor is a stranger" never guards, whatever the variable
 is about. A wrongly withheld ownership hint costs more than a wrongly dealt
@@ -108,14 +115,15 @@ REASON_FAMILY_RULES: tuple[ReasonRule, ...] = (
         "ownership_reason",
         ("ownership",),
         "The reason states an ownership relation, a failed authentication or "
-        "authorization of the session or a principal, or a failed "
-        "authorization read from the session; and no limit failure, which "
-        "would win.",
+        "authorization of the session or a principal, a failed comparison "
+        "with the session or a principal, or a failed authorization read "
+        "from the session; this wins over a stated limit failure.",
     ),
     ReasonRule(
         "reason_variable_field",
         ("ownership", "flag", "bound", "state"),
-        "A family cites the state field the reason variable is read from.",
+        "A family cites the state field the reason variable is read from; "
+        "with a stated limit failure, only a bound family.",
     ),
     ReasonRule(
         "reason_terms",
@@ -251,6 +259,26 @@ FAILED_COMPARISON_TERMS = frozenset(
         "deviate",
         "deviates",
         "other",
+        "another",
+    }
+)
+# A relation that is not current does not affirm ownership in the guard.
+UNSETTLED_TERMS = frozenset(
+    {
+        "former",
+        "previous",
+        "prior",
+        "past",
+        "ex",
+        "pending",
+        "prospective",
+        "proposed",
+        "potential",
+        "future",
+        "expected",
+        "requested",
+        "claimed",
+        "alleged",
     }
 )
 # What a comparison with the principal's intent names; such a reason is an
@@ -489,13 +517,16 @@ def choose_reason_family(
         or _principal_comparison_failure(words)
         or (_reads_session(variable) and _auth_failure(words))
     )
-    if ownership_source and not terms & _LIMIT_TERMS:
+    if ownership_source:
         if not guard:
             return ReasonFamilyChoice(
                 "ownership", "ownership_reason", pm_id, False, labels
             )
         guarded = True
-    for kind in ("ownership", "flag", "bound", "state"):
+    field_kinds = (
+        ("bound",) if terms & _LIMIT_TERMS else ("ownership", "flag", "bound", "state")
+    )
+    for kind in field_kinds:
         if not any(
             family.kind == kind and set(family.field_paths) & set(labels)
             for family in families
@@ -636,7 +667,7 @@ def _affirms_ownership(variable: ContextVariable) -> bool:
     """Return whether the value itself states the record is the principal's."""
     words = reason_terms(variable.value)
     terms = frozenset(words)
-    if _negated(terms):
+    if _negated(terms) or terms & UNSETTLED_TERMS:
         return False
     if terms & POSSESSION_TERMS and (
         terms & PRINCIPAL_TERMS or _reads_session(variable)
@@ -750,6 +781,7 @@ __all__ = [
     "PRINCIPAL_TERMS",
     "ROLE_TERMS",
     "SESSION_TERMS",
+    "UNSETTLED_TERMS",
     "REASON_FAMILY_RULES",
     "TIMING_CHOICE",
     "CitedContextRow",
