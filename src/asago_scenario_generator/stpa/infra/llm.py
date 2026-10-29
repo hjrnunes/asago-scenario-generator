@@ -365,8 +365,9 @@ def _drop_api_key(error: BaseException, api_key: str) -> None:
     (``__cause__`` and ``__context__``) are scrubbed too, each once.
 
     This runs while the provider error propagates, and retry decisions read
-    that error's type, so it never raises: an attribute that cannot be set
-    (a read-only ``args`` or ``message``) keeps its text.
+    that error's type, so it never raises: an attribute that cannot be read
+    or set (a read-only ``args`` or ``message``, a raising ``__cause__``)
+    keeps its text, and a chain link that cannot be read is not followed.
     """
     if not api_key or len(api_key) < _MIN_REDACTED_KEY_LENGTH:
         return
@@ -378,9 +379,19 @@ def _drop_api_key(error: BaseException, api_key: str) -> None:
             continue
         seen.add(id(current))
         _drop_api_key_from(current, api_key)
-        for chained in (current.__cause__, current.__context__):
+        for name in ("__cause__", "__context__"):
+            chained = _chained_error(current, name)
             if chained is not None:
                 pending.append(chained)
+
+
+def _chained_error(error: BaseException, name: str) -> BaseException | None:
+    """Return the error *error* was chained from, or ``None`` if unreadable."""
+    try:
+        chained = getattr(error, name, None)
+    except Exception:  # noqa: BLE001 - keep the provider error propagating
+        return None
+    return chained if isinstance(chained, BaseException) else None
 
 
 def _drop_api_key_from(error: BaseException, api_key: str) -> None:

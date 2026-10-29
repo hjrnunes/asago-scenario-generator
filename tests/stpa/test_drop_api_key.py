@@ -141,3 +141,55 @@ def test_an_eight_character_key_is_redacted() -> None:
 
     assert len(KEY) == 8
     assert failure.args == (REDACTED,)
+
+
+class _RaisingChain(Exception):
+    """An error whose chain links raise when read."""
+
+    @property
+    def __cause__(self) -> BaseException | None:  # type: ignore[override]
+        raise AttributeError("cause is unavailable")
+
+    @property
+    def __context__(self) -> BaseException | None:  # type: ignore[override]
+        raise RuntimeError("context is unavailable")
+
+
+class _OddChain(Exception):
+    """An error whose chain link is not an exception at all."""
+
+    @property
+    def __cause__(self) -> object:  # type: ignore[override]
+        return ECHOED
+
+
+def test_an_unreadable_chain_link_is_skipped_and_the_text_still_redacted() -> None:
+    failure = _RaisingChain(ECHOED)
+
+    assert _drop_api_key(failure, KEY) is None
+    assert failure.args == (REDACTED,)
+
+
+def test_a_chain_link_that_is_not_an_error_is_not_followed() -> None:
+    failure = _OddChain(ECHOED)
+
+    assert _drop_api_key(failure, KEY) is None
+    assert failure.args == (REDACTED,)
+
+
+@pytest.mark.parametrize("kind", [_RaisingChain, _OddChain], ids=["raising", "odd"])
+def test_the_client_reraises_the_original_error_when_its_chain_is_unreadable(
+    kind,
+) -> None:
+    failure = kind(ECHOED)
+
+    def fail(**kwargs: Any) -> Any:
+        raise failure
+
+    client = _client(_Provider(fail), api_key=KEY)
+    with pytest.raises(kind) as raised:
+        client._send("chat.completions.create", model="m", messages=[])
+
+    assert raised.value is failure
+    assert type(raised.value) is kind
+    assert failure.args == (REDACTED,)
