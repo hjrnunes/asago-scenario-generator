@@ -44,9 +44,16 @@ therefore reach 4 provider requests; without one, 2.
 
 An error that reaches the attempt this way is a provider or transport
 failure: a timeout, a 4xx (a 429 included, after any fallback), a 5xx after
-the transport retry, or a connection error. `is_provider_failure`
-(`infra/llm_helpers.py`) recognizes it, and the routing and governance
-adapters raise it as `ProviderCallError`. No caller-level re-ask below
+the transport retry, or a connection error, from the SDK or as a built-in
+`TimeoutError` or `ConnectionError`. `is_provider_failure`
+(`infra/provider_record.py`, also exported by `infra/llm_helpers.py`)
+recognizes it, and the routing and governance adapters raise it as
+`ProviderCallError`. Each error record in `provider-calls.jsonl` keeps this
+category as `provider_failure`, and a replay raises the rebuilt error with
+it, so a replay re-asks exactly where the live run did. A malformed
+response body that the SDK could not decode is not a provider failure; it
+replays as a `JSONDecodeError`. An error recorded before the key existed is
+classified by its recorded type. No caller-level re-ask below
 follows such a failure: the client has already made the one retry it earns,
 so the step goes straight to its "If it fails too" outcome. Only a reply
 that fails decoding or validation earns a re-ask.
@@ -105,7 +112,7 @@ default.
 | Re-ask | Where | Trigger | Sends | Max | If it fails too |
 | --- | --- | --- | --- | --- | --- |
 | Obligation routing | `obligation_aware/routing.py` `_route_batch`. The provider call uses `validation_retries=0`. | A decode or schema failure of the reply, a batch-identity mismatch, a route whose pattern binding, assessment or references fail, or a route rejected after mechanism verification. A provider or transport failure, and a prompt that preflight refuses as over budget, are not re-asked. | The whole batch again: the original prompt with a `Validation correction:` section that carries the repair text and the error | `validation_retries` per batch | Invalid routes stay `unresolved`. A second reply that is also partial is merged route by route (`_merge_partial`): a route valid in the second reply replaces the first reply's; otherwise a route the first reply validated is kept; otherwise the obligation is `unresolved`. An invalid route never displaces a valid one. |
-| Mechanism verification | `obligation_aware/provider.py` `_ask_mechanism_verifier` | A schema failure, or a reply that misses or duplicates an item handle | The original prompt, then the feedback and the error | 1 per verifier call. It runs inside each routing attempt. | No route gets mechanism credit. The failure is not cached, so the next routing attempt asks again. |
+| Mechanism verification | `obligation_aware/provider.py` `_ask_mechanism_verifier` | A schema failure, or a reply that misses or duplicates an item handle | The original prompt, then the feedback and the error | 1 per verifier call. It runs inside each routing attempt. | No route gets mechanism credit, also after a provider or transport failure, which gets no correction. The route stays valid, so the failure never re-asks routing; the batch keeps the route without credit. The failure is not cached, so a later routing attempt, batch or recheck that holds the same item asks again. |
 | Mechanism-suggestion verification | `obligation_aware/mechanism_suggestion_provider.py` `_verify_batch` | Same as mechanism verification | Same as mechanism verification | 1 per batch | Every candidate in the batch is `INCOMPLETE_VERIFICATION`. |
 | Governance routing | `obligation_aware/governance_routing.py` `_run_batch`. The provider call uses `validation_retries=0`. | A decode or schema failure of the reply, a batch-identity or risk-set mismatch, or a placement that names a target outside the index. A provider or transport failure, or a prompt that is over budget, stops the loop. | The whole batch again, with feedback that names each invalid placement | `validation_retries` per batch | The accepted placements are kept. Each invalid risk stays `unresolved`. |
 | Structural revision | `provider.py` `revise` | A schema failure | The original prompt, then the feedback and the error | `validation_retries` per request | The baseline structure is kept. |
@@ -143,7 +150,7 @@ cap, the concise retry, and the retry's correction.
 | Inventory correction | `target_realization/provider.py` `_map_action` | The mapping picks an operation that was not offered | The original prompt, then the inventory feedback, the error and the prior reply | 1 per control action | The step fails. |
 | Extension correction | `provider.py` `extend` | A schema, parser or validator failure | The original prompt, then the feedback, the error and the prior reply | 1 | The valid outcomes are salvaged from the last reply. |
 | Duplicate-reference correction | `provider.py` `_correct_repeated_references` | The target-derived ICA draft repeats references | The original prompt, then the feedback, the list of repeats and the prior reply | 1 per request | It is recorded as a provider failure, and the run continues. |
-| Omitted-findings verification | `provider.py` `_decisions` | The first verifier reply failed decoding or its schema, or it left findings without a decision. A provider or transport failure gets no retry. | A fresh verifier prompt that covers only those findings | 1 per request | Those findings stay unverified. |
+| Omitted-findings verification | `provider.py` `_decisions` | The first verifier reply failed decoding or its schema, or it left findings without a decision. A provider or transport failure gets no retry. | A fresh verifier prompt that covers only those findings | 1 per request | Those findings stay unverified. Their detail says whether the verifier omitted them on the retry too or its call ended in a provider or transport failure. |
 
 ## Calls that make no re-ask
 
