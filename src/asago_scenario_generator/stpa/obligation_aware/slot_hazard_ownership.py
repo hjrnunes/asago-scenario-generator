@@ -277,9 +277,31 @@ def _names(text: str, name: str) -> bool:
 def _clause_before(text: str, end: int) -> str:
     """Return the text from the start of *end*'s clause up to *end*."""
     start = max(
-        (match.end() for match in _CLAUSE_END.finditer(text, 0, end)), default=0
+        (
+            match.end()
+            for match in _CLAUSE_END.finditer(text, 0, end)
+            if _ends_clause(text, match.start())
+        ),
+        default=0,
     )
     return text[start:end]
+
+
+def _ends_clause(text: str, stop: int) -> bool:
+    """Whether the stop at *stop* ends a clause.
+
+    A full stop that closes an abbreviation does not: a single-letter initial
+    ("J."), a dotted acronym ("U.S.", "e.g."), or a common short form ("Dr.").
+    """
+    if text[stop] != ".":
+        return True
+    word = _WORD_BEFORE_STOP.search(text, 0, stop)
+    abbreviation = word.group() if word else ""
+    return not (
+        len(abbreviation) == 1
+        or "." in abbreviation
+        or abbreviation.lower() in _ABBREVIATIONS
+    )
 
 
 _IDENTIFIER_LIKE = re.compile(r"[_\d]|[a-z][A-Z]")
@@ -288,9 +310,13 @@ _EXAMPLE = re.compile(
     r"\b(?:e\.g\.|(?:for example|for instance|such as|like|including)\b)",
     re.IGNORECASE,
 )
-# A clause ends at a sentence or clause stop, or a closing parenthesis; the
-# full stops inside "e.g.", in any case, do not end one.
-_CLAUSE_END = re.compile(r"(?<!\be\.g)(?<!\be)\.(?=\s|$)|[!?;:)]", re.IGNORECASE)
+# A clause ends at a sentence or clause stop, or a closing parenthesis;
+# ``_ends_clause`` keeps an abbreviation's full stop from ending one.
+_CLAUSE_END = re.compile(r"\.(?=\s|$)|[!?;:)]")
+_WORD_BEFORE_STOP = re.compile(r"[A-Za-z.]*\Z")
+_ABBREVIATIONS = frozenset(
+    {"dr", "mr", "mrs", "ms", "prof", "st", "vs", "etc", "inc", "ltd", "no"}
+)
 
 
 def _slot_mismatches(

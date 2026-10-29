@@ -767,3 +767,29 @@ def test_an_example_ends_at_an_exclamation_or_question_mark(stop) -> None:
     [mismatch] = _mismatches(_reply_slot(), losses, _structure())
 
     assert mismatch.hazard_operations == ("escalate_trust_safety",)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Unapproved disclosures, such as sending Dr. Lee's diagnosis through "
+        "`escalate_trust_safety`, occur without consent.",
+        "Transfers, such as moving U.S. records through `escalate_trust_safety`, "
+        "occur without consent.",
+        "Disclosures, such as sending J. Lee's file through "
+        "`escalate_trust_safety`, occur without consent.",
+    ],
+    ids=["title", "dotted-acronym", "initial"],
+)
+def test_an_abbreviations_period_does_not_end_an_example(text) -> None:
+    assert _mismatches(_reply_slot(), _hazard_text(text), _structure()) == ()
+
+
+def test_a_sentence_end_still_ends_an_example() -> None:
+    losses = _hazard_text(
+        "Actions such as reviews run late. The assistant omits `escalate_trust_safety`."
+    )
+
+    [mismatch] = _mismatches(_reply_slot(), losses, _structure())
+
+    assert mismatch.hazard_operations == ("escalate_trust_safety",)
