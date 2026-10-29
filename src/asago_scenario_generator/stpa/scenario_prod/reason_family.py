@@ -28,7 +28,8 @@ mapping; the first rule that matches decides:
    with the principal's intent or eligibility); or a failed authorization
    in a reason whose variable is read from a ``session:`` reference. A
    mention of the session or a principal alone is not a source, and neither
-   is a missing user confirmation or "another user confirmation", which is
+   is a missing user confirmation or "another user confirmation" (also
+   past modifiers: "another user's explicit confirmation"), which is
    consent rather than authentication or a record of the principal's. When the operation offers no ownership family the ICA
    gets no hint; it does not fall through.
 3. ``reason_variable_field``: the reason variable is read from a ``state:``
@@ -287,10 +288,56 @@ UNSETTLED_TERMS = frozenset(
         "alleged",
     }
 )
-# A principal followed by one of these names the principal's act, not a
-# record of theirs ("another user confirmation"): no compared record.
+# A principal whose noun phrase holds one of these names the principal's
+# act, not a record of theirs ("another user confirmation", "another user's
+# explicit confirmation"): no compared record.
 CONSENT_TERMS = frozenset(
     {"confirmation", "confirmations", "approval", "approvals", "consent", "consents"}
+)
+# Words that end the noun phrase after a principal, as a negation term
+# does, so a consent noun past one is not the principal's.
+_PHRASE_BREAKS = frozenset(
+    {
+        "for",
+        "by",
+        "to",
+        "of",
+        "with",
+        "from",
+        "in",
+        "on",
+        "at",
+        "than",
+        "as",
+        "the",
+        "a",
+        "an",
+        "this",
+        "that",
+        "and",
+        "or",
+        "but",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "has",
+        "have",
+        "had",
+        "does",
+        "do",
+        "did",
+        "will",
+        "would",
+        "can",
+        "could",
+        "should",
+        "must",
+        "may",
+        "might",
+    }
 )
 # What a comparison with the principal's intent names; such a reason is an
 # intent reason, not an ownership one. A principal's eligibility is likewise
@@ -775,8 +822,9 @@ def _principal_comparison_failure(words: Sequence[str]) -> bool:
     is the owner of what is compared ("the authenticated customer's
     orders"), unless what follows within four words is the principal's
     intent or an eligibility term: an attribute, not a record of theirs. A
-    principal followed by a consent noun ("another user confirmation")
-    names the principal's act, not a compared record.
+    principal whose noun phrase is a consent ("another user confirmation",
+    "another user's explicit confirmation") names the principal's act, not a
+    compared record.
     """
     for index, word in enumerate(words):
         if word in COMPARISON_TERMS:
@@ -791,10 +839,25 @@ def _principal_comparison_failure(words: Sequence[str]) -> bool:
         compared = list(words[principal + 1 : principal + 6])
         if compared[:1] == ["s"] and set(compared) & _ATTRIBUTE_TERMS:
             continue
-        noun = compared[1:2] if compared[:1] == ["s"] else compared[:1]
-        if noun and noun[0] in CONSENT_TERMS:
+        if _names_consent(compared[1:] if compared[:1] == ["s"] else compared):
             continue
         return True
+    return False
+
+
+def _names_consent(phrase: Sequence[str]) -> bool:
+    """Return whether the words after a principal name the principal's consent.
+
+    A consent noun counts within three words, past modifiers ("prior written
+    approval"), and before any preposition, verb, determiner or negation
+    ends the phrase: in "another customer's order without confirmation" the
+    confirmation is not the customer's.
+    """
+    for word in phrase[:_WINDOW]:
+        if word in CONSENT_TERMS:
+            return True
+        if word in _PHRASE_BREAKS or word in NEGATION_TERMS:
+            return False
     return False
 
 
