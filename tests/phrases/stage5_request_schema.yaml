@@ -1,0 +1,37 @@
+request: stage5_request_schema
+cases:
+  condition-operation-inventory:
+    once:
+      # record_selection.argument_values[].operation
+      - >-
+        "operation": {"minLength": 1, "title": "Operation", "type": "string",
+        "enum": ["get_gadget", "get_member", "open_ticket", "schedule_service",
+        "search_manual", "update_gadget"]}
+      # The flat comparison's operation: not_called.operation and
+      # order.operation merge into this one nullable property.
+      - >-
+        "operation": {"anyOf": [{"minLength": 1, "type": "string", "enum":
+        ["get_gadget", "get_member", "open_ticket", "schedule_service",
+        "search_manual", "update_gadget"]}, {"type": "null"}], "title":
+        "Operation", "description": "Applies when `kind` is `order` or
+        `not_called`; null otherwise."}
+      # order.requires_prior
+      - >-
+        "requires_prior": {"anyOf": [{"minLength": 1, "type": "string", "enum":
+        ["get_gadget", "get_member", "open_ticket", "schedule_service",
+        "search_manual", "update_gadget"]}, {"type": "null"}], "title":
+        "Requires Prior", "description": "Applies when `kind` is `order`; null
+        otherwise."}
+    required:
+      # The argument operand's operation, on both the left and right operand.
+      - >-
+        "operation": {"anyOf": [{"minLength": 1, "type": "string", "enum":
+        ["get_gadget", "get_member", "open_ticket", "schedule_service",
+        "search_manual", "update_gadget"]}, {"type": "null"}], "title":
+        "Operation", "description": "Applies when `source` is `argument`; null
+        otherwise."}
+    forbidden:
+      # No condition operation field is left an open string.
+      - '"operation": {"minLength": 1, "title": "Operation", "type": "string"}'
+      - '"operation": {"anyOf": [{"minLength": 1, "type": "string"}, {"type": "null"}]'
+      - '"requires_prior": {"anyOf": [{"minLength": 1, "type": "string"}, {"type": "null"}]'

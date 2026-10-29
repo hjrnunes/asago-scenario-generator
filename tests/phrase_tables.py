@@ -19,7 +19,8 @@ whitespace collapsed to one space, so template line wrapping does not matter.
 
 A request built in Python rather than from one template (``REQUESTS``) has a
 table named after it that gives ``request`` in place of ``template``; its cases
-render the request the producer sends.
+render the request the producer sends. ``stage5_request_schema`` renders the
+JSON schema the Stage 5 client sends, as compact JSON text.
 
 Wording that depends on a test's input (an identifier, a value or a list from
 its fixture) stays as a code assert next to that fixture.
@@ -30,6 +31,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
+import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
@@ -140,6 +142,17 @@ from tests.stpa.condition_prompt_fixture import (
     realistic_observations,
     realistic_profile,
 )
+from tests.stpa.test_stage5_condition_operation_inventory import (
+    _client as _missing_ticket_client,
+)
+from tests.stpa.test_stage5_condition_operation_inventory import (
+    _condition as _not_called_condition,
+)
+from tests.stpa.test_stage5_condition_operation_inventory import (
+    _missing_ticket_payload,
+    _profile_generate,
+    _sent_schema,
+)
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
 from asago_scenario_generator.stpa.threat_enum.slot_creation import create_slots
 from tests.helpers.governance import _setup as _governance_setup
@@ -166,6 +179,7 @@ REQUESTS = (
     "stage2_call2b_authority_correction_request",
     "revision_authority_correction_request",
     "revision_merge_and_authority_correction_request",
+    "stage5_request_schema",
 )
 
 _STAGE5_TEMPLATES = ("stage5_context_system.j2", "stage5_context_user.j2")
@@ -764,6 +778,18 @@ def _stage5_correction(condition: Callable[[], dict | None]) -> Callable[[str], 
     return render
 
 
+def _stage5_request_schema(request: str) -> str:
+    """Render the Stage 5 request schema sent for the six-operation profile."""
+
+    assert request == "stage5_request_schema"
+    client = _missing_ticket_client(
+        _missing_ticket_payload(_not_called_condition("open_ticket"))
+    )
+    with tempfile.TemporaryDirectory() as run_dir:
+        _profile_generate(client, Path(run_dir))
+    return json.dumps(_sent_schema(client))
+
+
 def _call_2b_authority_correction(request: str) -> str:
     """Render the Call 2b correction request that follows two failing bases."""
     assert request == "stage2_call2b_authority_correction_request"
@@ -926,6 +952,7 @@ CASES: dict[str, Callable[[str], str]] = {
     "literal-unsupported-correction": _stage5_correction(
         _descriptive_literal_condition
     ),
+    "condition-operation-inventory": _stage5_request_schema,
     "two-failing-authority-bases": _call_2b_authority_correction,
     "two-failing-revision-authority-bases": _revision_authority_correction,
     "unmergeable-revision-with-failing-authority-basis": (
