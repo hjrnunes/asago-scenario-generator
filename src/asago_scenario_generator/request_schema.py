@@ -2,10 +2,15 @@
 
 Guided decoding samples only what the request schema allows, so a schema
 enum is what keeps a guided response inside a vocabulary that code later
-matches on.  Call sites apply these helpers only when
-:func:`uses_guided_decoding` is true; other clients keep the static schema.
-The helpers change the generated schema only, so the existing validators
-still write the exact correction feedback.
+matches on.  The helpers themselves apply unconditionally; each call site
+decides whether a client gets the tightened schema.  The Stage 1b capability
+profile, the Stage 1a risk drafts and disposition repairs, and the target
+interpreter tighten their schema only when :func:`uses_guided_decoding` is
+true, and other clients keep the static schema.  The Stage 5 operation names
+and the target-derived ICA slot IDs are closed for every client, since any
+other value fails validation anyway.  The helpers change the generated
+schema only, so the existing validators still write the exact correction
+feedback.
 """
 
 from __future__ import annotations
@@ -142,8 +147,9 @@ def _apply_bounds(
 def uses_guided_decoding(llm_client: object) -> bool:
     """Whether *llm_client*'s profile asks for guided decoding.
 
-    Call sites send the tightened request schemas only to these clients;
-    every other client receives the static wire's schema unchanged.
+    A call site that gates its tightened request schema on this sends it
+    only to these clients; every other client receives the static wire's
+    schema unchanged.  A schema closed for every client ignores it.
     """
     return getattr(llm_client, "use_guided_decoding", False) is True
 
