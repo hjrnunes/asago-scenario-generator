@@ -837,15 +837,12 @@ when the correction is nonempty; it does not union obsolete records by ID.
 Exact repeats of the accepted risk baseline are removed, while changed reused
 identities are rejected on both initial gap responses and corrections.
 Stage 2 rejects empty
-requirement/responsibility sets, and an exhausted fallback is fatal. The
-STPA retry contract is bounded: Stage 2 retries a JSON-decoding failure or a
-semantically empty requirement/responsibility result once, while Stage 1a
-retries semantic dangling hazard/loss references once with concise validation
-feedback. A reply that does not decode as JSON also earns the call's one
-correction request in the Stage 1b capability profile, the Stage 1a graph
-revision, Stage 2 Calls 1–3 when the repeat is undecodable too, the
-completeness critic, and the critic revision; the correction names the decode
-error and asks for the complete object again. The critic revision's
+requirement/responsibility sets, and an exhausted fallback is fatal. Every
+model re-ask is bounded; `docs/architecture/model-reasks.md` lists each one
+with its trigger, what it sends, its bound, and what happens when it fails
+too. Where a reply that does not decode as JSON earns a correction, the
+correction names the decode error and asks for the complete object again.
+The critic revision's
 correction shows the rejected delta before the exact error. Validation merges
 a revision delta into the structure it revises, so a delta the merge would
 refuse, such as one restating an unknown responsibility, earns that
@@ -871,18 +868,9 @@ reported only by its `Stripped empty responsibility ...` post-revision
 warning. The replay gate holds no copy of the run's target evidence, so it
 does not reject an `applied` record whose structure differs from its input
 only in fields that strip and rebinding could also change. Each attempt is logged
-separately in `calls.jsonl` and counts as one request in the stage's call
-count; these retries do not change the manifest/result schemas, and
-exhaustion remains fatal with three exceptions: an exhausted critic returns
-empty findings, an exhausted revision keeps the pre-revision control
-structure, and an exhausted Stage 1b draw is left out of the KC vote (the
-stage fails only when every draw fails).
-Stage 3 likewise retries a Pydantic-invalid slot response once with explicit
-slot-consistency feedback. Stage 5 retains one concise retry for an isolated
-completion-length failure; if that retry is also exhausted, the stage records a
-fatal diagnostic and stops processing the remaining threats because repeating
-the same structured-output deployment failure cannot improve the run.
-public SP1 result and run-manifest schemas are unchanged: fatal diagnostics
+separately in `calls.jsonl`; these re-asks do not change the manifest/result
+schemas. `model-reasks.md` gives each re-ask's outcome when it is exhausted.
+The public SP1 result and run-manifest schemas are unchanged: fatal diagnostics
 use the existing `stage_errors` fields, while recoverable assembly repairs
 remain in `stage_warnings`. STPA sampling resolves explicit arguments before
 profile/environment values and defaults, and manifests persist the effective
@@ -897,13 +885,19 @@ model client makes one recorded retry after a transport error: an HTTP 5xx
 status, or a connection error that is not a timeout. Timeouts, 4xx statuses, and
 invalid answers are never retried at the transport level. The retry waits one
 second, appears in `provider-calls.jsonl` as its own record marked `retry_of`,
-and counts as a request. The Stage 1a risk-coverage review adds one step-level
-exception: it repeats a batch once when the reply decodes but carries no row,
-and counts the repeat in its `call_count`.
+and counts as a request. With a profile `service_tier` and
+`service_tier_fallback`, the client re-sends a request refused with HTTP 429
+once on the fallback tier; that request has its own record and also counts.
+No step re-asks after a provider or transport failure that reaches it; a
+step re-asks only a reply that failed decoding or validation. The step-level
+re-asks, and their bounds, are listed in `model-reasks.md`.
 
 A producer call count is the number of requests actually sent to the model.
-Retries and correction requests count; a request the prompt preflight blocks
-does not. The count comes from the call helper's `CallOutcome.calls`. This rule
+Retries, correction requests, transport retries and the service-tier fallback
+request count; a request the prompt preflight blocks does not. The count
+comes from the call helper's `CallOutcome.calls`. The Stage 1a risk-coverage
+review counts its own requests and leaves out transport retries (see
+`model-reasks.md`). This rule
 covers `revision_call_count` in `loss-analysis-gates.yaml`,
 `graph_revision_call_count` and the Stage 1a and Stage 1b totals in the run
 manifest, the stated-rule coverage, stated-rule revision, and risk-actionability

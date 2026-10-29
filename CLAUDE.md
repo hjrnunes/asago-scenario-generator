@@ -81,7 +81,9 @@ with unit tests under `tests/` and prompt text with rows in
   spend from that file. The re-asks are bounded:
   - The client retries a transport error (HTTP 5xx, or a connection error that
     is not a timeout) once. With a profile `service_tier_fallback`, it re-sends
-    an HTTP 429 once on the fallback tier.
+    an HTTP 429 once on the fallback tier. No step re-asks after a provider or
+    transport failure; steps re-ask only a reply that fails decoding or
+    validation.
   - Many model calls earn one correction when a reply fails its schema or
     validators. The correction is the original prompt plus feedback and the
     exact error. Stage 2 Calls 1–3 and the risk-actionability classifier also
@@ -91,7 +93,8 @@ with unit tests under `tests/` and prompt text with rows in
     - The risk review and the risk-actionability classifier each repeat a
       batch or its pending cards.
     - Stage 2 runs the Call 2b repair and the Call 3 density correction.
-    - Obligation and governance routing re-ask the whole batch.
+    - Obligation and governance routing re-ask the whole batch. A partial
+      second routing reply is merged route by route with the first.
     - An unchanged ICA correction is asked again.
     - Stage 5 sends its concise retry after a stop at the completion cap and
       its condition correction.
