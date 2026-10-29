@@ -348,9 +348,12 @@ def _raise_if_length_without_content(response: Any) -> None:
 _MIN_REDACTED_KEY_LENGTH = 8
 """Shortest configured key that is redacted by its value.
 
-A shorter value is a placeholder for an endpoint that needs no key (``EMPTY``
-or ``none``, say), not a secret, and replacing it would corrupt ordinary
-words in the error text.  No provider issues keys that short.
+Shorter values are skipped because placeholders for an endpoint that needs
+no key (``EMPTY`` or ``none``, say) are that short, and replacing them would
+corrupt ordinary words in the error text.  A genuine key that short is not
+redacted by value; the labelled patterns the call log and the provider-call
+record apply to error text (``api_key=...``, ``Bearer ...``, ``sk-...``)
+still catch it when it is echoed in one of those forms.
 """
 
 _REDACTED_KEY = "[redacted-key]"
