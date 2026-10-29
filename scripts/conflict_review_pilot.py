@@ -63,7 +63,9 @@ with ``ReplayFill(max_live_requests=N)``: every request is recorded in
 ``--replay-dir`` replays it for free. A reply that fails the schema or a
 validator earns one correction, which asks the model to decide its class
 again (``CorrectionPolicy(validation_retries=1)``); the summary records the
-class of each attempt and whether the correction changed it. The runner
+class of each attempt and whether the correction changed it, and counts
+corrections apart from the client's transport retries and tier fallbacks. The
+runner
 starts no case once the live budget is spent, stops at the first refused
 request, and stops after ``--stop-after-failures`` consecutive cases without
 an accepted verdict. It writes ``verdicts/<case>.json`` per case and
@@ -73,7 +75,8 @@ an accepted verdict. It writes ``verdicts/<case>.json`` per case and
 them, without a model, against each label file (``cases: [{case_id, label,
 acceptable, over_refusal}]``, ``over_refusal`` being ``clear`` or ``yes``,
 ``contingent``, or ``no``) and on the cases where every file gives the same
-label. It writes ``score.json`` and ``score.md``.
+label. Each file is scored on the verdicts it labels, and the report says how
+many verdicts that is. It writes ``score.json`` and ``score.md``.
 
 A fixtures file is ``scripts/conflict_review/paired-fixtures.yaml``. A
 manifest lists recorded cases::
@@ -93,7 +96,8 @@ capacities a case may rely on. A fixture or a manifest case carries its own
 under ``resources``; ``--resources FILE`` (``resources: [...]``) adds the same
 list to every recorded case. Each item is ``{resource_id: RES-<n>, kind,
 value, unit, applies_to}``. Without one, a finding that turns on such a
-resource may only be ``missing_information``.
+resource may only be ``missing_information``. A resource id given twice for
+one case, within a source or across sources, is refused.
 
 Labels, expected classes and notes are kept for scoring and never reach a
 prompt.
@@ -585,6 +589,11 @@ def _text(value: Any) -> str:
 
 
 def _with_resources(case: ReviewCase, resources: Sequence[ResourceLimit]) -> None:
+    """Attach the merged resources; an id given by two sources is refused."""
+    ids = [item.resource_id for item in resources]
+    repeated = sorted({rid for rid in ids if ids.count(rid) > 1})
+    if repeated:
+        raise SystemExit(f"{case.case_id}: resource ids repeat: {repeated}")
     case.resources = tuple(resources)
     case.identifiers = (*case.identifiers, *(item.resource_id for item in resources))
 
@@ -1282,17 +1291,27 @@ class _VerdictRejectedError(ExactFeedbackError):
 
 
 def correction_policy(
-    prior_class: Callable[[], str | None], loader: TemplateLoader | None = None
+    prior_class: Callable[[], str | None],
+    loader: TemplateLoader | None = None,
+    on_correction: Callable[[], None] | None = None,
 ) -> CorrectionPolicy:
     """One correction that asks the model to decide its class again.
 
     The prior reply is not shown for in-place editing: the model re-derives
     the whole finding from the case, told only which class it gave and which
-    rules that reply broke.
+    rules that reply broke. *on_correction* is called each time a correction
+    request is built, so a caller counts corrections apart from transport
+    retries and service-tier fallbacks.
     """
+
+    def feedback(_exc: Exception) -> str:
+        if on_correction is not None:
+            on_correction()
+        return render_correction_feedback(prior_class(), loader)
+
     return CorrectionPolicy(
         validation_retries=1,
-        feedback=lambda _exc: render_correction_feedback(prior_class(), loader),
+        feedback=feedback,
         include_schema=False,
         include_response=False,
     )
@@ -1310,6 +1329,9 @@ class CaseResult:
     attempt_classes: list[str | None] = field(default_factory=list)
     """The finding class of each decoded reply, in order; None when absent."""
     requests: int = 0
+    """Every request the call sent, transport retries included."""
+    corrections: int = 0
+    """Correction requests built; one the live budget refused still counts."""
     error: str | None = None
     budget_refused: bool = False
 
@@ -1318,16 +1340,12 @@ class CaseResult:
         return self.verdict is not None
 
     @property
-    def corrections(self) -> int:
-        return max(self.requests - 1, 0)
-
-    @property
     def correction_changed_class(self) -> bool | None:
         """Whether the corrected reply's class differs from the first reply's.
 
         None when no correction was sent or a class is unknown.
         """
-        if len(self.attempt_classes) < 2:
+        if not self.corrections or len(self.attempt_classes) < 2:
             return None
         first, last = self.attempt_classes[0], self.attempt_classes[-1]
         if first is None or last is None:
@@ -1349,6 +1367,9 @@ def review_case(
     def note_class(raw: Any) -> None:
         value = raw.get("finding_class") if isinstance(raw, dict) else None
         result.attempt_classes.append(value if isinstance(value, str) else None)
+
+    def count_correction() -> None:
+        result.corrections += 1
 
     def check(reply: ConflictVerdict) -> None:
         failures = verdict_failures(reply, case)
@@ -1374,6 +1395,7 @@ def review_case(
         policy=correction_policy(
             lambda: result.attempt_classes[-1] if result.attempt_classes else None,
             loader,
+            on_correction=count_correction,
         ),
         scenario_id=case.case_id,
         temperature=effective_temperature(llm_client),
@@ -1434,6 +1456,7 @@ def run_cases(
             "attempt_classes": result.attempt_classes,
             "correction_changed_class": result.correction_changed_class,
             "requests": result.requests,
+            "corrections": result.corrections,
             "error": result.error,
             "labels": case.labels,
         }
@@ -1805,7 +1828,11 @@ def score_references(
     }
 
     def compare(labels: Mapping[str, Mapping[str, Any]], ids: Iterable[str]) -> dict:
-        scored = [cid for cid in ids if cid in model and labels[cid]["label"]]
+        scored = [
+            cid
+            for cid in ids
+            if cid in model and cid in labels and labels[cid]["label"]
+        ]
         return {
             "cases": len(scored),
             "exact": sum(
@@ -1856,8 +1883,10 @@ def score_references(
     return {
         "references": names,
         "flagged": sorted(cid for cid, row in model.items() if row["flagged"]),
+        "verdicts": len(model),
         "by_reference": {
             name: {
+                "covers": sum(1 for cid in model if cid in labels),
                 "class": compare(labels, sorted(model)),
                 "over_refusal": refusal(
                     {cid: labels[cid]["over_refusal"] for cid in model if cid in labels}
@@ -1890,15 +1919,16 @@ def score_markdown(score: Mapping[str, Any]) -> str:
     lines = [
         "# Conflict review scores",
         "",
-        "| Reference | Cases | Exact | Acceptable "
+        "| Reference | Covers | Labelled | Exact | Acceptable "
         "| Clear over-refusals found | Contingent found | Flagged, not expected |",
-        "| --- | --- | --- | --- | --- | --- | --- |",
+        "| --- | --- | --- | --- | --- | --- | --- | --- |",
     ]
     for name in names:
         part = score["by_reference"][name]
         refusal = part["over_refusal"]
         lines.append(
-            f"| {name} | {part['class']['cases']} | {part['class']['exact']} "
+            f"| {name} | {part['covers']} of {score['verdicts']} "
+            f"| {part['class']['cases']} | {part['class']['exact']} "
             f"| {part['class']['acceptable']} "
             f"| {len(refusal['found_clear'])}/{len(refusal['expected_clear'])} "
             f"{refusal['found_clear']} "

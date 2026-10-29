@@ -1605,7 +1605,9 @@ def test_score_compares_with_each_reference_and_where_they_agree(
     assert score["agreed"]["case_ids"] == ["H1", "H3"]
     assert score["agreed"]["class"]["one"] == {"cases": 2, "exact": 1, "acceptable": 2}
     assert score["agreed"]["over_refusal"]["expected_clear"] == ["H1"]
-    assert "| one | 3 | 2 | 3 |" in (tmp_path / "score" / "score.md").read_text()
+    assert (
+        "| one | 3 of 3 | 3 | 2 | 3 |" in (tmp_path / "score" / "score.md").read_text()
+    )
 
 
 def test_score_refuses_a_label_argument_without_a_name(tmp_path: Path) -> None:
@@ -1616,3 +1618,109 @@ def test_score_refuses_a_label_argument_without_a_name(tmp_path: Path) -> None:
             ["score", "--verdicts", str(tmp_path), "--labels", "labels.yaml"]
             + ["--out-dir", str(tmp_path / "score")]
         )
+
+
+def test_score_covers_only_the_cases_a_partial_reference_labels(
+    tmp_path: Path,
+) -> None:
+    script = _script()
+    out = tmp_path / "run"
+    for case_id in ("H1", "H2", "H3"):
+        _verdict_record(out, case_id, _recorded_verdict())
+    full = tmp_path / "full.yaml"
+    _dump(
+        full,
+        {
+            "cases": [
+                {"case_id": cid, "label": "demonstrated_conflict"}
+                for cid in ("H1", "H2", "H3")
+            ]
+        },
+    )
+    partial = tmp_path / "partial.yaml"
+    _dump(
+        partial,
+        {"cases": [{"case_id": "H2", "label": "no_conflict", "over_refusal": "yes"}]},
+    )
+
+    script.main(
+        ["score", "--verdicts", str(out), "--labels", f"full={full}"]
+        + ["--labels", f"partial={partial}", "--out-dir", str(tmp_path / "score")]
+    )
+
+    score = json.loads((tmp_path / "score" / "score.json").read_text())
+    assert score["verdicts"] == 3
+    assert score["by_reference"]["full"]["covers"] == 3
+    assert score["by_reference"]["full"]["class"]["exact"] == 3
+    partial_score = score["by_reference"]["partial"]
+    assert partial_score["covers"] == 1
+    assert partial_score["class"] == {"cases": 1, "exact": 0, "acceptable": 0}
+    assert partial_score["over_refusal"]["found_clear"] == ["H2"]
+    assert partial_score["over_refusal"]["flagged_unexpected"] == []
+    assert score["agreed"]["case_ids"] == []
+    assert "| partial | 1 of 3 |" in (tmp_path / "score" / "score.md").read_text()
+
+
+def test_a_resource_id_repeated_across_sources_is_refused(tmp_path: Path) -> None:
+    script = _script()
+    manifest = tmp_path / "manifest.yaml"
+    _dump(
+        manifest,
+        {
+            "cases": [
+                {
+                    "case_id": "H1",
+                    "run_dir": str(_run_dir(tmp_path)),
+                    "scenario_ids": ["SCN-001"],
+                    "resources": [
+                        {
+                            "resource_id": "RES-1",
+                            "kind": "deadline",
+                            "value": 1,
+                            "unit": "hours",
+                            "applies_to": "answering",
+                        }
+                    ],
+                }
+            ]
+        },
+    )
+    shared = script.parse_resources(
+        [
+            {
+                "resource_id": "RES-1",
+                "kind": "reviewer_capacity",
+                "value": 4,
+                "unit": "reviews per hour",
+                "applies_to": "the queue",
+            }
+        ]
+    )
+
+    with pytest.raises(SystemExit, match=r"H1: resource ids repeat: \['RES-1'\]"):
+        script.load_cases(None, manifest, resources=shared)
+
+
+def test_a_transport_retry_is_not_counted_as_a_correction(tmp_path: Path) -> None:
+    from tests.helpers.transport_retry import _status_error
+
+    script = _script()
+    pending: list[BaseException] = [_status_error(502)]
+
+    def respond(**kw: Any) -> Any:
+        if pending:
+            raise pending.pop(0)
+        return _reply(_verdict())
+
+    provider = _Provider(respond)
+
+    summary = _run(script, provider, _cases(script, 1), tmp_path / "out", budget=5)
+
+    assert len(provider.requests) == 2
+    assert summary["spend"]["transport_retries"] == 1
+    row = summary["rows"][0]
+    assert row["requests"] == 2
+    assert row["corrections"] == 0
+    assert row["correction_changed_class"] is None
+    assert summary["metrics"]["corrections"] == 0
+    assert summary["metrics"]["cases_corrected"] == 0
