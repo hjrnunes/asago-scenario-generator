@@ -4,15 +4,16 @@
 Research script; it only reads recorded runs and writes one JSON report.
 
 The Stage 5 cross-scenario check evaluates a sibling's bound
-``tool_call_condition`` on the one call a safe outcome names, with no
-argument values, as an incomplete capture. Recorded safe outcomes carry
-neither argument values nor a statement that the call is the agent's complete
-behaviour, so this script measures the ceiling of each:
+``tool_call_condition`` on the one call a safe outcome states the agent
+makes, with the values it states, as an incomplete capture. ``today`` is
+that outcome. Recorded safe outcomes rarely carry argument values and never
+a statement that the call is the agent's complete behaviour, so this script
+measures the ceiling of each:
 
 ``complete``
-    The same argument-less call evaluated as a complete capture: every
-    ``not_called`` and ``order`` comparison and every comparison on another
-    operation becomes decidable.
+    The check's call evaluated as a complete capture: every ``not_called``
+    and ``order`` comparison and every comparison on another operation
+    becomes decidable.
 ``argument_values``
     Each argument B's condition reads on the safe operation is given every
     value that matters to the condition (each literal it is compared with,
@@ -30,12 +31,17 @@ behaviour, so this script measures the ceiling of each:
     safe outcome (statement, record or fact references); other arguments stay
     unknown. The call is evaluated as an incomplete capture.
 
-Siblings and pairs are those of
-:func:`~asago_scenario_generator.stpa.scenario_prod.stage5.cross_scenario.check_cross_scenario_conflicts`:
-the published scenarios of a run grouped by control action and process-model
-context, the context rebuilt from ``target-realization.yaml``'s effective ICA
-enumeration and ``control-structure.yaml``. ``--exclude-duplicates`` drops the
-scenarios ``testability.yaml`` marks duplicate.
+Siblings, eligible pairs and evaluated pairs are computed by the check's own
+:func:`~asago_scenario_generator.stpa.scenario_prod.stage5.cross_scenario.sibling_pairs`
+over the published scenarios of a run, functional tests included, as the
+check sees them: grouped by control action and process-model context, the
+context rebuilt from ``target-realization.yaml``'s effective ICA enumeration
+and ``control-structure.yaml``; a pair is evaluated only when the safe
+outcome states its call and the failing scenario binds a condition. A
+scenario the check withdrew is not published, so it is not counted. A
+published condition that the current model refuses (``invalid_conditions``)
+counts as unbound. ``--exclude-duplicates`` drops the scenarios
+``testability.yaml`` marks duplicate.
 
 Usage::
 
@@ -54,12 +60,17 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from pydantic import ValidationError
 
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
+from asago_scenario_generator.stpa.observation_contract import SafeObservableOutcome
+from asago_scenario_generator.stpa.scenario_prod.stage5 import cross_scenario
 from asago_scenario_generator.stpa.scenario_prod.stage5.cross_scenario import (
+    SiblingCandidate,
     ica_process_model_contexts,
 )
+from asago_scenario_generator.stpa.tool_call_condition import ToolCallCondition
 from asago_scenario_generator.stpa.tool_call_condition_eval import (
     evaluate_condition_v2,
 )
@@ -96,28 +107,50 @@ def load_scenarios(
     return scenarios, ica_process_model_contexts(enumeration, structure)
 
 
+def _candidate(scenario: Mapping[str, Any], invalid: list[str]) -> SiblingCandidate:
+    """Return the check's view of one published scenario."""
+    lineage = scenario.get("lineage") or {}
+    outcome = scenario.get("safe_observable_outcome")
+    raw_condition = scenario.get("tool_call_condition")
+    condition = None
+    if raw_condition:
+        try:
+            condition = ToolCallCondition.model_validate(raw_condition)
+        except ValidationError:
+            invalid.append(scenario["scenario_id"])
+    return SiblingCandidate(
+        scenario_id=scenario["scenario_id"],
+        control_action_id=str(lineage.get("control_action_id")),
+        ica_id=lineage.get("ica_id"),
+        safe_outcome=(
+            SafeObservableOutcome.model_validate(outcome) if outcome else None
+        ),
+        condition=condition,
+    )
+
+
 def sibling_pairs(
     scenarios: Sequence[Mapping[str, Any]], contexts: Mapping[str, Mapping[str, str]]
-) -> tuple[int, list[tuple[Mapping[str, Any], Mapping[str, Any]]]]:
-    """Return the eligible pair count and the evaluable (safe, failing) pairs."""
-    groups: dict[tuple[str, tuple[tuple[str, str], ...]], list[Mapping[str, Any]]]
-    groups = {}
-    for scenario in sorted(scenarios, key=lambda item: item["scenario_id"]):
-        lineage = scenario.get("lineage") or {}
-        context = contexts.get(lineage.get("ica_id") or "")
-        if not context:
-            continue
-        key = (str(lineage.get("control_action_id")), tuple(sorted(context.items())))
-        groups.setdefault(key, []).append(scenario)
-    eligible = 0
-    pairs = []
-    for _, members in sorted(groups.items()):
-        for safe, failing in itertools.permutations(members, 2):
-            eligible += 1
-            outcome = safe.get("safe_observable_outcome") or {}
-            if outcome.get("operation_name") and failing.get("tool_call_condition"):
-                pairs.append((safe, failing))
-    return eligible, pairs
+) -> tuple[
+    int,
+    list[tuple[Mapping[str, Any], Mapping[str, Any], dict[str, Any]]],
+    list[str],
+]:
+    """Return the eligible pair count, the evaluated pairs and invalid conditions.
+
+    Each evaluated pair is (safe, failing, call): the two published scenarios
+    and the call the check evaluates the failing condition on.
+    """
+    by_id = {scenario["scenario_id"]: scenario for scenario in scenarios}
+    invalid: list[str] = []
+    candidates = [_candidate(scenario, invalid) for scenario in scenarios]
+    siblings = cross_scenario.sibling_pairs(candidates, contexts)
+    pairs = [
+        (by_id[pair.safe.scenario_id], by_id[pair.failing.scenario_id], pair.call)
+        for pair in siblings.pairs
+        if pair.call is not None
+    ]
+    return len(siblings.pairs), pairs, sorted(invalid)
 
 
 def _numeric_neighbours(value: Any) -> list[Any]:
@@ -213,12 +246,16 @@ def _stated_values(
     return stated
 
 
-def measure_pair(safe: Mapping[str, Any], failing: Mapping[str, Any]) -> dict[str, Any]:
-    """Return every measured outcome of one ordered sibling pair."""
+def measure_pair(
+    safe: Mapping[str, Any], failing: Mapping[str, Any], call: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Return every measured outcome of one ordered sibling pair.
+
+    ``call`` is the call the check evaluates the failing condition on.
+    """
     outcome = safe["safe_observable_outcome"]
     operation = outcome["operation_name"]
     condition = failing["tool_call_condition"]
-    bare = {"name": operation, "arguments": {}}
     candidates = argument_candidates(condition, operation)
     stated = _stated_values(outcome, candidates)
     stated_call = {"name": operation, "arguments": stated}
@@ -231,8 +268,8 @@ def measure_pair(safe: Mapping[str, Any], failing: Mapping[str, Any]) -> dict[st
             {comparison["kind"] for comparison in condition["comparisons"]}
         ),
         "arguments_read": sorted(candidates),
-        "today": evaluate_condition_v2(condition, [bare], False)[0],
-        "complete": evaluate_condition_v2(condition, [bare], True)[0],
+        "today": evaluate_condition_v2(condition, [call], False)[0],
+        "complete": evaluate_condition_v2(condition, [call], True)[0],
         "argument_values": _summarize(
             _outcomes(condition, operation, candidates, False)
         ),
@@ -254,13 +291,15 @@ def measure_runs(run_dirs: Sequence[Path], exclude_duplicates: bool) -> dict[str
     rows = []
     eligible = 0
     runs_with_pairs = 0
+    invalid_conditions = []
     for run_dir in run_dirs:
         scenarios, contexts = load_scenarios(run_dir, exclude_duplicates)
-        run_eligible, pairs = sibling_pairs(scenarios, contexts)
+        run_eligible, pairs, invalid = sibling_pairs(scenarios, contexts)
         eligible += run_eligible
         runs_with_pairs += bool(pairs)
-        for safe, failing in pairs:
-            rows.append({"run": run_dir.name, **measure_pair(safe, failing)})
+        invalid_conditions += [f"{run_dir.name}:{item}" for item in invalid]
+        for safe, failing, call in pairs:
+            rows.append({"run": run_dir.name, **measure_pair(safe, failing, call)})
     totals = {
         key: dict(collections.Counter(row[key] for row in rows))
         for key in (
@@ -302,6 +341,7 @@ def measure_runs(run_dirs: Sequence[Path], exclude_duplicates: bool) -> dict[str
         "exclude_duplicates": exclude_duplicates,
         "eligible_pairs": eligible,
         "evaluated_pairs": len(rows),
+        "invalid_conditions": invalid_conditions,
         "totals": totals,
         "today_inconclusive_decided_by": dict(decided_by),
         "detected_or_value_dependent_pairs": detected,
