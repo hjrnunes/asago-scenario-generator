@@ -507,16 +507,22 @@ def _manifest_candidate_outcomes(result: Any) -> list[dict[str, Any]] | None:
     outcomes = result.candidate_outcomes
     if outcomes is None:
         return None
-    return [
-        {
-            "scenario_id": item.scenario_id,
-            "ica_slot_id": item.ica_slot_id,
-            "ica_id": item.ica_id,
-            "status": getattr(item.status, "value", item.status),
-            "diagnostics": list(item.diagnostics),
-        }
-        for item in outcomes
-    ]
+    return [_manifest_candidate_outcome(item) for item in outcomes]
+
+
+def _manifest_candidate_outcome(item: Any) -> dict[str, Any]:
+    """Project one terminal record; a reason code appears only when set."""
+    record: dict[str, Any] = {
+        "scenario_id": item.scenario_id,
+        "ica_slot_id": item.ica_slot_id,
+        "ica_id": item.ica_id,
+        "status": getattr(item.status, "value", item.status),
+    }
+    reason_code = getattr(item, "reason_code", None)
+    if reason_code is not None:
+        record["reason_code"] = reason_code
+    record["diagnostics"] = list(item.diagnostics)
+    return record
 
 
 def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | None]:
@@ -529,6 +535,7 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
         "attempted": None,
         "skipped": None,
         "functional_test": None,
+        "not_applicable": None,
         "diagnostic_count": len(result.stage_errors),
     }
     if outcomes is None:
@@ -537,6 +544,7 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
     published = sum(item["status"] == "published" for item in outcomes)
     functional_test = sum(item["status"] == "functional_test" for item in outcomes)
     skipped = sum(item["status"] == "skipped" for item in outcomes)
+    not_applicable = sum(item["status"] == "not_applicable" for item in outcomes)
     counts.update(
         # Once explicit terminal outcomes exist, ``published`` is the
         # authoritative adversarial yield.  An envelope can exist briefly
@@ -544,13 +552,15 @@ def _manifest_scenario_counts(result: Any, generated: int) -> dict[str, int | No
         # here would incorrectly turn a zero-publication run into a
         # successful one.  ``functional_test`` candidates are resolved
         # outcomes for the owner's information; they are neither failures
-        # nor published adversarial yield.
+        # nor published adversarial yield.  ``not_applicable`` candidates
+        # were routed by code before Stage 5: resolved, never attempted.
         generated=published,
         failed=sum(item["status"] in failures for item in outcomes),
         requested=len(outcomes),
-        attempted=len(outcomes) - skipped,
+        attempted=len(outcomes) - skipped - not_applicable,
         skipped=skipped,
         functional_test=functional_test,
+        not_applicable=not_applicable,
     )
     return counts
 
@@ -578,7 +588,9 @@ def _scenario_generation_status(
 
     Zero requested candidates is a valid analysis unless the prompt contract
     check stopped calls before dispatch: those calls never asked for the
-    candidates, so the run failed rather than found none.  A failure that
+    candidates, so the run failed rather than found none.  A not-applicable
+    candidate is resolved without an attempt: it counts towards completion
+    but is not yield.  A failure that
     stopped the ICA fill, such as the provider rejecting its request schema
     or giving two consecutive requests the same HTTP 400 reply, stopped the
     run's model calls, so the run failed whatever its candidates did.
@@ -599,12 +611,13 @@ def _scenario_generation_status(
     attempted = counts.get("attempted")
     generated = counts.get("generated")
     functional_test = counts.get("functional_test") or 0
+    not_applicable = counts.get("not_applicable") or 0
     if None in (requested, attempted, generated):
         return (
             SynthesisRunStatus.UNKNOWN,
             "candidate_outcomes_unavailable",
         )
-    resolved = (generated or 0) + functional_test
+    resolved = (generated or 0) + functional_test + not_applicable
     choices = (
         (requested == 0, _zero_request_status(prompt_contract_failures)),
         (
@@ -612,7 +625,7 @@ def _scenario_generation_status(
             (SynthesisRunStatus.FAILED, "zero_yield_after_attempts"),
         ),
         (
-            resolved == requested and attempted == requested,
+            resolved == requested and attempted + not_applicable == requested,
             (
                 SynthesisRunStatus.COMPLETED,
                 "all_requested_candidates_resolved",

@@ -1088,6 +1088,78 @@ record agree with it; an ICA that cites no row gets no row section. The run
 writes each candidate's hint, the rule that chose it, and the cited row's ID to
 `condition-families.yaml` (`condition-families-v2`).
 
+### Intent-type INCORRECT ICAs are routed before Stage 5
+
+A Stage 5 condition on a tool call can compare only the call's arguments,
+TARGET-STATE and TARGET-READ fact paths and literals. None of them represents
+what the user asked for. So a reason such as "the request does not match the
+customer's authorized intent", "the intent is unknown" or, for an intent
+variable, "unauthorized transaction" has nothing to test. Asking the model to
+narrow the reason does not help: it tests eligibility, amount or status
+instead, for example picking an ineligible order when the cited row says the
+order is eligible. Code therefore routes such an ICA before Stage 5
+(`stpa.scenario_prod.intent_reason`). An ICA is routed only when all of these
+hold:
+
+- its slot is INCORRECT and its control action's typed `effect_kind` is
+  `tool_call`, the path where Stage 5 writes an `incorrect_call` scenario;
+- its reason states no ground Stage 5 can test: no ownership source of
+  `REASON_FAMILY_RULES` (an ownership relation, a failed session or principal
+  authorization, a failed comparison with the session or a principal), no
+  limit failure, and no eligibility or lifecycle term;
+- the cited row's reason variable, if there is one, carries no target
+  evidence (`state:`, `session:`, `argument:`, `operation:`);
+- the reason is about intent. The structural basis comes first: the reason
+  variable's description names the user's intent (`reason_variable`).
+  Otherwise the wording basis applies: the reason states a failed comparison
+  with an intent, or an unknown intent (`reason_wording`). "intended" does
+  not count, and neither does an intent the action itself produces ("the
+  classified intent is incorrect").
+
+So session ("not authorized for the session"), actor ("the actor is
+unauthorized", "the actor is not the host or the guest"), identity ("record
+identity unknown", "not owned by the authenticated customer"), bound ("amount
+or plan not authorized by session") and timing reasons keep reaching Stage 5.
+So does an intent comparison stated beside one of them ("... and the refund is
+ineligible").
+
+A routed ICA keeps one candidate with no family hint. Its
+`CandidateFamilyPlan.not_applicable` holds the disposition: the reason code
+`intent_reason_not_groundable`, a reason for the reader, the basis, and the
+reason variable it read. The run sends that candidate no Stage 5 request and
+writes no scenario. The disposition is recorded in three places:
+
+- the candidate's outcome has status `not_applicable`, with `reason_code` and
+  the reason as its diagnostic. It appears in `synthesis-manifest.yaml`
+  `candidate_outcomes` and is counted in `scenario_counts.not_applicable`.
+- `testability.yaml` lists the candidate under `not_applicable`, with
+  `summary.not_applicable` as its count. `summary.total` still counts only
+  the scenarios Stage 5 wrote.
+- the report lists it in the testability section and counts it in the
+  handoff section.
+
+Every candidate is accounted exactly once:
+`requested = generated + functional_test + not_applicable + failed + skipped`.
+A not-applicable candidate is resolved but never attempted (`attempted`
+excludes it) and is not yield. The run status counts it towards completion,
+so a run whose other candidates all published is `completed`. Obligation
+accounting is unchanged: an addressed obligation whose only finding is
+routed is still marked `generation_failed`.
+
+Timing decision: a prior read, such as an earlier `lookup_order`, is not
+treated as confirming the authorization status. A WRONG_TIMING ICA ("before
+the authorization status is confirmed") is never routed and keeps its Stage 5
+path with the `prior_read` hint. The code does not count such an ICA as
+faithfully kept: a prior read shows only that a read happened, not that it
+confirmed authorization.
+
+Open contract question: the faithful form of an intent reason would be a
+request operand bound to the user's turn, which the condition language does
+not have. The alternative is that intent-type ICAs are analytical by design on
+targets without request evidence. Until the contract decides, code takes the
+second reading, and a typed reason field from ICA authoring would replace the
+wording basis.
+
 ## Test boundary
 
 Unit tests under `tests/` are the behavior contract, and the phrase tables in

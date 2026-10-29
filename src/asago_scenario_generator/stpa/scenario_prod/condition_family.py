@@ -36,7 +36,9 @@ argument bound to the same key domain as one of this operation's record-key
 arguments.
 
 Which family an ICA's candidates carry is decided by the ICA's stated
-reason (``reason_family``), not by its position in the slot.
+reason (``reason_family``), not by its position in the slot. An ICA that
+code routes before Stage 5 (``intent_reason``) keeps one candidate that
+carries its not-applicable disposition and no hint.
 """
 
 from __future__ import annotations
@@ -64,6 +66,7 @@ from asago_scenario_generator.stpa.models.target_subject_model import (
 )
 
 from .condition_check import target_observation_fact_values
+from .intent_reason import NotApplicableDisposition
 from .condition_index import (
     STATE_REF,
     StateIndex,
@@ -158,12 +161,15 @@ class CandidateFamilyPlan:
     ``reason`` records how the ICA's reason chose the hint (``None`` when no
     family was offered or the slot takes none); ``context_row`` is the row
     the ICA cites, rendered in the candidate's Stage 5 request.
+    ``not_applicable`` is set when code routes the ICA before Stage 5: the
+    run records the candidate as not applicable and sends no request.
     """
 
     family: ConditionFamily | None = None
     capped_out: tuple[ConditionFamily, ...] = ()
     reason: ReasonFamilyChoice | None = None
     context_row: CitedContextRow | None = None
+    not_applicable: NotApplicableDisposition | None = None
 
 
 @dataclass(frozen=True)
@@ -234,6 +240,7 @@ def plan_family_candidates(
     observations: TargetObservationSnapshot | None,
     *,
     reasons: Mapping[str, IcaReason] | None = None,
+    not_applicable: Mapping[str, NotApplicableDisposition] | None = None,
     cap: int = DEFAULT_CANDIDATE_CAP,
 ) -> FamilyPlan:
     """Expand INCORRECT threats by their reason's family and hint WRONG_TIMING.
@@ -246,12 +253,18 @@ def plan_family_candidates(
     may get the same families. An ICA whose reason matches no family keeps
     one candidate without a hint. A WRONG_TIMING ICA keeps one candidate
     with the first prior-read family. Every other threat keeps one
-    candidate without a hint. Every candidate carries its ICA's cited row.
+    candidate without a hint. An ICA in ``not_applicable`` (by ICA ID)
+    keeps one candidate that carries its disposition and no hint. Every
+    candidate carries its ICA's cited row.
     """
 
     if realization is None or observations is None:
         return expand_family_candidates(
-            threats, lambda _action_id: (), reasons=reasons, cap=cap
+            threats,
+            lambda _action_id: (),
+            reasons=reasons,
+            not_applicable=not_applicable,
+            cap=cap,
         )
     state = StateIndex.from_fact_values(target_observation_fact_values(observations))
     observed = tuple(record.operation for record in realization.operation_records)
@@ -265,7 +278,13 @@ def plan_family_candidates(
             return ()
         return derive_condition_families(operation, observed, state)
 
-    return expand_family_candidates(threats, families_for, reasons=reasons, cap=cap)
+    return expand_family_candidates(
+        threats,
+        families_for,
+        reasons=reasons,
+        not_applicable=not_applicable,
+        cap=cap,
+    )
 
 
 def expand_family_candidates(
@@ -273,6 +292,7 @@ def expand_family_candidates(
     families_for_action: Callable[[str], Sequence[ConditionFamily]],
     *,
     reasons: Mapping[str, IcaReason] | None = None,
+    not_applicable: Mapping[str, NotApplicableDisposition] | None = None,
     cap: int = DEFAULT_CANDIDATE_CAP,
 ) -> FamilyPlan:
     """Apply the fan-out rules of ``plan_family_candidates`` to known families.
@@ -291,7 +311,12 @@ def expand_family_candidates(
         parts = threat.ica_slot_id.split(":")
         slot_type = parts[2] if len(parts) >= 3 else ""
         reason = _threat_reason(threat, reasons)
-        if slot_type == FAN_OUT_SLOT_TYPE and len(parts) >= 3:
+        disposition = (not_applicable or {}).get(getattr(threat, "ica_id", None))
+        if disposition is not None:
+            threat_plans = [
+                CandidateFamilyPlan(context_row=reason.row, not_applicable=disposition)
+            ]
+        elif slot_type == FAN_OUT_SLOT_TYPE and len(parts) >= 3:
             threat_plans = _reason_plans(reason, families_for(parts[1]), cap)
         else:
             threat_plans = [

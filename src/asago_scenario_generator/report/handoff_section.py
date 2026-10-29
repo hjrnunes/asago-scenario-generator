@@ -27,6 +27,7 @@ COUNT_LABEL = {
     "attempted": "attempted",
     "generated": "generated",
     "functional_test": "functional test",
+    "not_applicable": "not applicable",
     "failed": "failed",
     "skipped": "skipped",
     "diagnostic_count": "diagnostic",
@@ -125,7 +126,11 @@ def _unpublished(run: RunData) -> Markup:
             [
                 code_id(c.scenario_id),
                 code_id(c.ica_slot_id or "none"),
-                c.status or "not reported",
+                (
+                    f"{c.status} ({c.reason_code})"
+                    if c.reason_code
+                    else c.status or "not reported"
+                ),
                 "; ".join(c.diagnostics) or "none",
             ],
             id=f"unpublished-{c.scenario_id}",

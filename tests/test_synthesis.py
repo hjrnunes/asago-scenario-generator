@@ -916,6 +916,7 @@ def test_synthesis_manifest_retains_plain_scenario_failures(tmp_path: Path) -> N
         "attempted": None,
         "skipped": None,
         "functional_test": None,
+        "not_applicable": None,
         "diagnostic_count": 1,
     }
     assert result.manifest["scenario_errors"] == [
@@ -958,6 +959,7 @@ def test_synthesis_counts_candidates_separately_from_diagnostics(
         "attempted": 3,
         "skipped": 1,
         "functional_test": 0,
+        "not_applicable": 0,
         "diagnostic_count": 4,
     }
     assert [item["status"] for item in result.manifest["candidate_outcomes"]] == [
@@ -995,6 +997,7 @@ def test_synthesis_no_eligible_candidates_has_distinct_valid_status(
         "attempted": 0,
         "skipped": 0,
         "functional_test": 0,
+        "not_applicable": 0,
         "diagnostic_count": 0,
     }
     assert result.run_status == "no_candidates"
@@ -1036,6 +1039,7 @@ def test_synthesis_attempted_zero_yield_is_failed_after_artifacts_publish(
         "attempted": 2,
         "skipped": 0,
         "functional_test": 0,
+        "not_applicable": 0,
         "diagnostic_count": 0,
     }
     assert result.run_status == "failed"
@@ -1098,6 +1102,7 @@ def test_synthesis_partial_yield_is_degraded_with_separate_candidate_counts(
         "attempted": 2,
         "skipped": 1,
         "functional_test": 0,
+        "not_applicable": 0,
         "diagnostic_count": 0,
     }
     assert [item["status"] for item in result.manifest["candidate_outcomes"]] == [

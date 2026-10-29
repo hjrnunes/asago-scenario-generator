@@ -230,6 +230,7 @@ def test_handoff_publishes_deduplication_and_testability_summary(
         "duplicates": 0,
         "analytical_only": 0,
         "executable": 1,
+        "not_applicable": 0,
     }
 
 

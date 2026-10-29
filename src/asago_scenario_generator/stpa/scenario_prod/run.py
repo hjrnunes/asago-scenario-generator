@@ -71,6 +71,7 @@ from .condition_family import (
     family_honoured,
 )
 from .content_surface import ContentSurfaceFacts, content_surface_facts
+from .intent_reason import NotApplicableDisposition
 from .reason_family import CitedContextRow
 from .deduplication import (
     ScenarioDeduplication,
@@ -167,6 +168,9 @@ class SP3CandidateStatus(str, Enum):
     # ``kind: none`` marks a functional test.  It is persisted for
     # the owner's information but never enters the execution bundle.
     functional_test = "functional_test"
+    # Code routed the candidate before Stage 5 (``intent_reason``): it is
+    # kept and counted, but no request is sent and no scenario is written.
+    not_applicable = "not_applicable"
     generation_failed = "generation_failed"
     rendering_failed = "rendering_failed"
     publication_failed = "publication_failed"
@@ -175,13 +179,18 @@ class SP3CandidateStatus(str, Enum):
 
 @dataclass(frozen=True)
 class SP3CandidateOutcome:
-    """Terminal outcome for one exact scenario/slot/ICA candidate."""
+    """Terminal outcome for one exact scenario/slot/ICA candidate.
+
+    ``reason_code`` is the machine-readable reason of a ``not_applicable``
+    candidate; its diagnostics state the reason.
+    """
 
     scenario_id: str
     ica_slot_id: str
     ica_id: str | None
     status: SP3CandidateStatus
     diagnostics: tuple[str, ...] = ()
+    reason_code: str | None = None
 
 
 @dataclass
@@ -211,6 +220,7 @@ class _CandidateOutcomeBuilder:
     ica_id: str | None
     status: SP3CandidateStatus | None = None
     diagnostics: list[str] = field(default_factory=list)
+    reason_code: str | None = None
 
     def terminal(self) -> SP3CandidateOutcome:
         """Freeze this candidate exactly once for public result accounting."""
@@ -220,6 +230,7 @@ class _CandidateOutcomeBuilder:
             ica_id=self.ica_id,
             status=self.status or SP3CandidateStatus.skipped,
             diagnostics=tuple(self.diagnostics),
+            reason_code=self.reason_code,
         )
 
 
@@ -647,6 +658,9 @@ def _run_stages_5_and_6(
                 channel_splits=build_channel_splits(
                     deduplicated_specs, deduplication_by_scenario
                 ),
+                not_applicable=_not_applicable_entries(
+                    candidate_builders, inputs.condition_families
+                ),
             ),
             sort_keys=False,
             allow_unicode=True,
@@ -707,6 +721,25 @@ def _run_stages_5_and_6(
         taxonomy=inputs.handoff_taxonomy,
     )
     return published_specs, scenario_envelopes, functional_test_specs
+
+
+def _not_applicable_entries(
+    candidate_builders: list[_CandidateOutcomeBuilder],
+    condition_families: Sequence[CandidateFamilyPlan] | None,
+) -> list[dict[str, object]]:
+    """Return the testability entry of each candidate routed before Stage 5."""
+    if condition_families is None:
+        return []
+    return [
+        {
+            "scenario_id": builder.scenario_id,
+            "ica_slot_id": builder.ica_slot_id,
+            "ica_id": builder.ica_id,
+            **plan.not_applicable.as_log(),
+        }
+        for builder, plan in zip(candidate_builders, condition_families, strict=True)
+        if plan.not_applicable is not None
+    ]
 
 
 def _withdraw_conflicting_candidates(
@@ -973,6 +1006,11 @@ def _collect_stage5_specs(
     threats = enriched_threat_set.structural_threats
     for index, threat in enumerate(threats):
         plan = condition_families[index] if condition_families is not None else None
+        if plan is not None and plan.not_applicable is not None:
+            _record_not_applicable(
+                _candidate_builder_at(candidate_builders, index), plan.not_applicable
+            )
+            continue
         result = _run_stage5_candidate(
             llm_client,
             threat,
@@ -1001,6 +1039,18 @@ def _collect_stage5_specs(
             _skip_stage5_remaining_candidates(candidate_builders, index)
             break
     return specs
+
+
+def _record_not_applicable(
+    builder: _CandidateOutcomeBuilder | None,
+    disposition: NotApplicableDisposition,
+) -> None:
+    """Close a candidate code routed before Stage 5, with its reason."""
+    if builder is None:
+        return
+    builder.status = SP3CandidateStatus.not_applicable
+    builder.reason_code = disposition.reason_code
+    builder.diagnostics.append(disposition.reason)
 
 
 def _record_stage5_abort(stage_errors: list[str], remaining: int) -> None:
