@@ -20,7 +20,7 @@ from openai.types.chat import ChatCompletion
 from pydantic import BaseModel
 
 from asago_scenario_generator.stpa.infra.call_log import jsonl_lines
-from asago_scenario_generator.stpa.infra.llm import LLMClient
+from asago_scenario_generator.stpa.infra.llm import LLMClient, effective_model_config
 from asago_scenario_generator.stpa.infra.llm_helpers import (
     CorrectionPolicy,
     call_with_policy,
@@ -213,6 +213,14 @@ def test_a_plain_word_api_key_is_never_recorded_with_a_request(tmp_path: Path) -
 
     for path in tmp_path.iterdir():
         assert PLAIN_KEY not in path.read_text(), path.name
+
+
+def test_the_manifest_model_config_has_no_api_key_field_or_value() -> None:
+    config = effective_model_config(_client(api_key=PLAIN_KEY))
+
+    assert not [key for key in config if "key" in key.lower()]
+    assert PLAIN_KEY not in json.dumps(config)
+    assert ENDPOINT not in json.dumps(config)
 
 
 def test_a_response_the_client_rejects_is_recorded_with_the_rejection(
