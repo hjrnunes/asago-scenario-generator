@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from functools import lru_cache
-from typing import Annotated, Literal, Union
+from typing import Annotated, Any, Literal, Union
 from pydantic import (
     BaseModel,
     Field,
@@ -15,8 +15,13 @@ from asago_scenario_generator.stpa.observation_contract import (
     FailureCall,
     SafeObservableOutcome,
 )
+from asago_scenario_generator.request_schema import string_enum
 from asago_scenario_generator.stpa.discriminating_condition import (
+    ArgumentOperand,
+    ArgumentValueSelection,
     DiscriminatingCondition,
+    NotCalledComparison,
+    OrderComparison,
 )
 from .wire import (
     _ContextAbsenceTemporalWire,
@@ -42,6 +47,7 @@ def _scenario_semantics_payload_type(
     observation_criteria_required: bool = False,
     condition_references_supplied: bool = False,
     failure_call_supported: bool = False,
+    condition_operations: tuple[str, ...] = (),
 ) -> type[BaseModel]:
     """Return the normal-path response schema: semantics and evidence only.
 
@@ -50,7 +56,9 @@ def _scenario_semantics_payload_type(
     execution route, factor-route binding or unsafe-outcome condition.
     ``failure_call_supported`` adds the required, nullable ``failure_call``
     of the failure criterion, which the prompt explains only when the
-    contract captures tool calls.
+    contract captures tool calls. ``condition_operations`` closes every
+    operation name of the discriminating condition to the request's operation
+    inventory (:func:`_with_condition_operations`).
     """
     _require_positive_schema_count(choice_count, "choice_count")
     suffix = f"{choice_count}"
@@ -109,13 +117,69 @@ def _scenario_semantics_payload_type(
             **failure_call_field,
             **condition_field,
         )
-    return create_model(
+    payload_type = create_model(
         f"_ContextScenarioSemanticsPayload{suffix}",
         __base__=_ContextScenarioSemanticsPayload,
         attacker_bdi=(attacker_type, ...),
         causal_factors=(conlist(factor_union, min_length=1), ...),
         unsafe_outcome=(outcome_type, ...),
     )
+    condition_offered = observation_criteria_required and condition_references_supplied
+    if condition_offered and condition_operations:
+        return _with_condition_operations(payload_type, condition_operations)
+    return payload_type
+
+
+# Each condition model and its fields that name an operation of the inventory.
+_CONDITION_OPERATION_FIELDS: tuple[tuple[type[BaseModel], tuple[str, ...]], ...] = (
+    (ArgumentOperand, ("operation",)),
+    (OrderComparison, ("operation", "requires_prior")),
+    (NotCalledComparison, ("operation",)),
+    (ArgumentValueSelection, ("operation",)),
+)
+
+
+def _with_condition_operations(
+    model: type[BaseModel], operations: tuple[str, ...]
+) -> type[BaseModel]:
+    """Return a subclass whose schema closes condition operations to ``operations``.
+
+    A guided decoder samples any string an open field allows. In the flat
+    comparison object the nullable fields of the other branches follow
+    ``operation``, so a reply that closes the comparison early writes the
+    closing characters into the name. The enum keeps the reply inside the
+    inventory. Only the schema changes: a reply still parses with any name,
+    so the condition check rejects one outside the inventory with its exact
+    correction.
+    """
+
+    def model_json_schema(cls: type[BaseModel], *args: Any, **kwargs: Any):
+        schema = super(closed, cls).model_json_schema(*args, **kwargs)
+        definitions = schema["$defs"]
+        for condition_model, names in _CONDITION_OPERATION_FIELDS:
+            properties = definitions[condition_model.__name__]["properties"]
+            for name in names:
+                _close_string(properties[name], operations)
+        return schema
+
+    closed = type(
+        model.__name__,
+        (model,),
+        {
+            "__module__": model.__module__,
+            "__qualname__": model.__qualname__,
+            "model_json_schema": classmethod(model_json_schema),
+        },
+    )
+    return closed
+
+
+def _close_string(field: dict[str, Any], operations: tuple[str, ...]) -> None:
+    """Add the enum to a string field, or to the string branch of a nullable one."""
+
+    branches = field.get("anyOf", [field])
+    [string] = [branch for branch in branches if branch.get("type") == "string"]
+    string_enum(operations)(string)
 
 
 def _discriminated_union(
