@@ -953,3 +953,70 @@ def test_an_alignment_only_description_still_routes_every_value_form() -> None:
         disposition = _recognize(reason, _row(variable))
         assert disposition is not None, value
         assert disposition.basis == "reason_variable"
+
+
+# --- a cited description must affirmatively state request-intent alignment --
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        # who is authorized, not whether the request matches the intent
+        "Whether the user is authorized to perform the transaction described by "
+        "their intent.",
+        "Who authorized the customer's intent.",
+        "Whether the customer's intent is authorized.",
+        # the intent alone, or something about it other than alignment
+        "The user's intent.",
+        "The customer's authorized intent.",
+        "The intent behind the request.",
+        "The source of the user's intent.",
+        # context alone, or context and intent without the slash form
+        "The alignment between the requested operation and the customer's "
+        "authorized context.",
+        "The alignment between the requested operation and the customer's "
+        "authorized context intent.",
+        "The alignment between the requested operation and the customer's "
+        "authorized context or intent.",
+        # alignment plus anything beyond it
+        "The alignment between the requested operation and the customer's "
+        "authorized context/intent and the refund eligibility.",
+        "The alignment between the requested operation and the customer's "
+        "authorized intent, as confirmed by the agent.",
+        "Whether the requested operation matches the customer's authorized intent "
+        "for this order.",
+        # alignment between other things
+        "The alignment between the user's intent and the assistant's reply.",
+    ],
+)
+def test_a_description_that_is_not_request_intent_alignment_keeps_stage5(
+    description,
+) -> None:
+    for value, reason in _VALUE_FORMS:
+        variable = _var("PM-1-1", value, description=description)
+        assert _recognize(reason, _row(variable)) is None, (description, value)
+
+
+@pytest.mark.parametrize(
+    "description",
+    [
+        "The alignment between the requested operation and the customer's "
+        "authorized context/intent.",
+        "the alignment between the requested operation and the customer's "
+        "authorized context / intent",
+        "The alignment between the user's expressed intent and the requested "
+        "transaction.",
+        "The match between the request and the customer's intent.",
+        "The consistency between the requested payment and the user's intent.",
+        "Whether the requested operation matches the customer's authorized intent.",
+        "Whether the request aligns with the user's stated intent.",
+        "Whether the requested transaction is consistent with the customer's "
+        "authorized intent.",
+    ],
+)
+def test_a_request_intent_alignment_description_routes(description) -> None:
+    for value, reason in _VALUE_FORMS:
+        variable = _var("PM-1-1", value, description=description)
+        disposition = _recognize(reason, _row(variable))
+        assert disposition is not None, (description, value)
+        assert disposition.basis == "reason_variable"
