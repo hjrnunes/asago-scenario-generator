@@ -922,6 +922,10 @@ def _route_batch(
                 attempt_partial = _partial_routing(
                     candidate, "verified routing records", validate, batch
                 )
+            if attempt_partial is not None and partial is not None:
+                candidate, attempt_partial = _merge_partial(
+                    partial, attempt_partial, batch
+                )
             if attempt_partial is not None:
                 partial = attempt_partial
                 error = attempt_partial.error
@@ -1026,6 +1030,51 @@ def _partial_routing(
         error=ValueError(
             f"{label} failed local validation: "
             + _record_errors_text(record_errors, batch)
+        ),
+    )
+
+
+def _merge_partial(
+    previous: _PartialRouting,
+    current: _PartialRouting,
+    batch: Sequence[NeutralObligationBrief],
+) -> tuple[StructuralRoutingResponse, _PartialRouting | None]:
+    """Merge a re-asked partial reply into the routes an earlier reply kept.
+
+    The rule, per obligation: a route valid in the re-asked reply replaces
+    the earlier one; otherwise a route valid in the earlier reply is kept;
+    otherwise the obligation stays invalid, with the re-asked reply's route
+    and error, and ends ``unresolved``.  An invalid route never displaces a
+    valid one.  When every obligation has a valid route, the merged response
+    is returned with no partial result.
+    """
+    current_valid = {route.obligation_id: route for route in current.routes}
+    previous_valid = {route.obligation_id: route for route in previous.routes}
+    replied = {route.obligation_id: route for route in current.candidate.routes}
+    routes: list[ObligationRoute] = []
+    valid: list[ObligationRoute] = []
+    errors: dict[str, BaseException] = {}
+    for brief in batch:
+        obligation_id = brief.obligation_id
+        route = current_valid.get(obligation_id) or previous_valid.get(obligation_id)
+        if route is None:
+            routes.append(replied[obligation_id])
+            errors[obligation_id] = current.errors[obligation_id]
+        else:
+            routes.append(route)
+            valid.append(route)
+    payload = current.candidate.model_dump(mode="python", exclude={"response_digest"})
+    payload["routes"] = tuple(routes)
+    merged = StructuralRoutingResponse.model_validate(payload)
+    if not errors:
+        return merged, None
+    return merged, _PartialRouting(
+        candidate=merged,
+        routes=tuple(valid),
+        errors=errors,
+        error=ValueError(
+            "merged routing records failed local validation: "
+            + _record_errors_text(errors, batch)
         ),
     )
 

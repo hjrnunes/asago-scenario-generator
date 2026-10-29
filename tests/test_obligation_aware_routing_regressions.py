@@ -424,3 +424,90 @@ def test_the_default_recheck_routes_every_brief_again_as_a_recheck(tmp_path) -> 
     assert [item.semantic_digest for item in production.requests] == [
         item.semantic_digest for item in direct.requests
     ]
+
+
+def _invalid_route(brief):
+    """A route that fails local validation: a targeted route with no mechanism."""
+    slot = create_slots(_control_structure())[0]
+    return ObligationRoute(
+        obligation_id=brief.obligation_id,
+        disposition="targeted",
+        semantic_assessment=_assessment(
+            mechanism="absent_from_system", risk="supported"
+        ),
+        slot_ids=(slot.slot_id,),
+        hazard_ids=("H-1",),
+        constraint_ids=("SC-1",),
+        rationale="The concern is relevant but the route is incorrectly targeted.",
+        evidence=("bad-route",),
+    )
+
+
+def _route_two_replies(first, second):
+    """Route both briefs in one batch; the re-ask gets the second reply."""
+    replies = [first, second]
+
+    class Adapter:
+        def route(self, request, *, correction_feedback=None):
+            return StructuralRoutingResponse(
+                adapter_kind="fake",
+                request_digest=request.semantic_digest,
+                routes=replies.pop(0),
+            )
+
+    result = route_obligations(
+        Adapter(),
+        briefs=_briefs(),
+        loss_analysis=_loss_analysis(),
+        control_structure=_control_structure(),
+        controls=_controls(),
+        max_batch_size=2,
+    )
+    assert replies == []
+    return result, {route.obligation_id: route for route in result.routes}
+
+
+def test_a_partial_reask_keeps_the_routes_the_first_reply_validated() -> None:
+    a, b = _briefs()
+    kept = _valid_route(a)
+
+    result, by_id = _route_two_replies(
+        (kept, _invalid_route(b)), (_invalid_route(a), _invalid_route(b))
+    )
+
+    assert by_id[a.obligation_id] == kept
+    assert by_id[b.obligation_id].disposition == "unresolved"
+    assert [item.outcome for item in result.call_evidence] == ["unresolved"]
+    assert b.obligation_id in result.diagnostics[0]
+    assert a.obligation_id not in result.diagnostics[0]
+
+
+def test_a_partial_reask_fills_the_routes_the_first_reply_left_invalid() -> None:
+    a, b = _briefs()
+    first_a, second_b = _valid_route(a), _valid_route(b)
+
+    result, by_id = _route_two_replies(
+        (first_a, _invalid_route(b)), (_invalid_route(a), second_b)
+    )
+
+    assert by_id[a.obligation_id] == first_a
+    assert by_id[b.obligation_id] == second_b
+    assert [item.outcome for item in result.call_evidence] == ["accepted"]
+    assert result.diagnostics == ()
+
+
+def test_a_valid_route_in_the_reask_replaces_the_first_replys_route() -> None:
+    a, b = _briefs()
+    second_a = ObligationRoute(
+        **{
+            **_valid_route(a).model_dump(exclude={"route_id"}),
+            "rationale": "The re-asked reply states this differently.",
+        }
+    )
+
+    _, by_id = _route_two_replies(
+        (_valid_route(a), _invalid_route(b)), (second_a, _invalid_route(b))
+    )
+
+    assert by_id[a.obligation_id].rationale == second_a.rationale
+    assert by_id[b.obligation_id].disposition == "unresolved"
