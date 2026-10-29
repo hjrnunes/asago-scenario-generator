@@ -174,8 +174,8 @@ def test_ownership_identity_actor_and_session_reasons_get_ownership(reason) -> N
 
 
 def test_a_session_evidenced_reason_variable_gets_ownership() -> None:
-    variable = _var("PM-1-1", "unconfirmed", "session:authenticated_owner_id")
-    choice = _choose("the caller is unconfirmed", _row(variable, EDITABLE))
+    variable = _var("PM-1-1", "unverified", "session:authenticated_owner_id")
+    choice = _choose("the caller is unverified", _row(variable, EDITABLE))
     assert (choice.kind, choice.rule, choice.reason_variable) == (
         "ownership",
         "ownership_reason",
@@ -303,6 +303,32 @@ def test_a_failed_comparison_with_the_principals_intent_is_not_ownership() -> No
         "the refund is executed without matching the customer's intended order",
     ):
         assert _choose(reason).kind is None, reason
+
+
+def test_a_failed_comparison_with_a_principals_attribute_is_not_ownership() -> None:
+    choice = _choose(
+        "the parameters do not align with the customer's eligibility or intent"
+    )
+    assert (choice.kind, choice.rule) == ("flag", "reason_terms")
+
+
+@pytest.mark.parametrize(
+    "reason",
+    ["the user has not confirmed the escalation", "the caller is unconfirmed"],
+)
+def test_a_missing_confirmation_is_not_an_authentication_failure(reason) -> None:
+    assert _choose(reason).kind is None
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the actor has no relationship to the listing",
+        "the requester has no association with the booking",
+    ],
+)
+def test_a_relationship_reason_is_ownership(reason) -> None:
+    assert _choose(reason).kind == "ownership"
 
 
 def test_amount_or_plan_not_authorized_by_session_is_a_session_failure() -> None:
