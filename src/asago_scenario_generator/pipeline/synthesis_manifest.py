@@ -21,6 +21,10 @@ from asago_scenario_generator.pipeline.synthesis_types import (
 )
 from asago_scenario_generator.pipeline.synthesis_values import _dump
 from asago_scenario_generator.stpa.infra.prompt_preflight import PromptContractError
+from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
+    SLOT_HAZARD_MISMATCH_CODE,
+    UNINVOKED_HAZARD_OPERATION_CODE,
+)
 from asago_scenario_generator.stpa.models.control_structure import (
     MAX_CONTEXT_ROWS_PER_ACTION,
     ControlStructure,
@@ -504,7 +508,24 @@ def _manifest_provider_evidence(
         verification = getattr(stages[stage_name], "ica_hazard_verification", None)
         if verification is not None:
             result[stage_name]["ica_hazard_verification"] = _dump(verification)
+            counts = _ica_hazard_check_counts(verification)
+            if counts:
+                result[stage_name]["ica_hazard_check_counts"] = counts
     return result
+
+
+def _ica_hazard_check_counts(verification: Any) -> dict[str, int]:
+    """Count the slot/hazard flags and the coverage findings apart, by code.
+
+    Each counts the batch diagnostics of its code: one per finding and cited
+    hazard. A zero count is left out, so a run with neither keeps its bytes.
+    """
+    codes = Counter(item.code for item in verification.diagnostics)
+    return {
+        code: codes[code]
+        for code in (SLOT_HAZARD_MISMATCH_CODE, UNINVOKED_HAZARD_OPERATION_CODE)
+        if codes[code]
+    }
 
 
 def _manifest_candidate_outcomes(result: Any) -> list[dict[str, Any]] | None:

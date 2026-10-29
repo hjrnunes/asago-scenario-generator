@@ -35,9 +35,18 @@ shares an operation's output with it.  Two actions share an output when one
 refers to a process-model part that a feedback channel of kind
 ``operation_result`` or ``retrieved_content`` updates from the controlled
 process the other targets: a reply that reads a lookup's result relays it,
-and an operation that reads another's result depends on it.  Otherwise the
-ICA is flagged with the slots that own the named operations, and with the
-named operations that no control action invokes, which no slot owns.
+and an operation that reads another's result depends on it.  Relaying does not
+reach an operation that changes target state: a reply that reports an update's
+outcome does not make the update.  An operation changes state when the target
+profile's interpretation gives it the likely effect ``create``, ``update`` or
+``delete``; without an interpretation every operation can be relayed.
+Otherwise the ICA is flagged with the slots that own the named operations.
+
+A named operation that no control action invokes has no owning slot, so the
+slot check leaves it out: the gap is in the control structure's coverage of
+the target, not in the ICA's tie.  Where the slot check would have flagged
+such a hazard, the coverage diagnostic records it instead, under its own
+code, in the batch diagnostics only.
 
 A mismatch is flagged, never moved.  The ICA's deviation, context, and loss
 were written for the slot's own action, so moving it to the owning slot
@@ -51,7 +60,7 @@ removes nothing and leaves the judgement to the reader.
 from __future__ import annotations
 
 import re
-from collections.abc import Collection, Iterable, Mapping, Sequence
+from collections.abc import Collection, Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -66,6 +75,7 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 
 SLOT_HAZARD_MISMATCH_CODE = "ica_hazard_operation_outside_slot"
+UNINVOKED_HAZARD_OPERATION_CODE = "ica_hazard_operation_uninvoked"
 
 
 @dataclass(frozen=True)
@@ -74,7 +84,6 @@ class SlotHazardMismatch:
 
     ``owning_slot_ids`` are the same-category slots of every control action
     that invokes one of ``hazard_operations``, in structure order.
-    ``unowned_operations`` are the named operations no control action invokes.
     """
 
     ica_id: str
@@ -84,7 +93,6 @@ class SlotHazardMismatch:
     hazard_id: str
     hazard_operations: tuple[str, ...]
     owning_slot_ids: tuple[str, ...]
-    unowned_operations: tuple[str, ...] = ()
 
     @property
     def reason(self) -> str:
@@ -95,21 +103,40 @@ class SlotHazardMismatch:
             else "invokes no operation"
         )
         operations = ", ".join(f"`{name}`" for name in self.hazard_operations)
-        owners: list[str] = []
         if len(self.owning_slot_ids) == 1:
-            owners.append(f"the owning slot is {self.owning_slot_ids[0]}")
-        elif self.owning_slot_ids:
-            owners.append("the owning slots are " + ", ".join(self.owning_slot_ids))
-        if self.unowned_operations:
-            unowned = ", ".join(f"`{name}`" for name in self.unowned_operations)
-            pronoun = "it" if len(self.unowned_operations) == 1 else "them"
-            owners.append(
-                f"no slot owns {unowned}: no control action invokes {pronoun}"
-            )
+            owners = f"the owning slot is {self.owning_slot_ids[0]}"
+        else:
+            owners = "the owning slots are " + ", ".join(self.owning_slot_ids)
         return (
             f"hazard {self.hazard_id} depends on {operations}, but control "
             f"action {self.control_action_id} of slot {self.slot_id} {invoked}; "
-            + "; ".join(owners)
+            + owners
+        )
+
+
+@dataclass(frozen=True)
+class UninvokedHazardOperation:
+    """One cited hazard naming declared operations no control action invokes.
+
+    It is recorded where the slot check would otherwise have flagged the
+    hazard: the slot's action reaches none of the hazard's other operations.
+    """
+
+    ica_id: str
+    slot_id: str
+    control_action_id: str
+    hazard_id: str
+    operations: tuple[str, ...]
+
+    @property
+    def reason(self) -> str:
+        """Describe the operations the control structure leaves uncovered."""
+        names = ", ".join(f"`{name}`" for name in self.operations)
+        pronoun = "it" if len(self.operations) == 1 else "them"
+        return (
+            f"hazard {self.hazard_id} names {names}, but no control action "
+            f"invokes {pronoun}, so no slot owns {pronoun}; ICA {self.ica_id} "
+            f"of slot {self.slot_id} cites the hazard"
         )
 
 
@@ -119,27 +146,73 @@ def find_slot_hazard_mismatches(
     control_structure: ControlStructure,
     *,
     operation_inventory: Collection[str] = (),
+    operation_effects: Mapping[str, Any] | None = None,
 ) -> tuple[SlotHazardMismatch, ...]:
     """Return every cited hazard whose operations lie outside the ICA's slot.
 
     *operation_inventory* holds the target's declared operation names; an
     operation can be named whether or not a control action invokes it.
+    *operation_effects* maps an operation name to its interpreted likely
+    effect; an operation that changes state cannot be reached by relaying it.
     """
+    return tuple(
+        finding
+        for finding in _findings(
+            enumeration,
+            loss_analysis,
+            control_structure,
+            operation_inventory,
+            operation_effects,
+        )
+        if isinstance(finding, SlotHazardMismatch)
+    )
+
+
+def find_uninvoked_hazard_operations(
+    enumeration: ICAEnumeration,
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+    *,
+    operation_inventory: Collection[str] = (),
+    operation_effects: Mapping[str, Any] | None = None,
+) -> tuple[UninvokedHazardOperation, ...]:
+    """Return every cited hazard naming an operation no control action invokes.
+
+    Only a hazard the slot's action does not reach otherwise is returned, as
+    the slot check decides it; the arguments are the slot check's.
+    """
+    return tuple(
+        finding
+        for finding in _findings(
+            enumeration,
+            loss_analysis,
+            control_structure,
+            operation_inventory,
+            operation_effects,
+        )
+        if isinstance(finding, UninvokedHazardOperation)
+    )
+
+
+def _findings(
+    enumeration: ICAEnumeration,
+    loss_analysis: LossAnalysis,
+    control_structure: ControlStructure,
+    operation_inventory: Collection[str],
+    operation_effects: Mapping[str, Any] | None,
+) -> Iterator[SlotHazardMismatch | UninvokedHazardOperation]:
     owners = _operation_owners(control_structure)
     operations = {*owners, *(name for name in operation_inventory if name)}
     if not operations:
-        return ()
+        return
     hazard_operations = {
         hazard.hazard_id: _named_operations(hazard.description, operations)
         for hazard in loss_analysis.hazards
     }
-    reach = _Reach(control_structure)
-    return tuple(
-        mismatch
-        for slot in enumeration.slots
-        if not slot.is_na
-        for mismatch in _slot_mismatches(slot, hazard_operations, owners, reach)
-    )
+    reach = _Reach(control_structure, _state_changing(operation_effects or {}))
+    for slot in enumeration.slots:
+        if not slot.is_na:
+            yield from _slot_findings(slot, hazard_operations, owners, reach)
 
 
 def _operation_owners(
@@ -160,16 +233,32 @@ def _operation_owners(
 _INDIRECT_EFFECTS = frozenset({"agent_message", "state_change"})
 # Feedback kinds that carry an operation's output to the controller.
 _OUTPUT_FEEDBACK = frozenset({"operation_result", "retrieved_content"})
+# Interpreted likely effects that change target state.
+_STATE_CHANGING_EFFECTS = frozenset({"create", "update", "delete"})
 
 
 def _value(item: Any) -> Any:
     return getattr(item, "value", item)
 
 
+def _state_changing(operation_effects: Mapping[str, Any]) -> frozenset[str]:
+    return frozenset(
+        name
+        for name, effect in operation_effects.items()
+        if _value(effect) in _STATE_CHANGING_EFFECTS
+    )
+
+
 class _Reach:
     """Which operations a control action can reach in the final structure."""
 
-    def __init__(self, control_structure: ControlStructure) -> None:
+    def __init__(
+        self,
+        control_structure: ControlStructure,
+        state_changing: Collection[str] = frozenset(),
+    ) -> None:
+        # Operations whose output an action can read without reaching them.
+        self._state_changing = state_changing
         self._actions: dict[tuple[str, str], Any] = {}
         # (resp_id, pm_id) -> controlled processes whose output updates it
         self._output_sources: dict[tuple[str, str], set[str]] = {}
@@ -197,13 +286,18 @@ class _Reach:
         return self._actions.get((resp_id, ca_id))
 
     def reaches(self, resp_id: str, action: Any, operation: str) -> bool:
-        """Whether *action* invokes *operation* or shares an output with it."""
+        """Whether *action* invokes *operation* or shares an output with it.
+
+        Reading the output of an operation that changes state does not reach
+        it: relaying the outcome does not cause the change.
+        """
         if action.operation == operation:
             return True
         own_target = _target_process(action)
         own_inputs = self._inputs(resp_id, action)
+        relays = operation not in self._state_changing
         return any(
-            _target_process(invoker) in own_inputs
+            (relays and _target_process(invoker) in own_inputs)
             or (
                 own_target is not None
                 and own_target in self._inputs(invoker_resp, invoker)
@@ -247,6 +341,16 @@ def declared_operation_names(execution_target_profile: Any) -> tuple[str, ...]:
         for resource in execution_target_profile.resources
         for operation in resource.operations
     )
+
+
+def declared_operation_effects(execution_target_profile: Any) -> dict[str, str]:
+    """Map each interpreted tool to its likely effect, none without a profile."""
+    if execution_target_profile is None:
+        return {}
+    return {
+        item.tool_name: str(_value(item.likely_effect))
+        for item in getattr(execution_target_profile, "interpretations", None) or ()
+    }
 
 
 def _named_operations(text: str, operations: Iterable[str]) -> tuple[str, ...]:
@@ -320,41 +424,47 @@ _ABBREVIATIONS = frozenset(
 )
 
 
-def _slot_mismatches(
+def _slot_findings(
     slot: ICASlot,
     hazard_operations: Mapping[str, tuple[str, ...]],
     owners: Mapping[str, tuple[tuple[str, str], ...]],
     reach: _Reach,
-) -> list[SlotHazardMismatch]:
+) -> Iterator[SlotHazardMismatch | UninvokedHazardOperation]:
     # A coordination-link slot has no responsibility; it acts only through
     # the controllers it connects.
     if slot.responsibility is None:
-        return []
+        return
     resp_id = str(slot.responsibility)
     action = reach.action(resp_id, slot.control_action)
     if action is None or not _acts_directly(action):
-        return []
-    mismatches: list[SlotHazardMismatch] = []
+        return
     for ica in slot.icas:
         for hazard_id in ica.related_hazards:
             named = hazard_operations.get(hazard_id, ())
-            if not named or any(reach.reaches(resp_id, action, name) for name in named):
+            invoked = tuple(name for name in named if name in owners)
+            if not named or any(
+                reach.reaches(resp_id, action, name) for name in invoked
+            ):
                 continue
-            mismatches.append(
-                SlotHazardMismatch(
+            if invoked:
+                yield SlotHazardMismatch(
                     ica_id=ica.ica_id,
                     slot_id=slot.slot_id,
                     control_action_id=slot.control_action,
                     slot_operation=action.operation,
                     hazard_id=hazard_id,
                     hazard_operations=named,
-                    owning_slot_ids=_owning_slot_ids(slot, named, owners),
-                    unowned_operations=tuple(
-                        name for name in named if name not in owners
-                    ),
+                    owning_slot_ids=_owning_slot_ids(slot, invoked, owners),
                 )
-            )
-    return mismatches
+            uninvoked = tuple(name for name in named if name not in owners)
+            if uninvoked:
+                yield UninvokedHazardOperation(
+                    ica_id=ica.ica_id,
+                    slot_id=slot.slot_id,
+                    control_action_id=slot.control_action,
+                    hazard_id=hazard_id,
+                    operations=uninvoked,
+                )
 
 
 def _owning_slot_ids(
@@ -382,6 +492,20 @@ def slot_hazard_diagnostics(
             refs=(mismatch.ica_id,),
         )
         for mismatch in mismatches
+    )
+
+
+def uninvoked_operation_diagnostics(
+    findings: Sequence[UninvokedHazardOperation],
+) -> tuple[ConsiderationDiagnostic, ...]:
+    """Record each uncovered operation finding as a warning that names its ICA."""
+    return tuple(
+        ConsiderationDiagnostic(
+            code=UNINVOKED_HAZARD_OPERATION_CODE,
+            detail=finding.reason,
+            refs=(finding.ica_id,),
+        )
+        for finding in findings
     )
 
 
@@ -423,9 +547,14 @@ def flag_slot_hazard_mismatches(
 
 __all__ = [
     "SLOT_HAZARD_MISMATCH_CODE",
+    "UNINVOKED_HAZARD_OPERATION_CODE",
     "SlotHazardMismatch",
+    "UninvokedHazardOperation",
+    "declared_operation_effects",
     "declared_operation_names",
     "find_slot_hazard_mismatches",
+    "find_uninvoked_hazard_operations",
     "flag_slot_hazard_mismatches",
     "slot_hazard_diagnostics",
+    "uninvoked_operation_diagnostics",
 ]

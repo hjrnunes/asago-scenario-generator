@@ -321,12 +321,27 @@ act through other actions, so a hazard about another action's operation is
 their expected causal path. The action reaches an operation it invokes, and
 one whose action shares an output with it: either action reads a
 process-model part that an `operation_result` or `retrieved_content` feedback
-channel updates from the controlled process the other targets. An ICA that fails the check keeps its slot and is flagged with
-`ica_hazard_operation_outside_slot`, in its `quality_warnings` and in the
-verification batch diagnostics, naming the slot or slots whose action owns the
-operation, or saying that no slot owns it when no control action invokes it.
-It is not moved: its text describes its own action, and the owner is often
-not unique.
+channel updates from the controlled process the other targets. Relaying an
+output does not reach an operation that changes target state: a reply that
+reports an update's outcome does not make the update. An operation changes
+state when the execution target profile's interpretation gives it the likely
+effect `create`, `update` or `delete`; without a profile or an interpretation
+every operation can be relayed, as before. An ICA that fails the check keeps
+its slot and is flagged with `ica_hazard_operation_outside_slot`, in its
+`quality_warnings` and in the verification batch diagnostics, naming the slot
+or slots whose action owns the operation. It is not moved: its text describes
+its own action, and the owner is often not unique.
+
+A named operation that no control action invokes has no owning slot, so the
+slot check leaves it out. Where the slot check would otherwise have flagged
+the hazard, a separate coverage diagnostic, `ica_hazard_operation_uninvoked`,
+records it in the verification batch diagnostics only: the gap is in the
+control structure's coverage of the target, not in the ICA's tie. A hazard
+naming both such an operation and another action's operation gets both. The
+manifest counts each code beside the batch, under
+`provider_evidence.<stage>.ica_hazard_check_counts` (a zero count is left
+out, and so is the block when both are zero), and the report lists
+each in its own section (`slot-hazard-ties`, `uninvoked-operations`).
 
 Scenario generation receives one immutable `ScenarioGenerationContext` per
 ICA. It contains only the selected loss, hazard, governing constraint, unsafe

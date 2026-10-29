@@ -446,7 +446,8 @@ def test_a_mixed_batch_keeps_every_excluded_icas_reason(adapter) -> None:
     assert batch.unsupported_count == 1 and batch.provider_failure_count == 1
 
 
-def test_the_slot_hazard_flag_survives_a_missing_verifier() -> None:
+def test_the_slot_hazard_coverage_finding_survives_a_missing_verifier() -> None:
+    # No control action invokes `deploy_now`, so the finding is coverage.
     enumeration, loss_analysis, control_structure = _single_ica_inputs()
     loss_analysis = loss_analysis.model_copy(
         update={
@@ -467,7 +468,7 @@ def test_the_slot_hazard_flag_survives_a_missing_verifier() -> None:
     )
 
     assert any(
-        item.code == "ica_hazard_operation_outside_slot"
+        item.code == "ica_hazard_operation_uninvoked"
         and item.refs == (enumeration.slots[0].icas[0].ica_id,)
         for item in batch.diagnostics
     )

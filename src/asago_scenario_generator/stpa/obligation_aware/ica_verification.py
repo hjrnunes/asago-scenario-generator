@@ -47,8 +47,10 @@ from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.calls import call_evidence
 from asago_scenario_generator.stpa.obligation_aware.slot_hazard_ownership import (
     find_slot_hazard_mismatches,
+    find_uninvoked_hazard_operations,
     flag_slot_hazard_mismatches,
     slot_hazard_diagnostics,
+    uninvoked_operation_diagnostics,
 )
 from asago_scenario_generator.stpa.obligation_aware.stpa_index import (
     StpaIndex,
@@ -1473,6 +1475,7 @@ def verify_final_ica_batch(
     control_structure: ControlStructure,
     batch_id: str = "ica-hazard-verification",
     operation_inventory: Collection[str] = (),
+    operation_effects: Mapping[str, Any] | None = None,
 ) -> tuple[ICAEnumeration, IcaHazardVerificationBatch]:
     """Verify final ICAs and keep only those with a supported verdict.
 
@@ -1484,14 +1487,21 @@ def verify_final_ica_batch(
     A correction failure cannot rehabilitate a previously rejected finding.
     Each final ICA whose hazard depends on another action's operation is
     flagged, on the ICA and in the batch diagnostics, and kept in its slot;
-    *operation_inventory* names the target's declared operations for it.
+    *operation_inventory* names the target's declared operations for it and
+    *operation_effects* their interpreted likely effects.  A hazard operation
+    no control action invokes is recorded in the batch diagnostics under the
+    coverage code instead.
     """
     requests, incomplete_ica_ids, diagnostics = _build_verification_requests(
         enumeration, loss_analysis, control_structure
     )
     if not requests:
         enumeration, flags = _flag_slot_hazards(
-            enumeration, loss_analysis, control_structure, operation_inventory
+            enumeration,
+            loss_analysis,
+            control_structure,
+            operation_inventory,
+            operation_effects,
         )
         batch = IcaHazardVerificationBatch(
             batch_id=batch_id,
@@ -1502,7 +1512,11 @@ def verify_final_ica_batch(
     method = _verification_method(adapter)
     if method is None:
         enumeration, flags = _flag_slot_hazards(
-            enumeration, loss_analysis, control_structure, operation_inventory
+            enumeration,
+            loss_analysis,
+            control_structure,
+            operation_inventory,
+            operation_effects,
         )
         batch = _failed_batch(
             batch_id,
@@ -1541,6 +1555,7 @@ def verify_final_ica_batch(
         loss_analysis,
         control_structure,
         operation_inventory,
+        operation_effects,
     )
     batch = IcaHazardVerificationBatch(
         batch_id=batch_id,
@@ -1557,20 +1572,32 @@ def _flag_slot_hazards(
     loss_analysis: LossAnalysis,
     control_structure: ControlStructure,
     operation_inventory: Collection[str] = (),
+    operation_effects: Mapping[str, Any] | None = None,
 ) -> tuple[ICAEnumeration, tuple[ConsiderationDiagnostic, ...]]:
-    """Flag every ICA whose hazard depends on another action's operation."""
+    """Flag every ICA whose hazard depends on another action's operation.
+
+    A hazard operation no control action invokes is a coverage diagnostic of
+    the batch, not a flag on the ICA.
+    """
     # Without both artifacts no request was built, and there is nothing to check.
     if loss_analysis is None or control_structure is None:
         return enumeration, ()
+    arguments = {
+        "operation_inventory": operation_inventory,
+        "operation_effects": operation_effects,
+    }
     mismatches = find_slot_hazard_mismatches(
-        enumeration,
-        loss_analysis,
-        control_structure,
-        operation_inventory=operation_inventory,
+        enumeration, loss_analysis, control_structure, **arguments
+    )
+    uninvoked = find_uninvoked_hazard_operations(
+        enumeration, loss_analysis, control_structure, **arguments
     )
     return (
         flag_slot_hazard_mismatches(enumeration, mismatches),
-        slot_hazard_diagnostics(mismatches),
+        (
+            *slot_hazard_diagnostics(mismatches),
+            *uninvoked_operation_diagnostics(uninvoked),
+        ),
     )
 
 
