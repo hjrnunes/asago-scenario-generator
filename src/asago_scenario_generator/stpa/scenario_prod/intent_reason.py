@@ -32,7 +32,11 @@ An ICA is routed only when all of these hold:
 
    - ``reason_variable``: that variable's description names an intent and
      no classifier output ("the classified intent produced by the
-     classifier" is the action's output, not the user's intent); its value,
+     classifier" is the action's output, not the user's intent) and is
+     about request and intent alignment alone: a description that also
+     names an amount, value or numeric range, a limit or bound, a currency,
+     eligibility, a status or lifecycle, timing, ownership, the session,
+     the actor or identity keeps the ICA on Stage 5; its value,
      as a whole, is one of ``_INTENT_ONLY_VALUE_FORMS``, a sole failed or
      unknown intent ("does not match authorized intent", "not aligned with
      authorized intent", "intent unknown", "unauthorized transaction"), so
@@ -130,6 +134,78 @@ _FRAME_TERMS = frozenset(
 _INTENT_PRINCIPALS = frozenset({"customer", "user", "guest", "host", "requester"})
 _PRINCIPAL_LINKS = frozenset(
     {"s", "authorized", "authorised", "actual", "expressed", "stated", "original"}
+)
+# The grounds a variable's description may name beside the intent: an
+# amount, value or range, a currency, a session, actor or identity, a status
+# or lifecycle, eligibility, and timing. A description naming one is not
+# about request and intent alignment alone.
+_DESCRIPTION_GROUND_TERMS = frozenset(
+    {
+        # amount, value, bound or range
+        "amount",
+        "amounts",
+        "value",
+        "values",
+        "price",
+        "prices",
+        "total",
+        "totals",
+        "quantity",
+        "quantities",
+        "balance",
+        "balances",
+        "fee",
+        "fees",
+        "cost",
+        "costs",
+        "sum",
+        "range",
+        "ranges",
+        "within",
+        "bound",
+        "bounds",
+        "bounded",
+        "least",
+        "most",
+        # currency
+        "currency",
+        "currencies",
+        # session, actor or identity
+        "session",
+        "sessions",
+        "authenticated",
+        "authentication",
+        "actor",
+        "actors",
+        "identity",
+        "identities",
+        # status or lifecycle
+        "status",
+        "statuses",
+        "state",
+        "states",
+        "lifecycle",
+        "stage",
+        "phase",
+        # eligibility
+        "eligibility",
+        "eligible",
+        "ineligible",
+        # timing or order
+        "time",
+        "timing",
+        "before",
+        "after",
+        "prior",
+        "date",
+        "dates",
+        "deadline",
+        "expiry",
+        "expiration",
+        "schedule",
+        "scheduled",
+        "sequence",
+    }
 )
 _TARGET_EVIDENCE_PREFIXES = ("state:", "session:", "argument:", "operation:")
 # The intent-only reason forms, over the reason's words joined by spaces
@@ -337,18 +413,37 @@ def _is_failed_user_intent(
 ) -> bool:
     """Return whether the reason states only a failed value of a user-intent variable.
 
-    The description names an intent and no classifier output, the whole
-    value is a sole failed or unknown intent, and the reason adds only words
-    naming the request.
+    The description names an intent, no classifier output and no other
+    ground (``_describes_another_ground``), the whole value is a sole failed
+    or unknown intent, and the reason adds only words naming the request.
     """
-    described = frozenset(reason_terms(variable.description or ""))
+    description = reason_terms(variable.description or "")
+    described = frozenset(description)
     if not described & _INTENT_NOUNS or described & _CLASSIFIER_TERMS:
+        return False
+    if _describes_another_ground(description):
         return False
     value = reason_terms(variable.value)
     if not _matches_any(value, _INTENT_ONLY_VALUE_FORMS):
         return False
     frame = _without_run(words, value)
     return frame is not None and frozenset(frame) <= _FRAME_TERMS
+
+
+def _describes_another_ground(description: Sequence[str]) -> bool:
+    """Return whether a variable's description states a ground beside the intent.
+
+    It runs the reason's ground guard (ownership, a failed session or
+    principal authorization or comparison, a limit, an eligibility or a
+    lifecycle term) and also refuses the grounds a description names without
+    stating a failure: ``_DESCRIPTION_GROUND_TERMS`` and any number, as in
+    "between 0 and 100".
+    """
+    return (
+        _states_another_ground(description)
+        or bool(frozenset(description) & _DESCRIPTION_GROUND_TERMS)
+        or any(any(char.isdigit() for char in word) for word in description)
+    )
 
 
 def _without_run(words: Sequence[str], run: Sequence[str]) -> tuple[str, ...] | None:

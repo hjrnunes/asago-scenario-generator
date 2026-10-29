@@ -80,13 +80,13 @@ INTENT_UNKNOWN = _var(
     "PM-1-1",
     "intent unknown",
     description="The alignment between the user's expressed intent and the "
-    "authenticated session's authorized transaction scope.",
+    "requested transaction.",
 )
 UNAUTHORIZED_TRANSACTION = _var(
     "PM-1-1",
     "unauthorized transaction",
     description="The alignment between the user's expressed intent and the "
-    "authenticated session's authorized transaction scope.",
+    "requested transaction.",
 )
 ELIGIBLE = _var(
     "PM-1-2",
@@ -931,6 +931,8 @@ _VALUE_FORMS = (
         "Whether the user's intent is confirmed before the refund is issued.",
         "The date by which the user's intent must be confirmed.",
         # ownership, session, actor, identity
+        "The alignment between the user's expressed intent and the "
+        "authenticated session's authorized transaction scope.",
         "Whether the user's intent matches the owner of the order.",
         "Whether the requested operation matches the intent of the authenticated "
         "session.",

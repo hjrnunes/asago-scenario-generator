@@ -1117,7 +1117,12 @@ hold:
     `operation:`);
   - have a description that names an intent but no classifier output ("the
     classified intent produced by the classifier" is the action's output,
-    not the user's intent);
+    not the user's intent) and is about request and intent alignment alone.
+    A description that also names an amount, value or numeric range, a
+    limit or bound, a currency, eligibility, a status or lifecycle, timing,
+    ownership, the session, the actor or identity keeps the ICA on Stage 5
+    ("whether the payment amount specified by the user's intent is between 0
+    and 100");
   - have a value that is, as a whole, a sole failed or unknown intent ("does
     not match authorized intent", "not aligned with authorized intent",
     "intent unknown", "unauthorized transaction"). A value that adds another
