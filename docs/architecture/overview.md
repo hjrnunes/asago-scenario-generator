@@ -280,6 +280,21 @@ own reason beside such a slot.
 ICA prose length and repetition are presentation diagnostics only:
 semantically valid findings remain available with `ica_prose_quality_warning`.
 
+Every slot is offered every hazard, so an ICA can cite a hazard about an
+operation that another control action invokes. Final-ICA verification checks
+this without a model call: a cited hazard whose description names an
+operation must name the operation of the slot's own action. An operation is a
+name in the execution target profile's operations (the inventory Stage 5
+checks conditions against) or the `operation` of some control action. An
+identifier-like name (with `_`, a digit, or camelCase) is named wherever it
+appears as a whole identifier; a plain word such as `update` only when quoted
+or backticked, so ordinary prose does not name it. An ICA that fails the check keeps its slot and is flagged with
+`ica_hazard_operation_outside_slot`, in its `quality_warnings` and in the
+verification batch diagnostics, naming the slot or slots whose action owns the
+operation, or saying that no slot owns it when no control action invokes it.
+It is not moved: its text describes its own action, and the owner is often
+not unique.
+
 Scenario generation receives one immutable `ScenarioGenerationContext` per
 ICA. It contains only the selected loss, hazard, governing constraint, unsafe
 action, obligation concern, and causal evidence. Stage 5 must retain the
@@ -754,7 +769,11 @@ as an explicit exclusion while sibling ICAs proceed. A technical correction/rech
 failure retains its provider-failure disposition and original semantic attempt,
 but cannot admit the rejected ICA. Unverified replacement prose is never
 applied to the enumeration; only independently supported corrections are applied.
-An initial provider outage with no semantic verdict remains distinguishable.
+An initial provider outage with no semantic verdict remains distinguishable:
+the ICA is unverified, its record keeps the `provider_failure` disposition and
+the error, and it does not reach Stage 5, because only a supported verdict
+admits an ICA. A slot left with no ICA this way is unresolved and says it
+could not be verified. No verification request is repeated for it.
 Taxonomy concepts and mapping evidence do not enter this verifier. Mapping strength is instead
 derived deterministically from the complete pinned relation path.
 

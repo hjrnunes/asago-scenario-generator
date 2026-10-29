@@ -330,8 +330,161 @@ def test_verification_batches_are_isolated_by_responsibility() -> None:
     assert batch.provider_failure_count == 2
     assert batch.supported_count == 1
     assert len(filtered.slots) == 2
-    assert len(filtered.slots[0].icas) == 2
+    assert filtered.slots[0].icas == []
+    assert "could be verified" in filtered.slots[0].unresolved_reason
     assert len(filtered.slots[1].icas) == 1
+
+
+class _FailingFirstReview:
+    """A verifier whose first review of every ICA fails without a verdict."""
+
+    def verify_ica_hazards(self, requests, **_):
+        raise RuntimeError("verifier unavailable")
+
+
+def test_an_ica_whose_review_failed_without_a_verdict_is_unverified() -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+
+    filtered, batch = verify_final_ica_batch(
+        _FailingFirstReview(),
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    [record] = batch.records
+    assert record.disposition == "provider_failure"
+    assert record.final_verdict is None
+    assert "RuntimeError: verifier unavailable" in record.attempts[0].error
+    assert batch.supported_count == 0 and batch.provider_failure_count == 1
+    assert filtered.slots[0].icas == []
+    assert not filtered.slots[0].is_na
+    assert "could be verified" in filtered.slots[0].unresolved_reason
+
+
+def test_an_unverified_ica_leaves_its_supported_sibling_in_the_slot() -> None:
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    first, second = (ica.ica_id for ica in enumeration.slots[0].icas)
+
+    class FailsForTheSecond:
+        def verify_ica_hazards(self, requests, **_):
+            return [
+                {
+                    "ica_id": request.ica_id,
+                    "verdict": "supported",
+                    "rationale": "The supplied STPA path is coherent.",
+                }
+                for request in requests
+                if request.ica_id == first
+            ]
+
+    filtered, batch = verify_final_ica_batch(
+        FailsForTheSecond(),
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    dispositions = {record.ica_id: record.disposition for record in batch.records}
+    assert dispositions[first] == "supported"
+    assert dispositions[second] != "supported"
+    assert [ica.ica_id for ica in filtered.slots[0].icas] == [first]
+
+
+def test_no_verifier_leaves_every_ica_unverified() -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+
+    filtered, batch = verify_final_ica_batch(
+        None,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    assert batch.records[0].disposition == "provider_failure"
+    assert filtered.slots[0].icas == []
+    assert "could be verified" in filtered.slots[0].unresolved_reason
+
+
+def _mixed_inputs() -> tuple[ICAEnumeration, LossAnalysis, ControlStructure]:
+    """Two ICAs in one slot; the second cites a hazard the analysis lacks."""
+    enumeration, loss_analysis, control_structure = _stpa_inputs()
+    slot = enumeration.slots[0]
+    valid, other = slot.icas
+    incomplete = other.model_copy(update={"related_hazards": ["H-missing"]})
+    return (
+        ICAEnumeration(slots=[slot.model_copy(update={"icas": [valid, incomplete]})]),
+        loss_analysis,
+        control_structure,
+    )
+
+
+@pytest.mark.parametrize(
+    "adapter",
+    [None, _FailingFirstReview()],
+    ids=["no-verifier", "failing-verifier"],
+)
+def test_a_mixed_batch_keeps_every_excluded_icas_reason(adapter) -> None:
+    enumeration, loss_analysis, control_structure = _mixed_inputs()
+    valid, incomplete = (ica.ica_id for ica in enumeration.slots[0].icas)
+
+    filtered, batch = verify_final_ica_batch(
+        adapter,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    assert filtered.slots[0].icas == []
+    assert "could be verified" not in filtered.slots[0].unresolved_reason
+    [record] = batch.records
+    assert record.ica_id == valid and record.disposition == "provider_failure"
+    assert batch.incomplete_ica_ids == (incomplete,)
+    reasons = {(item.code, ref) for item in batch.diagnostics for ref in item.refs}
+    assert ("ica_hazard_verification_provider_failure", valid) in reasons
+    assert ("unsafe_outcome_lineage_incomplete", incomplete) in reasons
+    assert batch.unsupported_count == 1 and batch.provider_failure_count == 1
+
+
+def test_the_slot_hazard_flag_survives_a_missing_verifier() -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+    loss_analysis = loss_analysis.model_copy(
+        update={
+            "hazards": [
+                loss_analysis.hazards[0].model_copy(
+                    update={"description": "An unsafe release reaches `deploy_now`."}
+                )
+            ]
+        }
+    )
+
+    _, batch = verify_final_ica_batch(
+        None,
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+        operation_inventory=("deploy_now",),
+    )
+
+    assert any(
+        item.code == "ica_hazard_operation_outside_slot"
+        and item.refs == (enumeration.slots[0].icas[0].ica_id,)
+        for item in batch.diagnostics
+    )
+
+
+def test_a_rejected_then_failed_ica_keeps_the_rejection_reason() -> None:
+    enumeration, loss_analysis, control_structure = _single_ica_inputs()
+
+    filtered, batch = verify_final_ica_batch(
+        _SecondVerificationFailureFake(omit_verdict=False),
+        enumeration,
+        loss_analysis=loss_analysis,
+        control_structure=control_structure,
+    )
+
+    assert batch.records[0].disposition == "provider_failure"
+    assert "failed independent semantic" in filtered.slots[0].unresolved_reason
 
 
 class _CorrectionFake:

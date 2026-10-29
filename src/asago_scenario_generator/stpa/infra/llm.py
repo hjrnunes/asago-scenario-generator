@@ -345,22 +345,73 @@ def _raise_if_length_without_content(response: Any) -> None:
         raise LengthFinishReasonError(completion=response)
 
 
+_MIN_REDACTED_KEY_LENGTH = 8
+"""Shortest configured key that is redacted by its value.
+
+Shorter values are skipped because placeholders for an endpoint that needs
+no key (``EMPTY`` or ``none``, say) are that short, and replacing them would
+corrupt ordinary words in the error text.  A genuine key that short is not
+redacted by value; the labelled patterns the call log and the provider-call
+record apply to error text (``api_key=...``, ``Bearer ...``, ``sk-...``)
+still catch it when it is echoed in one of those forms.
+"""
+
+_REDACTED_KEY = "[redacted-key]"
+
+
 def _drop_api_key(error: BaseException, api_key: str) -> None:
     """Replace the client's API key in a provider error's text, in place.
 
     A provider can echo the key it was sent with no label or key-like prefix,
     so the key is found by its value, whatever that value is, before any
-    record or log turns the error into text.
+    record or log turns the error into text.  The errors it was chained from
+    (``__cause__`` and ``__context__``) are scrubbed too, each once.
+
+    This runs while the provider error propagates, and retry decisions read
+    that error's type, so it never raises: an attribute that cannot be read
+    or set (a read-only ``args`` or ``message``, a raising ``__cause__``)
+    keeps its text, and a chain link that cannot be read is not followed.
     """
-    if not api_key:
+    if not api_key or len(api_key) < _MIN_REDACTED_KEY_LENGTH:
         return
-    error.args = tuple(
-        arg.replace(api_key, "[redacted-key]") if isinstance(arg, str) else arg
-        for arg in error.args
-    )
-    message = getattr(error, "message", None)
-    if isinstance(message, str):
-        error.message = message.replace(api_key, "[redacted-key]")  # type: ignore[attr-defined]
+    seen: set[int] = set()
+    pending: list[BaseException] = [error]
+    while pending:
+        current = pending.pop()
+        if id(current) in seen:
+            continue
+        seen.add(id(current))
+        _drop_api_key_from(current, api_key)
+        for name in ("__cause__", "__context__"):
+            chained = _chained_error(current, name)
+            if chained is not None:
+                pending.append(chained)
+
+
+def _chained_error(error: BaseException, name: str) -> BaseException | None:
+    """Return the error *error* was chained from, or ``None`` if unreadable."""
+    try:
+        chained = getattr(error, name, None)
+    except Exception:  # noqa: BLE001 - keep the provider error propagating
+        return None
+    return chained if isinstance(chained, BaseException) else None
+
+
+def _drop_api_key_from(error: BaseException, api_key: str) -> None:
+    """Redact one error's ``args`` and ``message``; skip what cannot be set."""
+    try:
+        error.args = tuple(
+            arg.replace(api_key, _REDACTED_KEY) if isinstance(arg, str) else arg
+            for arg in error.args
+        )
+    except Exception:  # noqa: BLE001 - keep the provider error propagating
+        pass
+    try:
+        message = getattr(error, "message", None)
+        if isinstance(message, str) and api_key in message:
+            error.message = message.replace(api_key, _REDACTED_KEY)  # type: ignore[attr-defined]
+    except Exception:  # noqa: BLE001 - keep the provider error propagating
+        pass
 
 
 def _locally_parse_response_content(
