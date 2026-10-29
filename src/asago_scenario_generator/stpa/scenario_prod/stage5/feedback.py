@@ -185,6 +185,13 @@ def _repair_guidance(supplied_records: str) -> dict[IssueCode, str]:
             "observation criterion; with no observable criterion, set "
             "observable=false with no claim or references."
         ),
+        IssueCode.safe_outcome_call_argument_not_supplied: (
+            "safe_observable_outcome.call_arguments names only parameters of "
+            "its operation_name, each with a value the request supplies, "
+            "typed as the input schema declares it; remove an argument whose "
+            "value is not supplied, and set call_arguments to null when the "
+            "safe behavior is that the call is not made."
+        ),
         IssueCode.intention_handle_undeclared: (
             "every attacker_bdi intention cites at least one source_handle that "
             "has a declared causal_factors entry; declare the factor or cite a "

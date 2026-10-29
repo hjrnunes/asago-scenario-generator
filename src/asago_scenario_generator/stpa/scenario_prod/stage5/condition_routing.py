@@ -72,11 +72,13 @@ _ANALYTICAL_SAFE_OUTCOME = {
     "operation_name": None,
     "record_refs": (),
     "fact_refs": (),
+    "call_arguments": None,
 }
 _REPLY_SAFE_OUTCOME = {
     "claim_level": "reply",
     "evidence": "assistant_message",
     "operation_name": None,
+    "call_arguments": None,
 }
 
 

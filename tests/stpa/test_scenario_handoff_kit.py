@@ -45,6 +45,7 @@ VALID = {
     "functional-null-shape.json",
     "functional-record-unavailable.json",
     "functional-stated-belief.json",
+    "safe-call-arguments.json",
     "taxonomy-block.json",
 }
 
@@ -53,6 +54,7 @@ PATH = "schema_violation:attack_path"
 ROOT_CODE = "schema_violation:<root>"
 TAXONOMY = "schema_violation:taxonomy"
 FAILURE_CALL = "schema_violation:semantic_failure_call"
+SAFE_OUTCOME = "schema_violation:safe_observable_outcome"
 
 # fixture -> (typed codes, rule named by the model error or None, schema rejects)
 INVALID: dict[str, tuple[list[str], str | None, bool]] = {
@@ -143,6 +145,8 @@ INVALID: dict[str, tuple[list[str], str | None, bool]] = {
     "taxonomy-unsorted-references.json": ([TAXONOMY], "sorted", False),
     "failure-call-kind-not-enumerated.json": ([FAILURE_CALL], None, True),
     "failure-call-blank-operation.json": ([FAILURE_CALL], "blank", False),
+    "safe-call-argument-value-not-scalar.json": ([SAFE_OUTCOME], None, True),
+    "safe-call-argument-blank-name.json": ([SAFE_OUTCOME], "blank", False),
 }
 
 
@@ -164,7 +168,7 @@ def test_the_kit_holds_exactly_the_listed_fixtures() -> None:
         if not path.name.startswith(("schema-", "v5-"))
     }
     assert listed == set(INVALID)
-    assert len(INVALID) == 46
+    assert len(INVALID) == 48
 
 
 @pytest.mark.parametrize("name", sorted(VALID))
@@ -207,6 +211,20 @@ def test_only_the_failure_call_fixture_carries_a_failure_call() -> None:
         "kind": "incorrect_call",
         "operation_name": "update_item",
     }
+
+
+def test_only_the_safe_call_fixture_carries_call_arguments() -> None:
+    carrying = {
+        name
+        for name in VALID
+        if "call_arguments"
+        in (_load(f"valid/{name}").get("safe_observable_outcome") or {})
+    }
+
+    assert carrying == {"safe-call-arguments.json"}
+    assert _load("valid/safe-call-arguments.json")["safe_observable_outcome"][
+        "call_arguments"
+    ] == [{"argument": "item_id", "value": "ITEM-2"}]
 
 
 def test_only_the_taxonomy_fixture_carries_the_optional_block() -> None:

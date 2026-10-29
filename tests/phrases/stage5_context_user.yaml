@@ -145,6 +145,12 @@ cases:
         operation, for example a reply, set `failure_call` to `null`; never
         omit the key.
       - '`{"kind":"incorrect_call","operation_name":"documented_operation"}`'
+      - >-
+        Set the safe outcome's `call_arguments` only when the safe behavior is
+        that the agent makes its `operation_name` call
+      - >-
+        Otherwise set it to `null`, for example when the safe behavior is that
+        the call is not made.
       - Also return `discriminating_condition` under `unsafe_outcome`
       - '{"source":"argument","operation":<name>,"argument":<name>}'
       - '{"source":"fact","path":<path>}'
@@ -335,4 +341,5 @@ cases:
       - *call-precondition
       - *call-boundary
       - failure_call
+      - "safe outcome's `call_arguments`"
       - "`not_called` on a lookup"

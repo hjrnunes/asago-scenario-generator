@@ -59,6 +59,7 @@ class IssueCode(StrEnum):
     safe_outcome_fact_ref_not_supplied = "safe_outcome_fact_ref_not_supplied"
     safe_outcome_observability_mismatch = "safe_outcome_observability_mismatch"
     safe_outcome_claim_missing = "safe_outcome_claim_missing"
+    safe_outcome_call_argument_not_supplied = "safe_outcome_call_argument_not_supplied"
     intention_handle_undeclared = "intention_handle_undeclared"
     attacker_intentions_missing = "attacker_intentions_missing"
     no_content_surface = "no_content_surface"
