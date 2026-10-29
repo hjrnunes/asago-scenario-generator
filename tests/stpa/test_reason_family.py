@@ -342,6 +342,17 @@ def test_a_failed_comparison_with_the_principal_is_ownership(reason) -> None:
     assert (choice.kind, choice.rule) == ("ownership", "ownership_reason")
 
 
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "another user confirmation is required",
+        "the request lacks another customer approval",
+    ],
+)
+def test_a_principals_consent_is_not_a_compared_record(reason) -> None:
+    assert _choose(reason).kind is None
+
+
 def test_a_failed_comparison_with_the_principals_intent_is_not_ownership() -> None:
     for reason in (
         "the request does not match the customer's authorized intent",
@@ -496,6 +507,20 @@ def test_a_negated_ownership_value_does_not_guard(value) -> None:
             ("session:x", "state:widgets.owner_id"),
         ),
         ("requester is a member", ("state:widgets.owner_id",)),
+        # A non-current word that qualifies the record or the sentence, not
+        # the ownership relation, leaves the affirmation current.
+        (
+            "the requested record belongs to the session customer",
+            ("session:x", "state:widgets.owner_id"),
+        ),
+        (
+            "the record belongs to the session customer as expected",
+            ("session:x", "state:widgets.owner_id"),
+        ),
+        (
+            "the pending order is owned by the authenticated customer",
+            ("session:x", "state:widgets.owner_id"),
+        ),
     ],
 )
 def test_an_affirmative_ownership_value_guards(value, refs) -> None:
@@ -513,8 +538,11 @@ def test_an_affirmative_ownership_value_guards(value, refs) -> None:
         "actor is a stranger",
         "actor is the former owner",
         "owner verification pending",
+        "pending owner verification",
         "requester is the previous guest",
         "actor is a prospective member",
+        "actor is the guest, pending",
+        "belongs to the session customer, ownership pending",
     ],
 )
 def test_a_relationship_description_without_an_affirming_value_does_not_guard(
