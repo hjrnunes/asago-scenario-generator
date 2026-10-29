@@ -771,28 +771,54 @@ def test_bound_findings_are_split_by_what_the_operation_returns(tmp_path: Path):
     assert runs[0]["target_profile"] == str(profile)
 
 
-def test_a_finding_is_result_carrying_when_any_operation_it_names_is():
-    module = _script()
-    actions = [
-        {"effect_kind": "tool_call", "operation": "a", "result_kind": kind}
-        for kind in ("acknowledgement_only", "result_carrying")
-    ]
+def _bound(kind: str) -> dict[str, Any]:
+    return {"effect_kind": "tool_call", "operation": "op", "result_kind": kind}
 
-    assert module._finding_result_kind(actions) == "result_carrying"
-    assert module._finding_result_kind(actions[:1]) == "acknowledgement_only"
-    assert (
-        module._finding_result_kind(
+
+@pytest.mark.parametrize(
+    ("actions", "kind"),
+    [
+        (
+            [_bound("result_carrying"), _bound("acknowledgement_only")],
+            "result_carrying",
+        ),
+        ([_bound("unclassified"), _bound("result_carrying")], "result_carrying"),
+        ([_bound("no_declared_output"), _bound("result_carrying")], "result_carrying"),
+        ([_bound("acknowledgement_only"), _bound("unclassified")], "unclassified"),
+        ([_bound("no_declared_output"), _bound("unclassified")], "unclassified"),
+        (
+            [_bound("no_declared_output"), _bound("acknowledgement_only")],
+            "acknowledgement_only",
+        ),
+        ([_bound("acknowledgement_only")], "acknowledgement_only"),
+        ([_bound("no_declared_output")], "no_declared_output"),
+        # Only tool calls bound to an operation decide the kind: a reply that
+        # names an operation, or a tool call bound to none, is left out.
+        (
             [
-                *actions[:1],
+                _bound("no_declared_output"),
                 {
-                    "effect_kind": "tool_call",
-                    "operation": "b",
-                    "result_kind": "unclassified",
+                    "effect_kind": "model_output",
+                    "operation": "op",
+                    "result_kind": "result_carrying",
                 },
-            ]
-        )
-        == "unclassified"
-    )
+            ],
+            "no_declared_output",
+        ),
+        (
+            [
+                _bound("acknowledgement_only"),
+                {"effect_kind": "tool_call", "operation": None, "result_kind": None},
+            ],
+            "acknowledgement_only",
+        ),
+    ],
+)
+def test_a_finding_takes_the_strongest_kind_of_its_bound_tool_calls(
+    actions: list[dict[str, Any]], kind: str
+):
+    """result_carrying, then unclassified, then acknowledgement_only."""
+    assert _script()._finding_result_kind(actions) == kind
 
 
 def test_without_a_target_profile_bound_findings_are_unclassified(tmp_path: Path):
@@ -871,3 +897,28 @@ def test_a_target_profile_argument_needs_a_label(tmp_path: Path):
                 str(tmp_path / "runs" / "run-a"),
             ]
         )
+
+
+def test_a_duplicate_target_profile_label_is_refused_before_writing(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+):
+    _run(tmp_path / "runs" / "run-a", structure=_bound_structure())
+    first = _profile_file(tmp_path / "profiles" / "first.json")
+    second = _profile_file(tmp_path / "profiles" / "second.json")
+    out = tmp_path / "out"
+
+    with pytest.raises(SystemExit):
+        _script().main(
+            [
+                "--out-dir",
+                str(out),
+                "--target-profile",
+                f"run-a={first}",
+                "--target-profile",
+                f"run-a={second}",
+                str(tmp_path / "runs" / "run-a"),
+            ]
+        )
+
+    assert "duplicate --target-profile label: run-a" in capsys.readouterr().err
+    assert not out.exists()

@@ -625,6 +625,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("run_dirs", type=Path, nargs="+")
     args = parser.parse_args(argv)
+    labels = [label for label, _ in args.target_profile]
+    duplicates = sorted({label for label in labels if labels.count(label) > 1})
+    if duplicates:
+        parser.error(f"duplicate --target-profile label: {', '.join(duplicates)}")
     counts = sweep(
         args.run_dirs,
         args.out_dir,
