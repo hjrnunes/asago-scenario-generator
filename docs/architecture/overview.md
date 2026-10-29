@@ -898,8 +898,12 @@ relative to the no-revision output (a responsibility whose child changes is
 changed too). Normalization numbers elements by position, so an inserted
 element can take an existing element's published ID; the check follows each
 element from the reply to the published structure and compares elements by
-that identity, with references rewritten the same way, so a change of ID
-alone is not a change. A claimed ID the reply wrote names the element it
+that identity, with its ID and reference fields rewritten the same way, so a
+change of ID alone is not a change. Only those fields are rewritten: the
+`ElementRef` fields the model declares, plus the text references
+(`process_model_refs`, `updates`, and a link's `source`, `target` and
+`shared_pm`); values, descriptions and other data are compared as written,
+even when they look like an ID. A claimed ID the reply wrote names the element it
 wrote under that ID, including a new link's mechanism whose colliding ID the
 merge renumbered; any other claimed ID is read as a published ID. A gap with
 no disposition, a disposition for an unknown

@@ -13,11 +13,22 @@ from __future__ import annotations
 
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Literal
+from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from asago_scenario_generator.stpa.models.control_structure import ControlStructure
+from asago_scenario_generator.stpa.models.control_structure import (
+    ControlAction,
+    ControlledProcess,
+    ControlStructure,
+    CoordinationLink,
+    CoordinationMechanism,
+    ElementRef,
+    FeedbackChannel,
+    ProcessModelPart,
+    Responsibility,
+    ResponsibilityConstraint,
+)
 
 DISPOSITION_KINDS = ("addressed", "dismissed", "recommendation")
 DispositionKind = Literal["addressed", "dismissed", "recommendation"]
@@ -282,15 +293,82 @@ def revision_identity(
     )
 
 
-def _in_reviewed_terms(value: Any, tokens: Mapping[str, str]) -> Any:
-    """Rewrite every published ID in *value* to its reviewed ID or new token."""
-    if isinstance(value, dict):
-        return {key: _in_reviewed_terms(item, tokens) for key, item in value.items()}
-    if isinstance(value, list):
-        return [_in_reviewed_terms(item, tokens) for item in value]
-    if isinstance(value, str):
-        return tokens.get(value, value)
-    return value
+# Each identified element type and the field that holds its own ID.
+_ID_FIELDS: dict[type[BaseModel], str] = {
+    Responsibility: "resp_id",
+    ResponsibilityConstraint: "rc_id",
+    ProcessModelPart: "pm_id",
+    ControlAction: "ca_id",
+    FeedbackChannel: "fb_id",
+    ControlledProcess: "cp_id",
+    CoordinationLink: "link_id",
+    CoordinationMechanism: "cm_id",
+}
+# The fields that hold another element's ID as plain text.  The model types
+# them as ``str``, so they cannot be read from it; they are the text
+# references ``id_normalization`` rewrites.
+_TEXT_REFERENCE_FIELDS: dict[type[BaseModel], tuple[str, ...]] = {
+    ControlAction: ("process_model_refs",),
+    FeedbackChannel: ("updates",),
+    CoordinationLink: ("source", "target", "shared_pm"),
+}
+
+
+def _annotation_types(annotation: Any) -> Iterator[Any]:
+    yield annotation
+    for argument in get_args(annotation):
+        yield from _annotation_types(argument)
+
+
+def element_ref_fields(model: type[BaseModel]) -> tuple[str, ...]:
+    """Return the fields of *model* the model types as an ``ElementRef``."""
+    return tuple(
+        name
+        for name, field in model.model_fields.items()
+        if ElementRef in tuple(_annotation_types(field.annotation))
+    )
+
+
+def reference_fields(model: type[BaseModel]) -> tuple[str, ...]:
+    """Return the fields of *model* that hold an element ID.
+
+    They are its own ID field, its text references, and its ``ElementRef``
+    fields, whose ``id`` is the reference.
+    """
+    return (
+        _ID_FIELDS[model],
+        *_TEXT_REFERENCE_FIELDS.get(model, ()),
+        *element_ref_fields(model),
+    )
+
+
+def _in_reviewed_terms(
+    element: BaseModel, payload: dict[str, Any], tokens: Mapping[str, str]
+) -> dict[str, Any]:
+    """Rewrite the IDs *element*'s payload holds to reviewed IDs or new tokens.
+
+    Only the reference fields are rewritten; every other field, such as a
+    variable's values or a description, is data and stays as written, even
+    when its text looks like an ID.
+    """
+    model = type(element)
+    refs = set(element_ref_fields(model))
+
+    def token(value: Any) -> Any:
+        return tokens.get(value, value) if isinstance(value, str) else value
+
+    for name in reference_fields(model):
+        if name not in payload:
+            continue
+        value = payload[name]
+        if name in refs:
+            if isinstance(value, dict):
+                payload[name] = {**value, "id": token(value.get("id"))}
+        elif isinstance(value, list):
+            payload[name] = [token(item) for item in value]
+        else:
+            payload[name] = token(value)
+    return payload
 
 
 def _token(identity: Identity) -> str:
@@ -364,7 +442,7 @@ def changed_element_ids(
     for element_id, element, nested in _flat_elements(after):
         token = tokens.get(element_id)
         payload = _in_reviewed_terms(
-            element.model_dump(mode="json", exclude=set(nested)), tokens
+            element, element.model_dump(mode="json", exclude=set(nested)), tokens
         )
         members = frozenset(
             tokens.get(member, member) for member in _members(element, nested)

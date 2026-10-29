@@ -23,6 +23,7 @@ import pytest
 from asago_scenario_generator.stpa.models.control_structure import (
     ControlAction,
     ControlStructure,
+    CoordinationLink,
     ElementRef,
     FeedbackChannel,
     ProcessModelPart,
@@ -41,8 +42,13 @@ from asago_scenario_generator.stpa.system_model.revision_dispositions import (
     RevisionIdentity,
     changed_element_ids,
     critic_gap_ids,
+    element_ref_fields,
+    reference_fields,
     review_gap_dispositions,
     unread_added_process_model_warnings,
+)
+from asago_scenario_generator.stpa.system_model.id_normalization import (
+    _TYPED_REFERENCE_FIELDS,
 )
 from asago_scenario_generator.stpa.system_model.run import _critic_revision_record
 from tests.helpers.calls_log import read_calls_jsonl
@@ -431,6 +437,99 @@ def test_an_inserted_unread_variable_is_reported_under_its_published_id(
     ) in outcome.warnings
     # The original keeps its reader under its new published ID.
     assert not [w for w in outcome.warnings if "PM-1-2 (" in w]
+
+
+def _reviewed_with_id_like_values() -> ControlStructure:
+    """The reviewed structure where PM-2-1 holds an ID-like literal value."""
+    reviewed = _reviewed()
+    reviewed.responsibilities[1].process_model_parts[0].values = ["PM-1-1", "none"]
+    return reviewed
+
+
+def _insertion_and_resp_2(resp_2: dict | None, *element_ids: str) -> dict:
+    """The insertion into RESP-1, optionally RESP-2 restated, one claim on G-1."""
+    reply = _inserted_reply(*element_ids)
+    if resp_2 is not None:
+        reply["modified_responsibilities"].append(resp_2)
+    return reply
+
+
+def test_an_untouched_id_like_value_is_not_rewritten_by_the_renumbering(
+    tmp_path,
+) -> None:
+    reply = _insertion_and_resp_2(None, "PM-2-1")
+
+    outcome, _ = _revise(reply, tmp_path, reviewed=_reviewed_with_id_like_values())
+
+    # The insertion published the new variable as PM-1-1; PM-2-1's literal
+    # value "PM-1-1" is data, not a reference, and PM-2-1 is unchanged.
+    assert outcome.structure.responsibilities[1].process_model_parts[0].values == [
+        "PM-1-1",
+        "none",
+    ]
+    assert outcome.gap_review is not None
+    assert [(gap.gap_id, gap.reason) for gap in outcome.gap_review.unresolved] == [
+        ("G-1", "claimed addressed but did not change PM-2-1")
+    ]
+
+
+def test_a_changed_id_like_value_is_a_change_after_the_renumbering(
+    tmp_path,
+) -> None:
+    reviewed = _reviewed_with_id_like_values()
+    resp_2 = reviewed.responsibilities[1].model_dump(mode="json", exclude_none=True)
+    resp_2["process_model_parts"][0]["values"] = ["PM-1-2", "none"]
+    reply = _insertion_and_resp_2(resp_2, "PM-2-1")
+
+    outcome, _ = _revise(reply, tmp_path, reviewed=reviewed)
+
+    assert outcome.structure.responsibilities[1].process_model_parts[0].values == [
+        "PM-1-2",
+        "none",
+    ]
+    assert outcome.gap_review is not None
+    assert outcome.gap_review.unresolved == ()
+
+
+def test_reference_fields_are_still_read_through_the_renumbering(tmp_path) -> None:
+    # The restated action and channel still name the original variable, which
+    # now publishes as PM-1-2; they are unchanged, and so is RESP-2's channel.
+    reply = _inserted_reply("CA-1-1", "FB-1-1", "FB-2-1", read_new_variable=False)
+
+    outcome, _ = _revise(reply, tmp_path)
+
+    resp_1 = outcome.structure.responsibilities[0]
+    assert resp_1.control_actions[0].process_model_refs == ["PM-1-2"]
+    assert resp_1.feedback_channels[0].updates == "PM-1-2"
+    assert outcome.gap_review is not None
+    assert [(gap.gap_id, gap.reason) for gap in outcome.gap_review.unresolved] == [
+        ("G-1", "claimed addressed but did not change CA-1-1, FB-1-1, FB-2-1")
+    ]
+
+
+def test_the_typed_reference_fields_come_from_the_model() -> None:
+    derived = {
+        (items, name)
+        for model, items in (
+            (ProcessModelPart, "process_model_parts"),
+            (ControlAction, "control_actions"),
+            (FeedbackChannel, "feedback_channels"),
+        )
+        for name in element_ref_fields(model)
+    }
+
+    # They are the typed references the ID normalizer rewrites.
+    assert derived == set(_TYPED_REFERENCE_FIELDS)
+    assert reference_fields(ProcessModelPart) == ("pm_id", "feedback_source")
+    assert reference_fields(ControlAction) == ("ca_id", "process_model_refs", "target")
+    assert reference_fields(FeedbackChannel) == ("fb_id", "updates", "source")
+    assert reference_fields(CoordinationLink) == (
+        "link_id",
+        "source",
+        "target",
+        "shared_pm",
+    )
+    assert reference_fields(Responsibility) == ("resp_id",)
 
 
 def _reviewed_with_two_links() -> ControlStructure:
