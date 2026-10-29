@@ -383,6 +383,10 @@ unsafe-control-action category (UCA type) `{{ selected_uca_type }}`.
      change with what the agent does, so the comparison always holds or never
      holds. Compare it with a fact of another record or with an argument of
      the unsafe call.
+   - Never compare an argument with itself: both sides read the one value
+     the call carries, so the comparison holds on every call of the
+     operation or on none. Compare it with a fact of the selected record,
+     with a supplied literal, or with another argument.
    - Some harms lie in the content of free text, such as bias, abuse, or an
      inappropriate statement in a reply or in a free-text argument. No
      comparison over supplied values separates such a call from a safe one.

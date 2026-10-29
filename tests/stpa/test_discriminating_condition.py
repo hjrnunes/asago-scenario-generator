@@ -1982,6 +1982,63 @@ def test_a_comparison_that_can_hold_is_not_a_self_comparison(
     assert _self_findings(comparison, selection) == ()
 
 
+_ORDER_ID = {
+    "source": "argument",
+    "operation": "refund_payment",
+    "argument": "order_id",
+}
+
+
+@pytest.mark.parametrize(
+    ("op", "claim"),
+    [
+        ("ne", "never holds"),
+        ("lt", "never holds"),
+        ("eq", "holds on every refund_payment call"),
+        ("ge", "holds on every refund_payment call"),
+    ],
+)
+def test_an_argument_compared_with_itself_is_flagged(op, claim) -> None:
+    findings = _self_findings(_value(_ORDER_ID, op, _ORDER_ID))
+
+    assert [item.code for item in findings] == [SELF_COMPARISON]
+    assert findings[0].detail == (
+        "comparisons[0] compares argument refund_payment.order_id with itself: "
+        f"refund_payment.order_id {op} refund_payment.order_id {claim}, whatever "
+        "value the call carries. Compare the argument with a fact of the "
+        "selected record, with a supplied literal, or with another argument"
+    )
+
+
+def test_two_arguments_of_one_call_are_not_a_self_comparison() -> None:
+    amount = {**_ORDER_ID, "argument": "amount"}
+
+    assert _self_findings(_value(_ORDER_ID, "ne", amount)) == ()
+
+
+def test_stage5_corrects_an_argument_compared_with_itself(tmp_path) -> None:
+    self_compared = _ownership_condition("ORD-2")
+    self_compared["comparisons"].append(_value(_ORDER_ID, "ne", _ORDER_ID))
+    client = MockLLMClient()
+    client.set_response_queue(
+        [_payload_with(self_compared), _payload_with(_ownership_condition("ORD-2"))]
+    )
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None, error
+    assert client.call_count == 2
+    correction = " ".join(client.calls[1].user_prompt.split())
+    assert f"{SELF_COMPARISON}:" in correction
+    assert (
+        "comparisons[1] compares argument refund_payment.order_id with itself"
+        in correction
+    )
+    assert "Never compare an argument with itself either" in correction
+    assert result is not None and result.discriminating_condition is not None
+    assert len(result.discriminating_condition.comparisons) == 1
+
+
 def _selected_self_comparison(*extra: dict) -> dict:
     """The selected order's owner compared ne with itself, then ``extra``."""
     condition = _ownership_condition("ORD-1")

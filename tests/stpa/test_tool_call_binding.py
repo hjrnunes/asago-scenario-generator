@@ -305,6 +305,20 @@ def test_order_is_copied_with_an_optional_same_argument() -> None:
             "unknown comparison kind 'sometimes'",
         ),
         (
+            handoff(
+                [
+                    value(
+                        arg("modify_booking", "check_in"),
+                        "ne",
+                        arg("modify_booking", "check_in"),
+                    )
+                ]
+            ),
+            "condition_problem",
+            "comparisons[0] compares argument modify_booking.check_in with "
+            "itself, so it holds on every call of the operation or on none",
+        ),
+        (
             handoff([value(fact("TARGET-STATE.limit"), "eq", literal(100))]),
             "state_only",
             "the condition holds only state predicates, "
@@ -476,6 +490,35 @@ def test_compare_uses_arm_one_truth_rules(
 def test_tool_call_condition_rejects_invalid_shapes(payload: dict[str, Any]) -> None:
     with pytest.raises(ValidationError):
         ToolCallCondition.model_validate(payload)
+
+
+@pytest.mark.parametrize("op", ["ne", "eq", "lt"])
+def test_tool_call_condition_rejects_an_argument_compared_with_itself(
+    op: str,
+) -> None:
+    # One argument of one call holds one value, so the comparison holds on
+    # every call of the operation or on none, whatever the call carries.
+    payload = {
+        "comparisons": [
+            value(
+                arg("modify_booking", "check_in"), op, arg("modify_booking", "check_in")
+            )
+        ]
+    }
+
+    with pytest.raises(
+        ValidationError,
+        match="compares argument modify_booking.check_in with itself",
+    ):
+        ToolCallCondition.model_validate(payload)
+
+
+def test_tool_call_condition_accepts_two_different_arguments() -> None:
+    for left, right in (
+        (arg("modify_booking", "check_in"), arg("modify_booking", "check_out")),
+        (arg("modify_booking", "check_in"), arg("get_reservation", "check_in")),
+    ):
+        ToolCallCondition.model_validate({"comparisons": [value(left, "lt", right)]})
 
 
 @pytest.mark.parametrize(

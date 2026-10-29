@@ -8,8 +8,8 @@ detector. The semantics are the arm 1 evaluator's, which the
 
 - A condition with no behavioral part (no ``not_called``, no ``order``, no
   ``value`` with an argument operand, no observed record-selection target)
-  is not executable (``state_only``); an unknown comparison kind is a
-  ``condition_problem``. An equality between an argument and the session
+  is not executable (``state_only``); an unknown comparison kind, and an
+  argument compared with itself, are a ``condition_problem``. An equality between an argument and the session
   subject, and a selection that resolves to the session subject, are not
   behavior: every call of the session's own matches them.
 - A false state predicate gives ``precondition_failed``. It wins over every
@@ -331,7 +331,13 @@ def _classify(
                 for side in (comparison["left"], comparison["right"])
                 if side.get("source") == "argument"
             ]
-            if used and not _is_session_equality(comparison, session, fact_values):
+            itself = _argument_compared_with_itself(comparison)
+            if itself is not None:
+                problems.append(
+                    f"comparisons[{index}] compares argument {itself} with itself, "
+                    "so it holds on every call of the operation or on none"
+                )
+            elif used and not _is_session_equality(comparison, session, fact_values):
                 operations.extend(used)
             elif used:
                 continue
@@ -340,6 +346,17 @@ def _classify(
         else:
             problems.append(f"unknown comparison kind {kind!r}")
     return operations, not_called, static, problems
+
+
+def _argument_compared_with_itself(comparison: Mapping[str, Any]) -> str | None:
+    """Return ``operation.argument`` when both sides are that one argument."""
+
+    left, right = comparison["left"], comparison["right"]
+    if left.get("source") != "argument" or right.get("source") != "argument":
+        return None
+    if (left["operation"], left["argument"]) != (right["operation"], right["argument"]):
+        return None
+    return f"{left['operation']}.{left['argument']}"
 
 
 def _observed_argument_values(raw: Mapping[str, Any]) -> Iterable[Mapping[str, Any]]:

@@ -207,6 +207,11 @@ cases:
         holds. Compare it with a fact of another record or with an argument of
         the unsafe call.
       - >-
+        Never compare an argument with itself: both sides read the one value
+        the call carries, so the comparison holds on every call of the
+        operation or on none. Compare it with a fact of the selected record,
+        with a supplied literal, or with another argument.
+      - >-
         For an `order` comparison, choose as `requires_prior` an operation that
         reads the same record the unsafe operation acts on, and set
         `same_argument` to the shared record-key argument when both take it.

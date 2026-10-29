@@ -108,13 +108,23 @@ class ToolCallValueComparison(_ClosedModel):
 
     @model_validator(mode="after")
     def validate_argument_side(self) -> "ToolCallValueComparison":
-        """Require at least one argument operand."""
+        """Require an argument operand that is not compared with itself.
+
+        Both sides of an argument compared with itself read one value of the
+        assigned call, so the comparison holds on every call or on none.
+        """
 
         if not any(
             isinstance(side, ToolCallArgumentOperand)
             for side in (self.left, self.right)
         ):
             raise ValueError("a value comparison needs an argument operand")
+        if self.left == self.right:
+            name = f"{self.left.operation}.{self.left.argument}"
+            raise ValueError(
+                f"a value comparison compares argument {name} with itself, so "
+                "it holds on every call of the operation or on none"
+            )
         return self
 
 

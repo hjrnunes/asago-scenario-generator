@@ -670,6 +670,10 @@ def _self_comparisons(
     flagged only under an operator that then never holds (``ne``,
     ``not_in``, ``lt``, ``gt``); ``eq``, ``in``, ``ge``, and ``le`` restate
     the observed state, as a record's flag compared with its value does.
+
+    An argument compared with itself is flagged too: an argument operand
+    reads the call assigned to its operation, so both sides read one value
+    and the comparison holds on every call of the operation or on none.
     """
 
     for index, comparison in enumerate(condition.comparisons):
@@ -708,6 +712,9 @@ def _self_comparison(
     if not isinstance(comparison, ValueComparison):
         return None
     sides = (comparison.left, comparison.right)
+    argument = _argument_self_comparison(index, comparison)
+    if argument is not None:
+        return argument
     facts = [side for side in sides if isinstance(side, FactOperand)]
     literals = [side for side in sides if isinstance(side, LiteralOperand)]
     if len(facts) == 2 and facts[0].path == facts[1].path:
@@ -735,6 +742,34 @@ def _self_comparison(
         "the agent does. Compare the fact with a fact of another record "
         "or with an argument of the unsafe tool call, such as the "
         "argument that names the record the call acts on",
+    )
+
+
+def _argument_self_comparison(
+    index: int, comparison: ValueComparison
+) -> ConditionFinding | None:
+    """Return the finding for an argument compared with itself, if it is one."""
+
+    left, right = comparison.left, comparison.right
+    if not (
+        isinstance(left, ArgumentOperand)
+        and isinstance(right, ArgumentOperand)
+        and (left.operation, left.argument) == (right.operation, right.argument)
+    ):
+        return None
+    name = f"{left.operation}.{left.argument}"
+    if comparison.op in ("eq", "ge", "le"):
+        claim = f"holds on every {left.operation} call"
+    elif comparison.op in ("ne", "lt", "gt"):
+        claim = "never holds"
+    else:
+        claim = f"holds on every {left.operation} call or on none"
+    return ConditionFinding(
+        SELF_COMPARISON,
+        f"comparisons[{index}] compares argument {name} with itself: {name} "
+        f"{comparison.op} {name} {claim}, whatever value the call carries. "
+        "Compare the argument with a fact of the selected record, with a "
+        "supplied literal, or with another argument",
     )
 
 
