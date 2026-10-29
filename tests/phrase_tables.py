@@ -778,30 +778,84 @@ def _conflict_review_script():
     return sys.modules[name]
 
 
-def _conflict_review(*, requests: bool) -> Callable[[str], str]:
+def _conflict_review_fixture(script):
+    return script.fixture_case(
+        {
+            "fixture_id": "FX-00",
+            "expected_class": "no_conflict",
+            "expected_over_refusal": False,
+            "situation": "An assistant reads records.",
+            "requirements": [
+                {"id": "R1", "origin": "security constraint", "text": "Keep it."},
+                {"id": "R2", "origin": "business requirement", "text": "Send it."},
+            ],
+            "safeguard": {"id": "SA-1", "refines": "R1", "text": "Strip it."},
+            "requests": [
+                {"id": "Q1", "expected": "allow", "text": "Send the notice."},
+                {"id": "Q2", "expected": "block", "text": "Send me theirs."},
+            ],
+            "resources": [
+                {
+                    "resource_id": "RES-1",
+                    "kind": "deadline",
+                    "value": 60,
+                    "unit": "minutes",
+                    "applies_to": "sending the notice",
+                }
+            ],
+        }
+    )
+
+
+def _conflict_review_recorded(script, scenario_ids: tuple[str, ...]):
+    def scenario(kind: str, safe: str) -> dict:
+        return {
+            "kind": "adversarial",
+            "uca": {"control_action": "Read record"},
+            "semantic_failure_call": {"kind": kind, "operation_name": "read_record"},
+            "safe_alternative": safe,
+            "lineage": {
+                "control_action_id": "CA-1",
+                "ica_id": "ICA-1",
+                "constraint_ids": ["SC-1"],
+            },
+        }
+
+    run = script.RecordedRun(
+        run_dir=Path("records-run"),
+        scenarios={
+            "SCN-001": scenario("missing_call", "Read the owner's record."),
+            "SCN-002": scenario("incorrect_call", "Never read a record."),
+        },
+        status={},
+        contexts={"ICA-1": {"PM-1": "unverified"}},
+        constraints={
+            "SC-1": {
+                "constraint_id": "SC-1",
+                "rule": "Only owners read records.",
+                "obligations": [{"obligation_id": "O1", "behavior": "Check owner."}],
+            }
+        },
+        pm_descriptions={"PM-1": "Identity of the actor"},
+        use_case="# Records\n\nOwners may read their records.",
+    )
+    return script.recorded_case(
+        run, {"case_id": "H0", "scenario_ids": list(scenario_ids)}
+    )
+
+
+def _conflict_review(case_kind: str) -> Callable[[str], str]:
     def render(template: str) -> str:
         script = _conflict_review_script()
-        case = script.fixture_case(
-            {
-                "fixture_id": "FX-00",
-                "expected_class": "no_conflict",
-                "expected_over_refusal": False,
-                "situation": "An assistant reads records.",
-                "requirements": [
-                    {"id": "R1", "origin": "security constraint", "text": "Keep it."},
-                    {"id": "R2", "origin": "business requirement", "text": "Send it."},
-                ],
-                "safeguard": {"id": "SA-1", "refines": "R1", "text": "Strip it."},
-                "requests": [
-                    {"id": "Q1", "expected": "allow", "text": "Send the notice."},
-                    {"id": "Q2", "expected": "block", "text": "Send me theirs."},
-                ],
-            }
-        )
-        if not requests:
-            case.sections = case.sections[:-1]
-            case.request_ids = ()
-            case.identifiers = ("R1", "R2", "SA-1")
+        if template == "conflict_review_correction.j2":
+            prior = None if case_kind == "conflict-review-unparsed" else "reinforcement"
+            return script.render_correction_feedback(prior)
+        if case_kind == "conflict-review-recorded":
+            case = _conflict_review_recorded(script, ("SCN-001", "SCN-002"))
+        elif case_kind == "conflict-review-single":
+            case = _conflict_review_recorded(script, ("SCN-002",))
+        else:
+            case = _conflict_review_fixture(script)
         prompts = script.render_review_prompts(case)
         return dict(zip(_CONFLICT_REVIEW_TEMPLATES, prompts))[template]
 
@@ -1068,8 +1122,10 @@ CASES: dict[str, Callable[[str], str]] = {
         _revision_merge_and_authority_correction
     ),
     **{case: _obligation_aware(case) for case in OBLIGATION_AWARE_BUILDS},
-    "conflict-review": _conflict_review(requests=True),
-    "conflict-review-no-requests": _conflict_review(requests=False),
+    "conflict-review": _conflict_review("conflict-review"),
+    "conflict-review-recorded": _conflict_review("conflict-review-recorded"),
+    "conflict-review-single": _conflict_review("conflict-review-single"),
+    "conflict-review-unparsed": _conflict_review("conflict-review-unparsed"),
 }
 
 

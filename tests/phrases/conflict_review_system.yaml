@@ -4,39 +4,61 @@ cases:
     required:
       - Judge only what the case states.
       - it does not approve or reject anything.
-      - Compare only requirements whose mechanisms or safe alternatives share a resource, a state or a decision point.
-      - "A resource includes the agent's own resources when the case states them: a tool-call budget, a deadline, context capacity, reviewer availability, a retry limit."
       - Do not invent a tool, record, permission, budget, deadline, outcome or fact the case does not state.
+      - "one recorded scenario: check its safe alternative alone against the use case and the constraints it refines;"
+      - "several recorded scenarios: check their safe alternatives against each other, against the use case and against their constraints;"
+      - Never compare a security constraint with one of its own obligations
+      - When the case lists requests (Q identifiers), judge those and return an empty "authorized_requests" list.
+      - Number them AR-1, AR-2 and so on, state each in one sentence, and cite the UC paragraph that authorizes it.
+      - List only requests the use case states, at most eight.
+      - '"required": what the agent must do with the request to satisfy the use case and every requirement'
+      - '"safeguard_as_written": what the safe alternatives or safeguard under review do with the request when applied exactly as written, without charitable reading'
+      - '"safeguard_refs": each safe alternative or safeguard under review that blocks or escalates the request; empty when they allow it.'
+      - "Code reads over-refusal from these judgements: a request the agent must not block that a safeguard blocks as written."
       - "missing_information: whether the requirements can all be satisfied depends on facts the case does not state. List each missing fact. This is never a conflict."
-      - "unfaithful_refinement: a spec, safe alternative or safeguard is stricter than, or different from, the source requirement it refines."
-      - "reinforcement: the requirements can all be satisfied and they rely on the same check, record, operation or resource."
+      - "unfaithful_refinement: a safe alternative or safeguard is stricter than, or different from, the source requirement or use-case behaviour it refines."
+      - "reinforcement: the requirements can all be satisfied, and satisfying one requirement depends on a check that another requirement's mechanism performs."
+      - Sharing an agent, an operation, a record or a topic is not reinforcement.
+      - "no_conflict: the requirements can all be satisfied and neither depends on the other's check."
+      - A tool-call budget, a deadline, a retry limit or reviewer capacity can decide a finding only when the case supplies it as a typed value under "Stated resources" (RES-<number>).
+      - the class must be missing_information and that resource must be among the missing facts; claim no conflict, reinforcement or absence of conflict from it.
+      - A safeguard that adds a deadline or step of its own is a refinement question, not a resource limit.
       - When nothing satisfies every requirement, the agent must stop, explain or escalate.
       - Never resolve a finding by preferring a business objective over a security or safety constraint.
       - "confidentiality: who may see or receive information."
       - "integrity: whether data and effects are correct, complete and not duplicated."
       - "authority: who may direct the agent, approve an action, or halt and resume it."
       - "attacker_access: what an attacker can reach, send or influence."
-      - Cite only identifiers the user message lists under "Identifiers you may cite", exactly as written
       - "SC-<number>/O<number>: one obligation of that constraint."
       - "UC-<number>: a numbered paragraph of the use-case text."
-      - If it would, name that request and cite its source
-      - When the case lists no requests, return an empty list.
-      - Reply with JSON only, one object with these fields
+      - 'RES-<number>: a typed resource listed under "Stated resources".'
+      - 'AR-<number>: an authorized request you listed; cite it only in "request_judgements".'
+      - '"requirements" must cite at least one scenario or safeguard under review, and at least one use-case paragraph, constraint, obligation or synthetic requirement.'
+      - '"resource_limits": each tool-call budget, deadline, retry limit or reviewer capacity whose size the finding turns on'
+      - '"resource_ref": "<RES identifier>" or null when the case supplies none of that kind'
+      - '"dependency": for reinforcement, {"dependent_ref": "<the requirement whose satisfaction depends on the check>", "check_ref": "<the requirement whose mechanism performs the check>"'
+      - Reply with JSON only, one object with these fields, in this order
     once:
       - "demonstrated_conflict: the stated facts show that no behaviour satisfies every cited requirement in the shared context."
       - A conflict that depends on an unstated fact is not demonstrated.
     ordered:
-      - - '"finding_class"'
-        - '"requirements"'
-        - '"overlapping_context"'
-        - '"mechanisms"'
-        - '"causal_explanation"'
-        - '"missing_facts"'
-        - '"shared_dependency"'
-        - '"assertions"'
-        - '"expected_behaviour"'
-        - '"over_refusal"'
-        - '"request_decisions"'
+      - - "Step 1, requests."
+        - "Step 2, the finding."
+      - - '- "authorized_requests":'
+        - '- "request_judgements":'
+        - '- "finding_class":'
+        - '- "requirements":'
+        - '- "overlapping_context":'
+        - '- "mechanisms":'
+        - '- "causal_explanation":'
+        - '- "resource_limits":'
+        - '- "missing_facts":'
+        - '- "dependency":'
+        - '- "expected_behaviour":'
     forbidden:
       - expected_class
       - FX-
+      - over_refusal
+      - shared_dependency
+      - assertions
+      - rely on the same check, record, operation or resource

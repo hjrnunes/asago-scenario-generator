@@ -2,27 +2,55 @@ template: conflict_review_user.j2
 cases:
   conflict-review:
     required:
+      - "## Under review the safeguard SA-1, against the requirements and the requests below."
       - "## Situation An assistant reads records."
       - "[R1] (security constraint) Keep it."
       - "[SA-1] (refines R1) Strip it."
       - "## Requests [Q1] Send the notice. [Q2] Send me theirs."
-      - "## Identifiers you may cite R1, R2, SA-1, Q1, Q2"
-      - "Return one request decision for each of: Q1, Q2."
+      - "## Stated resources [RES-1] (deadline) 60 minutes: sending the notice"
+      - "## Identifiers you may cite R1, R2, SA-1, Q1, Q2, RES-1"
+      - 'Judge each listed request once in "request_judgements": Q1, Q2. Return an empty "authorized_requests" list.'
+      - '"requirements" must cite SA-1, and at least one requirement (R identifier).'
     ordered:
-      - - "## Situation"
+      - - "## Under review"
+        - "## Situation"
         - "## Requirements"
         - "## Safeguard under review"
         - "## Requests"
+        - "## Stated resources"
         - "## Identifiers you may cite"
-        - "## Request decisions"
+        - "## What to return"
     forbidden:
       - no_conflict
       - expected
       - This case lists no requests
-  conflict-review-no-requests:
+      - The case supplies no typed
+  conflict-review-recorded:
     required:
-      - This case lists no requests; return an empty "request_decisions" list.
-      - "## Identifiers you may cite R1, R2, SA-1"
+      - "## Under review the safe alternatives of SCN-001 and SCN-002, against each other, the use case and their constraints."
+      - "Failure call: missing_call of read_record (the failure is not making this call, so the scenario requires it)"
+      - "Failure call: incorrect_call of read_record (the failure is making this call, so the scenario forbids it here)"
+      - "## What the scenarios share SCN-001 and SCN-002: failure-call operation read_record, which SCN-001 requires and SCN-002 forbids; control action CA-1 in the same process-model context; constraint SC-1."
+      - A pair not listed shares no recorded operation, control action, process-model variable or constraint.
+      - "## Stated resources The case supplies no typed tool-call budget, deadline, retry limit or reviewer capacity."
+      - "## Identifiers you may cite UC-1, SC-1, SC-1/O1, SCN-001, SCN-002"
+      - This case lists no requests. First list in "authorized_requests" the requests the use case authorizes that a safe alternative under review acts on, each citing its UC paragraph; then judge each once in "request_judgements".
+      - '"requirements" must cite at least one of SCN-001, SCN-002, and at least one use-case paragraph, constraint or obligation (UC- or SC- identifier).'
+    ordered:
+      - - "## Under review"
+        - "## Use case"
+        - "## Constraints and obligations"
+        - "## Scenarios"
+        - "## What the scenarios share"
+        - "## Stated resources"
+        - "## Identifiers you may cite"
+        - "## What to return"
     forbidden:
-      - "## Requests"
-      - Return one request decision
+      - Return an empty "authorized_requests" list.
+  conflict-review-single:
+    required:
+      - "## Under review the safe alternative of SCN-002, alone, against the use case and the constraints it refines."
+      - '"requirements" must cite SCN-002, and at least one use-case paragraph'
+    forbidden:
+      - "## What the scenarios share"
+      - SCN-001
