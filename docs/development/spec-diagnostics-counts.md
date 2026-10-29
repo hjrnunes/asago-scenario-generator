@@ -200,6 +200,31 @@ actions it names, and `feedback_by_action` in the counts splits those
 findings into `bound_tool_call` (the finding names a `tool_call` bound to an
 observed operation) and `other`.
 
+Not every such finding is a gap. An operation that hands a request to
+another party returns at most an acknowledgement of the hand-off, so the
+structure rightly has no channel reporting the state of whoever handles it.
+Given the execution target profile each run's Stage 2 received
+(`--target-profile LABEL=PATH`, repeatable), the sweep records the
+`result_kind` of each operation a feedback finding names, from the evidence
+Stage 2 builds from that profile, and `bound_tool_call_by_result` in the
+counts splits the `bound_tool_call` findings by it:
+
+- `no_declared_output`: the operation declares no output;
+- `acknowledgement_only`: it declares an output and its interpreted effect is
+  `escalate` or `notify`;
+- `result_carrying`: any other operation that declares an output;
+- `unclassified`: no profile was given for the run, or it lists no such
+  operation.
+
+A finding takes the first of `result_carrying`, `unclassified` and
+`acknowledgement_only` that any operation it names has, and is otherwise
+`no_declared_output`. The rule reads only the declared output and the
+interpreted effect. Every tool declares an output of the same shape in the
+targets measured so far, so an operation whose result only acknowledges
+receipt but whose effect is `create` or `update` (submitting a form, storing
+a draft) still counts as `result_carrying`; telling those apart is a
+semantic judgement the profile does not record.
+
 ### Corpus and baseline
 
 The corpus is the 219 run directories matching `stpo7-*` and `stpo7b-*`

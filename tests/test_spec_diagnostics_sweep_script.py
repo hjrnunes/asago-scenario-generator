@@ -36,6 +36,9 @@ from asago_scenario_generator.stpa.spec_diagnostics import (
     SpecCheck,
     read_spec_diagnostics,
 )
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    EvidenceOperation,
+)
 
 from tests.helpers.target_realization import (
     _ExtensionInterpreter,
@@ -594,10 +597,21 @@ def test_feedback_findings_are_split_by_the_actions_they_name(tmp_path: Path):
     }
     assert actions == {
         ("CP-2", "RESP-1", "CA-1-2"): [
-            {"ca_id": "CA-1-2", "effect_kind": "tool_call", "operation": "op_two"}
+            {
+                "ca_id": "CA-1-2",
+                "effect_kind": "tool_call",
+                "operation": "op_two",
+                # No target profile was given for the run.
+                "result_kind": "unclassified",
+            }
         ],
         ("CP-3", "RESP-1", "CA-1-3"): [
-            {"ca_id": "CA-1-3", "effect_kind": "model_output", "operation": None}
+            {
+                "ca_id": "CA-1-3",
+                "effect_kind": "model_output",
+                "operation": None,
+                "result_kind": None,
+            }
         ],
     }
     assert all(
@@ -631,3 +645,229 @@ def test_stage2_only_diagnoses_the_published_stage2_structure(tmp_path: Path):
     assert "Stage 2" in reasons[SpecCheck.hazard_without_ica]
     # Without the flag the same run has no final artifacts to diagnose.
     assert _skip_reason(tmp_path / "runs" / "run-a").startswith("no synthesis manifest")
+
+
+_PROFILE = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "miniocciai-baseline-rev2"
+    / "execution-target-profile.json"
+)
+
+
+def _profile_file(path: Path) -> Path:
+    """A copy of the fixture target profile; every tool declares an output."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(_PROFILE.read_bytes())
+    return path
+
+
+def _evidence_operation(
+    name: str, *, effect: str | None, returns_result: bool
+) -> EvidenceOperation:
+    return EvidenceOperation(
+        name=name,
+        description="Observed.",
+        arguments=(),
+        effect=effect,
+        returns_result=returns_result,
+    )
+
+
+@pytest.mark.parametrize(
+    ("effect", "returns_result", "kind"),
+    [
+        ("escalate", True, "acknowledgement_only"),
+        ("notify", True, "acknowledgement_only"),
+        ("update", True, "result_carrying"),
+        ("read", True, "result_carrying"),
+        ("create", True, "result_carrying"),
+        (None, True, "result_carrying"),
+        ("escalate", False, "no_declared_output"),
+        ("update", False, "no_declared_output"),
+    ],
+)
+def test_an_operation_s_result_kind_follows_its_effect_and_declared_output(
+    effect: str | None, returns_result: bool, kind: str
+):
+    """A hand-off's declared output can only acknowledge the hand-off."""
+    operation = _evidence_operation("op", effect=effect, returns_result=returns_result)
+
+    assert _script().result_kind(operation) == kind
+    assert _script().result_kind(None) == "unclassified"
+
+
+def _bound_structure() -> dict[str, Any]:
+    """One tool call per unobserved process, each bound to an operation."""
+    structure = _structure()
+    resp = structure["responsibilities"][0]
+    resp["control_actions"] = resp["control_actions"][:1]
+    for number, operation in enumerate(
+        ("escalate_to_clinician", "commit_to_ehr", "not_listed"),
+        start=2,
+    ):
+        resp["control_actions"].append(
+            {
+                "ca_id": f"CA-1-{number}",
+                "description": f"Invoke {operation}",
+                "target": {"type": "controlled_process", "id": f"CP-{number}"},
+                "effect_kind": "tool_call",
+                "temporality": "discrete",
+                "operation": operation,
+                "process_model_refs": ["PM-1-1"],
+            }
+        )
+    structure["controlled_processes"] = [
+        {"cp_id": f"CP-{number}", "description": f"Process {number}"}
+        for number in range(1, 5)
+    ]
+    return structure
+
+
+def _finding_rows(out: Path) -> list[dict[str, Any]]:
+    return [
+        json.loads(line)
+        for line in (out / "spec-diagnostics-findings.jsonl").read_text().splitlines()
+    ]
+
+
+def test_bound_findings_are_split_by_what_the_operation_returns(tmp_path: Path):
+    """An acknowledgement-only operation's absent feedback is counted apart."""
+    _run(tmp_path / "runs" / "run-a", structure=_bound_structure())
+    profile = _profile_file(tmp_path / "profiles" / "run-a.json")
+    out = tmp_path / "out"
+
+    counts = _script().sweep(
+        [tmp_path / "runs" / "run-a"], out, target_profiles={"run-a": profile}
+    )
+
+    one = {"runs_with_findings": 1, "findings": 1}
+    check = "controlled_process_without_feedback"
+    assert counts["bound_tool_call_by_result"][check] == {
+        "acknowledgement_only": one,
+        "no_declared_output": {"runs_with_findings": 0, "findings": 0},
+        "result_carrying": one,
+        "unclassified": one,
+    }
+    # The split refines the bound tool call count, which is unchanged.
+    assert counts["feedback_by_action"][check] == {
+        "bound_tool_call": {"runs_with_findings": 1, "findings": 3},
+        "other": {"runs_with_findings": 0, "findings": 0},
+    }
+    kinds = {
+        tuple(row["subject_ids"]): [a["result_kind"] for a in row["actions"]]
+        for row in _finding_rows(out)
+        if row["check"] == check
+    }
+    assert kinds == {
+        ("CP-2", "RESP-1", "CA-1-2"): ["acknowledgement_only"],
+        ("CP-3", "RESP-1", "CA-1-3"): ["result_carrying"],
+        ("CP-4", "RESP-1", "CA-1-4"): ["unclassified"],
+    }
+    runs = [
+        json.loads(line)
+        for line in (out / "spec-diagnostics-runs.jsonl").read_text().splitlines()
+    ]
+    assert runs[0]["target_profile"] == str(profile)
+
+
+def test_a_finding_is_result_carrying_when_any_operation_it_names_is():
+    module = _script()
+    actions = [
+        {"effect_kind": "tool_call", "operation": "a", "result_kind": kind}
+        for kind in ("acknowledgement_only", "result_carrying")
+    ]
+
+    assert module._finding_result_kind(actions) == "result_carrying"
+    assert module._finding_result_kind(actions[:1]) == "acknowledgement_only"
+    assert (
+        module._finding_result_kind(
+            [
+                *actions[:1],
+                {
+                    "effect_kind": "tool_call",
+                    "operation": "b",
+                    "result_kind": "unclassified",
+                },
+            ]
+        )
+        == "unclassified"
+    )
+
+
+def test_without_a_target_profile_bound_findings_are_unclassified(tmp_path: Path):
+    _run(tmp_path / "runs" / "run-a", structure=_bound_structure())
+    out = tmp_path / "out"
+
+    counts = _script().sweep([tmp_path / "runs" / "run-a"], out)
+
+    split = counts["bound_tool_call_by_result"]["controlled_process_without_feedback"]
+    assert split["unclassified"] == {"runs_with_findings": 1, "findings": 3}
+    assert all(
+        split[kind]["findings"] == 0
+        for kind in ("acknowledgement_only", "no_declared_output", "result_carrying")
+    )
+
+
+def test_the_cli_maps_a_target_profile_to_its_run(tmp_path: Path):
+    _run(tmp_path / "runs" / "run-a", structure=_bound_structure())
+    profile = _profile_file(tmp_path / "profiles" / "run-a.json")
+    out = tmp_path / "out"
+
+    assert (
+        _script().main(
+            [
+                "--out-dir",
+                str(out),
+                "--target-profile",
+                f"run-a={profile}",
+                str(tmp_path / "runs" / "run-a"),
+            ]
+        )
+        == 0
+    )
+
+    written = json.loads((out / "spec-diagnostics-counts.json").read_text())
+    split = written["bound_tool_call_by_result"]["controlled_process_without_feedback"]
+    assert split["acknowledgement_only"]["findings"] == 1
+    assert split["unclassified"]["findings"] == 1
+
+
+@pytest.mark.parametrize(
+    ("mapping", "message"),
+    [
+        ({"run-b": "PROFILE"}, "run-b"),
+        ({"run-a": "MISSING"}, "cannot be read"),
+    ],
+)
+def test_a_target_profile_for_no_run_or_unreadable_refuses_before_writing(
+    tmp_path: Path, mapping: dict[str, str], message: str
+):
+    _run(tmp_path / "runs" / "run-a", structure=_bound_structure())
+    profile = _profile_file(tmp_path / "profiles" / "run-a.json")
+    paths = {
+        "PROFILE": profile,
+        "MISSING": tmp_path / "profiles" / "missing.json",
+    }
+    out = tmp_path / "out"
+
+    with pytest.raises(ValueError, match=message):
+        _script().sweep(
+            [tmp_path / "runs" / "run-a"],
+            out,
+            target_profiles={label: paths[key] for label, key in mapping.items()},
+        )
+    assert not out.exists()
+
+
+def test_a_target_profile_argument_needs_a_label(tmp_path: Path):
+    with pytest.raises(SystemExit):
+        _script().main(
+            [
+                "--out-dir",
+                str(tmp_path / "out"),
+                "--target-profile",
+                str(tmp_path / "profile.json"),
+                str(tmp_path / "runs" / "run-a"),
+            ]
+        )

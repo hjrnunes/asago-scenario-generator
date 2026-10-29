@@ -46,6 +46,28 @@ A finding of the two feedback checks also lists, under ``actions``, the
 the counts split those findings (``feedback_by_action``): ``bound_tool_call``
 when the finding names a ``tool_call`` bound to an observed operation (evidence
 binding drops any other name), ``other`` otherwise.
+
+``--target-profile LABEL=PATH`` names the execution target profile a run's
+Stage 2 was given.  Each action that names an operation then also records
+the ``result_kind`` of that operation, read from the evidence Stage 2 built
+from the profile (:func:`result_kind`):
+
+- ``no_declared_output``: the operation declares no output, so it returns no
+  result to feed back;
+- ``acknowledgement_only``: it declares an output, and its interpreted effect
+  hands the request to another party (``escalate`` or ``notify``), so its
+  result can only acknowledge the hand-off, not report the state of whoever
+  handles it;
+- ``result_carrying``: any other operation that declares an output;
+- ``unclassified``: the run has no profile, or the profile lists no such
+  operation.
+
+The counts split the ``bound_tool_call`` findings of each feedback check by
+the kind of the operations they name (``bound_tool_call_by_result``): a
+finding is ``result_carrying`` when any operation it names is, otherwise
+``unclassified`` when any is, otherwise ``acknowledgement_only`` when any is,
+otherwise ``no_declared_output``.  The absence of feedback from an
+acknowledgement-only or output-less operation is by design, not a gap.
 """
 
 from __future__ import annotations
@@ -70,6 +92,10 @@ from asago_scenario_generator.stpa.models.control_structure import (
     ControlActionEffectKind,
     ControlStructure,
 )
+from asago_scenario_generator.stpa.models.execution_classification import (
+    ExecutionTargetProfile,
+    TargetOperationEffect,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import ICAEnumeration
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.spec_diagnostics import (
@@ -79,6 +105,10 @@ from asago_scenario_generator.stpa.spec_diagnostics import (
     SpecFinding,
     diagnose_final_artifacts,
     write_spec_diagnostics,
+)
+from asago_scenario_generator.stpa.system_model.target_evidence import (
+    EvidenceOperation,
+    build_target_evidence,
 )
 
 MANIFEST = "synthesis-manifest.yaml"
@@ -299,10 +329,46 @@ FEEDBACK_CHECKS = (
 )
 
 
+# Effects that hand a request to another party: the caller learns only that
+# the hand-off was accepted.
+HAND_OFF_EFFECTS = frozenset(
+    {TargetOperationEffect.escalate.value, TargetOperationEffect.notify.value}
+)
+RESULT_KINDS = (
+    "acknowledgement_only",
+    "no_declared_output",
+    "result_carrying",
+    "unclassified",
+)
+
+
+def result_kind(operation: EvidenceOperation | None) -> str:
+    """What *operation*'s result can tell the responsibility that invokes it."""
+    if operation is None:
+        return "unclassified"
+    if not operation.returns_result:
+        return "no_declared_output"
+    if operation.effect in HAND_OFF_EFFECTS:
+        return "acknowledgement_only"
+    return "result_carrying"
+
+
+def _evidence_operations(
+    profile: ExecutionTargetProfile | None,
+) -> dict[str, EvidenceOperation] | None:
+    """The operations of the evidence Stage 2 builds from *profile*."""
+    if profile is None:
+        return None
+    evidence = build_target_evidence(profile, None)
+    return {} if evidence is None else {op.name: op for op in evidence.operations}
+
+
 def _named_actions(
-    finding: SpecFinding, structure: ControlStructure
+    finding: SpecFinding,
+    structure: ControlStructure,
+    operations: dict[str, EvidenceOperation] | None,
 ) -> list[dict[str, Any]]:
-    """The effect kind and bound operation of each action *finding* names."""
+    """The effect kind, bound operation and its result kind of each action."""
     actions = {
         action.ca_id: action
         for resp in structure.responsibilities
@@ -315,18 +381,37 @@ def _named_actions(
                 action.effect_kind.value if action.effect_kind is not None else None
             ),
             "operation": action.operation,
+            "result_kind": (
+                None
+                if action.operation is None
+                else result_kind((operations or {}).get(action.operation))
+            ),
         }
         for ca_id in finding.subject_ids
         if (action := actions.get(ca_id)) is not None
     ]
 
 
-def _names_bound_tool_call(actions: list[dict[str, Any]]) -> bool:
-    return any(
-        item["effect_kind"] == ControlActionEffectKind.tool_call.value
-        and item["operation"] is not None
+def _bound_tool_calls(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        item
         for item in actions
-    )
+        if item["effect_kind"] == ControlActionEffectKind.tool_call.value
+        and item["operation"] is not None
+    ]
+
+
+def _names_bound_tool_call(actions: list[dict[str, Any]]) -> bool:
+    return bool(_bound_tool_calls(actions))
+
+
+def _finding_result_kind(actions: list[dict[str, Any]]) -> str:
+    """The result kind of a finding, from the bound tool calls it names."""
+    kinds = {item["result_kind"] for item in _bound_tool_calls(actions)}
+    for kind in ("result_carrying", "unclassified", "acknowledgement_only"):
+        if kind in kinds:
+            return kind
+    return "no_declared_output"
 
 
 def _counts(results: dict[str, SpecDiagnostics]) -> dict[str, Any]:
@@ -361,25 +446,70 @@ def _feedback_by_action(finding_rows: list[dict[str, Any]]) -> dict[str, Any]:
                     else "other"
                 )
                 groups[group].append(row["run"])
-        split[check.value] = {
-            group: {"runs_with_findings": len(set(runs)), "findings": len(runs)}
-            for group, runs in groups.items()
-        }
+        split[check.value] = _group_counts(groups)
     return split
 
 
+def _bound_tool_call_by_result(finding_rows: list[dict[str, Any]]) -> dict[str, Any]:
+    split: dict[str, Any] = {}
+    for check in FEEDBACK_CHECKS:
+        groups: dict[str, list[str]] = {kind: [] for kind in RESULT_KINDS}
+        for row in finding_rows:
+            if row["check"] == check.value and _names_bound_tool_call(row["actions"]):
+                groups[_finding_result_kind(row["actions"])].append(row["run"])
+        split[check.value] = _group_counts(groups)
+    return split
+
+
+def _group_counts(groups: dict[str, list[str]]) -> dict[str, Any]:
+    return {
+        group: {"runs_with_findings": len(set(runs)), "findings": len(runs)}
+        for group, runs in groups.items()
+    }
+
+
+def _load_target_profiles(
+    target_profiles: dict[str, Path], labels: list[str]
+) -> dict[str, ExecutionTargetProfile]:
+    unknown = sorted(set(target_profiles) - set(labels))
+    if unknown:
+        raise ValueError(f"target profile for no swept run: {', '.join(unknown)}")
+    profiles: dict[str, ExecutionTargetProfile] = {}
+    for label, path in target_profiles.items():
+        try:
+            profiles[label] = ExecutionTargetProfile.model_validate_json(
+                path.read_bytes()
+            )
+        except OSError as exc:
+            raise ValueError(
+                f"target profile {path} cannot be read: {exc.strerror or exc}"
+            ) from exc
+        except ValidationError as exc:
+            first = str(exc).splitlines()[0]
+            raise ValueError(f"target profile {path} does not load: {first}") from exc
+    return profiles
+
+
 def sweep(
-    run_dirs: list[Path], out_dir: Path, *, stage2_only: bool = False
+    run_dirs: list[Path],
+    out_dir: Path,
+    *,
+    stage2_only: bool = False,
+    target_profiles: dict[str, Path] | None = None,
 ) -> dict[str, Any]:
     """Diagnose every run into *out_dir* and return the counts.
 
     With *stage2_only* each run is diagnosed on its published Stage 2
     artifacts (:func:`load_stage2_artifacts`) instead of its final ones.
+    *target_profiles* maps a run's label to the execution target profile its
+    Stage 2 was given, which classifies the operations its findings name.
     """
     load = load_stage2_artifacts if stage2_only else load_final_artifacts
     labels = [run_dir.name for run_dir in run_dirs]
     if len(set(labels)) != len(labels):
         raise ValueError("run directory names must be unique")
+    profile_paths = target_profiles or {}
+    profiles = _load_target_profiles(profile_paths, labels)
     _refuse_writes_inside_runs(_destinations(out_dir, labels), run_dirs)
     out_dir.mkdir(parents=True, exist_ok=True)
     results: dict[str, SpecDiagnostics] = {}
@@ -394,6 +524,7 @@ def sweep(
             continue
         results[label] = result
         write_spec_diagnostics(out_dir / label, result)
+        profile_path = profile_paths.get(label)
         run_rows.append(
             {
                 "run": label,
@@ -402,12 +533,16 @@ def sweep(
                     s.check.value: s.findings if s.status == "run" else None
                     for s in result.checks
                 },
+                "target_profile": None if profile_path is None else str(profile_path),
             }
         )
+        operations = _evidence_operations(profiles.get(label))
         for finding in result.findings:
             row = {"run": label, **finding.model_dump(mode="json")}
             if finding.check in FEEDBACK_CHECKS:
-                row["actions"] = _named_actions(finding, final.control_structure)
+                row["actions"] = _named_actions(
+                    finding, final.control_structure, operations
+                )
             finding_rows.append(row)
     counts = {
         "runs": len(run_rows),
@@ -415,6 +550,7 @@ def sweep(
         "skipped": len(run_rows) - len(results),
         "checks": _counts(results),
         "feedback_by_action": _feedback_by_action(finding_rows),
+        "bound_tool_call_by_result": _bound_tool_call_by_result(finding_rows),
     }
     _write_jsonl(out_dir / RUNS_FILE, run_rows)
     _write_jsonl(out_dir / FINDINGS_FILE, finding_rows)
@@ -456,6 +592,13 @@ def _write_jsonl(path: Path, rows: list[dict[str, Any]]) -> None:
     )
 
 
+def _labelled_path(value: str) -> tuple[str, Path]:
+    label, sep, path = value.partition("=")
+    if not sep or not label or not path:
+        raise argparse.ArgumentTypeError(f"expected LABEL=PATH, got {value!r}")
+    return label, Path(path)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Compute the specification diagnostics of saved runs."
@@ -469,9 +612,25 @@ def main(argv: list[str] | None = None) -> int:
             "published, without a synthesis manifest; the ICA checks do not run."
         ),
     )
+    parser.add_argument(
+        "--target-profile",
+        action="append",
+        default=[],
+        type=_labelled_path,
+        metavar="LABEL=PATH",
+        help=(
+            "The execution target profile the run labelled LABEL gave Stage 2; "
+            "classifies the operations its feedback findings name. Repeatable."
+        ),
+    )
     parser.add_argument("run_dirs", type=Path, nargs="+")
     args = parser.parse_args(argv)
-    counts = sweep(args.run_dirs, args.out_dir, stage2_only=args.stage2_only)
+    counts = sweep(
+        args.run_dirs,
+        args.out_dir,
+        stage2_only=args.stage2_only,
+        target_profiles=dict(args.target_profile),
+    )
     json.dump(counts, sys.stdout, indent=2)
     sys.stdout.write("\n")
     return 0
