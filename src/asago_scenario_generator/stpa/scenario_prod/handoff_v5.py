@@ -19,7 +19,10 @@ from asago_scenario_generator.stpa.models.attack_shape import (
     IndirectShape,
     default_attack_shape,
 )
-from asago_scenario_generator.stpa.models.causal_factor import CausalFactor
+from asago_scenario_generator.stpa.models.causal_factor import (
+    CausalFactor,
+    is_belief_flaw,
+)
 from asago_scenario_generator.stpa.models.scenario_context import (
     ScenarioGenerationContext,
 )
@@ -273,6 +276,16 @@ def _causal_factors(spec: ScenarioSpec) -> list[HandoffCausalFactor]:
     for factor in spec.causal_factors:
         if factor.flawed_belief:
             factors.append(_stated_causal_factor(spec, factor))
+            continue
+        if not is_belief_flaw(factor.kind):
+            # A faulty decision rule: the controller's belief is correct.
+            factors.append(
+                HandoffCausalFactor(
+                    source_id=factor.source_id,
+                    process_model_belief=None,
+                    flaw=_required(spec, "causal_factors.flaw", factor.description),
+                )
+            )
             continue
         belief = beliefs.get(factor.source_id)
         content = plain(belief.content) if belief is not None else ""

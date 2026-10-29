@@ -8,7 +8,8 @@
 The scenario's causal factors, under local `source_handle` values. Each one
 gives its source type, the source's description, the factor's description in
 this scenario, and whether code fills its `process_model_variable` or you
-choose it. Give each listed factor one entry under its `source_handle`. Do not
+choose it{% if has_decision_rule %}, or that it is a faulty decision rule whose
+`flawed_belief` is null{% endif %}. Give each listed factor one entry under its `source_handle`. Do not
 return structural IDs.{% if has_feedback_authority %}
 
 A feedback factor may carry `authority_for_update`, the recorded assessment of

@@ -1,11 +1,13 @@
 """Stated flawed beliefs: the variable frame, the reply rules, and the variable.
 
-The belief step asks, for every Stage 5 causal factor, what the controller
-wrongly takes to be true and which process-model variable holds the belief. Code fills the variable where the structure fixes it: a process-model
-factor's own source, and a feedback factor's updated variable when that
-variable is on the selected path. The model chooses for every other factor,
-from the path's variables under local handles, or ``none`` with a description
-of the missing variable.
+The belief step asks, for every Stage 5 causal factor that is a belief flaw,
+what the controller wrongly takes to be true and which process-model variable
+holds the belief. Code fills the variable where the structure fixes it: a
+process-model factor's own source, and a feedback factor's updated variable
+when that variable is on the selected path. The model chooses for every other
+belief flaw, from the path's variables under local handles, or ``none`` with a
+description of the missing variable. A decision-rule factor states no belief
+and has no variable: its belief must be null.
 """
 
 from __future__ import annotations
@@ -19,6 +21,7 @@ from pydantic import BaseModel
 from asago_scenario_generator.stpa.models.causal_factor import (
     CausalFactorKind,
     ProcessModelVariable,
+    is_belief_flaw,
 )
 from asago_scenario_generator.stpa.models.control_structure import ControlStructure
 from asago_scenario_generator.stpa.models.scenario_context import (
@@ -58,11 +61,13 @@ class FlawedBeliefFrame:
     """The variables a request offers and the factors whose variable code fills.
 
     ``fixed`` maps a causal-source handle to the variable handle code assigns
-    it; the model chooses the variable of every other source.
+    it; the model chooses the variable of every other source. ``beliefless``
+    names the sources that are not belief flaws, which state no belief.
     """
 
     variables: tuple[VariableChoice, ...]
     fixed: tuple[tuple[str, str], ...]
+    beliefless: tuple[str, ...] = ()
 
     @property
     def variable_handles(self) -> tuple[str, ...]:
@@ -82,7 +87,8 @@ def build_flawed_belief_frame(
     context: ScenarioGenerationContext,
     control_structure: ControlStructure,
 ) -> FlawedBeliefFrame:
-    """Number the path's variables and fix the variable of PM and FB sources."""
+    """Number the path's variables, fix the variable of PM and FB sources, and
+    mark the sources that state no belief."""
     parts = {
         part.pm_id: part
         for responsibility in control_structure.responsibilities
@@ -108,7 +114,11 @@ def build_flawed_belief_frame(
     )
     handle_of = {item.pm_id: item.handle for item in variables}
     fixed: list[tuple[str, str]] = []
+    beliefless: list[str] = []
     for choice in choices:
+        if not is_belief_flaw(choice.kind):
+            beliefless.append(choice.handle)
+            continue
         if choice.kind is CausalFactorKind.process_model_flaw:
             pm_id: str | None = choice.source_id
         elif choice.kind in _FEEDBACK_KINDS:
@@ -117,7 +127,9 @@ def build_flawed_belief_frame(
             pm_id = None
         if pm_id in handle_of:
             fixed.append((choice.handle, handle_of[pm_id]))
-    return FlawedBeliefFrame(variables=variables, fixed=tuple(fixed))
+    return FlawedBeliefFrame(
+        variables=variables, fixed=tuple(fixed), beliefless=tuple(beliefless)
+    )
 
 
 def _words(text: str) -> set[str]:
@@ -151,6 +163,18 @@ def flawed_belief_findings(
         variable = getattr(factor, "process_model_variable", None)
         missing = getattr(factor, "missing_variable", None)
         missing_text = (missing or "").strip()
+        if factor.source_handle in frame.beliefless:
+            if belief:
+                findings.append(
+                    f"{where}: this factor is a faulty decision rule, not a "
+                    "flawed belief; set flawed_belief to null."
+                )
+            if variable is not None or missing_text:
+                findings.append(
+                    f"{where}: this factor holds no belief; leave out "
+                    "process_model_variable and missing_variable."
+                )
+            continue
         if not belief:
             findings.append(
                 f"{where}: flawed_belief is blank; state what the controller "
@@ -216,8 +240,13 @@ def flawed_belief_findings(
 
 def resolve_process_model_variable(
     factor: BaseModel, frame: FlawedBeliefFrame
-) -> ProcessModelVariable:
-    """Return the variable a validated factor's belief concerns, or its gap."""
+) -> ProcessModelVariable | None:
+    """Return the variable a validated factor's belief concerns, or its gap.
+
+    A factor that states no belief has no variable.
+    """
+    if factor.source_handle in frame.beliefless:
+        return None
     fixed = frame.fixed_variable(factor.source_handle)
     if fixed is not None:
         return ProcessModelVariable(pm_id=fixed.pm_id, description=fixed.description)

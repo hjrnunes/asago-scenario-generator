@@ -18,6 +18,7 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import Any
 
 from asago_scenario_generator.stpa.models.attack_shape import default_attack_shape
+from asago_scenario_generator.stpa.models.causal_factor import is_belief_flaw
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from .narration import (
@@ -201,9 +202,12 @@ def _conditions_node(spec: ScenarioSpec, adversarial: bool) -> dict[str, Any]:
         belief = beliefs.get(factor.source_id)
         if factor.flawed_belief:
             extras["belief"] = weak_point_belief_text(factor)
-        elif belief is not None and plain(belief.content):
-            # The belief's pm_id is the weak point's source_id, so the text
-            # alone keeps everything.
+        elif (
+            is_belief_flaw(factor.kind) and belief is not None and plain(belief.content)
+        ):
+            # A faulty decision rule states no belief to repeat. The belief's
+            # pm_id is the weak point's source_id, so the text alone keeps
+            # everything.
             extras["belief"] = belief_text(
                 belief.content, belief.vulnerability, {plain(factor.description)}
             )

@@ -168,7 +168,10 @@ def test_stage5_shows_the_mechanism_as_provenance_and_keeps_every_source() -> No
     assert _causal_source_choices(with_mechanism) == _causal_source_choices(plain)
     source_ids = {item.source_id for item in _causal_source_choices(with_mechanism)}
     assert not source_ids & {item.value for item in MechanismId}
-    assert all(source_id.startswith(("PM-", "FB-", "CA-")) for source_id in source_ids)
+    assert all(
+        source_id.startswith(("PM-", "FB-", "CA-", "RESP-", "CL-"))
+        for source_id in source_ids
+    )
 
 
 @pytest.mark.parametrize(

@@ -4,9 +4,10 @@ Stage 5 asks for no stated belief. This step then sends one request per
 Stage 5 spec, in spec order: the scenario
 account, the spec's causal factors under the local source handles Stage 5
 used, and the selected path's process-model variables under local handles.
-The reply states one flawed belief per listed factor and, where code does not
-fill the factor's variable, names the variable that holds the belief or the
-variable the controller lacks.
+The reply states one flawed belief per listed belief-flaw factor and, where
+code does not fill the factor's variable, names the variable that holds the
+belief or the variable the controller lacks. A decision-rule factor, whose
+belief is correct, takes a null belief and no variable.
 
 Code checks the reply with the stated-belief rules and never repairs it. A
 reply that breaks a rule, or does not decode, earns one correction. A reply
@@ -101,6 +102,13 @@ class _ChosenBeliefBase(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
+# A factor that is not a belief flaw states no belief.
+class _NoBelief(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    flawed_belief: None
+
+
 @dataclass(frozen=True)
 class BeliefRequest:
     """What one spec's request lists: its factors' choices and the frame.
@@ -154,7 +162,8 @@ def belief_request(
 def belief_reply_type(request: BeliefRequest) -> type[StatedBeliefReply]:
     """Return the closed reply model: one required entry per listed handle.
 
-    A factor whose variable code fills carries only ``flawed_belief``; every
+    A factor that is not a belief flaw carries only a null ``flawed_belief``;
+    a factor whose variable code fills carries only ``flawed_belief``; every
     other factor also carries ``process_model_variable`` (one of the
     ``variable_N`` handles or ``none``) and ``missing_variable``.
     """
@@ -170,12 +179,7 @@ def belief_reply_type(request: BeliefRequest) -> type[StatedBeliefReply]:
         missing_variable=(StrictStr | None, ...),
     )
     fields: dict[str, Any] = {
-        choice.handle: (
-            _FixedBelief
-            if request.frame.fixed_variable(choice.handle) is not None
-            else chosen,
-            ...,
-        )
+        choice.handle: (_entry_type(choice.handle, request.frame, chosen), ...)
         for choice in request.choices
     }
     fixed = sum(
@@ -187,6 +191,16 @@ def belief_reply_type(request: BeliefRequest) -> type[StatedBeliefReply]:
         __base__=StatedBeliefReply,
         **fields,
     )
+
+
+def _entry_type(
+    handle: str, frame: FlawedBeliefFrame, chosen: type[BaseModel]
+) -> type[BaseModel]:
+    if handle in frame.beliefless:
+        return _NoBelief
+    if frame.fixed_variable(handle) is not None:
+        return _FixedBelief
+    return chosen
 
 
 def _variable_rule(choice: _CausalSourceChoice, frame: FlawedBeliefFrame) -> str:
@@ -219,8 +233,13 @@ def _factor_entry(
         "source_type": _source_type_explanation(choice.kind),
         "source_description": choice.description,
         "factor_description": spec.causal_factors[index].description,
-        "process_model_variable": _variable_rule(choice, request.frame),
     }
+    if choice.handle in request.frame.beliefless:
+        entry["flawed_belief"] = (
+            "null; this factor is a faulty decision rule, not a flawed belief"
+        )
+    else:
+        entry["process_model_variable"] = _variable_rule(choice, request.frame)
     if choice.authority_for_update is not None:
         entry["authority_for_update"] = choice.authority_for_update.model_dump(
             mode="json"
@@ -235,7 +254,10 @@ def render_belief_prompts(
 ) -> tuple[str, str]:
     """Return the system and user prompts of one spec's belief request."""
     loader = loader or TemplateLoader(PROMPTS_DIR)
-    system = loader.render_prompt("stage5_belief_system.j2")
+    has_decision_rule = bool(request.frame.beliefless)
+    system = loader.render_prompt(
+        "stage5_belief_system.j2", has_decision_rule=has_decision_rule
+    )
     user = loader.render_prompt(
         "stage5_belief_user.j2",
         account=render_scenario_summary(spec)[0],
@@ -244,6 +266,7 @@ def render_belief_prompts(
         has_feedback_authority=any(
             choice.authority_for_update is not None for _, choice in request.listed
         ),
+        has_decision_rule=has_decision_rule,
     )
     return system, user
 
@@ -281,7 +304,11 @@ def apply_beliefs(
     for (index, _), entry in zip(request.listed, _entries(reply, request)):
         factors[index] = factors[index].model_copy(
             update={
-                "flawed_belief": entry.flawed_belief.strip(),
+                "flawed_belief": (
+                    entry.flawed_belief.strip()
+                    if entry.flawed_belief is not None
+                    else None
+                ),
                 "process_model_variable": resolve_process_model_variable(
                     entry, request.frame
                 ),

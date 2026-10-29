@@ -30,6 +30,20 @@ cases:
       - "## Scenario SCN-"
       - authority_for_update
       - Allowed channels
+      - faulty decision rule
+  decision-rule-beliefs:
+    required:
+      - >-
+        and whether code fills its `process_model_variable` or you choose it,
+        or that it is a faulty decision rule whose `flawed_belief` is null.
+        Give each listed factor one entry under its `source_handle`.
+      - "source_type: a controller decision rule"
+      - >-
+        flawed_belief: null; this factor is a faulty decision rule, not a
+        flawed belief
+      - "process_model_variable: filled by code (variable_1); give only flawed_belief"
+    forbidden:
+      - authority_for_update
   feedback-authority-beliefs:
     required:
       - >-

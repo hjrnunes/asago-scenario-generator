@@ -18,6 +18,12 @@ cases:
       - Do not return hazard, constraint, or loss IDs
       - analysis provenance, not causal evidence
       - explain why STPA considered this unsafe action
+      - "source_type: a controller decision rule"
+      - >-
+        select_when: Select only when the controller's belief about the
+        situation is correct and the rule it applies to that belief still
+        selects the unsafe action; a wrong, missing, or stale belief belongs to
+        the process-model belief instead.
     forbidden:
       - compatible_mechanisms
       - "`stimulus`"

@@ -654,6 +654,7 @@ def test_every_compiled_intention_names_a_selected_path_identity(make_context) -
         *(item.element_id for item in path.feedback),
         path.control_action.action_id,
         *(item.action_id for item in path.related_control_actions),
+        path.controller.element_id,
     }
     choices = _causal_source_choices(context)
     by_handle = {choice.handle: choice for choice in choices}

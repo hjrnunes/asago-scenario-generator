@@ -4,7 +4,9 @@ After the shape step, one request per published scenario asks the model for
 the scenario's lead paragraph in the STPA Handbook's loss-scenario form
 (Leveson and Thomas 2018, pp. 46-47): the situation, the unsafe action
 "because" the agent wrongly believes something, how that flawed belief
-arises, and the harm. The model cites numbered facts that code builds from
+arises, and the harm. When every causal factor is a faulty decision rule, the
+agent's belief is correct, and the paragraph says the action happens because
+of that rule instead. The model cites numbered facts that code builds from
 the scenario spec, and adds no fact of its own.
 
 Code checks every reply and never repairs it. A reply that breaks a rule
@@ -46,7 +48,10 @@ from asago_scenario_generator.stpa.models.attack_shape import (
     TurnSpeaker,
     default_attack_shape,
 )
-from asago_scenario_generator.stpa.models.causal_factor import CausalFactor
+from asago_scenario_generator.stpa.models.causal_factor import (
+    CausalFactor,
+    is_belief_flaw,
+)
 from asago_scenario_generator.stpa.models.scenario_spec import ScenarioSpec
 
 from ._constants import PROMPTS_DIR
@@ -80,6 +85,7 @@ ATTACKER_PLAN = "attacker plan"
 ATTACK_STEP = "attack step"
 AGENT_BELIEF = "agent belief"
 WEAK_POINT = "weak point"
+DECISION_RULE = "decision rule"
 UNSAFE_ACTION = "unsafe action"
 FAILURE = "failure"
 HAZARD = "hazard"
@@ -88,7 +94,7 @@ LOSS = "loss"
 _COVERAGE: tuple[tuple[str, tuple[str, ...], bool], ...] = (
     ("the situation", (SITUATION,), False),
     ("the unsafe action", (UNSAFE_ACTION, FAILURE), False),
-    ("the weak point", (WEAK_POINT, AGENT_BELIEF), False),
+    ("the weak point", (WEAK_POINT, AGENT_BELIEF, DECISION_RULE), False),
     ("how the attacker brings it about", (ATTACK_STEP, ATTACKER_PLAN), True),
     ("the harm", (HAZARD, LOSS), False),
 )
@@ -127,6 +133,12 @@ _STRUCTURAL_ID = re.compile(
     r"\b(?:PM|FB|CA)-\d+-\d+\b|\b(?:RESP|CL|CM|CP|H|L|SC|SEM)-\d+\b"
 )
 _FACT_ID = re.compile(r"\bF\d+\b")
+# Wording that attributes a false belief to the agent.
+_FALSE_BELIEF = re.compile(
+    r"\b(?:incorrectly|wrongly|mistakenly|falsely|erroneously)\s+believ"
+    r"|\bflawed\s+belief",
+    re.IGNORECASE,
+)
 _IDENTIFIER = re.compile(r"\b[A-Za-z][A-Za-z0-9]*_[A-Za-z0-9_]+\b|\b[A-Z]{2,}-?\d+\b")
 _NUMBER = re.compile(r"\d+(?:[.,]\d+)?")
 _LONG_QUOTE = re.compile(r"[\"\u201c][^\"\u201c\u201d]{40,}[\"\u201d]")
@@ -325,6 +337,10 @@ class ScenarioFacts:
     # True when the agent-belief facts state the factors' flawed beliefs; the
     # sentence that says why the agent acts must then cite one of them.
     stated_beliefs: bool = False
+    # True when every factor is a faulty decision rule: the agent's belief is
+    # correct, so the sentence that says why the agent acts cites a decision
+    # rule fact and says no belief is false.
+    rule_only: bool = False
 
     def ids_in(self, categories: Sequence[str]) -> list[str]:
         return [fact.fact_id for fact in self.facts if fact.category in categories]
@@ -373,7 +389,8 @@ def build_facts(spec: ScenarioSpec) -> ScenarioFacts:
                 )
             )
         if plain(factor.description):
-            entries.append((WEAK_POINT, plain(factor.description)))
+            category = WEAK_POINT if is_belief_flaw(factor.kind) else DECISION_RULE
+            entries.append((category, plain(factor.description)))
     if context is not None:
         entries.append((UNSAFE_ACTION, plain(context.ica.exact_ica_text)))
     entries.append((FAILURE, plain(selected_criterion(spec))))
@@ -398,6 +415,8 @@ def build_facts(spec: ScenarioSpec) -> ScenarioFacts:
         coverage=coverage,
         steps=steps,
         stated_beliefs=stated,
+        rule_only=bool(spec.causal_factors)
+        and not any(is_belief_flaw(factor.kind) for factor in spec.causal_factors),
     )
 
 
@@ -598,6 +617,7 @@ def render_narration_prompts(
         max_sentences=MAX_SENTENCES,
         max_words=WORDS_ASKED,
         max_title_words=MAX_TITLE_WORDS,
+        rule_only=facts.rule_only,
     )
     user = loader.render_prompt(
         "stage6_narrate_user.j2",
@@ -611,6 +631,7 @@ def render_narration_prompts(
         belief_ids=(
             ", ".join(facts.ids_in((AGENT_BELIEF,))) if facts.stated_beliefs else ""
         ),
+        rule_ids=", ".join(facts.ids_in((DECISION_RULE,))) if facts.rule_only else "",
     )
     return system, user
 
@@ -644,6 +665,22 @@ def narration_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[str]
             failures.append(
                 f"no sentence cites {name}; cite at least one of {', '.join(ids)}"
             )
+    if facts.rule_only:
+        failures.extend(_rule_reason_failures(reply, facts))
+    else:
+        failures.extend(_belief_reason_failures(reply, facts))
+    title_words = word_count(reply.title)
+    if title_words > MAX_TITLE_WORDS:
+        failures.append(
+            f"the title has {title_words} words; use at most {MAX_TITLE_WORDS}"
+        )
+    failures.extend(text_failures("the title", reply.title, source_text))
+    return failures
+
+
+def _belief_reason_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[str]:
+    """Check the sentence that explains the action by an incorrect belief."""
+    failures: list[str] = []
     reasons = [
         sentence
         for sentence in reply.sentences
@@ -664,12 +701,35 @@ def narration_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[str]
             "the sentence that says why the agent acts cites no agent belief "
             f"fact; cite the one whose belief it states: {', '.join(belief_ids)}"
         )
-    title_words = word_count(reply.title)
-    if title_words > MAX_TITLE_WORDS:
+    return failures
+
+
+def _rule_reason_failures(reply: NarrationReply, facts: ScenarioFacts) -> list[str]:
+    """Check the sentence that explains the action by a faulty decision rule."""
+    failures: list[str] = []
+    reasons = [
+        sentence for sentence in reply.sentences if "because" in sentence.text.lower()
+    ]
+    rule_ids = facts.ids_in((DECISION_RULE,))
+    if not reasons:
         failures.append(
-            f"the title has {title_words} words; use at most {MAX_TITLE_WORDS}"
+            'no sentence says why the agent acts, as in "because the rule it '
+            'applies ..."'
         )
-    failures.extend(text_failures("the title", reply.title, source_text))
+    elif rule_ids and not any(
+        set(sentence.facts) & set(rule_ids) for sentence in reasons
+    ):
+        failures.append(
+            "the sentence that says why the agent acts cites no decision rule "
+            f"fact; cite the one whose rule it states: {', '.join(rule_ids)}"
+        )
+    for index, sentence in enumerate(reply.sentences, 1):
+        if _FALSE_BELIEF.search(sentence.text):
+            failures.append(
+                f"sentence {index} says the agent holds a false belief; its "
+                "belief is correct here, so explain the action by its faulty "
+                "decision rule"
+            )
     return failures
 
 
@@ -973,8 +1033,9 @@ def write_fallback(spec: ScenarioSpec) -> FallbackNarrative:
 def _reason_sentences(
     spec: ScenarioSpec, stated: Callable[[str, Sequence[str | None]], list[str]]
 ) -> list[str]:
-    """Say why the agent acts: its flawed beliefs, then the weak points."""
+    """Say why the agent acts: its flawed beliefs or rule, then the weak points."""
     factors = spec.causal_factors
+    belief_factors = [factor for factor in factors if is_belief_flaw(factor.kind)]
     reason = ""
     if any(factor.flawed_belief for factor in factors):
         beliefs = stated(BELIEFS_PART, [factor.flawed_belief for factor in factors])
@@ -983,12 +1044,15 @@ def _reason_sentences(
     else:
         held = {belief.pm_id: belief.content for belief in spec.defender_bdi.beliefs}
         topics = stated(
-            BELIEFS_PART, [held.get(factor.source_id) for factor in factors]
+            BELIEFS_PART, [held.get(factor.source_id) for factor in belief_factors]
         )
         if len(topics) == 1:
             reason = f"its belief about {topics[0]} is wrong"
         elif topics:
             reason = f"its beliefs about {' and '.join(topics)} are wrong"
+    if len(belief_factors) < len(factors):
+        rule = "it applies a faulty decision rule"
+        reason = f"{reason}, and {rule}" if reason else rule
     weak = stated(WEAK_POINTS_PART, [factor.description for factor in factors])
     weak_text = ""
     if weak:
