@@ -47,7 +47,7 @@ def _scenario_semantics_payload_type(
     observation_criteria_required: bool = False,
     condition_references_supplied: bool = False,
     failure_call_supported: bool = False,
-    condition_operations: tuple[str, ...] = (),
+    operations: tuple[str, ...] = (),
 ) -> type[BaseModel]:
     """Return the normal-path response schema: semantics and evidence only.
 
@@ -56,9 +56,10 @@ def _scenario_semantics_payload_type(
     execution route, factor-route binding or unsafe-outcome condition.
     ``failure_call_supported`` adds the required, nullable ``failure_call``
     of the failure criterion, which the prompt explains only when the
-    contract captures tool calls. ``condition_operations`` closes every
-    operation name of the discriminating condition to the request's operation
-    inventory (:func:`_with_condition_operations`).
+    contract captures tool calls. ``operations`` closes every operation name
+    of the discriminating condition, the failure call and the observation
+    criteria to the request's operation inventory
+    (:func:`_with_closed_operations`).
     """
     _require_positive_schema_count(choice_count, "choice_count")
     suffix = f"{choice_count}"
@@ -124,42 +125,48 @@ def _scenario_semantics_payload_type(
         causal_factors=(conlist(factor_union, min_length=1), ...),
         unsafe_outcome=(outcome_type, ...),
     )
-    condition_offered = observation_criteria_required and condition_references_supplied
-    if condition_offered and condition_operations:
-        return _with_condition_operations(payload_type, condition_operations)
+    if operations:
+        return _with_closed_operations(payload_type, operations)
     return payload_type
 
 
-# Each condition model and its fields that name an operation of the inventory.
-_CONDITION_OPERATION_FIELDS: tuple[tuple[type[BaseModel], tuple[str, ...]], ...] = (
+# Each model and its fields that name an operation of the inventory: the
+# discriminating condition's, the failure call's and the observation
+# criterion's.
+_OPERATION_FIELDS: tuple[tuple[type[BaseModel], tuple[str, ...]], ...] = (
     (ArgumentOperand, ("operation",)),
     (OrderComparison, ("operation", "requires_prior")),
     (NotCalledComparison, ("operation",)),
     (ArgumentValueSelection, ("operation",)),
+    (FailureCall, ("operation_name",)),
+    (_ObservationCriterionDraft, ("operation_name",)),
 )
 
 
-def _with_condition_operations(
+def _with_closed_operations(
     model: type[BaseModel], operations: tuple[str, ...]
 ) -> type[BaseModel]:
-    """Return a subclass whose schema closes condition operations to ``operations``.
+    """Return a subclass whose schema closes operation names to ``operations``.
 
     A guided decoder samples any string an open field allows. In the flat
     comparison object the nullable fields of the other branches follow
     ``operation``, so a reply that closes the comparison early writes the
     closing characters into the name. The enum keeps the reply inside the
     inventory. Only the schema changes: a reply still parses with any name,
-    so the condition check rejects one outside the inventory with its exact
-    correction.
+    so the condition check and the observation check reject one outside the
+    inventory with their exact correction. A model the request does not
+    carry (no condition, or no failure call) has no definition to close.
     """
 
     def model_json_schema(cls: type[BaseModel], *args: Any, **kwargs: Any):
         schema = super(closed, cls).model_json_schema(*args, **kwargs)
         definitions = schema["$defs"]
-        for condition_model, names in _CONDITION_OPERATION_FIELDS:
-            properties = definitions[condition_model.__name__]["properties"]
+        for operation_model, names in _OPERATION_FIELDS:
+            definition = definitions.get(operation_model.__name__)
+            if definition is None:
+                continue
             for name in names:
-                _close_string(properties[name], operations)
+                _close_string(definition["properties"][name], operations)
         return schema
 
     closed = type(

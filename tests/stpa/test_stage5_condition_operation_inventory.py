@@ -1,4 +1,4 @@
-"""A Stage 5 condition names only operations of the target's inventory.
+"""A Stage 5 reply names only operations of the target's inventory.
 
 The fixture reproduces a reply shape seen from a guided decoder: the request
 schema left a ``not_called`` operation an open string, and in the flat
@@ -6,7 +6,8 @@ comparison object the nullable fields of the other branches follow
 ``operation``. The reply closed the comparison inside the string, so the
 operation came back as ``"open_ticket}], "``. A schema enum keeps a guided
 reply inside the inventory; the condition check still rejects any name outside
-it with the exact correction.
+it with the exact correction. The failure call and the observation criteria
+name an operation of the same inventory and are closed the same way.
 """
 
 from __future__ import annotations
@@ -34,6 +35,14 @@ INVENTORY = sorted(TOOLS)
 MALFORMED = "open_ticket}], "
 MISSING_TICKET = {"kind": "missing_call", "operation_name": "open_ticket"}
 CHECK_FAILED = "discriminating_condition_check_failed"
+UNKNOWN_FAILURE_CALL = (
+    "failure_call operation_name must name an exact operation from the "
+    "supplied inventory, or failure_call must be null"
+)
+UNKNOWN_CRITERION = (
+    "observation criterion operation_name must name an exact operation from "
+    "the supplied inventory"
+)
 # The decoded operation is stripped, so the error names it without the space.
 UNKNOWN_OPERATION = (
     f"comparisons[0] names operation {MALFORMED.strip()!r}, which is not in the "
@@ -101,7 +110,7 @@ def _missing_ticket_payload(condition: dict) -> dict:
         "evidence": "tool_call",
         "operation_name": "open_ticket",
     }
-    outcome["failure_call"] = MISSING_TICKET
+    outcome["failure_call"] = dict(MISSING_TICKET)
     return payload
 
 
@@ -142,6 +151,26 @@ def _condition_validator(schema: dict) -> jsonschema.Draft202012Validator:
     )
 
 
+def _outcome_definition(schema: dict, name: str) -> dict:
+    """The definition of one ``unsafe_outcome`` property, nullable or not."""
+    outcome = schema["properties"]["unsafe_outcome"]
+    if "$ref" in outcome:
+        outcome = schema["$defs"][outcome["$ref"].rsplit("/", 1)[-1]]
+    field = outcome["properties"][name]
+    if field.get("type") == "array":
+        field = field["items"]
+    [option] = [
+        branch for branch in field.get("anyOf", [field]) if branch != {"type": "null"}
+    ]
+    return schema["$defs"][option["$ref"].rsplit("/", 1)[-1]]
+
+
+def _validator_of(schema: dict, name: str) -> jsonschema.Draft202012Validator:
+    return jsonschema.Draft202012Validator(
+        {**_outcome_definition(schema, name), "$defs": schema.get("$defs", {})}
+    )
+
+
 def _normalizations(tmp_path) -> list[dict]:
     [path] = (tmp_path / "stage5-normalizations").glob("*.yaml")
     return yaml.safe_load(path.read_text(encoding="utf-8"))["normalizations"]
@@ -168,14 +197,46 @@ def test_the_sent_schema_rejects_the_recorded_malformed_not_called_operation(
     ] == [("enum", INVENTORY)]
 
 
-def test_every_condition_operation_field_is_closed_to_the_inventory() -> None:
+def test_the_sent_schema_rejects_a_malformed_failure_call_and_criterion_operation(
+    tmp_path,
+) -> None:
+    client = _client(_missing_ticket_payload(_condition("open_ticket")))
+
+    _profile_generate(client, tmp_path)
+
+    schema = _sent_schema(client)
+    failure_call = _validator_of(schema, "failure_call")
+    failure_call.validate(MISSING_TICKET)
+    with pytest.raises(jsonschema.ValidationError) as caught:
+        failure_call.validate({**MISSING_TICKET, "operation_name": MALFORMED})
+    assert (caught.value.validator, caught.value.validator_value) == (
+        "enum",
+        INVENTORY,
+    )
+    criterion = _validator_of(schema, "observation_criteria")
+    [observed] = _missing_ticket_payload(_condition("open_ticket"))["unsafe_outcome"][
+        "observation_criteria"
+    ]
+    criterion.validate(observed)
+    criterion.validate({**observed, "operation_name": None})
+    with pytest.raises(jsonschema.ValidationError) as caught:
+        criterion.validate({**observed, "operation_name": MALFORMED})
+    # ``operation_name`` is nullable: its string branch carries the enum.
+    assert [
+        (item.validator, item.validator_value)
+        for item in caught.value.context
+        if item.validator == "enum"
+    ] == [("enum", INVENTORY)]
+
+
+def test_every_operation_field_is_closed_to_the_inventory() -> None:
     operations = ("open_ticket", "update_gadget")
     payload_type = _scenario_semantics_payload_type(
         1,
         observation_criteria_required=True,
         condition_references_supplied=True,
         failure_call_supported=True,
-        condition_operations=operations,
+        operations=operations,
     )
     defs = payload_type.model_json_schema()["$defs"]
 
@@ -187,9 +248,32 @@ def test_every_condition_operation_field_is_closed_to_the_inventory() -> None:
             ("OrderComparison", "requires_prior"),
             ("ArgumentOperand", "operation"),
             ("ArgumentValueSelection", "operation"),
+            ("FailureCall", "operation_name"),
         )
     }
     assert closed == dict.fromkeys(closed, list(operations))
+    criterion = defs["_ObservationCriterionDraft"]["properties"]["operation_name"]
+    assert criterion["anyOf"] == [
+        {"minLength": 1, "type": "string", "enum": list(operations)},
+        {"type": "null"},
+    ]
+
+
+def test_the_failure_call_and_criteria_are_closed_without_a_condition() -> None:
+    operations = ("open_ticket", "update_gadget")
+    defs = _scenario_semantics_payload_type(
+        1,
+        observation_criteria_required=True,
+        failure_call_supported=True,
+        operations=operations,
+    ).model_json_schema()["$defs"]
+
+    assert "NotCalledComparison" not in defs
+    assert defs["FailureCall"]["properties"]["operation_name"]["enum"] == list(
+        operations
+    )
+    criterion = defs["_ObservationCriterionDraft"]["properties"]["operation_name"]
+    assert criterion["anyOf"][0]["enum"] == list(operations)
 
 
 def test_a_reply_parse_still_accepts_any_operation_for_the_exact_check() -> None:
@@ -198,9 +282,11 @@ def test_a_reply_parse_still_accepts_any_operation_for_the_exact_check() -> None
         observation_criteria_required=True,
         condition_references_supplied=True,
         failure_call_supported=True,
-        condition_operations=("open_ticket",),
+        operations=("open_ticket",),
     )
     payload = _missing_ticket_payload(_condition(MALFORMED))
+    payload["unsafe_outcome"]["failure_call"]["operation_name"] = MALFORMED
+    payload["unsafe_outcome"]["observation_criteria"][0]["operation_name"] = MALFORMED
     payload["causal_factors"] = payload["causal_factors"][:1]
     payload["causal_factors"][0]["source_handle"] = "cause_1"
     for intention in payload["attacker_bdi"]["intentions"]:
@@ -210,9 +296,12 @@ def test_a_reply_parse_still_accepts_any_operation_for_the_exact_check() -> None
 
     [comparison] = draft.unsafe_outcome.discriminating_condition.comparisons
     assert comparison.operation == MALFORMED.strip()
+    assert draft.unsafe_outcome.failure_call.operation_name == MALFORMED.strip()
+    [criterion] = draft.unsafe_outcome.observation_criteria
+    assert criterion.operation_name == MALFORMED
 
 
-def test_without_operations_the_condition_schema_is_unchanged() -> None:
+def test_without_operations_the_schema_is_unchanged() -> None:
     options = {
         "observation_criteria_required": True,
         "condition_references_supplied": True,
@@ -222,13 +311,14 @@ def test_without_operations_the_condition_schema_is_unchanged() -> None:
 
     assert (
         _scenario_semantics_payload_type(
-            1, **options, condition_operations=()
+            1, **options, operations=()
         ).model_json_schema()
         == plain
     )
     assert (
         "enum" not in plain["$defs"]["NotCalledComparison"]["properties"]["operation"]
     )
+    assert "enum" not in plain["$defs"]["FailureCall"]["properties"]["operation_name"]
 
 
 def test_a_malformed_operation_is_corrected_with_the_exact_inventory_error(
@@ -279,3 +369,27 @@ def test_a_malformed_operation_the_corrections_keep_is_a_recorded_failure(
         MALFORMED,
         "open_ticket",
     ]
+
+
+@pytest.mark.parametrize(
+    ("field", "error"),
+    [("failure_call", UNKNOWN_FAILURE_CALL), ("criterion", UNKNOWN_CRITERION)],
+)
+def test_a_malformed_outcome_operation_is_corrected_with_the_exact_error(
+    tmp_path, field: str, error: str
+) -> None:
+    malformed = _missing_ticket_payload(_condition("open_ticket"))
+    outcome = malformed["unsafe_outcome"]
+    if field == "failure_call":
+        outcome["failure_call"]["operation_name"] = MALFORMED
+    else:
+        outcome["observation_criteria"][0]["operation_name"] = MALFORMED
+    client = _client(malformed, _missing_ticket_payload(_condition("open_ticket")))
+
+    result, failure = _profile_generate(client, tmp_path)
+
+    assert failure is None
+    assert client.call_count == 2
+    assert error in client.calls[1].user_prompt
+    assert _sent_schema(client, 1) == _sent_schema(client, 0)
+    assert result.discriminating_condition is not None

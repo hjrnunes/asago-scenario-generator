@@ -256,7 +256,7 @@ def _generate_semantics(
             observation_contract is not None
             and observation_contract.supports_evidence("tool_call")
         ),
-        condition_operations=tuple(sorted(condition_universe.operations)),
+        operations=tuple(sorted(condition_universe.operations)),
     )
     checks: list[_NormalDraftCheck] = []
 
