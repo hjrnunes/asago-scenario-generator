@@ -286,17 +286,22 @@ ICA prose length and repetition are presentation diagnostics only:
 semantically valid findings remain available with `ica_prose_quality_warning`.
 
 Once the per-slot replies are assembled, and before the enumeration is
-accepted, the fill withholds each NOT_PROVIDED ICA that cites the same
+accepted, the fill quarantines each NOT_PROVIDED ICA that cites the same
 context row, hazards and constraints as an INCORRECT ICA of the same
 controller and control action (`obligation_aware.inverted_omission`). The
-omission would claim that leaving the action out causes the very hazard its
-sibling says providing it causes. Each slot is sent in a request of its own,
-so the two never meet in one reply and no correction is sent; the check adds
-no request. The withheld ICA leaves its slot, which keeps its other ICA IDs
-or becomes unresolved; each obligation or mechanism result that credited it
-keeps its other ICAs or becomes unresolved; and both carry an
-`ica_inverted_omission_withheld` diagnostic naming the two ICAs. An ICA that
-cites no context row is not compared.
+omission claims that leaving the action out causes the hazard its sibling
+says providing it causes. Both can hold, but the omission may be the
+INCORRECT ICA inverted, so it is kept out of scenario generation pending a
+semantic check. Each slot is sent in a request of its own, so the two never
+meet in one reply and no correction is sent; the check adds no request. The
+quarantined ICA leaves its slot, which keeps its other ICA IDs or becomes
+unresolved; each obligation or mechanism result that credited it keeps its
+other ICAs or becomes unresolved; and both carry an
+`ica_inverted_omission_quarantined` diagnostic naming the two ICAs. The
+manifest lists each one under `provider_evidence.ica.quarantined_icas`, with
+`status: quarantined`, its slot, the whole ICA (ID, context row, hazards,
+constraints and prose), the sibling ICA ID and the diagnostic, so a later
+check can release it. An ICA that cites no context row is not compared.
 
 Every slot is offered every hazard, so an ICA can cite a hazard about an
 operation that another control action invokes. Final-ICA verification checks

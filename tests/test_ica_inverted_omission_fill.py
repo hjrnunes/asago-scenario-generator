@@ -1,4 +1,4 @@
-"""A NOT_PROVIDED finding that repeats an INCORRECT one is withheld by the fill.
+"""A NOT_PROVIDED finding that repeats an INCORRECT one is quarantined by the fill.
 
 The fill sends every slot in its own request, so the two findings meet only
 once the per-slot replies are assembled.
@@ -6,7 +6,12 @@ once the per-slot replies are assembled.
 
 from __future__ import annotations
 
+from types import SimpleNamespace
+
 from asago_scenario_generator.models.attack_pattern_chain import AttackPattern
+from asago_scenario_generator.pipeline.synthesis_manifest import (
+    _manifest_provider_evidence,
+)
 from asago_scenario_generator.stpa.models.ica_enumeration import UCAType
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     IcaDeviationDraft,
@@ -158,7 +163,7 @@ def _fill(omitted_rows: tuple[str, ...]):
     return adapter, result, slots, pairs
 
 
-def test_the_omission_is_withheld_after_the_per_slot_replies_are_assembled() -> None:
+def test_the_omission_is_quarantined_after_the_per_slot_replies_are_assembled() -> None:
     adapter, result, slots, pairs = _fill((ROW_INVALID,))
 
     # Production sends each slot in a request of its own.
@@ -167,7 +172,7 @@ def test_the_omission_is_withheld_after_the_per_slot_replies_are_assembled() -> 
     assert omitted.icas == []
     assert omitted.unresolved_reason == (
         "Every finding of this slot repeats an INCORRECT finding of the same "
-        "control action and was withheld."
+        "control action and is quarantined pending a semantic check."
     )
     assert [ica.ica_id for ica in slots[INCORRECT].icas] == [f"{INCORRECT}:1"]
     [diagnostic] = [
@@ -176,23 +181,71 @@ def test_the_omission_is_withheld_after_the_per_slot_replies_are_assembled() -> 
     # Diagnostic refs are kept in sorted order.
     assert diagnostic.refs == (f"{INCORRECT}:1", f"{NOT_PROVIDED}:1")
     assert diagnostic.detail == (
-        f"{NOT_PROVIDED}:1 withheld: it cites the same context row "
-        f"({ROW_INVALID}), hazards (H-1) and constraints (SC-1) as "
-        f"{INCORRECT}:1. The NOT_PROVIDED finding states that omitting the "
-        "action in that context causes the hazard, and the INCORRECT finding "
-        "that providing it does; both cannot hold for the same hazard."
+        f"{NOT_PROVIDED}:1 quarantined: the NOT_PROVIDED finding repeats the "
+        f"context row ({ROW_INVALID}), hazards (H-1) and constraints (SC-1) of "
+        f"the INCORRECT finding {INCORRECT}:1, so it may be the INCORRECT "
+        "finding inverted. It is kept out of scenario generation pending a "
+        "semantic check."
     )
-    # The pair no longer credits the withheld ICA.
+    # The pair no longer credits the quarantined ICA.
     pair = pairs[NOT_PROVIDED]
     assert (pair.disposition, pair.ica_ids) == ("unresolved", ())
     assert INVERTED_OMISSION_CODE in {item.code for item in pair.diagnostics}
     assert pairs[INCORRECT].ica_ids == (f"{INCORRECT}:1",)
 
 
+def test_the_quarantined_omission_is_absent_from_scenario_generation_input() -> None:
+    _adapter, result, _slots, _pairs = _fill((ROW_INVALID,))
+
+    # Stage 5 builds scenarios from the ICA enumeration and its considerations.
+    ica_ids = {ica.ica_id for slot in result.ica_enumeration.slots for ica in slot.icas}
+    credited = {ica_id for item in result.considerations for ica_id in item.ica_ids}
+    assert f"{NOT_PROVIDED}:1" not in ica_ids | credited
+    assert ica_ids == {f"{INCORRECT}:1"}
+
+
+def test_the_quarantined_omission_is_recorded_with_its_finding_and_diagnostic() -> None:
+    _adapter, result, _slots, _pairs = _fill((ROW_INVALID,))
+
+    [record] = result.quarantined_icas
+    assert result.result.quarantined_icas == result.quarantined_icas
+    assert record.status == "quarantined"
+    assert (record.slot_id, record.sibling_ica_id) == (NOT_PROVIDED, f"{INCORRECT}:1")
+    assert (
+        record.ica.ica_id,
+        record.ica.context_row,
+        record.ica.related_hazards,
+        record.ica.related_constraints,
+    ) == (f"{NOT_PROVIDED}:1", ROW_INVALID, ["H-1"], ["SC-1"])
+    assert record.ica.ica_text
+    [diagnostic] = [
+        item for item in result.diagnostics if item.code == INVERTED_OMISSION_CODE
+    ]
+    assert record.diagnostic == diagnostic
+
+
+def test_the_manifest_lists_the_quarantined_omission() -> None:
+    _adapter, result, _slots, _pairs = _fill((ROW_INVALID,))
+
+    evidence = _manifest_provider_evidence(
+        {"ica": result}, SimpleNamespace(profile="synthesis")
+    )
+
+    [entry] = evidence["ica"]["quarantined_icas"]
+    assert entry == result.quarantined_icas[0].model_dump(mode="json")
+    assert entry["status"] == "quarantined"
+    assert entry["ica"]["ica_id"] == f"{NOT_PROVIDED}:1"
+    assert entry["ica"]["context_row"] == ROW_INVALID
+    assert entry["ica"]["related_hazards"] == ["H-1"]
+    assert entry["ica"]["related_constraints"] == ["SC-1"]
+    assert entry["sibling_ica_id"] == f"{INCORRECT}:1"
+    assert entry["diagnostic"]["code"] == INVERTED_OMISSION_CODE
+
+
 def test_a_sibling_omission_on_another_row_stays() -> None:
     _adapter, result, slots, pairs = _fill((ROW_INVALID, ROW_VALID))
 
-    # The withheld ICA keeps its identity gap; the other keeps its ID.
+    # The quarantined ICA keeps its identity gap; the other keeps its ID.
     assert [ica.ica_id for ica in slots[NOT_PROVIDED].icas] == [f"{NOT_PROVIDED}:2"]
     assert pairs[NOT_PROVIDED].disposition == "finding"
     assert pairs[NOT_PROVIDED].ica_ids == (f"{NOT_PROVIDED}:2",)
@@ -204,3 +257,8 @@ def test_an_omission_on_its_own_row_is_kept() -> None:
     assert [ica.context_row for ica in slots[NOT_PROVIDED].icas] == [ROW_VALID]
     assert pairs[NOT_PROVIDED].ica_ids == (f"{NOT_PROVIDED}:1",)
     assert INVERTED_OMISSION_CODE not in {item.code for item in result.diagnostics}
+    assert result.quarantined_icas == ()
+    evidence = _manifest_provider_evidence(
+        {"ica": result}, SimpleNamespace(profile="synthesis")
+    )
+    assert "quarantined_icas" not in evidence["ica"]

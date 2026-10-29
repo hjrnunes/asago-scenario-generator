@@ -47,6 +47,7 @@ from asago_scenario_generator.stpa.models.control_structure import (
     FeedbackUpdateAuthority,
 )
 from asago_scenario_generator.stpa.models.ica_enumeration import (
+    ICA,
     ICAEnumeration,
     ICASlot,
     UCAType,
@@ -938,6 +939,22 @@ class SlotLoss(_Model):
     call_id: str = Field(min_length=1)
 
 
+class QuarantinedIca(_Model):
+    """A NOT_PROVIDED ICA the fill kept out of scenario generation.
+
+    It repeats the context row, hazards and constraints of an INCORRECT ICA
+    of its control action, so it may be that ICA inverted.  The record keeps
+    the whole ICA, its slot and the sibling, so that a later semantic check
+    can release it.
+    """
+
+    status: Literal["quarantined"] = "quarantined"
+    slot_id: str = Field(min_length=1)
+    ica: ICA
+    sibling_ica_id: str = Field(min_length=1)
+    diagnostic: ConsiderationDiagnostic
+
+
 class SlotFillFailure(_Model):
     """The failure that stopped a slot fill before it sent every request.
 
@@ -977,6 +994,11 @@ class SynthesisSlotFillResult(_Model):
     # the fill sent every request.
     fill_failure: SlotFillFailure | None = Field(
         default=None, exclude_if=lambda value: value is None
+    )
+    # ICAs kept out of the enumeration pending a semantic check; absent from
+    # the serialized form when none was.
+    quarantined_icas: tuple[QuarantinedIca, ...] = Field(
+        default=(), exclude_if=lambda value: not value
     )
 
     @model_validator(mode="after")
@@ -1032,6 +1054,11 @@ class SynthesisSlotFillResult(_Model):
             unique_mechanism_considerations(
                 self.mechanism_considerations, "slot fill result"
             ),
+        )
+        object.__setattr__(
+            self,
+            "quarantined_icas",
+            tuple(sorted(self.quarantined_icas, key=lambda item: item.ica.ica_id)),
         )
         return self
 

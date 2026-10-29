@@ -51,13 +51,14 @@ from asago_scenario_generator.stpa.models.ica_enumeration import (
 from asago_scenario_generator.stpa.models.loss_analysis import LossAnalysis
 from asago_scenario_generator.stpa.obligation_aware.calls import call_evidence
 from asago_scenario_generator.stpa.obligation_aware.inverted_omission import (
-    withhold_inverted_omissions,
+    quarantine_inverted_omissions,
 )
 from asago_scenario_generator.stpa.obligation_aware.contracts import (
     DEVIATION_FIELD_BY_UCA_TYPE,
     AnalysisControls,
     IcaFindingDraft,
     ObligationIcaDraft,
+    QuarantinedIca,
     SlotIcaDraft,
     SlotProviderEntry,
     SlotAnalysisAdapter,
@@ -1600,6 +1601,11 @@ class SlotFillRunResult:
         return self.result.ica_merges
 
     @property
+    def quarantined_icas(self) -> tuple[QuarantinedIca, ...]:
+        """Expose the ICAs kept out of the enumeration pending a semantic check."""
+        return self.result.quarantined_icas
+
+    @property
     def call_evidence(self) -> tuple[Any, ...]:
         """Expose slot and independent-verifier call evidence together."""
         values = list(self.result.call_evidence)
@@ -2387,7 +2393,7 @@ def fill_synthesis_slots(
             call_ref=call_ref,
         )
 
-    withhold_inverted_omissions(
+    quarantined = quarantine_inverted_omissions(
         state.all_filled, state.all_pairs, state.mechanism_pairs, state.diagnostics
     )
     ordered_slots = tuple(state.all_filled[key] for key in sorted(state.all_filled))
@@ -2402,6 +2408,7 @@ def fill_synthesis_slots(
         lost_slots=tuple(state.lost.values()),
         ica_merges=tuple(state.ica_merges),
         mechanism_considerations=tuple(state.mechanism_pairs),
+        quarantined_icas=quarantined,
         fill_failure=(
             None
             if stop is None

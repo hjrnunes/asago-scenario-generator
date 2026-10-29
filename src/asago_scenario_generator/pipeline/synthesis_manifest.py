@@ -496,6 +496,11 @@ def _manifest_provider_evidence(
         fill_failure = getattr(stages[stage_name], "fill_failure", None)
         if fill_failure is not None:
             result[stage_name]["fill_failure"] = _dump(fill_failure)
+        quarantined = getattr(stages[stage_name], "quarantined_icas", ())
+        if quarantined:
+            result[stage_name]["quarantined_icas"] = [
+                _dump(item) for item in quarantined
+            ]
         verification = getattr(stages[stage_name], "ica_hazard_verification", None)
         if verification is not None:
             result[stage_name]["ica_hazard_verification"] = _dump(verification)
