@@ -343,7 +343,10 @@ def test_the_verifier_makes_no_retry_after_a_provider_failure(
     response = _find(client, tmp_path)
 
     assert client.call_count == 2
-    assert response.findings[0].verification.status == "unverified"
+    verification = response.findings[0].verification
+    assert verification.status == "unverified"
+    assert "retry" not in verification.detail
+    assert "provider or transport failure" in verification.detail
 
 
 def test_the_verifier_still_retries_an_invalid_reply(tmp_path: Path) -> None:
