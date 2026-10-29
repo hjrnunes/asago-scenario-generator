@@ -1167,6 +1167,47 @@ def test_the_correction_shows_an_undecodable_prior_reply_as_written(
     assert _shown_prior_reply(request) == '{"dismissed_gaps": ["legacy"'
 
 
+@pytest.mark.parametrize("opening", ["```json", "```"])
+def test_the_correction_shows_a_fenced_prior_reply_in_the_current_format(
+    tmp_path, opening: str
+) -> None:
+    corrected = _reply(
+        _disposition("G-1", "addressed", "PM-1-2"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        _disposition("G-3", "dismissed"),
+        _disposition("G-4", "dismissed"),
+    )
+    client = _transport_client(corrected)
+    invalid = {"new_responsibilities": "invalid list", "dismissed_gaps": ["legacy"]}
+    fenced = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=3, completion_tokens=4),
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(
+                    content=f"{opening}\n{json.dumps(invalid)}\n```"
+                ),
+                finish_reason="stop",
+            )
+        ],
+    )
+    create = client._client.chat.completions.create
+    create.side_effect = [fenced, *create.side_effect]
+
+    revise_control_structure(
+        llm_client=client,
+        control_structure=_reviewed(),
+        critic_findings=_FINDINGS,
+        use_case_text="Drafts are stored for later review by a person.",
+        run_dir=tmp_path,
+    )
+
+    request = create.call_args_list[1].kwargs["messages"][-1]["content"]
+    assert "dismissed_gaps" not in request
+    assert json.loads(_shown_prior_reply(request)) == {
+        "new_responsibilities": "invalid list"
+    }
+
+
 def test_the_request_schema_offers_dispositions_and_not_free_text() -> None:
     schema = _RevisionDeltaProviderSet.model_json_schema()
 

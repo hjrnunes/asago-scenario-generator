@@ -49,6 +49,7 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     call_with_policy,
     compact_validation_error,
     decode_content,
+    strip_json_fence,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -340,14 +341,14 @@ def _shown_revision_reply(content: Any) -> Any:
     """Show a correction the prior reply with only the fields the schema asks for.
 
     A reply kept as text, because it failed the schema, is shown as written
-    unless it is one JSON object holding such a field; that one is shown
-    decoded, without it.
+    unless it is one JSON object, bare or in one JSON fence, holding such a
+    field; that one is shown decoded, without it.
     """
     if isinstance(content, BaseModel):
         content = raw_model_data(content)
     if isinstance(content, str):
         try:
-            decoded = json.loads(content)
+            decoded = json.loads(strip_json_fence(content))
         except ValueError:
             return content
         if not isinstance(decoded, dict) or _UNREQUESTED_REVISION_FIELDS.isdisjoint(
