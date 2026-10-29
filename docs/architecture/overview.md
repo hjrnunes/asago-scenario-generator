@@ -1034,7 +1034,10 @@ A loss names only channels inside the deployed system: its replies and chat,
 its tool calls, and the backend those calls reach. A third-party model
 provider or other outside service, and prompts as a channel data leaks
 through, are the policy's setting, not this system's. The disposition repair
-cites no declared loss whose only channel is one of those.
+cites no declared loss whose only channel is one of those. The risk-coverage
+review judges each card against its class: the actor or path and the loss of
+its grounded-path test are the class's within this system, not the policy
+example's.
 
 Tolerant SP1 response graphs remain raw until deterministic ID/reference
 normalization produces valid typed artifacts; invalid intermediate Pydantic

@@ -9,14 +9,22 @@ decides what to do with it.
 
 {% include "_loss_analysis_method.j2" %}
 
+## Risk class and policy example
+
+A card's description is its risk class, and the class sets what each row
+judges. The card's consequence, when shown, is the source policy's example of
+that class, written in the policy's own setting with that setting's actors and
+assets. It illustrates the class; it does not define it.
+
 ## What to decide, per risk card
 
 For every supplied risk card, return exactly one row and decide:
 
 1. **What the card puts at stake.** `protects` names the party, data, asset,
    or capability the risk threatens, in your own words.
-2. **Who or what acts against it.** `against` names the actor or path the
-   card itself names, in one phrase. Use `null` when the card names none.
+2. **Who or what acts against it.** `against` names the actor or path through
+   which the card's risk class would act in this system, in one phrase. Use
+   `null` when neither the class nor this system names one.
 3. **Which constraints cover it.** Select exact `SC-*` ids whose rules protect
    the same party or asset against the same actor or path. For each selected
    constraint, nest the source-handle evidence that supports the selection.
@@ -32,8 +40,9 @@ For every supplied risk card, return exactly one row and decide:
      - **Through what**: a tool the use case lists, a data field or record
        the system holds, or a reply it gives that the people in the use case
        act on.
-     - **What loss**: the consequence the card names, landing on the
-       organization that runs the system or on the people it serves.
+     - **What loss**: the harm the card's risk class would cause through
+       this system, landing on the organization that runs the system or on
+       the people it serves.
 
      Choose `not_applicable_disputed` when a grounded path exists, and name
      its three parts in `rationale` as `who; through what; what loss`.
@@ -50,8 +59,8 @@ For every supplied risk card, return exactly one row and decide:
 
 `full` means the constraint's rule protects the same party or asset against
 the same actor or path as the card. A constraint about the same topic is not
-enough: a rule that keeps data inside the system does not cover a card about
-sending that data to a provider. When you are unsure, prefer `partial` over
+enough: a rule that keeps account data out of replies does not cover a card
+about account data sent out through a tool call. When you are unsure, prefer `partial` over
 `full`; a false `full` is the dangerous direction.
 
 ## Evidence rules
