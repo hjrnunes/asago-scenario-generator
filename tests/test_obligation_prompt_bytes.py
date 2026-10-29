@@ -273,10 +273,7 @@ def render_all(tmp_path: Path) -> dict[str, Any]:
     _send(
         tmp_path,
         "ica_verification_correction",
-        lambda a: a.verify_ica_hazards(
-            verification,
-            correction_feedback={verification[0].ica_id: "revised once"},
-        ),
+        lambda a: a.verify_ica_hazards(verification, correction=True),
         record,
         digests,
     )
