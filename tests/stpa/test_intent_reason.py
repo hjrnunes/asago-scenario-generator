@@ -782,3 +782,114 @@ def test_an_obligation_whose_only_finding_is_routed_is_still_generation_failed(
     assert row.disposition == "generation_failed"
     assert row.stop_reason == "scenario_generation_failure"
     assert row.ica_ids == (ica_id,)
+
+
+# --- the cited value must itself be a sole failed-intent predicate ----------
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [
+        (
+            "does not match authorized intent and the currency is wrong",
+            "the request does not match authorized intent and the currency is wrong",
+        ),
+        (
+            "intent unknown before the authorization status is confirmed",
+            "the request is intent unknown before the authorization status is "
+            "confirmed",
+        ),
+        (
+            "does not match the customer's authorized intent or transaction context",
+            "the request does not match the customer's authorized intent or "
+            "transaction context",
+        ),
+        (
+            "not aligned with authorized intent and the amount is negative",
+            "the request is not aligned with authorized intent and the amount is "
+            "negative",
+        ),
+        (
+            "unauthorized transaction over the limit",
+            "the request is an unauthorized transaction over the limit",
+        ),
+        (
+            "intent matches but currency is different",
+            "intent matches but currency is different",
+        ),
+    ],
+)
+def test_a_cited_value_with_mixed_grounds_or_another_failure_is_not_routed(
+    value, reason
+) -> None:
+    variable = _var("PM-1-1", value, description=INTENT.description)
+
+    assert _recognize(reason, _row(variable)) is None
+
+
+@pytest.mark.parametrize(
+    ("value", "reason"),
+    [
+        (
+            "not aligned with authorized intent",
+            "the request is not aligned with authorized intent",
+        ),
+        (
+            "inconsistent with authorized intent",
+            "the request is inconsistent with authorized intent",
+        ),
+        ("user intent unknown", "the request is user intent unknown"),
+    ],
+)
+def test_a_cited_value_in_a_new_intent_only_form_is_routed(value, reason) -> None:
+    variable = _var("PM-1-1", value, description=INTENT.description)
+
+    disposition = _recognize(reason, _row(variable))
+
+    assert disposition is not None
+    assert disposition.basis == "reason_variable"
+
+
+# --- common intent-only phrasings --------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the request is not aligned with the customer's authorized intent",
+        "the request is inconsistent with the customer's authorized intent",
+        "the request is not consistent with the customer's authorized intent",
+        "the request is misaligned with the customer's authorized intent",
+        "the requested operation does not agree with the user's stated intent",
+        "the user intent is unknown",
+        "the customer intent is unknown",
+        "the guest's intent is unknown",
+        "the user's intent is not known",
+        "the customer intent does not match the requested operation",
+        "the user intent is not aligned with the requested payment",
+    ],
+)
+def test_common_intent_only_phrasings_are_routed(reason) -> None:
+    for row in (None, _row(ELIGIBLE)):
+        disposition = _recognize(reason, row)
+        assert disposition is not None, (reason, row)
+        assert disposition.basis == "reason_wording"
+
+
+@pytest.mark.parametrize(
+    "reason",
+    [
+        "the request is not aligned with the customer's authorized intent and the "
+        "amount is negative",
+        "the request is inconsistent with the customer's authorized intent or "
+        "transaction context",
+        "the user intent is unknown before the authorization status is confirmed",
+        "the user intent is known but the currency is inconsistent with the order",
+        "the currency is not aligned with the user intent",
+        "the user intent is classified as unknown",
+        "the guest's intent is unknown and the guest is not the host",
+    ],
+)
+def test_the_new_phrasings_reopen_no_mixed_ground(reason) -> None:
+    for row in (None, _row(ELIGIBLE), _row(INTENT, ELIGIBLE)):
+        assert _recognize(reason, row) is None, (reason, row)
