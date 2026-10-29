@@ -46,6 +46,7 @@ from ..condition_check import (
     condition_failure_message,
     condition_findings,
     condition_findings_message,
+    violations_are_self_comparisons,
 )
 from ..content_surface import ContentSurfaceFacts
 from ..target_observations import TargetObservationSnapshot
@@ -990,7 +991,8 @@ def _validate_discriminating_condition(
         return None
     outcome = check_discriminating_condition(condition, universe)
     message = condition_failure_message(outcome)
-    if message is not None:
+    # A condition violated only by self-comparisons gets their finding below.
+    if message is not None and not violations_are_self_comparisons(outcome, universe):
         code = IssueCode.discriminating_condition_check_failed
         raise ExactIssueError(code, message.removeprefix(f"{code.value}: "))
     _raise_condition_findings(
