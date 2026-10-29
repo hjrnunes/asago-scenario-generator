@@ -49,7 +49,6 @@ from asago_scenario_generator.stpa.infra.llm_helpers import (
     call_with_policy,
     compact_validation_error,
     decode_content,
-    strip_json_fence,
 )
 from asago_scenario_generator.stpa.infra.templates import TemplateLoader
 from asago_scenario_generator.stpa.models.control_structure import (
@@ -337,6 +336,14 @@ _UNREQUESTED_REVISION_FIELDS = frozenset(
 ) - frozenset(_RevisionDeltaProviderSet.model_json_schema()["properties"])
 
 
+# One JSON Markdown fence around the whole text.  Only ``\n`` (or ``\r\n``)
+# ends a fence line, so a line separator inside a JSON string stays in the body.
+_FENCED_REPLY = re.compile(
+    r"[ \t\r\n]*```(?:json)?[ \t]*\r?\n(.*)\r?\n[ \t]*```[ \t\r\n]*",
+    re.DOTALL | re.IGNORECASE,
+)
+
+
 def _shown_revision_reply(content: Any) -> Any:
     """Show a correction the prior reply with only the fields the schema asks for.
 
@@ -347,8 +354,9 @@ def _shown_revision_reply(content: Any) -> Any:
     if isinstance(content, BaseModel):
         content = raw_model_data(content)
     if isinstance(content, str):
+        fenced = _FENCED_REPLY.fullmatch(content)
         try:
-            decoded = json.loads(strip_json_fence(content))
+            decoded = json.loads(content if fenced is None else fenced.group(1))
         except ValueError:
             return content
         if not isinstance(decoded, dict) or _UNREQUESTED_REVISION_FIELDS.isdisjoint(
