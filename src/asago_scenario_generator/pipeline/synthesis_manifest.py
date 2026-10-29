@@ -759,7 +759,68 @@ def _obligation_resolution_funnel(
     routed = _count_rows_with_value(rows, "stop_reason", "governance_routed_no_finding")
     if routed:
         funnel["governance_routed_no_finding"] = routed
+    funnel["applicable_without_llm_fan_out"] = _fan_out_denominator(
+        plan=plan, rows=rows, realization=realization
+    )
     return funnel
+
+
+# OWASP LLM codes whose mapping rows fan one risk out to many attack patterns.
+FAN_OUT_LLM_CODES = ("LLM01", "LLM07")
+FAN_OUT_RULE = (
+    "An applicable obligation is a fan-out row when it has at least one mapping "
+    "path and every mapping path from its risk to its attack pattern passes "
+    f"through {' or '.join(FAN_OUT_LLM_CODES)}."
+)
+
+
+def _fan_out_denominator(
+    *, plan: Any, rows: tuple[Any, ...], realization: Any
+) -> dict[str, Any]:
+    """Count the applicable obligations again without the fan-out rows.
+
+    The rows are the ``applicable_and_considered`` rows; ``FAN_OUT_RULE``
+    names the excluded ones. A path is one ``mapping`` evidence record of the
+    plan row, and it passes through a code when any of its edges starts or
+    ends at that code. A row also reached through another code, a row reached
+    by catalog identity (an empty path) and a row without mapping evidence
+    stay in. The excluded rows are counted per attack pattern, so the plan
+    and this rule identify each of them.
+    """
+    plan_rows = {str(item.obligation_id): item for item in plan.obligations}
+    considered = _considered_rows(rows)
+    excluded = [
+        row for row in considered if _is_fan_out(plan_rows.get(str(row.obligation_id)))
+    ]
+    excluded_ids = {str(row.obligation_id) for row in excluded}
+    kept_ids = {str(row.obligation_id) for row in considered} - excluded_ids
+    realized = _realized_obligation_ids(realization)
+    by_pattern = Counter(
+        str(plan_rows[str(row.obligation_id)].attack_pattern_id) for row in excluded
+    )
+    return {
+        "rule": FAN_OUT_RULE,
+        "fan_out_llm_codes": list(FAN_OUT_LLM_CODES),
+        "applicable": len(considered) - len(excluded),
+        "fan_out_excluded": len(excluded),
+        "fan_out_excluded_by_attack_pattern": dict(sorted(by_pattern.items())),
+        "realized_obligations": len(realized & kept_ids),
+        "fan_out_realized": len(realized & excluded_ids),
+    }
+
+
+def _is_fan_out(obligation: Any) -> bool:
+    """Apply ``FAN_OUT_RULE`` to one plan row."""
+    paths = [
+        {
+            node
+            for edge in json.loads(item.detail)["path"]
+            for node in (edge["source_id"], edge["target_id"])
+        }
+        for item in getattr(obligation, "evidence", ())
+        if getattr(item, "kind", None) == "mapping"
+    ]
+    return bool(paths) and all(path & set(FAN_OUT_LLM_CODES) for path in paths)
 
 
 _OUT_OF_SCOPE_DECISIONS = ("outside_boundary", "not_applicable")

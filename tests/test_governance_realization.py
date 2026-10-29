@@ -14,6 +14,7 @@ from asago_scenario_generator.pipeline.scenario_realization import (
     build_scenario_realization_assessment,
 )
 from asago_scenario_generator.pipeline.synthesis_manifest import (
+    FAN_OUT_RULE,
     _obligation_resolution_funnel,
 )
 from tests.helpers.governance import (
@@ -173,6 +174,15 @@ def test_funnel_without_a_credit_keeps_its_exact_shape() -> None:
         "reconciles": True,
         "realized_obligation_denominator": 0,
         "admitted_scenario_denominator": 1,
+        "applicable_without_llm_fan_out": {
+            "rule": FAN_OUT_RULE,
+            "fan_out_llm_codes": ["LLM01", "LLM07"],
+            "applicable": 0,
+            "fan_out_excluded": 0,
+            "fan_out_excluded_by_attack_pattern": {},
+            "realized_obligations": 0,
+            "fan_out_realized": 0,
+        },
     }
 
 
