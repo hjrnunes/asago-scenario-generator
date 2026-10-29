@@ -1981,6 +1981,62 @@ def test_a_comparison_that_can_hold_is_not_a_self_comparison(
     assert _self_findings(comparison, selection) == ()
 
 
+def _selected_self_comparison(*extra: dict) -> dict:
+    """The selected order's owner compared ne with itself, then ``extra``."""
+    condition = _ownership_condition("ORD-1")
+    condition["comparisons"] = [
+        _value(_fact("orders.ORD-1.owner_id"), "ne", _fact("orders.ORD-1.owner_id")),
+        *extra,
+    ]
+    return condition
+
+
+def test_stage5_corrects_a_violated_self_comparison_with_its_own_finding(
+    tmp_path,
+) -> None:
+    client = MockLLMClient()
+    client.set_response_queue(
+        [
+            _payload_with(_selected_self_comparison()),
+            _payload_with(_ownership_condition("ORD-2")),
+        ]
+    )
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None, error
+    assert result is not None and result.discriminating_condition is not None
+    assert client.call_count == 2
+    correction = client.calls[1].user_prompt
+    assert f"{SELF_COMPARISON}:" in correction
+    assert "discriminating_condition_check_failed:" not in correction
+    assert (
+        "comparisons[0] compares fact TARGET-STATE.orders.ORD-1.owner_id with "
+        "itself" in correction
+    )
+
+
+def test_a_violated_comparison_beside_a_self_comparison_keeps_the_check_failure(
+    tmp_path,
+) -> None:
+    condition = _selected_self_comparison(
+        _value(_fact("orders.ORD-1.owner_id"), "ne", _fact("session.customer_id"))
+    )
+    client = MockLLMClient()
+    client.set_response_queue(
+        [_payload_with(condition), _payload_with(_ownership_condition("ORD-2"))]
+    )
+
+    result, error = _generate(client, tmp_path)
+
+    assert error is None, error
+    assert client.call_count == 2
+    correction = client.calls[1].user_prompt
+    assert "discriminating_condition_check_failed:" in correction
+    for line in _check_failed_fragments(condition):
+        assert line in correction
+
+
 def _not_called(operation: str) -> dict:
     return {"kind": "not_called", "operation": operation}
 
