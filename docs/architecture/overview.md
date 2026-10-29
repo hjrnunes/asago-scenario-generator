@@ -283,12 +283,22 @@ semantically valid findings remain available with `ica_prose_quality_warning`.
 Every slot is offered every hazard, so an ICA can cite a hazard about an
 operation that another control action invokes. Final-ICA verification checks
 this without a model call: a cited hazard whose description names an
-operation must name the operation of the slot's own action. An operation is a
+operation must name one the slot's own action reaches. An operation is a
 name in the execution target profile's operations (the inventory Stage 5
 checks conditions against) or the `operation` of some control action. An
 identifier-like name (with `_`, a digit, or camelCase) is named wherever it
 appears as a whole identifier; a plain word such as `update` only when quoted
-or backticked, so ordinary prose does not name it. An ICA that fails the check keeps its slot and is flagged with
+or backticked, so ordinary prose does not name it. A name that follows an
+example marker ("e.g.", "such as", "like", "for example", "for instance",
+"including") in the same clause is an example of a wider hazard and does not count. Only a
+responsibility slot whose action acts through its own output or operation is
+checked; a coordination link, a message to another controller
+(`agent_message`), a `state_change`, and a `tool_call` without an `operation`
+act through other actions, so a hazard about another action's operation is
+their expected causal path. The action reaches an operation it invokes, and
+one whose action shares an output with it: either action reads a
+process-model part that an `operation_result` or `retrieved_content` feedback
+channel updates from the controlled process the other targets. An ICA that fails the check keeps its slot and is flagged with
 `ica_hazard_operation_outside_slot`, in its `quality_warnings` and in the
 verification batch diagnostics, naming the slot or slots whose action owns the
 operation, or saying that no slot owns it when no control action invokes it.
