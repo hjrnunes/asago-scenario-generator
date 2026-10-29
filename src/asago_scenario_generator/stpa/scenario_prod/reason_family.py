@@ -35,10 +35,11 @@ Context guard: ``ownership`` is never chosen when another variable of the
 cited row already says the record belongs to the session principal. That
 needs an affirmative ownership statement about a record and the principal:
 the variable is read from a ``state:`` field (the record), its value or
-description names an owner, belonging, party or membership relation, it
-names the principal (a principal term, or a ``session:`` reference), and its
-value is not negated (a negation term, a contracted "n't", or an un-, non-
-or dis- prefix on a participle such as "unowned"). An ownership test would
+description names an owner, belonging, party, membership, relationship or
+association relation, it names the principal (a principal term, or a
+``session:`` reference), and its value is not negated (a negation term, a
+contracted "n't", or an un-, non- or dis- prefix on a participle such as
+"unowned"). An ownership test would
 contradict the ICA's own context, so the rules continue without ownership
 and the ICA gets what rules 3-5 give, or no hint. Evidence shape alone
 ("within limit" read from a session and a state field), or a variable that
@@ -158,6 +159,8 @@ RELATION_TERMS = frozenset(
         "parties",
         "member",
         "membership",
+        "relationship",
+        "association",
     }
 )
 _KIND_TERMS: tuple[tuple[FamilyKind, frozenset[str]], ...] = (
