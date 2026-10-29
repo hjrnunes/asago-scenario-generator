@@ -500,9 +500,9 @@ class _DowngradingVerifier:
         self.verification_calls = 0
         self.corrections = 0
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
+    def verify_ica_hazards(self, requests, *, correction=False):
         self.verification_calls += 1
-        verdict = self.second if correction_feedback else _DOWNGRADED
+        verdict = self.second if correction else _DOWNGRADED
         assert verdict is not None
         return [{"ica_id": request.ica_id, **verdict} for request in requests]
 
@@ -556,14 +556,14 @@ def test_a_downgrade_is_counted_and_named_apart_from_insufficient_evidence() -> 
 
 def test_the_count_is_left_out_when_nothing_was_downgraded() -> None:
     class Supports:
-        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+        def verify_ica_hazards(self, requests, *, correction=False):
             return [
                 {"ica_id": item.ica_id, "verdict": "supported", "rationale": "r"}
                 for item in requests
             ]
 
     class Contradicts:
-        def verify_ica_hazards(self, requests, *, correction_feedback=None):
+        def verify_ica_hazards(self, requests, *, correction=False):
             return [
                 {"ica_id": item.ica_id, "verdict": "contradictory", "rationale": "r"}
                 for item in requests
@@ -592,10 +592,10 @@ def test_a_downgrade_in_the_second_round_is_named_the_same_way() -> None:
     first = {"verdict": "contradictory", "rationale": "The first verdict rejects it."}
 
     class Rejects(_DowngradingVerifier):
-        def verify_ica_hazards(self, requests, *, correction_feedback=None):
-            if correction_feedback:
+        def verify_ica_hazards(self, requests, *, correction=False):
+            if correction:
                 return super().verify_ica_hazards(
-                    requests, correction_feedback=correction_feedback
+                    requests, correction=correction
                 )
             return [{"ica_id": item.ica_id, **first} for item in requests]
 

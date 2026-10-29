@@ -1300,11 +1300,11 @@ def _verify_correction_requests(
     correction_by_id: dict[str, IcaHazardVerificationVerdict] = {}
     call_evidence: list[ConsiderationCallEvidence] = []
     for index, group in enumerate(_correction_request_groups(correction_requests), 1):
-        corrected_requests, feedback = _correction_verification_inputs(group)
+        corrected_requests = tuple(item[2] for item in group)
         with count_requests() as sent:
             try:
                 correction_by_id.update(
-                    _run_correction_verification(method, corrected_requests, feedback)
+                    _run_correction_verification(method, corrected_requests)
                 )
                 outcome = "accepted"
             except Exception as exc:  # noqa: BLE001 - retain first verdict and failure
@@ -1364,33 +1364,16 @@ def _correction_request_groups(
     return tuple(tuple(grouped[key]) for key in sorted(grouped))
 
 
-def _correction_verification_inputs(
-    correction_requests: Sequence[
-        tuple[
-            IcaHazardVerificationRequest,
-            IcaHazardVerificationVerdict,
-            IcaHazardVerificationRequest,
-        ]
-    ],
-) -> tuple[tuple[IcaHazardVerificationRequest, ...], dict[str, str]]:
-    corrected_requests = tuple(item[2] for item in correction_requests)
-    feedback = {
-        request.ica_id: (
-            "The ICA was corrected once after the first independent verdict: "
-            f"{first_verdict.rationale}"
-        )
-        for request, first_verdict, _ in correction_requests
-    }
-    return corrected_requests, feedback
-
-
 def _run_correction_verification(
     method: Any,
     corrected_requests: Sequence[IcaHazardVerificationRequest],
-    feedback: Mapping[str, str],
 ) -> dict[str, IcaHazardVerificationVerdict]:
+    """Verify the corrected ICAs as independently as the first time.
+
+    The verifier sees the corrected requests only, never the first verdict.
+    """
     correction_raw = _invoke_verification_method(
-        method, tuple(corrected_requests), correction_feedback=feedback
+        method, tuple(corrected_requests), correction=True
     )
     correction_verdicts = _coerce_provider_result(correction_raw, corrected_requests)
     return {item.ica_id: item for item in correction_verdicts}
@@ -1793,10 +1776,10 @@ def _invoke_verification_method(
     method: Any,
     requests: tuple[IcaHazardVerificationRequest, ...],
     *,
-    correction_feedback: Mapping[str, str] | None = None,
+    correction: bool = False,
 ) -> Any:
     """Call the batch verifier once, without hidden retries."""
-    return method(requests, correction_feedback=correction_feedback)
+    return method(requests, correction=correction)
 
 
 def _coerce_provider_result(

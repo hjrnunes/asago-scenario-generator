@@ -519,8 +519,8 @@ class _VerifierSpy:
         self.verdict = verdict
         self.requests: list[Any] = []
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
-        del correction_feedback
+    def verify_ica_hazards(self, requests, *, correction=False):
+        del correction
         self.requests.extend(requests)
         return [
             {"ica_id": item.ica_id, "verdict": self.verdict, "rationale": "r"}

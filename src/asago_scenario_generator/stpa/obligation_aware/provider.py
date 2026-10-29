@@ -1941,13 +1941,16 @@ class ObligationAwareLLMAdapter:
         self,
         requests: Sequence[IcaHazardVerificationRequest],
         *,
-        correction_feedback: Mapping[str, str] | None = None,
+        correction: bool = False,
     ) -> tuple[IcaHazardVerificationVerdict, ...]:
         """Independently verify every supplied final ICA in one bounded call.
 
         The request projection and prompt builder contain only STPA semantic
         context.  A correction call is explicit and is initiated by the
-        deterministic orchestration seam.  This adapter sends one repair
+        deterministic orchestration seam; ``correction`` only names its step
+        in the call log, and its prompt is built exactly as the first one's,
+        so the first verdict never reaches the verifier.  This adapter sends
+        one repair
         request, with the exact feedback, when a response fails its schema or
         omits the losses and consequence a hazardous absence must name. An
         absence still unproven after that repair is returned downgraded, not
@@ -1958,7 +1961,7 @@ class ObligationAwareLLMAdapter:
             return ()
         request_by_ref = _ica_review_requests(requests)
         system_prompt, user_prompt = build_ica_hazard_verification_prompts(requests)
-        step = "correction" if correction_feedback else "initial"
+        step = "correction" if correction else "initial"
         payload_type = _ica_hazard_provider_payload_type(len(requests))
         repair = _AbsenceEvidenceRepair(
             request_by_ref, payload_type, _ICA_VERIFICATION_REPAIRS

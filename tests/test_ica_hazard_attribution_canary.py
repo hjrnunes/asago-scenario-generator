@@ -161,8 +161,8 @@ def _replace(value: Any, replacements: dict[str, str]) -> Any:
 class _SupportsEveryICA:
     """Deterministic verifier used by the canary; no network is available."""
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
-        del correction_feedback
+    def verify_ica_hazards(self, requests, *, correction=False):
+        del correction
         return [
             {
                 "ica_id": request.ica_id,
@@ -176,8 +176,8 @@ class _SupportsEveryICA:
 class _RejectsEveryICA:
     """Deterministic mismatch verifier used to prove credit is withheld."""
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
-        del correction_feedback
+    def verify_ica_hazards(self, requests, *, correction=False):
+        del correction
         return [
             {
                 "ica_id": request.ica_id,
@@ -191,8 +191,8 @@ class _RejectsEveryICA:
 class _DowngradesEveryICA:
     """Verifier whose every verdict lacks the evidence a hazardous absence needs."""
 
-    def verify_ica_hazards(self, requests, *, correction_feedback=None):
-        del correction_feedback
+    def verify_ica_hazards(self, requests, *, correction=False):
+        del correction
         return [
             {
                 "ica_id": request.ica_id,
