@@ -1091,6 +1091,82 @@ def test_the_correction_shows_the_prior_reply_in_the_current_format(
     assert _fields_outside_schema(prior, schema, schema["$defs"]) == []
 
 
+def _revise_with_transport(tmp_path: Path, *replies: Any) -> tuple[Any, str]:
+    """Revise with a transport client; return the outcome and the correction."""
+    client = _transport_client(*replies)
+    outcome = revise_control_structure(
+        llm_client=client,
+        control_structure=_reviewed(),
+        critic_findings=_FINDINGS,
+        use_case_text="Drafts are stored for later review by a person.",
+        run_dir=tmp_path,
+    )
+    calls = client._client.chat.completions.create.call_args_list
+    assert len(calls) == 2
+    return outcome, calls[1].kwargs["messages"][-1]["content"]
+
+
+def _shown_prior_reply(request: str) -> str:
+    return request.split("Prior structured response to correct in place:\n```json\n")[
+        1
+    ].split("\n```", 1)[0]
+
+
+def test_the_correction_shows_a_raw_prior_reply_in_the_current_format(
+    tmp_path,
+) -> None:
+    # The reply decodes but fails the schema, so the client keeps it as text.
+    invalid = {"new_responsibilities": "invalid list", "dismissed_gaps": ["legacy"]}
+    corrected = _reply(
+        _disposition("G-1", "addressed", "PM-1-2"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        _disposition("G-3", "dismissed"),
+        _disposition("G-4", "dismissed"),
+    )
+
+    outcome, request = _revise_with_transport(tmp_path, invalid, corrected)
+
+    assert outcome.applied is True
+    assert "dismissed_gaps" not in request
+    assert json.loads(_shown_prior_reply(request)) == {
+        "new_responsibilities": "invalid list"
+    }
+
+
+def test_the_correction_shows_an_undecodable_prior_reply_as_written(
+    tmp_path,
+) -> None:
+    corrected = _reply(
+        _disposition("G-1", "addressed", "PM-1-2"),
+        _disposition("G-2", "addressed", "RESP-4"),
+        _disposition("G-3", "dismissed"),
+        _disposition("G-4", "dismissed"),
+    )
+    client = _transport_client(corrected)
+    undecodable = SimpleNamespace(
+        usage=SimpleNamespace(prompt_tokens=3, completion_tokens=4),
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content='{"dismissed_gaps": ["legacy"'),
+                finish_reason="stop",
+            )
+        ],
+    )
+    create = client._client.chat.completions.create
+    create.side_effect = [undecodable, *create.side_effect]
+
+    revise_control_structure(
+        llm_client=client,
+        control_structure=_reviewed(),
+        critic_findings=_FINDINGS,
+        use_case_text="Drafts are stored for later review by a person.",
+        run_dir=tmp_path,
+    )
+
+    request = create.call_args_list[1].kwargs["messages"][-1]["content"]
+    assert _shown_prior_reply(request) == '{"dismissed_gaps": ["legacy"'
+
+
 def test_the_request_schema_offers_dispositions_and_not_free_text() -> None:
     schema = _RevisionDeltaProviderSet.model_json_schema()
 

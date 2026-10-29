@@ -12,8 +12,7 @@ element changed for it is unresolved.  It sends no request and never rejects the
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
-from dataclasses import dataclass
-from types import MappingProxyType
+from dataclasses import dataclass, field
 from typing import Any, Literal, get_args
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -92,8 +91,8 @@ class ElementChanges:
     """
 
     ids: frozenset[str]
-    members: Mapping[str, tuple[str, ...]] = MappingProxyType({})
-    member_changes: Mapping[str, tuple[str, ...]] = MappingProxyType({})
+    members: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
+    member_changes: Mapping[str, tuple[str, ...]] = field(default_factory=dict)
 
 
 def review_gap_dispositions(
@@ -489,8 +488,8 @@ def _flat_elements(
 def _members(element: Any, nested: tuple[str, ...]) -> list[str]:
     """Return the IDs of the identified elements *element* holds."""
     ids: list[str] = []
-    for field in nested:
-        value = getattr(element, field)
+    for name in nested:
+        value = getattr(element, name)
         for item in value if isinstance(value, list) else [value]:
             ids.extend(
                 getattr(item, key)

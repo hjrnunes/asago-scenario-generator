@@ -13,6 +13,7 @@ which is merged programmatically into the existing ControlStructure.
 from __future__ import annotations
 
 import copy
+import json
 from collections.abc import Mapping
 import logging
 import re
@@ -336,9 +337,24 @@ _UNREQUESTED_REVISION_FIELDS = frozenset(
 
 
 def _shown_revision_reply(content: Any) -> Any:
-    """Show a correction the prior reply with only the fields the schema asks for."""
+    """Show a correction the prior reply with only the fields the schema asks for.
+
+    A reply kept as text, because it failed the schema, is shown as written
+    unless it is one JSON object holding such a field; that one is shown
+    decoded, without it.
+    """
     if isinstance(content, BaseModel):
         content = raw_model_data(content)
+    if isinstance(content, str):
+        try:
+            decoded = json.loads(content)
+        except ValueError:
+            return content
+        if not isinstance(decoded, dict) or _UNREQUESTED_REVISION_FIELDS.isdisjoint(
+            decoded
+        ):
+            return content
+        content = decoded
     if not isinstance(content, dict):
         return content
     return {
