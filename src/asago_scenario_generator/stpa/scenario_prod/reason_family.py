@@ -50,8 +50,9 @@ belong to the authenticated customer and the amount exceeds the balance"
 get ``ownership``), because keeping the ownership, identity, actor or
 session qualifier is the point and a wrongly withheld ownership hint costs
 more. A limit failure (exceeds, over, above, beyond, greater, more, less,
-maximum, minimum, limit, cap, remaining, insufficient, threshold...) wins
-only over wording that is not an ownership source: "the amount exceeds the
+maximum, minimum, limit, cap, remaining, insufficient, threshold...; not
+the "over" of "take over") wins only over wording that is not an ownership
+source: "the amount exceeds the
 session spending limit", where the session merely owns the limit, gets
 ``bound``. A bare object noun (amount, plan, price) states no limit failure,
 so "the requested amount or plan is not authorized by session", a failed
@@ -533,9 +534,8 @@ def choose_reason_family(
                 "ownership", "ownership_reason", pm_id, False, labels
             )
         guarded = True
-    field_kinds = (
-        ("bound",) if terms & _LIMIT_TERMS else ("ownership", "flag", "bound", "state")
-    )
+    limit = _limit_failure(words)
+    field_kinds = ("bound",) if limit else ("ownership", "flag", "bound", "state")
     for kind in field_kinds:
         if not any(
             family.kind == kind and set(family.field_paths) & set(labels)
@@ -546,13 +546,15 @@ def choose_reason_family(
             guarded = True
             continue
         return ReasonFamilyChoice(kind, "reason_variable_field", pm_id, guarded, labels)
-    for kind, words in _KIND_TERMS:
-        if terms & words:
+    for kind, kind_terms in _KIND_TERMS:
+        if limit if kind == "bound" else terms & kind_terms:
             return ReasonFamilyChoice(kind, "reason_terms", pm_id, guarded, labels)
     return ReasonFamilyChoice(None, "no_match", pm_id, guarded, labels)
 
 
 _LIMIT_TERMS = dict(_KIND_TERMS)["bound"]
+# A form of "take" right before "over" names a takeover, not a limit.
+_TAKE_FORMS = frozenset({"take", "takes", "taking", "took", "taken"})
 _RELATION_WORDS = POSSESSION_TERMS | ROLE_TERMS | {"ownership", "membership"}
 _RELATION_NOUNS = frozenset({"verification", "confirmation", "approval", "check"})
 _ATTRIBUTE_TERMS = INTENT_TERMS | dict(_KIND_TERMS)["flag"]
@@ -716,6 +718,19 @@ def _relation_not_current(words: Sequence[str]) -> bool:
         ):
             return True
     return False
+
+
+def _limit_failure(words: Sequence[str]) -> bool:
+    """Return whether the reason states a limit failure.
+
+    "over" right after a form of "take" ("could take over the account")
+    states a takeover, not an exceeded limit.
+    """
+    return any(
+        word in _LIMIT_TERMS
+        and not (word == "over" and index > 0 and words[index - 1] in _TAKE_FORMS)
+        for index, word in enumerate(words)
+    )
 
 
 def _auth_failure_at(words: Sequence[str], index: int) -> bool:
