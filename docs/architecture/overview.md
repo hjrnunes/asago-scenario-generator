@@ -1118,18 +1118,27 @@ hold:
   - have a description that names an intent but no classifier output ("the
     classified intent produced by the classifier" is the action's output,
     not the user's intent);
-  - have a value that states a failure ("does not match authorized intent",
-    "intent unknown", "unauthorized transaction");
+  - have a value that is, as a whole, a sole failed or unknown intent ("does
+    not match authorized intent", "not aligned with authorized intent",
+    "intent unknown", "unauthorized transaction"). A value that adds another
+    ground ("... and the currency is wrong", "... before the authorization
+    status is confirmed", "... or transaction context") keeps the ICA on
+    Stage 5, whether that wording is in the reason or only in the value;
 
   and the rest of the reason may only name the request ("the request", "the
   requested operation"). A reason that states no row value must be, as a
   whole, one of the intent-only forms (`reason_wording`). In those forms the
-  failed or unknown predicate applies to the intent itself: the request does
-  not match or deviates from an intent ("the request does not match the
-  customer's authorized intent", "the customer's intent does not match the
-  requested payment operation", "the refund is executed without matching the
-  customer's authorized intent"), or the intent is unknown ("the intent is
-  unknown", "intent unknown").
+  failed or unknown predicate applies to the intent itself. In one form the
+  request does not match, does not agree with, is not aligned or consistent
+  with, is inconsistent or misaligned with, or deviates from an intent ("the
+  request does not match the customer's authorized intent", "the request is
+  inconsistent with the customer's authorized intent", "the customer's
+  intent does not match the requested payment operation", "the refund is
+  executed without matching the customer's authorized intent"). In the other,
+  the intent is unknown ("the intent is unknown", "the user intent is
+  unknown", "intent unknown"). The intent may be qualified by its principal
+  as a noun or a possessive ("the user intent", "the guest's intent"). Such
+  a principal word is not counted as an ownership ground.
 
 So these keep reaching Stage 5:
 - session reasons ("not authorized for the session");
