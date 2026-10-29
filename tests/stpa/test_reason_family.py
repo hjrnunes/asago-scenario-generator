@@ -389,6 +389,8 @@ def test_a_principals_consent_past_modifiers_is_not_a_compared_record(reason) ->
     [
         "the refund targets another customer's order without confirmation",
         "the refund targets another customer's order for approval",
+        "the request changes another user's account approval status",
+        "the refund targets another customer's order confirmation",
     ],
 )
 def test_a_consent_word_outside_the_principals_noun_phrase_keeps_ownership(
